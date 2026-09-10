@@ -24,10 +24,6 @@ Words this library coined that a reader has to learn before the code means anyth
 if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
 across `src/`.
 
-- [ ] **`seat`, `seats` -> `slot`, `slots` (394).** llama.cpp calls these slots and its API
-  field is `slot`; the synonym makes a reader learn a second word for the thing they
-  already know, and `--parallel` sets it. `ml_stack/serve/shape.py:seat()`,
-  `Shape.seats`, `AskRoutes.seated()`, `Profile.shape(seats=)` and every caller.
 - [ ] **`Shape` -> what it is (65), and `measured shape` deleted (49).** `Shape` is the
   settings a server is started with. `Profile` already holds "the settings that scored
   best", so the concept carries two names and neither says settings. Pick one plain name,
@@ -239,7 +235,7 @@ plan` names them as unplaceable rather than guessing.
   --prompts 4096 --context 65536 --parallel N --serve-kv-unified|--no-serve-kv-unified`, two
   runs each): one slot 125/153 tok/s, one slot unified 143/152, four slots 152/156, four
   slots unified 121/122 -- and the draft head's acceptance on the four unified slots was 44%
-  where every other shape reported 70%. Prefill ~2,600 tok/s in every shape. So one seat
+  where every other shape reported 70%. Prefill ~2,600 tok/s in every shape. So one slot
   by default costs nothing at one stream, and the page's 2026-09-04 shape (four unified
   slots) was ~20% slower to decode, but whether the cache or the head under it is the
   reason is one more run: the same four shapes with `--no-draft`.
@@ -313,7 +309,7 @@ time with the page's server down for the Ollama half.
   ```
   Memory is sampled over the serving process tree every second (Ollama: the listener's
   children hold the weights) and kept as `resident_peak`. `speed --serve` defaults
-  `--parallel` to the most streams asked (4) and the per-seat context to the largest prompt
+  `--parallel` to the most streams asked (4) and the per-slot context to the largest prompt
   plus the generation, so set `--context` for the 4-stream cells. `ttft_s` is a streamed
   first token on llama.cpp (`ttft_from: stream`) and the server's prompt clock on Ollama
   (`prompt_ms`, marked `*`). Estimate before each: ~45 min the hundred-question graph
@@ -368,7 +364,7 @@ time with the page's server down for the Ollama half.
   silently and fix only the keying.
 
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
-  nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
+  nothing yet sends a new session to a free slot on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
 
 ## What the window has not been driven through
@@ -579,7 +575,7 @@ worth taking, in this order:
   `train.backend.get_backend` for a device handle, where the ops that sit under both belong
   below `graph` rather than in the tools layer. The
   `graph` -> `serve` three are function-local reaches: `profile_for` in
-  `graph/asking.py`, `serve` in `graph/requests.py`, and `Run`, `Shape`, `seat` and `held`
+  `graph/asking.py`, `serve` in `graph/requests.py`, and `Run`, `Shape`, `slot` and `held`
   in `graph/serve.py`. The first goes when the profile store moves below `graph`; the other
   two are a page and a request handler leasing a server, which is what the machine layer is
   for.

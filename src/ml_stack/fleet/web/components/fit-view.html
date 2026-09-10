@@ -239,7 +239,7 @@
       if (first) for (const f of s.records) s.on.add(f.i);
     }
 
-    /** Where a context sits on the ladder the seats were worked out at. */
+    /** Where a context sits on the ladder the slots were worked out at. */
     rung(ctx) {
       const s = this.state;
       const step = Math.round(8 * Math.log2(Math.max(1, ctx) / s.ladder[0]));
@@ -247,7 +247,7 @@
     }
 
     /** How many users fit at that context, and the context it was answered for. */
-    seats(f, ctx) { return f.seats[this.rung(ctx)]; }
+    slots(f, ctx) { return f.slots[this.rung(ctx)]; }
     each(f, ctx) { return f.costs[this.rung(ctx)]; }
     read(ctx) { return this.state.ladder[this.rung(ctx)]; }
 
@@ -289,7 +289,7 @@
       const s = this.state;
       const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
       const xs = s.steps;
-      const at = (f, c) => this.seats(f, c);
+      const at = (f, c) => this.slots(f, c);
       const topUsers = Math.max(1, ...rows.flatMap((f) => xs.map((c) => at(f, c))));
       const decades = Math.log10(Math.max(10, topUsers * 1.15));
 
@@ -360,7 +360,7 @@
     panelCost(rows, tip) {
       const s = this.state;
       const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
-      const fits = rows.map((f) => this.seats(f, s.ctx));
+      const fits = rows.map((f) => this.slots(f, s.ctx));
       const natural = Math.max(8, Math.min(4096, Math.max(1, ...fits) * 1.15));
       const [x0, x1] = s.zoom || [0, natural];
       const px = (n) => IX0 + (n - x0) / Math.max(1e-9, x1 - x0) * (IX1 - IX0);
@@ -524,7 +524,7 @@
       const s = this.state;
       const body = el("tbody", {});
       for (const f of rows) {
-        const fits = this.seats(f, s.ctx);
+        const fits = this.slots(f, s.ctx);
         const long = f.longest;
         const tr = el("tr", { class: fits ? "" : "nofit",
           onmouseenter: () => { s.hot = f.i; this.paintHot(); },
@@ -655,7 +655,7 @@
       ref.usersSaid.textContent = commas(s.users);
       // the users slider reaches as far as the most generous model actually fits, so
       // dragging it never runs off into a range where every answer is "does not fit"
-      const most = Math.max(1, ...this.visible().map((f) => this.seats(f, s.ctx)));
+      const most = Math.max(1, ...this.visible().map((f) => this.slots(f, s.ctx)));
       const ceiling = Math.max(8, Math.min(1024, most));
       ref.usersSlider.max = String(ceiling);
       if (s.users > ceiling) { s.users = ceiling; ref.usersSlider.value = String(ceiling); }

@@ -133,7 +133,7 @@ def _usage_of(message: Any) -> Usage:
 
 
 @contextmanager
-def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
+def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
             profile: bool = True, offline: bool = True, draft: str = "auto",
             say: Callable[[str], None] = lambda _line: None, **options: Any) -> Iterator[Harness]:
     """Lease ``model`` in its measured shape and yield a :class:`Harness` on it; the server
@@ -152,11 +152,11 @@ def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
     leasing = say if manager.already_up(found, port) is None else (lambda _line: None)
     measured = records.profile_for(found) if profile else None
     if measured is not None:
-        run = measured.run(port=port, seats=seats, model=found)
+        run = measured.run(port=port, slots=slots, model=found)
         leasing(f"serving in its measured shape: {records.said(measured)}")
         run = drafted(run, "none", say=leasing)
     else:
-        run = Run(shape=Shape(model=found, port=port, seats=seats))
+        run = Run(shape=Shape(model=found, port=port, slots=slots))
         run = drafted(run, draft, say=leasing)
     patched = chat_template.written_beside(found)
     if patched is not None:
@@ -177,8 +177,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("prompt")
     ap.add_argument("--model", required=True)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--seats", type=int, default=DEFAULT_SEATS,
-                    help="conversations the server holds at once; one seat gets "
+    ap.add_argument("--slots", type=int, default=DEFAULT_SEATS,
+                    help="conversations the server holds at once; one slot gets "
                          "the whole measured cache (default: %(default)s)")
     ap.add_argument("--cwd", default="")
     ap.add_argument("--max-turns", type=int, default=None)
@@ -206,7 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         options["allowed_tools"] = list(args.allow)
     if args.permission_mode:
         options["permission_mode"] = args.permission_mode
-    with session(args.model, port=args.port, seats=args.seats, profile=not args.no_profile,
+    with session(args.model, port=args.port, slots=args.slots, profile=not args.no_profile,
                  offline=not args.online, draft=args.draft, say=say, **options) as agent:
         answer = agent.ask(args.prompt)
     say(answer.text)

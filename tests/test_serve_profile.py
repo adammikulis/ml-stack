@@ -36,7 +36,7 @@ def _profiles_in_tmp(tmp_path, monkeypatch, fit_files):
     """The shipped file and this machine's own, both inside ``tmp_path`` and both empty.
 
     The fit half is emptied the same way, and `hub.located` is held to nothing found, so a
-    lone seat's trained-context lookup cannot read this machine's real fit records or Hub
+    lone slot's trained-context lookup cannot read this machine's real fit records or Hub
     cache -- a test that wants either points them at its own fixtures instead.
     """
     shipped = tmp_path / "ssot" / "profiles.json"
@@ -62,7 +62,7 @@ def measured(model: str = MODEL, **fields) -> Profile:
         "build": "thornfell", "draft": HEAD, "spec_type": "draft-mtp",
         "spec_draft_max": 4, "cache_type": "q8_0", "reasoning_budget": 0, "mmproj": "auto",
         "extra_args": ("-ub", "2048", "--spec-draft-p-min", "0.5"),
-        "seat_context": 32768, "parallel": 2,
+        "slot_context": 32768, "parallel": 2,
         "tight": True, "batch": True, "kinds": True, "summary": True,
         "sampling": {"temperature": 0.0},
         "measured_at": "2026-09-02", "label": "thornfield--all-plain-kv-q8_0-rb0",
@@ -142,8 +142,8 @@ def test_a_model_nothing_measured_has_no_profile():
 def test_the_shape_is_the_whole_serving_and_the_lease_it_becomes():
     shape = measured().shape(port=8099, resolve=False)
 
-    assert (shape.model, shape.port, shape.seats, shape.seat_context) == (MODEL, 8099, 1, 65536), \
-        "one seat holding the whole cache the record measured across two"
+    assert (shape.model, shape.port, shape.slots, shape.slot_context) == (MODEL, 8099, 1, 65536), \
+        "one slot holding the whole cache the record measured across two"
     assert (shape.build, shape.draft, shape.spec_type) == ("thornfell", HEAD, "draft-mtp")
     assert shape.lease() == {"port": 8099, "context": 65536, "parallel": 1,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0",
@@ -152,14 +152,14 @@ def test_the_shape_is_the_whole_serving_and_the_lease_it_becomes():
                              "extra_args": ("-ub", "2048", "--spec-draft-p-min", "0.5")}
 
 
-def test_the_shape_is_served_by_the_reference_asked_for_and_the_seats_asked_for():
+def test_the_shape_is_served_by_the_reference_asked_for_and_the_slots_asked_for():
     add(measured())
     found = profile_for(f"hf:thornfell/thornfield-GGUF/{MODEL}")
-    shape = found.shape(port=8080, seats=8, resolve=False)
+    shape = found.shape(port=8080, slots=8, resolve=False)
 
     assert shape.model == f"hf:thornfell/thornfield-GGUF/{MODEL}"
-    assert shape.seats == 8, "how many conversations a machine wants is that machine's"
-    assert shape.seat_context == 32768, "and the rest of the shape is not"
+    assert shape.slots == 8, "how many conversations a machine wants is that machine's"
+    assert shape.slot_context == 32768, "and the rest of the shape is not"
 
 
 def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_models(
@@ -171,7 +171,7 @@ def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_mod
     assert measured().shape(resolve=True).draft == "", "a head not on this machine is not served"
 
 
-# -- one seat, alone: the model's own trained context, capped by what fits ---------------
+# -- one slot, alone: the model's own trained context, capped by what fits ---------------
 
 TRAINED = 262144
 
@@ -184,65 +184,65 @@ def _model_file(tmp_path, name: str, context_length: int = TRAINED) -> Path:
                                         "testarch.block_count": 0})
 
 
-def test_one_seat_alone_gets_the_trained_context_when_it_fits(tmp_path, fit_files):
+def test_one_slot_alone_gets_the_trained_context_when_it_fits(tmp_path, fit_files):
     path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
     fit_files([Fit(model=path.name, cache_type="f16", spec="", per_token=100,
                    per_seq=1000)], room=30_000_000)
-    solo = record(path.name, seat_context=32768, parallel=2)
+    solo = record(path.name, slot_context=32768, parallel=2)
 
     shape = solo.alone(model=str(path), resolve=False).shape
 
-    assert shape.seat_context == TRAINED
+    assert shape.slot_context == TRAINED
     assert "trained context" in shape.note and f"{TRAINED:,}" in shape.note
 
 
-def test_one_seat_alone_gets_the_longest_that_fits_when_trained_does_not(tmp_path, fit_files):
+def test_one_slot_alone_gets_the_longest_that_fits_when_trained_does_not(tmp_path, fit_files):
     path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
     fit_files([Fit(model=path.name, cache_type="f16", spec="", per_token=100,
                    per_seq=1000)], room=5_000_000)
-    solo = record(path.name, seat_context=32768, parallel=2)
+    solo = record(path.name, slot_context=32768, parallel=2)
 
     shape = solo.alone(model=str(path), resolve=False).shape
 
-    assert shape.seat_context == 49_990, "(free 5,000,000 - per_seq 1,000) // per_token 100"
-    assert shape.seat_context < TRAINED
+    assert shape.slot_context == 49_990, "(free 5,000,000 - per_seq 1,000) // per_token 100"
+    assert shape.slot_context < TRAINED
     assert "does not fit" in shape.note and "49,990" in shape.note
 
 
-def test_one_seat_alone_falls_back_to_the_measured_shape_with_no_fit_record(tmp_path):
+def test_one_slot_alone_falls_back_to_the_measured_shape_with_no_fit_record(tmp_path):
     path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
-    solo = record(path.name, seat_context=32768, parallel=2)
+    solo = record(path.name, slot_context=32768, parallel=2)
 
     shape = solo.alone(model=str(path), resolve=False).shape
 
-    assert shape.seat_context == 65536, "seat_context 32768 * parallel 2: today's fallback"
+    assert shape.slot_context == 65536, "slot_context 32768 * parallel 2: today's fallback"
     assert "no fit record" in shape.note
 
 
-def test_one_seat_alone_falls_back_to_the_measured_shape_with_no_layout_data(
+def test_one_slot_alone_falls_back_to_the_measured_shape_with_no_layout_data(
         tmp_path, fit_files):
     # a model file this test never wrote: nothing to read a trained context off
     missing = tmp_path / "duskfield-12B-Q4_K_M.gguf"
     fit_files([Fit(model=missing.name, cache_type="f16", spec="", per_token=100,
                    per_seq=1000)], room=30_000_000)
-    solo = record(missing.name, seat_context=32768, parallel=2)
+    solo = record(missing.name, slot_context=32768, parallel=2)
 
     shape = solo.alone(model=str(missing), resolve=False).shape
 
-    assert shape.seat_context == 65536
+    assert shape.slot_context == 65536
     assert "no trained context" in shape.note
 
 
-def test_more_than_one_seat_still_gets_the_profiles_own_seat_context(tmp_path, fit_files):
+def test_more_than_one_slot_still_gets_the_profiles_own_slot_context(tmp_path, fit_files):
     path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
     fit_files([Fit(model=path.name, cache_type="f16", spec="", per_token=100,
                    per_seq=1000)], room=30_000_000)
-    solo = record(path.name, seat_context=32768, parallel=2)
+    solo = record(path.name, slot_context=32768, parallel=2)
 
-    shape = solo.shape(model=str(path), seats=4, resolve=False)
+    shape = solo.shape(model=str(path), slots=4, resolve=False)
 
-    assert (shape.seats, shape.seat_context) == (4, 32768), \
-        "trained-context sizing is the lone seat's; a crowd keeps the profile's own"
+    assert (shape.slots, shape.slot_context) == (4, 32768), \
+        "trained-context sizing is the lone slot's; a crowd keeps the profile's own"
     assert shape.note == ""
 
 
@@ -266,8 +266,8 @@ def test_the_command_reads_out_the_serving_the_asking_and_what_measured_it(capsy
     assert "--build thornfell" in out and "--kv q8_0" in out and "--spec-n-max 4" in out
     assert "--reasoning-budget 0" in out
     assert "--context 65536" in out and "--parallel" not in out.split("measured at")[0], \
-        "the serve line is one seat holding the whole measured cache"
-    assert "measured at --parallel 2, 32768 per seat" in out
+        "the serve line is one slot holding the whole measured cache"
+    assert "measured at --parallel 2, 32768 per slot" in out
     assert "-ub 2048 --spec-draft-p-min 0.5" in out
     assert "tight + batch + kinds + summary + greedy" in out
     assert "80% F1" in out and "26.7 s/question" in out and "100 question(s)" in out
@@ -329,7 +329,7 @@ def test_up_with_a_profile_fills_every_flag_that_was_not_given(leases, tmp_path)
 
     spec = leases[0]
     assert spec.context == 65536 and spec.parallel == 1, \
-        "one seat holding the whole cache the record measured across two"
+        "one slot holding the whole cache the record measured across two"
     assert str(spec.draft) == f"/models/{HEAD}" and spec.spec_type == "draft-mtp"
     assert spec.spec_draft_max == 4
     assert spec.cache_type_k == spec.cache_type_v == "q8_0"
@@ -345,7 +345,7 @@ def test_a_flag_that_was_given_wins_over_the_record(leases, tmp_path):
     spec = leases[0]
     assert spec.cache_type_k == "f16", "a person naming a flag is overruling on purpose"
     assert spec.parallel == 4 and spec.spec_draft_max == 2
-    assert spec.context == 32768 * 4, "each seat asked for gets what one measured seat got"
+    assert spec.context == 32768 * 4, "each slot asked for gets what one measured slot got"
     assert spec.reasoning_budget == 0, "and what nobody named still comes from the record"
 
 
@@ -469,7 +469,7 @@ def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
     assert one.model == MODEL
     assert (one.draft, one.spec_type, one.spec_draft_max) == (HEAD, "draft-mtp", 4)
     assert one.cache_type == "q8_0" and one.reasoning_budget == 0
-    assert one.seat_context == 32768 and one.parallel == 2, "65536 over two slots"
+    assert one.slot_context == 32768 and one.parallel == 2, "65536 over two slots"
     assert (one.batch, one.kinds, one.summary, one.tight) == (True, True, True, True)
     assert one.sampling == {"temperature": 0.0}
     assert one.questions == 20 and round(one.right, 2) == 0.8
@@ -650,26 +650,26 @@ def test_the_shape_a_person_reads_names_the_flags_and_the_ways(capsys):
     assert "serve with" in text and "ask with" in text and "measured" in text
 
 
-def test_alone_is_one_seat_holding_the_whole_measured_cache():
-    """A record measured at two seats of 32k is one seat of 64k, asked for either way."""
+def test_alone_is_one_slot_holding_the_whole_measured_cache():
+    """A record measured at two slots of 32k is one slot of 64k, asked for either way."""
     from ml_stack.serve.profile import Profile
 
-    record = Profile(model="quince-2b.gguf", seat_context=32768, parallel=2)
+    record = Profile(model="quince-2b.gguf", slot_context=32768, parallel=2)
     run = record.alone(port=8123, model="quince-2b.gguf", resolve=False)
-    assert run.shape.seats == 1 and run.shape.seat_context == 65536 and run.shape.port == 8123
+    assert run.shape.slots == 1 and run.shape.slot_context == 65536 and run.shape.port == 8123
 
     bare = record.run(port=8123, model="quince-2b.gguf", resolve=False)
-    assert (bare.shape.seats, bare.shape.seat_context) == (1, 65536), \
-        "the record's parallel is provenance, not how many seats to serve"
+    assert (bare.shape.slots, bare.shape.slot_context) == (1, 65536), \
+        "the record's parallel is provenance, not how many slots to serve"
 
 
-def test_seats_asked_for_get_what_one_measured_seat_got():
+def test_slots_asked_for_get_what_one_measured_slot_got():
     """`--parallel N` is how anyone asks for more than one conversation."""
     from ml_stack.serve.profile import Profile
 
-    record = Profile(model="quince-2b.gguf", seat_context=32768, parallel=2)
-    crowded = record.shape(seats=4, model="quince-2b.gguf", resolve=False)
-    assert (crowded.seats, crowded.seat_context, crowded.context) == (4, 32768, 131072)
+    record = Profile(model="quince-2b.gguf", slot_context=32768, parallel=2)
+    crowded = record.shape(slots=4, model="quince-2b.gguf", resolve=False)
+    assert (crowded.slots, crowded.slot_context, crowded.context) == (4, 32768, 131072)
     assert crowded.lease()["parallel"] == 4
 
 
@@ -757,7 +757,7 @@ def test_the_startup_half_still_names_the_draft_depth_it_was_served_with():
 def test_up_for_a_workload_serves_that_workloads_record(leases, tmp_path):
     add(measured(workload="ask", mmproj="", spec_draft_max=4))
     add(measured(workload="ingest", mmproj="", spec_draft_max=2, build="hollowmere",
-                 seat_context=8192))
+                 slot_context=8192))
     assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
 
     spec = leases[0]

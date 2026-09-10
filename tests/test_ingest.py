@@ -775,16 +775,16 @@ def test_the_source_fold_joins_a_plural_to_its_singular():
 def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path):
     """Adam: "we shouldn't be handling parallel requests while extracting ... we should never
     be splitting the GPU like that" -- and measured: two workers averaged 140 s a unit
-    against 86 alone. One seat, and --context is all its own."""
+    against 86 alone. One slot, and --context is all its own."""
     from ml_stack.serve import Run, Shape
 
     seen = {}
 
     class Found:
-        def run(self, port, seats, resolve=True, n_predict=16384, timeout=300.0):
-            seen["seats"] = seats
-            return Run(shape=Shape(model="x.gguf", port=port, seats=seats,
-                                   seat_context=16384))
+        def run(self, port, slots, resolve=True, n_predict=16384, timeout=300.0):
+            seen["slots"] = slots
+            return Run(shape=Shape(model="x.gguf", port=port, slots=slots,
+                                   slot_context=16384))
 
         def said(self):
             return "measured"
@@ -803,7 +803,7 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
     import contextlib
     with contextlib.suppress(SystemExit):
         ingest.main(["--gold", str(tmp_path / "g.json"), "--model", "x", "--context", "32768"])
-    assert seen["seats"] == 1 and seen["lease"]["parallel"] == 1
+    assert seen["slots"] == 1 and seen["lease"]["parallel"] == 1
     assert seen["lease"]["context"] == 32768
     with pytest.raises(SystemExit):
         ingest.parser().parse_args(["source.pdf", "--out", "s", "--workers", "2"])
@@ -819,7 +819,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
 
     from ml_stack.serve.profile import Profile
 
-    measured = Profile(model="kestrel-8B-UD-Q4_K_XL.gguf", seat_context=16384, parallel=4,
+    measured = Profile(model="kestrel-8B-UD-Q4_K_XL.gguf", slot_context=16384, parallel=4,
                        cache_type="q8_0", sampling={"temperature": 1.0})
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
                         lambda m, **_: replace(measured, served=str(m)))
@@ -842,7 +842,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
     with ingest._serving(args, say=lambda line: None) as client:
         assert client.base_url == "http://127.0.0.1:8099"
         assert client.n_predict == 999 and client.timeout == 120.0
-        assert client.slot == 0, "one seat, and it is sat in"
+        assert client.slot == 0, "one slot, and it is the one used"
         assert client.asked_temperature == 0.1, "extraction's own default, not the " \
             "profile's answering temperature"
         assert client.asked_top_k == 20, "and the command line laid its own over"
@@ -851,7 +851,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
     lease = seen["lease"]
     assert lease["parallel"] == 1, "extraction never splits the GPU, whatever measured"
     assert lease["context"] == 65536, \
-        "one seat holding the whole cache the record measured across four"
+        "one slot holding the whole cache the record measured across four"
     assert lease["cache_type_k"] == lease["cache_type_v"] == "q8_0", "from the profile"
     assert (lease["timeout"], lease["cache_reuse"], lease["warmup"]) == (900.0, 256, False)
 
@@ -946,9 +946,9 @@ def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
     seen = {}
 
     class Found:
-        def run(self, port, seats, resolve=True, n_predict=16384, timeout=300.0):
-            return Run(shape=Shape(model="x.gguf", port=port, seats=seats,
-                                   seat_context=16384, draft="mtp.gguf", draft_n_max=4))
+        def run(self, port, slots, resolve=True, n_predict=16384, timeout=300.0):
+            return Run(shape=Shape(model="x.gguf", port=port, slots=slots,
+                                   slot_context=16384, draft="mtp.gguf", draft_n_max=4))
 
         def said(self):
             return "measured"

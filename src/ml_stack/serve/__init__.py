@@ -44,7 +44,7 @@ from ml_stack.serve.shape import (
     Talking,
     draft_for,
     projector_for,
-    seat,
+    slot,
 )
 
 __all__ = [
@@ -79,7 +79,7 @@ __all__ = [
     "reclaim_port",
     "recorded_servers",
     "require_binary",
-    "seat",
+    "slot",
     "serve",
     "server_pids_on_port",
     "shape_mismatch",

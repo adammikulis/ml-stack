@@ -564,15 +564,15 @@ def _measured_fit_check(spec, limit_bytes: int,
         return Check("fit (measured)", True,
                      "no measured record for this model; the estimate above is what stands")
     at = found.at_room(limit_bytes)
-    seats = max(1, int(spec.parallel or 1))
-    per_seat_context = int(spec.context) // seats
-    loaded, per_seat = at.line(per_seat_context)
-    total = loaded + per_seat * seats
+    slots = max(1, int(spec.parallel or 1))
+    per_slot_context = int(spec.context) // slots
+    loaded, per_slot = at.line(per_slot_context)
+    total = loaded + per_slot * slots
     pieces = (f"measured on {found.model} ({found.cache_type}"
               + (f", {found.spec}" if found.spec else "") + "): "
-              f"loaded {human_bytes(loaded)}, +{human_bytes(per_seat)} a seat at "
-              f"{per_seat_context:,} tokens ({at.per_token:,} B/token)"
-              + (f" x {seats}" if seats > 1 else ""))
+              f"loaded {human_bytes(loaded)}, +{human_bytes(per_slot)} a slot at "
+              f"{per_slot_context:,} tokens ({at.per_token:,} B/token)"
+              + (f" x {slots}" if slots > 1 else ""))
     if not limit_bytes:
         return Check("fit (measured)", True,
                      f"{human_bytes(total)} {pieces}; no machine memory limit is known to "

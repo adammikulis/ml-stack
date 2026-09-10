@@ -1104,7 +1104,7 @@ def _():
     fell_back = profile_for(named, workload="ingest")
     assert fell_back is not None and "not for ingest" in fell_back.note, \
         "a workload with no record of its own must say what it fell back to"
-    return (f"{found.workload}: one seat at {found.seat_context}, F1 {found.right:.0%} over "
+    return (f"{found.workload}: one slot at {found.slot_context}, F1 {found.right:.0%} over "
             f"{found.questions} questions, on {found.host or 'a measured host'}; "
             f"ingest falls back and says so")
 
@@ -1123,8 +1123,8 @@ def _():
     return f"{len(steps)} steps parse; a misspelled flag is refused before anything loads"
 
 
-# -- seating a fleet -------------------------------------------------------
-@check("Fleet", "a plan seats the wanted conversations and names what fits nowhere")
+# -- placing a fleet -------------------------------------------------------
+@check("Fleet", "a plan slots the wanted conversations and names what fits nowhere")
 def _():
     from ml_stack.fleet.plan import Room, place
     from ml_stack.serve.fit import Fit
@@ -1140,12 +1140,12 @@ def _():
                 per_seq=100 * kb, compute=gb // 4)]
     peers = [Room(name="studio", room=110 * gb), Room(name="larch", room=20 * gb)]
     got = place(30, 16384, peers, [big, small], fits)
-    assert got.seated == 30 and got.unplaced == 0, got.as_dict()
+    assert got.placed == 30 and got.unplaced == 0, got.as_dict()
     assert got.rows[0].model == big.model, "the better model did not reach the roomiest peer"
     tight = place(400, 16384, [Room(name="pi", room=4 * gb)], [big, small], fits)
     assert tight.unplaced > 0 and any(p == "pi" and m == big.model for p, m, _ in tight.why), \
         "the model that fits nowhere was not named"
-    return "30 seated over two peers; on a 4 GB peer the big model is refused by name"
+    return "30 placed over two peers; on a 4 GB peer the big model is refused by name"
 
 
 # -- agents and the web ----------------------------------------------------

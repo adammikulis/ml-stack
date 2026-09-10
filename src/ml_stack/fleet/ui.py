@@ -375,7 +375,7 @@ class UI:
         return [asdict(e) for e in history(home_dir())][::-1][:limit]
 
     def fit(self, room: int = 0, users: int = 1) -> dict[str, Any]:
-        """The measured fit records, seated in a room of this size.
+        """The measured fit records, worked out for a room of this size.
 
         Everything the Fit view draws, worked out here: `fit.records()` as it comes off
         disk -- measured at load, never estimated -- each with what `Fit.loaded`, `Fit.cost`,
@@ -397,7 +397,7 @@ class UI:
             at = one.at_room(asked)
             rows.append({**one.as_dict(), "loaded": at.loaded(), "free": at.free(),
                          "longest": at.longest(people),
-                         "seats": [at.users(c) for c in fit_mod.READ_CONTEXTS],
+                         "slots": [at.users(c) for c in fit_mod.READ_CONTEXTS],
                          "costs": [at.cost(c) for c in fit_mod.READ_CONTEXTS]})
         return {
             "records": rows,

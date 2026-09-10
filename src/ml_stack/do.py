@@ -637,7 +637,7 @@ def best_on_disk() -> tuple[Any, str] | None:
 
 def client_for(args: argparse.Namespace) -> Any:
     """A client on the served model: ``--url`` for one already up, ``--model`` leased in
-    its measured shape on one seat."""
+    its measured shape on one slot."""
     if args.url:
         from ml_stack.client import Client
 
@@ -648,7 +648,7 @@ def client_for(args: argparse.Namespace) -> Any:
     from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.recent import note
-    from ml_stack.serve.shape import Run, Shape, drafted, seat
+    from ml_stack.serve.shape import Run, Shape, drafted, slot
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="do")
@@ -662,14 +662,14 @@ def client_for(args: argparse.Namespace) -> Any:
     if measured is not None:
         run = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
                              timeout=args.timeout)
-        say(f"serving alone, one seat of {run.shape.seat_context} tokens "
+        say(f"serving alone, one slot of {run.shape.slot_context} tokens "
             f"({run.shape.note}): {said(measured)}")
         run = drafted(run, "none", say=say)
     else:
-        run = Run(shape=Shape(model=found, port=args.port, seats=1, seat_context=32768,
+        run = Run(shape=Shape(model=found, port=args.port, slots=1, slot_context=32768,
                               reasoning_budget=0))
         run = drafted(run, args.draft, say=say)
-    return seat(run, index=0)
+    return slot(run, index=0)
 
 
 def parser() -> argparse.ArgumentParser:

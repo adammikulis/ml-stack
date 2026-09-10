@@ -519,7 +519,7 @@ def test_a_task_with_no_model_and_nothing_measured_on_disk_still_asks_for_one(mo
 
 
 def test_a_model_already_up_on_the_port_is_used_as_it_stands(monkeypatch, tmp_path, capsys):
-    """The weights already up in another shape are used, not reloaded into one seat."""
+    """The weights already up in another shape are used, not reloaded into one slot."""
     from ml_stack import do
 
     here = tmp_path / "quince-2b.gguf"

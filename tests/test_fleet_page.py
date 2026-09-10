@@ -370,7 +370,7 @@ class TestTheFitView:
             assert cells.nth(4).inner_text().replace(",", "") == str(here.longest(8))
         assert not errors
 
-    def test_moving_the_room_asks_again_and_seats_fewer(self, joined, open_page):
+    def test_moving_the_room_asks_again_and_slots_fewer(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Fit')")
         page.wait_for_selector("table.fit tbody tr")
@@ -382,8 +382,8 @@ class TestTheFitView:
         after = page.locator("table.fit tbody tr").first.locator("td").nth(3).inner_text()
 
         _, got, _ = joined.call(f"/ui/fit.json?room={8 * GIB}", cookie=joined.cookie)
-        seats = got["records"][0]["seats"][got["ladder"].index(32768)]
-        assert after == (f"{seats:,}" if seats else "does not fit")
+        slots = got["records"][0]["slots"][got["ladder"].index(32768)]
+        assert after == (f"{slots:,}" if slots else "does not fit")
         assert after != before
         assert "8.0G of room" in page.locator("fit-view").inner_text()
         assert not errors

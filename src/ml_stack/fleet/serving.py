@@ -112,10 +112,10 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
                 context: int = 8192, parallel: int = 1, manager: Any = None,
                 serving: Serving | None = None, port: int | None = None,
                 escalate: bool = False) -> Started:
-    """Run ``model_path`` on this machine with ``parallel`` seats of ``context`` tokens.
+    """Run ``model_path`` on this machine with ``parallel`` slots of ``context`` tokens.
     Registers the port when given a ``Serving``.
 
-    ``escalate=True`` grows a server already up on ``port`` with fewer seats than
+    ``escalate=True`` grows a server already up on ``port`` with fewer slots than
     ``parallel`` asks for, rather than refusing -- see
     :meth:`~ml_stack.serve.ServerManager.escalate`.
     """
@@ -147,7 +147,7 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
 
 
 class NoRoom(RuntimeError):
-    """The model and its seats do not fit in this machine's room."""
+    """The model and its slots do not fit in this machine's room."""
 
 
 class Hosting:
@@ -170,7 +170,7 @@ class Hosting:
         return None
 
     def fits_in(self, name: str, *, context: int, parallel: int, room: int) -> str:
-        """"" when the model with ``parallel`` seats fits in ``room`` bytes by its memory
+        """"" when the model with ``parallel`` slots fits in ``room`` bytes by its memory
         record, or a line saying what it needs. A model with no record passes."""
         from ml_stack.serve.fit import records
         from .plan import fit_for
@@ -184,7 +184,7 @@ class Hosting:
         need = loaded + max(1, int(parallel)) * each
         if need <= room:
             return ""
-        return (f"{human_bytes(need)} for {parallel} seat(s) at {context} tokens; "
+        return (f"{human_bytes(need)} for {parallel} slot(s) at {context} tokens; "
                 f"this machine has {human_bytes(room)}")
 
     def start(self, model_path: Path | str, *, name: str = "", context: int = 8192,
@@ -192,7 +192,7 @@ class Hosting:
         """Serve ``model_path`` here, or raise `NoRoom`.
 
         ``escalate`` (on by default: a pool is exactly the place more than one
-        conversation is expected) grows a server already up with fewer seats than
+        conversation is expected) grows a server already up with fewer slots than
         ``parallel`` asks for rather than refusing.
         """
         name = name or Path(model_path).name

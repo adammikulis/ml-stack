@@ -29,7 +29,7 @@ def log_dir() -> Path:
 
 
 def default_slot_save_path() -> Path:
-    """Where a slot's KV cache is saved when a lease escalates seats without naming one."""
+    """Where a slot's KV cache is saved when a lease escalates slots without naming one."""
     return home.cache("slots")
 
 

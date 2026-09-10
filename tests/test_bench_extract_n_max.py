@@ -26,8 +26,8 @@ def _serving_seam(monkeypatch, seen, *, draft):
     from ml_stack.serve import Shape
 
     class Found:
-        def shape(self, port, seats):
-            return Shape(model="x.gguf", port=port, seats=seats, seat_context=4096,
+        def shape(self, port, slots):
+            return Shape(model="x.gguf", port=port, slots=slots, slot_context=4096,
                          cache_type="q8_0", draft=draft, draft_n_max=4 if draft else None)
 
         def said(self):

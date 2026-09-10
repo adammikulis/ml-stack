@@ -172,7 +172,7 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
     """Put ``model`` (a path or ``hf:owner/repo/file.gguf``) up on ``port`` with
     ``ml-stack-serve up``, detached; returns the log and pid, and ``serve_status`` says
     when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``. ``escalate``
-    grows a server already up on ``port`` with fewer than ``parallel`` seats rather than
+    grows a server already up on ``port`` with fewer than ``parallel`` slots rather than
     refusing, keeping every live conversation."""
     argv = ["up", model, "--port", str(port), "--parallel", str(parallel)]
     if context:
@@ -203,7 +203,7 @@ def serve_down(port: int = 8080) -> dict[str, Any]:
 
 
 def serve_escalate(port: int = 8080, add: int = 1) -> dict[str, Any]:
-    """Grow the seats the server on ``port`` holds by ``add``, keeping every live
+    """Grow the slots the server on ``port`` holds by ``add``, keeping every live
     conversation (``ml-stack-serve escalate``), detached; ``serve_status`` says when the
     relaunch has finished."""
     return detached("ml_stack.serve.cli", ["escalate", "--port", str(port), "--add",
@@ -368,7 +368,7 @@ TOOLS: list[Tool] = [
          serve_status),
     Tool("serve_up", "Put a model up on a port, detached; returns the log and pid.", serve_up),
     Tool("serve_down", "Stop the server this machine started on a port.", serve_down),
-    Tool("serve_escalate", "Grow the seats a running server holds, keeping every live "
+    Tool("serve_escalate", "Grow the slots a running server holds, keeping every live "
                           "conversation.", serve_escalate),
     Tool("models_find", "Search the Hub for a model, the trusted publishers first.",
          models_find),

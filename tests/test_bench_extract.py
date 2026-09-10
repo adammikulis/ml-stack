@@ -454,8 +454,8 @@ def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeyp
     seen = {}
 
     class Found:
-        def shape(self, port, seats):
-            return Shape(model="x.gguf", port=port, seats=seats, seat_context=4096,
+        def shape(self, port, slots):
+            return Shape(model="x.gguf", port=port, slots=slots, slot_context=4096,
                          cache_type="q8_0", build="unsloth", draft="mtp.gguf", draft_n_max=4,
                          reasoning_budget=0, extra_args=("-ub", "2048"))
 

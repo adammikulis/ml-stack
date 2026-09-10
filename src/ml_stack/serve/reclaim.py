@@ -1,6 +1,6 @@
 """Stop a model server nobody is using, so the memory it holds goes back.
 
-A server holds its weights and every seat's cache for as long as it runs, and a machine
+A server holds its weights and every slot's cache for as long as it runs, and a machine
 that answered one question at nine o'clock is still carrying ninety gigabytes at five. What
 is missing is not a way to stop one -- that is `ServerManager.release` -- it is knowing
 which one nobody wants.
@@ -69,7 +69,7 @@ def state_path() -> Path:
 def busy_now(base_url: str, *, timeout: float = 2.0) -> bool | None:
     """Whether any slot on this server is processing. None when it does not say.
 
-    llama.cpp's ``/slots`` is a list, one entry a seat, each carrying ``is_processing``.
+    llama.cpp's ``/slots`` is a list, one entry a slot, each carrying ``is_processing``.
     A build served with ``--no-slots``, or anything else on the port, says nothing -- and
     nothing is not idle.
     """

@@ -1474,7 +1474,7 @@ def measuring() -> dict[str, Any] | None:
 
 def asking_said(argv: Sequence[str]) -> dict[str, Any]:
     """How a run started with ``argv`` will ask: the sampling, the draft head and its
-    depth, the cache type, the thinking budget, the context and the seats."""
+    depth, the cache type, the thinking budget, the context and the slots."""
     try:
         args = _parser().parse_args([a for a in argv if a not in ("--detach", "--no-queue")])
     except SystemExit:
@@ -1586,7 +1586,7 @@ def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: in
     if found is None:
         return None
     run = found.run(port=int(getattr(args, "serve_port", 8099) or 8099),
-                    seats=int(getattr(args, "parallel", 1) or 1))
+                    slots=int(getattr(args, "parallel", 1) or 1))
     shape = run.shape
     said: dict[str, Any] = {}
     if n >= len(heads) and shape.draft:
@@ -1616,7 +1616,7 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     One object rather than twenty keyword arguments, and one place that lays a flag over a
     record, so the lease `served` takes, the ways it asks with and the client it asks with
     cannot say different things. ``context`` is the total across the slots, which is what
-    ``-c`` takes; a `Shape` holds it as every seat's share.
+    ``-c`` takes; a `Shape` holds it as every slot's share.
 
     ``head`` is what ``--serve-draft`` named for this model -- ``""`` for the bare model it
     asked for outright -- and None when it named nothing, which is where a record's own
@@ -1624,10 +1624,10 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     """
     from ml_stack.serve.shape import Run, Shape
 
-    seats = max(1, int(getattr(args, "parallel", 1) or 1))
+    slots = max(1, int(getattr(args, "parallel", 1) or 1))
     run = measured if measured is not None else Run(shape=Shape(model=str(model)))
-    run = run.over(model=str(model), port=int(port), seats=seats,
-                   seat_context=max(1, int(context) // seats),
+    run = run.over(model=str(model), port=int(port), slots=slots,
+                   slot_context=max(1, int(context) // slots),
                    timeout=float(getattr(args, "per_question", PER_QUESTION)),
                    terse=bool(getattr(args, "terse", False)),
                    **sampling_from(args))
@@ -1791,7 +1791,7 @@ def _how_said(how: Mapping[str, Any]) -> list[str]:
     if how.get("card"):
         said += ", over what the model's card asks for"
     head, ahead = str(how.get("head") or ""), how.get("head_ahead")
-    context, seats = int(how.get("context") or 0), int(how.get("slots") or 1)
+    context, slots = int(how.get("context") or 0), int(how.get("slots") or 1)
     shape = [f"draft head{'s' if ', ' in head else ''} {head}" if head else "no draft head"]
     if ahead:
         shape.append(f"{ahead} ahead")
@@ -1799,7 +1799,7 @@ def _how_said(how: Mapping[str, Any]) -> list[str]:
     if how.get("reasoning_budget") is not None:
         shape.append(f"thinking budget {int(how['reasoning_budget'])}")
     shape.append((f"{context // 1024}k context" if context else "the model's own context")
-                 + f" across {seats} seat" + ("s" if seats != 1 else ""))
+                 + f" across {slots} slot" + ("s" if slots != 1 else ""))
     return [f"  asking: {said}", "  shape: " + "; ".join(shape)]
 
 

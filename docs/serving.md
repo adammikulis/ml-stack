@@ -67,33 +67,33 @@ and leaves an adopted server alone on exit. It only stops what it started.
 two parts of a program that lease it differently are not two clients of one server:
 whichever leases second finds a mismatch, stops the first and loads the weights again. A
 `Shape` is the whole shape in one object and `Shape.lease()` is the only place it becomes
-`serve`'s arguments, so the two cannot drift apart. `seat` starts the server on the first
+`serve`'s arguments, so the two cannot drift apart. `slot` starts the server on the first
 ask, holds it per port for the process, and hands each caller a `Client` pinned to a slot of
 its own -- so several conversations at once do not reprocess each other's context.
 
 ```python
 from dataclasses import replace
 
-from ml_stack.serve import Shape, seat, draft_for, projector_for
+from ml_stack.serve import Shape, slot, draft_for, projector_for
 
 model = "hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
-shape = Shape(model=model, port=8080, seat_context=131072, cache_type="q8_0",
+shape = Shape(model=model, port=8080, slot_context=131072, cache_type="q8_0",
               draft=draft_for(model, "auto"),         # the head shipped beside the weights
               draft_n_max=4, reasoning_budget=0,      # measured, not remembered
               mmproj=projector_for(model, "auto"),    # so the model can see
               build="unsloth")                        # a head mainline will not load
 
-client = seat(shape, index=request_number, n_predict=16384)
+client = slot(shape, index=request_number, n_predict=16384)
 
-crowded = replace(shape, seats=4, seat_context=32768)   # four conversations at once
+crowded = replace(shape, slots=4, slot_context=32768)   # four conversations at once
 ```
 
-A shape holds one seat unless it is asked for more, and that seat gets the whole context.
-`seats=N` divides the same memory between N conversations, each with its own KV cache. A
-lone seat is given the model's own trained window when the room allows it, read off the
+A shape holds one slot unless it is asked for more, and that slot gets the whole context.
+`slots=N` divides the same memory between N conversations, each with its own KV cache. A
+lone slot is given the model's own trained window when the room allows it, read off the
 GGUF header; a context asked for past the trained window turns on YaRN position scaling by
 itself and says so, because past the trained length the positions are the part that goes
-wrong first. `ml-stack-serve escalate --port 8080 --add 2` grows a running server's seats
+wrong first. `ml-stack-serve escalate --port 8080 --add 2` grows a running server's slots
 in place and carries its conversations across, so the next person does not cost the ones
 already talking a cold reload.
 
@@ -135,14 +135,14 @@ Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
   serve with  --context 32768 --build unsloth --draft mtp-…-shared-Q8_0.gguf
               --spec draft-mtp --spec-n-max 4 --kv q8_0 --mmproj auto --reasoning-budget 0
               and -ub 2048 --spec-draft-p-min 0.5 -- llama-server's own, passed by --profile
-  measured at --parallel 2, 16384 per seat
+  measured at --parallel 2, 16384 per slot
   per request draft 4 ahead, greedy -- sent with each call, where the build takes it
   ask with    tight + batch + kinds + summary + greedy
   measured    85% F1 (89% recall, 83% precision) at 26.0 s/question over 10 question(s)
 ```
 
 A record has a **startup half** and a **request half**. The build, the draft head file, the
-cache type, the context and the seats are what a server is told once; the draft depth, its
+cache type, the context and the slots are what a server is told once; the draft depth, its
 confidence floor and the sampling ride on each call, so one served model can guess four
 tokens ahead for a tool call and two for a document. A build without llama.cpp's
 per-request speculative override ignores those fields and serves the depth it was started
@@ -171,13 +171,13 @@ a measurement from a habit.
 From Python, both ends read the same record:
 
 ```python
-from ml_stack.serve import profile_for, seat
+from ml_stack.serve import profile_for, slot
 from ml_stack.graph.ask import converse
 
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf",
                     workload="ask")
 run = found.run(port=8080, n_predict=16384)
-client = seat(run, index=request_number)
+client = slot(run, index=request_number)
 answer = converse(question, graph, client, asking=run.asking)
 ```
 
@@ -190,7 +190,7 @@ lays a knob over it, routed to the section that owns it rather than to whichever
 `**kwargs` next.
 
 Hand the same run to the bench (`bench.served(run, ...)`), to a page (`AskRoutes.run`, and
-`seated()` hands out a seat of it) and to `seat` and they lease one shape and ask one way by
+`client_on_slot()` hands out a slot of it) and to `slot` and they lease one shape and ask one way by
 construction. Three places each building their own from the record is how a knob about the
 asking reached `Client.__init__` and took an 87G load down with it, and how two of them
 could lease one port two ways — which llama.cpp answers by stopping the server and loading
@@ -286,7 +286,7 @@ ml-stack-serve fit --ui
 ```
 
 The fleet app shows the same view under **Fit**, at `/ui/fit`, from the same two routes --
-`/ui/fit.json` hands over the records seated for the room and the head count the sliders
+`/ui/fit.json` hands over the records worked out for the room and the head count the sliders
 stand at, so every number on the screen is the one `ml-stack-serve fit` prints. A sibling
 tab, **What it cost to be
 right**, draws `ml-stack-bench show --rates` the same way: accuracy against wall clock,

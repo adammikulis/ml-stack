@@ -10,7 +10,7 @@
       "reasoning_budget": null,
       "mmproj": "auto",
       "extra_args": [],
-      "seat_context": 16384,
+      "slot_context": 16384,
       "parallel": 2
     },
     "ask": {
@@ -51,7 +51,7 @@
       "reasoning_budget": null,
       "mmproj": "auto",
       "extra_args": [],
-      "seat_context": 16384,
+      "slot_context": 16384,
       "parallel": 2
     },
     "ask": {
@@ -92,7 +92,7 @@
       "reasoning_budget": null,
       "mmproj": "",
       "extra_args": [],
-      "seat_context": 16384,
+      "slot_context": 16384,
       "parallel": 2
     },
     "ask": {
@@ -133,7 +133,7 @@
       "reasoning_budget": null,
       "mmproj": "",
       "extra_args": [],
-      "seat_context": 16384,
+      "slot_context": 16384,
       "parallel": 2
     },
     "ask": {
@@ -179,7 +179,7 @@
         "--spec-draft-p-min",
         "0.5"
       ],
-      "seat_context": 16384,
+      "slot_context": 16384,
       "parallel": 2
     },
     "ask": {

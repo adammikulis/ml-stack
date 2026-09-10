@@ -1053,7 +1053,7 @@ def main(args: Any) -> int:
 
             measured = profile_for(str(found), workload="ingest")
             if measured is not None:
-                shape = measured.shape(port=args.serve_port, seats=args.parallel)
+                shape = measured.shape(port=args.serve_port, slots=args.parallel)
                 lease = {**lease, **{k: v for k, v in shape.lease().items()
                                      if k not in ("port", "context", "parallel")}}
                 manager = shape.manager()

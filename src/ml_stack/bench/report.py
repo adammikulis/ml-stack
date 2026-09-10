@@ -411,7 +411,7 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
         draft_cache_type=str(server.get("draft_cache_type") or ""),
         reasoning_budget=(int(server["reasoning_budget"])
                           if server.get("reasoning_budget") is not None else None),
-        seat_context=(context // slots) if context else 32768,
+        slot_context=(context // slots) if context else 32768,
         parallel=slots,
         sampling=dict(sampling) if isinstance(sampling, Mapping) else {},
         measured_at=str(one.get("at") or "")[:10],

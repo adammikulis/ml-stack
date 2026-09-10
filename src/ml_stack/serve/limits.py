@@ -12,7 +12,7 @@ the same record:
 * `hub.room` caps the memory a model may use, so every preflight, fit and lease already
   honours it without being told;
 * `ServerManager.lease` refuses a server that would be one too many, or a lease asking for
-  more seats than allowed, before anything is started;
+  more slots than allowed, before anything is started;
 * `ml_stack.serve.reclaim` stops an idle server once ``idle_s`` has passed.
 
 Nothing here is a default with an opinion: every field starts at 0, which means *no limit
@@ -45,7 +45,7 @@ class Limits:
     """The most a model and its caches may use, whatever the machine would allow."""
     servers: int = 0
     """The most model servers to run at once."""
-    seats: int = 0
+    slots: int = 0
     """The most conversations one server may hold."""
     idle_s: float = 0.0
     """Stop a server that has not been seen busy for this long. 0 leaves it running."""
@@ -56,7 +56,7 @@ class Limits:
             return machine
         return min(self.memory_bytes, machine) if machine > 0 else self.memory_bytes
 
-    def refusal(self, *, running: int = 0, seats: int = 1) -> str:
+    def refusal(self, *, running: int = 0, slots: int = 1) -> str:
         """Why a lease may not go ahead, or "" when it may.
 
         ``running`` is how many servers are already up that this one would join.
@@ -65,10 +65,10 @@ class Limits:
             return (f"this machine is set to run {self.servers} server(s) at once and "
                     f"{running} are up; stop one, or raise the limit "
                     f"(ml-stack-serve limits --servers N)")
-        if self.seats and seats > self.seats:
-            return (f"this lease asks for {seats} seat(s) and this machine is set to allow "
-                    f"{self.seats}; ask for fewer, or raise the limit "
-                    f"(ml-stack-serve limits --seats N)")
+        if self.slots and slots > self.slots:
+            return (f"this lease asks for {slots} slot(s) and this machine is set to allow "
+                    f"{self.slots}; ask for fewer, or raise the limit "
+                    f"(ml-stack-serve limits --slots N)")
         return ""
 
     def said(self) -> list[str]:
@@ -79,8 +79,8 @@ class Limits:
             out.append(f"memory   a model may use {human_bytes(self.memory_bytes)}")
         if self.servers:
             out.append(f"servers  {self.servers} at once")
-        if self.seats:
-            out.append(f"seats    {self.seats} on one server")
+        if self.slots:
+            out.append(f"slots    {self.slots} on one server")
         if self.idle_s:
             out.append(f"idle     stop a server unused for {self.idle_s:.0f}s")
         return out

@@ -280,10 +280,10 @@ class TestMeasuredFitCheck:
         assert next(c for c in report.checks if c.name == "fit (estimate)").ok
         found = next(c for c in report.checks if c.name == "fit (measured)")
         assert found.ok, found.detail
-        assert "loaded 80.5G" in found.detail and "a seat at 262,144 tokens" in found.detail
+        assert "loaded 80.5G" in found.detail and "a slot at 262,144 tokens" in found.detail
         assert report.ok
 
-    def test_seats_are_charged_each(self, tmp_path, monkeypatch):
+    def test_slots_are_charged_each(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module
 
         from ml_stack.serve.fit import Fit
@@ -297,7 +297,7 @@ class TestMeasuredFitCheck:
         report = Preflight(spec, binary=fake_binary(tmp_path), limit_bytes=64 * 2**30,
                            fits=lambda: [measured])
         found = next(c for c in report.checks if c.name == "fit (measured)")
-        assert "a seat at 2,048 tokens" in found.detail and " x 4" in found.detail
+        assert "a slot at 2,048 tokens" in found.detail and " x 4" in found.detail
 
     def test_no_measured_record_says_so_and_passes(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module

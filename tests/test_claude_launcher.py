@@ -55,7 +55,7 @@ def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch,
     code = claude.launch(["kestrel", "--port", "8899", "--claude", str(binary), "--",
                           "--print", "hello"], say=lambda _: None, run_claude=run_claude)
     assert code == 7
-    assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 1, "one conversation, one seat"
+    assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 1, "one conversation, one slot"
     assert seen["lease"]["cache_type_k"] == "q8_0", "the measured shape"
     assert seen["command"][0] == str(binary) and seen["command"][1] == "--settings"
     assert seen["command"][-2:] == ["--print", "hello"]
@@ -64,8 +64,8 @@ def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch,
     assert seen["released"], "and the server goes when claude exits"
 
 
-def test_seats_asked_for_reach_the_lease(monkeypatch, tmp_path):
-    """One seat holds the whole measured cache; `--seats N` divides it between N."""
+def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
+    """One slot holds the whole measured cache; `--slots N` divides it between N."""
     from ml_stack.serve.profile import record
 
     seen = {}
@@ -78,7 +78,7 @@ def test_seats_asked_for_reach_the_lease(monkeypatch, tmp_path):
         seen["lease"] = lease
         yield Server()
 
-    profile = record("kestrel-8B-UD-Q4_K_XL.gguf", seat_context=32768, parallel=2)
+    profile = record("kestrel-8B-UD-Q4_K_XL.gguf", slot_context=32768, parallel=2)
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: profile)
     monkeypatch.setattr("ml_stack.hub.located",
@@ -91,12 +91,12 @@ def test_seats_asked_for_reach_the_lease(monkeypatch, tmp_path):
 
     claude.launch(started, say=lambda _: None, run_claude=lambda command, env: 0)
     assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (1, 65536), \
-        "one seat holding the whole cache the record measured across two"
+        "one slot holding the whole cache the record measured across two"
 
-    claude.launch([*started, "--seats", "4"], say=lambda _: None,
+    claude.launch([*started, "--slots", "4"], say=lambda _: None,
                   run_claude=lambda command, env: 0)
     assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (4, 131072), \
-        "each seat asked for gets what one measured seat got"
+        "each slot asked for gets what one measured slot got"
 
 
 def test_launch_refuses_without_a_claude_binary(monkeypatch, capsys):

@@ -1,4 +1,4 @@
-"""``ml-stack-fleet plan``: which model each peer serves, and how many seats, for N users.
+"""``ml-stack-fleet plan``: which model each peer serves, and how many slots, for N users.
 
 Profiles, memory records and peers are invented; the command is driven through `join.main`
 against daemons on loopback, and ``--apply`` against the real daemon handler over a
@@ -45,7 +45,7 @@ PROFILES = [
     Profile(model=SHINY, questions=5, right=0.99, seconds_per_question=0.5),
 ]
 
-# loaded = weights_gpu + compute; a seat at 16384 tokens costs per_token * 16384 + per_seq
+# loaded = weights_gpu + compute; a slot at 16384 tokens costs per_token * 16384 + per_seq
 FITS = [
     Fit(model=BIG, weights_gpu=40 * G, compute=1 * G, per_token=1 * M, per_seq=0),
     Fit(model="larch-9b-IQ4_XS.gguf", weights_gpu=8 * G, compute=1 * G, per_token=256 * 1024,
@@ -91,30 +91,30 @@ class TestRanking:
 class TestPlacing:
     def test_three_users_all_get_the_best_model_on_the_roomy_peer(self):
         got = place(3, 16384, [SMALLER, ROOMY], PROFILES, FITS)
-        assert [(r.peer, r.model, r.seats) for r in got.rows] == [("roomy", BIG, 3)]
-        assert got.unplaced == 0 and got.seated == 3
+        assert [(r.peer, r.model, r.slots) for r in got.rows] == [("roomy", BIG, 3)]
+        assert got.unplaced == 0 and got.placed == 3
         assert got.rows[0].used == 41 * G + 3 * 16 * G and got.rows[0].room == 96 * G
 
-    def test_more_users_than_the_best_model_seats_go_to_a_smaller_model(self):
+    def test_more_users_than_the_best_model_slots_go_to_a_smaller_model(self):
         got = place(5, 16384, [SMALLER, ROOMY], PROFILES, FITS)
-        assert [(r.peer, r.model, r.seats) for r in got.rows] == [
+        assert [(r.peer, r.model, r.slots) for r in got.rows] == [
             ("roomy", BIG, 3), ("small", MID, 2)]
         assert got.unplaced == 0
         assert ("small", BIG, "room 24.0G < 41.0G loaded") in got.why
 
     def test_a_tiny_peer_gets_the_small_model(self):
         got = place(7, 16384, [TINY, SMALLER, ROOMY], PROFILES, FITS)
-        assert [(r.peer, r.model, r.seats) for r in got.rows] == [
+        assert [(r.peer, r.model, r.slots) for r in got.rows] == [
             ("roomy", BIG, 3), ("small", MID, 3), ("tiny", SMALL, 1)]
         assert got.unplaced == 0
 
     def test_nobody_is_dropped_silently(self):
         said: list[str] = []
         got = place(10, 16384, [SMALLER, ROOMY], PROFILES, FITS, log=said.append)
-        assert got.seated == 6 and got.unplaced == 4
-        assert any("4 user(s) without a seat" in line for line in said)
+        assert got.placed == 6 and got.unplaced == 4
+        assert any("4 user(s) without a slot" in line for line in said)
         text = table(got)
-        assert "4 user(s) without a seat" in text
+        assert "4 user(s) without a slot" in text
         assert "small: quince-70b-Q4_K_M.gguf: room 24.0G < 41.0G loaded" in text
 
     def test_no_peer_answering_is_the_reason_given(self):
@@ -125,11 +125,11 @@ class TestPlacing:
         assert "no peer answered" in table(got)
         assert any("no peer answered" in line for line in said)
 
-    def test_a_shorter_context_seats_everyone_on_one_peer(self):
+    def test_a_shorter_context_slots_everyone_on_one_peer(self):
         long = place(5, 16384, [SMALLER, ROOMY], PROFILES, FITS)
         short = place(5, 4096, [SMALLER, ROOMY], PROFILES, FITS)
         assert [r.peer for r in long.rows] == ["roomy", "small"]
-        assert [(r.peer, r.seats) for r in short.rows] == [("roomy", 5)]
+        assert [(r.peer, r.slots) for r in short.rows] == [("roomy", 5)]
         assert short.rows[0].context == 4096
 
     def test_a_peer_with_no_room_figure_is_named_once(self):
@@ -146,44 +146,44 @@ class TestPlacing:
     def test_as_dict_carries_rows_and_reasons(self):
         got = place(5, 16384, [SMALLER, ROOMY], PROFILES, FITS)
         d = got.as_dict()
-        assert d["seated"] == 5 and d["unplaced"] == 0
-        assert d["rows"][0]["peer"] == "roomy" and d["rows"][0]["seats"] == 3
+        assert d["placed"] == 5 and d["unplaced"] == 0
+        assert d["rows"][0]["peer"] == "roomy" and d["rows"][0]["slots"] == 3
         assert {"peer": "small", "model": BIG, "reason": "room 24.0G < 41.0G loaded"} in d["why"]
 
 
 class TestPreference:
-    """`--prefer quality` gives a peer the best model that fits; `--prefer seats` the
-    model that seats the most of the users still waiting."""
+    """`--prefer quality` gives a peer the best model that fits; `--prefer slots` the
+    model that slots the most of the users still waiting."""
 
-    def test_quality_seats_one_on_a_peer_where_a_smaller_model_seats_three(self):
+    def test_quality_slots_one_on_a_peer_where_a_smaller_model_slots_three(self):
         got = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="quality")
-        assert [(r.peer, r.model, r.seats) for r in got.rows] == [("midsize", BIG, 1)]
+        assert [(r.peer, r.model, r.slots) for r in got.rows] == [("midsize", BIG, 1)]
         assert got.unplaced == 2 and got.prefer == "quality"
 
-    def test_seats_takes_the_smaller_model_and_everyone_sits(self):
-        got = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="seats")
-        assert [(r.peer, r.model, r.seats) for r in got.rows] == [("midsize", MID, 3)]
-        assert got.unplaced == 0 and got.prefer == "seats"
+    def test_slots_takes_the_smaller_model_and_everyone_gets_one(self):
+        got = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="slots")
+        assert [(r.peer, r.model, r.slots) for r in got.rows] == [("midsize", MID, 3)]
+        assert got.unplaced == 0 and got.prefer == "slots"
 
     def test_quality_is_what_no_preference_asks_for(self):
         assert place(3, 16384, [MIDSIZE], PROFILES, FITS).as_dict() == place(
             3, 16384, [MIDSIZE], PROFILES, FITS, prefer="quality").as_dict()
 
-    def test_seats_takes_the_better_model_when_both_seat_everyone(self):
-        got = place(2, 16384, [ROOMY], PROFILES, FITS, prefer="seats")
-        assert [(r.model, r.seats) for r in got.rows] == [(BIG, 2)]
+    def test_slots_takes_the_better_model_when_both_slot_everyone(self):
+        got = place(2, 16384, [ROOMY], PROFILES, FITS, prefer="slots")
+        assert [(r.model, r.slots) for r in got.rows] == [(BIG, 2)]
 
-    def test_seats_never_seats_fewer_people_than_quality(self):
+    def test_slots_never_slots_fewer_people_than_quality(self):
         for fleet in FLEETS:
             for users in (1, 2, 3, 5, 7, 10, 20):
                 good = place(users, 16384, fleet, PROFILES, FITS, prefer="quality")
-                many = place(users, 16384, fleet, PROFILES, FITS, prefer="seats")
-                assert many.seated >= good.seated, (fleet, users)
-                assert many.seated + many.unplaced == users
+                many = place(users, 16384, fleet, PROFILES, FITS, prefer="slots")
+                assert many.placed >= good.placed, (fleet, users)
+                assert many.placed + many.unplaced == users
 
     def test_a_half_measured_model_is_named_once_for_the_fleet_either_way(self):
         profiles = [*PROFILES, Profile(model=UNMEASURED, questions=100, right=0.7)]
-        for want in ("quality", "seats"):
+        for want in ("quality", "slots"):
             got = place(9, 16384, [MIDSIZE, SMALLER, TINY], profiles, FITS, prefer=want)
             assert [w for w in got.why if w[2] == "no memory measurement"] == [
                 ("*", UNMEASURED, "no memory measurement")]
@@ -192,10 +192,10 @@ class TestPreference:
 
     def test_the_table_and_the_data_name_the_preference(self):
         good = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="quality")
-        many = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="seats")
+        many = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="slots")
         assert "--prefer quality: the best measured model that fits each peer" in table(good)
-        assert "--prefer seats: the model that seats the most users on each peer" in table(many)
-        assert good.as_dict()["prefer"] == "quality" and many.as_dict()["prefer"] == "seats"
+        assert "--prefer slots: the model that slots the most users on each peer" in table(many)
+        assert good.as_dict()["prefer"] == "quality" and many.as_dict()["prefer"] == "slots"
 
 
 # -- the command --------------------------------------------------------------------
@@ -240,11 +240,11 @@ class TestCommand:
                      "--context", "16384", "--json", "--timeout", "1"])
         got = json.loads(capsys.readouterr().out)
         assert code == 0
-        assert [(r["peer"], r["model"], r["seats"]) for r in got["rows"]] == [
+        assert [(r["peer"], r["model"], r["slots"]) for r in got["rows"]] == [
             ("roomy", BIG, 3), ("small", MID, 2)]
         assert got["unplaced"] == 0 and got["applied"] == []
 
-    def test_it_prints_a_table_and_says_who_is_without_a_seat(
+    def test_it_prints_a_table_and_says_who_is_without_a_slot(
             self, key, udp, daemons, measured, monkeypatch, capsys):
         raw = load_cluster_key(key)
         small = _free_tcp()
@@ -255,8 +255,8 @@ class TestCommand:
         out = capsys.readouterr().out
         assert code == 1
         assert "PEER" in out and "small" in out and MID in out
-        assert "3 of 4 user(s) seated at 16384 tokens each" in out
-        assert "1 user(s) without a seat" in out
+        assert "3 of 4 user(s) placed at 16384 tokens each" in out
+        assert "1 user(s) without a slot" in out
         assert f"small: {BIG}: room 24.0G < 41.0G loaded" in out
 
     def test_the_preference_reaches_the_planner_and_the_table(
@@ -269,20 +269,20 @@ class TestCommand:
                 "--context", "16384", "--timeout", "1"]
         assert main([*argv, "--json"]) == 1
         good = json.loads(capsys.readouterr().out)
-        assert main([*argv, "--prefer", "seats", "--json"]) == 0
+        assert main([*argv, "--prefer", "slots", "--json"]) == 0
         many = json.loads(capsys.readouterr().out)
         assert good["prefer"] == "quality"
-        assert [(r["peer"], r["model"], r["seats"]) for r in good["rows"]] == [
+        assert [(r["peer"], r["model"], r["slots"]) for r in good["rows"]] == [
             ("midsize", BIG, 1)]
         assert good["unplaced"] == 2
-        assert many["prefer"] == "seats"
-        assert [(r["peer"], r["model"], r["seats"]) for r in many["rows"]] == [
+        assert many["prefer"] == "slots"
+        assert [(r["peer"], r["model"], r["slots"]) for r in many["rows"]] == [
             ("midsize", MID, 3)]
         assert many["unplaced"] == 0
-        main([*argv, "--prefer", "seats"])
+        main([*argv, "--prefer", "slots"])
         out = capsys.readouterr().out
-        assert "--prefer seats: the model that seats the most users on each peer" in out
-        assert "3 of 3 user(s) seated at 16384 tokens each" in out
+        assert "--prefer slots: the model that slots the most users on each peer" in out
+        assert "3 of 3 user(s) placed at 16384 tokens each" in out
 
     def test_in_no_cluster_it_says_join(self, tmp_path, capsys):
         assert main(["--cluster-key", str(tmp_path / "none.key"), "plan", "--users", "1"]) == 1
@@ -344,7 +344,7 @@ class ServingDaemon:
 
 
 class TestServeRoute:
-    def test_it_serves_a_model_this_machine_holds_with_its_seats(
+    def test_it_serves_a_model_this_machine_holds_with_its_slots(
             self, tmp_path, llama_binary, daemons):
         d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
@@ -376,7 +376,7 @@ class TestServeRoute:
         with pytest.raises(PeerError, match="404"):
             d.client._json("POST", "/serve", {"model": BIG, "parallel": 1})
 
-    def test_more_seats_than_the_room_holds_is_409(self, tmp_path, llama_binary,
+    def test_more_slots_than_the_room_holds_is_409(self, tmp_path, llama_binary,
                                                    daemons):
         d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
@@ -412,10 +412,10 @@ class TestApply:
                      "2", "--context", "16384", "--apply", "--timeout", "1"])
         out = capsys.readouterr().out
         assert code == 0, out
-        assert f"small: {MID}: 2 seat(s) on port" in out
+        assert f"small: {MID}: 2 slot(s) on port" in out
         live = d.serving.live(force=True)
         assert len(live) == 1 and live[0].models == [MID] and live[0].slots == 2
-        assert f"small            {MID}:{live[0].port} (2 seat(s))" in out
+        assert f"small            {MID}:{live[0].port} (2 slot(s))" in out
 
     def test_apply_as_json_carries_each_answer(
             self, tmp_path, llama_binary, key, udp, daemons, measured, monkeypatch,

@@ -16,7 +16,7 @@ Those routes were the same in every project that rendered the page, and lived in
 of them here. ``AskRoutes`` is that server-side half, with no opinion about where the graph
 comes from or which model answers: a subclass says how a question is answered (``asker``)
 and where conversations are kept (``threads``), and hangs whatever it wants -- a journal, a
-review queue, a seat number -- off ``answered`` and ``failed``.
+review queue, a slot number -- off ``answered`` and ``failed``.
 
 What goes back with a question is ``history``'s ``History``: the last ``WINDOW`` turns as
 messages, always, and on it the latest ``summary`` and the earlier turns ``recalled`` for
@@ -299,8 +299,8 @@ class AskRoutes:
 
     ``run``
         The :class:`~ml_stack.serve.Run` this page answers with: the shape its model is
-        served in, the ways it is asked, and the client. Given one, ``seated()`` leases the
-        server and hands out a seat of it, and ``model_name`` and ``serving_url`` answer
+        served in, the ways it is asked, and the client. Given one, ``client_on_slot()``
+        leases the server and hands out a slot of it, and ``model_name`` and ``serving_url`` answer
         from it.
     ``asker(question, *, turns, held, stream, emit)``
         Answers. Returns an ``Answer`` (or a mapping in ``answer_payload``'s shape).
@@ -354,22 +354,23 @@ class AskRoutes:
               emit: Any) -> Any:
         raise NotImplementedError("a subclass says how a question is answered")
 
-    def seated(self, *, index: int = 0, **over: Any) -> Any:
-        """A client on one seat of ``run``'s server, leased on the first question.
+    def client_on_slot(self, *, index: int = 0, **over: Any) -> Any:
+        """A client on one slot of ``run``'s server, leased on the first question.
 
         ``run`` is a :class:`~ml_stack.serve.Run`: the same object a bench row is measured
-        from and `seat` elsewhere is given, so a page answer and a measurement of the
+        from and `slot` elsewhere is given, so a page answer and a measurement of the
         page's model are one lease and one way of asking. llama.cpp serves one shape per
         port, and a page that spelled its lease out beside the bench's stopped the server
         and loaded the weights again the first time either was edited.
 
-        ``over`` is `Run.over`'s: a knob for this seat, routed to the section that owns it.
+        ``over`` is `Run.over`'s: a knob for this slot, routed to the section that owns it.
         """
         if self.run is None:
-            raise RuntimeError("no run on this handler: set `run`, or override `seated`")
-        from ml_stack.serve.shape import seat
+            raise RuntimeError("no run on this handler: set `run`, or override "
+                               "`client_on_slot`")
+        from ml_stack.serve.shape import slot
 
-        return seat(self.run.over(**over) if over else self.run, index=index)
+        return slot(self.run.over(**over) if over else self.run, index=index)
 
     def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
         return None
@@ -391,7 +392,7 @@ class AskRoutes:
         also says how much context each slot holds and how many slots there are, which is
         what a peak in `spent` is measured against.
 
-        With a ``run``, the server `seat` is holding on that run's port -- so this answers
+        With a ``run``, the server `slot` is holding on that run's port -- so this answers
         once a question has been asked and not before."""
         if self.run is None:
             return ""
@@ -910,7 +911,7 @@ class DraftRoutes:
     """``POST /draft``: a note introducing the entries an answer named, for a person to send.
 
     ``drafter(ids, question, answer)`` is the subclass's: `ml_stack.graph.ask.draft` on the
-    graph and a seat of the model, returning its dict. 400 without ids, 404 without a
+    graph and a slot of the model, returning its dict. 400 without ids, 404 without a
     drafter, 500 with the exception's text when it raised.
     """
 
@@ -975,7 +976,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
             raise RuntimeError("no graph on this server: serve with --graph FILE")
         from ml_stack.graph.ask import ASKING, converse, converse_stream
 
-        client = self.seated(index=0)
+        client = self.client_on_slot(index=0)
         ways = {"asking": self.run.asking if self.run is not None else ASKING,
                 "turns": turns, "held": held,
                 "summary": getattr(turns, "summary", None),

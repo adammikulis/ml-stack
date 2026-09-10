@@ -1,4 +1,4 @@
-"""One shape per port, written down once, and one held server to take a seat on."""
+"""One shape per port, written down once, and one held server to take a slot on."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -7,7 +7,7 @@ import pytest
 
 import ml_stack.serve
 from ml_stack.serve import shape as shape_mod
-from ml_stack.serve.shape import Shape, draft_for, held, projector_for, release_all, seat
+from ml_stack.serve.shape import Shape, draft_for, held, projector_for, release_all, slot
 
 
 class Held:
@@ -51,16 +51,16 @@ def test_a_unified_cache_is_asked_for_only_when_the_shape_says():
 
 
 def test_a_lease_says_only_what_was_asked_for_and_the_cache_is_q8_0_unless_said():
-    plain = Shape(model="weights.gguf", port=8080, seats=2, seat_context=32768)
+    plain = Shape(model="weights.gguf", port=8080, slots=2, slot_context=32768)
     assert plain.lease() == {"port": 8080, "context": 65536, "parallel": 2,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0"}
-    full = Shape(model="weights.gguf", port=8080, seats=2, seat_context=32768, cache_type="f16")
+    full = Shape(model="weights.gguf", port=8080, slots=2, slot_context=32768, cache_type="f16")
     assert full.lease()["cache_type_k"] == "f16"
-    assert plain.context == 65536, "what the server is asked for is every seat added up"
+    assert plain.context == 65536, "what the server is asked for is every slot added up"
 
 
 def test_the_whole_shape_becomes_the_arguments_serve_takes():
-    full = Shape(model="weights.gguf", port=8082, seats=4, seat_context=32768,
+    full = Shape(model="weights.gguf", port=8082, slots=4, slot_context=32768,
                  cache_type="q8_0", draft="hf:owner/repo/mtp-Q8_0.gguf", draft_n_max=4,
                  mmproj="/models/mmproj-F16.gguf", reasoning_budget=0)
     assert full.lease() == {
@@ -89,38 +89,38 @@ def test_a_named_build_gets_its_own_manager_and_the_default_gets_none():
 def test_two_models_on_two_ports_are_two_servers_and_neither_is_leased_twice(leases):
     """A single held server used to serve whichever job asked first, at four times the cost."""
     asked, _servers = leases
-    large = Shape(model="/models/large.gguf", port=8080, seats=2, seat_context=32768)
-    small = Shape(model="/models/small.gguf", port=8082, seats=4, seat_context=32768)
+    large = Shape(model="/models/large.gguf", port=8080, slots=2, slot_context=32768)
+    small = Shape(model="/models/small.gguf", port=8082, slots=4, slot_context=32768)
 
-    reading = seat(large, index=0, n_predict=100)
-    answering = seat(small, index=0, n_predict=100)
+    reading = slot(large, index=0, n_predict=100)
+    answering = slot(small, index=0, n_predict=100)
 
     assert [model for model, _ in asked] == ["/models/large.gguf", "/models/small.gguf"]
     assert [lease["port"] for _, lease in asked] == [8080, 8082]
     assert [lease["parallel"] for _, lease in asked] == [2, 4]
     assert reading.base_url != answering.base_url
 
-    seat(small, index=1, n_predict=100)
+    slot(small, index=1, n_predict=100)
     assert len(asked) == 2, "the server is held per port, not started per ask"
     assert held() == {8080: reading.base_url, 8082: answering.base_url}
 
 
-def test_every_seat_is_its_own_slot_and_a_busy_port_cycles_through_them(leases):
-    small = Shape(model="/models/small.gguf", port=8082, seats=4)
-    assert [seat(small, index=i, n_predict=100).slot for i in range(6)] == [0, 1, 2, 3, 0, 1]
-    # a shape with no seats named still asks for a slot that exists
-    assert seat(Shape(model="/m.gguf", port=8083, seats=0), index=3, n_predict=100).slot == 0
+def test_every_slot_is_its_own_slot_and_a_busy_port_cycles_through_them(leases):
+    small = Shape(model="/models/small.gguf", port=8082, slots=4)
+    assert [slot(small, index=i, n_predict=100).slot for i in range(6)] == [0, 1, 2, 3, 0, 1]
+    # a shape with no slots named still asks for a slot that exists
+    assert slot(Shape(model="/m.gguf", port=8083, slots=0), index=3, n_predict=100).slot == 0
 
 
 def test_the_client_gets_the_ceiling_and_the_timeout_it_was_asked_for(leases):
-    client = seat(Shape(model="/m.gguf", port=8080), index=0, n_predict=16384, timeout=42.0)
+    client = slot(Shape(model="/m.gguf", port=8080), index=0, n_predict=16384, timeout=42.0)
     assert (client.n_predict, client.timeout) == (16384, 42.0)
 
 
 def test_letting_go_releases_every_held_server(leases):
     _asked, servers = leases
-    seat(Shape(model="/a.gguf", port=8080), index=0, n_predict=100)
-    seat(Shape(model="/b.gguf", port=8082), index=0, n_predict=100)
+    slot(Shape(model="/a.gguf", port=8080), index=0, n_predict=100)
+    slot(Shape(model="/b.gguf", port=8082), index=0, n_predict=100)
     release_all()
     assert [s.closed for s in servers] == [True, True]
     assert held() == {}
@@ -200,7 +200,7 @@ def shipped(monkeypatch):
     monkeypatch.setattr(ops, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
     found = profile_for(FLASH, records=records_in(package_file()))
     assert found is not None, "the shipped profiles must still hold the Flash-Next record"
-    run = found.run(port=8099, seats=2)
+    run = found.run(port=8099, slots=2)
     if run.shape.build:
         where = managed_named() / run.shape.build
         where.mkdir(parents=True, exist_ok=True)
@@ -247,9 +247,9 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
         run.over(tightt=True)
 
 
-def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_seat(shipped, leases,
+def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_slot(shipped, leases,
                                                                     monkeypatch):
-    """A bench row, a page answer and a seated client for one model are the same lease by
+    """A bench row, a page answer and a client on a slot for one model are the same lease by
     construction. Three places each built their own from the profile, and llama.cpp serves
     one shape per port: whichever leased second stopped the server and loaded the weights
     again. Mutation: give any one of them its own Shape."""
@@ -263,8 +263,8 @@ def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_seat(shipped, lea
         run = shipped
 
     page = Page.__new__(Page)
-    answering = page.seated(index=0)
-    elsewhere = seat(shipped, index=0)
+    answering = page.client_on_slot(index=0)
+    elsewhere = slot(shipped, index=0)
 
     assert [model for model, _ in asked] == [FLASH, FLASH]
     def lease_of(kwargs):
@@ -277,7 +277,7 @@ def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_seat(shipped, lea
     assert lease_of(asked[1][1]) == shipped.lease(), "the page's"
     assert [k["manager"].backend._build for _m, k in asked] == ["unsloth", "unsloth"], \
         "the build the record names loads it in both places, or the head does not load"
-    # and `seat` asked for nothing more: the page's server is the one it sat down at,
+    # and `slot` asked for nothing more: the page's server is the one it took a slot on,
     # which is what one shape per port means
     assert len(asked) == 2 and answering.base_url == elsewhere.base_url
     assert held() == {8099: answering.base_url}
@@ -289,12 +289,12 @@ def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_seat(shipped, lea
 
 def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
     """`Run.over` is the one place a knob is laid over a record, so setting it once sets it
-    for the bench, the page and a seat at the same moment. Mutation: rebuild any one of the
+    for the bench, the page and a slot at the same moment. Mutation: rebuild any one of the
     three from the profile instead of taking the run it was given."""
     from ml_stack.graph.serve import AskRoutes
 
     asked, _servers = leases
-    changed = shipped.over(cache_type="f16", seat_context=8192, batch=False, few=True,
+    changed = shipped.over(cache_type="f16", slot_context=8192, batch=False, few=True,
                            n_predict=4096)
     _bench_lease(changed, monkeypatch, {})
 
@@ -302,13 +302,13 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
         run = changed
 
     page = Page.__new__(Page)
-    client = page.seated(index=1)
-    seated = seat(changed, index=1)
+    client = page.client_on_slot(index=1)
+    taken = slot(changed, index=1)
 
     for _model, lease in asked:
         assert lease["cache_type_k"] == "f16" and lease["cache_type_v"] == "f16"
-        assert lease["context"] == 16384, "8192 a seat, two seats"
-    assert (client.n_predict, seated.n_predict) == (4096, 4096)
+        assert lease["context"] == 16384, "8192 a slot, two slots"
+    assert (client.n_predict, taken.n_predict) == (4096, 4096)
     assert changed.asking.said() == {"tight": True, "terse": False, "kinds": True,
                                      "few": True, "summary": True}, \
         "batch off, few on, in one place"

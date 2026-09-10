@@ -1,7 +1,7 @@
 """The shape a model is served in, written down once, and one server per port to sit at.
 
 llama.cpp serves **one shape per port**. Two parts of a program that lease the same model
-with different context, different seats, or a draft head on one and not the other are not
+with different context, different slots, or a draft head on one and not the other are not
 two clients of one server: whichever leases second finds a mismatch, stops the first server
 and loads the weights again. On a large model that is a minute of nothing working, and it
 happens the moment a lease is spelled out in two places and one of them is edited.
@@ -11,27 +11,27 @@ conversations it holds and how much context each gets, the KV cache's precision,
 head and how far ahead it guesses, the vision projector, the thinking budget, and which
 llama.cpp build serves it -- and :meth:`Shape.lease` is the only place those become the
 keyword arguments :func:`ml_stack.serve.serve` takes. Everything that wants the model asks
-:func:`seat` for a seat on it: the server is started once per port and held for the process,
+:func:`slot` for a slot on it: the server is started once per port and held for the process,
 and each caller gets a :class:`~ml_stack.client.Client` pinned to a slot of its own, so two
 conversations at once do not reprocess each other's context.
 
-A shape holds one seat unless it is asked for more, and that seat gets the whole context::
+A shape holds one slot unless it is asked for more, and that slot gets the whole context::
 
     shape = Shape(model="hf:owner/repo/weights.gguf", port=8080,
-                  seat_context=131072, cache_type="q8_0", draft=head, draft_n_max=4)
-    client = seat(shape, index=request_number, n_predict=16384)
+                  slot_context=131072, cache_type="q8_0", draft=head, draft_n_max=4)
+    client = slot(shape, index=request_number, n_predict=16384)
 
-    crowded = dataclasses.replace(shape, seats=4, seat_context=32768)   # four at once
+    crowded = dataclasses.replace(shape, slots=4, slot_context=32768)   # four at once
 
 A shape is one third of what a model needs. :class:`Run` is all three -- the :class:`Shape`
 to serve it in, the :class:`Asking` to ask it with, and the :class:`Talking` the client is
-built from -- so a bench row, a page answer and a seated client for one model are the same
+built from -- so a bench row, a page answer and a client on a slot for one model are the same
 lease and the same asking by construction rather than by three places agreeing::
 
     run = profile_for(model).run(port=8080)
     serve(run.shape.model, **run.lease())                  # the server
     converse(question, graph, client, asking=run.asking)   # the asking
-    client = seat(run, index=request_number)                # the client
+    client = slot(run, index=request_number)                # the client
 
 :func:`draft_for` and :func:`projector_for` answer 'auto' the way `ml-stack-serve up` does,
 because a lease built by hand has to resolve what the CLI resolves for itself.
@@ -51,7 +51,7 @@ from ml_stack.graph.asking import Asking
 from ml_stack.log import say
 
 __all__ = ["Run", "Shape", "Talking", "draft_for", "drafted", "held", "projector_for",
-           "release_all", "said_cache", "seat", "served", "shape_said",
+           "release_all", "said_cache", "served", "shape_said", "slot",
            "split_cache_type"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
@@ -81,14 +81,14 @@ class Shape:
     model: str
     port: int = 8080
     # One conversation each, with its own KV cache. The server divides the context it was
-    # given between them, so what is asked for is seats x seat_context and a seat is what
+    # given between them, so what is asked for is slots x slot_context and a slot is what
     # any one conversation actually gets.
-    seats: int = 1
-    seat_context: int = 4096
+    slots: int = 1
+    slot_context: int = 4096
     # How the KV cache is stored: q8_0 unless a shape says otherwise (measured 2026-09-02
     # on Flash-Next: F1 unchanged, faster, half the cache); "f16" asks for the full one.
     cache_type: str = DEFAULT_CACHE
-    # Whether every seat's cache is one pool the server masks per sequence, or a cache per
+    # Whether every slot's cache is one pool the server masks per sequence, or a cache per
     # slot. None leaves the build's own default; measure before choosing.
     kv_unified: bool | None = None
     # A small model or a head of the same family, guessing ahead for the large one to check
@@ -117,15 +117,15 @@ class Shape:
     # profile carries what a measurement found, and a run that found `-ub 2048` worth 4.7x
     # has nowhere else to put it.
     extra_args: tuple[str, ...] = ()
-    # What decided `seat_context` for a lone seat -- the model's trained context, the
+    # What decided `slot_context` for a lone slot -- the model's trained context, the
     # longest this machine's room holds, or the measured shape -- said outright rather
-    # than left for a caller to work out from the number alone. "" when seats > 1.
+    # than left for a caller to work out from the number alone. "" when slots > 1.
     note: str = ""
 
     @property
     def context(self) -> int:
-        """What the server is asked for: every seat's context, added up."""
-        return self.seat_context * self.seats
+        """What the server is asked for: every slot's context, added up."""
+        return self.slot_context * self.slots
 
     def lease(self) -> dict[str, Any]:
         """The keyword arguments :func:`ml_stack.serve.serve` takes, model aside.
@@ -134,7 +134,7 @@ class Shape:
         draft, a projector or thinking serves exactly as the build's own defaults do.
         """
         out: dict[str, Any] = {"port": self.port, "context": self.context,
-                               "parallel": self.seats}
+                               "parallel": self.slots}
         if self.cache_type:
             out["cache_type_k"] = out["cache_type_v"] = self.cache_type
         if self.kv_unified is not None:
@@ -215,7 +215,7 @@ class Run:
     """One model, whole: served one way, asked one way, talked to one way.
 
     Three sections, because three different pieces of code read them, and one object,
-    because a bench row, a page answer and a seated client that build their own drift.
+    because a bench row, a page answer and a client on a slot that build their own drift.
     :meth:`lease` is the server's, :attr:`asking` the asking, :meth:`client` the client's,
     and :meth:`over` is how a caller changes one knob without knowing which section owns
     it.
@@ -241,7 +241,7 @@ class Run:
     def client(self, base_url: str, *, index: int | None = None, **over: Any) -> Any:
         """A :class:`~ml_stack.client.Client` on this run's server.
 
-        ``index`` pins it to a slot -- whose seat it is, taken modulo the seats -- and
+        ``index`` pins it to a slot -- whose slot it is, taken modulo the slots -- and
         None leaves the server to choose, which is what a run measuring one conversation
         at a time wants.
         """
@@ -249,7 +249,7 @@ class Run:
 
         asked = {**self.talking.client(), **over}
         if index is not None:
-            asked["slot"] = index % max(1, self.shape.seats)
+            asked["slot"] = index % max(1, self.shape.slots)
         return Client(base_url, **asked)
 
     def over(self, **fields: Any) -> Run:
@@ -294,15 +294,15 @@ _STACKS: dict[int, contextlib.ExitStack] = {}
 _URLS: dict[int, str] = {}
 
 
-def seat(shape: Shape | Run, *, index: int, n_predict: int | None = None,
+def slot(shape: Shape | Run, *, index: int, n_predict: int | None = None,
          timeout: float | None = None, **client_kwargs: Any) -> Any:
-    """A client on one seat of ``shape``'s server, started on first ask and held after.
+    """A client on one slot of ``shape``'s server, started on first ask and held after.
 
     ``shape`` is a :class:`Shape` or the whole :class:`Run`; given a run, the ceiling, the
     timeout and the sampling are its ``talking``'s and need not be said again.
 
-    ``index`` is whose seat it is -- a request number, a worker id -- taken modulo the
-    seats, so each conversation keeps its own KV cache and a busy port cycles through them
+    ``index`` is whose slot it is -- a request number, a worker id -- taken modulo the
+    slots, so each conversation keeps its own KV cache and a busy port cycles through them
     rather than fighting over one. Sampling is the client's default, which is greedy: a
     task that calls tools with exact ids is one where sampling noise becomes a wrong
     argument rather than a livelier sentence.
@@ -325,7 +325,7 @@ def seat(shape: Shape | Run, *, index: int, n_predict: int | None = None,
 
 
 def held() -> dict[int, str]:
-    """port -> base url, for every server :func:`seat` is holding."""
+    """port -> base url, for every server :func:`slot` is holding."""
     with _LOCK:
         return dict(_URLS)
 

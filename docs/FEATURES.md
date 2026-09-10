@@ -427,14 +427,14 @@ Serving and asking a model well is a measurement per model, not a habit.
   one document, and can render it as a graphic; anything never measured is a blank, never
   a zero.
 
-## Seating a fleet
+## Placing a fleet
 
-A plan says which model each peer should serve, and with how many seats, for a number of
+A plan says which model each peer should serve, and with how many slots, for a number of
 conversations at once. Models are taken best-measured first, and each goes to every machine
-with room for its weights and at least one seat's cache at the chosen context — or, asked
-the other way, each machine serves whichever model seats the most of the people still
-waiting, so a fleet seats everyone rather than seating the lucky ones on the best model. A
-user left without a seat is counted, with every machine's reason.
+with room for its weights and at least one slot's cache at the chosen context — or, asked
+the other way, each machine serves whichever model slots the most of the people still
+waiting, so a fleet gives everyone a slot rather than placing the lucky ones on the best model. A
+user left without a slot is counted, with every machine's reason.
 
 ## An agent drives it
 

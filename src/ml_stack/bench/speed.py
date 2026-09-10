@@ -393,9 +393,9 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
 
     keys: list[str] = []
     prompts, streams = _ints(args.prompts, PROMPTS), _ints(args.streams, STREAMS)
-    seats = int(getattr(args, "parallel", 0) or 0) or max(streams)
-    # each seat holds the largest prompt and what is written after it, with room to spare
-    per_seat = int(getattr(args, "context", 0) or 0) // seats if getattr(args, "context", 0) \
+    slots = int(getattr(args, "parallel", 0) or 0) or max(streams)
+    # each slot holds the largest prompt and what is written after it, with room to spare
+    per_slot = int(getattr(args, "context", 0) or 0) // slots if getattr(args, "context", 0) \
         else max(4096, ((max(prompts) + int(args.generate) + 512 + 1023) // 1024) * 1024)
     for n, wanted in enumerate(list(getattr(args, "serve", []) or [])):
         model = str(hub.located(wanted, loose=True) or wanted)
@@ -410,9 +410,9 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
         label = (stem + ("-nodraft" if getattr(args, "no_draft", False) else "")
                  + str(getattr(args, "label_suffix", "") or "") + "-speed")
         say(f"\n{label}: {len(prompts)} prompt size(s) x {len(streams)} stream count(s)")
-        args.parallel = seats
+        args.parallel = slots
         run = swept(args, model, measured_shape(args, model, head, heads, n),
-                    context=per_seat * seats, port=args.serve_port,
+                    context=per_slot * slots, port=args.serve_port,
                     head=head if n < len(heads) else None)
         run = run.over(**{k: v for k, v in _client_settings(
             args, timeout=float(args.per_question)).items()})

@@ -230,16 +230,16 @@ def recommendation(measured: Sequence[Measured], *, model: str, head: str,
 # ---------------------------------------------------------------- running one arm
 
 def _run_for(model: str, args: argparse.Namespace, *, workload: str) -> Any:
-    """The run every arm is measured against: this model's measured shape, one seat."""
+    """The run every arm is measured against: this model's measured shape, one slot."""
     port, context = int(args.port), int(args.context or 0)
     build, kv = str(args.build or ""), str(args.kv or "")
     found = profile_for(model, workload=workload)
     if found is not None:
-        run = found.run(port=port, seats=1)
-        run = run.over(seat_context=context) if context else run
+        run = found.run(port=port, slots=1)
+        run = run.over(slot_context=context) if context else run
     else:
-        run = Run(shape=Shape(model=model, port=port, seats=1,
-                              seat_context=context or 32768),
+        run = Run(shape=Shape(model=model, port=port, slots=1,
+                              slot_context=context or 32768),
                   talking=Talking(n_predict=4096, timeout=300.0))
     if build:
         run = run.over(build=build)
@@ -503,7 +503,7 @@ OPTIONS = (
          help="where each arm is kept (default: the bench's own runs store)"),
     option("port", default=8099, help="the port to serve each arm on (default: 8099)"),
     option("context", default=0,
-           help="context for the one seat (default: the model's measured shape's)"),
+           help="context for the one slot (default: the model's measured shape's)"),
 )
 
 COMMANDS = Group(

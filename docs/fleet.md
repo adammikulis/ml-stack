@@ -88,37 +88,37 @@ current and when it last looked. A fleet half on one commit and half on another 
 thing those two columns exist to make visible -- `harrowgate` above is six days behind and
 following nothing, which is a machine somebody has to visit.
 
-### Seating users
+### Placing users
 
-`plan` says which model each peer should serve, and with how many seats, for a number of
+`plan` says which model each peer should serve, and with how many slots, for a number of
 conversations at once:
 
 ```
 ml-stack-fleet plan --users 36 --context 16384
-PEER             MODEL                                            SEATS  CONTEXT     USED     ROOM
+PEER             MODEL                                            SLOTS  CONTEXT     USED     ROOM
 studio           Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf    31    16384   109.9G   110.0G
 larch            gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf                   5    16384     5.7G    24.0G
-36 of 36 user(s) seated at 16384 tokens each
+36 of 36 user(s) placed at 16384 tokens each
 --prefer quality: the best measured model that fits each peer
 ```
 
 Models are taken in the order `docs/model-ranking.md` ranks them, and each goes to every
-peer with room for its loaded weights and at least one seat's cache at `--context`, taking
-as many seats as fit or as are still wanted; so the best model reaches the most users, and
+peer with room for its loaded weights and at least one slot's cache at `--context`, taking
+as many slots as fit or as are still wanted; so the best model reaches the most users, and
 a smaller machine serves a smaller model to the rest. A peer serves one model.
 
-`--prefer seats` reads the other way: each peer, roomiest first, serves whichever model
-seats the most of the users still waiting, and a tie goes to the better-ranked model. A
-machine with room for the best model at one seat and a smaller one at six gives six people
+`--prefer slots` reads the other way: each peer, roomiest first, serves whichever model
+slots the most of the users still waiting, and a tie goes to the better-ranked model. A
+machine with room for the best model at one slot and a smaller one at six gives six people
 a smaller model:
 
 ```
-ml-stack-fleet plan --users 36 --context 16384 --prefer seats
+ml-stack-fleet plan --users 36 --context 16384 --prefer slots
 ```
 
-A user who gets no seat is counted, with every peer's reason; so is a model with no memory
+A user who gets no slot is counted, with every peer's reason; so is a model with no memory
 measurement and a memory measurement for a model nobody has scored. `--apply` serves the
-plan: each placed peer's daemon runs its model with those seats (`POST /serve`), and what
+plan: each placed peer's daemon runs its model with those slots (`POST /serve`), and what
 each is serving afterwards is printed. `--json` is the same as data.
 
 ### Following main

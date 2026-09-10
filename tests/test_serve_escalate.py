@@ -1,4 +1,4 @@
-"""Growing a server's seats without losing a live conversation.
+"""Growing a server's slots without losing a live conversation.
 
 `FakeBackend` stands in for the relaunch -- it never binds a socket, so the same real
 llama-server (`FakeLlamaServer`, on a real port) answers before and after, and every call
@@ -75,11 +75,11 @@ class TestGrow:
 
         current = ServerSpec(model=MODEL, port=instance.port, context=65536, parallel=1,
                              slot_save_path="slots")
-        info = manager.escalate(current, add_seats=1, room=10**9)
+        info = manager.escalate(current, add_slots=1, room=10**9)
 
         assert info.pid == 90001
         assert backend.started and backend.started[0].parallel == 2
-        assert backend.started[0].context == 65536 * 2, "each seat keeps its size"
+        assert backend.started[0].context == 65536 * 2, "each slot keeps its size"
         assert backend.started[0].slot_save_path == "slots"
         assert instance.saved == [(0, instance.saved[0][1])]
         assert instance.restored == instance.saved, "restored from the file just saved"
@@ -93,7 +93,7 @@ class TestGrow:
                              slot_save_path="slots")
 
         seen: list[str] = []
-        manager.escalate(current, add_seats=1, room=10**9,
+        manager.escalate(current, add_slots=1, room=10**9,
                         on_event=lambda e: seen.append(e["event"]))
 
         assert seen == ["escalating", "saving", "stopping", "loading", "ready",
@@ -107,7 +107,7 @@ class TestGrow:
         current = ServerSpec(model=MODEL, port=instance.port, context=65536, parallel=1,
                              slot_save_path="slots")
 
-        info = manager.escalate(current, add_seats=1, room=10**9)
+        info = manager.escalate(current, add_slots=1, room=10**9)
         assert info.port == instance.port
 
 
@@ -122,7 +122,7 @@ class TestSplit:
         current = ServerSpec(model=MODEL, port=instance.port, context=131072, parallel=2,
                              slot_save_path="slots")
 
-        info = manager.escalate(current, add_seats=1, room=1)
+        info = manager.escalate(current, add_slots=1, room=1)
 
         assert backend.started[0].parallel == 3
         assert backend.started[0].context == 131072, "the total is unchanged, only split finer"
@@ -140,7 +140,7 @@ class TestSplit:
         current = ServerSpec(model=MODEL, port=instance.port, context=65536, parallel=1,
                              slot_save_path="slots")
 
-        info = manager.escalate(current, add_seats=1)
+        info = manager.escalate(current, add_slots=1)
 
         assert backend.started[0].parallel == 2
         assert backend.started[0].context == 65536, "split, not grown, with nothing measured"
@@ -158,7 +158,7 @@ class TestSummarize:
                              slot_save_path="slots")
 
         seen: list[dict] = []
-        info = manager.escalate(current, add_seats=1, room=1, on_event=seen.append)
+        info = manager.escalate(current, add_slots=1, room=1, on_event=seen.append)
 
         assert backend.started[0].parallel == 2
         assert instance.saved == [(0, instance.saved[0][1])], "the full cache is still saved"
@@ -183,7 +183,7 @@ class TestSummarize:
                              slot_save_path="slots")
 
         seen: list[dict] = []
-        manager.escalate(current, add_seats=1, room=1, on_event=seen.append)
+        manager.escalate(current, add_slots=1, room=1, on_event=seen.append)
 
         from ml_stack.serve.manager import SUMMARY_SUFFIX
 
@@ -204,7 +204,7 @@ class TestSummarize:
                              slot_save_path="slots")
 
         with pytest.raises(EscalationRefused, match="cache is kept at"):
-            manager.escalate(current, add_seats=1, room=1)
+            manager.escalate(current, add_slots=1, room=1)
         assert instance.saved, ("the cache was saved before the failed summary, "
                                 "and is not lost")
 
@@ -216,7 +216,7 @@ class TestPreconditions:
         current = ServerSpec(model=MODEL, port=instance.port, context=65536, parallel=1)
 
         with pytest.raises(ServerFailed, match="slot-save-path"):
-            manager.escalate(current, add_seats=1)
+            manager.escalate(current, add_slots=1)
 
     def test_a_restore_failure_is_surfaced_not_swallowed(self, serving, tmp_path):
         write_fit(MODEL, per_token=10, per_seq=0, room=10**9)
@@ -229,7 +229,7 @@ class TestPreconditions:
                              slot_save_path="slots")
 
         with pytest.raises(ServerFailed, match="could not restore slot 0"):
-            manager.escalate(current, add_seats=1, room=10**9)
+            manager.escalate(current, add_slots=1, room=10**9)
 
         assert manager._recorded_pid(instance.port) is not None, (
             "the relaunched server is recorded even though a restore failed -- a "

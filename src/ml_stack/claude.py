@@ -46,7 +46,7 @@ BARE_CONTEXT = 131072
 """What a model that will not say what it trained for is served with. The system prompt and
 tool definitions Claude Code sends are tens of thousands of tokens before the conversation
 starts, so the build's 4,096 default answers one request with an error."""
-DEFAULT_SEATS = 1      # one conversation, one seat, the whole measured cache
+DEFAULT_SEATS = 1      # one conversation, one slot, the whole measured cache
 OFFLINE = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
@@ -105,7 +105,7 @@ def parser() -> argparse.ArgumentParser:
         prog="ml-stack-claude", allow_abbrev=False,
         description="Claude Code on a model this machine serves, in its measured shape. "
                     "Everything after `--` goes to claude.",
-        usage="ml-stack-claude {MODEL | --on URL} [--port N] [--seats N] [--no-profile] [--online] "
+        usage="ml-stack-claude {MODEL | --on URL} [--port N] [--slots N] [--no-profile] [--online] "
               "[--claude PATH] [-- claude arguments]")
     ap.add_argument("model", nargs="?", default="",
                     help="the model file, a name ml-stack-models finds, or hf:owner/repo/file")
@@ -114,8 +114,8 @@ def parser() -> argparse.ArgumentParser:
                          "talks to it as it stands and it is left running afterwards; "
                          "nothing is served and no model is named")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--seats", type=int, default=DEFAULT_SEATS,
-                    help="conversations the server holds at once; one seat gets the whole "
+    ap.add_argument("--slots", type=int, default=DEFAULT_SEATS,
+                    help="conversations the server holds at once; one slot gets the whole "
                          "measured cache (default: %(default)s)")
     ap.add_argument("--no-profile", action="store_true", help="serve the model bare")
     ap.add_argument("--draft", default="auto", metavar="HEAD",
@@ -184,21 +184,21 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     leasing = say if manager.already_up(found, args.port) is None else (lambda _line: None)
     measured = None if args.no_profile else profile.profile_for(found)
     if measured is not None:
-        run = measured.run(port=args.port, seats=args.seats, model=found)
+        run = measured.run(port=args.port, slots=args.slots, model=found)
         if whole := chat_template.trained_context(found):
             from dataclasses import replace
 
-            run = replace(run, shape=replace(run.shape, seat_context=whole // max(1, args.seats)))
+            run = replace(run, shape=replace(run.shape, slot_context=whole // max(1, args.slots)))
         leasing(f"serving in its measured shape: {profile.said(measured)}")
         if whole:
             leasing(f"  with the model's whole {whole:,}-token window, not the "
                     f"measured cache")
         run = drafted(run, "none", say=leasing)
     else:
-        seat = chat_template.trained_context(found) or BARE_CONTEXT
-        run = Run(shape=Shape(model=found, port=args.port, seats=args.seats,
-                              seat_context=seat))
-        leasing(f"serving bare: no measured shape for this model, {seat:,} tokens a seat")
+        slot = chat_template.trained_context(found) or BARE_CONTEXT
+        run = Run(shape=Shape(model=found, port=args.port, slots=args.slots,
+                              slot_context=slot))
+        leasing(f"serving bare: no measured shape for this model, {slot:,} tokens a slot")
         try:
             run = drafted(run, args.draft, say=leasing)
         except ValueError as why:

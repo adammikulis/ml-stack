@@ -840,7 +840,7 @@ def test_no_test_finds_the_llama_server_this_machine_happens_to_have(binary):
     assert find_binary("llama-server", explicit=binary) == binary
 
 
-def test_one_seat_says_so_rather_than_leaving_it_to_the_server(binary):
+def test_one_slot_says_so_rather_than_leaving_it_to_the_server(binary):
     """llama-server's own --parallel default is -1, auto, which picked 4 on a 128 GB Mac."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 

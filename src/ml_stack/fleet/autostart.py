@@ -298,9 +298,9 @@ def needs_bytes(fit: dict[str, Any], context: int = 0) -> int:
     The numbers come from `ml_stack.data.fit.json`, which is measured rather than guessed;
     ``context`` overrides the context that measurement used.
     """
-    seats = int(context or fit.get("context") or 0)
+    slots = int(context or fit.get("context") or 0)
     return (int(fit.get("weights") or 0) + int(fit.get("draft") or 0)
-            + int(fit.get("per_token") or 0) * seats
+            + int(fit.get("per_token") or 0) * slots
             + int(fit.get("per_seq") or 0) + int(fit.get("compute") or 0))
 
 

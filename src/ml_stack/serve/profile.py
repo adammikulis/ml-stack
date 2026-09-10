@@ -11,7 +11,7 @@ the three this repository drives a model with, and both ends read it: the serve 
 takes :meth:`Profile.talking`.
 
 A record has a startup half and a request half. `--context`, the draft head file, the cache
-type, the seat count and the build are what a server is told once; the draft depth, the
+type, the slot count and the build are what a server is told once; the draft depth, the
 draft p-min and the sampling ride on each call, so two workloads can share one served model
 and still each get what they measured. The startup half is written under ``serve`` and the
 request half under ``request``.
@@ -122,7 +122,7 @@ class Profile:
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
     extra_args: tuple[str, ...] = ()     # -ub 2048, --spec-draft-p-min 0.5
-    seat_context: int = 32768            # what one conversation gets
+    slot_context: int = 32768            # what one conversation gets
     parallel: int = 1                    # how many conversations at once
 
     # -- serving, per request -----------------------------------------------------------
@@ -172,16 +172,16 @@ class Profile:
         """The quantisation the record was measured at -- ``Q4_K_XL``, "" when unnamed."""
         return quant_of(self.model)
 
-    def shape(self, *, port: int = 8080, seats: int | None = None,
+    def shape(self, *, port: int = 8080, slots: int | None = None,
               model: str = "", resolve: bool = True) -> Any:
         """The :class:`~ml_stack.serve.Shape` this model measured best in.
 
-        One seat alone (no ``seats``, or ``seats=1``) gets the model's own trained context
+        One slot alone (no ``slots``, or ``slots=1``) gets the model's own trained context
         length when this machine's room holds it, the longest context that room does hold
-        when it does not, and the measured shape's whole cache -- ``seat_context *
+        when it does not, and the measured shape's whole cache -- ``slot_context *
         parallel``, the record's own -- only when neither can be computed.
-        :attr:`~ml_stack.serve.Shape.note` says which. ``seats`` above one each get what
-        one measured seat got, from the record's own ``parallel``. ``model`` overrides the
+        :attr:`~ml_stack.serve.Shape.note` says which. ``slots`` above one each get what
+        one measured slot got, from the record's own ``parallel``. ``model`` overrides the
         reference served, which otherwise is what :func:`profile_for` was asked about, and
         the record's own file name failing that.
 
@@ -196,11 +196,11 @@ class Profile:
         draft, seeing = self.draft, self.mmproj
         if resolve:
             draft, seeing = resolved(served, draft, seeing, build=self.build)
-        taken = max(1, int(seats or 1))
+        taken = max(1, int(slots or 1))
         each, note = (_alone_context(self, served) if taken == 1
-                     else (self.seat_context, ""))
-        return Shape(model=served, port=port, seats=taken,
-                     seat_context=each, cache_type=self.cache_type,
+                     else (self.slot_context, ""))
+        return Shape(model=served, port=port, slots=taken,
+                     slot_context=each, cache_type=self.cache_type,
                      draft=draft, draft_n_max=self.spec_draft_max,
                      draft_cache_type=self.draft_cache_type,
                      spec_type=self.spec_type, mmproj=seeing,
@@ -229,25 +229,25 @@ class Profile:
 
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
               n_predict: int = 16384, timeout: float = 300.0) -> Any:
-        """This record as one conversation: one seat holding the whole cache the record
-        measured across its ``parallel`` seats. The same as :meth:`run` with no ``seats``.
+        """This record as one conversation: one slot holding the whole cache the record
+        measured across its ``parallel`` slots. The same as :meth:`run` with no ``slots``.
         """
-        return self.run(port=port, seats=1, model=model, resolve=resolve,
+        return self.run(port=port, slots=1, model=model, resolve=resolve,
                         n_predict=n_predict, timeout=timeout)
 
-    def run(self, *, port: int = 8080, seats: int | None = None, model: str = "",
+    def run(self, *, port: int = 8080, slots: int | None = None, model: str = "",
             resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
         """This record whole, as a :class:`~ml_stack.serve.Run`: the shape to serve it in,
         the ways to ask it, and the client to ask it with.
 
-        One object built once and handed on, so a bench row, a page answer and a seated
-        client for this model are the same lease and the same asking. ``port``, ``seats``,
-        ``model`` and ``resolve`` are :meth:`shape`'s: no ``seats`` is one seat holding the
+        One object built once and handed on, so a bench row, a page answer and a client on a
+        slot of this model are the same lease and the same asking. ``port``, ``slots``,
+        ``model`` and ``resolve`` are :meth:`shape`'s: no ``slots`` is one slot holding the
         whole measured cache.
         """
         from ml_stack.serve.shape import Run
 
-        return Run(shape=self.shape(port=port, seats=seats, model=model, resolve=resolve),
+        return Run(shape=self.shape(port=port, slots=slots, model=model, resolve=resolve),
                    asking=self.asked(),
                    talking=self.talking(n_predict=n_predict, timeout=timeout))
 
@@ -262,7 +262,7 @@ class Profile:
                                  "reasoning_budget": self.reasoning_budget,
                                  "mmproj": self.mmproj,
                                  "extra_args": list(self.extra_args),
-                                 "seat_context": self.seat_context,
+                                 "slot_context": self.slot_context,
                                  "parallel": self.parallel}
         request: dict[str, Any] = {"spec_draft_max": self.spec_draft_max,
                                    "spec_p_min": self.spec_p_min,
@@ -497,8 +497,8 @@ def record(model: str, **fields: Any) -> Profile:
 # ---------------------------------------------------------------- saying it to a person
 
 def whole_context(profile: Profile) -> int:
-    """The cache the record measured, summed across its seats: one seat's worth."""
-    return profile.seat_context * max(1, profile.parallel)
+    """The cache the record measured, summed across its slots: one slot's worth."""
+    return profile.slot_context * max(1, profile.parallel)
 
 
 def _model_path(served: str) -> Path | None:
@@ -543,7 +543,7 @@ def _fit_for(profile: Profile, *, room: int) -> Any | None:
 
 
 def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
-    """What one seat gets when it is alone, and which of three ways decided it.
+    """What one slot gets when it is alone, and which of three ways decided it.
 
     The model's trained context length when a measured :class:`Fit` for this shape says
     this machine's room holds it; the longest context that room does hold when it does
@@ -576,7 +576,7 @@ def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
 
 def _flags(profile: Profile) -> str:
     """The serving line: what `ml-stack-serve up` would be told, in its own flags. One
-    seat holding the whole measured cache; `--parallel` is left to the caller.
+    slot holding the whole measured cache; `--parallel` is left to the caller.
 
     The draft depth is here as well as on the request line: it is the server's default,
     which is what a call that cannot override it gets.
@@ -667,7 +667,7 @@ def said(profile: Profile) -> str:
         lines.append(f"              and {' '.join(profile.extra_args)} "
                      f"-- llama-server's own, passed by --profile")
     lines.append(f"  measured at --parallel {max(1, profile.parallel)}, "
-                 f"{profile.seat_context} per seat")
+                 f"{profile.slot_context} per slot")
     asked = _per_request(profile)
     if asked:
         lines.append(f"  per request {asked} -- sent with each call, where the build "

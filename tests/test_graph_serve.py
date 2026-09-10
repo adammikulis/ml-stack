@@ -324,9 +324,9 @@ def test_answer_payload_keeps_a_mappings_keys_and_fills_why_from_steps():
     got = answer_payload({"content": "hi", "ids": [], "steps": ["a", "b"], "raised": [{"id": "x"}]})
     assert got["why"] == "a; b" and got["raised"] == [{"id": "x"}]
     assert answer_payload({"content": "hi", "why": "a; b"})["steps"] == ["a", "b"]
-    assert answer_payload(Answer(content="Nobody."), seat=1) == {
+    assert answer_payload(Answer(content="Nobody."), slot=1) == {
         "content": "Nobody.", "ids": [], "found": [], "read": [], "path": [], "show": [],
-        "why": "", "steps": [], "seat": 1}
+        "why": "", "steps": [], "slot": 1}
 
 
 def test_sse_writes_one_flushed_frame_per_event():

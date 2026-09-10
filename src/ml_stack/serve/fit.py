@@ -534,10 +534,10 @@ class Fit:
     cache_type: str = "f16"
     spec: str = ""
     draft_per_token: int = 0
-    """Bytes of KV cache the draft head keeps per token of context, per seat. A draft keeps
+    """Bytes of KV cache the draft head keeps per token of context, per slot. A draft keeps
     its own cache at the target's context, so this is charged per user like the model's."""
     draft_per_seq: int = 0
-    """Bytes the draft head costs a seat whatever its context is."""
+    """Bytes the draft head costs a slot whatever its context is."""
     draft_cache_type: str = ""
     """What the head's cache stores. "" for a record with no head, or one measured before
     the head's cache was read apart from the model's."""
@@ -589,12 +589,12 @@ class Fit:
 
     @property
     def token_bytes(self) -> int:
-        """Bytes one seat pays per token of context: the model's cache and the head's."""
+        """Bytes one slot pays per token of context: the model's cache and the head's."""
         return self.per_token + self.draft_per_token
 
     @property
     def seq_bytes(self) -> int:
-        """Bytes one seat pays whatever its context: the model's and the head's."""
+        """Bytes one slot pays whatever its context: the model's and the head's."""
         return self.per_seq + self.draft_per_seq
 
     def free(self) -> int:
@@ -864,7 +864,7 @@ def _headline(fit: Fit) -> str:
 
 
 def _drafts(fit: Fit) -> str:
-    """What the draft head's own cache costs a seat, or "" where none is served."""
+    """What the draft head's own cache costs a slot, or "" where none is served."""
     if not (fit.draft_per_token or fit.draft_per_seq):
         return ""
     said = [f"the draft head keeps its own cache: {human_bytes(fit.draft_per_token)} per "
@@ -1187,7 +1187,7 @@ PLOT_CONTEXTS: tuple[int, ...] = (2048, 4096, 8192, 16384, 32768, 65536, 131072)
 # Where the fit view's context slider stands, 1k to 256k by doubling.
 SLIDER_CONTEXTS: tuple[int, ...] = tuple(1024 * 2 ** k for k in range(9))
 
-# The contexts a seating is worked out at, eight to the octave over the same range, so a
+# The contexts a slot count is worked out at, eight to the octave over the same range, so a
 # reader dragging across the chart reads a measured answer rather than one worked out again
 # in the browser.
 READ_CONTEXTS: tuple[int, ...] = tuple(round(1024 * 2 ** (k / 8)) for k in range(65))

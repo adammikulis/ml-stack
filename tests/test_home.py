@@ -159,21 +159,21 @@ class TestAStatePathThatUsedToLiveInTheCache:
         monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
         older = tmp_path / "cache" / "limits.json"
         older.parent.mkdir(parents=True)
-        older.write_text('{"seats": 3}')
+        older.write_text('{"slots": 3}')
         (tmp_path / "state").write_text("not a directory")
 
         assert home.moved("limits.json") == older
-        assert older.read_text() == '{"seats": 3}'
+        assert older.read_text() == '{"slots": 3}'
 
     def test_the_limits_and_the_idle_record_carry_across(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
         monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
         (tmp_path / "cache").mkdir(parents=True)
-        (tmp_path / "cache" / "limits.json").write_text('{"servers": 2, "seats": 4}')
+        (tmp_path / "cache" / "limits.json").write_text('{"servers": 2, "slots": 4}')
         (tmp_path / "cache" / "idle.json").write_text('{"8100": {"idle": 90.0}}')
 
         assert limits.where() == tmp_path / "state" / "limits.json"
         held = limits.read()
-        assert (held.servers, held.seats) == (2, 4)
+        assert (held.servers, held.slots) == (2, 4)
         assert reclaim.state_path() == tmp_path / "state" / "idle.json"
         assert (tmp_path / "state" / "idle.json").read_text() == '{"8100": {"idle": 90.0}}'

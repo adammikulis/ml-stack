@@ -245,10 +245,10 @@ class TestTheDataRoute:
 
 # -- the arithmetic ----------------------------------------------------------------------
 
-class TestTheSeatingIsWorkedOutOnce:
+class TestTheSlotCountIsWorkedOutOnce:
     """One formula, in one language.
 
-    The page draws; `serve.fit` counts. Every seating the view shows -- what a model costs
+    The page draws; `serve.fit` counts. Every count the view shows -- what a model costs
     loaded, what one more user costs, how many fit at a context, the longest context this
     many could each be given -- arrives worked out on the route, so there is no second copy
     to keep equal.
@@ -262,7 +262,7 @@ class TestTheSeatingIsWorkedOutOnce:
 
         return (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
 
-    def test_the_view_works_out_no_seating_of_its_own(self):
+    def test_the_view_works_out_no_slot_count_of_its_own(self):
         """The measured per-user numbers never reach the browser as something to divide by:
         a copy of the formula there is a copy that can disagree."""
         html = self.component()
@@ -275,7 +275,7 @@ class TestTheSeatingIsWorkedOutOnce:
         assert "vram_gb" in html, "the view reads the rooms from somewhere else"
         assert not re.search(r"\[\s*6,\s*8,\s*12,", html), "the rooms are typed twice"
 
-    def test_the_route_seats_exactly_as_fit_py_does(self, page):
+    def test_the_route_slots_exactly_as_fit_py_does(self, page):
         for room in self.ROOMS:
             for people in self.PEOPLE:
                 _, got, _ = page.call(f"/ui/fit.json?room={room}&users={people}")
@@ -286,11 +286,11 @@ class TestTheSeatingIsWorkedOutOnce:
                     assert row["loaded"] == here.loaded()
                     assert row["free"] == here.free()
                     assert row["longest"] == here.longest(people)
-                    assert row["seats"] == [here.users(c) for c in ladder]
+                    assert row["slots"] == [here.users(c) for c in ladder]
                     assert row["costs"] == [here.cost(c) for c in ladder]
 
     def test_the_ladder_holds_every_step_the_slider_stops_at(self, page):
-        """The view reads a seating off the ladder; a step missing from it would be read at
+        """The view reads a slot count off the ladder; a step missing from it would be read at
         the wrong context."""
         _, got, _ = page.call("/ui/fit.json")
         assert set(got["steps"]) <= set(got["ladder"])
@@ -300,12 +300,12 @@ class TestTheSeatingIsWorkedOutOnce:
         _, got, _ = page.call("/ui/fit.json")
         assert got["room"] == ROOM and got["at_room"] == ROOM
 
-    def test_asking_for_a_smaller_room_seats_fewer(self, page):
+    def test_asking_for_a_smaller_room_slots_fewer(self, page):
         _, big, _ = page.call(f"/ui/fit.json?room={128 * GIB}")
         _, small, _ = page.call(f"/ui/fit.json?room={8 * GIB}")
         at = big["ladder"].index(32768)
-        assert sum(r["seats"][at] for r in big["records"]) \
-            > sum(r["seats"][at] for r in small["records"])
+        assert sum(r["slots"][at] for r in big["records"]) \
+            > sum(r["slots"][at] for r in small["records"])
 
 
 class TestTheCliFlag:

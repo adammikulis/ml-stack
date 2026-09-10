@@ -67,7 +67,7 @@ def _run(args: Any, *, resolve: bool = True,
     the run record names are the same thing rather than two derivations that drift.
 
     The command line is laid over the measurement with :meth:`Run.over`, each field going
-    to the section that owns it: ``--context`` is the one seat's whole context, ``--n-max``
+    to the section that owns it: ``--context`` is the one slot's whole context, ``--n-max``
     the draft's length, ``--per-section`` the cap on one call, ``--n-predict`` the ceiling,
     and the samplers the client's.
     """
@@ -80,7 +80,7 @@ def _run(args: Any, *, resolve: bool = True,
     # extracting. In fact, we should never be splitting the GPU like that" -- and the run
     # measured it: one worker read a unit in 86 s, two workers sharing the model averaged
     # 140 s each, slower in aggregate as well as apiece.
-    seats = 1
+    slots = 1
     n_predict = int(getattr(args, "n_predict", None) or 16384)
     timeout = float(getattr(args, "per_section", None) or 300.0)
 
@@ -90,22 +90,22 @@ def _run(args: Any, *, resolve: bool = True,
 
         measured = profile_for(found, workload="ingest")
     if measured is not None:
-        run = measured.run(port=port, seats=seats, resolve=resolve,
+        run = measured.run(port=port, slots=slots, resolve=resolve,
                            n_predict=n_predict, timeout=timeout)
         say(f"    serving in its measured shape: {_said(measured)}")
         run = drafted(run, "none", say=lambda line: say(f"    {line}"))
     else:
-        run = Run(shape=Shape(model=found, port=port, seats=seats)).over(
+        run = Run(shape=Shape(model=found, port=port, slots=slots)).over(
             n_predict=n_predict, timeout=timeout)
         if found:
             asked = str(getattr(args, "draft", "auto") or "auto")
             run = drafted(run, asked, say=lambda line: say(f"    {line}"))
 
-    # The whole --context is the one seat's: a 2,500-token unit with four figures through
-    # the projector and a reply of several thousand tokens overran a 16k seat on the first
-    # night. A profile that measured a wider seat keeps it.
-    run = run.over(seat_context=max(int(getattr(args, "context", 0) or 0),
-                                    int(run.shape.seat_context or 0)))
+    # The whole --context is the one slot's: a 2,500-token unit with four figures through
+    # the projector and a reply of several thousand tokens overran a 16k slot on the first
+    # night. A profile that measured a wider slot keeps it.
+    run = run.over(slot_context=max(int(getattr(args, "context", 0) or 0),
+                                    int(run.shape.slot_context or 0)))
     sampling = _sampling(args)
     if sampling:
         run = run.over(**sampling)
@@ -162,7 +162,7 @@ def _serving_said(args: Any) -> str:
     """The measured shape a --model is served in, for the run record.
 
     Read off the same `Run` `_serving` leases, so a record says what was actually asked for
-    -- the seat's context, the draft's length -- and not a second derivation of it that can
+    -- the slot's context, the draft's length -- and not a second derivation of it that can
     differ from what the server was told.
     """
     if not getattr(args, "model", ""):

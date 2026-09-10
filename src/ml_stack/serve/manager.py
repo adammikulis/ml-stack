@@ -87,7 +87,7 @@ def measurement_said(held: dict[str, Any]) -> str:
 
 
 class EscalationRefused(ServerFailed):
-    """Growing or splitting a server's seats would drop a live conversation's cache, and
+    """Growing or splitting a server's slots would drop a live conversation's cache, and
     summarising it did not rescue that. The saved cache named in the message is kept."""
 
 def lease_file() -> Path:
@@ -209,7 +209,7 @@ def shape_mismatch(
 
 def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict | None:
     """The recorded server on ``port`` if it serves ``model`` (by file name) and its
-    process is alive -- whatever its shape. A conversation that would lease one seat on a
+    process is alive -- whatever its shape. A conversation that would lease one slot on a
     port already holding the same weights in another shape uses what is up rather than
     reloading them: the reload is the cost, the shape is not (Adam, 2026-09-03)."""
     entry = recorded_servers(state_file).get(int(port))
@@ -280,7 +280,7 @@ class ServerManager:
 
         ``escalate=True`` is for a caller that may genuinely need more than one concurrent
         cache: when the only reason a running server does not match ``spec`` is that it
-        holds fewer seats than asked, it is grown (or, if that will not fit, split, or
+        holds fewer slots than asked, it is grown (or, if that will not fit, split, or
         summarised and split -- see :meth:`escalate`) rather than refused. A spec with no
         ``slot_save_path`` is given this manager's own default so a later escalation has
         somewhere to save a live conversation before the relaunch.
@@ -297,8 +297,8 @@ class ServerManager:
         if escalate:
             # llama.cpp's slot-save file carries the cache's stream count, and a restore
             # raises "n_stream mismatch" the moment that count differs from the file's --
-            # which a change in seat count always does unless every stream is one shared
-            # buffer throughout, seat count or no. A lease that may later escalate is
+            # which a change in slot count always does unless every stream is one shared
+            # buffer throughout, slot count or no. A lease that may later escalate is
             # kv_unified from its first launch, not only from the relaunch.
             if not spec.slot_save_path:
                 spec = replace(spec, slot_save_path=str(default_slot_save_path()))
@@ -332,7 +332,7 @@ class ServerManager:
                     running = self._slots_shortfall(spec)
                     if running is not None:
                         return self.escalate(
-                            running, add_seats=max(1, int(spec.parallel or 1))
+                            running, add_slots=max(1, int(spec.parallel or 1))
                             - max(1, int(running.parallel or 1)),
                             timeout=resolved_timeout, anyway=anyway, on_event=on_event,
                             say=told)
@@ -384,7 +384,7 @@ class ServerManager:
                 f"that measurement and this one. Wait for it to finish, stop it with "
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
         _emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
-              seats=max(1, int(spec.parallel or 1)))
+              slots=max(1, int(spec.parallel or 1)))
         info = self.backend.start(spec, lease=self._pending(spec), timeout=timeout,
                                   **starting)
         _emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
@@ -392,7 +392,7 @@ class ServerManager:
 
     def _slots_shortfall(self, spec: ServerSpec) -> ServerSpec | None:
         """The shape actually running on ``spec.port``, if the only way it disagrees with
-        ``spec`` is holding fewer seats than asked. ``None`` for any other disagreement,
+        ``spec`` is holding fewer slots than asked. ``None`` for any other disagreement,
         or for nothing answering at all -- an escalation is a repair for one specific
         mismatch, not a second way to adopt."""
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"
@@ -477,11 +477,11 @@ class ServerManager:
             adopted=True,
         )
 
-    def escalate(self, spec: ServerSpec, *, add_seats: int = 1, room: int | None = None,
+    def escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
                 timeout: float | None = None, anyway: bool = False,
                 on_event: Event | None = None,
                 say: Callable[[str], None] | None = None) -> ServerInfo:
-        """Grow the server on ``spec.port`` by ``add_seats`` more concurrent conversations,
+        """Grow the server on ``spec.port`` by ``add_slots`` more concurrent conversations,
         keeping every one already live.
 
         ``spec`` is the shape actually running -- its ``context`` and ``parallel`` are
@@ -490,9 +490,9 @@ class ServerManager:
         here). Every slot with a live conversation is saved through
         ``/slots/{id}?action=save`` before anything stops.
 
-        Grows the whole cache -- every seat keeping its size -- when ``fit`` says the
-        extra room is there. Otherwise splits the existing total across the larger seat
-        count, when every live conversation is short enough for the smaller per-seat
+        Grows the whole cache -- every slot keeping its size -- when ``fit`` says the
+        extra room is there. Otherwise splits the existing total across the larger slot
+        count, when every live conversation is short enough for the smaller per-slot
         context that leaves each with. A conversation that is not short enough is
         summarised on the model itself, on the slot that already holds it, and the
         summary is re-seeded in its place after the relaunch rather than the saved cache
@@ -505,8 +505,8 @@ class ServerManager:
 
         told = say or self.say or logger.info
         current_slots = max(1, int(spec.parallel or 1))
-        new_slots = current_slots + max(1, int(add_seats))
-        per_seat = max(1, int(spec.context) // current_slots)
+        new_slots = current_slots + max(1, int(add_slots))
+        per_slot = max(1, int(spec.context) // current_slots)
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"
 
         if not is_healthy(base_url, timeout=2.0):
@@ -538,34 +538,34 @@ class ServerManager:
         fit = self._fit_for(spec.model, room=room_bytes)
 
         mode = ""
-        new_context = per_seat * new_slots
+        new_context = per_slot * new_slots
         reason = ""
         if fit is not None:
-            loaded, each = fit.line(per_seat)
+            loaded, each = fit.line(per_slot)
             need = loaded + new_slots * each
             if need <= room_bytes:
                 mode = "grow"
-                reason = (f"{new_slots} seats of {per_seat:,} tokens need {human_bytes(need)}, "
+                reason = (f"{new_slots} slots of {per_slot:,} tokens need {human_bytes(need)}, "
                           f"which fits in {human_bytes(room_bytes)} of room")
 
         too_long: list[tuple[int, int]] = []
         if mode != "grow":
             new_context = int(spec.context)
-            split_per_seat = max(1, new_context // new_slots)
-            too_long = [(sid, tok) for sid, tok in live if tok > split_per_seat]
+            split_per_slot = max(1, new_context // new_slots)
+            too_long = [(sid, tok) for sid, tok in live if tok > split_per_slot]
             if too_long:
                 mode = "summarize"
                 reason = (f"{len(too_long)} live conversation(s) do not fit the "
-                          f"{split_per_seat:,}-token seat a split leaves them and will be "
+                          f"{split_per_slot:,}-token slot a split leaves them and will be "
                           "summarised")
             else:
                 mode = "split"
                 reason = (f"the existing {new_context:,}-token cache split across "
-                          f"{new_slots} seats is {split_per_seat:,} each")
+                          f"{new_slots} slots is {split_per_slot:,} each")
 
         _emit(on_event, "escalating", port=spec.port, mode=mode, reason=reason,
-              from_seats=current_slots, to_seats=new_slots)
-        told(f"port {spec.port}: escalating from {current_slots} to {new_slots} seat(s) "
+              from_slots=current_slots, to_slots=new_slots)
+        told(f"port {spec.port}: escalating from {current_slots} to {new_slots} slot(s) "
             f"by {mode} -- {reason}")
 
         stamp = time.strftime("%Y%m%dT%H%M%S")
@@ -602,13 +602,13 @@ class ServerManager:
             except Exception as exc:
                 raise EscalationRefused(
                     f"slot {sid} on port {spec.port} holds {tok:,} tokens, too long for "
-                    f"the seat a split leaves it, and summarising it failed: {exc}. Its "
+                    f"the slot a split leaves it, and summarising it failed: {exc}. Its "
                     f"cache is kept at {saved[sid]}."
                 ) from exc
             if not summary:
                 raise EscalationRefused(
                     f"slot {sid} on port {spec.port} holds {tok:,} tokens, too long for "
-                    f"the seat a split leaves it, and summarising it returned nothing. "
+                    f"the slot a split leaves it, and summarising it returned nothing. "
                     f"Its cache is kept at {saved[sid]}."
                 )
             summaries[sid] = summary
@@ -627,7 +627,7 @@ class ServerManager:
         self._forget(spec.port)
 
         # kv_unified keeps the cache's stream count at 1 across the relaunch; any other
-        # value makes a save from the old seat count unrestorable into the new one, "n_stream
+        # value makes a save from the old slot count unrestorable into the new one, "n_stream
         # mismatch" thrown by llama.cpp's own state reader regardless of which slot.
         new_spec = replace(spec, parallel=new_slots, context=new_context, kv_unified=True)
         resolved_timeout = (
@@ -661,8 +661,8 @@ class ServerManager:
                         f"{saved[sid]}: {exc}"
                     ) from exc
 
-        _emit(on_event, "done", port=spec.port, seats=new_slots, mode=mode)
-        told(f"port {spec.port}: now serving {new_slots} seat(s)")
+        _emit(on_event, "done", port=spec.port, slots=new_slots, mode=mode)
+        told(f"port {spec.port}: now serving {new_slots} slot(s)")
         return info
 
     @staticmethod
@@ -804,11 +804,11 @@ class ServerManager:
         from ml_stack.serve.limits import read
 
         limits = read()
-        if not (limits.servers or limits.seats):
+        if not (limits.servers or limits.slots):
             return ""
         running = sum(1 for port, entry in recorded_servers(self.state_file).items()
                       if port != spec.port and pid_exists(int(entry.get("pid") or 0)))
-        return limits.refusal(running=running, seats=max(1, int(spec.parallel or 1)))
+        return limits.refusal(running=running, slots=max(1, int(spec.parallel or 1)))
 
     def reclaim(self, port: int) -> bool:
         """Free ``port`` if one of our servers is holding it."""

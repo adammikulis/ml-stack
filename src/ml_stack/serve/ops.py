@@ -647,7 +647,7 @@ def write_plist(where: Path, mb: int) -> Path:
     return where
 
 
-def limits(*, memory_size: str = "", servers: int | None = None, seats: int | None = None,
+def limits(*, memory_size: str = "", servers: int | None = None, slots: int | None = None,
            idle: str = "", clear: bool = False) -> Limits:
     """Set whatever is named, then read back what this machine allows.
 
@@ -671,7 +671,7 @@ def limits(*, memory_size: str = "", servers: int | None = None, seats: int | No
         if seconds is None:
             raise Refused(f"cannot read {idle!r} as a length of time; try 10m")
         asked["idle_s"] = seconds
-    for name, value in (("servers", servers), ("seats", seats)):
+    for name, value in (("servers", servers), ("slots", slots)):
         if value is not None:
             asked[name] = int(value)
     if asked:
@@ -752,7 +752,7 @@ def orphans(*, root: str = DEFAULT_ROOT) -> list[tuple[Stopped, str]]:
 def escalate(port: int, *, add: int = 1, room: str = "", timeout: float | None = None,
              slot_save_path: str = "",
              on_event: Callable[[dict], None] | None = None) -> ServerInfo:
-    """Grow the seats the server on ``port`` holds, keeping every live conversation."""
+    """Grow the slots the server on ``port`` holds, keeping every live conversation."""
     manager = ServerManager(state_file=lease_file())
     base_url = base_url_for(port)
     if not is_healthy(base_url, timeout=PROBE_TIMEOUT):
@@ -765,7 +765,7 @@ def escalate(port: int, *, add: int = 1, room: str = "", timeout: float | None =
                          context=int(params.n_ctx) * int(params.total_slots),
                          parallel=int(params.total_slots),
                          slot_save_path=slot_save_path or str(default_slot_save_path()))
-    return manager.escalate(current, add_seats=max(1, int(add)),
+    return manager.escalate(current, add_slots=max(1, int(add)),
                             room=fit_mod.parse_room(room) if room else None,
                             timeout=timeout,
                             on_event=on_event)

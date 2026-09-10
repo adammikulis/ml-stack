@@ -4735,7 +4735,7 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
     import ml_stack.bench as bench
     from ml_stack.serve.profile import record
 
-    measured = record("tiny.gguf", seat_context=4096, cache_type="q8_0",
+    measured = record("tiny.gguf", slot_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4,
                       reasoning_budget=0, extra_args=("-ub", "2048"), batch=True)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",

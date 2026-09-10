@@ -639,13 +639,13 @@ def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
                say: Callable[[str], None] = say) -> list[dict[str, Any]]:
     """``POST /serve`` on each placed peer, and what each answered.
 
-    Each answer is ``{"peer", "model", "seats", "status", "served" | "error", "serving"}``;
+    Each answer is ``{"peer", "model", "slots", "status", "served" | "error", "serving"}``;
     ``serving`` is the peer's ``/health`` serving rows after the call.
     """
     clients = peer_clients(rows, cluster_key_path=cluster_key_path, timeout=600.0)
     out: list[dict[str, Any]] = []
     for row in placement.rows:
-        answer: dict[str, Any] = {"peer": row.peer, "model": row.model, "seats": row.seats}
+        answer: dict[str, Any] = {"peer": row.peer, "model": row.model, "slots": row.slots}
         peer = clients.get(row.peer)
         if peer is None:
             answer.update(status=0, error="no daemon answered for this peer")
@@ -654,9 +654,9 @@ def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
             continue
         try:
             served = peer._json("POST", "/serve", {"model": row.model, "context": row.context,
-                                                   "parallel": row.seats})
+                                                   "parallel": row.slots})
             answer.update(status=201, served=served)
-            say(f"{row.peer}: {row.model}: {served.get('slots', row.seats)} seat(s) on "
+            say(f"{row.peer}: {row.model}: {served.get('slots', row.slots)} slot(s) on "
                 f"port {served.get('port', '?')}")
         except PeerError as exc:
             status, body = _refusal(str(exc))
@@ -674,7 +674,7 @@ def serving_table(applied: Sequence[dict[str, Any]]) -> str:
     """What each peer serves after an apply, as text."""
     lines = [f"{'PEER':<16} SERVING"]
     for answer in applied:
-        cells = [f"{m}:{one.get('port', '?')} ({int(one.get('slots') or 1)} seat(s))"
+        cells = [f"{m}:{one.get('port', '?')} ({int(one.get('slots') or 1)} slot(s))"
                  for one in answer.get("serving") or [] for m in one.get("models") or []]
         lines.append(f"{answer['peer']:<16} {', '.join(cells) or '-'}")
     return "\n".join(lines)
@@ -802,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
     status_p.add_argument("--json", action="store_true")
 
     plan_p = sub.add_parser("plan", help="which model each peer serves, and how many "
-                                         "seats, for a number of users at one context; "
+                                         "slots, for a number of users at one context; "
                                          "the best measured models go to the most users")
     plan_p.add_argument("--users", type=int, required=True,
                         help="how many conversations at once, across the fleet")
@@ -810,10 +810,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="tokens each conversation gets (default: 16384)")
     plan_p.add_argument("--prefer", choices=sorted(PREFERENCES), default="quality",
                         help="what each peer serves: 'quality' the best measured model "
-                             "that fits there (default), 'seats' the model that seats "
+                             "that fits there (default), 'slots' the model that slots "
                              "the most users there")
     plan_p.add_argument("--apply", action="store_true",
-                        help="serve the plan: each peer runs its model with its seats")
+                        help="serve the plan: each peer runs its model with its slots")
     plan_p.add_argument("--timeout", type=float, default=2.0,
                         help="seconds to listen for peers (default: 2)")
     plan_p.add_argument("--json", action="store_true")

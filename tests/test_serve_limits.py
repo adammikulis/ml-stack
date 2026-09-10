@@ -30,7 +30,7 @@ def own_file(tmp_path, monkeypatch):
 def test_a_machine_nobody_has_limited_behaves_as_it_did(own_file):
     assert caps.read() == caps.Limits()
     assert caps.read().room(100) == 100
-    assert caps.read().refusal(running=9, seats=64) == ""
+    assert caps.read().refusal(running=9, slots=64) == ""
     assert caps.read().said() == []
     assert not own_file.exists(), "reading writes nothing"
 
@@ -42,13 +42,13 @@ def test_the_memory_limit_caps_what_the_machine_allows_and_stands_alone():
     assert small.room(0) == 40, "a machine that says nothing still has our limit"
 
 
-def test_a_lease_over_the_server_or_seat_limit_is_refused_with_what_to_do():
+def test_a_lease_over_the_server_or_slot_limit_is_refused_with_what_to_do():
     said = caps.Limits(servers=2).refusal(running=2)
     assert "2 server(s) at once" in said and "ml-stack-serve limits --servers" in said
     assert caps.Limits(servers=2).refusal(running=1) == ""
-    said = caps.Limits(seats=1).refusal(seats=4)
-    assert "asks for 4 seat(s)" in said and "--seats" in said
-    assert caps.Limits(seats=4).refusal(seats=4) == ""
+    said = caps.Limits(slots=1).refusal(slots=4)
+    assert "asks for 4 slot(s)" in said and "--slots" in said
+    assert caps.Limits(slots=4).refusal(slots=4) == ""
 
 
 def test_limits_are_written_read_back_and_taken_off(own_file):
@@ -113,8 +113,8 @@ def test_a_lease_past_the_server_limit_never_starts_a_process(tmp_path, monkeypa
         manager.lease(ServerSpec(model="two.gguf", port=8101), roam=False)
     assert started == []
 
-    caps.changed(servers=0, seats=1)
-    with pytest.raises(ServerFailed, match="asks for 4 seat"):
+    caps.changed(servers=0, slots=1)
+    with pytest.raises(ServerFailed, match="asks for 4 slot"):
         manager.lease(ServerSpec(model="two.gguf", port=8101, parallel=4), roam=False)
     assert started == []
 

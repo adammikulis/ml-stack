@@ -491,7 +491,7 @@ class TestTheCommand:
 
     def test_measuring_serves_one_slot_and_parallel_asks_for_more(
             self, tmp_path, monkeypatch, _fit_files_in_tmp):
-        """One seat unless asked otherwise, and `--parallel N` reaches the spec.
+        """One slot unless asked otherwise, and `--parallel N` reaches the spec.
         Mutation: clamp the slots, and a measurement over several sequences cannot be had.
         """
         model = tmp_path / "quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf"
@@ -1519,7 +1519,7 @@ K (f16):    64.00 MiB, V (f16):    64.00 MiB
 
 
 class TestTheDraftsOwnCache:
-    """A draft head keeps a second KV cache at the target's context. It is a cost per seat
+    """A draft head keeps a second KV cache at the target's context. It is a cost per slot
     like the model's own, and a person choosing whether to serve a head is choosing it."""
 
     def test_a_second_cache_over_the_whole_context_costs_per_token(self):
@@ -1542,7 +1542,7 @@ class TestTheDraftsOwnCache:
         assert drafted.draft_kv_layers == 1
         assert bare.draft_per_token == 0 and bare.draft_cache_type == ""
 
-    def test_a_seat_pays_the_heads_cache_as_well(self):
+    def test_a_slot_pays_the_heads_cache_as_well(self):
         drafted = Fit.of(parse_load_log(SPARSE_DRAFTED_LOG), model="m.gguf",
                          weights=90 * GIB, room=110 * GIB, context=32768, parallel=2,
                          spec="draft-mtp")
@@ -1550,7 +1550,7 @@ class TestTheDraftsOwnCache:
                       room=110 * GIB, context=32768, parallel=2)
         assert drafted.draft_cost(32768) == drafted.draft_per_token * 32768
         assert drafted.cost(32768) - bare.cost(32768) == drafted.draft_cost(32768)
-        assert drafted.longest(1) < bare.longest(1), "the head takes context from a seat"
+        assert drafted.longest(1) < bare.longest(1), "the head takes context from a slot"
 
     def test_the_head_is_named_in_the_block_rather_than_folded_in(self):
         drafted = Fit.of(parse_load_log(SPARSE_DRAFTED_LOG), model="m.gguf",

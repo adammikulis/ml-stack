@@ -106,7 +106,7 @@ class TestStatus:
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         out = capsys.readouterr().out
         assert "would adopt this server" in out
-        assert "--parallel" not in out, "one seat is the default and is not spelt out"
+        assert "--parallel" not in out, "one slot is the default and is not spelt out"
 
     def test_a_lease_that_would_be_refused_says_which_field(self, serving, state, capsys):
         instance = serving()

@@ -56,8 +56,8 @@ def _lease_line(snapshot: ops.Snapshot) -> str:
 
 
 def _verdict_line(snapshot: ops.Snapshot, model: str, parallel: int) -> str:
-    seats = f" --parallel {parallel}" if int(parallel or 1) != 1 else ""
-    ask = f"'ml-stack-serve up {model}{seats}'"
+    slots = f" --parallel {parallel}" if int(parallel or 1) != 1 else ""
+    ask = f"'ml-stack-serve up {model}{slots}'"
     if snapshot.verdict == "adopt":
         return f"{ask} would adopt this server"
     if snapshot.verdict == "refuse":
@@ -203,10 +203,10 @@ def from_profile(args: argparse.Namespace, model: str,
     found = profile_for(model, workload=workload or ASK)
     if found is None:
         return None, []
-    # One seat holds the whole measured cache unless --parallel was given, in which case
-    # each of those seats gets what one measured seat got.
-    seats = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
-    shape = found.shape(seats=seats, resolve=False)
+    # One slot holds the whole measured cache unless --parallel was given, in which case
+    # each of those slots gets what one measured slot got.
+    slots = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
+    shape = found.shape(slots=slots, resolve=False)
     # The head is recorded by file name and llama-server needs a path. 'auto' is left
     # alone: `resolve_spec` answers it, and it has to know which binary will serve.
     head = found.draft
@@ -215,7 +215,7 @@ def from_profile(args: argparse.Namespace, model: str,
     # dest -> the value the profile would have, for the flags whose default `up` defines
     wanted = {
         "context": shape.context,
-        "parallel": max(1, seats),
+        "parallel": max(1, slots),
         "build": found.build,
         "draft": head,
         "spec": found.spec_type,
@@ -242,11 +242,11 @@ def from_profile(args: argparse.Namespace, model: str,
 
 
 _EVENT_LINES = {
-    "loading": lambda e: f"loading {e.get('model', '')} ({e.get('seats', 1)} seat(s))",
+    "loading": lambda e: f"loading {e.get('model', '')} ({e.get('slots', 1)} slot(s))",
     "ready": lambda e: (
         f"ready in {e['load_s']:.1f}s" if e.get("load_s") is not None else "ready"),
     "escalating": lambda e: (
-        f"escalating {e.get('from_seats')} -> {e.get('to_seats')} seat(s) by "
+        f"escalating {e.get('from_slots')} -> {e.get('to_slots')} slot(s) by "
         f"{e.get('mode')} -- {e.get('reason', '')}"),
     "saving": lambda e: f"saving slot {e.get('slot')} ({e.get('tokens', 0):,} tokens)",
     "summarizing": lambda e: f"summarising slot {e.get('slot')} ({e.get('tokens', 0):,} tokens)",
@@ -255,7 +255,7 @@ _EVENT_LINES = {
         f"{e.get('summary', '')}"),
     "stopping": lambda e: "stopping the old server",
     "restoring": lambda e: f"restoring slot {e.get('slot')} ({e.get('mode', 'cache')})",
-    "done": lambda e: f"now serving {e.get('seats')} seat(s)",
+    "done": lambda e: f"now serving {e.get('slots')} slot(s)",
 }
 
 
@@ -848,7 +848,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
                   "number of bytes. Every preflight, fit and lease reads it"),
         flag("--servers", type=int, default=None, metavar="N",
              help="the most model servers to run at once"),
-        flag("--seats", type=int, default=None, metavar="N",
+        flag("--slots", type=int, default=None, metavar="N",
              help="the most conversations one server may hold"),
         flag("--idle", default="", metavar="TIME",
              help="stop a server unused for this long -- 10m, 1h, 600. "
@@ -862,7 +862,7 @@ def cmd_limits(args: argparse.Namespace) -> int:
     """
     try:
         limits = ops.limits(memory_size=args.memory, servers=args.servers,
-                            seats=args.seats, idle=args.idle, clear=bool(args.clear))
+                            slots=args.slots, idle=args.idle, clear=bool(args.clear))
     except Refused as no:
         warn(f"error: {no.lines[0]}")
         return 2
@@ -971,12 +971,12 @@ def cmd_down(args: argparse.Namespace) -> int:
 
 @COMMANDS.command(
     "escalate",
-    help="grow the seats a running server holds, keeping every live conversation",
+    help="grow the slots a running server holds, keeping every live conversation",
     options=[
         option("port", default=DEFAULT_PORT,
                help=f"port of the server to grow (default: {DEFAULT_PORT})"),
         flag("--add", type=int, default=1, metavar="N",
-             help="how many more seats to ask for (default: 1)"),
+             help="how many more slots to ask for (default: 1)"),
         flag("--slot-save-path", default="", metavar="PATH",
              help="where the running server saves slots, if it was not started through 'up "
                   "--escalate' (default: this manager's own)"),
@@ -989,7 +989,7 @@ def cmd_down(args: argparse.Namespace) -> int:
         option("json", help="print one JSON object instead of the human lines"),
     ])
 def cmd_escalate(args: argparse.Namespace) -> int:
-    """``ml-stack-serve escalate`` -- grow a running server's seats in place."""
+    """``ml-stack-serve escalate`` -- grow a running server's slots in place."""
     try:
         info = ops.escalate(args.port, add=args.add,
                             room=str(getattr(args, "room", "") or ""),
