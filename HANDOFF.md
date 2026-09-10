@@ -201,11 +201,12 @@ across `src/`.
   `AskRoutes.asker(highlighted=)`, `Ask.highlighted`, the `highlighted` field the page
   posts, and `bench.save(server=)` -- and so are `ingest/fold.py`, `graph/tidy.py`,
   `graph/serve.py`, the five modules `graph/ask.py` became, `bench/keep.py`,
-  `bench/extract.py`, `bench/run.py`,
-  `bench/serve.py`, `bench/speed.py` and `jobs.py`. What is left is per-file:
+  `bench/extract.py`, `bench/run.py` and the modules it became,
+  `bench/serve.py`, `bench/show.py`, `bench/speed.py` and `jobs.py`. What is left is
+  per-file:
   `ingest/sources.py` (36), `bench/measure.py` (32), `serve/manager.py` (25),
-  `bench/show.py` (23), `world/simulate.py` (21), `ingest/imports.py` (20),
-  `graph/rebuild.py` (9), `graph/store.py` (7), `serve/cli.py` (15), then a long tail. Rename each to what it
+  `world/simulate.py` (21), `ingest/imports.py` (20), `serve/cli.py` (15),
+  `graph/rebuild.py` (9), `graph/store.py` (7), then a long tail. Rename each to what it
   holds; renaming them all to one other word is the same problem again. Watch for the
   name already in that scope: three of these renames collided with an existing local and
   only the tests caught it.
@@ -233,8 +234,7 @@ across `src/`.
 or CSS file over 500. No component is over any more; ten Python files are.
 `claude-edit-guard` refuses a write that lengthens one of them, so each can only get
 shorter from here, but nothing shortens them except somebody splitting them.
-`scripts/budgets --show deep-files` lists them. `bench/run.py` (2,019) has its own entry
-below, under the commands.
+`scripts/budgets --show deep-files` lists them.
 
 Each is a file to read before it is a file to split: the answer is a module per job with a
 name, not a line count met by moving code sideways.
@@ -256,8 +256,6 @@ name, not a line count met by moving code sideways.
 - [ ] **`serve/cli.py` (1,062)** -- twenty subcommands, each parsing its own arguments; the
   work is already in `serve/ops.py`, so this is parsers and printing. The one a newcomer
   meets first, and the file in the commands entry below.
-- [ ] **`bench/show.py` (1,019)** -- the table, the questions behind a score, the rates and
-  the frontier, the plot, and the `drafts` summary: five outputs over one reader.
 - [ ] **`serve/build.py` (999)** -- finding a toolchain, the cmake invocation, the cache of
   what was built, and choosing the binary to run.
 - [ ] **`train/tools.py` (953)** -- reading the worked examples out of tool schemas,
@@ -273,12 +271,13 @@ their leading underscore and every importer moved rather than being re-exported.
 
 ### The commands
 
-- [ ] **Twenty commands still build their own parser and keep their work in the handler.**
+- [ ] **Nineteen commands still build their own parser and keep their work in the handler.**
   `ml_stack.command` holds the shared options and a `Group` that collects subcommands and
   answers as `main`; `ml_stack.cli.reference` holds one line per command and the README's
   table, and `tests/test_cli_reference.py` fails when the two disagree. On it so far:
-  `ml-stack-serve` (work in `serve/ops.py`), `ml-stack-world` (`world/ops.py`) and
-  `ml-stack-jobs`. The pattern, per command: make a `<package>/ops.py` whose functions take
+  `ml-stack-serve` (work in `serve/ops.py`), `ml-stack-world` (`world/ops.py`),
+  `ml-stack-jobs` and `ml-stack-bench` (`bench/ops.py`, with its flags in
+  `bench/options.py`). The pattern, per command: make a `<package>/ops.py` whose functions take
   typed arguments and return values, raising rather than printing (`serve.ops.Refused`
   carries the lines); leave the handler to parse and print; declare each subcommand with
   `@COMMANDS.command(name, help=..., options=[option("port", ...), flag("--own", ...)])` in
@@ -287,14 +286,24 @@ their leading underscore and every importer moved rather than being re-exported.
   subcommand's `--help` and the output of everything safe to run; take one against
   `main`'s `src/` and one against the branch, and `ml-stack-surface diff BEFORE AFTER`
   names what moved.
-  Worth doing next in this order: `ml-stack-bench` (2,019 lines, two `main`s, and the last
-  screen-scrape in `mcp.bench_show` and `do.bench_cli` is waiting on it), `ml-stack-setup`
+  Worth doing next in this order: `ml-stack-setup`
   and `ml-stack-doctor` (one module, two entry points), `ml-stack-ingest`,
   `ml-stack-models`, `ml-stack-store`, `ml-stack-speech`, `ml-stack-train-run`,
   `ml-stack-train-tools`, `ml-stack-do`, `ml-stack-claude`, `ml-stack-agent`,
   `ml-stack-graph`, `ml-stack-audit`, `ml-stack-suite`, `ml-stack-fleet`,
   `ml-stack-peers`, `ml-stack-traind`. A command whose row in the README's table changes
   is a change to `ml_stack.cli.reference` and `scripts/reference --write`.
+
+- [ ] **`do.bench_cli` runs four bench subcommands in-process and hands back what they
+  printed.** `BENCH_SUBS` in `do.py` names `compare`, `animate`, `standard` and `speed`;
+  `standard` and `speed` detach and return a log and a pid, but `compare` and `animate`
+  go through `mcp._captured(lambda: _main([sub, *args]))`, so a model reads a fixed-width
+  progress listing instead of a value. Each has a function already: `compare` is
+  `bench.comparison.assemble` and `write`, which return the document and where it went;
+  `animate` returns the path of the file it rendered. Both tools also take `args: list[str]`
+  and are documented as following the command line, so giving them typed arguments is a
+  change to what an agent driving them writes. `mcp.bench_show` is done -- it calls
+  `bench.ops.kept_for` and `summarised` and answers with records.
 
 ### Layers
 

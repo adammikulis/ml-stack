@@ -132,7 +132,7 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
     "bench_history": (("what ran today?", 'bench_history(since="1d")'),
                       ("the last five runs", "bench_history(limit=5)")),
     "bench_show": (("show me the table", "bench_show()"),
-                   ("which model is fastest per GB?", 'bench_show(args=["--rates"])')),
+                   ("what did the last three runs score?", "bench_show(last=3)")),
     "fleet_peers": (("who else is on the network?", "fleet_peers()"),
                     ("is the studio serving anything?", "fleet_peers(timeout_s=4)")),
     "fleet_join": (("make this machine a peer", 'fleet_join(passphrase="...")'),
@@ -178,7 +178,7 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
                     ("did the ingest finish?", "jobs_status()")),
     "jobs_wait": (("wait for the bench", 'jobs_wait(kind="bench")'),
                   ("run the report once the sweep ends",
-                   'jobs_wait(kind="bench") then bench_show(args=["--rates"])')),
+                   'jobs_wait(kind="bench") then bench_show()')),
     "models_on_disk": (("run benchmarks with qwen3.8-flash-next",
                         'models_on_disk(words="qwen3.8-flash-next") first, so the question '
                         'names the file and its draft head'),
@@ -206,7 +206,7 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
                   'ask_user(question="Write the ranking where? (default: the bench home)")')),
     "plan": (("run benchmarks with qwen3.8-flash-next",
               'plan(steps=["bench_run sweep flash-next with its draft head, a sample of 10, '
-              'kept as Qwen3.8-Flash--plain", "jobs_wait bench", "bench_show --rates"])'),
+              'kept as Qwen3.8-Flash--plain", "jobs_wait bench", "bench_show"])'),
              (ACCEPTANCE,
               'plan(steps=["bench_run sweep with the head -> Qwen3.8-Flash--plain", '
               '"jobs_wait bench", "bench_run sweep without the head, --label-suffix -nodraft '
@@ -215,7 +215,7 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
               'bench", "bench_compare --export compare.json", "bench_animate compare.json"])')),
     "done": (("run benchmarks with qwen3.8-flash-next",
               'done(summary="Measured 10 questions as Qwen3.8-Flash--plain: 83% F1 at 44 s a '
-              'question; the table is under the bench home, `bench_show` prints it.")'),
+              'question; the runs are under the bench home, `bench_show` reads them back.")'),
              ("make an animation of the last comparison",
               'done(summary="compare.mp4 written next to compare.json in the bench home; '
               'three panels, thirty seconds.")')),

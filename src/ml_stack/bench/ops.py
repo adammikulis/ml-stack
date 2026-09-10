@@ -21,12 +21,15 @@ from ml_stack import bench
 from ml_stack.bench.askings import sampling_from
 from ml_stack.bench.keep import _commit
 from ml_stack.bench.measure import PER_QUESTION
+from ml_stack.bench.record import of
+from ml_stack.bench.score import derived
 from ml_stack.bench.show import NOT_ANSWERING
 from ml_stack.log import say
 from ml_stack.serve.serving import Config, Serving
 
 __all__ = ["Fleeted", "Kept", "Refused", "fleet_jobs", "fleet_measure", "fleet_planned",
-           "kept_for", "measured_run", "newest", "prepare", "serving_fields", "swept"]
+           "kept_for", "measured_run", "newest", "prepare", "serving_fields",
+           "summarised", "swept"]
 
 
 class Refused(Exception):
@@ -82,6 +85,24 @@ def kept_for(store: str | Path, *, last: int = 0, since: str = "") -> Kept:
                 answering=newest(answering, last=last, since=since),
                 extracted=bench_extract.only(everything),
                 speed=newest(bench_speed.only(everything), last=last, since=since))
+
+
+def summarised(kept: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """One record per run with what the table shows -- what was served, how it was asked,
+    what it scored and what it cost -- and none of the per-question rows."""
+    out = []
+    for one in kept:
+        got = of(one)
+        out.append({"label": got.label, "at": got.at, "key": got.key, "kind": got.kind,
+                    "workload": got.workload, "model": got.model, "build": got.build,
+                    "head": got.head, "head_ahead": got.head_ahead,
+                    "context": got.context, "slots": got.slots,
+                    "cache_type": got.cache_type, "reasoning_budget": got.reasoning_budget,
+                    "graph": got.graph, "finder": got.finder,
+                    "asking": dict(got.asking or {}), "sampling": dict(got.sampling),
+                    "host": got.host, "commit": got.commit, "seconds": got.seconds,
+                    "questions": len(got.rows), **derived(one)})
+    return out
 
 
 def prepare(store: str | Path, graph: Mapping[str, Any], *, embed_url: str = "",

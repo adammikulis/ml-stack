@@ -274,13 +274,17 @@ def bench_history(since: str = "", limit: int = 20) -> list[dict[str, Any]]:
     return [_plain(e) for e in rows[::-1][: max(1, int(limit))]]
 
 
-def bench_show(args: list[str] = []) -> dict[str, Any]:
-    """The bench's table of kept runs, as ``ml-stack-bench show args`` prints it -- pass
-    ``["--rates"]`` for accuracy per second, per 1k tokens and per GB, ``["--rank",
-    "FILE.md"]`` to write the ranking."""
-    from ml_stack.bench.run import _main
+def bench_show(last: int = 0, since: str = "", extract: bool = False,
+               speed: bool = False) -> list[dict[str, Any]]:
+    """Every benchmark run kept, as records: what was served, how it was asked, what it
+    scored and what it cost (``ml-stack-bench show``). ``last`` keeps the newest N and
+    ``since`` an ISO time; ``extract`` asks for the extraction runs and ``speed`` for the
+    speed grids instead of the answering ones."""
+    from ml_stack.bench import home_dir
+    from ml_stack.bench.ops import kept_for, summarised
 
-    return _captured(lambda: _main(["show", *args]))
+    got = kept_for(home_dir() / "runs.ladybug", last=int(last), since=since)
+    return summarised(got.speed if speed else got.extracted if extract else got.answering)
 
 
 def fleet_peers(timeout_s: float = 2.0) -> list[dict[str, Any]]:
@@ -381,7 +385,8 @@ TOOLS: list[Tool] = [
     Tool("bench_status", "What is measuring now, or that nothing is.", bench_status),
     Tool("bench_history", "Every measurement run, newest first, with how each ended.",
          bench_history),
-    Tool("bench_show", "The table of kept runs, as ml-stack-bench show prints it.", bench_show),
+    Tool("bench_show", "Every benchmark run kept, as records: what was served, how "
+         "it was asked, what it scored and what it cost.", bench_show),
     Tool("fleet_peers", "Every peer on the LAN: serving, room, busy, commit.", fleet_peers),
     Tool("fleet_join", "Make this machine a peer: checks, cluster, daemon, announce.",
          fleet_join),

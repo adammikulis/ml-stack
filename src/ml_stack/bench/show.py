@@ -293,10 +293,10 @@ def peak(rows: Sequence[Mapping[str, Any]]) -> int | None:
             try:
                 if call[0] is None and call[1] is None:
                     continue
-                held = int(call[0] or 0) + int(call[1] or 0)
+                tokens = int(call[0] or 0) + int(call[1] or 0)
             except (TypeError, ValueError, IndexError):
                 continue
-            most = held if most is None else max(most, held)
+            most = tokens if most is None else max(most, tokens)
     return most
 
 
@@ -532,21 +532,21 @@ def cache_turns(row: Mapping[str, Any]) -> str:
 
 def at_once(server: Mapping[str, Any]) -> str:
     """``4x3`` for four conversations of three turns asked together; "" for one at a time."""
-    held = server.get("concurrency") or {}
-    if not isinstance(held, Mapping) or not held.get("conversations"):
+    at = server.get("concurrency") or {}
+    if not isinstance(at, Mapping) or not at.get("conversations"):
         return ""
-    return f"{held['conversations']}x{held.get('turns') or 1}"
+    return f"{at['conversations']}x{at.get('turns') or 1}"
 
 
 def sampled(server: Mapping[str, Any]) -> str:
     """The sampling a run used, short enough for a column: "t1.0 p.95 k64"."""
-    held = server.get("sampling") or {}
-    if not isinstance(held, Mapping) or not held:
+    sampling = server.get("sampling") or {}
+    if not isinstance(sampling, Mapping) or not sampling:
         return "-"
     bits = []
     for key, tag in (("temperature", "t"), ("top_p", "p"), ("top_k", "k"), ("min_p", "m")):
-        if key in held:
-            value = held[key]
+        if key in sampling:
+            value = sampling[key]
             bits.append(f"{tag}{value:g}" if not isinstance(value, float) or value >= 1
                         else f"{tag}{value:g}".replace("0.", "."))
     return " ".join(bits) or "-"
@@ -598,12 +598,12 @@ def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, A
             f"{(f'{got * 100:.0f}% {spread}'.strip() if got is not None else '-'):>9} "
             f"{(f'{delta:+.0f}' if delta is not None else '-'):>5}  "
             f"{base.get('label', '') if base is not None else 'no baseline'}")
-    held = [(one, faster, base) for one, base, faster, mine, theirs in rows
-            if faster is not None and base is not None and theirs.get("right") is not None
-            and held_up(one, base, noise=noise)]
+    kept_f1 = [(one, faster, base) for one, base, faster, mine, theirs in rows
+               if faster is not None and base is not None
+               and theirs.get("right") is not None and held_up(one, base, noise=noise)]
     # a head that held its F1 but is slower than no head is worth nothing: gpt-oss's eagle3
     # head accepted 65% and still ran at 0.82x, and was recommended (2026-09-02)
-    won = [trio for trio in held if trio[1] > 1.0]
+    won = [trio for trio in kept_f1 if trio[1] > 1.0]
     pts = noise * 100
     if won:
         best, faster, base = max(won, key=lambda trio: trio[1])
@@ -619,8 +619,8 @@ def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, A
                      f"{_times(faster)}"
                      + (" -- but its s/q is not separated from the baseline's either, so "
                         "that speedup is inside the noise" if clock is False else ""))
-    elif held:
-        best, faster, base = max(held, key=lambda trio: trio[1])
+    elif kept_f1:
+        best, faster, base = max(kept_f1, key=lambda trio: trio[1])
         lines.append(f"serve no head: the best that held its F1, {best.get('label', '')}, "
                      f"is slower than none at {_times(faster)}")
     elif any(faster is not None for _, _, faster, _, _ in rows):

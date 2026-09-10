@@ -135,10 +135,9 @@ class TestTheTools:
         rows = said(reply)
         assert [r["subcommand"] for r in rows] == ["sweep"]
 
-    def test_bench_show_is_the_command_captured(self):
-        (reply,) = drive(rpc(1, "tools/call", name="bench_show", arguments={"args": []}))
-        got = said(reply)
-        assert got["exit"] == 0 and isinstance(got["output"], str)
+    def test_bench_show_answers_with_records_not_a_table(self):
+        (reply,) = drive(rpc(1, "tools/call", name="bench_show", arguments={}))
+        assert said(reply) == [], "an empty bench home holds no runs"
 
     def test_fleet_peers_in_no_cluster_is_empty_not_an_error(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ML_STACK_CLUSTER_KEY", str(tmp_path / "none.key"))
