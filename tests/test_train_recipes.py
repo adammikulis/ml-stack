@@ -7,6 +7,7 @@ import math
 
 import pytest
 from ml_stack.contracts import ContractError, recipe, recipes
+from ml_stack.testing import needs_a_backend
 from ml_stack.train.holdout import LeakageError, stratified
 from ml_stack.train.recipes import build, known, validate
 from ml_stack.train.recipes.models import suggest_size
@@ -116,6 +117,7 @@ class TestStratified:
 
 class TestBuild:
     @pytest.mark.slow
+    @needs_a_backend
     def test_a_language_model_trains_on_real_text(self, corpus, tmp_path):
         from ml_stack.train.run import run
 
@@ -127,6 +129,7 @@ class TestBuild:
         # Byte-level: an untrained model sits at ln(256).
         assert got["final_loss"] < math.log(256) * 0.7, got
 
+    @needs_a_backend
     def test_a_classifier_generalises_to_held_out_rows(self, reviews, tmp_path):
         from ml_stack.train.run import run
 
@@ -137,6 +140,7 @@ class TestBuild:
         assert got["best_metric"] < math.log(2), (
             "the held-out score is no better than guessing between two labels")
 
+    @needs_a_backend
     def test_a_dry_run_leaves_no_checkpoint_behind(self, reviews, tmp_path):
         from ml_stack.train.run import run
 
@@ -160,6 +164,7 @@ class TestBuild:
         with pytest.raises(ValueError, match="nothing to learn"):
             build("classify-text", {"size": "small"}, d)
 
+    @needs_a_backend
     def test_the_run_records_what_it_actually_trained_on(self, corpus, tmp_path):
         from ml_stack.train import read
         from ml_stack.train.run import run
@@ -176,6 +181,7 @@ class TestBuild:
 
 
 class TestCommandLine:
+    @needs_a_backend
     def test_the_cli_trains_and_prints_json(self, corpus, tmp_path, capsys):
         from ml_stack.train.run import main
 
