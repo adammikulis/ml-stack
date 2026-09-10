@@ -231,7 +231,7 @@ across `src/`.
 ### Files that hold more than one job
 
 `deep-files` refuses a Python file over 900 lines and `deep-components` an HTML, JavaScript
-or CSS file over 500. No component is over any more; ten Python files are.
+or CSS file over 500. No component is over any more; eight Python files are.
 `claude-edit-guard` refuses a write that lengthens one of them, so each can only get
 shorter from here, but nothing shortens them except somebody splitting them.
 `scripts/budgets --show deep-files` lists them.
@@ -256,7 +256,7 @@ name, not a line count met by moving code sideways.
 - [ ] **`serve/cli.py` (1,062)** -- twenty subcommands, each parsing its own arguments; the
   work is already in `serve/ops.py`, so this is parsers and printing. The one a newcomer
   meets first, and the file in the commands entry below.
-- [ ] **`serve/build.py` (999)** -- finding a toolchain, the cmake invocation, the cache of
+- [ ] **`serve/build.py` (1,000)** -- finding a toolchain, the cmake invocation, the cache of
   what was built, and choosing the binary to run.
 - [ ] **`train/tools.py` (953)** -- reading the worked examples out of tool schemas,
   inventing arguments and paraphrases, the synthesiser, turning kept bench traces into
