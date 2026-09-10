@@ -300,10 +300,9 @@ their leading underscore and every importer moved rather than being re-exported.
   go through `mcp._captured(lambda: _main([sub, *args]))`, so a model reads a fixed-width
   progress listing instead of a value. Each has a function already: `compare` is
   `bench.comparison.assemble` and `write`, which return the document and where it went;
-  `animate` returns the path of the file it rendered. Both tools also take `args: list[str]`
-  and are documented as following the command line, so giving them typed arguments is a
-  change to what an agent driving them writes. `mcp.bench_show` is done -- it calls
-  `bench.ops.kept_for` and `summarised` and answers with records.
+  `animate` returns the path of the file it rendered. Both tools take `args: list[str]` and
+  are documented as following the command line, so giving them typed arguments changes what
+  an agent driving them writes.
 
 ### Layers
 
