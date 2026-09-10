@@ -59,19 +59,19 @@ def _said(measured: Any) -> str:
 
 def _run(args: Any, *, resolve: bool = True,
          say: Callable[[str], None] = lambda _line: None) -> tuple[Any, Any]:
-    """The whole :class:`~ml_stack.serve.Run` this ingest reads with, and the profile that
+    """The whole :class:`~ml_stack.serve.Config` this ingest reads with, and the profile that
     measured it (None when nothing did).
 
     One object -- how to serve the model, the asking it measured best with, the client to
     ask it with -- built here and nowhere else, so the lease that is taken and the serving
     the run record names are the same thing rather than two derivations that drift.
 
-    The command line is laid over the measurement with :meth:`Run.over`, each field going
+    The command line is laid over the measurement with :meth:`Config.over`, each field going
     to the section that owns it: ``--context`` is the one slot's whole context, ``--n-max``
     the draft's length, ``--per-section`` the cap on one call, ``--n-predict`` the ceiling,
     and the samplers the client's.
     """
-    from ml_stack.serve.serving import Run, Serving, drafted
+    from ml_stack.serve.serving import Config, Serving, drafted
 
     model = str(getattr(args, "model", "") or "")
     found = str(hub.located(model, loose=True) or model) if model else ""
@@ -90,35 +90,35 @@ def _run(args: Any, *, resolve: bool = True,
 
         measured = profile_for(found, workload="ingest")
     if measured is not None:
-        run = measured.run(port=port, slots=slots, resolve=resolve,
+        config = measured.config(port=port, slots=slots, resolve=resolve,
                            n_predict=n_predict, timeout=timeout)
         say(f"    serving in the settings it scored best with: {_said(measured)}")
-        run = drafted(run, "none", say=lambda line: say(f"    {line}"))
+        config = drafted(config, "none", say=lambda line: say(f"    {line}"))
     else:
-        run = Run(serving=Serving(model=found, port=port, slots=slots)).over(
+        config = Config(serving=Serving(model=found, port=port, slots=slots)).over(
             n_predict=n_predict, timeout=timeout)
         if found:
             asked = str(getattr(args, "draft", "auto") or "auto")
-            run = drafted(run, asked, say=lambda line: say(f"    {line}"))
+            config = drafted(config, asked, say=lambda line: say(f"    {line}"))
 
     # The whole --context is the one slot's: a 2,500-token unit with four figures through
     # the projector and a reply of several thousand tokens overran a 16k slot on the first
     # night. A profile that measured a wider slot keeps it.
-    run = run.over(slot_context=max(int(getattr(args, "context", 0) or 0),
-                                    int(run.serving.slot_context or 0)))
+    config = config.over(slot_context=max(int(getattr(args, "context", 0) or 0),
+                                    int(config.serving.slot_context or 0)))
     sampling = _sampling(args)
     if sampling:
-        run = run.over(**sampling)
-    if not getattr(args, "images", False) and run.serving.mmproj:
-        run = run.over(mmproj="")
+        config = config.over(**sampling)
+    if not getattr(args, "images", False) and config.serving.mmproj:
+        config = config.over(mmproj="")
     if getattr(args, "n_max", None) is not None:
         # the draft length for this run, over the one the profile measured
-        if not (run.serving.draft or run.serving.spec_type):
+        if not (config.serving.draft or config.serving.spec_type):
             say("--n-max: no draft head is being served, so there is no draft to lengthen")
         else:
-            run = run.over(draft_n_max=int(args.n_max))
+            config = config.over(draft_n_max=int(args.n_max))
             say(f"    draft length {args.n_max} over the profile's")
-    return run, measured
+    return config, measured
 
 
 @contextmanager
@@ -133,21 +133,21 @@ def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
     from ml_stack import bench
     from ml_stack.lock import only_one
 
-    run, _measured = _run(args, say=say)
+    config, _measured = _run(args, say=say)
     with only_one(bench.home_dir() / "measuring.lock",
                   wait=not getattr(args, "no_queue", False),
                   announce=lambda line: say(f"waiting for the bench -- {line}")):
         if not getattr(args, "model", ""):
-            yield run.client(args.base_url)
+            yield config.client(args.base_url)
             return
 
         from ml_stack.serve.manager import serve
 
         began = time.time()
-        with serve(run.model, manager=run.serving.manager(), **run.lease(),
+        with serve(config.model, manager=config.serving.manager(), **config.lease(),
                    **SERVE_EXTRA) as server:
             say(f"    up in {time.time() - began:.0f}s")
-            yield run.client(server.base_url, index=0)
+            yield config.client(server.base_url, index=0)
 
 
 def _alive(client: Any) -> bool:
@@ -161,15 +161,15 @@ def _alive(client: Any) -> bool:
 def _serving_said(args: Any) -> str:
     """The settings a --model is served in, for the run record.
 
-    Read off the same `Run` `_serving` leases, so a record says what was actually asked for
+    Read off the same `Config` `_serving` leases, so a record says what was actually asked for
     -- the slot's context, the draft's length -- and not a second derivation of it that can
     differ from what the server was told.
     """
     if not getattr(args, "model", ""):
         return f"base_url {getattr(args, 'base_url', '')}"
     try:
-        run, measured = _run(args, resolve=False)
-        lease = run.lease()
+        config, measured = _run(args, resolve=False)
+        lease = config.lease()
         laid = [f"context {lease.get('context')}", f"parallel {lease.get('parallel')}"]
         if lease.get("spec_draft_max") is not None:
             laid.append(f"draft {lease['spec_draft_max']}")

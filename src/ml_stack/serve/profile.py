@@ -230,14 +230,14 @@ class Profile:
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
               n_predict: int = 16384, timeout: float = 300.0) -> Any:
         """This record as one conversation: one slot holding the whole cache the record
-        measured across its ``parallel`` slots. The same as :meth:`run` with no ``slots``.
+        measured across its ``parallel`` slots. The same as :meth:`config` with no ``slots``.
         """
-        return self.run(port=port, slots=1, model=model, resolve=resolve,
+        return self.config(port=port, slots=1, model=model, resolve=resolve,
                         n_predict=n_predict, timeout=timeout)
 
-    def run(self, *, port: int = 8080, slots: int | None = None, model: str = "",
+    def config(self, *, port: int = 8080, slots: int | None = None, model: str = "",
             resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
-        """This record whole, as a :class:`~ml_stack.serve.Run`: how to serve it,
+        """This record whole, as a :class:`~ml_stack.serve.Config`: how to serve it,
         the asking to ask it with, and the client.
 
         One object built once and handed on, so a bench row, a page answer and a client on a
@@ -245,9 +245,9 @@ class Profile:
         ``model`` and ``resolve`` are :meth:`serving`'s: no ``slots`` is one slot holding the
         whole measured cache.
         """
-        from ml_stack.serve.serving import Run
+        from ml_stack.serve.serving import Config
 
-        return Run(serving=self.serving(port=port, slots=slots, model=model, resolve=resolve),
+        return Config(serving=self.serving(port=port, slots=slots, model=model, resolve=resolve),
                    asking=self.asked(),
                    talking=self.talking(n_predict=n_predict, timeout=timeout))
 

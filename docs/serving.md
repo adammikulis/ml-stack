@@ -176,22 +176,22 @@ from ml_stack.graph.ask import converse
 
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf",
                     workload="ask")
-run = found.run(port=8080, n_predict=16384)
-client = slot(run, index=request_number)
-answer = converse(question, graph, client, asking=run.asking)
+config = found.config(port=8080, n_predict=16384)
+client = slot(config, index=request_number)
+answer = converse(question, graph, client, asking=config.asking)
 ```
 
-`Profile.run()` is a **`Run`**: the whole configuration in one object, in three sections
-that different code reads. `run.serving` is the `Serving` the server is leased with, `run.asking`
-is an `Asking` — how `converse` is called — and `run.talking` is a `Talking`, what
-the `Client` is built from. `run.lease()`, `run.asking` and `run.client()` are the only
-places each becomes arguments, and `run.over(cache_type="f16", few=True, temperature=0.7)`
-lays a knob over it, routed to the section that owns it rather than to whichever call takes
-`**kwargs` next.
+`Profile.config()` is a **`Config`**: everything in one object, in three sections that
+different code reads. `config.serving` is the `Serving` the server is leased with,
+`config.asking` is an `Asking` — how `converse` is called — and `config.talking` is a
+`Talking`, what the `Client` is built from. `config.lease()`, `config.asking` and
+`config.client()` are the only places each becomes arguments, and
+`config.over(cache_type="f16", few=True, temperature=0.7)` lays a knob over it, routed to
+the section that owns it rather than to whichever call takes `**kwargs` next.
 
-Hand the same run to the bench (`bench.served(run, ...)`), to a page (`AskRoutes.run`, and
-`client_on_slot()` hands out a slot of it) and to `slot` and they lease one serving and ask one way by
-construction. Three places each building their own from the record is how a knob about the
+Hand the same config to the bench (`bench.served(config, ...)`), to a page
+(`AskRoutes.config`, and `client_on_slot()` hands out a slot of it) and to `slot` and they
+lease one serving and ask one way by construction. Three places each building their own from the record is how a knob about the
 asking reached `Client.__init__` and took an 87G load down with it, and how two of them
 could lease one port two ways — which llama.cpp answers by stopping the server and loading
 the weights again.

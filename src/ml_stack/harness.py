@@ -144,7 +144,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
     from ml_stack.serve import chat_template, manager
     from ml_stack.serve import profile as records
     from ml_stack.serve.recent import note
-    from ml_stack.serve.serving import Run, Serving, drafted, served
+    from ml_stack.serve.serving import Config, Serving, drafted, served
 
     found = str(hub.located(model, loose=True) or model)
     note(found, by="agent")
@@ -152,17 +152,17 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
     leasing = say if manager.already_up(found, port) is None else (lambda _line: None)
     measured = records.profile_for(found) if profile else None
     if measured is not None:
-        run = measured.run(port=port, slots=slots, model=found)
+        config = measured.config(port=port, slots=slots, model=found)
         leasing(f"serving in the settings it scored best with: {records.said(measured)}")
-        run = drafted(run, "none", say=leasing)
+        config = drafted(config, "none", say=leasing)
     else:
-        run = Run(serving=Serving(model=found, port=port, slots=slots))
-        run = drafted(run, draft, say=leasing)
+        config = Config(serving=Serving(model=found, port=port, slots=slots))
+        config = drafted(config, draft, say=leasing)
     patched = chat_template.written_beside(found)
     if patched is not None:
         leasing("this model's template refuses a system message after the first; serving "
                 f"with one that renders it instead ({patched.name})")
-    with served(run, say=say, timeout=900.0, cache_reuse=256, warmup=False,
+    with served(config, say=say, timeout=900.0, cache_reuse=256, warmup=False,
                         chat_template_file=patched) as base_url:
         alias = alias_of(base_url, found)
         say(f"the harness on {base_url} as {alias!r}")

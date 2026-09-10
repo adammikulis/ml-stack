@@ -175,14 +175,14 @@ def test_auto_takes_the_most_precise_projector_and_a_missing_one_is_no_projector
     assert said == ["no projector: gone"]
 
 
-# -- one Run, three call sites -------------------------------------------------------------
+# -- one Config, three call sites -------------------------------------------------------------
 
 FLASH = "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"
 
 
 @pytest.fixture
 def shipped(monkeypatch):
-    """The Flash-Next record that ships with ml-stack, as a `Run`.
+    """The Flash-Next record that ships with ml-stack, as a `Config`.
 
     The packaged file only -- never this machine's `~/.ml-stack/profiles.json`, which would
     make the test read a measurement somebody else made -- and the head and the projector
@@ -200,15 +200,15 @@ def shipped(monkeypatch):
     monkeypatch.setattr(ops, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
     found = profile_for(FLASH, records=records_in(package_file()))
     assert found is not None, "the shipped profiles must still hold the Flash-Next record"
-    run = found.run(port=8099, slots=2)
-    if run.serving.build:
-        where = managed_named() / run.serving.build
+    config = found.config(port=8099, slots=2)
+    if config.serving.build:
+        where = managed_named() / config.serving.build
         where.mkdir(parents=True, exist_ok=True)
         fake_binary(where)
-    return run
+    return config
 
 
-def _bench_lease(run, monkeypatch, leased):
+def _bench_lease(config, monkeypatch, leased):
     """What `bench.served` hands `serve`, with everything but the lease faked away."""
     import ml_stack.hub
     import ml_stack.serve.preflight as preflight
@@ -221,7 +221,7 @@ def _bench_lease(run, monkeypatch, leased):
     monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
     monkeypatch.setattr(bench, "asking", lambda graph, **k: leased.setdefault("asked", k))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
-    bench.served(run, [{"q": "who?", "expect": []}], {"nodes": [], "edges": []}, kept="")
+    bench.served(config, [{"q": "who?", "expect": []}], {"nodes": [], "edges": []}, kept="")
 
 
 def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused():
@@ -229,13 +229,13 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     `over` knows which section owns each name, so nothing about the asking can reach the
     client at all. Mutation: send unknown names on to one of the three."""
     from ml_stack.graph.asking import Asking
-    from ml_stack.serve import Run, Serving
+    from ml_stack.serve import Config, Serving
 
-    run = Run(serving=Serving(model="weights.gguf"))
-    laid = run.over(cache_type="q8_0", few=True, reach=8000, n_predict=4096,
+    config = Config(serving=Serving(model="weights.gguf"))
+    laid = config.over(cache_type="q8_0", few=True, reach=8000, n_predict=4096,
                     temperature=0.7, top_k=20)
     assert laid.serving.cache_type == "q8_0" and laid.serving == replace(
-        run.serving, cache_type="q8_0")
+        config.serving, cache_type="q8_0")
     assert laid.asking == Asking(few=True, reach=8000)
     assert laid.talking.n_predict == 4096
     assert laid.talking.sampling == {"temperature": 0.7, "top_k": 20}
@@ -244,7 +244,7 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     assert laid.over(think=False).talking.client() == {
         "n_predict": 4096, "timeout": 300.0, "temperature": 0.7, "top_k": 20}
     with pytest.raises(TypeError, match="tightt"):
-        run.over(tightt=True)
+        config.over(tightt=True)
 
 
 def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, leases,
@@ -260,7 +260,7 @@ def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, l
     _bench_lease(shipped, monkeypatch, leased)
 
     class Page(AskRoutes):
-        run = shipped
+        config = shipped
 
     page = Page.__new__(Page)
     answering = page.client_on_slot(index=0)
@@ -288,7 +288,7 @@ def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, l
 
 
 def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
-    """`Run.over` is the one place a knob is laid over a record, so setting it once sets it
+    """`Config.over` is the one place a knob is laid over a record, so setting it once sets it
     for the bench, the page and a slot at the same moment. Mutation: rebuild any one of the
     three from the profile instead of taking the run it was given."""
     from ml_stack.graph.serve import AskRoutes
@@ -299,7 +299,7 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
     _bench_lease(changed, monkeypatch, {})
 
     class Page(AskRoutes):
-        run = changed
+        config = changed
 
     page = Page.__new__(Page)
     client = page.client_on_slot(index=1)
@@ -315,11 +315,11 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
 
 
 def test_a_new_draft_depth_reaches_the_server_and_the_request():
-    from ml_stack.serve.serving import Run, Serving, Talking
+    from ml_stack.serve.serving import Config, Serving, Talking
 
-    run = Run(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
+    config = Config(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
               talking=Talking(spec_draft_max=4))
-    deeper = run.over(draft_n_max=8)
+    deeper = config.over(draft_n_max=8)
 
     assert deeper.serving.draft_n_max == 8
     assert deeper.talking.spec_draft_max == 8, \
@@ -327,11 +327,11 @@ def test_a_new_draft_depth_reaches_the_server_and_the_request():
 
 
 def test_taking_the_head_away_takes_the_requests_depth_with_it():
-    from ml_stack.serve.serving import Run, Serving, Talking
+    from ml_stack.serve.serving import Config, Serving, Talking
 
-    run = Run(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
+    config = Config(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
               talking=Talking(spec_draft_max=4))
-    bare = run.over(draft="", spec_type="")
+    bare = config.over(draft="", spec_type="")
 
     assert bare.talking.spec_draft_max is None
 
@@ -365,10 +365,10 @@ class TestDraftCacheType:
         assert lease["spec_draft_type_k"] == "q4_0"
 
     def test_a_run_lays_it_over_the_serving(self):
-        from ml_stack.serve.serving import Run
+        from ml_stack.serve.serving import Config
 
-        run = Run(serving=Serving(model="m.gguf", draft="h.gguf", draft_cache_type="f16"))
-        assert run.over(draft_cache_type="q4_0").serving.draft_cache_type == "q4_0"
+        config = Config(serving=Serving(model="m.gguf", draft="h.gguf", draft_cache_type="f16"))
+        assert config.over(draft_cache_type="q4_0").serving.draft_cache_type == "q4_0"
 
 
 def test_one_cache_type_reads_both_ways():

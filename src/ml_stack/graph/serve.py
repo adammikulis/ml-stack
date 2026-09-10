@@ -297,11 +297,11 @@ class AskRoutes:
     ``do_GET`` and ``do_POST``; each writes its own response and returns what it sent.
     Two things are the subclass's to say, and the rest has a default:
 
-    ``run``
-        The :class:`~ml_stack.serve.Run` this page answers with: the settings its model
+    ``config``
+        The :class:`~ml_stack.serve.Config` this page answers with: the settings its model
         is served with, the asking, and the client. Given one, ``client_on_slot()``
-        leases the server and hands out a slot of it, and ``model_name`` and ``serving_url`` answer
-        from it.
+        leases the server and hands out a slot of it, and ``model_name`` and
+        ``serving_url`` answer from it.
     ``asker(question, *, turns, held, stream, emit)``
         Answers. Returns an ``Answer`` (or a mapping in ``answer_payload``'s shape).
         When ``stream`` is true the model's events are reported through ``emit`` as they
@@ -346,7 +346,7 @@ class AskRoutes:
     recalled_turns: int = 3
     summary_every: int = EVERY
     asking: Ask | None = None
-    run: Any = None
+    config: Any = None
 
     # ------------------------------------------------------------- what a subclass says
 
@@ -355,22 +355,22 @@ class AskRoutes:
         raise NotImplementedError("a subclass says how a question is answered")
 
     def client_on_slot(self, *, index: int = 0, **over: Any) -> Any:
-        """A client on one slot of ``run``'s server, leased on the first question.
+        """A client on one slot of ``config``'s server, leased on the first question.
 
-        ``run`` is a :class:`~ml_stack.serve.Run`: the same object a bench row is measured
+        ``config`` is a :class:`~ml_stack.serve.Config`: the same object a bench row is measured
         from and `slot` elsewhere is given, so a page answer and a measurement of the
         page's model are one lease and one way of asking. llama.cpp serves one set of
         settings per port, and a page that spelled its lease out beside the bench's stopped the server
         and loaded the weights again the first time either was edited.
 
-        ``over`` is `Run.over`'s: a knob for this slot, routed to the section that owns it.
+        ``over`` is `Config.over`'s: a knob for this slot, routed to the section that owns it.
         """
-        if self.run is None:
-            raise RuntimeError("no run on this handler: set `run`, or override "
+        if self.config is None:
+            raise RuntimeError("no config on this handler: set `config`, or override "
                                "`client_on_slot`")
         from ml_stack.serve.serving import slot
 
-        return slot(self.run.over(**over) if over else self.run, index=index)
+        return slot(self.config.over(**over) if over else self.config, index=index)
 
     def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
         return None
@@ -381,24 +381,24 @@ class AskRoutes:
     def model_name(self) -> str:
         """What is answering, for a reader who has not asked anything yet -- the served
         model's name, as the subclass knows it (a lease, a config, a probe of the server).
-        ``run``'s model when there is one; every answer carries the name the server
+        ``config``'s model when there is one; every answer carries the name the server
         reported whether or not this can say."""
-        if self.run is None:
+        if self.config is None:
             return ""
-        return str(self.run.model).rsplit("/", 1)[-1]
+        return str(self.config.model).rsplit("/", 1)[-1]
 
     def serving_url(self) -> str:
         """The answering server's base URL, when the subclass knows it; ``/ask/model`` then
         also says how much context each slot holds and how many slots there are, which is
         what a peak in `spent` is measured against.
 
-        With a ``run``, the server `slot` is holding on that run's port -- so this answers
+        With a ``config``, the server `slot` is holding on that config's port -- so this answers
         once a question has been asked and not before."""
-        if self.run is None:
+        if self.config is None:
             return ""
         from ml_stack.serve.serving import held
 
-        return held().get(self.run.port, "")
+        return held().get(self.config.port, "")
 
     def handle_model(self) -> dict[str, Any]:
         """``GET /ask/model``: ``{"model": name, "slot_context": n, "slots": n}`` -- the
@@ -944,7 +944,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
     Configured on the class, since ``http.server`` makes an instance per request:
     ``site`` is the page file ``GET /`` serves, ``export`` the root ``GET /export/<path>``
     reads under, ``graph`` what questions are answered over, ``store`` where conversations
-    are kept, and ``run`` the model (`AskRoutes.run`); ``queue``, ``requests``, ``stages``
+    are kept, and ``config`` the model (`AskRoutes.config`); ``queue``, ``requests``, ``stages``
     and ``drafter`` are the review, request, refresh and draft routes' (each a 404 until
     set). :meth:`configured` makes a subclass with those set, so two servers in one process
     do not share them.
@@ -958,13 +958,13 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
     @classmethod
     def configured(cls, *, site: Path | str | None = None, export: Path | str | None = None,
                    graph: Mapping[str, Any] | None = None, store: Path | str | None = None,
-                   run: Any = None, queue: Any = None, requests: Path | str | None = None,
+                   config: Any = None, queue: Any = None, requests: Path | str | None = None,
                    name: str = "Configured", **more: Any) -> type[Handler]:
         """A subclass of this handler with the given collaborators on it; ``more`` is any
         other attribute or method to set on it (``stages``, ``drafter``, ``proposed``)."""
         fields = {"site": Path(site) if site else None,
                   "export": Path(export).resolve() if export else None,
-                  "graph": graph, "store": Path(store) if store else None, "run": run,
+                  "graph": graph, "store": Path(store) if store else None, "config": config,
                   "queue": queue, "requests": Path(requests) if requests else None, **more}
         return type(name, (cls,), fields)
 
@@ -977,7 +977,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
         from ml_stack.graph.ask import ASKING, converse, converse_stream
 
         client = self.client_on_slot(index=0)
-        asked = {"asking": self.run.asking if self.run is not None else ASKING,
+        asked = {"asking": self.config.asking if self.config is not None else ASKING,
                 "turns": turns, "held": held,
                 "summary": getattr(turns, "summary", None),
                 "recalled": list(getattr(turns, "recalled", ()) or ())}
@@ -1135,17 +1135,18 @@ def geocode(args: argparse.Namespace) -> int:
 def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
     """A server bound on loopback from the command line, not yet serving."""
     args = parser().parse_args(argv)
-    run = None
+    config = None
     if args.model:
-        from ml_stack.serve.serving import Run, Serving, drafted
+        from ml_stack.serve.serving import Config, Serving, drafted
 
-        run = drafted(Run(serving=Serving(model=str(args.model), port=int(args.model_port))),
-                      str(getattr(args, "draft", "auto") or "auto"))
+        config = drafted(
+            Config(serving=Serving(model=str(args.model), port=int(args.model_port))),
+            str(getattr(args, "draft", "auto") or "auto"))
     graph = None
     if args.graph:
         graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
     handler = Handler.configured(site=args.site, export=args.export, graph=graph,
-                                 store=args.store, run=run)
+                                 store=args.store, config=config)
     return ThreadingHTTPServer(("127.0.0.1", int(args.port)), handler)
 
 

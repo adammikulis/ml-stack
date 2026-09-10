@@ -1569,12 +1569,12 @@ def _last_line(log: Path) -> str:
 
 
 def measured_run(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> Any:
-    """The `Run` the model's profile measured best in, or None with --no-profile or no
+    """The `Config` the model's profile measured best in, or None with --no-profile or no
     record. Reports the settings it took.
 
     The head is left out when ``--serve-draft`` named one for this model, since a flag
     beats a record; everything else the record says is on the run, and the sweep's own
-    flags are laid over it by `Run.over` afterwards.
+    flags are laid over it by `Config.over` afterwards.
     """
     if not getattr(args, "profile", True):
         return None
@@ -1585,9 +1585,9 @@ def measured_run(args: Any, model: str, head: str, heads: Sequence[str], n: int)
     found = profile_for(str(model))
     if found is None:
         return None
-    run = found.run(port=int(getattr(args, "serve_port", 8099) or 8099),
+    config = found.config(port=int(getattr(args, "serve_port", 8099) or 8099),
                     slots=int(getattr(args, "parallel", 1) or 1))
-    serving = run.serving
+    serving = config.serving
     said: dict[str, Any] = {}
     if n >= len(heads) and serving.draft:
         said["draft"] = str(serving.draft)
@@ -1601,16 +1601,16 @@ def measured_run(args: Any, model: str, head: str, heads: Sequence[str], n: int)
         said["draft_n_max"] = int(serving.draft_n_max)
     rest = {k: v for k, v in (("extra_args", tuple(serving.extra_args)),
                               ("mmproj", serving.mmproj)) if v}
-    asking = run.asking.said()
+    asking = config.asking.said()
     say("    scored best with: " + ", ".join(f"{k}={v}" for k, v in said.items())
         + (f"; also {rest}" if rest else "")
         + (f"; asking {asking}" if asking else ""))
-    return run
+    return config
 
 
 def swept(args: Any, model: str, measured: Any, *, context: int, head: str | None,
           port: int) -> Any:
-    """The `Run` one ``--serve``'d model is measured in: what a record measured, with this
+    """The `Config` one ``--serve``'d model is measured in: what a record measured, with this
     sweep's own flags laid over it.
 
     One object rather than twenty keyword arguments, and one place that lays a flag over a
@@ -1622,11 +1622,11 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     asked for outright -- and None when it named nothing, which is where a record's own
     head stands.
     """
-    from ml_stack.serve.serving import Run, Serving
+    from ml_stack.serve.serving import Config, Serving
 
     slots = max(1, int(getattr(args, "parallel", 1) or 1))
-    run = measured if measured is not None else Run(serving=Serving(model=str(model)))
-    run = run.over(model=str(model), port=int(port), slots=slots,
+    config = measured if measured is not None else Config(serving=Serving(model=str(model)))
+    config = config.over(model=str(model), port=int(port), slots=slots,
                    slot_context=max(1, int(context) // slots),
                    timeout=float(getattr(args, "per_question", PER_QUESTION)),
                    terse=bool(getattr(args, "terse", False)),
@@ -1634,23 +1634,23 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     if head is not None:
         # a head named on the command line beats the one a record measured, and its method
         # is read off its own name rather than kept from the record's
-        run = bench.drafted_by(run, head)
+        config = bench.drafted_by(config, head)
     if getattr(args, "no_draft", False):
         # the profile's serving minus its head: what the head is worth is this run against
         # the drafted one, two labels apart
-        run = bench.drafted_by(run, "")
+        config = bench.drafted_by(config, "")
     if getattr(args, "serve_kv", ""):
-        run = run.over(cache_type=str(args.serve_kv))
+        config = config.over(cache_type=str(args.serve_kv))
     if getattr(args, "serve_kv_unified", None) is not None:
-        run = run.over(kv_unified=bool(args.serve_kv_unified))
+        config = config.over(kv_unified=bool(args.serve_kv_unified))
     if getattr(args, "reasoning_budget", None) is not None:
-        run = run.over(reasoning_budget=int(args.reasoning_budget))
+        config = config.over(reasoning_budget=int(args.reasoning_budget))
     length = getattr(args, "n_max", None)
     if isinstance(length, int) and length:
         # `drafts` takes a list of them, one served configuration each, put on its own arm
         # there; a sweep takes one number for the whole run
-        run = run.over(draft_n_max=length)
-    return run.over(**serving_fields(args))
+        config = config.over(draft_n_max=length)
+    return config.over(**serving_fields(args))
 
 
 def serving_fields(args: Any) -> dict[str, Any]:

@@ -27,7 +27,7 @@ from ml_stack.log import say, warn
 from ml_stack.serve.backend import LlamaServerBackend
 from ml_stack.serve.binary import find_binary
 from ml_stack.serve.profile import profile_for, profiles
-from ml_stack.serve.serving import Run, Serving, Talking
+from ml_stack.serve.serving import Config, Serving, Talking
 from ml_stack.sources import pdf
 
 __all__ = [
@@ -235,18 +235,18 @@ def _run_for(model: str, args: argparse.Namespace, *, workload: str) -> Any:
     build, kv = str(args.build or ""), str(args.kv or "")
     found = profile_for(model, workload=workload)
     if found is not None:
-        run = found.run(port=port, slots=1)
-        run = run.over(slot_context=context) if context else run
+        config = found.config(port=port, slots=1)
+        config = config.over(slot_context=context) if context else config
     else:
-        run = Run(serving=Serving(model=model, port=port, slots=1,
+        config = Config(serving=Serving(model=model, port=port, slots=1,
                               slot_context=context or 32768),
                   talking=Talking(n_predict=4096, timeout=300.0))
     if build:
-        run = run.over(build=build)
+        config = config.over(build=build)
     if kv:
-        run = run.over(cache_type=kv)
+        config = config.over(cache_type=kv)
     # every arm decides its own head, so the profile's is not carried into the baseline
-    return run.over(draft="", spec_type="", draft_n_max=None)
+    return config.over(draft="", spec_type="", draft_n_max=None)
 
 
 def _asked(sample: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -254,10 +254,10 @@ def _asked(sample: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return list(sampled(QUESTIONS, sample)), invented()
 
 
-def measure_arm(run: Any, arm: Arm, work: Any, *, kept: str, quiet: bool) -> Measured:
+def measure_arm(config: Any, arm: Arm, work: Any, *, kept: str, quiet: bool) -> Measured:
     """Serve the model with this arm's setting, do the work, take it down again."""
     say(f"\n--- {arm.label}")
-    rows = work(run.over(**dict(arm.over)), arm.label, kept)
+    rows = work(config.over(**dict(arm.over)), arm.label, kept)
     return Measured(label=arm.label, quiet=quiet,
                     rows=tuple(asdict(r) if hasattr(r, "__dataclass_fields__") else dict(r)
                                for r in rows))
@@ -266,8 +266,8 @@ def measure_arm(run: Any, arm: Arm, work: Any, *, kept: str, quiet: bool) -> Mea
 def _asking_work(questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
                  binary: str, store: str) -> Any:
     """A callable that serves one arm's run and asks it the graph questions."""
-    def work(run: Any, label: str, kept: str) -> list[Any]:
-        return served(run, questions, graph, label=label, binary=binary, kept=kept,
+    def work(config: Any, label: str, kept: str) -> list[Any]:
+        return served(config, questions, graph, label=label, binary=binary, kept=kept,
                       store=store or None)
 
     return work
@@ -314,10 +314,10 @@ def _reading_work(units: Sequence[Any], *, binary: str) -> Any:
     """A callable that serves one arm's run and reads the document sections with it."""
     shape = schema()
 
-    def work(run: Any, label: str, kept: str) -> list[Any]:
+    def work(config: Any, label: str, kept: str) -> list[Any]:
         rows = []
-        with up(run, binary=binary, name=label) as (server, held):
-            client = run.client(server.base_url)
+        with up(config, binary=binary, name=label) as (server, held):
+            client = config.client(server.base_url)
             for unit in units:
                 read = extract_unit(client, unit, shape)
                 rows.append(_row_of(read, label))
@@ -417,9 +417,9 @@ def _measure(args: argparse.Namespace, model: str, head: str, spec_type: str) ->
         f"{1 + len(depths)} arm(s) to start"
         + (f", head {Path(head).name}" if head else ""))
 
-    run = _run_for(model, args, workload=workload)
+    config = _run_for(model, args, workload=workload)
 
-    measured = [measure_arm(run, arm, work, kept=kept, quiet=bool(quiet))
+    measured = [measure_arm(config, arm, work, kept=kept, quiet=bool(quiet))
                 for arm in arms_for(head, depths=depths, spec_type=spec_type)]
     caches = [k for k in (args.draft_kv or ()) if k]
     if caches:
@@ -428,7 +428,7 @@ def _measure(args: argparse.Namespace, model: str, head: str, spec_type: str) ->
             best = max(drafted, key=lambda one: one.tokens_per_second or 0.0)
             depth = int(best.label.split("@n")[-1].split("-")[0])
             say(f"\nthe head's own cache, at the best depth so far (n{depth})")
-            measured += [measure_arm(run, arm, work, kept=kept, quiet=bool(quiet))
+            measured += [measure_arm(config, arm, work, kept=kept, quiet=bool(quiet))
                          for arm in _cache_arms(head, depth=depth, caches=caches,
                                                 spec_type=spec_type)]
 

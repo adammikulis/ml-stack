@@ -7,8 +7,8 @@ the per-question rows, and -- for a run measured over several seeds -- a `Spread
 metric. Its accessors
 are the one answer each question has: `build`, `head`, `made`, `identity`.
 
-`ml_stack.serve.serving.Run` is the other kind of run: a model to serve, asked one way. That
-one is a plan; this one is what a measurement left behind.
+`ml_stack.serve.serving.Config` is the other half of a run: a model to serve, asked one
+way. That one is the plan; this one is what the measurement left behind.
 """
 
 from __future__ import annotations

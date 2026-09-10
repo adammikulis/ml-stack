@@ -776,14 +776,14 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
     """Adam: "we shouldn't be handling parallel requests while extracting ... we should never
     be splitting the GPU like that" -- and measured: two workers averaged 140 s a unit
     against 86 alone. One slot, and --context is all its own."""
-    from ml_stack.serve import Run, Serving
+    from ml_stack.serve import Config, Serving
 
     seen = {}
 
     class Found:
-        def run(self, port, slots, resolve=True, n_predict=16384, timeout=300.0):
+        def config(self, port, slots, resolve=True, n_predict=16384, timeout=300.0):
             seen["slots"] = slots
-            return Run(serving=Serving(model="x.gguf", port=port, slots=slots,
+            return Config(serving=Serving(model="x.gguf", port=port, slots=slots,
                                    slot_context=16384))
 
         def said(self):
@@ -811,7 +811,7 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
 
 def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monkeypatch,
                                                                           tmp_path):
-    """Serving, ceiling, timeout and sampling are one `Run` laid over the model's measured
+    """Serving, ceiling, timeout and sampling are one `Config` laid over the model's measured
     profile -- not a lease built in one place and a client built beside it. The record says
     what was actually asked for, so the two can never disagree."""
     import contextlib
@@ -941,13 +941,13 @@ def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
 
 
 def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
-    from ml_stack.serve import Run, Serving
+    from ml_stack.serve import Config, Serving
 
     seen = {}
 
     class Found:
-        def run(self, port, slots, resolve=True, n_predict=16384, timeout=300.0):
-            return Run(serving=Serving(model="x.gguf", port=port, slots=slots,
+        def config(self, port, slots, resolve=True, n_predict=16384, timeout=300.0):
+            return Config(serving=Serving(model="x.gguf", port=port, slots=slots,
                                    slot_context=16384, draft="mtp.gguf", draft_n_max=4))
 
         def said(self):

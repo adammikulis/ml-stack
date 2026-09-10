@@ -77,7 +77,7 @@ class _Reply:
 class ScriptedModel:
     """A model that takes exactly what `Client` takes, calls look_up once, then answers.
 
-    Built the way `served` and `run` build the real one -- `Run.client`, the only place a
+    Built the way `served` and `run` build the real one -- `Config.client`, the only place a
     run becomes a client -- and bound against the real ``__init__``'s signature, so a
     keyword the client does not take fails here, naming itself, rather than on the GPU.
     Keeps every message it was

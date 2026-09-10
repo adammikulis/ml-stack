@@ -630,7 +630,7 @@ class Head:
         return drafting(self.path, self.spec_type, self.depth, self.build, self.bytes)
 
     def over(self) -> dict[str, object]:
-        """The `Run.over` fields that serve this head."""
+        """The `Config.over` fields that serve this head."""
         return {"draft": self.path, "spec_type": self.spec_type, "build": self.build,
                 "draft_n_max": self.depth}
 

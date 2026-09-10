@@ -24,16 +24,16 @@ A serving holds one slot unless it is asked for more, and that slot gets the who
 
     crowded = dataclasses.replace(serving, slots=4, slot_context=32768)   # four at once
 
-A serving is one third of what a model needs. :class:`Run` is all three -- the
+A serving is one third of what a model needs. :class:`Config` is all three -- the
 :class:`Serving` to serve it in, the :class:`Asking` to ask it with, and the
 :class:`Talking` the client is built from -- so a bench row, a page answer and a client on a
 slot for one model are the same lease and the same asking by construction rather than by
 three places agreeing::
 
-    run = profile_for(model).run(port=8080)
-    serve(run.serving.model, **run.lease())                # the server
-    converse(question, graph, client, asking=run.asking)   # the asking
-    client = slot(run, index=request_number)                # the client
+    config = profile_for(model).config(port=8080)
+    serve(config.serving.model, **config.lease())            # the server
+    converse(question, graph, client, asking=config.asking)  # the asking
+    client = slot(config, index=request_number)              # the client
 
 :func:`draft_for` and :func:`projector_for` answer 'auto' the way `ml-stack-serve up` does,
 because a lease built by hand has to resolve what the CLI resolves for itself.
@@ -52,7 +52,7 @@ from ml_stack.client.health import serving_params
 from ml_stack.graph.asking import Asking
 from ml_stack.log import say
 
-__all__ = ["Run", "Serving", "Talking", "draft_for", "drafted", "held", "projector_for",
+__all__ = ["Config", "Serving", "Talking", "draft_for", "drafted", "held", "projector_for",
            "release_all", "said_cache", "served", "serving_said", "slot",
            "split_cache_type"]
 
@@ -213,7 +213,7 @@ class Talking:
 
 
 @dataclass(frozen=True)
-class Run:
+class Config:
     """One model, whole: served one way, asked one way, talked to one way.
 
     Three sections, because three different pieces of code read them, and one object,
@@ -241,10 +241,10 @@ class Run:
         return self.serving.lease()
 
     def client(self, base_url: str, *, index: int | None = None, **over: Any) -> Any:
-        """A :class:`~ml_stack.client.Client` on this run's server.
+        """A :class:`~ml_stack.client.Client` on this config's server.
 
         ``index`` pins it to a slot -- whose slot it is, taken modulo the slots -- and
-        None leaves the server to choose, which is what a run measuring one conversation
+        None leaves the server to choose, which is what a config measuring one conversation
         at a time wants.
         """
         from ml_stack.client import Client
@@ -254,15 +254,15 @@ class Run:
             asked["slot"] = index % max(1, self.serving.slots)
         return Client(base_url, **asked)
 
-    def over(self, **fields: Any) -> Run:
-        """This run with ``fields`` laid over it, each routed to the section that owns it.
+    def over(self, **fields: Any) -> Config:
+        """This config with ``fields`` laid over it, each routed to the section that owns it.
 
         A sampler setting no field names -- ``temperature``, ``top_k`` -- goes into
         ``talking.sampling``. A name no section knows is a `TypeError` here rather than a
         keyword the client refuses at the far end of a load.
 
         ``draft_n_max`` reaches both sections: the depth a server starts with and the depth
-        a request asks for are one measurement, and a run whose two disagree measures the
+        a request asks for are one measurement, and a config whose two disagree measures the
         request's. Taking the head away takes the request's depth with it.
         """
         parts: dict[str, dict[str, Any]] = {"serving": {}, "asking": {}, "talking": {}}
@@ -277,7 +277,7 @@ class Run:
             elif name in SAMPLERS:
                 sampling[name] = value
             else:
-                raise TypeError(f"no such run field: {name}")
+                raise TypeError(f"no such config field: {name}")
         if "draft_n_max" in fields:
             parts["talking"]["spec_draft_max"] = fields["draft_n_max"]
         elif fields.get("draft") == "" and fields.get("spec_type") == "":
@@ -296,11 +296,11 @@ _STACKS: dict[int, contextlib.ExitStack] = {}
 _URLS: dict[int, str] = {}
 
 
-def slot(serving: Serving | Run, *, index: int, n_predict: int | None = None,
+def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
          timeout: float | None = None, **client_kwargs: Any) -> Any:
     """A client on one slot of ``serving``'s server, started on first ask and held after.
 
-    ``serving`` is a :class:`Serving` or the whole :class:`Run`; given a run, the ceiling, the
+    ``serving`` is a :class:`Serving` or the whole :class:`Config`; given a config, the ceiling,
     timeout and the sampling are its ``talking``'s and need not be said again.
 
     ``index`` is whose slot it is -- a request number, a worker id -- taken modulo the
@@ -309,21 +309,21 @@ def slot(serving: Serving | Run, *, index: int, n_predict: int | None = None,
     task that calls tools with exact ids is one where sampling noise becomes a wrong
     argument rather than a livelier sentence.
     """
-    run = serving if isinstance(serving, Run) else Run(serving=serving)
+    config = serving if isinstance(serving, Config) else Config(serving=serving)
     if n_predict is not None:
         client_kwargs["n_predict"] = n_predict
     if timeout is not None:
         client_kwargs["timeout"] = timeout
     with _LOCK:
-        if run.port not in _URLS:
+        if config.port not in _URLS:
             from ml_stack.serve import serve
 
             stack = contextlib.ExitStack()
             server = stack.enter_context(
-                serve(run.model, manager=run.serving.manager(), **run.lease()))
-            _STACKS[run.port], _URLS[run.port] = stack, server.base_url
-        where = _URLS[run.port]
-    return run.client(where, index=index, **client_kwargs)
+                serve(config.model, manager=config.serving.manager(), **config.lease()))
+            _STACKS[config.port], _URLS[config.port] = stack, server.base_url
+        where = _URLS[config.port]
+    return config.client(where, index=index, **client_kwargs)
 
 
 def held() -> dict[int, str]:
@@ -343,23 +343,23 @@ def release_all() -> None:
         stack.close()
 
 
-def drafted(run: Run, asked: str = "auto", *,
-            say: Callable[[str], None] = say) -> Run:
-    """``run`` serving with the draft head ``asked`` names, and one line saying which.
+def drafted(config: Config, asked: str = "auto", *,
+            say: Callable[[str], None] = say) -> Config:
+    """``config`` serving with the draft head ``asked`` names, and one line saying which.
 
-    A run that already carries a head keeps it. 'auto' takes the smallest head on this
+    A config that already carries a head keeps it. 'auto' takes the smallest head on this
     machine for the model, 'none' takes none, and anything else names one of the heads
     found -- a name matching none of them raises `ValueError`.
     """
     from ml_stack.hub import drafting, head_choice
 
-    if run.serving.draft:
-        say(drafting(run.serving.draft, run.serving.spec_type, run.talking.spec_draft_max,
-                     run.serving.build))
-        return run
-    head = head_choice(run.model, asked)
+    if config.serving.draft:
+        say(drafting(config.serving.draft, config.serving.spec_type, config.talking.spec_draft_max,
+                     config.serving.build))
+        return config
+    head = head_choice(config.model, asked)
     say(head.serving() if head is not None else drafting())
-    return run.over(**head.over()) if head is not None else run
+    return config.over(**head.over()) if head is not None else config
 
 
 def serving_said(base_url: str) -> str:
@@ -372,25 +372,25 @@ def serving_said(base_url: str) -> str:
 
 
 @contextlib.contextmanager
-def served(run: Run, *, say: Callable[[str], None] | None = None,
+def served(config: Config, *, say: Callable[[str], None] | None = None,
            **over: Any) -> Iterator[str]:
-    """The base URL of a server holding ``run``'s model, for the duration of the block.
+    """The base URL of a server holding ``config``'s model, for the duration of the block.
 
-    The server already up on ``run``'s port serving those weights is used as it stands and
-    left up; otherwise ``run`` is leased and the lease goes when the block ends. ``over``
+    The server already up on ``config``'s port serving those weights is used as it stands
+    and left up; otherwise ``config`` is leased and the lease goes when the block ends. ``over``
     goes to :func:`ml_stack.serve.serve`.
     """
     from ml_stack.serve.manager import already_up, serve
 
     told = say or (lambda _line: None)
-    up = already_up(run.model, run.port)
+    up = already_up(config.model, config.port)
     if up is not None:
         base_url = str(up["base_url"])
-        told(f"using the server already up on {run.port} ({serving_said(base_url)}); "
+        told(f"using the server already up on {config.port} ({serving_said(base_url)}); "
              f"it is left running")
         yield base_url
         return
-    with serve(run.model, manager=run.serving.manager(), **run.lease(), **over) as server:
+    with serve(config.model, manager=config.serving.manager(), **config.lease(), **over) as server:
         yield server.base_url
 
 

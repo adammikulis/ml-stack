@@ -5,7 +5,7 @@ llama-server speaks the Messages API at ``/v1/messages`` -- streaming, tool use 
 ``--jinja``, which every lease here carries), thinking, ``count_tokens`` -- so Claude Code
 needs no bridge, only an environment that points every request at the served model and
 keeps every other call off the network. ``ml-stack-claude MODEL [-- claude args]`` leases
-the model in the settings it scored best with (a `Run` from its profile, the way the bench, the page and
+the model in the settings it scored best with (a `Config` from its profile, the way the bench, the page and
 the ingest lease), builds that environment, runs ``claude`` inside the lease, and lets the
 server go when Claude Code exits.
 
@@ -176,7 +176,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
 
     from ml_stack.serve import chat_template, manager, profile
     from ml_stack.serve.recent import note
-    from ml_stack.serve.serving import Run, Serving, drafted, served
+    from ml_stack.serve.serving import Config, Serving, drafted, served
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="claude")
@@ -184,23 +184,23 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     leasing = say if manager.already_up(found, args.port) is None else (lambda _line: None)
     measured = None if args.no_profile else profile.profile_for(found)
     if measured is not None:
-        run = measured.run(port=args.port, slots=args.slots, model=found)
+        config = measured.config(port=args.port, slots=args.slots, model=found)
         if whole := chat_template.trained_context(found):
             from dataclasses import replace
 
-            run = replace(run, serving=replace(run.serving, slot_context=whole // max(1, args.slots)))
+            config = replace(config, serving=replace(config.serving, slot_context=whole // max(1, args.slots)))
         leasing(f"serving in the settings it scored best with: {profile.said(measured)}")
         if whole:
             leasing(f"  with the model's whole {whole:,}-token window, not the "
                     f"measured cache")
-        run = drafted(run, "none", say=leasing)
+        config = drafted(config, "none", say=leasing)
     else:
         slot = chat_template.trained_context(found) or BARE_CONTEXT
-        run = Run(serving=Serving(model=found, port=args.port, slots=args.slots,
+        config = Config(serving=Serving(model=found, port=args.port, slots=args.slots,
                               slot_context=slot))
         leasing(f"serving bare: nothing measured for this model, {slot:,} tokens a slot")
         try:
-            run = drafted(run, args.draft, say=leasing)
+            config = drafted(config, args.draft, say=leasing)
         except ValueError as why:
             say(f"error: {why}")
             return 2
@@ -209,14 +209,14 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         leasing("this model's template refuses a system message after the first; serving "
                 f"with one that renders it instead ({patched.name})")
     began = time.time()
-    with served(run, say=say, timeout=900.0, cache_reuse=256, warmup=False,
+    with served(config, say=say, timeout=900.0, cache_reuse=256, warmup=False,
                         escalate=True, chat_template_file=patched,
                         on_event=lambda e: say(f"  {e.get('event')}: "
                                                + ", ".join(f"{k}={v}" for k, v in e.items()
                                                            if k != "event"))) as base_url:
         alias = alias_of(base_url, found)
         env = environment(base_url, alias, offline=not args.online,
-                          context=run.serving.context)
+                          context=config.serving.context)
         say(f"claude on {base_url} as {alias!r}, up in {time.time() - began:.0f}s")
         command = [binary, "--settings", settings(), *extra]
         runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))

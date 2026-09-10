@@ -90,16 +90,16 @@ def smoked(kept: Sequence[Mapping[str, Any]], what: str) -> None:
 EMBEDDED = "embedded"
 
 
-def drafted_by(run: Any, head: str) -> Any:
-    """``run`` serving ``head``: a path or ``hf:`` reference, "" for no head at all, or
+def drafted_by(config: Any, head: str) -> Any:
+    """``config`` serving ``head``: a path or ``hf:`` reference, "" for no head at all, or
     `EMBEDDED` for the head inside the weights -- the speculative type, no ``-md``.
 
     The method is left to `Serving.lease`, which reads it off the head's own name, so an
     EAGLE3 head is never served as draft-simple.
     """
     if head == EMBEDDED:
-        return run.over(draft="", spec_type="draft-mtp")
-    return run.over(draft=str(head or ""), spec_type="")
+        return config.over(draft="", spec_type="draft-mtp")
+    return config.over(draft=str(head or ""), spec_type="")
 
 
 class NotLoaded(RuntimeError):
@@ -107,8 +107,8 @@ class NotLoaded(RuntimeError):
 
 
 @contextlib.contextmanager
-def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900.0) -> Any:
-    """One model put up in ``run``'s serving for the block: the load preflighted -- shards
+def up(config: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900.0) -> Any:
+    """One model put up in ``config``'s serving for the block: the load preflighted -- shards
     present, architecture read by this build, weights plus an estimated KV cache under
     what this machine may use, every flag one the build accepts -- then served, and taken
     down on the way out. Yields ``(server, held)``: the lease's `ServerInfo` and the record
@@ -125,8 +125,8 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
     from ml_stack.serve.backend import ServerSpec
     from ml_stack.serve.binary import find_binary
 
-    model = run.model
-    if str(run.serving.mmproj or "").lower() == "auto":
+    model = config.model
+    if str(config.serving.mmproj or "").lower() == "auto":
         # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
         # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
         # file to load -- it picked the MTP head and died (2026-09-02)
@@ -135,11 +135,11 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         found = alongside(str(model), "auto", "mmproj-", best=True)
         if not found:
             say("no vision projector is shipped beside that model; serving without one")
-        run = run.over(mmproj=str(found or ""))
+        config = config.over(mmproj=str(found or ""))
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
     # free accuracy-wise: the tokens are identical, so the cache is valid.
-    extra: dict[str, Any] = {**run.lease(), "cache_reuse": 256, "warmup": False}
+    extra: dict[str, Any] = {**config.lease(), "cache_reuse": 256, "warmup": False}
 
     # Asked of the spec `serve` is about to build, with the binary it will start -- or, with
     # none named, the one `find_binary` would; a name no build answers to gives the flag and
@@ -152,15 +152,15 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         from ml_stack.serve.manager import ServerManager
 
         manager = ServerManager(LlamaServerBackend(binary=binary))
-    elif run.serving.build:
+    elif config.serving.build:
         # a named build, because an architecture or a head newer than any release loads
         # only on the build that has it; not found here, the default build serves and says so
         try:
-            manager = run.serving.manager()
+            manager = config.serving.manager()
             build = str(manager.backend.binary)
         except Exception as exc:  # noqa: BLE001 - said, then the default build serves
             manager = None
-            say(f"    the profile names build {run.serving.build!r}, not found here: {exc}")
+            say(f"    the profile names build {config.serving.build!r}, not found here: {exc}")
     build = build or str(find_binary() or "llama-server")
     report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
     if not report.ok:
@@ -189,17 +189,17 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         # mainline when the ranking takes its cost; `build` is its name, for `served_by`
         held: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
                                 "warmup_s": warmup_s, "binary": build,
-                                "build": str(run.serving.build or ""),
+                                "build": str(config.serving.build or ""),
                                 "baseline": before_load, "loaded": loaded}
-        if run.serving.draft or run.serving.spec_type:
-            held["draft_model"] = (str(run.serving.draft).rsplit("/", 1)[-1] if run.serving.draft
+        if config.serving.draft or config.serving.spec_type:
+            held["draft_model"] = (str(config.serving.draft).rsplit("/", 1)[-1] if config.serving.draft
                                    else EMBEDDED)
-            if run.serving.draft_n_max is not None:
-                held["spec_draft_max"] = int(run.serving.draft_n_max)
-        if run.serving.cache_type:
-            held["cache_type"] = run.serving.cache_type
-        if run.serving.reasoning_budget is not None:
-            held["reasoning_budget"] = int(run.serving.reasoning_budget)
+            if config.serving.draft_n_max is not None:
+                held["spec_draft_max"] = int(config.serving.draft_n_max)
+        if config.serving.cache_type:
+            held["cache_type"] = config.serving.cache_type
+        if config.serving.reasoning_budget is not None:
+            held["reasoning_budget"] = int(config.serving.reasoning_budget)
         yield server, held
 
 
@@ -207,7 +207,7 @@ class DraftDepthIgnored(RuntimeError):
     """A server that drops ``speculative.n_max`` instead of drafting to it."""
 
 
-def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
+def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
            label: str = "", binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            askings: Sequence[Mapping[str, Any]] = (),
@@ -218,7 +218,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
            needs_draft_depth: bool = False) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
-    ``run`` is the whole configuration -- a :class:`~ml_stack.serve.Run`: the serving the
+    ``config`` is everything -- a :class:`~ml_stack.serve.Config`: the serving the
     server is leased in, the asking it is asked with, and the client. It used to
     be twenty keyword arguments unpacked here into three destinations, and `tight` went to
     the client once and took an 87G load down with it.
@@ -245,8 +245,8 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     shortlist is handed over first are questions about the asking and not about the
     serving -- so measuring four of them costs one load and not four. Only a change the
     server itself must be told about, a draft head or a context, needs putting it up
-    again. Each asking is ``{"label": ..., "shortlist": ...}`` plus any field of the run --
-    an asking flag, a sampler setting, a ceiling -- laid over it by `Run.over`, which is
+    again. Each asking is ``{"label": ..., "shortlist": ...}`` plus any field of the config --
+    an asking flag, a sampler setting, a ceiling -- laid over it by `Config.over`, which is
     what routes each name to the section that owns it.
 
     ``already(label)`` is the run a way is already kept as, when it is -- `sweep --resume`
@@ -256,7 +256,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     The label carries what the table has to show: ``-kv-TYPE`` for a cache stored as
     anything but the default q8_0, and ``-rbN`` for a thinking budget, because each is
     another configuration. Each question is
-    capped at the run's own ``talking.timeout`` -- see `_ask_once`.
+    capped at the config's own ``talking.timeout`` -- see `_ask_once`.
 
     **The load is preflighted first** -- shards present, architecture read by this build,
     weights plus an estimated KV cache under what this machine may use, every flag one the
@@ -266,15 +266,15 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     """
     from ml_stack.serve import preflight as checks
 
-    model = run.model
-    per_question = float(run.talking.timeout)
+    model = config.model
+    per_question = float(config.talking.timeout)
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
     from ml_stack.serve.serving import DEFAULT_CACHE
 
-    kv = run.serving.cache_type
+    kv = config.serving.cache_type
     suffix = ((f"-kv-{kv}" if kv and kv != DEFAULT_CACHE else "")
-              + (f"-rb{run.serving.reasoning_budget}"
-                 if run.serving.reasoning_budget is not None else ""))
+              + (f"-rb{config.serving.reasoning_budget}"
+                 if config.serving.reasoning_budget is not None else ""))
 
     def labelled(way: Mapping[str, Any]) -> str:
         tag = str(way.get("label", "") or "")
@@ -298,7 +298,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
 
     rows: list[Row] = []
     try:
-        with up(run, binary=binary, name=f"{name}{suffix}",
+        with up(config, binary=binary, name=f"{name}{suffix}",
                 serve_timeout=serve_timeout) as (server, held_up):
             finder, why = finder_of(store, embed_url, embed_model)
             say(f"      look_up by {finder}" + (f" ({why})" if why else ""))
@@ -307,7 +307,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
             load_s = held_up.get("load_s")
 
             if needs_draft_depth:
-                reading = draft_depth_support(run.client(server.base_url))
+                reading = draft_depth_support(config.client(server.base_url))
                 say(f"      per-request draft depth: {reading}")
                 if reading != DRAFT_OBEYED:
                     raise DraftDepthIgnored(reading)
@@ -325,12 +325,12 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                     if len(every) > 1 or smoking:
                         say(f"\n  --- {here}" + (" (smoke)" if smoking else ""))
                     wants_card = bool(asked.pop("_card", False))
-                    # The way, laid over the run: `Run.over` puts each name where it
+                    # The asking, laid over the config: `Config.over` puts each name where it
                     # belongs -- an asking to `asking`, a sampler or a ceiling to
                     # `talking` -- so nothing about the asking can reach the client. It
                     # did once: `tight` went to `Client.__init__` and took an 87G load
                     # down with it (measured 2026-09-02).
-                    this = run.over(**asked)
+                    this = config.over(**asked)
                     # the cap is the client's timeout too, so a call past it is cut off
                     # there and the connection closed, rather than waited on
                     client = this.client(server.base_url)
@@ -382,7 +382,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     return rows
 
 
-def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
+def drafts(config: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
            graph: Mapping[str, Any], *, binary: str = "", kept: str | Path = "",
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
@@ -390,7 +390,7 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
            per_request: bool | None = None) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
 
-    ``run`` is the configuration every head is measured against; each head is that run
+    ``config`` is what every head is measured against; each head is that config
     with its own ``draft`` laid over it, so nothing but the head and its length differs
     between two rows.
 
@@ -439,7 +439,7 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
             say(f"\n--- draft: {name}, {len(depths)} depths on one load")
             try:
                 out += bench.served(
-                    drafted_by(run, head).over(draft_n_max=max(depths)), questions, graph,
+                    drafted_by(config, head).over(draft_n_max=max(depths)), questions, graph,
                     label=f"draft:{name}", needs_draft_depth=shared is None,
                     askings=[{"label": f"@n{d}", "spec_draft_max": d} for d in depths],
                     **each)
@@ -452,7 +452,7 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
         for length in depths:
             tagged = f"{name}@n{length}" if length is not None else name
             say(f"\n--- draft: {tagged}")
-            out += bench.served(drafted_by(run, head).over(draft_n_max=length),
+            out += bench.served(drafted_by(config, head).over(draft_n_max=length),
                                 questions, graph, label=f"draft:{tagged}", **each)
     if kept and out:
         # the speedup as a number, against the baseline this call measured -- or, given

@@ -2849,7 +2849,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     import ml_stack.client
     import ml_stack.serve
     from ml_stack import bench
-    from ml_stack.serve import Run, Serving
+    from ml_stack.serve import Config, Serving
 
     built = []
 
@@ -2880,7 +2880,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     _preflight_ok(monkeypatch)
     askings = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
             {"label": "reach", "reach": 8000}]
-    bench.served(Run(serving=Serving(model="tiny.gguf")), [{"q": "who?", "expect": []}],
+    bench.served(Config(serving=Serving(model="tiny.gguf")), [{"q": "who?", "expect": []}],
                  {"nodes": [], "edges": []}, askings=askings, kept="")
     assert len(built) == 4, "one strict client per way, none refused"
 
@@ -3770,7 +3770,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     import ml_stack.client
     import ml_stack.serve
     from ml_stack import bench
-    from ml_stack.serve import Run, Serving
+    from ml_stack.serve import Config, Serving
     from ml_stack.testing import FakeClient, FakeServe
 
     fake = FakeServe()
@@ -3781,7 +3781,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
-    bare = Run(serving=Serving(model="tiny.gguf"))
+    bare = Config(serving=Serving(model="tiny.gguf"))
     bench.served(bench.drafted_by(bare, bench.EMBEDDED).over(draft_n_max=2),
                  [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
                  kept="", smoke=())
@@ -3790,9 +3790,9 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
 
     seen = []
     monkeypatch.setattr(bench, "served",
-                        lambda run, *a, **k: seen.append(
-                            (k.get("label"), run.serving.draft, run.serving.spec_type,
-                             run.serving.draft_n_max, k.get("askings"))) or [])
+                        lambda config, *a, **k: seen.append(
+                            (k.get("label"), config.serving.draft, config.serving.spec_type,
+                             config.serving.draft_n_max, k.get("askings"))) or [])
     bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
                  {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=True)
     assert [row[:4] for row in seen] == [("draft:none", "", "", None),

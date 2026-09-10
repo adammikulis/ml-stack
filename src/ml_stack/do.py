@@ -648,7 +648,7 @@ def client_for(args: argparse.Namespace) -> Any:
     from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.recent import note
-    from ml_stack.serve.serving import Run, Serving, drafted, slot
+    from ml_stack.serve.serving import Config, Serving, drafted, slot
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="do")
@@ -660,16 +660,16 @@ def client_for(args: argparse.Namespace) -> Any:
         return Client(str(up["base_url"]), n_predict=args.n_predict, timeout=args.timeout)
     measured = profile_for(found)
     if measured is not None:
-        run = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
+        config = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
                              timeout=args.timeout)
-        say(f"serving alone, one slot of {run.serving.slot_context} tokens "
-            f"({run.serving.note}): {said(measured)}")
-        run = drafted(run, "none", say=say)
+        say(f"serving alone, one slot of {config.serving.slot_context} tokens "
+            f"({config.serving.note}): {said(measured)}")
+        config = drafted(config, "none", say=say)
     else:
-        run = Run(serving=Serving(model=found, port=args.port, slots=1, slot_context=32768,
+        config = Config(serving=Serving(model=found, port=args.port, slots=1, slot_context=32768,
                               reasoning_budget=0))
-        run = drafted(run, args.draft, say=say)
-    return slot(run, index=0)
+        config = drafted(config, args.draft, say=say)
+    return slot(config, index=0)
 
 
 def parser() -> argparse.ArgumentParser:

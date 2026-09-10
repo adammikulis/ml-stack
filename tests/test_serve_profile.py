@@ -658,7 +658,7 @@ def test_alone_is_one_slot_holding_the_whole_measured_cache():
     run = record.alone(port=8123, model="quince-2b.gguf", resolve=False)
     assert run.serving.slots == 1 and run.serving.slot_context == 65536 and run.serving.port == 8123
 
-    bare = record.run(port=8123, model="quince-2b.gguf", resolve=False)
+    bare = record.config(port=8123, model="quince-2b.gguf", resolve=False)
     assert (bare.serving.slots, bare.serving.slot_context) == (1, 65536), \
         "the record's parallel is provenance, not how many slots to serve"
 
