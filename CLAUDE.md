@@ -148,14 +148,19 @@ Every agent works in its own worktree on its own branch. That means the main ses
 much as any subagent it spawns — "I am the one driving" is not an exemption. Nobody edits
 the primary checkout, and no two agents share a branch.
 
-Make one before the first edit, branching from `main`:
+Branch from the development branch the primary checkout is on -- `0.2dev` today, and
+`git branch --show-current` there says which it is now. Never from `main`.
 
 ```
-git worktree add -b <branch> ../ml-stack-<branch> main
+git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch --show-current)"
 ```
 
-Whoever made it finishes it. Merge into `main`, then take the worktree and the branch
-away:
+`main` is the release branch. release-please reads it, so a commit that arrives there is a
+commit queued to publish. Work lands on the development branch, and promoting that to
+`main` is Adam's, on his own timing, like the push it implies.
+
+Whoever made it finishes it. Merge into the development branch, then take the worktree and
+the branch away:
 
 ```
 git worktree remove ../ml-stack-<branch>
@@ -183,8 +188,8 @@ nobody's. So, spelled out:
 
 - The primary checkout is what *runs* — the editable install, a detached ingest, the
   page. It changes only by landing a branch: tests green on the branch, a fast-forward
-  or rebase merge into `main`, then push. Never an edit, never a `git add`, never a bare
-  `git commit` there.
+  or rebase merge into the development branch it is on. Never an edit, never a `git add`,
+  never a bare `git commit` there, and never a merge into `main`.
 - A brief to a subagent names the worktree rule and gives it a branch (the Agent tool's
   worktree isolation does the first half). A subagent told to commit nothing still
   commits on its own branch by named files before it reports — staged-and-uncommitted is
@@ -214,8 +219,8 @@ touches packaging, the page or the fleet. `-n 0` runs them in one process when a
 needs a clean order.
 
 Re-running the whole suite after every intermediate commit buys nothing: the branch has
-not landed, and it will be rebased onto a moved `main` before it does, which is what the
-one pre-merge run is for.
+not landed, and it will be rebased onto a moved development branch before it does, which
+is what the one pre-merge run is for.
 
 ## Driving a browser
 
