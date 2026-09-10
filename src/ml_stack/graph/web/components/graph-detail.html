@@ -82,6 +82,8 @@
 </template>
 <script>
 (function () {
+  // what a caller tells the page about a node, rather than what the node is
+  const TOLD_THE_PAGE = new Set(['member', 'type', 'handle', 'start']);
   const M = window.graphModel;
   const { ASIDE, COPY, DATA, G, PAINT, ROUTES, byId, display, esc, joinUp, linkGone, links, listOut, mainKind, nameOf, namedIn, nodes, routeThrough, routesBetween, shown, swatch, throughable, when } = M;
   const { node, link, hitline, root, svg, sim } = M.view2d;
@@ -308,7 +310,7 @@
         wireRefs(el);
         return;
       }
-      const attrs = Object.entries(n.attrs).filter(([k, v]) => !k.endsWith('_message') && k !== 'member' && k !== 'type' && k !== 'handle' && !(k === 'stated_location' && v === n.attrs.location)).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v]);
+      const attrs = Object.entries(n.attrs).filter(([k, v]) => !k.endsWith('_message') && !TOLD_THE_PAGE.has(k) && !(k === 'stated_location' && v === n.attrs.location)).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v]);
       // the panel lists what the graph is showing; a relation you have switched off is counted,
       // not listed, so the two never disagree about what this node is joined to
       const joined = links.filter(l => l.source.id === n.id || l.target.id === n.id);

@@ -177,3 +177,13 @@ def test_the_panes_do_not_depend_on_the_map_being_drawn():
     page = render({"nodes": [], "edges": []}, parts=without)
     assert "aside > .two { grid-row: -1; }" in page
     assert "<graph-map>" not in page
+
+
+def test_the_detail_panel_does_not_list_what_the_caller_told_the_page():
+    """`start` is a display instruction, not something the node is."""
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [{"id": "a", "label": "A", "kind": "clause",
+                              "attrs": {"start": "remove", "title": "kept"}}], "edges": []})
+    assert "TOLD_THE_PAGE = new Set(['member', 'type', 'handle', 'start'])" in page
+    assert "!TOLD_THE_PAGE.has(k)" in page
