@@ -67,6 +67,34 @@ xyz green (including benchmarks). this lib is a WIP and nothing is cemented unti
 
 ## The gates
 
+**A budget is a debt, not a permission.** Every number in `budgets.json` is a count of
+violations nobody has fixed yet -- 2,416 of them across 25 metrics on 2026-09-10. The file
+exists so the numbers can be driven down and so a new violation is refused. It does not
+mean any of them is allowed to stay. There is no acceptable violation, no accepted level,
+no shape this repository has decided to live with.
+
+**Nothing is ever grandfathered.** A violation that was here before your branch is your
+work the moment you touch the file it lives in, and everybody's work the rest of the time.
+The nineteen files over the size limit are not a baseline; they are nineteen files to
+split.
+
+**Banned as a reason to leave something alone:** "pre-existing", "not introduced by this
+change", "already over budget", "grandfathered", "out of scope for this branch", "the
+budget allows it", "it was already like that". None of those is a statement about whether
+the code is right, and none of them has ever been asked for here.
+
+Leave every number you touched lower than you found it, and say by how much. A number may
+never rise on its own: `scripts/budgets --allow-increase` is for a rise Adam has agreed to
+in words, before it is used.
+
+**And say what you found.** A tolerated violation you noticed and did not fix is something
+Adam hears from you, in the message where you found it -- not something he discovers in a
+budget file. Reporting a tolerance as a good state ("holding at nineteen") is worse than
+not mentioning it.
+
+(Adam, 2026-09-10: "no grandfathering anything ever!!!"; "especially without telling me";
+"when have i ever told you to ignore issues because they are pre-existing?")
+
 Six checks refuse a change rather than describing what it should have been. Run them
 before you ask whether the suite passes.
 
