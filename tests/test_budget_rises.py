@@ -200,6 +200,20 @@ def test_a_budgets_json_nobody_staged_is_not_this_hook_s_business(checkout):
     assert done.returncode == 0
 
 
+def test_the_hook_reads_the_checkout_it_is_committing_in(checkout, tmp_path):
+    """Installed as a symlink, the hook sits in one checkout and the commit is in another."""
+    elsewhere = tmp_path / "elsewhere" / "hooks"
+    elsewhere.mkdir(parents=True)
+    shutil.copy2(HOOK, elsewhere / HOOK.name)
+    kept = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    (checkout / "budgets.json").write_text(
+        json.dumps({"broad-excepts": 2, "print-calls": 0}, indent=2) + "\n", encoding="utf-8")
+    git(checkout, "add", "budgets.json")
+    done = subprocess.run([sys.executable, str(elsewhere / HOOK.name)], cwd=checkout,
+                          capture_output=True, text=True, env={**kept, "CLAUDECODE": "1"})
+    assert done.returncode == 0, done.stderr
+
+
 def test_the_branch_is_compared_against_a_revision_without_a_commit_hook(checkout):
     """The same refusal, reached the way CI reaches it."""
     (checkout / "budgets.json").write_text(

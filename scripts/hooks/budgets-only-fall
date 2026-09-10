@@ -22,12 +22,22 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
+
+
+def toplevel() -> Path:
+    """The checkout this commit is being made in, which in a worktree is not the hook's own."""
+    done = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                          capture_output=True, text=True, check=False)
+    found = done.stdout.strip()
+    return Path(found) if done.returncode == 0 and found else HERE.parent.parent
+
+
+ROOT = toplevel()
+NAME = "budgets.json"
+
+sys.path.insert(0, str(ROOT / "scripts"))
 
 import gates  # noqa: E402
-
-ROOT = HERE.parent.parent
-NAME = "budgets.json"
 
 
 def _git(*args: str) -> tuple[int, str]:
