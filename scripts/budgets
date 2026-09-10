@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,10 +19,9 @@ BUDGETS = ROOT / "budgets.json"
 
 
 def budgets() -> dict[str, int]:
-    """The allowed count for each metric."""
-    if not BUDGETS.exists():
-        return {}
-    return json.loads(BUDGETS.read_text(encoding="utf-8"))
+    """The allowed count for each metric; a hard gate allows none."""
+    held = json.loads(BUDGETS.read_text(encoding="utf-8")) if BUDGETS.exists() else {}
+    return {**held, **dict.fromkeys(gates.hard(), 0)}
 
 
 def owners() -> dict[str, str]:
@@ -35,8 +35,9 @@ def descriptions() -> dict[str, str]:
 
 
 def write_budgets(counts: dict[str, int]) -> None:
-    """Replace budgets.json with these counts."""
-    ordered = {name: counts[name] for name in sorted(counts)}
+    """Replace budgets.json with these counts, leaving out the hard gates."""
+    skip = gates.hard()
+    ordered = {name: counts[name] for name in sorted(counts) if name not in skip}
     BUDGETS.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
 
 
@@ -44,6 +45,7 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
     """Print every metric worst first; return 1 if any is over budget."""
     owner = owners()
     absent = gates.unrunnable()
+    strict = gates.hard()
     rows = []
     for name in sorted((set(found) | set(allowed)) - set(absent)):
         actual = len(found.get(name, []))
@@ -55,12 +57,19 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
     width = max((len(r[1]) for r in rows), default=6)
     print(f"{'metric'.ljust(width)}  {'budget':>6}  {'actual':>6}  delta")
     for delta, name, budget, actual in rows:
-        shown = "-" if budget is None else str(budget)
+        shown = "-" if budget is None else ("none" if name in strict else str(budget))
         mark = "+" if delta > 0 else ""
         print(f"{name.ljust(width)}  {shown:>6}  {actual:>6}  {mark}{delta}")
 
     for name in sorted(absent):
         print(f"{name.ljust(width)}  {str(allowed.get(name, '-')):>6}  {'?':>6}  {absent[name]}")
+
+    counted = sum(r[3] for r in rows)
+    against = sum(r[2] or 0 for r in rows)
+    moved = counted - against
+    print("-" * (width + 24))
+    print(f"{'total'.ljust(width)}  {against:>6}  {counted:>6}  "
+          f"{'+' if moved > 0 else ''}{moved}")
     print(f"\nruff and pyright metrics measured with {_pins.measured_with()}")
 
     over = [r for r in rows if r[0] > 0]
@@ -69,7 +78,8 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
     print()
     for delta, name, budget, actual in over:
         where = owner.get(name) or "no owner"
-        print(f"{name}: {actual} sites, {budget} allowed ({delta} over) -- {where}")
+        allowance = "none allowed" if name in strict else f"{budget} allowed"
+        print(f"{name}: {actual} sites, {allowance} ({delta} over) -- {where}")
         for finding in found.get(name, [])[:10]:
             print(f"    {finding.path}:{finding.line}  {finding.detail}")
         print(f"    scripts/budgets --show {name}")
@@ -97,12 +107,38 @@ def show(found: dict[str, list[gates.Finding]], metric: str) -> int:
     return 0
 
 
+def agent() -> bool:
+    """True when this is running under Claude Code, which sets CLAUDECODE and a terminal does not."""
+    return bool(os.environ.get("CLAUDECODE"))
+
+
+def refuse_the_rise(risen: dict[str, tuple[int, int]],
+                    found: dict[str, list[gates.Finding]]) -> int:
+    """Print why a budget may not be raised and return 1."""
+    for name, (was, now) in sorted(risen.items()):
+        print(f"{name}: {was} allowed, {now} found -- up {now - was}.")
+        for finding in found.get(name, [])[:10]:
+            print(f"    {finding.path}:{finding.line}  {finding.detail}")
+        print(f"    scripts/budgets --show {name}")
+    print("\nA budget only falls. Those sites are the work: take them out of the tree, "
+          "do not record them.")
+    if agent():
+        print("No agent raises a budget, with or without --allow-increase. Only the "
+              "repository owner, at his own terminal, can. Say in your report that the "
+              "budget is over and what is in it.")
+    else:
+        print("To raise it on purpose: scripts/budgets --update --allow-increase, "
+              "from your own terminal.")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the scoreboard."""
     parser = argparse.ArgumentParser(prog="scripts/budgets", description=__doc__)
     parser.add_argument("--update", action="store_true", help="rewrite budgets.json")
     parser.add_argument("--allow-increase", action="store_true",
-                        help="let --update raise a budget as well as lower it")
+                        help="let --update raise a budget as well as lower it; "
+                             "refused when CLAUDECODE is set")
     parser.add_argument("--show", metavar="METRIC", help="list every site for one metric")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
@@ -115,15 +151,15 @@ def main(argv: list[str] | None = None) -> int:
         for name in gates.unrunnable():
             if name in allowed:
                 counts[name] = allowed[name]
+        for name in sorted(gates.hard()):
+            if counts.get(name):
+                print(f"{name}: {counts[name]} sites and no budget to record. "
+                      f"The limit is the limit -- scripts/budgets --show {name}")
+            counts[name] = 0
         risen = {n: (allowed[n], counts[n]) for n in counts
                  if n in allowed and counts[n] > allowed[n]}
-        if risen and not args.allow_increase:
-            for name, (was, now) in sorted(risen.items()):
-                print(f"{name}: {was} -> {now}, up {now - was}. "
-                      f"scripts/budgets --show {name}")
-            print("\nA budget only falls. Take the new sites out, or say "
-                  "--allow-increase and the diff will show what was let through.")
-            return 1
+        if risen and (agent() or not args.allow_increase):
+            return refuse_the_rise(risen, found)
         write_budgets(counts)
         changed = [n for n in counts if allowed.get(n) != counts[n]]
         for name in sorted(changed):

@@ -46,6 +46,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -63,6 +65,14 @@ jobs:
 
       - name: budgets
         run: python scripts/budgets
+
+      # The pre-commit hook that refuses a raised number is opt-in; this is the same
+      # check on the branch, and it needs no install.
+      - name: budgets.json only falls
+        if: github.event_name == 'pull_request'
+        run: python scripts/hooks/budgets-only-fall --against "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
 
       - name: gate tests
         run: |

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Every pre-commit check, in order: no person's name, then no growth in any budget.
+# Every pre-commit check, in order: no person's name, no growth in any budget, and no
+# raised number in budgets.json.
 set -e
 
 self=$0
@@ -14,3 +15,4 @@ here=$(cd "$(dirname "$self")" && pwd)
 
 "$here/no-real-names" "$@"
 "$here/budgets" "$@"
+"$here/budgets-only-fall" "$@"

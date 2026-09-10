@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Refuse a commit whose staged budgets.json raises a number, whatever wrote it.
+
+    budgets-only-fall                  the staged file against HEAD (pre-commit)
+    budgets-only-fall --against REV    the file on disk against a revision (CI)
+
+A metric dropped from the file is a rise too: the next --update re-adds it at whatever
+the tree holds. A hard gate carries no number, so dropping one of those is the fix.
+
+Claude Code sets CLAUDECODE for every command it runs and a terminal sets nothing, so an
+agent is refused outright; a person raises a number on purpose with
+ML_STACK_BUDGET_RISE=yes git commit ...
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+
+import gates  # noqa: E402
+
+ROOT = HERE.parent.parent
+NAME = "budgets.json"
+
+
+def _git(*args: str) -> tuple[int, str]:
+    done = subprocess.run(["git", *args], cwd=ROOT, capture_output=True,
+                          text=True, check=False)
+    return done.returncode, done.stdout
+
+
+def staged_names() -> list[str]:
+    """The paths this commit adds, changes or renames."""
+    _, out = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+    return [name for name in out.split("\0") if name]
+
+
+def numbers(revision: str) -> dict[str, int]:
+    """budgets.json at a revision, empty when it is not there or does not parse."""
+    code, out = _git("show", f"{revision}:{NAME}")
+    if code != 0:
+        return {}
+    try:
+        held = json.loads(out)
+    except ValueError:
+        return {}
+    return {k: v for k, v in held.items() if isinstance(v, int)}
+
+
+def rises(before: dict[str, int], after: dict[str, int], strict: set[str]) -> list[str]:
+    """One line per number that went up or vanished."""
+    out = []
+    for name in sorted(before):
+        if name not in after:
+            if name in strict:
+                continue
+            out.append(f"  {name}: {before[name]} allowed, now absent -- "
+                       f"the next --update puts it back at whatever the tree holds")
+        elif after[name] > before[name]:
+            out.append(f"  {name}: {before[name]} -> {after[name]}, "
+                       f"up {after[name] - before[name]}")
+    return out
+
+
+def on_disk() -> dict[str, int]:
+    """budgets.json as the working tree holds it."""
+    try:
+        held = json.loads((ROOT / NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in held.items() if isinstance(v, int)}
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Compare budgets.json against an earlier one and refuse any number that rose."""
+    parser = argparse.ArgumentParser(prog="budgets-only-fall", description=__doc__)
+    parser.add_argument("--against", metavar="REV",
+                        help="compare the file on disk against this revision")
+    args, _ = parser.parse_known_args(argv)
+
+    if args.against:
+        before, after = numbers(args.against), on_disk()
+        if not before:
+            return 0
+    else:
+        if NAME not in staged_names():
+            return 0
+        code, _ = _git("rev-parse", "--verify", "HEAD")
+        if code != 0:
+            return 0
+        before, after = numbers("HEAD"), numbers("")
+    try:
+        strict = gates.hard()
+    except Exception:
+        strict = set()
+    went_up = rises(before, after, strict)
+    if not went_up:
+        return 0
+
+    print(f"{NAME}: a budget only falls.", file=sys.stderr)
+    for line in went_up:
+        print(line, file=sys.stderr)
+    if os.environ.get("CLAUDECODE"):
+        print("\nThose sites are the work: take them out of the tree, do not record them.\n"
+              "No agent raises a budget, by --allow-increase or by editing this file.\n"
+              "Only the repository owner, at his own terminal, can. Say in your report "
+              "that the budget is over and what is in it.", file=sys.stderr)
+        return 1
+    if os.environ.get("ML_STACK_BUDGET_RISE") == "yes":
+        return 0
+    print("\nTo raise it on purpose:  ML_STACK_BUDGET_RISE=yes git commit ...",
+          file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
