@@ -234,6 +234,26 @@ project's pages. That window is on their primary display and every click takes t
 screen. Drive your own Chromium through playwright instead, or run headless and read
 screenshots.
 
+## One thing on the GPU at a time
+
+Never put two pieces of work on the GPU at once. Not a question beside a reading, not two
+benchmark rows, not a smoke test while a long run is going. Serve one slot and let the
+second request wait.
+
+Two at once is more than twice as slow, and it takes the meaning out of every number either
+one produces: a second measured under load is not the same second, so a row measured that
+way cannot be compared with a row measured alone, and neither can be trusted afterwards.
+
+Measured 2026-09-09, one machine, Qwen3.8-Flash-Next reading a corpus: a one-line reply
+asked on a second slot while an extraction was running took 81s. The same server answers a
+hundred-question benchmark at 26.7 s/question with nothing else on it, and a reply that
+short is a second or two. The reading was slowed as well; nobody won.
+
+So: `--parallel 1` unless something genuinely needs concurrent conversations, and a
+program that reads and answers over the same model does both through the same server, one
+after the other. `ml-stack-serve status` says how many slots a server has; check it before
+starting a run that will take hours.
+
 ## Driving a model on this machine
 
 Never point `ml-stack-claude`, `ml-stack-agent` or `ml-stack-do` at a checkout you are
