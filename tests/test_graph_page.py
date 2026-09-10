@@ -1221,3 +1221,22 @@ def test_the_3d_labels_are_left_alone_on_a_frame_that_changed_nothing(open_page)
     assert errors == []
 
 
+def test_the_history_chip_is_there_only_when_a_link_carries_a_message(open_page):
+    """A graph read from messages can be played through; one whose links carry none has no
+    run to start, and the chip that would start it is not on the toolbar. Fails when the
+    chip is drawn whatever the links carry."""
+    page, errors = open_page()
+    settle(page)
+    assert page.is_visible(".tools #history")
+    assert errors == []
+
+    quiet = sample_graph()
+    quiet["messages"] = {}
+    for edge in quiet["edges"]:
+        edge["messages"] = []
+    page, errors = open_page(quiet)
+    settle(page)
+    assert page.locator(".tools #history").count() == 1
+    assert page.is_hidden(".tools #history")
+    assert page.is_hidden("#history-when")
+    assert errors == []

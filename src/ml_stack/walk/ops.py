@@ -378,10 +378,11 @@ def _ask_pane(walker: Walker) -> None:
 
 def _history_pane(walker: Walker) -> None:
     """The messages played through in order, when the links carry any."""
-    if not walker.through("history", partial(_play, walker.page)):
-        return
-    if walker.page.get_attribute("#history", "aria-pressed") != "true":
+    chip = walker.page.locator("#history")
+    if chip.count() == 0 or chip.is_hidden():
         walker.skip("history", "this graph's links carry no messages to play through")
+        return
+    if not walker.through("history", partial(_play, walker.page)):
         return
     walker.stop("history", "#history-when", "#hint-text")
 
