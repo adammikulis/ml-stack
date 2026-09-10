@@ -136,11 +136,12 @@ def test_the_run_tidies_each_source_on_the_way_out_with_its_own_model(
 
     monkeypatch.setattr(ingest, "_judge", lambda client, out, **kw: Judge())
     store = tmp_path / "sources.ladybug"
-    assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url]) == 0
+    assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url,
+                        "--no-embed"]) == 0
     out = capsys.readouterr().out
     assert "tidied:" in out
     assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url,
-                        "--resume", "--no-tidy"]) == 0
+                        "--resume", "--no-tidy", "--no-embed"]) == 0
     assert "tidied:" not in capsys.readouterr().out
 
 

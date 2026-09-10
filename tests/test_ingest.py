@@ -480,7 +480,8 @@ def a_reading(tmp_path, server, script=lambda prompt: LATTICE):
 
 
 def run(argv):
-    return ingest.main(argv)
+    """`ml-stack-ingest` with these arguments, reaching no embedder."""
+    return ingest.main([*argv, "--no-embed"])
 
 
 def test_a_source_is_read_section_by_section_into_a_store(tmp_path, server, capsys):

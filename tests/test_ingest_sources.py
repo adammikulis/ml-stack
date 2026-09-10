@@ -702,7 +702,8 @@ def test_a_run_whose_server_reset_reads_the_unit_again_and_carries_on(tmp_path, 
 
     monkeypatch.setattr(ingest, "extract_unit", resetting)
     monkeypatch.setattr(ingest, "_alive", lambda client: True)
-    assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url]) == 0
+    assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url,
+                        "--no-embed"]) == 0
 
     assert len(tries) == 3, "two units, one of them read twice"
     assert "read again after a reset" in capsys.readouterr().out
