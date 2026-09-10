@@ -478,8 +478,8 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
         return got
     shares = {str(n["id"]): int(n.get("mentions") or 0) for n in graph["nodes"]}
     if not rebuild and Path(out).expanduser().exists():
-        from ml_stack.graph.store import GraphStore
         from ml_stack.graph.absorbing import absorb
+        from ml_stack.graph.store import GraphStore
 
         with GraphStore(out) as store:
             taken = absorb(store, graph, judge=judge, sources=texts, log=log)

@@ -11,8 +11,16 @@ from typing import Any
 
 from ml_stack.entities.fold import merged_spans
 
-__all__ = ["NEVER_FOLDED", "Report", "SOURCE_LINKS", "hidden", "kept_spans", "label_of",
-           "union", "written_from"]
+__all__ = [
+    "NEVER_FOLDED",
+    "SOURCE_LINKS",
+    "Report",
+    "hidden",
+    "kept_spans",
+    "label_of",
+    "union",
+    "written_from",
+]
 
 # What is kept off the "no edge but its source" count: the links that say where a node came
 # from rather than what it stands in relation to.

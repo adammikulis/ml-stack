@@ -18,7 +18,7 @@ class History(list):
     oldest first. ``as_dict`` is the same three things by name.
     """
 
-    __slots__ = ("summary", "recalled")
+    __slots__ = ("recalled", "summary")
 
     def __init__(self, turns: Sequence[Mapping[str, str]] = (), *, summary: Any = None,
                  recalled: Sequence[Any] = ()) -> None:
@@ -33,7 +33,7 @@ class History(list):
 class Ask:
     """One question as the page sent it, after the body was checked and history resolved."""
 
-    __slots__ = ("question", "sent", "turns", "thread", "highlighted", "body", "began")
+    __slots__ = ("began", "body", "highlighted", "question", "sent", "thread", "turns")
 
     def __init__(self, body: Mapping[str, Any]) -> None:
         self.body = dict(body)

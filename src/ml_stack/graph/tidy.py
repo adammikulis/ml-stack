@@ -56,14 +56,30 @@ from typing import Any
 
 from ml_stack.entities.fold import ESTABLISHED, fold_edges
 from ml_stack.entities.spelling import close
-from ml_stack.graph.hygiene import (NEVER_FOLDED, SOURCE_LINKS, Report, hidden, kept_spans,
-                                    label_of, union)
+from ml_stack.graph.hygiene import (
+    NEVER_FOLDED,
+    SOURCE_LINKS,
+    Report,
+    hidden,
+    kept_spans,
+    label_of,
+    union,
+)
 from ml_stack.graph.merging import merge_nodes, resolve_conflict, resolve_suspect
 from ml_stack.graph.names import plurals, same_name, suspect
 from ml_stack.graph.relations import HIERARCHY, canonical_direction, cycles
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.verdicts import (decisions_in, keep_decision, merges_in, now, pair_key,
-                                     pair_remembered, remembered, stale, suspect_verdict)
+from ml_stack.graph.verdicts import (
+    decisions_in,
+    keep_decision,
+    merges_in,
+    now,
+    pair_key,
+    pair_remembered,
+    remembered,
+    stale,
+    suspect_verdict,
+)
 
 __all__ = ["tidy"]
 

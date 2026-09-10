@@ -205,7 +205,7 @@ across `src/`.
   `bench/serve.py`, `bench/speed.py` and `jobs.py`. What is left is per-file:
   `ingest/sources.py` (36), `bench/measure.py` (32), `serve/manager.py` (25),
   `bench/show.py` (23), `world/simulate.py` (21), `ingest/imports.py` (20),
-  `graph/store.py` (16), `serve/cli.py` (15), then a long tail. Rename each to what it
+  `graph/rebuild.py` (9), `graph/store.py` (7), `serve/cli.py` (15), then a long tail. Rename each to what it
   holds; renaming them all to one other word is the same problem again. Watch for the
   name already in that scope: three of these renames collided with an existing local and
   only the tests caught it.
@@ -233,12 +233,11 @@ across `src/`.
 count at 18. `scripts/budgets --show deep-files` lists them. The one with its own entry
 below is `bench/run.py` (2,019) under the commands; the rest, largest first:
 
-- [ ] **`graph/tidy.py` (1,660), `fleet/daemon.py` (1,575), `serve/fit.py` (1,390),
-  `bench/measure.py` (1,279), `world/organisation.py` (1,234), `hub.py` (1,215),
-  `world/simulate.py` (1,209), `graph/serve.py` (1,183), `bench/extract.py` (1,094),
-  `bench/report.py` (1,081), `serve/cli.py` (1,062), `fleet/bench.py` (1,057),
-  `bench/show.py` (1,019), `serve/build.py` (999), `train/tools.py` (953),
-  `graph/store.py` (938), `fleet/models.py` (930).** Each is a file to read before it is a
+- [ ] **`fleet/daemon.py` (1,575), `serve/fit.py` (1,390), `bench/measure.py` (1,279),
+  `world/organisation.py` (1,234), `hub.py` (1,215), `world/simulate.py` (1,209),
+  `bench/extract.py` (1,094), `bench/report.py` (1,081), `serve/cli.py` (1,062),
+  `fleet/bench.py` (1,057), `bench/show.py` (1,019), `serve/build.py` (999),
+  `train/tools.py` (953), `fleet/models.py` (930).** Each is a file to read before it is a
   file to split: the question is what jobs it holds, and the answer is a module per job with
   a name, not a line count met by moving code sideways. `fleet/daemon.py` and `serve/cli.py`
   are the two a newcomer meets first. Lower the budget as each lands, so the number cannot

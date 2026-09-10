@@ -13,11 +13,25 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack.graph.hygiene import NEVER_FOLDED, SOURCE_LINKS, Report, hidden, kept_spans, union
+from ml_stack.graph.hygiene import (
+    NEVER_FOLDED,
+    SOURCE_LINKS,
+    Report,
+    hidden,
+    kept_spans,
+    union,
+)
 from ml_stack.graph.merging import fold_node
 from ml_stack.graph.names import kin, near, same_name
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.verdicts import decisions_in, keep_decision, keep_merges, merges_in, now, pair_key
+from ml_stack.graph.verdicts import (
+    decisions_in,
+    keep_decision,
+    keep_merges,
+    merges_in,
+    now,
+    pair_key,
+)
 
 __all__ = ["absorb"]
 

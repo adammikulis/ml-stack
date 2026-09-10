@@ -10,8 +10,15 @@ from typing import Any
 
 from ml_stack.graph.hygiene import SOURCE_LINKS, Report, kept_spans, union
 from ml_stack.graph.names import TRAILING_PREPOSITION
-from ml_stack.graph.verdicts import (conflict_key, conflict_remembered, keep_decision,
-                                     keep_merge, now, pair_key, remembered)
+from ml_stack.graph.verdicts import (
+    conflict_key,
+    conflict_remembered,
+    keep_decision,
+    keep_merge,
+    now,
+    pair_key,
+    remembered,
+)
 
 __all__ = ["drop_edge", "fold_node", "merge_nodes", "resolve_conflict", "resolve_suspect"]
 

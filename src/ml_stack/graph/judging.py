@@ -15,9 +15,20 @@ from typing import Any
 
 from ml_stack.graph.hygiene import union
 
-__all__ = ["CONFLICT_VERDICTS", "JUDGE_SCHEMA", "ModelJudge", "SUSPECT_VERDICTS", "Scored",
-           "VERDICTS", "conflict_schema", "described", "excerpts", "gold_file", "judge_gold",
-           "load_gold"]
+__all__ = [
+    "CONFLICT_VERDICTS",
+    "JUDGE_SCHEMA",
+    "SUSPECT_VERDICTS",
+    "VERDICTS",
+    "ModelJudge",
+    "Scored",
+    "conflict_schema",
+    "described",
+    "excerpts",
+    "gold_file",
+    "judge_gold",
+    "load_gold",
+]
 
 VERDICTS = ("same", "different", "unsure")
 
