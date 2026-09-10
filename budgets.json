@@ -1,5 +1,5 @@
 {
-  "ad-hoc-fakes": 82,
+  "ad-hoc-fakes": 81,
   "argument-parsers": 29,
   "atomic-writes": 20,
   "broad-excepts": 218,
@@ -10,7 +10,7 @@
   "file-locks": 11,
   "home-paths": 0,
   "http-servers": 2,
-  "local-imports": 631,
+  "local-imports": 630,
   "long-docstrings": 128,
   "long-functions": 19,
   "print-calls": 0,
