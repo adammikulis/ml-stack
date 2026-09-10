@@ -18,7 +18,8 @@
   const M = window.graphModel;
   const { served } = M;
   function wire() {
-    Object.assign(M, { nowLine, tally, spentLine, sessionLine, howItGotThere, thoughtOver });
+    Object.assign(M, { openTrace, nowLine, tally, spentLine, sessionLine, howItGotThere,
+                       thoughtOver });
     let slotContext = 0;   // tokens one slot holds, from /ask/model, to show a peak against
     // the served model's name, before anything is asked: the pane says what will answer
     if (served) {
@@ -119,29 +120,38 @@
       if (why) { const p = document.createElement('p'); p.textContent = why; how.appendChild(p); }
       el.appendChild(how);
     }
+    // The fold an answer bubble wears: a line saying what is happening, the trace under it,
+    // and the words the model said beside them. `said` is what the bubble keeps saying while
+    // the fold fills.
+    function openTrace(el, said, open) {
+      const think = document.createElement('details');
+      think.className = 'think';
+      think.open = !!open;
+      const now = document.createElement('summary');
+      now.className = 'now';
+      const trace = document.createElement('div');
+      trace.className = 'trace';
+      think.append(now, trace);
+      const spoken = document.createElement('span');
+      spoken.className = 'said';
+      spoken.textContent = said;
+      el.textContent = '';
+      el.append(think, spoken);
+      const step = text => {
+        const line = document.createElement('div');
+        line.className = 'step';
+        line.textContent = text;
+        trace.appendChild(line);
+      };
+      return { think, now, trace, spoken, step };
+    }
     function thoughtOver(el, steps) {
       const list = Array.isArray(steps) ? steps.map(String) : String(steps).split(/;\s*/);
       const done = list.filter(Boolean);
       if (!done.length) return;
-      const think = document.createElement('details');
-      think.className = 'think';
-      const label = document.createElement('summary');
-      label.className = 'now';
-      label.textContent = done.join(', ');
-      const trace = document.createElement('div');
-      trace.className = 'trace';
-      for (const one of done) {
-        const line = document.createElement('div');
-        line.className = 'step';
-        line.textContent = `▸ ${one}`;
-        trace.appendChild(line);
-      }
-      think.append(label, trace);
-      const spoken = document.createElement('span');
-      spoken.className = 'said';
-      spoken.textContent = el.textContent;
-      el.textContent = '';
-      el.append(think, spoken);
+      const { now, step } = openTrace(el, el.textContent, false);
+      now.textContent = done.join(', ');
+      for (const one of done) step(`▸ ${one}`);
     }
   }
   class AskTrace extends HTMLElement {
