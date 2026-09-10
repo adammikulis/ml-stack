@@ -801,7 +801,7 @@ class TestWhatAMachineIsDoing:
         """os.sysconf does not exist there, so a Windows machine reported no memory
         at all -- not just no usage, no total either."""
         import ml_stack.fleet.device as mod
-        import ml_stack.hub as hub
+        from ml_stack.hub import memory
 
         def no_sysconf(*a, **k):
             raise AttributeError("no sysconf on this platform")
@@ -816,20 +816,20 @@ class TestWhatAMachineIsDoing:
             return real(name, *a, **k)
 
         monkeypatch.setattr(builtins, "__import__", no_psutil)
-        monkeypatch.setattr(hub.os, "sysconf", no_sysconf)
-        monkeypatch.setattr(hub, "_windows_memory",
+        monkeypatch.setattr(memory.os, "sysconf", no_sysconf)
+        monkeypatch.setattr(memory, "_windows_memory",
                             lambda: (16 * 2**30, int(9.5 * 2**30)))
 
-        assert hub.total_memory() == 16 * 2**30
+        assert memory.total_memory() == 16 * 2**30
         assert mod._ram_used_gb(16.0) == 6.5
 
     def test_the_windows_call_is_not_made_on_anything_else(self):
         import sys
 
-        import ml_stack.hub as hub
+        from ml_stack.hub import memory
 
         if sys.platform != "win32":
-            assert hub._windows_memory() is None
+            assert memory._windows_memory() is None
 
     def test_memory_in_use_is_never_more_than_there_is(self):
         from ml_stack.fleet.device import stdlib_device_report

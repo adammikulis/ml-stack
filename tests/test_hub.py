@@ -175,6 +175,23 @@ def test_room_is_what_can_be_served_not_what_is_installed(monkeypatch):
     assert hub.room() == 0, "a machine that will not say is not a machine with no memory"
 
 
+def test_an_unset_wired_limit_falls_through_to_the_default_share(monkeypatch):
+    """macOS reports `iogpu.wired_limit_mb` as 0 until somebody sets one, which describes
+    a machine with 128G of memory, not a machine with none."""
+    import subprocess
+
+    import ml_stack.hub as hub
+
+    class Done:
+        def __init__(self, out): self.returncode, self.stdout = 0, out
+
+    def sysctl(command, *a, **k):
+        return Done("0\n" if command[-1] == "iogpu.wired_limit_mb" else str(128 * 2**30))
+
+    monkeypatch.setattr(subprocess, "run", sysctl)
+    assert hub.room() == int(128 * 2**30 * 0.75)
+
+
 def test_a_listing_says_what_is_already_downloaded(monkeypatch, capsys):
     """Nothing said what was local, so 87G that was already on the disk was nearly fetched
     again. `fleet.models` had known all along; the listing just never asked."""
