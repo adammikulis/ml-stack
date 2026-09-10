@@ -448,6 +448,14 @@ their leading underscore and every importer moved rather than being re-exported.
 
 ### The code itself
 
+- [ ] **A branch's worth of honest skips is sitting in `git stash`, and its branch is gone.**
+  `stash@{0}`, "On honest-skips: wip: honest-skips fixes", 17 files off `aeb04db`. It gives
+  every skip a reason that names what to install -- "torch is not importable: ml-stack[torch]"
+  rather than "not importable on this platform", which is the passive voice `CLAUDE.md` bans --
+  adds `needs_a_backend` for the tests that want either torch or mlx, and stops
+  `test_findings_are_named_relative_to_the_tree_they_were_found_in` counting a checker that
+  could not run as one that found nothing. The branch was deleted without landing it. Rebase
+  it onto the development branch, land what still applies, and drop the stash.
 - [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
   that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
   `graph/replies.py`, `graph/answers.py` and `graph/conversation.py`, and every test still
