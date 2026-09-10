@@ -175,7 +175,7 @@ def test_the_panes_do_not_depend_on_the_map_being_drawn():
 
     without = [n for n in COMPONENTS if n != "graph-map"]
     page = render({"nodes": [], "edges": []}, parts=without)
-    assert "aside > .two { grid-row: -1; }" in page
+    assert "aside > .two { grid-row: 3; }" in page
     assert "<graph-map>" not in page
 
 

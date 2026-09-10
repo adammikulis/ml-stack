@@ -81,9 +81,10 @@ main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 
 .graph-wrap { position: relative; min-height: 0; border-right: 1px solid var(--line); }
 .graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
 aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
-/* the panes take the last row by name, not by counting: a page that leaves the map out has
-   one child fewer, and they landed in the 6px grip row with no height to draw an answer in */
-aside > .two { grid-row: -1; }
+/* the panes take the third row by number, not by counting children: a page that leaves the
+   map out has one child fewer and they landed in the 6px grip row. `-1` is the last grid
+   line, which puts them in an implicit fourth row and leaves the tall one empty above. */
+aside > .two { grid-row: 3; }
 /* the question on the left, what it is about on the right */
 .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
 @media (max-width: 1180px) { .two { grid-template-columns: 1fr; } .askpane { border-right: 0;

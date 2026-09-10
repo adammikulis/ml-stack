@@ -1014,3 +1014,19 @@ def test_the_map_draws_one_marker_for_every_geocoded_entry(open_page, tmp_path):
     assert page.locator("#map circle.dot").count() == 2
     assert page.locator("#located").inner_text() == "2"
     assert errors == []
+
+
+@pytest.mark.slow
+def test_the_panes_fill_the_column_without_the_map(open_page):
+    """`grid-row: -1` put them in an implicit fourth row and left the tall one empty."""
+    graph = {"nodes": [{"id": f"n{i}", "label": f"node {i}", "kind": "clause",
+                        "attrs": {}, "mentions": 1} for i in range(20)], "edges": []}
+    pg, _ = open_page(graph)
+    pg.wait_for_timeout(2500)
+    aside = pg.evaluate("document.querySelector('aside').getBoundingClientRect().height")
+    two = pg.evaluate("document.querySelector('.two').getBoundingClientRect().height")
+    rows = pg.evaluate("getComputedStyle(document.querySelector('aside')).gridTemplateRows")
+    sizes = [float(one.rstrip("px")) for one in rows.split()]
+    assert len(sizes) == 3, rows          # a fourth row means the panes fell out of the grid
+    assert abs(sizes[-1] - two) < 2, (sizes, two)   # and the tall row is the one they fill
+    assert two > 0 and aside > 0
