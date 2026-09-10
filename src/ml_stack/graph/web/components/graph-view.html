@@ -91,8 +91,18 @@
     // of the edges. Off to start with, the graph reads as who is interested in what, who works
     // where, and who answered whom; the Links section switches it back on.
     RELS.forEach(r => { if (!display.link[r]) display.link[r] = r === 'mentions' ? 'hide' : 'show'; });
-    const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link')
+    const linkLayer = root.append('g').attr('class', 'links');
+    const link = linkLayer.selectAll('line').data(links).join('line').attr('class', 'link')
       .attr('stroke-width', thickness).classed('gone', linkGone);
+    // A line's alpha is its own, so thousands of them stack into a wash, and an arrowhead takes
+    // none of its line's alpha; fading the layer once carries the arrowheads with it.
+    const INK_AT = 900;
+    function paintInk() {
+      let drawn = 0;
+      for (const l of links) if (!linkGone(l) && !linkDropped(l)) drawn++;
+      linkLayer.attr('opacity', Math.min(1, Math.sqrt(INK_AT / Math.max(drawn, 1))));
+    }
+    paintInk();
     // a one-pixel line is not something anyone can hit; the events live on a wide clear one
     const hitline = root.append('g').selectAll('line').data(links).join('line').attr('class', 'hitline')
       .classed('gone', linkGone)
@@ -291,6 +301,7 @@
       node.classed('picked', d => picked.has('node:' + d.id));
       link.classed('picked', l => picked.has('link:' + links.indexOf(l)));
       hitline.classed('gone', linkGone);
+      paintInk();
       link.classed('gone', linkGone)
           .classed('dim', l => !vis.has(l.source.id) || !vis.has(l.target.id) || (focus && l.source.id !== M.selected && l.target.id !== M.selected))
           .classed('on', l => focus && (l.source.id === M.selected || l.target.id === M.selected));

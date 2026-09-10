@@ -1106,6 +1106,84 @@ def a_crowd_of(n, per_node=2.7):
             "meta": {}}
 
 
+#: what the marks left on screen once the layout has settled: how far each one sits from its
+#: nearest neighbour, and how much of the view any mark falls in
+SPREAD = """() => {
+    const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
+    const pts = [...document.querySelectorAll('#graph g.node:not(.gone) path.mark')]
+        .map(el => { const r = el.getBoundingClientRect();
+                     return [r.left + r.width / 2 - wrap.left, r.top + r.height / 2 - wrap.top,
+                             r.width / 2]; });
+    const n = pts.length;
+    const X = Float64Array.from(pts.map(p => p[0])), Y = Float64Array.from(pts.map(p => p[1]));
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+        let best = Infinity;
+        for (let j = 0; j < n; j++) {
+            if (j === i) continue;
+            const dx = X[j] - X[i], dy = Y[j] - Y[i], d = dx * dx + dy * dy;
+            if (d < best) best = d;
+        }
+        if (best < Infinity) sum += Math.sqrt(best);
+    }
+    const g = 20, cols = Math.ceil(wrap.width / g), rows = Math.ceil(wrap.height / g);
+    const hit = new Set();
+    for (const [x, y] of pts) hit.add(Math.floor(x / g) + ':' + Math.floor(y / g));
+    const mid = a => a.slice().sort((p, q) => p - q)[Math.floor(a.length / 2)];
+    return { drawn: n, nn: n ? sum / n : 0, occupied: hit.size / (cols * rows),
+             radius: n ? mid(pts.map(p => p[2])) : 0 };
+}"""
+
+
+#: The same forces the page runs on rAF, run straight through and drawn once. A settled
+#: 3,000-node layout is four minutes of animated ticks and five seconds of these.
+SETTLE = """(ticks) => {
+    const M = window.graphModel, sim = M.view2d.sim;
+    const drawn = sim.on('tick');
+    sim.stop(); sim.alphaTarget(0); sim.alpha(1);
+    for (let i = 0; i < ticks; i++) sim.tick();
+    drawn(); M.fit();
+    return sim.alpha();
+}"""
+
+
+def settled(page, ticks=400, ms=180_000):
+    """Runs the layout through ``ticks`` and reads `SPREAD` and the link layer's ink."""
+    page.wait_for_selector(".graph-wrap:not(.settling)", timeout=ms)
+    page.evaluate(SETTLE, ticks)
+    page.wait_for_timeout(1200)
+    got = page.evaluate(SPREAD)
+    got["ink"] = float(page.evaluate(
+        "() => getComputedStyle(document.querySelector('#graph g.links')).opacity"))
+    return got
+
+
+def test_the_links_give_way_to_the_marks_at_thousands_of_nodes(open_page):
+    """Measured 2026-09-10 on 3,000 nodes at 2.7 edges each: 8,095 lines and their arrowheads
+    inked 44% of the pane against 8% for the marks, and the graph read as one grey mass. The
+    layer's ink falls with the number of links drawn in it. Fails when it is drawn full
+    strength whatever the count."""
+    page, errors = open_page(a_crowd_of(3000))
+    got = settled(page)
+    assert got["drawn"] == 3000
+    assert got["ink"] < 0.4, got
+    # and the marks still spread over the view rather than knotting in the middle of it
+    assert got["nn"] > 7.0, got
+    assert got["occupied"] > 0.4, got
+    assert errors == []
+
+
+def test_a_forty_node_graph_draws_the_way_it_did(open_page):
+    """A graph small enough to read whole keeps every link at full strength. Fails when the
+    ink scaling reaches below the count it starts at."""
+    page, errors = open_page(a_crowd_of(40))
+    got = settled(page)
+    assert got["drawn"] == 40
+    assert got["ink"] == 1.0, got
+    assert got["nn"] > 30, got
+    assert errors == []
+
+
 #: frames raised over ``ms``, and how many of them replaced the 3D labels
 FRAMES = """(ms) => new Promise(done => {
     const first = window.graphModel.label3dRuns;
