@@ -353,3 +353,32 @@ def test_the_page_declares_its_encoding():
     shell = template()
     assert 'charset="utf-8"' in shell.lower()
     assert shell.lower().index("charset") < shell.lower().index("<title>")
+
+
+def test_a_source_is_re_read_under_the_slug_it_was_read_under(tmp_path):
+    """A run given `--slug` stores units under it; a re-read that takes the slug off the
+    title mints other ids and every quote behind a citation comes back empty."""
+    from dataclasses import asdict
+
+    from ml_stack.ingest.judge import sources_for
+    from ml_stack.ingest.progress import Progress
+    from ml_stack.ingest.run import _named
+    from ml_stack.sources import units as source_units
+
+    statute = tmp_path / "act.xml"
+    statute.write_text(STATUTE)
+    marks = html.Marks(section_tag="Section", number_tag="Label", title_tag="MarginalNote")
+    document = ingest.reader_for(str(statute), marks=marks)()
+    import argparse
+
+    _named(argparse.Namespace(slug="an-act", title=""), document, 1)
+    wanted = source_units.units(document)
+    assert wanted[0].id.startswith("an-act:")
+
+    out = tmp_path / "store.ladybug"
+    record = Progress(Progress.beside(out))
+    record.source(document.slug, title=document.title, path=str(statute),
+                  sections=len(wanted), marks=asdict(marks))
+    record.save()
+
+    assert sources_for(out)(wanted[0].id) == wanted[0].text

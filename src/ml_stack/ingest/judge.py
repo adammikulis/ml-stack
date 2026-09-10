@@ -135,10 +135,10 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
     """``unit id -> the text it was read from``, for the judge's second look.
 
     ``texts`` are units already in memory (the run has them); anything else is found by
-    reading the document again from the path the progress file recorded, with the marks it
-    recorded beside it -- once per source, and kept for the rest of the pass. Read with any
-    other marks, a source splits into units under other ids and every lookup here answers
-    with silence. Adam: "allow it to go back over the source material if needed".
+    reading the document again from the path the progress file recorded, with the marks and
+    the slug it recorded beside it -- once per source, and kept for the rest of the pass.
+    Read under any other marks or any other slug, a source splits into units whose ids the
+    store does not hold, and every lookup here answers with silence. Adam: "allow it to go back over the source material if needed".
     """
     from ml_stack.home import expand
     from ml_stack.ingest.run import _read_local
@@ -161,6 +161,9 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
         held_marks = (held.get(slug) or {}).get("marks") or {}
         document = _read_local(where, images=False, chapter=None,
                                marks=Marks(**held_marks) if held_marks else None)
+        # the run may have been given a slug of its own; a unit read under any other one
+        # takes an id the store does not hold
+        document.named = slug
         for unit in source_units.units(document, keep_questions=True):
             known.setdefault(unit.id, unit.text)
         return known.get(unit_id, "")
