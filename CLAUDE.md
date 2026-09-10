@@ -95,6 +95,12 @@ long it took. "Trains across every machine on your network", never "training now
 
 Before/after belongs in a commit message, where the reader came looking for it.
 
+No benchmark result goes in a README. A measurement lives in a document that names its
+date, the command that produced it, the store it read and the model it ran on, so a reader
+can repeat it; the README points at that document and quotes no figure. A number without
+those four is not a measurement, it is a claim. (Adam, 2026-09-10: "we shouldn't have
+benchmark results in a readme".)
+
 ## HANDOFF.md
 
 It lists what is still pending. Nothing else.
