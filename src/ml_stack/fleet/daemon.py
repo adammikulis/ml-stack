@@ -28,6 +28,7 @@ from typing import Any
 from .availability import Availability, parse_window
 from .conversations import Conversations
 from .environment import Environment
+from ml_stack.files import promote
 from ml_stack.hub import default_roots, free_memory, total_memory
 from ml_stack.log import say, warn
 from ml_stack.speech import service as speech
@@ -1126,7 +1127,7 @@ def make_handler(runner: JobRunner, files_root: Path,
                     self._send(422, {"error": "checksum mismatch, upload discarded",
                                      "expected": want, "got": got})
                     return
-                os.replace(partial, target)
+                promote(partial, target)
                 size = target.stat().st_size
                 if got:
                     remember_digest(target, got)

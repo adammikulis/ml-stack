@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import promote
 
 STATE_FILE = "state.json"
 """Written last. Its presence is what makes a directory a valid checkpoint."""
@@ -65,7 +66,7 @@ def save(
 
     if directory.exists():
         shutil.rmtree(directory)
-    os.replace(staging, directory)
+    promote(staging, directory)
     return directory
 
 
@@ -161,7 +162,7 @@ def point_latest_at(root: Path | str, directory: Path | str) -> Path:
 
     staging.unlink(missing_ok=True)
     staging.symlink_to(directory.name, target_is_directory=True)
-    os.replace(staging, link)
+    promote(staging, link)
     return link
 
 

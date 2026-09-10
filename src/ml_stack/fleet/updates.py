@@ -30,6 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
 
 __all__ = ["Pulled", "Release", "UpdateError", "apply_if_newer", "asset_for", "check",
@@ -192,7 +193,7 @@ def download(asset: dict[str, Any], into: Path | str,
     if total and done != total:
         partial.unlink(missing_ok=True)
         raise UpdateError(f"got {done} of {total} bytes")
-    os.replace(partial, target)
+    promote(partial, target)
     return target
 
 
@@ -223,8 +224,8 @@ def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
         shutil.rmtree(backup, ignore_errors=True)
         backup.unlink(missing_ok=True)
         if target.exists():
-            os.replace(target, backup)
-        os.replace(found, target)
+            promote(target, backup)
+        promote(found, target)
         shutil.rmtree(backup, ignore_errors=True)
         _replace_companions(staging, target)
         return target
@@ -252,7 +253,7 @@ def _replace_companions(staging: Path, target: Path) -> list[Path]:
             continue
         _restore_modes(new)
         try:
-            os.replace(new, beside)
+            promote(new, beside)
         except OSError:                               # a busy file on Windows; not fatal
             continue
         done.append(beside)

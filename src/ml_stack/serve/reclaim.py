@@ -32,8 +32,8 @@ machine, not a reason to kill something on it.
 
 from __future__ import annotations
 
+import contextlib
 import json
-import os
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.files import write_json
 
 __all__ = ["Idleness", "TRUST_S", "busy_now", "ports_idle", "state_path",
            "reclaim_idle", "watching"]
@@ -130,14 +131,10 @@ class Idleness:
     def _write(self) -> None:
         if self.state is None:
             return
-        try:
-            self.state.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.state.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps({str(p): r for p, r in self.seen.items()},
-                                      indent=2, sort_keys=True), encoding="utf-8")
-            os.replace(tmp, self.state)
-        except OSError:  # a reading that cannot be kept is still a reading
-            pass
+        # a reading that cannot be kept is still a reading
+        with contextlib.suppress(OSError):
+            write_json(self.state,
+                       {str(p): self.seen[p] for p in sorted(self.seen, key=str)})
 
     def look(self, servers: Mapping[int, Mapping[str, Any]]) -> dict[int, float]:
         """``{port: seconds idle}`` for every server that answered. One that did not is

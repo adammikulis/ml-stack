@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable, Set
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import write_text
 
 __all__ = ["compact", "ts_key"]
 
@@ -48,7 +49,5 @@ def compact(path: Path, key: Callable[[Any], str | None], *,
     if len(kept) == len(lines):
         return (len(kept), 0)
     body = "\n".join(kept[k] for k in first_seen) + "\n"
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(body, encoding="utf-8")
-    os.replace(tmp, path)
+    write_text(path, body)
     return (len(kept), len(lines) - len(kept))

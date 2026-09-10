@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import promote
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _read_json, _write_json
 from ml_stack.log import say
@@ -119,7 +119,7 @@ def migrate(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     if moves is None:
         return 0
     for src, dst in moves:
-        os.replace(src, dst)
+        promote(src, dst)
     say(f"moved {where.name} and its {len(moves) - 1} file(s) beside it to "
         f"{moves[0][1].name}")
     return 0

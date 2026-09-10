@@ -39,6 +39,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import promote
+
 logger = logging.getLogger(__name__)
 
 SNAPSHOT_DIR = "_backups"
@@ -290,7 +292,7 @@ def restore(snapshot_path: str | Path, *, count: Any, fold: Any = None) -> Snaps
         # the source's own log must go, and go first: it holds writes against the file being
         # replaced, and would otherwise replay on top of what was just recovered
         Path(str(src) + WAL_SUFFIX).unlink(missing_ok=True)
-        os.replace(staging, src)
+        promote(staging, src)
     finally:
         _clear(staging)
     logger.info("restored %s from %s", src.name, snap.name)

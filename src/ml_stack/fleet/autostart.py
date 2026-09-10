@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import promote
 from ml_stack import home
 from ml_stack.log import say, warn
 
@@ -652,7 +653,7 @@ def plan_cache(user_cache: "Path | str", service_cache: "Path | str", *,
                          error=f"{theirs} already exists; move or remove it and re-run, "
                                f"rather than having two caches")
     try:
-        os.rename(mine, theirs)
+        promote(mine, theirs)
     except OSError as exc:
         # A cross-device rename would be a copy, and a copy is the one thing this must
         # never do: it doubles tens of gigabytes on a disk that has them once.

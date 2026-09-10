@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
 
 _CHUNK = 1 << 16
@@ -136,7 +136,7 @@ def fetch(
         raise DownloadError(f"{label}: cannot fetch {url} ({exc})") from exc
 
     _verify(partial, expect_sha256=expect_sha256, expect_bytes=expect_bytes, name=label)
-    os.replace(partial, target)
+    promote(partial, target)
     return target
 
 

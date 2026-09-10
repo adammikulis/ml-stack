@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import secrets
@@ -17,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import UNVERSIONED, promote, read_json, version_of, versioned, write_json
 from ml_stack import hub
 from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
 
@@ -26,6 +26,9 @@ __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
            "searched_families", "sized", "suggestions"]
 
 CHUNK = 1 << 20
+
+#: 1 -- the url a partial download came from and its validator.
+STAMP_VERSION = 1
 MIN_SIZE = 1 << 20
 # A download in progress writes continuously, so a part file untouched for this
 # long belongs to one that stopped.
@@ -37,18 +40,23 @@ class ModelError(RuntimeError):
 
 
 def _read_stamp(stamp: Path) -> dict[str, Any]:
-    """What a half-finished download recorded about where it came from."""
-    try:
-        raw = json.loads(stamp.read_text())
-    except (OSError, ValueError):
+    """What a half-finished download recorded about where it came from.
+
+    A stamp with no version key was written before the key existed and carries the same
+    ``url`` and ``validator``; one from a version this code does not know is discarded, so
+    the download starts again rather than resuming on a guess.
+    """
+    raw = read_json(stamp, None)
+    if not isinstance(raw, dict):
         return {}
-    return raw if isinstance(raw, dict) else {}
+    return raw if version_of(raw) in (UNVERSIONED, STAMP_VERSION) else {}
 
 
 def _write_stamp(stamp: Path, url: str, headers: Any) -> None:
     validator = headers.get("ETag") or headers.get("Last-Modified") or ""
     try:
-        stamp.write_text(json.dumps({"url": url, "validator": validator}))
+        write_json(stamp, versioned({"url": url, "validator": validator}, STAMP_VERSION),
+                   indent=None)
     except OSError:
         pass
 
@@ -270,7 +278,7 @@ class Models:
             if exc.status == 416 and start:
                 size = range_total(exc.headers.get("Content-Range", ""))
                 if size is not None and size == start:
-                    os.replace(partial, target)
+                    promote(partial, target)
                     stamp.unlink(missing_ok=True)
                     stat = target.stat()
                     return Model(target.name, target, stat.st_size, stat.st_mtime)
@@ -304,7 +312,7 @@ class Models:
             raise ModelError(
                 f"{name}: got {partial.stat().st_size} of {total} bytes; "
                 f"left {partial.name} to resume from")
-        os.replace(partial, target)
+        promote(partial, target)
         stamp.unlink(missing_ok=True)
         stat = target.stat()
         return Model(target.name, target, stat.st_size, stat.st_mtime)
@@ -322,7 +330,7 @@ class Models:
             return beside
         got = self._from_internet(beside.name, source, on_progress)
         if got.path != beside:
-            os.replace(got.path, beside)
+            promote(got.path, beside)
         return beside
 
     def _draft_from_peers(self, model: Model, beside: Path, key: bytes,

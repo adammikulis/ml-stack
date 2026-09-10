@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import time
 import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack.files import promote
 from ml_stack.http import (
     ONCE,
     Retry,
@@ -279,7 +279,7 @@ class Peer:
             if exc.status == 416:
                 size = range_total(exc.headers.get("Content-Range", ""))
                 if size is not None and start == size:
-                    os.replace(partial, local)
+                    promote(partial, local)
                     return local
                 raise PeerError(
                     f"{partial} is {start} bytes but the remote file is "
@@ -312,6 +312,6 @@ class Peer:
                 raise PeerError(
                     f"{remote}: checksum mismatch (expected {want[:16]}..., "
                     f"got {actual[:16]}...); discarded the download")
-        os.replace(partial, local)
+        promote(partial, local)
         return local
 

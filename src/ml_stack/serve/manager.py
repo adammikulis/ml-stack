@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.files import write_json
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.hub import free_memory
 from ml_stack.client.health import ServingParams, serving_params
@@ -761,10 +762,7 @@ class ServerManager:
         return parsed if isinstance(parsed, dict) else {}
 
     def _write(self, state: dict) -> None:
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_file.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-        os.replace(tmp, self.state_file)
+        write_json(self.state_file, state)
 
     @contextmanager
     def _exclusive(self) -> Iterator[None]:
