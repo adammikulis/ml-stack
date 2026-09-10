@@ -40,8 +40,8 @@ GRAPH = {
 
 QUESTION = "who works on compilers?"
 
-# Every way `ml-stack-bench --also` measures, and the riders `_ways` puts on each of them.
-WAYS = {
+# Every way `ml-stack-bench --also` measures, and the riders `_askings` puts on each of them.
+FLAGS = {
     "plain": Asking(),
     "terse": Asking(terse=True),
     "rich": Asking(rich=True),
@@ -115,16 +115,16 @@ def _digest(way: Asking) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-@pytest.mark.parametrize("name", sorted(WAYS))
+@pytest.mark.parametrize("name", sorted(FLAGS))
 def test_the_prompt_bytes_of_one_way_are_what_they_were(name):
-    assert _digest(WAYS[name]) == DIGESTS[name]
+    assert _digest(FLAGS[name]) == DIGESTS[name]
 
 
 def test_every_way_the_bench_measures_is_pinned():
-    assert sorted(WAYS) == sorted(DIGESTS)
+    assert sorted(FLAGS) == sorted(DIGESTS)
 
 
-# The ways that change what the model reads. `kinds` filters what `show` returns, `rounds`
+# The askings that change what the model reads. `kinds` filters what `show` returns, `rounds`
 # caps the loop, and `reach` changes how a tool result is packed; none touches the prompt.
 MOVES = ("terse", "rich", "loose", "batch", "summary", "single", "few", "constrain_ids")
 

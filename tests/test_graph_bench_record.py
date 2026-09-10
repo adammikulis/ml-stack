@@ -52,7 +52,7 @@ class TestWhatWasShown:
         assert before.fingerprint != after.fingerprint
         # and nothing else about them differs
         assert before.serving == after.serving
-        assert before.ways == after.ways
+        assert before.asking == after.asking
 
     def test_an_edited_tool_description_is_a_different_run(self):
         """A tool's words change what the model does with it, so an edit to them misses."""

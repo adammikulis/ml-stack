@@ -106,7 +106,7 @@ class Measured:
     reasoning_budget: int | None = None
     graph: str = ""
     finder: str = ""
-    ways: Mapping[str, Any] | None = None
+    asking: Mapping[str, Any] | None = None
     sampling: Mapping[str, Any] = field(default_factory=dict)
     prompts: str = ""
     host: str = ""
@@ -150,7 +150,7 @@ class Measured:
             reasoning_budget=_int(server.get("reasoning_budget")),
             graph=str(server.get("graph") or ""),
             finder=str(server.get("finder") or ""),
-            ways=dict(asked) if asked is not None else None,
+            asking=dict(asked) if asked is not None else None,
             sampling=sampling,
             prompts=str(one.get("prompts") or ""),
             host=str(server.get("host") or ""),
@@ -173,8 +173,8 @@ class Measured:
         if self.workload:
             out["workload"] = self.workload
         out["server"] = dict(self.server)
-        if self.ways:
-            out["asking"] = dict(self.ways)
+        if self.asking:
+            out["asking"] = dict(self.asking)
         if self.prompts:
             out["prompts"] = self.prompts
         out["rows"] = [dict(r) for r in self.rows]
@@ -273,15 +273,15 @@ class Measured:
     @property
     def asked(self) -> Asking | None:
         """The `Asking` a run recorded, or None for one kept before the record existed."""
-        if self.ways is None:
+        if self.asking is None:
             return None
         fields = Asking.__dataclass_fields__
-        return Asking(**{k: v for k, v in self.ways.items() if k in fields})
+        return Asking(**{k: v for k, v in self.asking.items() if k in fields})
 
     @property
     def knows_asking(self) -> bool:
         """Whether the run recorded how it asked, rather than leaving it to its label."""
-        return self.ways is not None
+        return self.asking is not None
 
     @property
     def knows_prompts(self) -> bool:
@@ -302,7 +302,7 @@ class Measured:
         and prompted the same way, for the same workload; two runs whose system prompts
         differ by a character do not.
         """
-        return (*self.serving, self.graph, self.finder, _frozen(self.ways),
+        return (*self.serving, self.graph, self.finder, _frozen(self.asking),
                 _frozen(self.sampling), self.prompts, self.workload)
 
     @property

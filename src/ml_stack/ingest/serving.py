@@ -62,7 +62,7 @@ def _run(args: Any, *, resolve: bool = True,
     """The whole :class:`~ml_stack.serve.Run` this ingest reads with, and the profile that
     measured it (None when nothing did).
 
-    One object -- how to serve the model, the ways it measured best, the client to
+    One object -- how to serve the model, the asking it measured best with, the client to
     ask it with -- built here and nowhere else, so the lease that is taken and the serving
     the run record names are the same thing rather than two derivations that drift.
 

@@ -3,7 +3,7 @@
 `estimate` reads the parsed command line and the runs already kept and says, per model
 the command will serve or measure, how long it should take: seconds per question from
 that model's newest kept run (the same context when one is kept at it), else a guess from
-the weights on disk, times the questions, times the ways one load is asked, plus a load
+the weights on disk, times the questions, times the askings one load is measured with, plus a load
 per model served. `main` prints it after the self-check and before the lock, and refuses
 with exit 5 when the total is over `--ceiling` and ``--yes`` was not given. A smoke run is
 never refused: two questions are the measurement of whether a run can start.
@@ -61,8 +61,8 @@ class ModelEstimate:
     """One model (or one served configuration of it) and what asking it should take."""
 
     name: str
-    questions: int                  # asked of each way, the smoke's included
-    ways: int                       # askings of one load: plain, terse, shortlist...
+    questions: int                  # asked of each asking, the smoke's included
+    askings: int                    # of one load: plain, terse, shortlist...
     per_question: float             # seconds
     load_s: float                   # 0 for a server already up
     source: str                     # where per_question came from, said in the line
@@ -70,11 +70,11 @@ class ModelEstimate:
 
     @property
     def seconds(self) -> float:
-        return self.questions * self.ways * self.per_question + self.load_s
+        return self.questions * self.askings * self.per_question + self.load_s
 
     def line(self) -> str:
         return (f"estimate: {span(self.seconds)} ({self.name} {self.questions} q × "
-                f"{self.ways} way{'s' if self.ways != 1 else ''} × "
+                f"{self.askings} asking{'s' if self.askings != 1 else ''} × "
                 f"{self.per_question:.0f} s/q"
                 + (f" + load {self.load_s:.0f} s" if self.load_s else "")
                 + f"; {self.source})")
@@ -171,15 +171,15 @@ def guessed(model: str) -> tuple[float, str]:
 
 
 def _one(kept: Sequence[Mapping[str, Any]], *, name: str, model: str = "",
-         labels: Sequence[str] = (), questions: int, ways: int, context: int = 0,
+         labels: Sequence[str] = (), questions: int, askings: int, context: int = 0,
          served: bool) -> ModelEstimate:
     got = measured(kept, model=model, labels=labels, context=context)
     if got is not None:
         per, load, source = got
         load_s = (GUESS_LOAD_S if load is None else load) if served else 0.0
-        return ModelEstimate(name, questions, ways, per, load_s, source)
+        return ModelEstimate(name, questions, askings, per, load_s, source)
     per, source = guessed(model)
-    return ModelEstimate(name, questions, ways, per, GUESS_LOAD_S if served else 0.0,
+    return ModelEstimate(name, questions, askings, per, GUESS_LOAD_S if served else 0.0,
                          source, guessed=True)
 
 
@@ -217,15 +217,15 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         for wanted in getattr(args, "serve", None) or []:
             model = str(hub.located(wanted, loose=True) or wanted)
             stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
-            ways = len(_asked(args, halves(args, f"{wanted} {model}")))
+            askings = len(_asked(args, halves(args, f"{wanted} {model}")))
             models.append(_one(kept, name=stem, model=model, labels=[stem], questions=q,
-                               ways=ways, context=context, served=True))
+                               askings=askings, context=context, served=True))
         for one in getattr(args, "on", None) or []:
             name, _, url = one.partition("=")
             if not name or not url:
                 continue
             models.append(_one(kept, name=name, labels=[name], questions=q,
-                               ways=len(halves(args, name)), served=False))
+                               askings=len(halves(args, name)), served=False))
     elif cmd == "drafts":
         wanted = getattr(args, "model", "")
         model = str(hub.located(wanted, loose=True) or wanted)
@@ -238,7 +238,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
             for length in (lengths if head else [None]):
                 tagged = f"{name}@n{length}" if length is not None else name
                 models.append(_one(kept, name=f"{stem} draft:{tagged}", model=model,
-                                   labels=[f"draft:{tagged}"], questions=q, ways=1,
+                                   labels=[f"draft:{tagged}"], questions=q, askings=1,
                                    context=int(getattr(args, "context", 0) or 0),
                                    served=True))
     elif cmd == "speed":
@@ -271,7 +271,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         q = many * long + (2 if wants_smoke(args) else 0)
         label = str(getattr(args, "label", "") or "")
         models.append(_one(kept, name=label or "the server", labels=[label], questions=q,
-                           ways=1, served=False))
+                           askings=1, served=False))
     elif cmd == "extract":
         from ml_stack.bench.extract import SMOKE_MESSAGES, only
 
@@ -279,24 +279,24 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         model = str(hub.located(serving[0], loose=True) or serving[0]) if serving else ""
         stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
         n = SMOKE_MESSAGES if smoke else int(getattr(args, "sample", 0) or 0)
-        ways = 2 if getattr(args, "twice", False) else 1
+        askings = 2 if getattr(args, "twice", False) else 1
         # an extraction run keeps `model` at its top and its rows are messages
         seen = [float(r.get("seconds") or 0) for one in only(kept)
                 if stem and str(one.get("model") or "") == stem
                 for r in (one.get("rows") or ())]
         name = stem or str(getattr(args, "label", "") or "the server")
         if seen:
-            models.append(ModelEstimate(name, n, ways, sum(seen) / len(seen),
+            models.append(ModelEstimate(name, n, askings, sum(seen) / len(seen),
                                         GUESS_LOAD_S if serving else 0.0,
                                         f"from {len(seen)} earlier messages of {stem}"))
         else:
             per, source = guessed(model)
-            models.append(ModelEstimate(name, n, ways, per, GUESS_LOAD_S if serving else 0.0,
+            models.append(ModelEstimate(name, n, askings, per, GUESS_LOAD_S if serving else 0.0,
                                         source, guessed=True))
     else:                                   # run
         q = _questions(args)
         label = str(getattr(args, "label", "") or "")
         client = str(getattr(args, "client", "") or "")
         models.append(_one(kept, name=label or client or "the server", labels=[label],
-                           questions=q, ways=1, served=False))
+                           questions=q, askings=1, served=False))
     return Estimate(models, ceiling_min=ceiling_min, smoke=smoke)

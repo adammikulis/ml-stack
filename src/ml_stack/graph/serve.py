@@ -299,7 +299,7 @@ class AskRoutes:
 
     ``run``
         The :class:`~ml_stack.serve.Run` this page answers with: the settings its model
-        is served with, the ways it is asked, and the client. Given one, ``client_on_slot()``
+        is served with, the asking, and the client. Given one, ``client_on_slot()``
         leases the server and hands out a slot of it, and ``model_name`` and ``serving_url`` answer
         from it.
     ``asker(question, *, turns, held, stream, emit)``
@@ -977,13 +977,13 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
         from ml_stack.graph.ask import ASKING, converse, converse_stream
 
         client = self.client_on_slot(index=0)
-        ways = {"asking": self.run.asking if self.run is not None else ASKING,
+        asked = {"asking": self.run.asking if self.run is not None else ASKING,
                 "turns": turns, "held": held,
                 "summary": getattr(turns, "summary", None),
                 "recalled": list(getattr(turns, "recalled", ()) or ())}
         if stream:
-            return converse_stream(question, self.graph, client, on_event=emit, **ways)
-        return converse(question, self.graph, client, **ways)
+            return converse_stream(question, self.graph, client, on_event=emit, **asked)
+        return converse(question, self.graph, client, **asked)
 
     def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
         if self.store is None:

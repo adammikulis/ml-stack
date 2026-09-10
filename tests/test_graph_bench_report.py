@@ -55,8 +55,8 @@ def _keep(store, label, *, model="flash.gguf", questions=20, hits=12, seconds=20
 
 @pytest.fixture()
 def store(tmp_path: pathlib.Path) -> str:
-    """One store with two models in it: a flash measured five ways, one of them with a
-    draft head and one of them a smoke run, and a smaller one measured two ways."""
+    """One store with two models in it: a flash measured five askings, one of them with a
+    draft head and one of them a smoke run, and a smaller one measured two askings."""
     where = str(tmp_path / "runs.ladybug")
     _keep(where, "flash-plain", questions=24, hits=18, seconds=240.0)
     _keep(where, "flash-plain-terse", questions=24, hits=15, seconds=180.0)

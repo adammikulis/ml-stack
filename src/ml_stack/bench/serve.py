@@ -210,7 +210,7 @@ class DraftDepthIgnored(RuntimeError):
 def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
            label: str = "", binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
-           ways: Sequence[Mapping[str, Any]] = (),
+           askings: Sequence[Mapping[str, Any]] = (),
            serve_timeout: float = 900.0,
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            trace: bool | None = None,
@@ -219,7 +219,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     """Put one model up, ask it the questions, take it down again.
 
     ``run`` is the whole configuration -- a :class:`~ml_stack.serve.Run`: the serving the
-    server is leased in, the ways it is asked, and the client it is asked with. It used to
+    server is leased in, the asking it is asked with, and the client. It used to
     be twenty keyword arguments unpacked here into three destinations, and `tight` went to
     the client once and took an 87G load down with it.
 
@@ -227,7 +227,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     answer -- a peer running a fleet's job records the name the plan gave it. Empty, the
     hostname is written.
 
-    ``smoke`` is the questions to ask first, of every way, on the same load -- two of them
+    ``smoke`` is the questions to ask first, of every asking, on the same load -- two of them
     -- kept, read back, and refused with `SmokeFailed` when every one of them failed. A
     real run does this before its questions unless told not to, and it is done here
     rather than around the call so that the load is paid once: the smoke is the first
@@ -240,13 +240,13 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     One model at a time is not a limitation, it is the point: two servers sharing a GPU
     produce timings that belong to neither.
 
-    ``ways`` asks the *same* server several times, which is most of the saving available
+    ``askings`` asks the *same* server several times, which is most of the saving available
     here. Whether the tools are described briefly, what sampling is used, and whether a
     shortlist is handed over first are questions about the asking and not about the
     serving -- so measuring four of them costs one load and not four. Only a change the
     server itself must be told about, a draft head or a context, needs putting it up
-    again. Each way is ``{"label": ..., "shortlist": ...}`` plus any field of the run --
-    a way of asking, a sampler setting, a ceiling -- laid over it by `Run.over`, which is
+    again. Each asking is ``{"label": ..., "shortlist": ...}`` plus any field of the run --
+    an asking flag, a sampler setting, a ceiling -- laid over it by `Run.over`, which is
     what routes each name to the section that owns it.
 
     ``already(label)`` is the run a way is already kept as, when it is -- `sweep --resume`
@@ -283,7 +283,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
         # a tag beginning with @ joins the name directly, everything else with a dash
         return f"{name}{'' if tag.startswith('@') else '-'}{tag}" + suffix
 
-    every = list(ways) or [{}]
+    every = list(askings) or [{}]
     if already is not None:
         todo = []
         for way in every:
@@ -441,7 +441,7 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
                 out += bench.served(
                     drafted_by(run, head).over(draft_n_max=max(depths)), questions, graph,
                     label=f"draft:{name}", needs_draft_depth=shared is None,
-                    ways=[{"label": f"@n{d}", "spec_draft_max": d} for d in depths],
+                    askings=[{"label": f"@n{d}", "spec_draft_max": d} for d in depths],
                     **each)
                 shared = True
                 continue

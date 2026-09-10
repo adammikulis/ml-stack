@@ -63,7 +63,7 @@ def day(tmp_path: Path) -> Path:
          "argv: sweep --serve models/quill.gguf --also terse\n"
          f"started: {FINISHED}\n"
          "commit: 0f1e2d3 (dirty)\n"
-         "estimate: 2h 15m for 2 ways x 1 model\n"
+         "estimate: 2h 15m for 2 askings x 1 model\n"
          "    up in 12s\n"
          "   4.1s   2 calls  who runs the workshop\n"
          "  11.9s   3 calls  which team owns the glasshouse\n"
@@ -207,7 +207,7 @@ def test_runs_as_a_module(day: Path):
 
 @pytest.mark.parametrize("text, seconds", [
     ("2h 15m", 8100.0), ("90s", 90.0), ("1.5h", 5400.0), ("~600", 600.0),
-    ("about 40 min, 2 ways", 2400.0), ("no number here", None),
+    ("about 40 min, 2 askings", 2400.0), ("no number here", None),
 ])
 def test_an_estimate_line_is_read_in_any_of_the_shapes_it_is_printed_in(text, seconds):
     assert bh.parse_duration(text) == seconds

@@ -389,7 +389,7 @@ def selfcheck(argv: Sequence[str]) -> str:
     """Drive ``ml-stack-bench argv`` through the whole path with no server and no GPU.
 
     The exact subcommand and flags given, with the model, the server and the machine
-    faked and everything else real: the ways are built, the spec is built, the real
+    faked and everything else real: the askings are built, the spec is built, the real
     preflight runs over it (its readers faked, its checks and its argv not), what
     `start()` does before `Popen` is done to it, every client is constructed as the run
     would construct it, two questions are asked of

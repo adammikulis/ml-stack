@@ -1,4 +1,4 @@
-"""The ways a question is asked: one record, and what each caller of `converse` takes."""
+"""How a question is asked: one record, and what each caller of `converse` takes."""
 
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ class Asking:
 
     @classmethod
     def for_model(cls, model: str, *, workload: str = "") -> Asking:
-        """The way a named model measured best at ``workload`` -- the graph asking when
-        none is named -- or the default way when nothing measured it."""
+        """The asking a named model scored best with at ``workload`` -- the graph asking
+        when none is named -- or the default when nothing measured it."""
         from ml_stack.serve.profile import profile_for
 
         found = profile_for(str(model), workload=workload)
@@ -44,13 +44,13 @@ class Asking:
         return {"asking": self, "cite": bool(self.cite)}
 
     def said(self) -> dict[str, Any]:
-        """The way itself, in the words the bench keeps beside its rows: ``summary`` under
-        its own name, ``terse`` said outright, and nothing that was not asked for."""
+        """The asking itself, in the words the bench keeps beside its rows: ``summary``
+        under its own name, ``terse`` said outright, and nothing that was not asked for."""
         out: dict[str, Any] = {"tight": bool(self.tight), "terse": bool(self.terse)}
-        for way in ("rich", "batch", "kinds", "summary", "single", "few", "cite",
-                    "constrain_ids"):
-            if getattr(self, way):
-                out[way] = True
+        for flag in ("rich", "batch", "kinds", "summary", "single", "few", "cite",
+                     "constrain_ids"):
+            if getattr(self, flag):
+                out[flag] = True
         if self.reach:
             out["reach"] = int(self.reach)
         if self.rounds:

@@ -69,7 +69,7 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
     assert (got.batch, got.kinds, got.summary, got.rounds) == (True, True, True, 6)
     assert got.questions == 100 and "predates asking records" in got.note
 
-    # a run that does record its asking is taken as it is, even when that means fewer ways
+    # a run that does record its asking is taken as it is, even when that means fewer askings
     save(store, scored_rows("flash--bare", questions=100, hits=82, seconds=2600.0),
          held={"graph": invented_digest(), "model": "flash.gguf"},
          asking={"tight": True, "batch": False, "kinds": False, "summary": False})
@@ -80,7 +80,7 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
 
 
 def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
-    """One model measured two ways writes two records, and neither overwrites the other."""
+    """One model measured two askings writes two records, and neither overwrites the other."""
     from ml_stack.bench.report import write_profiles
     from ml_stack.serve.profile import profile_for, records_in
 

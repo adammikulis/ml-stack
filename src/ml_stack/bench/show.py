@@ -147,9 +147,9 @@ def serving_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
 # The asking, in the order it is thought about: what the tools looked like, then what the
 # model was allowed to do with them. `tight` is the default asking now, so it says nothing
 # and its absence -- `loose` -- says everything.
-# (`report` has a `WAYS` of its own, the words a *label* can carry; this is the record's
+# (`report` has a `FLAGS` of its own, the words a *label* can carry; this is the record's
 # flags in the order a serving names them, and the two must not share a name in `bench`.)
-SHOWN_WAYS = (("terse", "terse"), ("rich", "rich"), ("batch", "batch"),
+SHOWN_FLAGS = (("terse", "terse"), ("rich", "rich"), ("batch", "batch"),
               ("single", "single"), ("few", "few"),
               ("kinds", "kinds"), ("summary", "summary"), ("constrain_ids", "ids"))
 
@@ -162,7 +162,7 @@ def asked_as(one: Mapping[str, Any]) -> str:
     `batch` because somebody typed it rather than because anything did. ``-`` for a run
     kept before the record existed: not recorded is not "asked plainly".
 
-    Only what differs from the plain asking is named, so a way shows what a person chose.
+    Only what differs from the plain asking is named, so it shows what a person chose.
     A run that chose nothing reads ``tight``, which is the plain asking said out loud, and
     is how a plain run is told from one that kept no record at all.
     """
@@ -172,7 +172,7 @@ def asked_as(one: Mapping[str, Any]) -> str:
     bits = []
     if not asking.get("tight", True):
         bits.append("+loose")
-    for key, name in SHOWN_WAYS:
+    for key, name in SHOWN_FLAGS:
         if asking.get(key):
             bits.append(f"+{name}")
     reach = int(asking.get("reach") or 0)

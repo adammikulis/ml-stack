@@ -799,11 +799,11 @@ def test_a_run_asks_the_way_the_flags_said_and_writes_it_down(tmp_path, monkeypa
     asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
                      + "\n")
     kept = tmp_path / "runs.ladybug"
-    ways = []
+    askings = []
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        ways.append(kw["how"])
+        askings.append(kw["how"])
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -812,7 +812,7 @@ def test_a_run_asks_the_way_the_flags_said_and_writes_it_down(tmp_path, monkeypa
                         "--client", "fake:client", "--no-smoke",
                         "--reach", "8000", "--rounds", "20"]) == 0
     capsys.readouterr()
-    assert ways == [Asking(reach=8000, rounds=20)]
+    assert askings == [Asking(reach=8000, rounds=20)]
     back = {r["label"]: r for r in runs(kept)}
     assert back["measured-that-way"]["asking"]["reach"] == 8000
     assert back["measured-that-way"]["asking"]["rounds"] == 20
@@ -1058,12 +1058,12 @@ def test_the_ranking_breaks_an_accuracy_tie_by_what_was_made_up():
 def test_rich_is_asked_for_the_way_terse_is():
     from argparse import Namespace
 
-    from ml_stack.bench import _ways
+    from ml_stack.bench import _askings
 
-    ways = _ways(Namespace(also=["rich"], terse=False, temperature=0.0))
-    assert ways[1]["label"] == "rich" and ways[1]["rich"] is True
-    assert ways[1]["temperature"] == 0.0, "the run's sampling, as terse carries it"
-    assert "rich" not in ways[0], "the first way is what was asked for, unchanged"
+    askings = _askings(Namespace(also=["rich"], terse=False, temperature=0.0))
+    assert askings[1]["label"] == "rich" and askings[1]["rich"] is True
+    assert askings[1]["temperature"] == 0.0, "the run's sampling, as terse carries it"
+    assert "rich" not in askings[0], "the first way is what was asked for, unchanged"
 
 
 def test_rich_reaches_converse_on_the_asking(monkeypatch):
@@ -1760,7 +1760,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
                      + "\n")
     kept = tmp_path / "runs.ladybug"
 
-    # two of three ways kept today at this context and slot count, one question each
+    # two of three askings kept today at this context and slot count, one question each
     row = a_row("who works on compilers?", expected=["topic:compiler"], shown=["topic:compiler"])
     for label in ("tiny-plain", "tiny-plain-terse"):
         row.label = label
@@ -2255,8 +2255,8 @@ def test_halves_and_the_ways_they_cross():
         == [("plain", 0), ("shortlist", 8)]
     assert halves(Namespace(plain_only=True, shortlist_for="e2b", shortlist=8), "e2b") \
         == [("plain", 0)]
-    ways = _asked(args, halves(args, "e2b"))
-    assert [(w["label"], w["shortlist"], w["terse"]) for w in ways] == [
+    askings = _asked(args, halves(args, "e2b"))
+    assert [(w["label"], w["shortlist"], w["terse"]) for w in askings] == [
         ("plain", 0, False), ("plain-terse", 0, True),
         ("shortlist", 8, False), ("shortlist-terse", 8, True)]
 
@@ -2761,17 +2761,17 @@ def test_loose_is_asked_for_the_way_rich_is_and_tight_asks_for_nothing_new(capsy
     and says so rather than paying for the same run twice."""
     from argparse import Namespace
 
-    from ml_stack.bench import _parser, _ways
+    from ml_stack.bench import _askings, _parser
 
-    ways = _ways(Namespace(also=["loose"], terse=False, temperature=0.0))
-    assert ways[1]["label"] == "loose" and ways[1]["tight"] is False
-    assert ways[1]["temperature"] == 0.0, "the run's sampling, as rich carries it"
-    assert "tight" not in ways[0], "the first way is what was asked for, unchanged"
+    askings = _askings(Namespace(also=["loose"], terse=False, temperature=0.0))
+    assert askings[1]["label"] == "loose" and askings[1]["tight"] is False
+    assert askings[1]["temperature"] == 0.0, "the run's sampling, as rich carries it"
+    assert "tight" not in askings[0], "the first way is what was asked for, unchanged"
     assert _parser().parse_args(["run", "x", "--also", "loose"]).also == ["loose"]
 
     capsys.readouterr()
-    assert _ways(Namespace(also=["tight"], terse=False, temperature=0.0)) == \
-        _ways(Namespace(also=[], terse=False, temperature=0.0)), "no second run to pay for"
+    assert _askings(Namespace(also=["tight"], terse=False, temperature=0.0)) == \
+        _askings(Namespace(also=[], terse=False, temperature=0.0)), "no second run to pay for"
     said = capsys.readouterr().err
     assert "tight is the default asking now" in said and "--also loose" in said
     assert _parser().parse_args(["run", "x", "--also", "tight"]).also == ["tight"]
@@ -2809,7 +2809,7 @@ def test_also_loose_reaches_the_serving_seam_as_tight_false(tmp_path, monkeypatc
 
 def test_tight_reaches_converse_on_the_asking(monkeypatch):
     """`tight` is a field of `converse`'s `Asking`; this only has to hand the record on --
-    both ways, which is the whole of `--also loose` -- and hand the terse set in already
+    both askings, which is the whole of `--also loose` -- and hand the terse set in already
     told, since that set is built here rather than chosen inside."""
     import ml_stack.graph.ask as ask_module
     from ml_stack.graph.ask import TERSE, TIGHT_SHOW_TERSE
@@ -2878,10 +2878,10 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
-    ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
+    askings = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
             {"label": "reach", "reach": 8000}]
     bench.served(Run(serving=Serving(model="tiny.gguf")), [{"q": "who?", "expect": []}],
-                 {"nodes": [], "edges": []}, ways=ways, kept="")
+                 {"nodes": [], "edges": []}, askings=askings, kept="")
     assert len(built) == 4, "one strict client per way, none refused"
 
 
@@ -2893,16 +2893,16 @@ def test_reach_is_a_way_of_its_own_and_also_a_setting_on_every_way(capsys):
     `--reach N` is "how fat", which is not a variant at all: it rides on every way asked."""
     from argparse import Namespace
 
-    from ml_stack.bench import _parser, _ways
+    from ml_stack.bench import _askings, _parser
     from ml_stack.bench.run import REACH
 
-    ways = _ways(Namespace(also=["reach"], terse=False, temperature=0.0, reach=0))
-    assert "reach" not in ways[0], "the first way is what was asked for, unchanged"
-    assert ways[1] == {"label": "reach", "terse": False, "reach": REACH, "temperature": 0.0}
+    askings = _askings(Namespace(also=["reach"], terse=False, temperature=0.0, reach=0))
+    assert "reach" not in askings[0], "the first way is what was asked for, unchanged"
+    assert askings[1] == {"label": "reach", "terse": False, "reach": REACH, "temperature": 0.0}
 
-    every = _ways(Namespace(also=["loose"], terse=False, temperature=0.0, reach=2500))
+    every = _askings(Namespace(also=["loose"], terse=False, temperature=0.0, reach=2500))
     assert [w["reach"] for w in every] == [2500, 2500], "a setting, not a variant"
-    both = _ways(Namespace(also=["reach"], terse=False, temperature=0.0, reach=2500))
+    both = _askings(Namespace(also=["reach"], terse=False, temperature=0.0, reach=2500))
     assert both[1]["reach"] == 2500, "asked for a size, that is the size measured"
 
     assert _parser().parse_args(["run", "x", "--also", "reach"]).also == ["reach"]
@@ -3592,7 +3592,7 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
                                                                                     monkeypatch):
     """The newest run of that model at this context, over a newer one at another: a model
     at 8k answers faster than the same model at 32k, and the `ctx` column exists because
-    the two are not the same measurement. Times the questions, the ways and a load."""
+    the two are not the same measurement. Times the questions, the askings and a load."""
     import ml_stack.bench as bench
     from ml_stack.bench import estimate, history
 
@@ -3609,9 +3609,9 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
     got = estimate(args, kept)
     assert len(got.models) == 1
     one = got.models[0]
-    assert (one.questions, one.ways, one.per_question, one.load_s) == (12, 4, 65.0, 41.6)
+    assert (one.questions, one.askings, one.per_question, one.load_s) == (12, 4, 65.0, 41.6)
     assert not one.guessed
-    assert one.line() == ("estimate: 53 min (quill 12 q × 4 ways × 65 s/q + load 42 s; "
+    assert one.line() == ("estimate: 53 min (quill 12 q × 4 askings × 65 s/q + load 42 s; "
                           "from quill-plain kept 2026-09-01T12:00:00 at 32k)")
     assert got.seconds == pytest.approx(12 * 4 * 65 + 41.6)
     assert got.over and got.ceiling_min == 30
@@ -3627,7 +3627,7 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
                                        "lantern=http://127.0.0.1:1", "--plain-only",
                                        "--questions", _twelve(tmp_path)])
     got = estimate(args, kept)
-    assert [(m.name, m.questions, m.ways, m.load_s) for m in got.models] == [
+    assert [(m.name, m.questions, m.askings, m.load_s) for m in got.models] == [
         ("quill", 14, 1, 41.6), ("lantern", 14, 1, 0.0)]
     assert got.models[1].per_question == 9.0 and not got.models[1].guessed
     assert got.lines()[-1] == "estimate: 18 min in all for 2 models"
@@ -3650,7 +3650,7 @@ def test_a_model_with_no_run_kept_is_guessed_from_its_weights_and_the_line_says_
     assert by_size.guessed and by_size.per_question == pytest.approx(2.1)
     assert by_size.load_s == 30.0 and "a guess from 2.8G of weights" in by_size.line()
     assert unknown.guessed and unknown.per_question == 15.0
-    assert unknown.line() == ("estimate: 2 min (absent 4 q × 1 way × 15 s/q + load 30 s; a "
+    assert unknown.line() == ("estimate: 2 min (absent 4 q × 1 asking × 15 s/q + load 30 s; a "
                               "guess, no run of it kept and no weights on disk to size it by)")
     assert unknown.seconds == 90.0, "and 90 s reads as 2 min, the shape history reads"
     assert got.lines()[-1] == "estimate: 2 min in all for 2 models, 2 guessed with no run kept"
@@ -3673,16 +3673,16 @@ def test_every_measuring_subcommand_estimates_its_own_shape(tmp_path, monkeypatc
         ("tiny draft:none", 7, 30.0)]
     talk = estimate(parse(["concurrent", "four-by-three", "--conversations", "4", "--turns",
                            "3", "--no-smoke", "--ceiling", "1"]), [])
-    assert [(m.name, m.questions, m.ways, m.load_s) for m in talk.models] == [
+    assert [(m.name, m.questions, m.askings, m.load_s) for m in talk.models] == [
         ("four-by-three", 12, 1, 0.0)]
     assert talk.over and talk.ceiling_min == 1.0
     reading = estimate(parse(["extract", "read", "--world", str(tmp_path), "--serve",
                               "tiny.gguf", "--sample", "10", "--twice"]), [])
-    assert [(m.name, m.questions, m.ways, m.load_s) for m in reading.models] == [
+    assert [(m.name, m.questions, m.askings, m.load_s) for m in reading.models] == [
         ("tiny", 10, 2, 30.0)]
     alone = estimate(parse(["run", "plain", "--client", "fake:client", "--no-smoke",
                             "--questions", _twelve(tmp_path)]), [])
-    assert [(m.name, m.questions, m.ways, m.load_s) for m in alone.models] == [
+    assert [(m.name, m.questions, m.askings, m.load_s) for m in alone.models] == [
         ("plain", 12, 1, 0.0)]
     smoke = estimate(parse(["sweep", "--serve", "huge.gguf", "--also", "terse", "--also",
                             "rich", "--smoke", "--ceiling", "0.01"]), [])
@@ -3705,7 +3705,7 @@ def test_main_refuses_over_the_ceiling_with_exit_5_and_serves_nothing_unless_yes
             "--no-selfcheck", "--ceiling", "0.5"]
     assert bench.main(argv) == 5
     said = capsys.readouterr()
-    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q × 1 way × 15 s/q "
+    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q × 1 asking × 15 s/q "
                                                "+ load 30 s; a guess")
     assert said.out.splitlines()[1] == ("estimate: 45 s in all for 1 model, 1 guessed with "
                                         "no run kept (over the ceiling)")
@@ -3754,7 +3754,7 @@ def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detache
     assert bench.main(argv) == 5
     said = capsys.readouterr()
     assert started == [] and not (tmp_path / "home" / "measuring.json").exists()
-    assert said.out.startswith("estimate: 4 min (tiny 12 q × 1 way × 15 s/q + load 30 s;")
+    assert said.out.startswith("estimate: 4 min (tiny 12 q × 1 asking × 15 s/q + load 30 s;")
     assert "over the 1 min ceiling" in said.err
 
     assert bench.main([*argv, "--yes"]) == 0
@@ -3792,7 +3792,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     monkeypatch.setattr(bench, "served",
                         lambda run, *a, **k: seen.append(
                             (k.get("label"), run.serving.draft, run.serving.spec_type,
-                             run.serving.draft_n_max, k.get("ways"))) or [])
+                             run.serving.draft_n_max, k.get("askings"))) or [])
     bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
                  {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=True)
     assert [row[:4] for row in seen] == [("draft:none", "", "", None),
@@ -4162,16 +4162,16 @@ def test_the_three_askings_of_2026_09_02_are_ways_and_not_loads():
     one model load and not four -- which is the whole point of `--also`."""
     from argparse import Namespace
 
-    from ml_stack.bench import _parser, _ways
+    from ml_stack.bench import _askings, _parser
 
-    ways = _ways(Namespace(also=["batch", "kinds", "summary"], terse=False,
+    askings = _askings(Namespace(also=["batch", "kinds", "summary"], terse=False,
                            temperature=0.0, reach=0))
-    assert [w.get("label") for w in ways] == [None, "batch", "kinds", "summary"]
-    assert ways[0] == {"terse": False, "temperature": 0.0}, \
+    assert [w.get("label") for w in askings] == [None, "batch", "kinds", "summary"]
+    assert askings[0] == {"terse": False, "temperature": 0.0}, \
         "the first way is what was asked for, unchanged"
-    assert ways[1] == {"label": "batch", "terse": False, "batch": True, "temperature": 0.0}
-    assert ways[2] == {"label": "kinds", "terse": False, "kinds": True, "temperature": 0.0}
-    assert ways[3] == {"label": "summary", "terse": False, "summary": True,
+    assert askings[1] == {"label": "batch", "terse": False, "batch": True, "temperature": 0.0}
+    assert askings[2] == {"label": "kinds", "terse": False, "kinds": True, "temperature": 0.0}
+    assert askings[3] == {"label": "summary", "terse": False, "summary": True,
                        "temperature": 0.0}
     for name in ("batch", "kinds", "summary"):
         assert _parser().parse_args(["sweep", "--serve", "x", "--also", name]).also == [name]
@@ -4251,12 +4251,12 @@ def test_batch_kinds_and_summary_reach_converse_on_the_asking(monkeypatch):
 
 
 def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypatch):
-    from ml_stack.bench.run import _ways as ways
+    from ml_stack.bench.run import _askings as askings
 
     args = type("A", (), {"also": ["rich"], "terse": False, "batch": True, "kinds": True,
                           "summary": False, "reach": 0, "temperature": None, "top_p": None,
                           "top_k": None, "min_p": None})()
-    got = ways(args)
+    got = askings(args)
     assert all(w.get("batch") is True and w.get("kinds") is True for w in got)
     assert all("summary" not in w for w in got)
 
@@ -4271,23 +4271,23 @@ def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypa
 def test_single_and_few_are_ways_and_rounds_rides_on_every_one_of_them():
     from argparse import Namespace
 
-    from ml_stack.bench import _parser, _ways
+    from ml_stack.bench import _askings, _parser
 
-    ways = _ways(Namespace(also=["batch", "single", "few"], terse=False,
+    askings = _askings(Namespace(also=["batch", "single", "few"], terse=False,
                            temperature=0.0, reach=0, rounds=0))
-    assert [w.get("label") for w in ways] == [None, "batch", "single", "few"]
-    assert ways[2] == {"label": "single", "terse": False, "single": True,
+    assert [w.get("label") for w in askings] == [None, "batch", "single", "few"]
+    assert askings[2] == {"label": "single", "terse": False, "single": True,
                        "temperature": 0.0}
-    assert ways[3] == {"label": "few", "terse": False, "few": True, "temperature": 0.0}
+    assert askings[3] == {"label": "few", "terse": False, "few": True, "temperature": 0.0}
     for name in ("single", "few"):
         assert _parser().parse_args(["sweep", "--serve", "x", "--also", name]).also == [name]
 
     # `--rounds N` is not a way of its own: it is what every way's questions may spend,
     # exactly as `--reach` is what every way's tool results may carry
-    every = _ways(Namespace(also=["single", "few"], terse=False, temperature=0.0,
+    every = _askings(Namespace(also=["single", "few"], terse=False, temperature=0.0,
                             reach=0, rounds=20))
     assert all(w.get("rounds") == 20 for w in every)
-    assert all("rounds" not in w for w in ways), "and absent when nobody asked"
+    assert all("rounds" not in w for w in askings), "and absent when nobody asked"
     assert _parser().parse_args(["sweep", "--serve", "x", "--rounds", "20"]).rounds == 20
     assert _parser().parse_args(["run", "a-label", "--rounds", "6"]).rounds == 6
 
@@ -4765,16 +4765,16 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
     from argparse import Namespace
 
     import ml_stack.graph.ask as ask_module
-    from ml_stack.bench import _parser, _ways, asked_as, asking
-    from ml_stack.bench.run import _ways as ways
+    from ml_stack.bench import _askings, _parser, asked_as, asking
+    from ml_stack.bench.run import _askings as askings
 
     assert _parser().parse_args(["sweep", "--serve", "x", "--constrain-ids"]).constrain_ids
     assert not _parser().parse_args(["sweep", "--serve", "x"]).constrain_ids
     args = Namespace(also=["batch"], terse=False, constrain_ids=True, reach=0,
                      temperature=None, top_p=None, top_k=None, min_p=None)
-    assert all(w.get("constrain_ids") is True for w in ways(args))
+    assert all(w.get("constrain_ids") is True for w in askings(args))
     assert all("constrain_ids" not in w
-               for w in _ways(Namespace(also=["batch"], terse=False, temperature=0.0)))
+               for w in _askings(Namespace(also=["batch"], terse=False, temperature=0.0)))
 
     reached = {}
 

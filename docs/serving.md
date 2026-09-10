@@ -183,7 +183,7 @@ answer = converse(question, graph, client, asking=run.asking)
 
 `Profile.run()` is a **`Run`**: the whole configuration in one object, in three sections
 that different code reads. `run.serving` is the `Serving` the server is leased with, `run.asking`
-is an `Asking` — the ways `converse` is called with — and `run.talking` is a `Talking`, what
+is an `Asking` — how `converse` is called — and `run.talking` is a `Talking`, what
 the `Client` is built from. `run.lease()`, `run.asking` and `run.client()` are the only
 places each becomes arguments, and `run.over(cache_type="f16", few=True, temperature=0.7)`
 lays a knob over it, routed to the section that owns it rather than to whichever call takes

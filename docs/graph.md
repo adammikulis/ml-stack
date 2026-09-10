@@ -142,7 +142,7 @@ not search survives `few` — `show`, and a caller's own change request — beca
 choice between ways to look. `Asking(rounds=N)` is the ceiling those two trade
 against: `--rounds N` rides on every way a sweep asks, the way `--reach` does.
 
-**One asking per model.** These ways exist to be *chosen per model by measurement*, never
+**One asking per model.** These flags exist to be *chosen per model by measurement*, never
 picked once and applied to everything. Flash-Next wants batch, kinds and summary together;
 a 2B that loses the thread of a long result wants `single` and more rounds; a model whose
 tool choice degrades with the offer wants `few` and more rounds still — and which is which

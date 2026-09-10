@@ -115,13 +115,13 @@ def test_the_self_check_is_fast_enough_to_run_every_time():
 # -- and fails when the asking is broken -------------------------------------------------------------
 
 def _broken_ways(monkeypatch):
-    """`_ways` with one more: a way carrying a keyword the client does not take."""
-    real = bench._ways
+    """`_askings` with one more: a way carrying a keyword the client does not take."""
+    real = bench._askings
 
     def with_a_bad_one(args):
         return [*real(args), {"label": "bad", "nonsense": True}]
 
-    monkeypatch.setattr(bench, "_ways", with_a_bad_one)
+    monkeypatch.setattr(bench, "_askings", with_a_bad_one)
 
 
 def test_a_way_the_client_does_not_take_fails_the_self_check_naming_the_keyword(monkeypatch):

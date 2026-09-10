@@ -87,7 +87,7 @@ def workload_named(name: str) -> str:
 # other way: how much one read carries, and how many tools there are to choose between.
 # Nothing here is a default -- a record says what *this* model measured, and two records
 # disagreeing about every one of these is the intended outcome, not a mistake.
-WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
+FLAGS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
         "constrain_ids")
 
 # The sampler settings a record keeps, and what each is called when it is read out. In the
@@ -208,11 +208,11 @@ class Profile:
                      extra_args=tuple(self.extra_args), note=note)
 
     def asked(self) -> Any:
-        """The ways this record measured, as an :class:`~ml_stack.graph.Asking`: every one
-        of `WAYS`, ``terse`` included, plus ``reach`` and ``rounds``."""
+        """The asking this record measured, as an :class:`~ml_stack.graph.Asking`: every
+        one of `FLAGS`, ``terse`` included, plus ``reach`` and ``rounds``."""
         from ml_stack.graph.asking import Asking
 
-        return Asking(**{way: bool(getattr(self, way)) for way in WAYS},
+        return Asking(**{flag: bool(getattr(self, flag)) for flag in FLAGS},
                       reach=self.reach, rounds=self.rounds)
 
     def talking(self, *, n_predict: int = 16384, timeout: float = 300.0) -> Any:
@@ -238,7 +238,7 @@ class Profile:
     def run(self, *, port: int = 8080, slots: int | None = None, model: str = "",
             resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
         """This record whole, as a :class:`~ml_stack.serve.Run`: how to serve it,
-        the ways to ask it, and the client to ask it with.
+        the asking to ask it with, and the client.
 
         One object built once and handed on, so a bench row, a page answer and a client on a
         slot of this model are the same lease and the same asking. ``port``, ``slots``,
@@ -267,7 +267,7 @@ class Profile:
         request: dict[str, Any] = {"spec_draft_max": self.spec_draft_max,
                                    "spec_p_min": self.spec_p_min,
                                    "sampling": dict(self.sampling)}
-        ask: dict[str, Any] = {**{way: bool(getattr(self, way)) for way in WAYS},
+        ask: dict[str, Any] = {**{flag: bool(getattr(self, flag)) for flag in FLAGS},
                                "reach": self.reach, "rounds": self.rounds}
         measured = {"measured_at": self.measured_at, "label": self.label,
                     "questions": self.questions, "right": self.right,
@@ -618,9 +618,9 @@ def _sampled(sampling: Mapping[str, Any] | None) -> str:
     return "at " + " / ".join(parts) if parts else ""
 
 
-def _ways(profile: Profile) -> str:
+def _asking_said(profile: Profile) -> str:
     """The asking line, as the words the bench and `converse` both use."""
-    said = [way.replace("_", "-") for way in WAYS if getattr(profile, way)]
+    said = [flag.replace("_", "-") for flag in FLAGS if getattr(profile, flag)]
     if not profile.tight:
         said.insert(0, "loose")
     if profile.reach is not None:
@@ -653,7 +653,7 @@ def said(profile: Profile) -> str:
     measured.
 
     A few lines and no table. A person asking `ml-stack-serve profile MODEL` is about to
-    serve it, and what they need is the workload, the flags, the ways, and enough of the
+    serve it, and what they need is the workload, the flags, the asking, and enough of the
     provenance to know whether to believe them.
     """
     lines = [profile.model,
@@ -672,7 +672,7 @@ def said(profile: Profile) -> str:
     if asked:
         lines.append(f"  per request {asked} -- sent with each call, where the build "
                      f"takes it")
-    lines.append(f"  ask with    {_ways(profile)}")
+    lines.append(f"  ask with    {_asking_said(profile)}")
     if profile.questions:
         lines.append(
             f"  measured    {profile.right * 100:.0f}% F1 "

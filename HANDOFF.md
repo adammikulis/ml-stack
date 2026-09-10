@@ -24,8 +24,6 @@ Words this library coined that a reader has to learn before the code means anyth
 if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
 across `src/`.
 
-- [ ] **`ways`, `the way` as a noun for configuration (276).** "every way of asking, in one
-  record" names nothing. Mostly `graph/ask.py`, `graph/asking.py`, `serve/serving.py`.
 - [ ] **`Run` (208).** Not an execution -- a model plus how to serve, ask and talk to it.
   The name points at the wrong thing.
 - [ ] **`held` as a variable name (989).** Says only that something was assigned. Rename to

@@ -57,14 +57,14 @@ from ml_stack.log import say, warn
 from ml_stack.serve.profile import ASK
 from ml_stack.units import human_bytes
 
-__all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
+__all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "FLAGS", "across", "answering", "asking_of",
            "best_extractor", "by_model", "cache_of", "extract_model_of",
            "extractions", "fit_for", "fits_named", "measured_best", "model_of",
            "profile_of", "read_messages", "recommended_head", "report", "thinking_of",
-           "ways_of", "workload_of", "write_profiles"]
+           "flags_of", "workload_of", "write_profiles"]
 
 
-# The words a sweep puts in a label for the way it asked (`bench.halves`, `bench._ways`).
+# The words a sweep puts in a label for how it asked (`bench.halves`, `bench._askings`).
 # ``shortlist`` is here beside ``plain`` although it is a half rather than a way: without
 # it `shortlist-terse` and `plain-terse` read as the same row, which is two measurements
 # printed as one -- the mistake every column in `show`'s table exists to prevent.
@@ -294,13 +294,13 @@ def fit_for(model: str, fits: Sequence[Any]) -> Any | None:
 
 # Every word a label can carry about the asking, and what it means to `converse`. Wider
 # than `ASKINGS`, which is only what the tables print: `batch`, `kinds` and `summary` ride
-# on a way rather than naming one, and a profile has to carry them or a model measured with
+# on an asking rather than naming one, and a profile has to carry them or a model measured with
 # all three would be served with none.
-WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
+FLAGS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
         "constrain_ids", "reach", "rounds")
 
 
-def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
+def flags_of(one: Mapping[str, Any]) -> dict[str, Any]:
     """The asking a run records, as the fields of a profile.
 
     A run kept since `asked_with` carries ``asking`` -- the keywords `converse` was actually
@@ -426,7 +426,7 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
               f"{int(got.get('questions') or 0)} question(s) at "
               f"{float(got.get('right') or 0.0) * 100:.0f}% F1, "
               f"{float(per_question(one)):.1f} s/question"),
-        **ways_of(one))
+        **flags_of(one))
 
 
 def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
@@ -458,15 +458,15 @@ def _written(model: str, workload: str, one: Mapping[str, Any],
     """One record, written from ``one`` into the ``model`` and ``workload`` slot."""
     from dataclasses import replace
 
-    from ml_stack.serve.profile import WAYS, add, profile_for, records_in, writable_file
+    from ml_stack.serve.profile import FLAGS, add, profile_for, records_in, writable_file
 
     made_one = profile_of(model, one)
     if not asked_recorded(one):
-        # a run whose label is all `ways_of` could read keeps the asking the record holds
+        # a run whose label is all `flags_of` could read keeps the asking the record holds
         older = profile_for(model, workload=workload,
                             records=records_in(path or writable_file()))
         if older is not None and older.workload == workload:
-            asked = {way: getattr(older, way) for way in WAYS}
+            asked = {flag: getattr(older, flag) for flag in FLAGS}
             asked.update(reach=older.reach, rounds=older.rounds)
             made_one = replace(made_one, **asked,
                                note=(made_one.note + " -- asked as the record already "

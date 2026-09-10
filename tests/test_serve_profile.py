@@ -479,24 +479,24 @@ def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
 
 
 def test_the_asking_a_run_recorded_is_taken_over_the_words_in_its_label():
-    from ml_stack.bench.report import ways_of
+    from ml_stack.bench.report import flags_of
 
     said = {"tight": True, "terse": False, "batch": True, "reach": 8000}
-    assert ways_of({"label": "thornfield--plain", "asking": said}) == {
+    assert flags_of({"label": "thornfield--plain", "asking": said}) == {
         "tight": True, "batch": True, "kinds": False, "summary": False, "rich": False,
         "terse": False, "single": False, "few": False, "constrain_ids": False,
         "reach": 8000}
-    assert ways_of({"label": "thornfield--loose-plain-kinds"}) == {
+    assert flags_of({"label": "thornfield--loose-plain-kinds"}) == {
         "tight": False, "batch": False, "kinds": True, "summary": False, "rich": False,
         "terse": False, "single": False, "few": False, "constrain_ids": False}, \
         "an older run has only its label, read by whole word"
-    # the ways of one asking per model: a record has to carry them or a model measured on
+    # the askings of one asking per model: a record has to carry them or a model measured on
     # three tools and twenty turns would be served with eight and ten
-    assert ways_of({"label": "x", "asking": {"tight": True, "few": True, "single": True,
+    assert flags_of({"label": "x", "asking": {"tight": True, "few": True, "single": True,
                                              "rounds": 20}}) == {
         "tight": True, "batch": False, "kinds": False, "summary": False, "rich": False,
         "terse": False, "single": True, "few": True, "constrain_ids": False, "rounds": 20}
-    assert ways_of({"label": "x", "asking": {"tight": True, "constrain_ids": True}})[
+    assert flags_of({"label": "x", "asking": {"tight": True, "constrain_ids": True}})[
         "constrain_ids"] is True
 
 

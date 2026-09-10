@@ -106,7 +106,7 @@ purpose.
 Every measuring command **estimates itself before it starts** -- after the self-check, before
 a download or the lock -- from what is kept: seconds per question from the newest run of
 each model (at the same context when one is kept there), else a guess from its weights on
-disk, times the questions, the ways one load is asked and the models, plus a load each,
+disk, times the questions, the askings one load is measured with and the models, plus a load each,
 printed as `estimate:` lines that `history` reads back beside the actual. Over `--ceiling`
 minutes (30, or `MLSTACK_BENCH_CEILING`) it refuses with exit 5 and says what to shorten;
 `--yes` runs it anyway, and a `--smoke` is never refused. No more eight-hour tests.
@@ -230,7 +230,7 @@ a flat character cut, `--also batch` asks for every read in one call, `--also si
 for the opposite (one entry a read, more turns), `--also few` offers three tools and no
 other way of looking, `--also kinds` keeps only the kind the question asked for, and `--also
 summary` offers the whole graph at a glance. (`--also tight` is what the first way already
-does, and says so.) `--reach N` and `--rounds N` are not ways of their own: they ride on
+does, and says so.) `--reach N` and `--rounds N` are not askings of their own: they ride on
 every way, as `--batch`, `--kinds` and `--summary` do. There is no asking every model wants,
 which is the point of measuring ten of them on one load — `report --profile` then writes the
 winner into that model's record.

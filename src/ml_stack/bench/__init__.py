@@ -147,7 +147,7 @@ from ml_stack.bench.measure import (  # noqa: F401
 )
 from ml_stack.bench.show import (  # noqa: F401
     AXES,
-    SHOWN_WAYS,
+    SHOWN_FLAGS,
     _shown,
     asked_as,
     at_once,
@@ -211,7 +211,7 @@ from ml_stack.bench.run import (  # noqa: F401
     _parser,
     _run,
     _stop_on_sigterm,
-    _ways,
+    _askings,
     checking,
     detach,
     fleet_jobs,

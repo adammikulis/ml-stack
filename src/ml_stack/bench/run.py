@@ -4,7 +4,7 @@
 `ml-stack-bench` calls -- the self-check and the prefetch before the lock, the lock itself,
 SIGTERM taken as an exit so a served model comes down, and `--detach` re-running the
 command in its own session with `status`, `tail` and `stop` reading the same file. The
-ways one served model is asked (`_ways`, `halves`, `_asked`) and the sampler overrides read
+askings one served model is measured with (`_askings`, `halves`, `_asked`) and the sampler overrides read
 off the command line (`sampling_from`, `with_card`) are here because they read argv.
 """
 
@@ -60,11 +60,11 @@ from ml_stack.serve.serving import DEFAULT_CACHE, SAMPLERS
 from ml_stack.units import human_bytes
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
-# `_ways`: a neighbourhood read whole, which a 256k window does not notice.
+# `_askings`: a neighbourhood read whole, which a 256k window does not notice.
 REACH = 8000
 
 
-def _ways(args: Any) -> list[dict[str, Any]]:
+def _askings(args: Any) -> list[dict[str, Any]]:
     """The askings to make of one served model: what was asked for, plus each --also.
 
     Separating these from the serving is where the time goes. A model load is minutes; an
@@ -146,17 +146,17 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             warn("note: tight is the default asking now; --also tight measures nothing new "
                  "(--also loose is the old asking, as a control)")
     # `--reach`, `--rounds`, `--batch`, `--kinds`, `--summary` and `--constrain-ids` are
-    # not ways of their own: each rides on every way, so the hundred-question run of
-    # "everything that held" is one way and not four.
+    # not askings of their own: each rides on every asking, so the hundred-question run of
+    # "everything that held" is one asking and not four.
     riders: dict[str, Any] = {name: True for name in
                               ("batch", "kinds", "summary", "constrain_ids")
                               if getattr(asked, name)}
     for name in ("reach", "rounds"):
         if getattr(asked, name):
             riders[name] = getattr(asked, name)
-    for way in out:
+    for one in out:
         for name, value in riders.items():
-            way.setdefault(name, value)
+            one.setdefault(name, value)
     return out
 
 
@@ -179,24 +179,24 @@ def halves(args: Any, model: str = "") -> list[tuple[str, int]]:
 
 
 def _asked(args: Any, parts: Sequence[tuple[str, int]]) -> list[dict[str, Any]]:
-    """Every way one served model is asked, both halves in one load: each half of ``parts``
-    crossed with each `_ways` variant, labelled ``plain``, ``plain-terse``, ``shortlist``...
+    """Every asking one served model is measured with, both halves in one load: each half of
+    ``parts`` crossed with each `_askings` variant, labelled ``plain``, ``plain-terse``...
 
     Loading the model once per half was how the sweep began, and a load is minutes that
     say nothing about the asking. Whether a shortlist is handed over is a question about
-    the asking, so it rides on the way like `terse` does and the server is put up once.
+    the asking, so it rides on the asking like `terse` does and the server is put up once.
     """
     out: list[dict[str, Any]] = []
     for suffix, shortlist in parts:
-        for way in bench._ways(args):
-            tag = str(way.get("label", "") or "")
-            out.append({**way, "label": f"{suffix}-{tag}" if tag else suffix,
+        for one in bench._askings(args):
+            tag = str(one.get("label", "") or "")
+            out.append({**one, "label": f"{suffix}-{tag}" if tag else suffix,
                         "shortlist": shortlist})
     return out
 
 
 def asking_from(args: Any) -> Asking:
-    """The ways of asking given on the command line, and nothing else."""
+    """The asking given on the command line, and nothing else."""
     return Asking(terse=bool(getattr(args, "terse", False)),
                   reach=int(getattr(args, "reach", 0) or 0) or None,
                   rounds=int(getattr(args, "rounds", 0) or 0) or None,
@@ -251,7 +251,7 @@ def checking(one: argparse.ArgumentParser) -> argparse.ArgumentParser:
     one.add_argument("--ceiling", type=float, default=ceiling_default(), metavar="MINUTES",
                      help="refuse to start when the estimate -- seconds per question from "
                           "the runs kept of each model, else a guess from its weights, "
-                          "times the questions, the ways and the models, plus a load each "
+                          "times the questions, the askings and the models, plus a load each "
                           "-- is over this many minutes, unless --yes (default: "
                           "%(default)s, or MLSTACK_BENCH_CEILING). A --smoke run is never "
                           "refused. No more eight-hour tests")
@@ -1040,7 +1040,7 @@ def _run(args: Any) -> int:
 
             # The settings that scored best fill every flag this sweep did not set: the head
             # at the length that measured best, the build that loads it, the cache type,
-            # the thinking budget, the raw flags, and the asking ways. Adam: "if a model
+            # the thinking budget, the raw flags, and the asking. Adam: "if a model
             # has a drafting head that speeds it up at some config, always use it at that
             # config (be sure to report it)". --no-profile serves it bare.
             chosen = swept(args, model, measured_run(args, model, head, heads, n),
@@ -1048,7 +1048,7 @@ def _run(args: Any) -> int:
                            head=head if n < len(heads) else None)
             try:
                 bench.served(chosen, questions, graph, label=stem,
-                       ways=_asked(args, parts),
+                       askings=_asked(args, parts),
                        binary=args.binary or "",
                        kept=args.kept,
                        store=args.store or None, embed_url=args.embed_url,
@@ -1614,7 +1614,7 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     sweep's own flags laid over it.
 
     One object rather than twenty keyword arguments, and one place that lays a flag over a
-    record, so the lease `served` takes, the ways it asks with and the client it asks with
+    record, so the lease `served` takes, the asking it asks with and the client it asks with
     cannot say different things. ``context`` is the total across the slots, which is what
     ``-c`` takes; a `Serving` holds it as every slot's share.
 

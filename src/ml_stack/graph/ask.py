@@ -1237,14 +1237,14 @@ def _kind_of(node: Mapping[str, Any]) -> str:
 
 def _singular(word: str) -> tuple[str, ...]:
     """The kind names a word might be asking for: itself, and what it is the plural of."""
-    ways = [word]
+    forms = [word]
     if word.endswith("ies"):
-        ways.append(word[:-3] + "y")
+        forms.append(word[:-3] + "y")
     if word.endswith("es"):
-        ways.append(word[:-2])
+        forms.append(word[:-2])
     if word.endswith("s"):
-        ways.append(word[:-1])
-    return tuple(ways)
+        forms.append(word[:-1])
+    return tuple(forms)
 
 
 def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED,
@@ -1483,7 +1483,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              recalled: Sequence[Any] = ()) -> Answer:
     """One question, answered with the graph in hand.
 
-    ``asking`` is the :class:`~ml_stack.graph.Asking` -- every way of asking, in one
+    ``asking`` is the :class:`~ml_stack.graph.Asking` -- every asking flag, in one
     record; `Asking.for_model` reads a model's measured one.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
