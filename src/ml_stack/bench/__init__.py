@@ -1,29 +1,22 @@
 """What a change to the asking costs and whether it was worth it.
 
 A graph answers questions through a large model, and every tool call it makes is a whole
-round trip. Any change to that — a different prompt, a search run before the model instead of
-by it — has to be shown to be an improvement rather than asserted, on wall clock, on tokens,
-and on whether the answers were right. Runs are kept, so two of them can be compared later.
+round trip. Any change to that -- a different prompt, a search run before the model instead
+of by it -- has to be shown to be an improvement rather than asserted, on wall clock, on
+tokens, and on whether the answers were right. Runs are kept, so two of them can be
+compared later.
 
-One package, one command (``ml-stack-bench``), six modules so that each agent is told
-"touch only this one":
-
-- `keep`: where runs are kept, `save` and the read-back, `SHORT` and `SMOKE`;
-- `score`: F1 per answer, the rates, the baseline a draft head is measured against, the
-  ranking and the export;
-- `measure`: the questions, `asking`, one question through the client with its bill,
-  `measure` and `concurrent`, and what the server costs;
-- `show`: the table, `--detail`, `--rates`, the frontier, the plot, the `drafts` summary;
-- `serve`: a model put up, asked every way on one load, and taken down;
-- `run`: the parser, every subcommand, the lock, `--detach`, `status`/`tail`/`stop`;
-- and beside them `extract` (reading a graph out of messages), `selfcheck` (the dry run
-  `main` makes before the lock), `estimate` (what a run will cost, and the ceiling it is
-  refused over) and `history` (the day, read out of the logs).
+One package, one command (``ml-stack-bench``). `keep` is where runs are kept and `score`
+is what a run is worth; `questions`, `counting`, `measure` and `holding` ask a set of
+questions and count what the server spent on them; `serve`, `run` and `options` put a
+model up and drive the subcommands; `show`, `detail`, `frontier`, `gathered`, `profiles`
+and `report` read the runs back; and `truth`, `folding` and `extract` are the other half
+of the bench, reading a graph out of messages.
 
 This module is the namespace: everything is imported here, and every call between the
 modules to something a test or `selfcheck` patches -- `served`, `measure`, `footprint`,
-`runs`, `home_dir` -- goes through ``bench.<name>`` at call time, so patching it here patches it
-everywhere. ``python -m ml_stack.bench`` is what `detach` re-runs.
+`runs`, `home_dir` -- goes through ``bench.<name>`` at call time, so patching it here
+patches it everywhere. ``python -m ml_stack.bench`` is what `detach` re-runs.
 """
 
 from __future__ import annotations
@@ -47,6 +40,15 @@ from ml_stack.bench.backends import (  # noqa: F401
     served_by,
     timings_of,
 )
+from ml_stack.bench.counting import (  # noqa: F401
+    PER_QUESTION,
+    TRACE_CAP,
+    TRACE_ENV,
+    TRACE_TEXT_CAP,
+    Counting,
+    QuestionTimedOut,
+    wants_trace,
+)
 from ml_stack.bench.detail import (  # noqa: F401
     missed,
     shape,
@@ -65,6 +67,36 @@ from ml_stack.bench.frontier import (  # noqa: F401
     pareto,
     plot,
     rates,
+)
+from ml_stack.bench.gathered import (  # noqa: F401
+    ASKINGS,
+    across,
+    answering,
+    asking_of,
+    by_model,
+    cache_of,
+    fit_for,
+    model_of,
+    recommended_head,
+    thinking_of,
+)
+from ml_stack.bench.holding import (  # noqa: F401
+    SAMPLE_EVERY,
+    Watching,
+    _idle,
+    _Peak,
+    _rusage_footprint,
+    beyond_weights,
+    busy,
+    footprint,
+    footprint_of,
+    machine_memory,
+    process_tree,
+    serving_pids,
+    serving_process,
+    slot_count,
+    watched,
+    watching,
 )
 from ml_stack.bench.keep import (  # noqa: F401
     SHORT,
@@ -85,40 +117,12 @@ from ml_stack.bench.keep import (  # noqa: F401
     stamped,
 )
 from ml_stack.bench.measure import (  # noqa: F401
-    PER_QUESTION,
-    SAMPLE_EVERY,
-    TRACE_CAP,
-    TRACE_ENV,
-    TRACE_TEXT_CAP,
-    Counting,
-    QuestionTimedOut,
-    Watching,
     _ask_once,
-    _how_many,
-    _idle,
-    _Peak,
-    _rusage_footprint,
     ask_from,
     asking,
-    beyond_weights,
-    busy,
     concurrent,
-    filed,
     finding,
-    footprint,
-    footprint_of,
-    machine_memory,
     measure,
-    mix,
-    process_tree,
-    read_questions,
-    sample,
-    serving_pids,
-    serving_process,
-    slot_count,
-    wants_trace,
-    watched,
-    watching,
 )
 from ml_stack.bench.ops import (  # noqa: F401
     Refused,
@@ -140,6 +144,13 @@ from ml_stack.bench.progress import (  # noqa: F401
     stop,
     tail,
 )
+from ml_stack.bench.questions import (  # noqa: F401
+    _how_many,
+    filed,
+    mix,
+    read_questions,
+    sample,
+)
 from ml_stack.bench.record import (  # noqa: F401
     Measured,
     Spread,
@@ -147,19 +158,9 @@ from ml_stack.bench.record import (  # noqa: F401
     prompt_digest,
 )
 from ml_stack.bench.report import (  # noqa: F401
-    ASKINGS,
     Doc,
-    across,
-    answering,
-    asking_of,
-    by_model,
-    cache_of,
-    fit_for,
     fits_named,
-    model_of,
-    recommended_head,
     report,
-    thinking_of,
 )
 from ml_stack.bench.run import (  # noqa: F401
     COMMANDS,
@@ -256,15 +257,73 @@ from ml_stack.bench.underway import (  # noqa: F401
 from ml_stack.graph.vectors import MARGIN, stands_out  # noqa: F401 - imported from here too
 from ml_stack.paths import repo_root  # noqa: F401
 
-__all__ = ["Counting", "Estimate", "Measured", "NOISE", "PER_QUESTION",
-           "QuestionTimedOut", "Row", "SHORT", "SMOKE", "SmokeFailed", "Spread",
-           "prompt_digest", "baseline", "beyond_weights", "choices",
-           "composed", "drafted", "drafted_by", "estimate", "export", "ranking", "ask_from", "asking",
-           "compare", "concurrent", "detach", "empties", "finding", "footprint", "forget",
-           "halves", "home_dir", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
-           "report", "asked_as", "band", "bands", "by_serving", "held_up", "separated",
-           "served_as", "serving_of", "wired_of",
-           "prefix_kept", "prepared", "read_questions", "references_in", "runs", "save",
-           "slot_count", "speedup", "status", "stop", "table", "tail", "transcript",
-           "Watching", "footprint_of", "machine_memory", "serving_process", "watching",
-           "unread_named", "wants_trace"]
+__all__ = [
+    "NOISE",
+    "PER_QUESTION",
+    "SHORT",
+    "SMOKE",
+    "Counting",
+    "Estimate",
+    "Measured",
+    "QuestionTimedOut",
+    "Row",
+    "SmokeFailed",
+    "Spread",
+    "Watching",
+    "ask_from",
+    "asked_as",
+    "asking",
+    "band",
+    "bands",
+    "baseline",
+    "beyond_weights",
+    "by_serving",
+    "choices",
+    "compare",
+    "composed",
+    "concurrent",
+    "detach",
+    "drafted",
+    "drafted_by",
+    "empties",
+    "estimate",
+    "export",
+    "finding",
+    "footprint",
+    "footprint_of",
+    "forget",
+    "halves",
+    "held_up",
+    "home_dir",
+    "kv_short",
+    "machine_memory",
+    "main",
+    "measure",
+    "measuring",
+    "prefetch",
+    "prefix_hits",
+    "prefix_kept",
+    "prepared",
+    "prompt_digest",
+    "ranking",
+    "read_questions",
+    "references_in",
+    "report",
+    "runs",
+    "save",
+    "separated",
+    "served_as",
+    "serving_of",
+    "serving_process",
+    "slot_count",
+    "speedup",
+    "status",
+    "stop",
+    "table",
+    "tail",
+    "transcript",
+    "unread_named",
+    "wants_trace",
+    "watching",
+    "wired_of",
+]

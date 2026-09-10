@@ -168,7 +168,7 @@ class RunNotKept(RuntimeError):
 def _told(row: dict[str, Any]) -> dict[str, Any]:
     """One row as it is kept: its transcript when it has one, and no key when it has not.
 
-    A traced row carries what was said call by call (`bench.measure.Counting.trace`), which
+    A traced row carries what was said call by call (`bench.counting.Counting.trace`), which
     is the field a fine-tune is built from and the only one measured in kilobytes. An
     untraced row carries an empty list, and an empty list in every row of every run is a
     key that says nothing -- so it is dropped, and a run kept before tracing existed and a

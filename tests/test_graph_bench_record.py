@@ -223,7 +223,7 @@ class TestWhatAMeasuredRunKeeps:
                 raw={"usage": {"prompt_tokens": 10, "completion_tokens": 4}})
 
     def test_the_counting_client_digests_what_the_model_was_shown(self):
-        from ml_stack.bench.measure import Counting
+        from ml_stack.bench.counting import Counting
 
         counting = Counting(self._Answering())
         counting.chat([{"role": "system", "content": SYSTEM},

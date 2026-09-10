@@ -479,7 +479,7 @@ def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
 
 
 def test_the_asking_a_run_recorded_is_taken_over_the_words_in_its_label():
-    from ml_stack.bench.report import flags_of
+    from ml_stack.bench.profiles import flags_of
 
     said = {"tight": True, "terse": False, "batch": True, "reach": 8000}
     assert flags_of({"label": "thornfield--plain", "asking": said}) == {
@@ -510,7 +510,7 @@ def test_constrain_ids_is_kept_on_the_record_and_read_out(tmp_path):
     assert "constrain-ids" not in said(record(OTHER))
 
     from ml_stack import bench
-    from ml_stack.bench.report import write_profiles
+    from ml_stack.bench.profiles import write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain", asking={"tight": True, "constrain_ids": True})
@@ -535,7 +535,7 @@ def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_pa
     cheap wrong one does.
     """
     from ml_stack import bench
-    from ml_stack.bench.report import measured_best, write_profiles
+    from ml_stack.bench.profiles import measured_best, write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-batch", right=0.75, n=20, seconds=6.0,
@@ -605,7 +605,7 @@ def test_what_a_person_reads_says_the_sampling_it_was_measured_at(capsys):
 
 
 def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):
-    from ml_stack.bench.report import write_profiles
+    from ml_stack.bench.profiles import write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-kv-q8_0-rb0", cache_type="q8_0")
@@ -848,7 +848,7 @@ def test_two_workloads_are_two_measurements():
 
 
 def test_a_run_with_no_workload_writes_the_graph_asking_record():
-    from ml_stack.bench.report import workload_of
+    from ml_stack.bench.profiles import workload_of
 
     assert workload_of({"label": "a", "server": {}}) == "ask"
     assert workload_of({"label": "a", "workload": "ingest", "server": {}}) == "ingest"

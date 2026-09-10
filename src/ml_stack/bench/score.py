@@ -73,7 +73,7 @@ class Row:
     # A digest of the system prompt and the tool schemas this question was asked under --
     # see `bench.record.prompt_digest`. `keep.save` lifts it onto the run and drops it here.
     prompts: str = ""
-    # What was said, call by call -- see `bench.measure.Counting.trace`. Every other field
+    # What was said, call by call -- see `bench.counting.Counting.trace`. Every other field
     # here is a total; this is the transcript those totals are of, and the only field a
     # fine-tune can be built from: the conversation up to each model turn, and the call the
     # model made from it. Empty unless the run was traced (`wants_trace`), because it is the

@@ -25,14 +25,14 @@ import pytest
 from ml_stack import bench
 from ml_stack.bench import Row
 from ml_stack.bench import extract as bx
-from ml_stack.bench.report import (
+from ml_stack.bench.gathered import (
     MIN_MESSAGES,
     best_extractor,
     extract_model_of,
     extractions,
     read_messages,
-    report,
 )
+from ml_stack.bench.report import report
 
 GIB = 1024 ** 3
 

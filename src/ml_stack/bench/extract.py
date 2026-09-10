@@ -1,46 +1,17 @@
-"""Whether a model reads a message right, scored against the truth that wrote the message.
+"""Whether a model reads a message right, scored against the truth that wrote it.
 
-`bench` measures the asking: a graph exists and a model is asked questions of it. Before
-any of that, a graph has to be *read out* of what people said, one message at a time, and
-which model does that best was never measured -- there was nothing to score an extraction
-against, because nobody knows the truth behind a real message. An invented world does:
-`ml_stack.world` generates its messages from a graph it holds, so every person, place and
-organisation a message names is on record, and so is every relation between them.
-
-So: sample the world's messages, have a model extract each into a generic shape
-(`contracts/extraction.schema.json` -- people, organisations, topics, places, relations),
-fold the extractions into one graph by name, and score that against the gold: the union
-of what the sampled messages assert, ``attrs["asserts"]`` as the simulation wrote it --
-the ids the writer put into each sentence and the relations it stated, labels read off
-the truth graph by id. Nothing here infers the gold back out of the text. A template-
-written message's record is exact and is scored strictly; a model-written one's is a lower
-bound (the persona may have named more) and is scored separately, coverage read as
-"against a lower bound".
-
-Reported the way the knowledge-graph construction benchmarks report: precision and
-coverage as separate columns per kind, never only F1; ``invented``, the count and rate of
-extracted people and organisations matching nothing in the gold -- the hallucination rate,
-the extraction-side twin of the answering bench's ``made``; and a topology line, the
-folded graph's connected components and the share of its nodes in the largest against the
-gold graph's own, so a model that scores well on triples and builds a fragmented graph is
-seen. Under each run a detail block adds what the same benchmarks add: *conformance*, the
-share of extracted relations named in the world's own vocabulary and of entries the schema
-has a kind for; *fact survival*, the share of each message's assertions still present
-after the fold, averaged, so a fold that merges two people into one is caught; and
-*resolution*, how many extracted nodes stand for one gold node (``splits``, 1.0 is
-perfect) and how many gold nodes one extracted node absorbed (``merges``). ``--twice``
-reads the sample a second time with the model's own card and reports the Jaccard of the
-two graphs -- a model that gives a different graph each run is a finding. Runs are kept
-beside the answering runs, marked ``kind: "extract"``, and printed in a table of their own.
+A world's messages are sampled, a model extracts each into the generic shape
+`contracts/extraction.schema.json` holds, the extractions are folded into one graph by
+name and that graph is scored against what the sampled messages assert. `extract_one` is
+one message through the model, `measure` the whole sample folded and scored, `save` and
+`read_back` how a run is kept beside the answering ones, and `table` how it prints:
+coverage and precision as separate columns per kind, never only F1.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import random
-import re
-import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
@@ -48,9 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import hub
-from ml_stack.entities.spelling import close
 from ml_stack.bench import (
-    home_dir,
     PER_QUESTION,
     Counting,
     RunNotKept,
@@ -58,6 +27,7 @@ from ml_stack.bench import (
     _shown,
     _which,
     footprint,
+    home_dir,
     runs,
     sampling_from,
     smoke_first,
@@ -65,14 +35,28 @@ from ml_stack.bench import (
     stamped,
     wants_smoke,
 )
+from ml_stack.bench.folding import consistency, fold, score
+from ml_stack.bench.truth import BUCKETS, gold, load_world, sample_messages, schema
 from ml_stack.log import say, warn
-from ml_stack.world import about
 
-__all__ = ["BUCKETS", "GUESS_SECONDS", "INSTRUCTIONS", "KIND", "MessageRow", "SAMPLE",
-           "SMOKE_MESSAGES", "add_arguments", "as_extraction", "estimate", "extract_one",
-           "consistency", "fold", "gold", "load_world", "main", "measure", "only",
-           "read_back", "same", "sample_messages", "save", "schema", "score", "table",
-           "detail", "topology"]
+__all__ = [
+    "GUESS_SECONDS",
+    "INSTRUCTIONS",
+    "KIND",
+    "SAMPLE",
+    "SMOKE_MESSAGES",
+    "MessageRow",
+    "add_arguments",
+    "detail",
+    "estimate",
+    "extract_one",
+    "main",
+    "measure",
+    "only",
+    "read_back",
+    "save",
+    "table",
+]
 
 # The record's `kind`, which is what tells an extraction run from an answering one in the
 # one store both are kept in.
@@ -86,13 +70,6 @@ SMOKE_MESSAGES = 3
 # What a message is guessed to cost before any run of that model has said otherwise; the
 # estimate is printed before the clock starts so the wall clock is known up front.
 GUESS_SECONDS = 15.0
-# The buckets the generic schema has a word for, as `simulate.asserts_of` files them. A
-# world asserts more -- departments, projects, events, under ``others`` -- and an
-# extraction naming one of those is neither right nor wrong.
-BUCKETS = ("people", "orgs", "topics", "places")
-# How many working days to simulate when the world has no messages of its own.
-DAYS = 5
-
 INSTRUCTIONS = (
     "Read this message from an organised group and list the people, organisations, topics, "
     "places and relations it states; invent nothing. The sender is named before the "
@@ -129,493 +106,6 @@ class MessageRow:
     exact: bool = True
     extracted: dict[str, Any] = field(default_factory=dict)
 
-
-# -- the world and its messages -----------------------------------------------------------------
-
-def schema() -> dict[str, Any]:
-    """The generic extraction shape, read from the contracts."""
-    from ml_stack.contracts import load
-
-    return dict(load("extraction.schema.json"))
-
-
-def load_world(where: str | Path, *, days: int = DAYS) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
-    """The truth and the messages: ``(graph, messages, note)``.
-
-    ``where`` is what `ml-stack-world make --out` wrote, or what `simulate` wrote beside it
-    (that one has ``messages.jsonl``). A world with no messages is simulated for ``days``
-    working days with the template writer -- no model -- into a temporary directory, and
-    the note says so; the truth is then the graph *after* the simulation, since an arc's
-    end writes a fact into it.
-    """
-    from ml_stack.files import read_json
-
-    where = Path(where).expanduser()
-    if not (where / "graph.json").is_file():
-        raise FileNotFoundError(f"no graph.json in {where}")
-    talk = where / "messages.jsonl"
-    note = ""
-    if not talk.is_file():
-        from ml_stack.world.simulate import run
-
-        seed = int(about.read(where).get("seed", 0) or 0)
-        out = Path(tempfile.mkdtemp(prefix="ml-stack-extract-"))
-        counts = run(where, out, days=days, mix=0.0, seed=seed)
-        note = (f"{where} has no messages.jsonl; simulated {days} working days with the "
-                f"template writer into {out}: {counts['messages']} messages in "
-                f"{counts['threads']} threads")
-        where, talk = out, out / "messages.jsonl"
-    graph = read_json(where / "graph.json", None)
-    if not isinstance(graph, Mapping):
-        raise FileNotFoundError(f"no graph.json in {where}")
-    messages = []
-    for line in talk.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            messages.append(json.loads(line))
-    return dict(graph), messages, note
-
-
-def _stratum(message: Mapping[str, Any]) -> str:
-    attrs = message.get("attrs") or {}
-    return ("arc" if attrs.get("arc") else "chat") + ":" + str(attrs.get("kind") or "")
-
-
-def sample_messages(messages: Sequence[Mapping[str, Any]], n: int, *,
-                    seed: int = 0) -> list[dict[str, Any]]:
-    """``n`` messages with every kind of conversation still in them, seeded.
-
-    Stratified the way `bench.sample` stratifies questions: one from each stratum first --
-    an arc's thread and routine chatter, by conversation kind -- rarest first, then in
-    proportion. An arc is a handful of threads in a fortnight of chatter, and a plain
-    draw of forty would miss it as often as not; an arc is also where names and
-    outcomes are stated, which is what an extractor is for. The same seed gives the same
-    sample, so two models are read on the same messages.
-    """
-    everything = [dict(m) for m in messages]
-    if n <= 0 or n >= len(everything):
-        return everything
-    rng = random.Random(f"extract/{seed}")
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for m in everything:
-        grouped.setdefault(_stratum(m), []).append(m)
-    for group in grouped.values():
-        rng.shuffle(group)
-    order = sorted(grouped, key=lambda k: (len(grouped[k]), k))
-    taken: list[dict[str, Any]] = []
-    for key in order:
-        if len(taken) < n:
-            taken.append(grouped[key].pop(0))
-    for key in order:
-        share = max(0, round((n - len(order)) * len(grouped[key]) / len(everything)))
-        for _ in range(min(share, len(grouped[key]))):
-            if len(taken) < n:
-                taken.append(grouped[key].pop(0))
-    for key in order:
-        while grouped[key] and len(taken) < n:
-            taken.append(grouped[key].pop(0))
-    ids = {id(m) for m in taken}
-    return [m for m in everything if id(m) in ids][:n]
-
-
-# -- names --------------------------------------------------------------------------------------
-
-_NOT_A_WORD = re.compile(r"[^\w]+|_+")
-
-
-def _norm(text: Any) -> str:
-    """Lower-cased words with single spaces between: how two names are compared."""
-    return _NOT_A_WORD.sub(" ", str(text or "").casefold()).strip()
-
-
-def same(a: Any, b: Any) -> bool:
-    """Whether two names are one name: equal once normalised, or the same number of words
-    each pair of which `spelling.close` calls one word spelled twice."""
-    x, y = _norm(a), _norm(b)
-    if not x or not y:
-        return False
-    if x == y:
-        return True
-    xs, ys = x.split(), y.split()
-    return len(xs) == len(ys) and all(close(p, q) for p, q in zip(xs, ys))
-
-
-def _same_rel(a: Any, b: Any) -> bool:
-    """Relation names, loosely: case, underscores and spaces aside, then near-spellings."""
-    return same(a, b)
-
-
-def _first(label: Any) -> str:
-    return (_norm(label).split() or [""])[0]
-
-
-def gold(graph: Mapping[str, Any], messages: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """The corpus gold: the union of what ``messages`` assert, labelled from ``graph`` by id.
-
-    ``{"nodes": {bucket: {id: node}}, "others": {id: node}, "relations": [[s, rel, t]],
-    "exact": bool, "vocabulary": [rels]}`` -- ``exact`` when every message's record is,
-    ``vocabulary`` every relation name the truth graph uses. A message with no
-    ``attrs["asserts"]`` was written before the simulation recorded them, and is refused
-    rather than guessed at: the point of the gold is that nobody inferred it.
-    """
-    nodes = {str(n.get("id")): n for n in (graph.get("nodes") or ())}
-    out: dict[str, Any] = {"nodes": {b: {} for b in BUCKETS}, "others": {}, "relations": [],
-                           "exact": True,
-                           "vocabulary": sorted({str(e.get("rel") or "")
-                                                 for e in (graph.get("edges") or ())} - {""})}
-    seen: set[tuple[str, str, str]] = set()
-    for m in messages:
-        asserts = (m.get("attrs") or {}).get("asserts")
-        if not isinstance(asserts, Mapping):
-            raise ValueError(f"message {m.get('id')!r} carries no attrs.asserts; simulate the "
-                             f"world again with a build that records what each message states")
-        if not (m.get("attrs") or {}).get("asserts_exact", True):
-            out["exact"] = False
-        for bucket in BUCKETS:
-            for one in asserts.get(bucket) or ():
-                if str(one) in nodes:
-                    out["nodes"][bucket][str(one)] = nodes[str(one)]
-        for one in asserts.get("others") or ():
-            if str(one) in nodes:
-                out["others"][str(one)] = nodes[str(one)]
-        for r in asserts.get("relations") or ():
-            if len(r) == 3 and str(r[0]) in nodes and str(r[2]) in nodes:
-                key = (str(r[0]), str(r[1]), str(r[2]))
-                if key not in seen:
-                    seen.add(key)
-                    out["relations"].append(list(key))
-    return out
-
-
-def as_extraction(truth: Mapping[str, Any]) -> dict[str, Any]:
-    """The gold written back in the schema's shape: what a perfect extractor would return,
-    and what the scorer must give 100% to."""
-    label = {i: str(n.get("label") or i) for b in BUCKETS for i, n in truth["nodes"][b].items()}
-    label.update({i: str(n.get("label") or i) for i, n in truth["others"].items()})
-    return {"people": [{"name": label[i], "role": "", "org": "", "place": ""}
-                       for i in truth["nodes"]["people"]],
-            "orgs": [{"name": label[i], "kind": ""} for i in truth["nodes"]["orgs"]],
-            "topics": [label[i] for i in truth["nodes"]["topics"]],
-            "places": [label[i] for i in truth["nodes"]["places"]],
-            "relations": [{"from": label.get(s, s), "rel": r, "to": label.get(t, t)}
-                          for s, r, t in truth["relations"]]}
-
-
-# -- folding what was extracted into one graph -----------------------------------------------------
-
-def fold(extractions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Every extraction folded into one graph by name.
-
-    ``{"nodes": {kind: [{"name", "names", "attrs"}]}, "relations": [{"from", "rel", "to"}]}``
-    where each node is a cluster of names `same` joins -- ``Pellard Foundry``, ``Pellard
-    foundry`` and ``Pelard Foundry`` are one organisation -- and a person named by first
-    name alone joins the person whose first name it is when there is exactly one. A
-    relation's ends are the clusters' first-seen names.
-    """
-    clusters: dict[str, list[dict[str, Any]]] = {k: [] for k in BUCKETS}
-
-    def place(kind: str, name: str, attrs: Mapping[str, Any] | None = None) -> str:
-        name = str(name or "").strip()
-        if not name:
-            return ""
-        group = clusters[kind]
-        hit = next((c for c in group if any(same(name, n) for n in c["names"])), None)
-        if hit is None and kind == "people" and len(_norm(name).split()) == 1:
-            by_first = [c for c in group if any(_first(n) == _norm(name) for n in c["names"])]
-            hit = by_first[0] if len(by_first) == 1 else None
-        if hit is None and kind == "people":
-            # a full name arriving after its first name alone
-            alone = [c for c in group if all(len(_norm(n).split()) == 1 for n in c["names"])
-                     and any(_norm(n) == _first(name) for n in c["names"])]
-            hit = alone[0] if len(alone) == 1 else None
-        if hit is None:
-            hit = {"name": name, "names": [], "attrs": {}}
-            group.append(hit)
-        if name not in hit["names"]:
-            hit["names"].append(name)
-        if len(_norm(name).split()) > len(_norm(hit["name"]).split()):
-            hit["name"] = name                 # the fullest spelling names the cluster
-        for key, value in (attrs or {}).items():
-            if value and not hit["attrs"].get(key):
-                hit["attrs"][key] = str(value)
-        return hit["name"]
-
-    relations: list[dict[str, Any]] = []
-    for one in extractions:
-        if not isinstance(one, Mapping):
-            continue
-        for p in one.get("people") or ():
-            if isinstance(p, Mapping):
-                place("people", p.get("name", ""),
-                      {"role": p.get("role", ""), "org": p.get("org", ""),
-                       "place": p.get("place", "")})
-                if p.get("org"):
-                    place("orgs", p["org"])
-                if p.get("place"):
-                    place("places", p["place"])
-        for o in one.get("orgs") or ():
-            if isinstance(o, Mapping):
-                place("orgs", o.get("name", ""), {"kind": o.get("kind", "")})
-        for t in one.get("topics") or ():
-            place("topics", t)
-        for p in one.get("places") or ():
-            place("places", p)
-    for one in extractions:
-        if not isinstance(one, Mapping):
-            continue
-        for r in one.get("relations") or ():
-            if not isinstance(r, Mapping):
-                continue
-            src, rel, dst = str(r.get("from") or ""), str(r.get("rel") or ""), str(r.get("to") or "")
-            if not (src and rel and dst):
-                continue
-            relations.append({"from": _named(clusters, src), "rel": rel,
-                              "to": _named(clusters, dst)})
-    return {"nodes": clusters, "relations": relations}
-
-
-def _named(clusters: Mapping[str, Sequence[Mapping[str, Any]]], name: str) -> str:
-    """The cluster name a relation's end refers to, or the name itself when no list held it."""
-    for kind in BUCKETS:
-        for c in clusters[kind]:
-            if any(same(name, n) for n in c["names"]):
-                return str(c["name"])
-    return name
-
-
-# -- scoring ------------------------------------------------------------------------------------
-
-def _resolve(name: str, truth: Mapping[str, Mapping[str, Any]], *, people: bool = False) -> str:
-    """The gold node among ``truth`` that ``name`` names, or ""; a person also by first name
-    alone when exactly one has it."""
-    for node_id, n in truth.items():
-        if _norm(n.get("label")) == _norm(name):
-            return node_id
-    for node_id, n in truth.items():
-        if same(name, n.get("label")):
-            return node_id
-    if people and len(_norm(name).split()) == 1:
-        by_first = [i for i, n in truth.items() if _first(n.get("label")) == _norm(name)
-                    or close(_first(n.get("label")), _norm(name))]
-        if len(by_first) == 1:
-            return by_first[0]
-    return ""
-
-
-def _rates(found: int, of: int, said: int) -> dict[str, float]:
-    coverage = found / of if of else 0.0
-    precision = found / said if said else 0.0
-    f1 = 2 * coverage * precision / (coverage + precision) if coverage + precision else 0.0
-    return {"coverage": round(coverage, 4), "precision": round(precision, 4), "f1": round(f1, 4)}
-
-
-def _components(nodes: Sequence[str], edges: Sequence[tuple[str, str]]) -> dict[str, Any]:
-    """How many pieces a graph is in, and the share of its nodes in the largest."""
-    parent = {n: n for n in nodes}
-
-    def root(n: str) -> str:
-        while parent[n] != n:
-            parent[n] = parent[parent[n]]
-            n = parent[n]
-        return n
-
-    for a, b in edges:
-        if a in parent and b in parent:
-            parent[root(a)] = root(b)
-    sizes: dict[str, int] = {}
-    for n in nodes:
-        sizes[root(n)] = sizes.get(root(n), 0) + 1
-    return {"nodes": len(nodes), "edges": len(edges), "components": len(sizes),
-            "largest_share": round(max(sizes.values()) / len(nodes), 4) if nodes else 0.0}
-
-
-def topology(folded: Mapping[str, Any], truth: Mapping[str, Any]) -> dict[str, Any]:
-    """The folded graph's shape against the gold's: nodes, edges, connected components and
-    the share of nodes in the largest, so a model that names the right things and joins
-    none of them is seen. A person's ``org`` and ``place`` count as edges the extraction
-    stated; the gold's edges are the relations the messages asserted."""
-    names = [str(c["name"]) for b in BUCKETS for c in (folded.get("nodes") or {}).get(b) or ()]
-    edges = [(str(r["from"]), str(r["to"])) for r in folded.get("relations") or ()]
-    for c in (folded.get("nodes") or {}).get("people") or ():
-        for key in ("org", "place"):
-            if c.get("attrs", {}).get(key):
-                edges.append((str(c["name"]), _named(folded["nodes"], str(c["attrs"][key]))))
-    ids = [i for b in BUCKETS for i in truth["nodes"][b]]
-    return {"extracted": _components(names, edges),
-            "gold": _components(ids, [(s, t) for s, _, t in truth["relations"]])}
-
-
-def score(folded: Mapping[str, Any], truth: Mapping[str, Any], *,
-          per_message: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
-    """The folded extraction against the gold.
-
-    Per bucket: ``of`` gold nodes, ``found`` of them (``coverage``), ``said`` extracted
-    entries, ``invented`` of those -- an entry naming nothing in the gold of that bucket --
-    and ``precision``. ``nodes`` is the same over every bucket together, with F1;
-    ``relations`` likewise: an extracted relation matches a gold one when both ends
-    resolve to its ends, in that direction, and the names are `same` (case, underscores
-    and spaces aside). ``invented`` on its own is the count and rate over extracted people
-    and organisations -- the hallucination rate. An entry naming something the messages
-    asserted under ``others`` -- a project, a department -- is dropped, neither found nor
-    invented, and so is a relation with such an end. ``attrs`` counts, of the organisations
-    and places the extraction put on people the gold also joins to one, how many were the
-    gold's: what it said, not what it left blank. ``topology`` is `topology`.
-
-    ``conformance``: of the extracted relations, how many are named in the gold's
-    ``vocabulary`` (loosely, as everywhere here) and of the extracted entries how many
-    are under a key the schema has -- the rest is ``off_schema``. ``survival``, given
-    ``per_message`` (each sampled message's ``asserts``): the share of each message's
-    assertions -- its ids under the four buckets and its relations -- present in the
-    folded graph, averaged over the messages that assert anything. ``resolution``:
-    ``splits``, the mean number of extracted nodes standing for one gold node that any
-    stood for, and ``merges``, the mean number of gold nodes one extracted node's names
-    resolve to; 1.0 is perfect for both.
-    """
-    by_kind: dict[str, dict[str, Any]] = {}
-    where: dict[str, str] = {}                       # cluster name -> gold id
-    absorbed: list[int] = []                         # per mapped cluster, gold ids it names
-    truth_all: dict[str, Mapping[str, Any]] = {i: n for b in BUCKETS for i, n in truth["nodes"][b].items()}
-    found_total = of_total = said_total = invented_total = 0
-    for bucket in BUCKETS:
-        wanted = truth["nodes"][bucket]
-        found: set[str] = set()
-        said = invented = 0
-        for cluster in (folded.get("nodes") or {}).get(bucket) or ():
-            hits = [h for n in cluster["names"]
-                    if (h := _resolve(n, wanted, people=bucket == "people"))]
-            hit = hits[0] if hits else ""
-            if hit:
-                found.add(hit)
-                where[cluster["name"]] = hit
-                absorbed.append(len(set(hits)))
-                said += 1
-            elif any(_resolve(n, truth["others"]) for n in cluster["names"]):
-                continue
-            else:
-                said += 1
-                invented += 1
-        by_kind[bucket] = {**_rates(len(found), len(wanted), said), "of": len(wanted),
-                           "found": len(found), "said": said, "invented": invented}
-        found_total += len(found)
-        of_total += len(wanted)
-        said_total += said
-        invented_total += invented
-    nodes = {**_rates(found_total, of_total, said_total), "of": of_total, "found": found_total,
-             "said": said_total, "invented": invented_total}
-    named = sum(by_kind[b]["said"] for b in ("people", "orgs"))
-    made_up = sum(by_kind[b]["invented"] for b in ("people", "orgs"))
-    invented = {"count": made_up, "of": named, "rate": round(made_up / named, 4) if named else 0.0}
-
-    def end(name: str) -> str | None:
-        """A gold id, "" for something asserted under others, None for an invented thing."""
-        if name in where:
-            return where[name]
-        hit = _resolve(name, truth_all, people=True)
-        if hit:
-            return hit
-        return "" if _resolve(name, truth["others"]) else None
-
-    matched: set[int] = set()
-    said_rels = right_rels = 0
-    # the gold relations that can be scored at all: one with an end the messages asserted
-    # under ``others`` -- a project, a department -- is dropped from both sides, the way an
-    # entry naming one is, since the schema had no bucket to put it in and an extraction
-    # naming it is neither right nor wrong
-    scored = [i for i, (s, _rel, t) in enumerate(truth["relations"])
-              if s in truth_all and t in truth_all]
-    for r in folded.get("relations") or ():
-        src, dst = end(str(r["from"])), end(str(r["to"]))
-        if src == "" or dst == "":
-            continue
-        said_rels += 1
-        if src is None or dst is None:
-            continue
-        for i in scored:
-            s, rel, t = truth["relations"][i]
-            if s == src and t == dst and same(r["rel"], rel):
-                matched.add(i)
-                right_rels += 1
-                break
-    relations = {**_rates(len(matched), len(scored), said_rels),
-                 "of": len(scored), "found": len(matched), "said": said_rels,
-                 "invented": said_rels - right_rels}
-
-    labels = {i: str(n.get("label") or "") for i, n in truth_all.items()}
-    has: dict[str, dict[str, list[str]]] = {"org": {}, "place": {}}
-    for s, _, t in truth["relations"]:
-        for key, bucket in (("org", "orgs"), ("place", "places")):
-            if s in truth["nodes"]["people"] and t in truth["nodes"][bucket]:
-                has[key].setdefault(s, []).append(labels[t])
-    attrs: dict[str, dict[str, int]] = {}
-    for key in ("org", "place"):
-        stated = right = 0
-        for cluster in (folded.get("nodes") or {}).get("people") or ():
-            who = where.get(cluster["name"])
-            claimed = cluster.get("attrs", {}).get(key)
-            if not who or not claimed or who not in has[key]:
-                continue
-            stated += 1
-            right += any(same(claimed, true) for true in has[key][who])
-        attrs[key] = {"stated": stated, "right": right}
-    # conformance: relations named in the world's own vocabulary, entries under a key the
-    # schema has -- a grammar makes the second always so, and a path without one may not
-    vocabulary = list(truth.get("vocabulary") or ())
-    rels_all = list(folded.get("relations") or ())
-    in_vocab = sum(1 for r in rels_all if any(same(r["rel"], v) for v in vocabulary))
-    on_schema = sum(len(v) for k, v in (folded.get("nodes") or {}).items() if k in BUCKETS)
-    off_schema = sum(len(v) for k, v in (folded.get("nodes") or {}).items() if k not in BUCKETS)
-    conformance = {"relations": {"in_vocabulary": in_vocab, "of": len(rels_all),
-                                 "share": round(in_vocab / len(rels_all), 4) if rels_all else None},
-                   "entities": {"in_schema": on_schema, "of": on_schema + off_schema,
-                                "share": round(on_schema / (on_schema + off_schema), 4)
-                                if on_schema + off_schema else None},
-                   "off_schema": (len(rels_all) - in_vocab) + off_schema}
-    # fact survival: per message, what of its own assertions the folded graph still holds
-    present = set(where.values())
-    kept_rels = {tuple(truth["relations"][i]) for i in matched}
-    shares: list[float] = []
-    for asserted in per_message:
-        facts: list[Any] = [str(i) for b in BUCKETS for i in (asserted.get(b) or ())
-                            if str(i) in truth_all]
-        for r in asserted.get("relations") or ():
-            triple = tuple(map(str, r))
-            if len(triple) == 3 and triple[0] in truth_all and triple[2] in truth_all:
-                facts.append(triple)
-        if facts:
-            shares.append(sum(1 for f in facts if (f in present if isinstance(f, str)
-                                                   else f in kept_rels)) / len(facts))
-    survival = {"mean": round(sum(shares) / len(shares), 4) if shares else None,
-                "messages": len(shares)}
-    # resolution: extracted nodes per gold node, and gold nodes per extracted node
-    per_gold: dict[str, int] = {}
-    for one in where.values():
-        per_gold[one] = per_gold.get(one, 0) + 1
-    resolution = {"splits": round(sum(per_gold.values()) / len(per_gold), 4) if per_gold else None,
-                  "merges": round(sum(absorbed) / len(absorbed), 4) if absorbed else None}
-    return {"nodes": nodes, "by_kind": by_kind, "relations": relations, "invented": invented,
-            "attrs": attrs, "topology": topology(folded, truth), "conformance": conformance,
-            "survival": survival, "resolution": resolution}
-
-
-def consistency(first: Mapping[str, Any], second: Mapping[str, Any]) -> dict[str, Any]:
-    """How alike two folds of the same messages are: the Jaccard of their node sets (bucket
-    and normalised name) and of their relation sets (normalised ends and name)."""
-    def nodes(folded: Mapping[str, Any]) -> set[tuple[str, str]]:
-        return {(b, _norm(c["name"])) for b in BUCKETS
-                for c in (folded.get("nodes") or {}).get(b) or ()}
-
-    def triples(folded: Mapping[str, Any]) -> set[tuple[str, str, str]]:
-        return {(_norm(r["from"]), _norm(r["rel"]), _norm(r["to"]))
-                for r in folded.get("relations") or ()}
-
-    def jaccard(a: set[Any], b: set[Any]) -> float | None:
-        return round(len(a & b) / len(a | b), 4) if a | b else None
-
-    return {"nodes": jaccard(nodes(first), nodes(second)),
-            "relations": jaccard(triples(first), triples(second))}
-
-
-# -- extracting ---------------------------------------------------------------------------------
 
 class _Extracting(Counting):
     """`Counting`, with `Client.extract` run through its own counted, deadlined `chat`.

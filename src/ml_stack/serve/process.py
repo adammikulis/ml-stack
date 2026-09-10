@@ -130,7 +130,7 @@ def every_server() -> list[dict]:
             state = ""
         rss = int(getattr(mem, "rss", 0) or 0)
         if isinstance(proc, psutil.Process):
-            from ml_stack.bench.measure import footprint_of
+            from ml_stack.bench.holding import footprint_of
 
             rss = footprint_of(proc) or rss
         ahead = after("--spec-draft-n-max")
