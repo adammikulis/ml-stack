@@ -1,10 +1,10 @@
 name: ci
 on:
   push:
-    branches: [main]
-    paths-ignore: ["**.md", "docs/**", "packaging/install.*"]
+    branches: [main, "*dev"]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
-    paths-ignore: ["**.md", "docs/**", "packaging/install.*"]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 # A newer push makes an older run pointless.
@@ -14,13 +14,27 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The classifiers claim 3.11 through 3.13, and the app ships for macOS as well as
+    # Linux. `packaging/install.sh` is executed on both by tests/test_packaging_install_runs.py.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-14
+            python: "3.12"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       - name: install test dependencies
         run: |
@@ -30,8 +44,13 @@ jobs:
           # and a title read without trafilatura is a different title
           python -m pip install -e ".[store,hub,web,plot]"
           # CPU torch: 28 tests across backend, graph and recipes need a framework,
-          # and without one they fail rather than skip.
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # and without one they fail rather than skip. The CPU index carries no macOS
+          # arm64 wheel; there torch comes from PyPI, which is CPU-only on that platform.
+          if [ "${{ runner.os }}" = Linux ]; then
+            python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          else
+            python -m pip install torch
+          fi
 
       # ml-stack's own packages are on no index. Without them the environment test
       # can build a venv, install torch, and still not import ml_stack.

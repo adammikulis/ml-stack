@@ -28,7 +28,7 @@ set -eu
 REPO="${ML_STACK_REPO:-adammikulis/ml-stack}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 GIT_URL="https://github.com/$REPO"
-EXTRAS="store,hub,web,plot"
+EXTRAS="store,hub,web,plot,graph"
 MODE="${ML_STACK_MODE:-app}"
 MODELS="${ML_STACK_MODELS:-}"
 REF="${ML_STACK_REF:-}"
@@ -125,6 +125,7 @@ install_app() {
     mkdir -p "$DEST"
     rm -rf "$DEST/ml-stack.app"
     cp -R "$TMP/out/ml-stack.app" "$DEST/ml-stack.app"
+    [ -d "$DEST/ml-stack.app" ] || die "$KEY could not be copied into $DEST"
     # Downloads are quarantined; without this macOS refuses to open it at all.
     xattr -dr com.apple.quarantine "$DEST/ml-stack.app" 2>/dev/null || true
     say ""
@@ -142,6 +143,8 @@ install_app() {
       [ -f "$TMP/out/$name" ] || continue
       install -m 0755 "$TMP/out/$name" "$DEST/$name"
     done
+    [ -x "$DEST/ml-stack" ] || die "$KEY held no runnable ml-stack.
+     Install without the window instead:  curl -fsSL $GIT_URL/releases/latest/download/install.sh | sh -s -- --headless"
     say ""
     say "Installed to $DEST"
     case ":$PATH:" in

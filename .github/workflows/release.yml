@@ -127,9 +127,14 @@ jobs:
 
   publish:
     needs: [wheels, bundle]
-    # Publishes whatever built. A platform whose runner was unavailable should
-    # not hold back the ones that are ready.
-    if: always() && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
+    # A platform whose runner was unavailable should not hold back the ones that are
+    # ready, so a skipped or cancelled bundle still publishes. A bundle that ran and
+    # failed does not: that is a broken zip on the release page.
+    if: >-
+      !cancelled()
+      && needs.wheels.result == 'success'
+      && needs.bundle.result != 'failure'
+      && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

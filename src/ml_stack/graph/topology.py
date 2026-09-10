@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError as exc:  # pragma: no cover - depends on the install
+    raise ModuleNotFoundError(
+        "ml_stack.graph.topology needs numpy: "
+        "pip install 'ml-stack[graph]'") from exc
 
 Tensor = Any
 
@@ -21,7 +26,7 @@ class Edges:
     def __len__(self) -> int:
         return int(self.src.shape[0])
 
-    def symmetrized(self) -> "Edges":
+    def symmetrized(self) -> Edges:
         """Both directions for every edge, so an undirected graph propagates both ways."""
         return Edges(
             src=np.concatenate([self.src, self.dst]),

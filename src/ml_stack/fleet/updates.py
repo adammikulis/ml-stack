@@ -93,7 +93,7 @@ def current_version() -> str:
     """The running version, or empty when there is no way to tell."""
     try:
         from importlib.metadata import version
-        return version("ml-stack-fleet")
+        return version("ml-stack")
     except Exception:                                 # noqa: BLE001
         pass
     told = os.environ.get("ML_STACK_VERSION", "").strip()

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
-import math
-
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError as exc:  # pragma: no cover - depends on the install
+    raise ModuleNotFoundError(
+        "ml_stack.vision.geometry needs numpy: "
+        "pip install 'ml-stack[vision]'") from exc
 
 __all__ = ["Bearing", "column_to_deg", "find_color_blob", "floor_boundary",
            "hfov_from_known_width", "nearest_obstacle", "to_gray"]
@@ -111,7 +115,7 @@ def nearest_obstacle(frame: np.ndarray, *, hfov_deg: float,
     nearness = _nearness((best_start, best_len)) / max(h, 1)
     confidence = float(min(1.0, (best_len / w) / 0.25) * min(1.0, nearness / 0.15))
     return Bearing(deg=column_to_deg(centre, w, hfov_deg), confidence=confidence,
-                   column=int(round(centre)), width=best_len,
+                   column=round(centre), width=best_len,
                    reason=f"obstacle {best_len}px wide, "
                           f"{nearness*100:.0f}% of frame nearer than background")
 
