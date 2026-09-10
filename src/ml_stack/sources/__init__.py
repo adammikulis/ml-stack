@@ -1,10 +1,10 @@
 """Readers from the formats products export back to one `list[Message]`.
 
 Slack's export directory, an mbox of mail, a Microsoft Graph `chatMessage` dump and the
-rows a Slack scraper writes all come back as `ml_stack.world.Message`, so a graph built
+rows a Slack scraper writes all come back as `ml_stack.messages.Message`, so a graph built
 from one is built from any of them with the same code. `read` looks at a path and picks the
 reader; each reader is also there by name. Given the world's people (`id -> {"label",
-"email"?, "handle"?}`, the mapping `ml_stack.world.emit` writes from), a reader puts the
+"email"?, "handle"?}`, the mapping `ml_stack.messages.directory` writes), a reader puts the
 `person:` ids back; without it the product's own id stays in `sender` and
 `attrs["sender_kind"]` says which product's it is.
 """
@@ -16,8 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack.world import Message
-from ml_stack.world.emit import directory, slack_user_id, teams_user_id
+from ml_stack.messages import Message, directory, slack_user_id, teams_user_id
 
 __all__ = ["People", "Message", "read", "sniff"]
 

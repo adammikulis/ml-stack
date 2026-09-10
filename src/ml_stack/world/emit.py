@@ -20,133 +20,36 @@ import hashlib
 import mailbox
 import re
 import time
-import unicodedata
-import uuid
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from email.message import EmailMessage
-from email.utils import formataddr, format_datetime
+from email.utils import format_datetime, formataddr
 from pathlib import Path
 from typing import Any
 
 from ml_stack.files import write_json
 from ml_stack.jsonl import ts_key
-from ml_stack.world import Message
+from ml_stack.messages import (
+    DEFAULT_DOMAIN,
+    Message,
+    directory,
+    dm_members,
+    is_dm,
+    slack_channel_id,
+    slack_dm_id,
+    slack_team_id,
+    slack_user_id,
+    teams_channel_id,
+    teams_chat_id,
+    teams_team_id,
+    teams_user_id,
+    when,
+)
 
-__all__ = ["directory", "mbox", "message_id", "rows", "slack_channel_id", "slack_dm_id",
-           "slack_export", "slack_user_id", "teams", "teams_channel_id", "teams_chat_id",
-           "teams_user_id", "when", "ts_of", "dm_members", "is_dm", "msgid"]
+__all__ = ["mbox", "msgid", "rows", "slack_export", "teams"]
 
-DEFAULT_DOMAIN = "example.com"
-_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-_TEAMS_NAMESPACE = uuid.UUID("6f1b2a3c-4d5e-4f60-8172-839405a6b7c8")
 _ATOM = re.compile(r"^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$")
-
-
-# --- people -------------------------------------------------------------------------------
-
-def _words(label: str) -> list[str]:
-    text = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
-    return [w for w in re.split(r"[^a-z0-9]+", text.lower()) if w]
-
-
-def directory(people: Mapping[str, Mapping[str, Any]], domain: str = DEFAULT_DOMAIN
-              ) -> dict[str, dict[str, str]]:
-    """Every person with a label, an address and a handle, derived where not given.
-
-    `people` maps a world id to `{"label", "email"?, "handle"?}`. The address is
-    `first.last@<domain>` and the handle `first.last`, both from the label; a second person
-    who would get the same ones gets a number after the name, so two Ada Lovelaces do not
-    share a mailbox. The result is what every emitter and reader keys on.
-    """
-    out: dict[str, dict[str, str]] = {}
-    used_handles: set[str] = set()
-    used_emails: set[str] = set()
-    for pid, given in people.items():
-        label = str(given.get("label") or pid.split(":", 1)[-1].replace("-", " ").title())
-        words = _words(label) or _words(pid) or ["someone"]
-        base = words[0] if len(words) == 1 else f"{words[0]}.{words[-1]}"
-        handle = str(given.get("handle") or "")
-        if not handle:
-            handle, n = base, 1
-            while handle in used_handles:
-                n += 1
-                handle = f"{base}{n}"
-        email = str(given.get("email") or "")
-        if not email:
-            email, n = f"{base}@{domain}", 1
-            while email in used_emails:
-                n += 1
-                email = f"{base}{n}@{domain}"
-        used_handles.add(handle)
-        used_emails.add(email)
-        out[pid] = {"id": pid, "label": label, "email": email, "handle": handle}
-    return out
-
-
-def _mint(prefix: str, key: str, length: int) -> str:
-    n = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16)
-    out = []
-    for _ in range(length):
-        out.append(_ALPHABET[n % 36])
-        n //= 36
-    return prefix + "".join(out)
-
-
-def slack_user_id(person_id: str) -> str:
-    """The `U0…` Slack would give this person: nine characters, the same every time."""
-    return _mint("U0", f"slack-user:{person_id}", 7)
-
-
-def slack_channel_id(channel: str) -> str:
-    """The `C0…` of a channel name."""
-    return _mint("C0", f"slack-channel:{channel}", 7)
-
-
-def slack_dm_id(channel: str) -> str:
-    """The `D0…` of a direct message, from its `dm:<a>,<b>` name."""
-    return _mint("D0", f"slack-dm:{channel}", 7)
-
-
-def teams_user_id(person_id: str) -> str:
-    """The Entra user uuid Graph would put in `from.user.id`."""
-    return str(uuid.uuid5(_TEAMS_NAMESPACE, f"user:{person_id}"))
-
-
-def teams_team_id(domain: str) -> str:
-    return str(uuid.uuid5(_TEAMS_NAMESPACE, f"team:{domain}"))
-
-
-def teams_channel_id(channel: str) -> str:
-    """A Teams channel id, `19:<hex>@thread.tacv2`, from its name."""
-    return f"19:{hashlib.sha256(f'teams-channel:{channel}'.encode()).hexdigest()[:32]}@thread.tacv2"
-
-
-def teams_chat_id(channel: str) -> str:
-    """A Teams chat id, `19:<hex>@thread.v2`, from a `dm:<a>,<b>` name."""
-    return f"19:{hashlib.sha256(f'teams-chat:{channel}'.encode()).hexdigest()[:32]}@thread.v2"
-
-
-def message_id(channel_id: str, ts: str) -> str:
-    """The id a scraped row gets when nothing carries the world's: `<channelId>-<ts>`."""
-    return f"{channel_id}-{ts}"
-
-
-# --- time ---------------------------------------------------------------------------------
-
-def when(ts: str) -> datetime:
-    """A Slack `ts` ("1725148800.000100") as an aware UTC datetime."""
-    sec, _, frac = str(ts).partition(".")
-    micro = int((frac or "0")[:6].ljust(6, "0"))
-    return datetime.fromtimestamp(int(sec), UTC).replace(microsecond=micro)
-
-
-def ts_of(moment: datetime) -> str:
-    """A datetime back as a Slack `ts`, six digits of fraction."""
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return f"{int(moment.timestamp())}.{moment.microsecond:06d}"
 
 
 def _iso(ts: str) -> str:
@@ -159,17 +62,6 @@ def _day(ts: str) -> str:
 
 def _order(m: Message) -> tuple[int, int]:
     return ts_key(m.ts) or (0, 0)
-
-
-# --- channels -----------------------------------------------------------------------------
-
-def is_dm(channel: str) -> bool:
-    return channel.startswith("dm:")
-
-
-def dm_members(channel: str) -> list[str]:
-    """The ids named in a `dm:<a>,<b>` channel, sorted."""
-    return sorted(p for p in channel[3:].split(",") if p)
 
 
 def _pick(messages: Iterable[Message], source: str | None) -> list[Message]:
@@ -217,7 +109,7 @@ def slack_export(messages: Iterable[Message], people: Mapping[str, Mapping[str, 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     book = directory(people, domain)
-    team = _mint("T0", f"slack-team:{domain}", 7)
+    team = slack_team_id(domain)
     said, reactions_on = _split(_pick(messages, source))
     said.sort(key=_order)
     by_id = {m.id: m for m in said}

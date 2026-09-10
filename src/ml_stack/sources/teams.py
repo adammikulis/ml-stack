@@ -15,9 +15,8 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json
+from ml_stack.messages import Message, ts_of
 from ml_stack.sources import People
-from ml_stack.world import Message
-from ml_stack.world.emit import ts_of
 
 __all__ = ["read"]
 

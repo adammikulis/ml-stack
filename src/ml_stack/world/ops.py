@@ -14,7 +14,8 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.files import write_json
-from ml_stack.world import Message, emit
+from ml_stack.messages import Message
+from ml_stack.world import emit
 from ml_stack.world.organisation import load, make, summary
 from ml_stack.world.questions import questions
 

@@ -15,9 +15,8 @@ from typing import Any
 
 from ml_stack.files import read_json
 from ml_stack.jsonl import ts_key
+from ml_stack.messages import Message, message_id
 from ml_stack.sources import People
-from ml_stack.world import Message
-from ml_stack.world.emit import message_id
 
 __all__ = ["read"]
 

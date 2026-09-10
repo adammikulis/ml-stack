@@ -13,7 +13,7 @@ import pytest
 
 import ml_stack.sources as sources
 from ml_stack.sources import mbox, rows, slack_export, teams
-from ml_stack.world.emit import slack_user_id, teams_user_id
+from ml_stack.messages import slack_user_id, teams_user_id
 
 PEOPLE = {"person:ada-lovelace": {"label": "Ada Lovelace"},
           "person:bea-marlow": {"label": "Bea Marlow"}}

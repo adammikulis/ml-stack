@@ -3,6 +3,7 @@
 | Module | What it is |
 |---|---|
 | `ml_stack.contracts` | Reader for `contracts/`; the RAM→model ladder and the fitting rule |
+| `ml_stack.messages` | One thing somebody said, and the product ids and timestamps that go with it |
 | `ml_stack.media` | WAV containers, image format sniffing, resumable asset download |
 | `ml_stack.http` | One HTTP client: JSON, bytes, streams, resumed downloads, retries |
 | `ml_stack.client` | Talking to a model server: chat, completion, embeddings, health, token estimate |

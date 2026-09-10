@@ -17,31 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["Message", "World", "check"]
-
-
-@dataclass(frozen=True)
-class Message:
-    """One thing somebody said, in whichever product they said it.
-
-    The one shape every emitter writes and every reader returns, so a corpus of Slack,
-    email and Teams is one list. Ids are the world's (`person:<slug>`); `ts` is unix seconds
-    as Slack writes it ("1725148800.000100") and emitters convert. `channel` is a Slack
-    channel name, `dm:<a>,<b>` for a direct message, an email subject line, or a Teams chat
-    id. `thread` is the id of the root message, or None for a root. `kind` is "message",
-    "reply" or "reaction". `attrs` carries what one product has and the others do not.
-    """
-
-    id: str
-    source: str  # "slack" | "email" | "teams"
-    channel: str
-    sender: str
-    ts: str
-    text: str
-    recipients: tuple[str, ...] = ()
-    thread: str | None = None
-    kind: str = "message"
-    attrs: dict[str, Any] = field(default_factory=dict)
+__all__ = ["World", "check"]
 
 
 @dataclass

@@ -47,10 +47,11 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ml_stack.world import Message, World
+from ml_stack.messages import Message
+from ml_stack.world import World
 from ml_stack.world.story import (DOWNWARD, ORG_KINDS, OUTCOMES, PEER, PLACE_KINDS,
-                                  TOPIC_KINDS, UPWARD, calendar, facts_for, groups, people_of,
-                                  place_of, slug)
+                                  TOPIC_KINDS, UPWARD, calendar, facts_for, groups,
+                                  people_of, place_of, slug)
 
 __all__ = ["CHATTER", "ModelWriter", "Writer", "asserts_of", "model_writer", "run",
            "simulate", "template_writer"]

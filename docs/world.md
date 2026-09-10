@@ -129,7 +129,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 
 ## Message formats
 
-**A corpus is one list, whichever product it came from.** `ml_stack.world.Message` is the
+**A corpus is one list, whichever product it came from.** `ml_stack.messages.Message` is the
 shape every reader returns and every emitter writes: a world id, a `source`, a `channel`, a
 `sender`, a Slack-style `ts`, the text, and `thread` naming the root. `ml_stack.sources.read`
 looks at a path and reads a Slack export directory, an mbox, a Microsoft Graph
