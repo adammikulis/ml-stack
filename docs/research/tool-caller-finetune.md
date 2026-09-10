@@ -89,7 +89,7 @@ given what came back.
 Identical to what `synthesise` writes, so the two sources mix in one directory and
 `ml-stack-train-run --recipe tool-calls --data` reads either. Deliberate choices in it:
 
-- **`tools` is what was offered on that call, not every tool that exists.** `graph.ask`
+- **`tools` is what was offered on that call, not every tool that exists.** `graph.conversation`
   takes tools away as a question goes on; an example that offers a tool the model did not
   have teaches it to reach for something that will not be there.
 - **A tool result is cut at 2000 characters**, with its whole length and its id count kept
@@ -173,7 +173,7 @@ What must move for this to have worked, in order of how much it would mean:
    never came from: a caller trained on this community's traces that only works on this
    community has learned the community, not the calling.
 
-And what must *not* move: `graph.ask`'s tool descriptions. The fine-tune is measured against
+And what must *not* move: `graph.prompts`'s tool descriptions. The fine-tune is measured against
 the descriptions it was traced under; changing both at once measures neither. (The answer
 cache is already fingerprinted on the tool descriptions for the same reason.)
 

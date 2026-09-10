@@ -262,7 +262,7 @@ def prompt_for(unit: Any, *, images: bool = False, core_only: bool = False,
     The section is named before its text -- a model reading "2.1 Atoms, Isotopes, Ions and
     Molecules" knows what the pronouns in the first paragraph refer to. With ``images`` the
     figures that rendered go in as a user message of their own after the text, which is the
-    `_images` convention `graph.ask` uses for a tool that brings pictures back: llama.cpp
+    `_images` convention `graph.answers` uses for a tool that brings pictures back: llama.cpp
     cannot carry an image inside anything but a user turn.
     """
     where = " / ".join(x for x in (unit.book_title, f"Chapter {unit.chapter}"

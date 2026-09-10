@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.ask import Answer
+from ml_stack.graph.answers import Answer
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.thread import (drew_on, follow, forget_thread, of_node, recent,
                                    remember_turn, threads, turn_of)
@@ -183,7 +183,8 @@ def test_a_graph_that_was_never_talked_to_has_no_conversation(tmp_path):
 
 # ------------------------------------------------------------ of any length
 
-from ml_stack.graph.ask import EARLIER, RECALLED, converse  # noqa: E402
+from ml_stack.graph.conversation import converse  # noqa: E402
+from ml_stack.graph.prompts import EARLIER, RECALLED  # noqa: E402
 from ml_stack.graph.thread import (EVERY, SUMMARY, WINDOW, latest_summary,  # noqa: E402
                                    recall, summarise, write_summary)
 from ml_stack.testing import ScriptedModel  # noqa: E402

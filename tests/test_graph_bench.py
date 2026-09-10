@@ -1068,7 +1068,7 @@ def test_rich_is_asked_for_the_way_terse_is():
 
 def test_rich_reaches_converse_on_the_asking(monkeypatch):
     """`rich` is a field of `converse`'s `Asking`; this only has to hand the record on."""
-    import ml_stack.graph.ask as ask_module
+    import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
     reached = {}
@@ -1077,7 +1077,7 @@ def test_rich_reaches_converse_on_the_asking(monkeypatch):
         reached.update(kw)
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
-    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    monkeypatch.setattr(conversation, "converse", fake_converse)
     asking(TINY, how=Asking(rich=True))("who?", _Scripted())
     assert reached["asking"].rich is True
     reached.clear()
@@ -2811,8 +2811,8 @@ def test_tight_reaches_converse_on_the_asking(monkeypatch):
     """`tight` is a field of `converse`'s `Asking`; this only has to hand the record on --
     both askings, which is the whole of `--also loose` -- and hand the terse set in already
     told, since that set is built here rather than chosen inside."""
-    import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.ask import TERSE, TIGHT_SHOW_TERSE
+    import ml_stack.graph.conversation as conversation
+    from ml_stack.graph.prompts import TERSE, TIGHT_SHOW_TERSE
     from ml_stack.bench import asking
 
     reached = {}
@@ -2821,7 +2821,7 @@ def test_tight_reaches_converse_on_the_asking(monkeypatch):
         reached.update(kw)
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
-    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    monkeypatch.setattr(conversation, "converse", fake_converse)
     asking(TINY, how=Asking(tight=True))("who?", _Scripted())
     assert reached["asking"].tight is True and reached["tools"] is None
     reached.clear()
@@ -2944,7 +2944,7 @@ def test_reach_reaches_converse_on_the_asking_and_is_none_without_one(monkeypatc
     """`reach` is a field of `converse`'s `Asking`; this only has to hand the record on, and
     hand the terse set in already built with it, since that set is built here rather than
     chosen inside."""
-    import ml_stack.graph.ask as ask_module
+    import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
     reached = {}
@@ -2953,7 +2953,7 @@ def test_reach_reaches_converse_on_the_asking_and_is_none_without_one(monkeypatc
         reached.update(kw)
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
-    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    monkeypatch.setattr(conversation, "converse", fake_converse)
     asking(TINY)("who?", _Scripted())
     assert reached["asking"].reach is None, "asked for no budget, sent no budget"
     reached.clear()
@@ -4222,7 +4222,7 @@ def test_batch_kinds_and_summary_reach_converse_on_the_asking(monkeypatch):
 
     `Asking.summary` is the summarise tool; `converse`'s own `summary` keyword is a thread's
     rolling summary and takes text. The two must never be confused."""
-    import ml_stack.graph.ask as ask_module
+    import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
     reached = {}
@@ -4231,7 +4231,7 @@ def test_batch_kinds_and_summary_reach_converse_on_the_asking(monkeypatch):
         reached.update(kw)
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
-    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    monkeypatch.setattr(conversation, "converse", fake_converse)
     asking(TINY)("who?", _Scripted())
     way = reached["asking"]
     assert not (way.batch or way.kinds or way.summary), \
@@ -4329,7 +4329,7 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
     """The asking record is what a profile is written from, so what was asked has to be in
     it. Mutation: send them as `False`/`ROUNDS` rather than leaving them out, and a run
     that asked for none is no longer byte for byte the run the ranking was written from."""
-    import ml_stack.graph.ask as ask_module
+    import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
     reached = {}
@@ -4338,7 +4338,7 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
         reached.update(kw)
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
-    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    monkeypatch.setattr(conversation, "converse", fake_converse)
     plain = asking(TINY)
     plain("who?", _Scripted())
     way = reached["asking"]
@@ -4764,7 +4764,7 @@ def test_sweep_serves_a_model_with_the_settings_that_scored_best_and_reports_the
 def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monkeypatch):
     from argparse import Namespace
 
-    import ml_stack.graph.ask as ask_module
+    import ml_stack.graph.conversation as conversation
     from ml_stack.bench import _askings, _parser, asked_as, asking
     from ml_stack.bench.run import _askings as askings
 
@@ -4782,7 +4782,7 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
         reached.update(kw)
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
-    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    monkeypatch.setattr(conversation, "converse", fake_converse)
     ask = asking(TINY, how=Asking(constrain_ids=True))
     ask("who?", _Scripted())
     assert reached["asking"].constrain_ids is True

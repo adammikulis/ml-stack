@@ -68,7 +68,7 @@ took nine hours" breaks down into which source, which section and how much of it
 The model is served the way the bench serves one: `--model` takes a lease for the whole run
 in the shape its profile measured (`--no-profile` serves it bare), or `--base-url` uses a
 server that is already up. `--images` hands the model each section's rendered figures as
-pictures rather than only their captions -- the `_images` convention `graph.ask` uses -- and
+pictures rather than only their captions -- the `_images` convention `graph.answers` uses -- and
 without a projector the captions are all it gets, which it says rather than pretending
 otherwise. A run is hours, so `--detach` runs it in its own session with a log under
 `~/.ml-stack/ingest/logs`, a progress file beside the store records every unit that finished,

@@ -10,8 +10,9 @@ from dataclasses import replace
 from ml_stack.client import Reply
 import json
 
-from ml_stack.graph.ask import (LISTED, Answer, converse, converse_stream, list_kind, look_at,
-                                look_up, path_between, tools_for)
+from ml_stack.graph.answers import Answer
+from ml_stack.graph.conversation import converse, converse_stream
+from ml_stack.graph.looking import LISTED, list_kind, look_at, look_up, path_between, tools_for
 from ml_stack.graph.asking import Asking
 from ml_stack.testing import ScriptedModel
 
@@ -145,7 +146,7 @@ def _show_of(tools):
 
 
 def _told_to_stop(messages):
-    from ml_stack.graph.ask import OVER
+    from ml_stack.graph.prompts import OVER
 
     return any(m.get("role") == "user" and m.get("content") == OVER for m in messages)
 
@@ -221,7 +222,7 @@ def test_the_final_turn_is_told_the_searching_is_over_and_refuses_a_search_once(
     """A search called after being told is not run: its tool message says the searching is
     over, and the turn after that is the answer. One refusal; a model that searches again
     after it gets the plain nudge that already exists."""
-    from ml_stack.graph.ask import OVER
+    from ml_stack.graph.prompts import OVER
 
     seen: list[list[dict]] = []
 
@@ -548,7 +549,7 @@ def test_notes_are_never_handed_back_as_the_answer():
     "We need to answer: ... Search for X again maybe missing.", printed to the reader
     as the answer. Notes are notes however they arrive.
     """
-    from ml_stack.graph.ask import is_working
+    from ml_stack.graph.replies import is_working
 
     notes = ["We need to answer: who can do this. Need people with both.",
              "Let me look up the names first.",
@@ -644,7 +645,7 @@ def test_a_tool_call_written_out_as_prose_is_cut_and_believed():
     prose. It is not an answer — but it is the model saying exactly what it meant, and a
     tighter set than asking it again afterwards.
     """
-    from ml_stack.graph.ask import spoken_show
+    from ml_stack.graph.replies import spoken_show
 
     said = ('It would be worthwhile for them to chat about robotics. '
             'show({"ids":["person:ada","person:bea"]})')
@@ -784,7 +785,7 @@ def test_the_tool_descriptions_show_a_call_and_never_use_the_bench_community():
     people, a rising bench score would mean the examples had been memorised rather than the
     convention learned, so the two sets of names are kept apart on purpose.
     """
-    from ml_stack.graph.ask import TOOLS
+    from ml_stack.graph.prompts import TOOLS
     from ml_stack.graph.community import graph as invented
 
     nodes = invented()["nodes"]
@@ -818,7 +819,8 @@ def test_the_tools_can_be_said_briefly_or_at_length():
     gemma-4-E4B from 17% to 70% recall and cost gpt-oss-120b twenty points over the same
     questions, so both exist and the caller chooses -- there is no answering that from
     first principles."""
-    from ml_stack.graph.ask import TERSE, TOOLS, tools_for
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import TERSE, TOOLS
 
     assert [t["function"]["name"] for t in TERSE] \
         == [t["function"]["name"] for t in TOOLS], "the same six tools, said differently"
@@ -990,11 +992,11 @@ def test_listing_a_kind_is_a_search_and_is_refused_on_the_final_turn():
 def test_show_is_found_by_name_after_the_tools_were_reordered():
     """Fails when the closing nudge indexes TOOLS by position: adding list_kind before show
     would offer the model list_kind and ask it to show, and nothing would light up."""
-    from ml_stack.graph.ask import TERSE, TOOLS, _schema
+    from ml_stack.graph.prompts import TERSE, TOOLS, schema_for
 
     assert TOOLS[3]["function"]["name"] != "show", "the reorder this test exists for"
-    assert _schema("show")["function"]["name"] == "show"
-    assert _schema("show", TERSE)["function"]["name"] == "show"
+    assert schema_for("show")["function"]["name"] == "show"
+    assert schema_for("show", TERSE)["function"]["name"] == "show"
     offered_last: list[tuple[str, ...]] = []
 
     class Reader:
@@ -1073,7 +1075,7 @@ def test_planning_welded_to_the_answer_without_a_space_is_cut_off():
     """Measured: one sentence of planning arrives stuck to the front of a good answer with
     no space after the full stop. Splitting on ". " alone keeps them as one sentence, and
     then cutting the note cuts the answer with it."""
-    from ml_stack.graph.ask import without_notes
+    from ml_stack.graph.replies import without_notes
 
     answer = ("Grace Hopper and Ada Lovelace are the two members who have spent years on "
               "compilers.")
@@ -1172,7 +1174,7 @@ def test_the_web_tools_are_searches_and_go_away_with_the_others():
     that exists to end the searching -- refuses them with the rest. Measured before this: the
     last turn ran 'web_search' and 'web_read' while refusing 'look_up'.
     Mutation: drop the web names from SEARCHING."""
-    from ml_stack.graph.ask import SEARCHING
+    from ml_stack.graph.prompts import SEARCHING
 
     assert {"web_search", "web_read", "web_look"} <= SEARCHING
     assert "show" not in SEARCHING
@@ -1211,7 +1213,7 @@ def test_with_rich_off_look_up_returns_exactly_what_it_always_did():
     touches show alone, and the same keys in the JSON the model reads."""
     import json
 
-    from ml_stack.graph.ask import RICH_SENTENCE, TOOLS
+    from ml_stack.graph.prompts import RICH_SENTENCE, TOOLS
 
     assert tools_for(GRAPH, asking=Asking(tight=False))[0][0] is TOOLS[0]
     assert tools_for(GRAPH)[0][0] == TOOLS[0]
@@ -1225,7 +1227,7 @@ def test_with_rich_off_look_up_returns_exactly_what_it_always_did():
 
 
 def test_a_rich_topic_hit_says_why_and_brings_its_people_most_mentioned_first_and_capped():
-    from ml_stack.graph.ask import JOINED_HITS, joined_people
+    from ml_stack.graph.looking import JOINED_HITS, joined_people
 
     graph = _staffing_graph()
     find = tools_for(graph, asking=Asking(rich=True))[0][1]
@@ -1277,7 +1279,7 @@ def test_a_finder_that_does_not_say_why_still_brings_the_people():
 
 
 def test_the_rich_sentence_is_only_in_the_rich_schema():
-    from ml_stack.graph.ask import RICH_SENTENCE, TERSE, TOOLS
+    from ml_stack.graph.prompts import RICH_SENTENCE, TERSE, TOOLS
 
     for terse, base in ((False, TOOLS), (True, TERSE)):
         rich = tools_for(GRAPH, terse=terse, asking=Asking(rich=True))[0][0]
@@ -1349,9 +1351,10 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
     """Tight is how everything asks now. `tight=False` is the control: the asking the
     ranking runs and the answer cache fingerprinted, so it is still the same schemas (not
     copies), the same nudge and the same system prompt, byte for byte."""
-    from ml_stack.graph.ask import (SHOW_PARAGRAPH, SYSTEM, TERSE, TIGHT_NUDGE,
-                                    TIGHT_SENTENCE, TIGHT_SHOW, TIGHT_SHOW_PARAGRAPH,
-                                    TIGHT_SYSTEM_SENTENCE, TOOLS, tools_for)
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import (SHOW_PARAGRAPH, SYSTEM, TERSE, TIGHT_NUDGE, TIGHT_SENTENCE,
+                                        TIGHT_SHOW, TIGHT_SHOW_PARAGRAPH, TIGHT_SYSTEM_SENTENCE,
+                                        TOOLS)
 
     for got, base in zip(tools_for(GRAPH, asking=Asking(tight=False)), TOOLS, strict=True):
         assert got[0] is base
@@ -1382,8 +1385,9 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
 
 
 def test_tight_changes_what_show_says_on_a_copy_of_every_set():
-    from ml_stack.graph.ask import (RICH_SENTENCE, TERSE, TIGHT_SENTENCE, TIGHT_SHOW,
-                                    TIGHT_SHOW_TERSE, TOOLS, tools_for)
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import (RICH_SENTENCE, TERSE, TIGHT_SENTENCE, TIGHT_SHOW,
+                                        TIGHT_SHOW_TERSE, TOOLS)
 
     for terse, base, want in ((False, TOOLS, TIGHT_SHOW), (True, TERSE, TIGHT_SHOW_TERSE)):
         got = tools_for(GRAPH, terse=terse, asking=Asking(tight=True))
@@ -1405,9 +1409,10 @@ def test_tight_changes_what_show_says_on_a_copy_of_every_set():
 
 
 def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
-    from ml_stack.graph.ask import (SYSTEM, TIGHT_NUDGE, TIGHT_SHOW, TIGHT_SHOW_TERSE,
-                                    TIGHT_SYSTEM_SENTENCE, tools_for)
-    from ml_stack.graph.ask import SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import (SYSTEM, TIGHT_NUDGE, TIGHT_SHOW, TIGHT_SHOW_TERSE,
+                                        TIGHT_SYSTEM_SENTENCE)
+    from ml_stack.graph.prompts import SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH
 
     model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
     converse("who?", GRAPH, model, asking=Asking(tight=True))
@@ -1430,7 +1435,7 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
 
 
 def test_tight_caps_show_at_six_keeping_what_the_prose_names_most_named_first():
-    from ml_stack.graph.ask import LIT_TIGHT
+    from ml_stack.graph.answers import LIT_TIGHT
 
     assert LIT_TIGHT == 6
     said = "Marek Voss leads it, with Ida Pellow beside him; ask Marek Voss first."
@@ -1452,7 +1457,8 @@ def test_tight_keeps_what_a_tool_returned_and_drops_what_none_did():
     the first tight rule dropped her -- measured 2026-09-02, that rule cut a listed place.
     A name no tool ever returned is the guess (the `made` case) and goes.
     Mutation: build `seen` from `out.read` alone, or skip the drop."""
-    from ml_stack.graph.ask import converse, look_up
+    from ml_stack.graph.conversation import converse
+    from ml_stack.graph.looking import look_up
 
     import copy
 
@@ -1492,7 +1498,7 @@ def test_the_streamed_path_takes_tight_too():
 def test_the_tight_system_prompt_no_longer_says_every_name_belongs_in_show():
     """The base prompt says every name written belongs in show; tight's copy says only the
     entries that answer belong, and the base is unchanged. Mutation: drop the replace."""
-    from ml_stack.graph.ask import SHOW_PARAGRAPH, SYSTEM, TIGHT_SHOW_PARAGRAPH
+    from ml_stack.graph.prompts import SHOW_PARAGRAPH, SYSTEM, TIGHT_SHOW_PARAGRAPH
 
     assert SHOW_PARAGRAPH in SYSTEM
     tight = SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH)
@@ -1504,7 +1510,7 @@ def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_
     alphabetically and threw away three expected ones, and the unread rule dropped a place
     the model had listed and seen joined to the people it read. Mutation: cut without
     sparing `out.listed`, or build `seen` from `out.read` alone."""
-    from ml_stack.graph.ask import LIT_TIGHT, _joined_to
+    from ml_stack.graph.answers import LIT_TIGHT, _joined_to
 
     graph = {"nodes": [{"id": f"org:o{i}", "kind": "org", "label": f"Org {i}"} for i in range(9)]
              + [{"id": "person:p", "kind": "person", "label": "Wren Halloway"},
@@ -1513,7 +1519,7 @@ def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_
     assert _joined_to(graph, ["person:p"]) == {"place:c"}
     assert LIT_TIGHT == 6
     # the cap logic, exercised directly on an Answer-shaped object
-    from ml_stack.graph.ask import Answer
+    from ml_stack.graph.answers import Answer
     out = Answer(content="Org 0 through Org 8 all employ people here.")
     out.listed = [f"org:o{i}" for i in range(9)]
     out.show = list(out.listed)
@@ -1526,8 +1532,8 @@ def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_
 
 from types import SimpleNamespace  # noqa: E402
 
-from ml_stack.graph.ask import (EARLIER, RECALLED, SHOW_PARAGRAPH,  # noqa: E402
-                                SYSTEM, TIGHT_SHOW_PARAGRAPH, TIGHT_SYSTEM_SENTENCE)
+from ml_stack.graph.prompts import (EARLIER, RECALLED, SHOW_PARAGRAPH,  # noqa: E402
+                                    SYSTEM, TIGHT_SHOW_PARAGRAPH, TIGHT_SYSTEM_SENTENCE)
 
 # The system prompt as the default asking sends it: tight. `SYSTEM` itself is what the
 # control -- tight=False -- still sends, byte for byte.
@@ -1697,7 +1703,7 @@ def test_look_around_reads_a_whole_neighbourhood_in_one_call():
     """The five calls it replaces: a look_up finds the topic, and everyone on it comes back
     with the relation, their kind, their id and a line of their own words -- so a staffing
     question never spends a call per neighbour."""
-    from ml_stack.graph.ask import look_around
+    from ml_stack.graph.looking import look_around
 
     text = look_around(AROUND_GRAPH, ["topic:ceramics"])
     assert text.startswith("- ceramics [topic:ceramics] (topic)")
@@ -1716,7 +1722,7 @@ def test_look_around_reads_a_whole_neighbourhood_in_one_call():
 
 
 def test_look_around_goes_a_second_hop_when_asked_and_never_loops():
-    from ml_stack.graph.ask import look_around
+    from ml_stack.graph.looking import look_around
 
     one = look_around(AROUND_GRAPH, ["topic:ceramics"])
     two = look_around(AROUND_GRAPH, ["topic:ceramics"], hops=2)
@@ -1732,7 +1738,7 @@ def test_a_reach_packs_whole_entries_with_their_quotes_and_the_default_packs_not
     their quotes cut out do not, so what a budget drops is entries, never words -- and the
     most-mentioned go first. Without one nothing is packed at all: what a caller asked for
     is what it gets, byte for byte as it always was."""
-    from ml_stack.graph.ask import look_at
+    from ml_stack.graph.looking import look_at
 
     ids = ["person:hollis", "person:wren", "topic:ceramics"]
     whole = look_at(AROUND_GRAPH, ids)
@@ -1748,7 +1754,7 @@ def test_a_reach_packs_whole_entries_with_their_quotes_and_the_default_packs_not
 def test_a_reach_lets_list_kind_read_out_more_than_its_fixed_forty():
     """The cap was a guess at what a result may cost. A model whose context is cheap wants
     every organisation there is, so a budget replaces the cap rather than joining it."""
-    from ml_stack.graph.ask import LISTED, list_kind
+    from ml_stack.graph.looking import LISTED, list_kind
 
     many = {"nodes": [{"id": f"org:o{i}", "kind": "org", "label": f"Org {i}", "mentions": i}
                       for i in range(60)],
@@ -1766,19 +1772,19 @@ def test_a_reach_cuts_a_tool_message_by_tokens_and_none_cuts_by_characters():
     """The flat 6000 characters is what every run so far measured, so it is what a
     conversation with no reach still gets."""
     from ml_stack.client.tokens import estimate_tokens
-    from ml_stack.graph.ask import CUT, _cut
+    from ml_stack.graph.looking import CUT, cut
 
     long = "the kiln cracked again. " * 2000
-    assert _cut(long, None) == long[:CUT]
-    assert _cut("short", None) == "short"
-    cut = _cut(long, 200)
-    assert estimate_tokens(cut) <= 200 and len(cut) < len(long)
-    assert _cut("short", 200) == "short", "under the budget nothing is touched"
+    assert cut(long, None) == long[:CUT]
+    assert cut("short", None) == "short"
+    trimmed = cut(long, 200)
+    assert estimate_tokens(trimmed) <= 200 and len(trimmed) < len(long)
+    assert cut("short", 200) == "short", "under the budget nothing is touched"
 
 
 def test_converse_offers_look_around_and_a_reach_reaches_its_result():
     """The plumbing: `reach` is a conversation's, so it has to arrive at the tools and at
-    the cut on the tool message. Mutation: pass it to `tools_for` and not to `_cut`, and a
+    the cut on the tool message. Mutation: pass it to `tools_for` and not to `cut`, and a
     caller's own fat tool result is still trimmed at 6000 characters."""
     model = ScriptedModel([call("look_around", ids=["topic:ceramics"])])
     out = converse("who could help with a cracked kiln?", AROUND_GRAPH, model)
@@ -1803,7 +1809,7 @@ def test_converse_offers_look_around_and_a_reach_reaches_its_result():
 def test_look_around_is_a_search_and_is_refused_on_the_last_turn():
     """A model that may still look around will look around instead of answering, which is
     the failure the last turn exists to end: the call is refused, not run."""
-    from ml_stack.graph.ask import SEARCHING, TOOLS
+    from ml_stack.graph.prompts import SEARCHING, TOOLS
 
     assert "look_around" in SEARCHING
     named = {t["function"]["name"] for t in TOOLS}
@@ -1905,7 +1911,7 @@ def test_reading_three_entries_in_one_call_is_one_round_not_three():
 
 
 def test_a_turn_that_read_one_entry_while_more_were_found_is_told_to_read_the_rest():
-    from ml_stack.graph.ask import BATCH_NUDGE
+    from ml_stack.graph.prompts import BATCH_NUDGE
 
     one_at_a_time = ScriptedModel([call("look_up", text="compil"),
                                    call("look_at", ids=["person:ada"]),
@@ -1932,8 +1938,8 @@ def test_a_turn_that_read_one_entry_while_more_were_found_is_told_to_read_the_re
 def test_the_batch_sentence_and_the_worked_calls_are_said_only_when_asked_for():
     """On copies, like rich and tight: with the flag off the descriptions and the system
     prompt are byte for byte what the ranking runs measured."""
-    from ml_stack.graph.ask import (BATCH_EXAMPLES, BATCH_SYSTEM_SENTENCE, TOOLS,
-                                    tools_for)
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import BATCH_EXAMPLES, BATCH_SYSTEM_SENTENCE, TOOLS
 
     said = ScriptedModel([])
     converse("who?", GRAPH, said, asking=Asking(batch=True))
@@ -1967,7 +1973,7 @@ def _schema_text(schemas, name):
 def test_reading_one_entry_at_a_time_is_asked_for_and_nudged_when_it_is_not():
     """The mirror of the batch nudge. A turn that read three entries in one call gets told,
     once, to read them one at a time -- and a turn that already read one is left alone."""
-    from ml_stack.graph.ask import SINGLE_NUDGE
+    from ml_stack.graph.prompts import SINGLE_NUDGE
 
     all_at_once = ScriptedModel([call("look_up", text="compil"),
                                  call("look_at", ids=["person:ada", "person:bea"]),
@@ -1996,8 +2002,9 @@ def test_reading_one_entry_at_a_time_is_asked_for_and_nudged_when_it_is_not():
 def test_the_single_sentence_and_the_one_entry_calls_are_said_only_when_asked_for():
     """On copies, like rich, tight and batch: with the flag off the descriptions and the
     system prompt are byte for byte what every run before this measured."""
-    from ml_stack.graph.ask import (BATCH_SYSTEM_SENTENCE, SINGLE_EXAMPLES,
-                                    SINGLE_SYSTEM_SENTENCE, TOOLS, tools_for)
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import (BATCH_SYSTEM_SENTENCE, SINGLE_EXAMPLES,
+                                        SINGLE_SYSTEM_SENTENCE, TOOLS)
 
     said = ScriptedModel([])
     converse("who?", GRAPH, said, asking=Asking(single=True))
@@ -2020,7 +2027,8 @@ def test_few_offers_three_tools_and_takes_the_rest_of_the_looking_away():
     """For the model whose tool choice degrades with the number of schemas. What goes is
     every *way of looking* that is not look_up or look_at; `show` stays, and so does a
     tool a caller added that does not search -- it is not a choice between ways to look."""
-    from ml_stack.graph.ask import FEW_SENTENCE, TOOLS, tools_for
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import FEW_SENTENCE, TOOLS
 
     offered = [t["function"]["name"] for t, _fn in tools_for(GRAPH, asking=Asking(few=True))]
     assert offered == ["look_up", "look_at", "show"]
@@ -2062,7 +2070,7 @@ def test_a_path_question_under_few_is_answered_by_reading_not_by_a_faked_tool():
     joined to, then Bea. Mutation: fold the path into look_up's description as a form of
     words ("ask for a path as 'path A to B'") and the model spends its turns on a call
     nothing answers."""
-    from ml_stack.graph.ask import FEW_SYSTEM_SENTENCE, PATH_CLAUSE
+    from ml_stack.graph.prompts import FEW_SYSTEM_SENTENCE, PATH_CLAUSE
 
     model = SayingModel([call("look_up", texts=["Ada Lovelace", "Bea Marlow"]),
                          call("look_at", ids=["person:ada"]),
@@ -2091,7 +2099,7 @@ def test_a_path_question_under_few_is_answered_by_reading_not_by_a_faked_tool():
 def test_rounds_is_what_a_way_may_spend_and_reaches_the_loop():
     """`few` and `single` both want more tool-calling turns and `batch` wants fewer, which
     is why the ceiling is measured beside them rather than fixed for every model."""
-    from ml_stack.graph.ask import ROUNDS
+    from ml_stack.graph.conversation import ROUNDS
 
     asking = [call("look_up", text="compil")] * 6
     two = ScriptedModel(list(asking))
@@ -2107,7 +2115,7 @@ def test_asked_kinds_reads_the_question_word():
     """The table, over the questions the bench actually asks. A question whose own words
     settle the kind is filtered; one naming several kinds or none is left alone, because a
     filter that guesses wrong empties the selection."""
-    from ml_stack.graph.ask import asked_kinds
+    from ml_stack.graph.answers import asked_kinds
     from ml_stack.graph.community import QUESTIONS
 
     table = {
@@ -2194,7 +2202,7 @@ def test_a_listing_is_exempt_from_the_kind_filter_and_an_empty_selection_is_neve
 # -- the whole graph at a glance ---------------------------------------------------------------
 
 def test_summarise_reads_out_the_counts_the_top_entries_and_the_busiest_joins():
-    from ml_stack.graph.ask import summarise
+    from ml_stack.graph.looking import summarise
 
     text = summarise(GRAPH)
     assert text.splitlines()[0] == \
@@ -2208,7 +2216,8 @@ def test_summarise_reads_out_the_counts_the_top_entries_and_the_busiest_joins():
 
 
 def test_the_summary_tool_is_offered_only_when_asked_for_and_goes_away_last():
-    from ml_stack.graph.ask import SEARCHING, TOOLS, tools_for
+    from ml_stack.graph.looking import tools_for
+    from ml_stack.graph.prompts import SEARCHING, TOOLS
 
     assert "summarise" not in {t["function"]["name"] for t in TOOLS}
     assert "summarise" not in {s["function"]["name"] for s, _fn in tools_for(GRAPH)}
@@ -2234,7 +2243,7 @@ def test_a_broad_question_calls_summarise_once_and_selects_the_top_entries():
 def test_a_broad_question_routes_to_the_summary_only_where_it_is_offered():
     """The examples are `graph.route`'s, and they are added only when the tool is: a broad
     question routed to something the model was never given is a question with no tool."""
-    from ml_stack.graph.ask import SUMMARY_PROMPTS, TOOL_PROMPTS, prompts_for, routing_prompts
+    from ml_stack.graph.prompts import SUMMARY_PROMPTS, TOOL_PROMPTS, prompts_for, routing_prompts
     from ml_stack.graph.route import rank
 
     def words(text):
@@ -2280,7 +2289,7 @@ def _format_of(given):
 
 
 def test_ids_are_constrained_on_a_turn_that_offers_a_tool_taking_them_and_not_otherwise():
-    from ml_stack.graph.ask import _schema
+    from ml_stack.graph.prompts import schema_for
 
     model = _Recording([call("look_up", text="Ada Lovelace"),
                         call("look_at", ids=["person:ada"])])
@@ -2312,7 +2321,7 @@ def test_ids_are_constrained_on_a_turn_that_offers_a_tool_taking_them_and_not_ot
     converse("who is Ada?", GRAPH, plain)
     assert all("response_format" not in g for g in plain.given)
     assert '{"answer"' not in plain.seen[0][0]["content"]
-    assert _schema("look_at")["function"]["parameters"]["properties"]["ids"]["items"] == {
+    assert schema_for("look_at")["function"]["parameters"]["properties"]["ids"]["items"] == {
         "type": "string"}, "the shared schemas were not written on"
 
 
@@ -2334,7 +2343,7 @@ def test_a_constrained_reply_is_read_as_the_tool_call_or_the_answer_it_holds():
 
 
 def test_the_show_nudge_is_constrained_too():
-    from ml_stack.graph.ask import TIGHT_NUDGE
+    from ml_stack.graph.prompts import TIGHT_NUDGE
 
     model = _Recording([call("look_up", text="Ada Lovelace"),
                         call("look_at", ids=["person:ada"])])

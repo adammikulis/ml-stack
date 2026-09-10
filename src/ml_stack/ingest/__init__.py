@@ -50,7 +50,7 @@ demand, ``show`` prints what one source holds, ``sources`` prints what they hold
 see `Sources.shared` -- and ``stop`` ends a detached run after folding what it has read.
 
 *A store is asked questions the way any graph is.* ``ml-stack-ingest ask --out STORE
-"question"`` puts the store's graph through `ml_stack.graph.ask.converse` with the model
+"question"`` puts the store's graph through `ml_stack.graph.conversation.converse` with the model
 served in the settings it scored best with, and ``ask --gold FILE`` scores a set of questions against the
 entries each answer should have selected, using the bench's own scorer.
 

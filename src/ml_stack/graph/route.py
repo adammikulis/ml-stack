@@ -43,7 +43,7 @@ class Routed:
         without ever looking anything up, which is the worst failure available here: it
         reads as a confident answer and is about nothing.
         """
-        from ml_stack.graph.ask import CHAT
+        from ml_stack.graph.prompts import CHAT
 
         return bool(self.clear and self.order and self.order[0] == CHAT)
 
@@ -116,7 +116,7 @@ def narrow(tools: Sequence[tuple[dict[str, Any], Any]], routed: Routed, *,
     A message routed to chat gets no tools whatsoever. That is the point of it: "tell me a
     joke" spends six model calls searching a graph for a joke otherwise.
     """
-    from ml_stack.graph.ask import CHAT
+    from ml_stack.graph.prompts import CHAT
 
     if routed.chat:
         return []

@@ -922,7 +922,7 @@ class RequestRoutes:
 class DraftRoutes:
     """``POST /draft``: a note introducing the entries an answer named, for a person to send.
 
-    ``drafter(ids, question, answer)`` is the subclass's: `ml_stack.graph.ask.draft` on the
+    ``drafter(ids, question, answer)`` is the subclass's: `ml_stack.graph.conversation.draft` on the
     graph and a slot of the model, returning its dict. 400 without ids, 404 without a
     drafter, 500 with the exception's text when it raised.
     """
@@ -986,7 +986,8 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
               emit: Any) -> Any:
         if self.graph is None:
             raise RuntimeError("no graph on this server: serve with --graph FILE")
-        from ml_stack.graph.ask import ASKING, converse, converse_stream
+        from ml_stack.graph.asking import ASKING
+        from ml_stack.graph.conversation import converse, converse_stream
 
         client = self.client_on_slot(index=0)
         asked = {"asking": self.config.asking if self.config is not None else ASKING,

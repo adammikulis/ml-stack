@@ -42,7 +42,7 @@ __all__ = ["CHAT", "Example", "SYSTEM", "examples_from", "examples_in", "from_be
            "would_yield", "write_dataset"]
 
 CHAT = "chat"
-"""The prompts key for messages that want no tool — the same key ``graph.ask.TOOL_PROMPTS``
+"""The prompts key for messages that want no tool — the same key ``graph.prompts.TOOL_PROMPTS``
 uses, so a project's router examples can be handed over as they are."""
 
 SYSTEM = ("You answer questions with the tools you have been given. When a question needs "
@@ -597,7 +597,7 @@ def examples_from(row: Mapping[str, Any], *, system: str = "") -> list[dict[str,
     but the next one, given what came back.
 
     The tools each example carries are the ones that were actually offered on that call:
-    `graph.ask` takes tools away as a question goes on, and an example that offers a tool
+    `graph.conversation` takes tools away as a question goes on, and an example that offers a tool
     the model was not offered teaches it to reach for something that will not be there.
     """
     schemas: list[dict[str, Any]] = []
@@ -818,10 +818,10 @@ def main(argv: list[str] | None = None) -> int:
                     "what a model actually did, from the traces a bench run kept.")
     ap.add_argument("--tools", required=True,
                     help="JSON list of tool schemas, or python:module:attr "
-                         "(e.g. python:ml_stack.graph.ask:TOOLS)")
+                         "(e.g. python:ml_stack.graph.prompts:TOOLS)")
     ap.add_argument("--prompts", default="",
                     help="JSON {tool: [question, ...]} or python:module:attr "
-                         "(e.g. python:ml_stack.graph.ask:TOOL_PROMPTS); a 'chat' key is "
+                         "(e.g. python:ml_stack.graph.prompts:TOOL_PROMPTS); a 'chat' key is "
                          "the messages that want no tool")
     ap.add_argument("--base", default="google/functiongemma-270m-it",
                     help="Hugging Face id or a local directory to fine-tune")

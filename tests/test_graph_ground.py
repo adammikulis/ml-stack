@@ -5,9 +5,10 @@ the passage behind one; `grounded` says, afterwards, which of the entries the an
 about had a source and which the model never read.
 """
 
-from ml_stack.graph.ask import Answer, look_around, look_at, quotes, tools_for
+from ml_stack.graph.answers import Answer
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.ground import grounded, ungrounded
+from ml_stack.graph.looking import look_around, look_at, quotes, tools_for
 
 PASSAGE = ("A glimmer node is a point of the lattice that holds charge between pulses. "
            "Every glimmer node sits inside a cinder vault.")

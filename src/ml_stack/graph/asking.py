@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["Asking"]
+__all__ = ["ASKING", "Asking"]
 
 
 @dataclass(frozen=True)
@@ -56,3 +56,7 @@ class Asking:
         if self.rounds:
             out["rounds"] = int(self.rounds)
         return out
+
+
+#: the way a question is asked when nobody says
+ASKING = Asking()

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 
-from ml_stack.graph.ask import TERSE, TOOLS, _schema
+from ml_stack.graph.prompts import TERSE, TOOLS, schema_for
 from ml_stack.graph.grammar import (CAP, ID_FIELDS, call_from, call_schema, constrained,
                                     ids_grammar)
 
@@ -27,9 +27,9 @@ def test_constrained_copies_pin_every_id_field_and_leave_the_rest_alone():
     assert between["from_id"]["enum"] == IDS and between["to_id"]["enum"] == IDS
     assert "type" not in between["from_id"] and between["from_id"]["description"]
     # what does not take an id is the same object, byte for byte
-    assert told["look_up"] == _schema("look_up") and told["list_kind"] == _schema("list_kind")
+    assert told["look_up"] == schema_for("look_up") and told["list_kind"] == schema_for("list_kind")
     # the originals were not written on
-    assert _schema("look_at")["function"]["parameters"]["properties"]["ids"]["items"] == {
+    assert schema_for("look_at")["function"]["parameters"]["properties"]["ids"]["items"] == {
         "type": "string"}
     assert set(ID_FIELDS) == {"look_at", "look_around", "show", "path_between"}
 
@@ -50,7 +50,7 @@ def test_call_schema_is_one_tool_call_or_an_answer():
 
 
 def test_call_schema_is_none_when_nothing_offered_takes_an_id_or_over_the_cap():
-    assert call_schema([_schema("list_kind"), _schema("look_up")], IDS) is None
+    assert call_schema([schema_for("list_kind"), schema_for("look_up")], IDS) is None
     assert call_schema(TOOLS, []) is None
     assert call_schema(TOOLS, [f"person:{n}" for n in range(CAP + 1)]) is None
     assert call_schema(TOOLS, [f"person:{n}" for n in range(CAP)]) is not None
@@ -77,7 +77,7 @@ def test_ids_grammar_lists_the_ids_as_literals_escaped_for_gbnf():
 def test_ids_grammar_is_empty_over_the_cap_and_with_nothing_to_constrain():
     assert ids_grammar([f"person:{n}" for n in range(CAP + 1)]) == ""
     assert ids_grammar([]) == ""
-    assert ids_grammar(IDS, [_schema("list_kind")]) == ""
+    assert ids_grammar(IDS, [schema_for("list_kind")]) == ""
 
 
 def test_call_from_reads_a_tool_call_or_an_answer_out_of_a_constrained_reply():

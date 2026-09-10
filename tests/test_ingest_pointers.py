@@ -97,7 +97,7 @@ def test_the_run_node_is_hidden_and_reached_by_pointer(tmp_path):
 
 
 def test_hidden_nodes_stay_off_the_page_and_out_of_list_kind():
-    from ml_stack.graph.ask import list_kind
+    from ml_stack.graph.looking import list_kind
     from ml_stack.graph.page import kinds_of, shown
 
     graph = {"nodes": [{"id": "concept:vault", "kind": "concept", "label": "vault",

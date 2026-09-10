@@ -262,7 +262,8 @@ attached, and answers confidently about nothing.
 ## Which tool a question wants
 
 ```python
-from ml_stack.graph.ask import TOOL_PROMPTS, tools_for
+from ml_stack.graph.looking import tools_for
+from ml_stack.graph.prompts import TOOL_PROMPTS
 from ml_stack.graph.route import narrow, rank
 
 routed = rank(question, TOOL_PROMPTS, base_url=embedder, model=name)
@@ -308,7 +309,8 @@ what a small model answers about, so the question is the last thing it reads.
 ## Answering the same question twice
 
 ```python
-from ml_stack.graph.ask import Answer, converse
+from ml_stack.graph.answers import Answer
+from ml_stack.graph.conversation import converse
 from ml_stack.graph.cache import asked, digest, forget
 
 out, again = asked(store, question, lambda: converse(question, graph, client),
@@ -387,7 +389,8 @@ The graph's tools see the graph and nothing else. `ml_stack.web` adds the web in
 `(schema, callable)` shape, so a model can be handed both:
 
 ```python
-from ml_stack.graph.ask import converse, tools_for
+from ml_stack.graph.conversation import converse
+from ml_stack.graph.looking import tools_for
 from ml_stack.web import PROMPTS, tools as web_tools
 
 converse(question, graph, client, tools=tools_for(graph) + web_tools())

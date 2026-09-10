@@ -172,7 +172,7 @@ From Python, both ends read the same record:
 
 ```python
 from ml_stack.serve import profile_for, slot
-from ml_stack.graph.ask import converse
+from ml_stack.graph.conversation import converse
 
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf",
                     workload="ask")

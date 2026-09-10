@@ -1,4 +1,4 @@
-"""A store asked questions: its graph through `graph.ask`, and a set of
+"""A store asked questions: its graph through `graph.looking`, and a set of
 questions scored the way the bench scores one."""
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ __all__ = ["ask", "asked_f1", "asked_lines", "graph_of", "read_asked", "score_as
 
 
 def graph_of(out: str | Path, *, cite: bool = False) -> dict[str, Any]:
-    """The store's graph in the shape `graph.ask` takes: ``{"nodes": [...], "edges": [...]}``.
+    """The store's graph in the shape `graph.looking` takes: ``{"nodes": [...], "edges": [...]}``.
 
     The hidden nodes -- the run each unit was read by -- and the edges that touch them are
     left out, as `graph.page.shown` leaves them out of a page: they are the record of the
     reading, not the thing being asked about. ``cite`` adds ``units`` -- where each unit
     was read -- and ``texts``, the documents read again a unit at a time, which is what
-    `graph.ask.tools_for(cite=True)` renders and quotes from.
+    `graph.looking.tools_for(cite=True)` renders and quotes from.
     """
     from ml_stack.graph.page import shown
     from ml_stack.graph.store import GraphStore
@@ -65,12 +65,13 @@ def spent_line(spent: Any) -> str:
 def ask(graph: Mapping[str, Any], question: str, client: Any, *,
         say: Callable[[str], None] = say, asking: Any = None,
         finder: Callable[[str], list[dict[str, Any]]] | None = None) -> Any:
-    """One question of a store's graph, through `graph.ask.converse`; the answer, printed.
+    """One question of a store's graph, through `graph.conversation.converse`; the answer, printed.
 
     ``asking`` is the :class:`~ml_stack.graph.Asking` to ask with. ``finder`` replaces what
     ``look_up`` calls -- `graph.search.hybrid`, say. Returns the `Answer`.
     """
-    from ml_stack.graph.ask import ASKING, converse
+    from ml_stack.graph.asking import ASKING
+    from ml_stack.graph.conversation import converse
 
     answer = converse(question, graph, client, asking=asking or ASKING, finder=finder)
     say(answer.content or "(no answer)")

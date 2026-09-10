@@ -211,7 +211,7 @@ def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path
     for the text, a store, and a model that reads a cited entry and quotes the passage."""
     pytest.importorskip("ladybug")
     pytest.importorskip("pymupdf")
-    from ml_stack.graph.ask import tools_for
+    from ml_stack.graph.looking import tools_for
     from ml_stack.ingest.ask import graph_of
     from ml_stack.sources import pdf
     from tests.test_sources_pdf import a_textbook
@@ -246,8 +246,9 @@ def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path
 
 def test_a_model_answering_with_citing_on_is_told_to_cite_and_can_quote():
     from ml_stack.client import Reply
-    from ml_stack.graph.ask import CITE_SYSTEM_SENTENCE, converse
     from ml_stack.graph.asking import Asking
+    from ml_stack.graph.conversation import converse
+    from ml_stack.graph.prompts import CITE_SYSTEM_SENTENCE
 
     graph = {"nodes": [{"id": "concept:vault-current", "kind": "concept",
                         "label": "vault current", "mentions": 3,

@@ -10,8 +10,8 @@ emitter to write in each product's export shape.
 Who says what is a `writer`, ``(persona, prompt, context) -> str``. `template_writer` needs
 no model: sentences per conversation kind and organisation kind, slot-filled with names
 read out of the graph, so even templated chatter is about a real project in a real place.
-`model_writer` has a persona speak through `graph.ask.converse` over the subgraph it knows,
-with its own system prompt, the thread so far as turns and what it said in earlier threads
+`model_writer` has a persona speak through `graph.conversation.converse` over the subgraph
+it knows, with its own system prompt, the thread so far as turns and what it said in earlier threads
 of the same arc as memory -- so what it said last week is what it says this week. ``mix`` is
 the share of threads the model writes; the arcs go to it first and routine chatter last,
 because an arc is where consistency is noticed.
@@ -914,8 +914,11 @@ class ModelWriter:
         return out
 
     def __call__(self, persona: Mapping[str, Any], prompt: str, context: Mapping[str, Any]) -> str:
-        from ml_stack.graph.ask import SYSTEM, converse, spoken_show, tools_for, without_notes
         from ml_stack.graph.asking import Asking
+        from ml_stack.graph.conversation import converse
+        from ml_stack.graph.looking import tools_for
+        from ml_stack.graph.prompts import SYSTEM
+        from ml_stack.graph.replies import spoken_show, without_notes
 
         graph = self.known(persona)
         me = str(persona.get("id") or "")

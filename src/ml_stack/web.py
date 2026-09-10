@@ -1,6 +1,6 @@
 """The web, as tools a model can call beside the graph's.
 
-The four tools in ``graph.ask`` see the graph and nothing else, which is right for "who
+The four tools in ``graph.looking`` see the graph and nothing else, which is right for "who
 here does robotics" and useless for "what does that company actually do" or "is there a
 newer release of this". ``tools()`` here gives a model two more pairs in the same
 ``(schema, callable)`` shape — ``web_search`` and ``web_read`` — and a third, ``web_look``,
@@ -13,12 +13,12 @@ What is deliberate about the shape:
 - **A search that will not answer says so** — ``SearchUnavailable`` from the function,
   ``{"none": "..."}`` from the tool — rather than returning ``[]``, because an empty list
   reads to a model as "try again" and a reason reads as "move on". That mirrors ``find``
-  in ``graph.ask``, and the measurement behind it is there.
+  in ``graph.looking``, and the measurement behind it is there.
 - **A model must not be able to read the machine it runs on.** ``read`` refuses anything
   that is not http(s), and any host that resolves to a loopback, private or link-local
   address, before a byte is fetched or a browser navigates. The check is on what the name
   *resolves to*, not what it looks like, because ``localhost`` is spelt many ways.
-- **The examples in the descriptions are the point.** Measured in ``graph.ask``: a worked
+- **The examples in the descriptions are the point.** Measured in ``graph.prompts``: a worked
   call in the description took a 4B model from 17% to 70% recall on the same weights,
   where prompt text had not. Every example below is invented, and the sites are under
   the reserved ``.example`` domain so none of them can be fetched by accident.

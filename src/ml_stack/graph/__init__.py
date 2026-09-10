@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from ml_stack.graph.access import (LockError, holder, reading, release_all, write_lock,
                                    writing)
-from ml_stack.graph.ask import (Answer, converse, look_around, look_at, look_up,
-                                path_between, quotes)
+from ml_stack.graph.answers import Answer
+from ml_stack.graph.conversation import converse
+from ml_stack.graph.looking import look_around, look_at, look_up, path_between, quotes
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.concerns import concerns
 from ml_stack.graph.drift import resting_on, superseded

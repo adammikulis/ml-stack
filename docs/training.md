@@ -32,8 +32,8 @@ instead of six hours.
 ## Fine-tuning a tool caller
 
 ```
-ml-stack-train-tools --tools python:ml_stack.graph.ask:TOOLS \
-    --prompts python:ml_stack.graph.ask:TOOL_PROMPTS --out runs/caller
+ml-stack-train-tools --tools python:ml_stack.graph.prompts:TOOLS \
+    --prompts python:ml_stack.graph.prompts:TOOL_PROMPTS --out runs/caller
 ```
 
 Plug in a project's tools and end with a GGUF that calls them. One command, three stages,
@@ -90,7 +90,7 @@ manifest. `--model` is a substring of the run's label or of the served model's f
 two models' turns in one dataset teach the average of two callers. One question in ten is
 held out by hash, with every turn of it. A turn the ceiling cut off is dropped — a truncated
 call is the one thing a tool caller must never learn — and each example carries only the
-tools that were offered on that call, since `graph.ask` takes tools away as a question goes
+tools that were offered on that call, since `graph.conversation` takes tools away as a question goes
 on.
 
 Runs are traced by default when 20 questions or fewer are asked, and not on the hundred,

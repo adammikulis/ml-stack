@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.ask import CHAT, TOOL_PROMPTS, TOOLS, prompts_for, tools_for
+from ml_stack.graph.looking import tools_for
+from ml_stack.graph.prompts import CHAT, TOOL_PROMPTS, TOOLS, prompts_for
 from ml_stack.graph.route import Routed, narrow, rank
 
 GRAPH = {"nodes": [], "edges": [], "messages": {}}

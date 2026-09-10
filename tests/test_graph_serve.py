@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from ml_stack.graph.ask import Answer
+from ml_stack.graph.answers import Answer
 from ml_stack.graph.serve import Ask, AskRoutes, History, answer_payload, sse, thread_request
 from ml_stack.graph.store import GraphStore
 

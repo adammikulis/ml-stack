@@ -13,7 +13,7 @@ import json
 import stat
 
 import pytest
-from ml_stack.graph import ask
+from ml_stack.graph import looking, prompts
 from ml_stack.train.tools import (
     CHAT,
     Example,
@@ -67,7 +67,7 @@ PROMPTS = {
 class TestExamplesIn:
     def test_the_graph_tools_carry_worked_examples(self):
         """The examples that took a 4B model from 17% to 70% recall are the seed."""
-        found = examples_in(ask.TOOLS)
+        found = examples_in(prompts.TOOLS)
         by_tool = {}
         for e in found:
             by_tool.setdefault(e.tool, []).append(e)
@@ -107,17 +107,17 @@ class TestExamplesIn:
         found = examples_in(TOOLS, PROMPTS)
         assert Example("what goes well with fennel?", "find_recipe", None) in found
         assert Example("hi there", CHAT, None) in found
-        assert CHAT == ask.CHAT, "a router's prompts are handed over as they are"
+        assert CHAT == prompts.CHAT, "a router's prompts are handed over as they are"
 
     def test_a_prompt_for_a_tool_that_does_not_exist_is_refused(self):
         with pytest.raises(ValueError, match="list_shelf"):
             examples_in(TOOLS, {"list_shelves": ["what is on the shelf?"]})
 
     def test_the_pairs_tools_for_emits_are_accepted(self):
-        pairs = ask.tools_for({"nodes": [], "edges": []})
+        pairs = looking.tools_for({"nodes": [], "edges": []})
         assert [s["function"]["name"] for s in schemas_of(pairs)] == \
-            [s["function"]["name"] for s in ask.TOOLS]
-        assert examples_in(pairs) == examples_in(ask.TOOLS)
+            [s["function"]["name"] for s in prompts.TOOLS]
+        assert examples_in(pairs) == examples_in(prompts.TOOLS)
 
 
 class TestSynthesise:
@@ -401,8 +401,8 @@ class TestCommandLine:
         assert "skipping" in capsys.readouterr().out
 
     def test_the_graph_tools_are_imported_live(self, tmp_path, capsys):
-        code = main(["--tools", "python:ml_stack.graph.ask:TOOLS",
-                     "--prompts", "python:ml_stack.graph.ask:TOOL_PROMPTS",
+        code = main(["--tools", "python:ml_stack.graph.prompts:TOOLS",
+                     "--prompts", "python:ml_stack.graph.prompts:TOOL_PROMPTS",
                      "--out", str(tmp_path / "out"), "--per-tool", "8", "--dry-run"])
         printed = capsys.readouterr().out
         assert code == 0, printed
@@ -416,7 +416,7 @@ class TestCommandLine:
         assert "absent.json" in capsys.readouterr().err
 
     def test_training_without_data_says_to_synthesise_first(self, tmp_path, capsys):
-        code = main(["--tools", "python:ml_stack.graph.ask:TOOLS", "--out", str(tmp_path / "o"),
+        code = main(["--tools", "python:ml_stack.graph.prompts:TOOLS", "--out", str(tmp_path / "o"),
                      "--only", "train"])
         assert code == 2
         assert "synth stage first" in capsys.readouterr().err

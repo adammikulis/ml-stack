@@ -552,7 +552,7 @@ def install_of(repo: Path, *, checkout: Path | None = None,
         python = venv if venv.exists() else Path(sys.executable)
     try:
         got = subprocess.run(
-            [str(python), "-c", "import ml_stack, ml_stack.graph.ask as a; print(a.__file__)"],
+            [str(python), "-c", "import ml_stack, ml_stack.graph.conversation as a; print(a.__file__)"],
             capture_output=True, text=True, timeout=60)
     except Exception as exc:  # noqa: BLE001
         got = None

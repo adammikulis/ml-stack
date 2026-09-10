@@ -121,7 +121,7 @@ def ids_grammar(ids: Iterable[str], schemas: Sequence[Mapping[str, Any]] | None 
     """The GBNF a constrained turn samples under, or "" when there is nothing to constrain
     or more than `CAP` ids. ``schemas`` is the offer; every built-in tool by default."""
     if schemas is None:
-        from ml_stack.graph.ask import TOOLS
+        from ml_stack.graph.prompts import TOOLS
         schemas = TOOLS
     schema = call_schema(schemas, ids)
     if schema is None:

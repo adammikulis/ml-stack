@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from ml_stack.graph.ask import TIGHT_SYSTEM_SENTENCE
+from ml_stack.graph.prompts import TIGHT_SYSTEM_SENTENCE
 from ml_stack.messages import Message
 from ml_stack.world import World
 from ml_stack.world.simulate import (LONGEST, SHORTEST, WORK_END, WORK_START, model_writer, run,

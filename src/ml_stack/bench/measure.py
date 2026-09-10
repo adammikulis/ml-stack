@@ -1215,8 +1215,9 @@ def asking(graph: Mapping[str, Any], *, how: Any = None, shortlist: int = 0,
     takes ``turns=`` -- the earlier turns of a conversation, as `converse` does -- so
     `concurrent` can carry one on.
     """
-    from ml_stack.graph.ask import converse, tools_for
     from ml_stack.graph.asking import Asking
+    from ml_stack.graph.conversation import converse
+    from ml_stack.graph.looking import tools_for
     from ml_stack.graph.search import hybrid
 
     how = how if how is not None else Asking()

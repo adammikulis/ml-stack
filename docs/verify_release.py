@@ -1046,7 +1046,7 @@ def _():
 @check("Graphs", "the model reads a graph with tools, and invented ids are refused")
 def _():
     from dataclasses import dataclass
-    from ml_stack.graph.ask import converse
+    from ml_stack.graph.conversation import converse
     graph = {"nodes": [{"id": "p:a", "kind": "person", "label": "Ada", "mentions": 1,
                         "attrs": {}, "messages": []}], "edges": [], "messages": {}}
 

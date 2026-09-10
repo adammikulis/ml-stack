@@ -57,7 +57,7 @@ __all__ = [
 
 
 # What this repository drives a model with, and one line saying what each is, in the order
-# a person meets them. Three, not one per module: `graph.ask`, `do`, `harness` and the
+# a person meets them. Three, not one per module: `graph.conversation`, `do`, `harness` and the
 # page all call `converse`; `ingest` and `Client.extract` and the judge all fill a schema;
 # `fleet.chat`, the world's writer and a question synthesiser all write prose.
 WORKLOADS = {

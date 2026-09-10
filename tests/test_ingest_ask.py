@@ -81,7 +81,7 @@ def test_the_store_reads_out_as_nodes_and_edges_with_the_run_left_out(tmp_path):
 def test_a_concept_is_read_out_with_the_definition_the_source_gave_it(tmp_path):
     """`look_at` is where a model gets the facts it answers from, and a concept's facts are
     its definition."""
-    from ml_stack.graph.ask import look_at
+    from ml_stack.graph.looking import look_at
 
     graph = ingest.graph_of(a_store(tmp_path))
 
