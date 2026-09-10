@@ -186,20 +186,35 @@ a great divider line, write that down".)
 
 ## The main session and its agents
 
-The main session runs on the most expensive model. It plans, writes the briefs, lands
-branches, and does what an agent cannot: a decision that needs the whole conversation, a
-conflict between two agents' work, a check on a claim before it is relayed. Everything
-else -- reading a subsystem, writing the code and its tests, running the suite, merging
-its own branch -- goes to a subagent on Opus or a smaller model, one per branch, in its own
-worktree.
+The main session plans, writes the briefs, lands branches, and does what an agent cannot:
+a decision that needs the whole conversation, a conflict between two agents' work, a check
+on a claim before it is relayed. Everything else -- reading a subsystem, writing the code
+and its tests, running the suite, merging its own branch -- goes to a subagent, one per
+branch, in its own worktree.
 
-The main session does a piece of work itself only when handing it off would cost more than
-doing it: a one-line edit, a change that needs what only this conversation knows, a thing
-a smaller model has already failed at twice. Never a subagent on the main session's model.
+**Pick the model the task needs.** Not a rank to stay under and not a default: read what
+the work actually asks for and choose. Haiku for a mechanical sweep with the judgement
+already in the brief -- a rename across known sites, a parser moved to the shared one,
+a fixture swapped. Sonnet for ordinary code with tests. Opus where the agent has to decide
+*what* the right change is, not just make it -- a module boundary, a failure that needs
+diagnosing, a measurement whose meaning is in question. Fable for work whose difficulty is
+the thinking rather than the typing, and it is a fine choice for a subagent when that is
+what the task is. Nothing is barred by being the model this session runs on.
+
+Getting it wrong costs in both directions. Too small and the agent produces something that
+passes its tests and is wrong in a way only a reader would catch, or it fails twice and the
+work comes back anyway. Too large and a rename that needed no judgement was paid for at the
+rate of one that did. When a task turns out to be harder than the brief assumed, that is
+what a second, better-modelled agent is for -- not a reason to send everything up front.
+
+The main session does a piece itself when handing it off would cost more than doing it: a
+one-line edit, a change that needs what only this conversation knows, a thing an agent has
+already failed at twice.
 
 (Adam, 2026-09-05: "main thread is for planning, integrating, and handling things that
-subagents can't ... make sure subagents are opus or lower"; "if it's something that is best
-for fable, you can do it on main".)
+subagents can't". 2026-09-10, replacing "make sure subagents are opus or lower":
+"subagents should be the model that they need for the task at hand. sometimes that's haiku,
+sometimes all the way to fable".)
 
 ## Worktrees
 
