@@ -135,8 +135,8 @@ def kept_spans(into: dict[str, Any], *things: Any) -> None:
         into["spans"] = found
 
 
-
 def union(*lists: Any) -> list[str]:
+    """Every item in those lists, once, in the order first seen."""
     out: list[str] = []
     for one in lists:
         for item in one or ():
@@ -146,9 +146,10 @@ def union(*lists: Any) -> list[str]:
 
 
 def hidden(node: Mapping[str, Any]) -> bool:
+    """Whether a hygiene pass leaves this node alone -- an ingest run, a unit."""
     return bool((node.get("attrs") or {}).get("hidden"))
 
 
-
 def label_of(nodes: Mapping[str, Mapping[str, Any]], node_id: str) -> str:
+    """One node's label, or its id when the pass no longer holds it."""
     return str((nodes.get(node_id) or {}).get("label") or node_id)
