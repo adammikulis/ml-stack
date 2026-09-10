@@ -10,8 +10,8 @@ The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
 Slack-specific. What was measured on 2026-09-02 and what it settled is
 `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `docs/architectures/` and
 `src/ml_stack/data/profiles.json` (the shape a model measured best in for one workload --
-`ask`, `ingest` or `chat` -- read by `ml-stack-serve up --profile --for WORKLOAD`, `sweep`,
-`extract` and `converse`).
+`ask`, `ingest` or `chat` -- read by `ml-stack-serve up --for WORKLOAD` (profile by default;
+`--no-profile` serves the model bare), `sweep`, `extract` and `converse`).
 
 Settled: Flash-Next answers (80% F1 at 27 s/q, 100 questions) and extracts (96% node / 76%
 relation F1); draft length 4 for both; one slot for extraction; `single` +8 pts on E4B at
@@ -48,13 +48,17 @@ of these by name.
 
 ## The store (each needs the GPU; Adam's call)
 
-- [ ] **The store holds APBiology and Biology2e chapter 2, sound; nine textbook PDFs are
-  unread.** `~/.ml-stack/sources.ladybug` on ladybug 0.20.2: ~9,500 concepts with
+- [ ] **The store holds APBiology and Biology2e chapter 2, sound; seven textbook PDFs are
+  unread.** `~/.ml-stack/sources.ladybug` on ladybug 0.20.2: ~9,700 concepts with
   definitions, page provenance and the run that read each, after the judged pass (362
   merges, 1,489 inverse pairs, 622 conflicts judged with 282 edges dropped, 186 definitions,
   113 suspects), `ml-stack-store check` clean. The reads files beside the store are the
-  truth (`ml-stack-ingest fold` rebuilds). Whether the other nine -- about four days of GPU
-  at 86 s a unit, one slot -- are worth it is Adam's call; the command is `ml-stack-ingest
+  truth (`ml-stack-ingest fold` rebuilds). One of the seven, Additive Manufacturing
+  Essentials, was already tried and every one of its 80 units failed with
+  `ServerUnreachable` -- nothing was serving on 8080 at the time -- so it needs
+  `ml-stack-ingest retry --out ~/.ml-stack/sources.ladybug` before a `--resume` reads it for
+  real; the other six have never been attempted. Whether they are worth it -- about three
+  days of GPU at 86 s a unit, one slot -- is Adam's call; the command is `ml-stack-ingest
   ~/Documents/Textbooks/<pdf> --out ~/.ml-stack/sources.ladybug --model <flash-next>
   --images --resume --serve-port 8080`, one source at a time, and it tidies itself at the
   source's end. Two answers before that: what a question over the store scores
@@ -75,11 +79,6 @@ of these by name.
   instructions now say keep both only when the passages support both (2026-09-03); the
   store's verdicts predate that and are worth `ml-stack-store tidy --rejudge
   ~/.ml-stack/sources.ladybug`, ~an hour.
-- [ ] **Fill the store's "between sources" section.** `ml-stack-ingest sources` reads
-  `tidy:merges`, written by every fold and tidy from 2026-09-04 on; the store's 210 shared
-  concepts were joined before it existed, so the section is empty. `ml-stack-ingest fold
-  --out ~/.ml-stack/sources.ladybug` re-folds every source from its reads (no model,
-  minutes) and writes the log; it rewrites the store, so take a copy beside it first.
 
 ## Per-request draft depth
 
@@ -172,7 +171,7 @@ works against any client, lm-eval included. Servers are now launched with `--met
 
 - [ ] **Nothing has measured any model for `ingest` or `chat`.** The record now holds a
   shape per workload and the five shipped records are all `ask`, so `ml-stack-serve up
-  --profile --for ingest` serves the graph-asking shape and says so. What is missing is a
+  --for ingest` serves the graph-asking shape (profile by default) and says so. What is missing is a
   measurement: `ml-stack-bench extract` records `workload: ingest` and `report --profile`
   writes that slot, so a sampled extraction run over Flash-Next at draft depths 2, 4 and 8
   would fill it. What makes it worth the GPU is that reading and answering accept the
@@ -424,16 +423,22 @@ worth taking, in this order:
 
 ## The tensor toolkit
 
-- [ ] **Six of the toolkit's functions have no caller here.** `graph.tensors` (the mapping
-  graph as arrays) is called by `graph.smooth`, and `topology.knn_edges` by
-  `graph.places.geocode`. `batch_graphs`, `resolvent_sweep`, `decompose_to_dags`,
-  `mst_edges`, `morton_codes` and `spatial_window_edges` are tested library API that nothing
-  in this repository calls. Each has an obvious home when the work arrives -- `batch_graphs`
-  when a graph model is trained on many graphs at once, `resolvent_sweep` for influence down
-  a DAG (a `reports_to` tree, a `part_of` hierarchy), `mst_edges`/`morton_codes`/
-  `spatial_window_edges` for a cheaper `--near` on a graph too big for the full distance
-  matrix `knn_edges` builds. The last one is the near-term task: `geocode --near K` is
-  O(n^2) in placed entries, which is nothing at 300 and a problem at 30,000.
+- [ ] **`batch_graphs`, `resolvent_sweep` and `decompose_to_dags` have no caller outside
+  `tests/test_graph.py`.** `graph.tensors` (the mapping graph as arrays) is called by
+  `graph.smooth`, and `topology.knn_edges` by `graph.places.geocode`.
+  `topology.build_topology` already wires `mst_edges`, `morton_codes` and
+  `spatial_window_edges` together with `knn_edges`, but `build_topology` itself is called
+  only by that same test file -- nothing in the app calls it. `batch_graphs`,
+  `resolvent_sweep` and `decompose_to_dags` each have an obvious home when the work arrives
+  -- `batch_graphs` when a graph model is trained on many graphs at once, `resolvent_sweep`
+  and `decompose_to_dags` for influence down a DAG (a `reports_to` tree, a `part_of`
+  hierarchy). The near-term task is `geocode --near K`, which is O(n^2) in placed entries
+  (nothing at 300, a problem at 30,000) because it calls `knn_edges` alone, which builds the
+  full distance matrix `pairwise_distances` does; wiring in `build_topology` would not by
+  itself fix that, because `build_topology`'s own `mst_edges` step also calls
+  `pairwise_distances` -- only `morton_codes`/`spatial_window_edges` avoid it. A cheaper
+  `--near` needs `geocode` to call `spatial_window_edges` on its own, skipping the kNN and
+  MST parts of `build_topology` entirely.
 
 ## Speech
 
@@ -502,18 +507,18 @@ worth taking, in this order:
 
 - [ ] **Nobody has drawn 3,000 nodes in the page.** The page ships the whole graph as one
   JSON blob and lays it out in the browser; the biggest graph it has held is a few hundred
-  nodes. `ml-stack-world make --size 5000` gives one to try, and `most_messages` already
-  trims the quotes; nothing trims the drawing.
+  nodes. `ml-stack-world make --size large` gives one 5,000 people to try, and
+  `most_messages` already trims the quotes; nothing trims the drawing.
 
 ## The tool loop
 
-- [ ] **`graph/ask.py` is 2,312 lines, and `deep-files` counts it as one site.** It holds
+- [ ] **`graph/ask.py` is 2,393 lines, and `deep-files` counts it as one site.** It holds
   three jobs: the prompt text and the tool schemas (`SYSTEM`, `TOOLS`, `TERSE`, every
   sentence a way of asking adds, `_asked`, `tools_for`), the tools themselves over a graph
   (`look_up`, `look_at`, `look_around`, `path_between`, `list_kind`, `summarise`), and the
   conversation (`Answer`, `_Loop`, `_converse`, `draft`). Splitting it into three modules
   would take `deep-files` from 19 to 18 and give each half a name, but every one of the
-  nineteen test files that imports from `ml_stack.graph.ask` names the symbols directly, so
+  seventeen test files that imports from `ml_stack.graph.ask` names the symbols directly, so
   the move is a rename across the suite rather than a re-export. Whatever moves, the
   prompt bytes may not: `tests/test_asking_is_the_same_asking.py` hashes the system prompt
   and the tool schemas for every way the bench measures, and `graph/cache.py:fingerprint`
@@ -535,7 +540,7 @@ worth taking, in this order:
   subcommand's `--help` and the output of everything safe to run; take one against
   `main`'s `src/` and one against the branch, and `ml-stack-surface diff BEFORE AFTER`
   names what moved.
-  Worth doing next in this order: `ml-stack-bench` (1,886 lines, two `main`s, and the last
+  Worth doing next in this order: `ml-stack-bench` (2,019 lines, two `main`s, and the last
   screen-scrape in `mcp.bench_show` and `do.bench_cli` is waiting on it), `ml-stack-setup`
   and `ml-stack-doctor` (one module, two entry points), `ml-stack-ingest`,
   `ml-stack-models`, `ml-stack-store`, `ml-stack-speech`, `ml-stack-train-run`,
@@ -551,12 +556,13 @@ worth taking, in this order:
   sideways only when the other package does not import it back. `KNOWN` in that file lists
   every edge that breaks it, and the test fails both on a new violation and on a `KNOWN`
   entry that is no longer one, so the set only shrinks. Four are two-way cycles inside one
-  layer: `serve` <-> `fleet` (3 files one way, 7 the other), `serve` <-> `setup` (2 and 1),
+  layer: `serve` <-> `fleet` (4 files one way, 7 the other), `serve` <-> `setup` (2 and 1),
   `fleet` <-> `setup` (1 and 1), and `sources` <-> `world` (5 and 1, going when
   `world.Message` moves down). Nine reach up a layer: `setup`, `fleet`, `ingest` and
-  `serve` into `bench` (1, 2, 2 and 1 files); `gguf`, `hub`, `graph` and `ingest` into
-  `serve` (1, 1, 3 and 1); and `graph.data` into `train.backend` for a device handle, where
-  the ops that sit under both belong below `graph` rather than in the tools layer. The
+  `serve` into `bench` (1, 3, 2 and 4 files); `gguf`, `hub`, `graph` and `ingest` into
+  `serve` (1, 1, 3 and 2); and `graph.data`, `graph.tensors` and `graph.vectors` into
+  `train.backend.get_backend` for a device handle, where the ops that sit under both belong
+  below `graph` rather than in the tools layer. The
   `graph` -> `serve` three are function-local reaches: `profile_for` in
   `graph/asking.py`, `serve` in `graph/requests.py`, and `Run`, `Shape`, `seat` and `held`
   in `graph/serve.py`. The first goes when the profile store moves below `graph`; the other
