@@ -443,7 +443,7 @@ class TestTheRatesRoute:
 
     def test_the_frontier_is_marked_for_every_cost(self, page, store):
         """Worked out for all three, so switching the axis on the page fetches nothing."""
-        from ml_stack.bench.show import AXES
+        from ml_stack.bench.frontier import AXES
 
         _, got, _ = page.call("/ui/rates.json")
         assert set(got["axes"]) == set(AXES)

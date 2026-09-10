@@ -417,7 +417,7 @@ class UI:
 
         Nothing here measures anything. `keep._kept` reads the store the command reads,
         `score.derived` turns one run into the rates it already prints, `score.composed`
-        adds each model once more as the command does, and `show.pareto` marks the runs
+        adds each model once more as the command does, and `frontier.pareto` marks the runs
         nothing beats on both axes. The frontier is worked out for *all three* costs and
         sent with each point, so switching the axis on the page costs no round trip -- the
         same reason the fit records carry their two composing numbers rather than answers.
@@ -426,7 +426,7 @@ class UI:
             from ml_stack.bench import home_dir
             from ml_stack.bench.keep import _kept
             from ml_stack.bench.score import COSTS, NOISE, composed, derived, host_of
-            from ml_stack.bench.show import AXES, pareto
+            from ml_stack.bench.frontier import AXES, pareto
         except ImportError as exc:                       # a device-tier install has no bench
             return {"error": f"the bench is not installed here: {exc}",
                     "runs": [], "axes": {}, "keys": {}, "store": ""}

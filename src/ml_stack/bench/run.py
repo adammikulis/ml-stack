@@ -26,6 +26,10 @@ from typing import Any
 # `bench.home_dir()` -- so anything patchable is looked up there at call
 # time, never bound here at import.
 from ml_stack import bench, hub, jobs
+from ml_stack.bench.detail import missed, shape
+from ml_stack.bench.estimate import ceiling_default, estimate
+from ml_stack.bench.frontier import plot, rates
+from ml_stack.bench.history import _epoch, _span
 from ml_stack.bench.keep import (
     SHORT,
     SMOKE,
@@ -37,8 +41,6 @@ from ml_stack.bench.keep import (
     resumable,
     save,
 )
-from ml_stack.bench.estimate import ceiling_default, estimate
-from ml_stack.bench.history import _epoch, _span
 from ml_stack.bench.measure import (
     PER_QUESTION,
     _how_many,
@@ -49,7 +51,7 @@ from ml_stack.bench.measure import (
 )
 from ml_stack.bench.score import NOISE, _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
-from ml_stack.bench.show import compare, missed, plot, rates, shape, table
+from ml_stack.bench.show import compare, table
 from ml_stack.client.chat import Client
 from ml_stack.asking import Asking
 from ml_stack.graph.vectors import MARGIN
@@ -965,7 +967,8 @@ def _run(args: Any) -> int:
         return 0
     if args.cmd == "sweep":
         from ml_stack.bench.backends import client_for, http_of, parse_on
-        from ml_stack.graph.community import QUESTIONS, graph as invented
+        from ml_stack.graph.community import QUESTIONS
+        from ml_stack.graph.community import graph as invented
 
         named = []
         for one in args.on:
@@ -1125,7 +1128,8 @@ def _run(args: Any) -> int:
         say(f"  {written} embedded")
         return 0
     if args.cmd == "drafts":
-        from ml_stack.graph.community import QUESTIONS, graph as invented
+        from ml_stack.graph.community import QUESTIONS
+        from ml_stack.graph.community import graph as invented
 
         everything = read_questions(args.questions) if args.questions else QUESTIONS
         asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
@@ -1149,7 +1153,8 @@ def _run(args: Any) -> int:
         return 0 if rows else 1
 
     if args.cmd == "concurrent":
-        from ml_stack.graph.community import QUESTIONS, graph as invented
+        from ml_stack.graph.community import QUESTIONS
+        from ml_stack.graph.community import graph as invented
 
         if wants_smoke(args):
             smoke_first(args)
@@ -1245,7 +1250,8 @@ def _run(args: Any) -> int:
                          anyway=getattr(args, "export_anyway", False)))
             return 0
         if args.shape:
-            from ml_stack.graph.community import QUESTIONS, graph as invented
+            from ml_stack.graph.community import QUESTIONS
+            from ml_stack.graph.community import graph as invented
 
             questions = read_questions(args.questions) if getattr(args, "questions", "") \
                 else QUESTIONS
@@ -1271,7 +1277,8 @@ def _run(args: Any) -> int:
                 f"removes them")
         return 0
 
-    from ml_stack.graph.community import QUESTIONS, graph as invented
+    from ml_stack.graph.community import QUESTIONS
+    from ml_stack.graph.community import graph as invented
 
     if wants_smoke(args):
         smoke_first(args)
