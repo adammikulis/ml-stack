@@ -85,12 +85,6 @@ capability; every line is something that already exists not being what it says.
   which is the whole of what is left to do about them.
 
 
-- [ ] **A reads file that will not parse is silently replaced, and it is the only copy of
-  every extraction for that source.** `ingest/reads.py` `_read_json` returns `None` on
-  `OSError` or `ValueError`, and `_keep_reads` then starts from `{}` and writes the file
-  back holding the current unit alone. `docs/ingest.md` and this file both call these files
-  the truth that `fold --rebuild` restores a store from. A file that will not parse must
-  raise, or be renamed aside, never be overwritten.
 - [ ] **Nothing detects a stale write-ahead log, and the recovery is written down nowhere.**
   `GraphStore.__init__` opens the database without looking for `<store>.wal`; a log left by
   a killed writer segfaults the engine on open, which no Python `except` can catch, so
@@ -112,11 +106,6 @@ capability; every line is something that already exists not being what it says.
   installed here and contradicts what this file records under store integrity. Pin
   `ladybug==0.20.2`, and fix or delete the comment. The probes that would catch a bad
   version are `slow`, so a default test run skips them.
-- [ ] **`graph/thread.py` turns any store fault into an empty conversation.** `_rows`
-  catches `Exception` and returns `[]` on the grounds that a graph with no conversation in
-  it has no conversation, and `follow`, `recent`, `threads` and `turn_of` all go through it.
-  A schema mismatch, a corrupt store and an engine error are all reported to the reader as
-  "no history". Catch the missing-table case by name and let the rest raise.
 
 ### Text it was never licensed to keep
 - [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,

@@ -192,6 +192,7 @@ from ml_stack.ingest.stats import (
     _source_in_store as _source_in_store,
 )
 from ml_stack.ingest.reads import (
+    Damaged as Damaged,
     Read as Read,
     reads_path as reads_path,
     tokens_of as tokens_of,

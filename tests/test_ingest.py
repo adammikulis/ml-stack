@@ -1460,6 +1460,27 @@ def test_a_reads_file_that_cannot_be_written_is_left_as_it_was(tmp_path):
     assert list(tmp_path.glob("*.part")) == [], "and no half-written file is left behind"
 
 
+def test_a_reads_file_that_will_not_parse_stops_the_run_rather_than_being_replaced(tmp_path):
+    """These files are the only copy of every extraction for their source, and what
+    `fold --rebuild` restores a store from. Reading one as nothing meant `_keep_reads`
+    started from an empty dict and wrote the current unit over the lot."""
+    out = tmp_path / "sources"
+    path = ingest.reads_path(out, "velthorne-open-texts")
+    damaged = '{"velthorne-open-texts:1:1.1": {"unit": "1.1", "concept'
+    path.write_text(damaged, encoding="utf-8")
+
+    with pytest.raises(ingest.Damaged, match="not JSON"):
+        ingest._keep_reads(out, "velthorne-open-texts", [{"unit": "9.9"}])
+
+    assert path.read_text(encoding="utf-8") == damaged, "the only copy was overwritten"
+
+
+def test_a_reads_file_that_is_not_there_is_not_a_damaged_one(tmp_path):
+    out = tmp_path / "sources"
+    ingest._keep_reads(out, "velthorne-open-texts", [{"unit": "1.1"}])
+    assert list(ingest._read_json(ingest.reads_path(out, "velthorne-open-texts"))) == ["1.1"]
+
+
 def _gold_with_a_fake_model(tmp_path, monkeypatch):
     """A `--gold --model` run whose server is a fake and whose scoring is a no-op."""
     import contextlib

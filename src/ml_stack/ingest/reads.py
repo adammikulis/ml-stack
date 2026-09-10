@@ -4,14 +4,19 @@ names, and the files beside the store they are written into."""
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Read", "reads_path", "tokens_of", "unit_of", "units_of"]
+from ml_stack.files import write_json
+
+__all__ = ["Damaged", "Read", "reads_path", "tokens_of", "unit_of", "units_of"]
+
+
+class Damaged(OSError):
+    """A file beside the store is there but does not parse."""
 
 
 def _slug(text: str) -> str:
@@ -107,22 +112,29 @@ def tokens_of(reads: Iterable[Mapping[str, Any]]) -> tuple[int, int]:
 
 
 def _read_json(path: Path) -> Any:
+    """What ``path`` holds, or ``None`` when there is no such file.
+
+    A file that is there but will not parse raises `Damaged` rather than reading as
+    nothing: these files are the only copy of every extraction for their source.
+    """
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return None
+    except OSError as exc:
+        raise Damaged(f"{path} cannot be read ({exc})") from exc
+    try:
+        return json.loads(text)
+    except ValueError as exc:
+        raise Damaged(
+            f"{path} is not JSON ({exc}). It holds every extraction kept for this source, "
+            f"so nothing has been written over it. Move it aside to start again, or repair "
+            f"it and re-run.") from exc
 
 
 def _write_json(path: Path, value: Any) -> None:
-    """JSON into ``path`` through a temporary file and a rename: a kill mid-write leaves
-    the file that was there, never half of the one being written."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f"{path.name}.{os.getpid()}.part")
-    try:
-        temp.write_text(json.dumps(value, indent=1), encoding="utf-8")
-        os.replace(temp, path)
-    finally:
-        temp.unlink(missing_ok=True)
+    """JSON into ``path`` so a kill mid-write leaves the file that was there."""
+    write_json(path, value, indent=1)
 
 
 def _keep_reads(out: str | Path, slug: str, reads: Sequence[Mapping[str, Any]]) -> None:
