@@ -34,6 +34,7 @@ from ml_stack.serve import (
     serving_mismatch,
     tail,
 )
+from ml_stack.serve.backend import fresh_log
 from ml_stack.serve.manager import orphaned
 from ml_stack.testing.fakes import (
     FakeLlamaServer,
@@ -973,3 +974,15 @@ def test_two_processes_recording_at_once_keep_both_records(tmp_path):
 
     written = json.loads(state.read_text())
     assert sorted(written) == sorted(str(p) for p in ports), written
+
+
+def test_a_restart_gives_the_log_a_new_file_and_leaves_the_old_one_whole(tmp_path):
+    log = tmp_path / "llama-server-50085.log"
+    log.write_bytes(b"the last run said this\n")
+    before = log.stat().st_ino
+    with log.open("rb") as still_reading:
+        with fresh_log(log) as handle:
+            handle.write(b"new run\n")
+        assert log.stat().st_ino != before
+        assert log.read_bytes() == b"new run\n"
+        assert still_reading.read() == b"the last run said this\n"
