@@ -10,16 +10,34 @@ HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "pre-push"
 ZERO = "0" * 40
 
 
+def git(where: Path, *args: str) -> str:
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    return subprocess.run(["git", "-C", str(where), *args], check=True, text=True,
+                          capture_output=True, env=env).stdout.strip()
+
+
+def commit(where: Path, name: str, text: str) -> str:
+    (where / name).parent.mkdir(parents=True, exist_ok=True)
+    (where / name).write_text(text)
+    git(where, "add", name)
+    git(where, "commit", "-q", "-m", name)
+    return git(where, "rev-parse", "HEAD")
+
+
 @pytest.fixture
 def checkout(tmp_path):
     """A repository whose primary checkout is on the development branch `0.9dev`."""
-    subprocess.run(["git", "init", "-q", "-b", "0.9dev", str(tmp_path)], check=True)
-    return tmp_path
+    where = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "0.9dev", str(where)], check=True)
+    commit(where, "README.md", "x\n")
+    return where
 
 
-def push(where: Path, *refs: str, sha: str = "deadbee",
+def push(where: Path, *refs: str, sha: str = "", base: str = ZERO,
          **env: str) -> subprocess.CompletedProcess:
-    lines = "".join(f"refs/heads/{r} {sha} refs/heads/{r} f00ba12\n" for r in refs)
+    sha = sha or git(where, "rev-parse", "HEAD")
+    lines = "".join(f"refs/heads/{r} {sha} refs/heads/{r} {base}\n" for r in refs)
     return subprocess.run(
         [str(HOOK), "origin", "https://example.invalid/x.git"], cwd=where,
         text=True, capture_output=True, input=lines, env={**os.environ, **env})
@@ -53,6 +71,7 @@ def test_an_agent_cannot_delete_the_development_branch(checkout):
 
 def test_main_is_refused_even_when_the_primary_checkout_is_on_it(tmp_path):
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    commit(tmp_path, "README.md", "x\n")
     assert push(tmp_path, "main", CLAUDECODE="1").returncode != 0
 
 
@@ -67,3 +86,36 @@ def test_a_person_is_not_stopped(checkout):
 def test_the_installer_wires_it_up():
     installer = HOOK.parent.parent / "install-hooks.sh"
     assert "pre-push pre-push" in installer.read_text()
+
+
+def test_an_agents_push_of_python_that_does_not_parse_is_refused(checkout):
+    base = git(checkout, "rev-parse", "HEAD")
+    commit(checkout, "pkg/broken.py", "def f(:\n")
+    done = push(checkout, "0.9dev", base=base, CLAUDECODE="1")
+    assert done.returncode != 0
+    assert "pkg/broken.py" in done.stderr
+
+
+def test_an_agents_push_of_a_data_file_is_refused(checkout):
+    base = git(checkout, "rev-parse", "HEAD")
+    commit(checkout, "store.lbug", "x")
+    done = push(checkout, "0.9dev", base=base, CLAUDECODE="1")
+    assert done.returncode != 0
+    assert "store.lbug" in done.stderr
+
+
+def test_a_merged_worktree_blocks_the_development_branch_until_removed_or_locked(checkout):
+    tree = checkout.parent / "done"
+    git(checkout, "worktree", "add", "-q", "-b", "done-work", str(tree))
+    done = push(checkout, "0.9dev", CLAUDECODE="1")
+    assert done.returncode != 0
+    assert f"git worktree remove {tree}" in done.stderr
+    git(checkout, "worktree", "lock", str(tree))
+    assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
+
+
+def test_a_worktree_with_its_own_commits_does_not_block(checkout):
+    tree = checkout.parent / "live"
+    git(checkout, "worktree", "add", "-q", "-b", "live-work", str(tree))
+    commit(tree, "new.py", "y = 2\n")
+    assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0

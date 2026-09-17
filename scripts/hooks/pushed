@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Check what an agent pushes: Python parses, no data files, and no merged worktree outlives a push.
+
+    pushed DEV   reads pre-push lines on stdin; DEV is the development branch
+"""
+
+from __future__ import annotations
+
+import ast
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+ZERO = "0" * 40
+HERE = Path(__file__).resolve().parent
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+
+
+def leftover_worktrees(tip: str) -> list[tuple[str, str]]:
+    """``(path, branch)`` of unlocked worktrees whose branch has no commit outside ``tip``."""
+    out = []
+    blocks = _git("worktree", "list", "--porcelain").stdout.strip().split("\n\n")[1:]
+    for block in blocks:
+        keys = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines())
+        branch = keys.get("branch", "").removeprefix("refs/heads/")
+        if "locked" in keys or not branch:
+            continue
+        merged = _git("merge-base", "--is-ancestor", branch, tip).returncode == 0
+        if merged or not any(ln.startswith("+") for ln in _git("cherry", tip, branch).stdout.splitlines()):
+            out.append((keys["worktree"], branch))
+    return out
+
+
+def unparseable(base: str, tip: str) -> list[str]:
+    """Python files changed in ``base..tip`` that do not parse at ``tip``."""
+    if base == ZERO or _git("cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
+        names = _git("log", "--format=", "--name-only", tip, "--not", "--remotes").stdout
+    else:
+        names = _git("diff", "--name-only", "--diff-filter=ACMR", base, tip).stdout
+    bad = []
+    for name in sorted({n for n in names.splitlines() if n.endswith(".py")}):
+        shown = _git("show", f"{tip}:{name}")
+        if shown.returncode != 0:
+            continue
+        try:
+            ast.parse(shown.stdout, filename=name)
+        except SyntaxError as exc:
+            bad.append(f"  {name}:{exc.lineno}: {exc.msg}")
+    return bad
+
+
+def main(dev: str, lines: list[str]) -> int:
+    """Return 1 when any pushed ref is refused."""
+    refused = 0
+    for line in lines:
+        parts = line.split()
+        if len(parts) != 4 or parts[1] == ZERO:
+            continue
+        _, tip, remote_ref, base = parts
+        if remote_ref == f"refs/heads/{dev}":
+            for where, branch in leftover_worktrees(tip):
+                refused = 1
+                print(f"pushed: {branch} has nothing outside {dev}; remove its worktree first:",
+                      *(f"  {shlex.join(c)}" for c in (["git", "worktree", "remove", where],
+                                                       ["git", "branch", "-d", branch])),
+                      sep="\n", file=sys.stderr)
+        bad = unparseable(base, tip)
+        if bad:
+            refused = 1
+            print(f"pushed: {remote_ref} carries Python that does not parse:\n" + "\n".join(bad),
+                  file=sys.stderr)
+        if subprocess.run([sys.executable, str(HERE / "no-data-files"), "--range", base, tip],
+                          check=False).returncode != 0:
+            refused = 1
+    if refused:
+        print("\nEvery pushed commit passes the pre-commit hooks. Fix it in a new commit, remove "
+              "merged worktrees with their branches, or lock a worktree still in use.", file=sys.stderr)
+    return refused
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    raise SystemExit(main(sys.argv[1], sys.stdin.read().splitlines()))
