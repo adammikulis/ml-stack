@@ -292,6 +292,35 @@ def test_a_bulk_relation_set_reaches_the_disk_whole_and_nowhere_else(tmp_path):
                               "RETURN count(r)") == 5000
 
 
+def test_a_recursive_patterns_predicate_takes_no_parameter(tmp_path):
+    """`literal` writes values into a path predicate because of this.
+
+    A statement is planned without its values (`CypherStore._run`), and a path predicate's
+    parameter cannot be bound then: the binder cannot tell whether it belongs to the node or
+    to the relationship. Red means it can, and a path predicate can carry a parameter.
+    """
+    db = lb.Database(str(tmp_path / "params.lbug"))
+    conn = lb.Connection(db)
+    conn.execute("CREATE NODE TABLE N(id STRING, PRIMARY KEY(id))")
+    conn.execute("CREATE REL TABLE R(FROM N TO N, eid STRING)")
+    conn.execute("CREATE (:N {id: 'A'}), (:N {id: 'B'})")
+    conn.execute("MATCH (a:N {id: 'A'}), (b:N {id: 'B'}) CREATE (a)-[:R {eid: 'AB'}]->(b)")
+    import warnings
+
+    warnings.simplefilter("ignore", DeprecationWarning)
+    try:
+        statement = conn.prepare("MATCH (a:N {id: 'A'})-[r:R* SHORTEST 1..4 "
+                                 "(e, n | WHERE e.eid <> $skip)]-(b:N {id: 'B'}) RETURN length(r)")
+        assert not statement.is_success()
+        assert "does not depend on" in statement.get_error_message()
+        rows = conn.execute("MATCH (a:N {id: 'A'})-[r:R* SHORTEST 1..4 (e, n | WHERE e.eid <> 'XX')]-"
+                            "(b:N {id: 'B'}) RETURN length(r)").get_all()
+        assert rows == [[1]]
+    finally:
+        conn.close()
+        db.close()
+
+
 def test_shortest_honours_a_node_predicate_and_a_relation_predicate(tmp_path):
     """A shortest path can avoid a node by naming it or by naming its relations.
 
