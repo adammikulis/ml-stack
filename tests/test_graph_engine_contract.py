@@ -11,9 +11,27 @@ import random
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import ladybug as lb
+
+REPO = Path(__file__).resolve().parents[1]
 import pytest
+
+
+def test_the_installed_engine_is_the_one_the_store_extra_asks_for():
+    """Every test here measures the installed ladybug, so a stale environment is said once.
+
+    Red means `pip install -e '.[store]'` has not been run since the pin moved, and the reds
+    below it are about that engine rather than about this code.
+    """
+    declared = [line.split("=", 1)[1].strip().strip('"[]')
+                for line in (REPO / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+                if line.startswith("store = ")][0]
+    floor = declared.split(">=", 1)[1].split(",")[0].strip().strip('"')
+    parts = tuple(int(x) for x in lb.__version__.split(".")[:3])
+    assert parts >= tuple(int(x) for x in floor.split(".")), (
+        f"ladybug {lb.__version__} is installed and pyproject asks for {declared}")
 
 
 def _child(body: str, *args: str) -> subprocess.CompletedProcess:
