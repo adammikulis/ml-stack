@@ -22,7 +22,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "home", "http", "jobs", "jsonl", "limits", "lock", "log", "markup",
               "media", "messages", "paths", "platform", "redact", "scrape", "records",
               "telemetry", "ui", "units")),
-    ("model", ("client", "gguf", "hub", "speech", "vision")),
+    ("model", ("client", "gguf", "hub", "spec", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
     ("machine", ("fleet", "serve", "setup")),
     ("tools", ("bench", "claude", "cli", "do", "draft", "harness", "mcp", "surface",
