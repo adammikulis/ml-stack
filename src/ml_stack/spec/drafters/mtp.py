@@ -1,8 +1,8 @@
 """The target's own multi-token-prediction head, expanded by beam search into a draft tree.
 
-One step of the head reads a pair (token t, hidden h): ``x = fc(norm_e(embed(t)) ++ norm_h(h))``
-through one full-attention decoder layer. The pair (x_{i+1}, h_i) predicts x_{i+2}, and a
-drafted child reads its parent's output as its hidden state.
+One step of the head reads a pair (token t, hidden h) through one full-attention decoder
+layer. The pair (x_{i+1}, h_i) predicts x_{i+2}, and a drafted child reads its parent's output
+as its hidden state; the head's ``readout`` of an output is what the target's head scores.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -24,14 +25,25 @@ from ml_stack.spec.drafters.vocab import sub_head
 from ml_stack.spec.layout import Layout
 from ml_stack.spec.tree import Candidates, Tree, budgeted
 
-__all__ = ["Beam", "MtpDrafter", "MtpHead", "load_head"]
+__all__ = ["Beam", "Head", "MtpDrafter", "MtpHead", "load_head"]
 
 NORMS = (".input_layernorm.weight", ".post_attention_layernorm.weight", ".q_norm.weight",
          ".k_norm.weight", "norm.weight", "pre_fc_norm_embedding.weight",
          "pre_fc_norm_hidden.weight")
 
 
+class Head(Protocol):
+    """One step of a multi-token-prediction head, and what its output is scored through."""
+
+    def step(self, layout: Layout, cache: KVCache, pair: tuple[mx.array, mx.array],
+             positions: mx.array, mask: mx.array | str | None) -> mx.array: ...
+
+    def readout(self, out: mx.array) -> mx.array: ...
+
+
 class MtpHead(nn.Module):
+    """Qwen3.5's head: one pre-norm decoder layer over ``fc`` of the normed pair."""
+
     def __init__(self, args: object) -> None:
         super().__init__()
         width = args.hidden_size
@@ -40,6 +52,21 @@ class MtpHead(nn.Module):
         self.pre_fc_norm_hidden = nn.RMSNorm(width, eps=args.rms_norm_eps)
         self.layers = [DecoderLayer(args, layer_idx=args.full_attention_interval - 1)]
         self.norm = nn.RMSNorm(width, eps=args.rms_norm_eps)
+
+    def step(self, layout: Layout, cache: KVCache, pair: tuple[mx.array, mx.array],
+             positions: mx.array, mask: mx.array | str | None) -> mx.array:
+        """The head's output [W, D] for (token, hidden) pairs at ``positions``."""
+        tokens, hidden = pair
+        layer = self.layers[0]
+        x = mx.concatenate([self.pre_fc_norm_embedding(layout.embed(tokens)),
+                            self.pre_fc_norm_hidden(hidden)], axis=-1)
+        x = self.fc(x)
+        x = x + attend(layer.self_attn, cache, layer.input_layernorm(x), positions, mask)
+        x = x + layer.mlp(layer.post_attention_layernorm(x))
+        return self.norm(x)
+
+    def readout(self, out: mx.array) -> mx.array:
+        return out
 
 
 def load_head(path: Path, args: object, bits: int = 4) -> MtpHead:
@@ -84,28 +111,18 @@ class MtpDrafter:
 
     taps: tuple[int, ...] = ()
 
-    def __init__(self, layout: Layout, head: MtpHead, budget: Budget, beam: Beam = BEAM) -> None:
+    def __init__(self, layout: Layout, head: Head, budget: Budget, beam: Beam = BEAM) -> None:
         self.layout, self.head, self.budget = layout, head, budget
         self.depth, self.beam, self.top_k = beam.depth, beam.width, beam.top_k
-        self.layer = head.layers[0]
         self.vocab = sub_head(layout.head(), int(layout.args.vocab_size))
         self.cache = KVCache()
         self.pairs = 0
-        self.last = mx.zeros((int(layout.args.hidden_size),))
+        self.last = mx.zeros((0,))
         self.min_value, self.cost_per_level = 0.02, 0.04
 
-    def _step(self, tokens: mx.array, hidden: mx.array, positions: mx.array,
-              mask: mx.array | str | None) -> mx.array:
-        x = mx.concatenate([self.head.pre_fc_norm_embedding(self.layout.embed(tokens)),
-                            self.head.pre_fc_norm_hidden(hidden)], axis=-1)
-        x = self.head.fc(x)
-        x = x + attend(self.layer.self_attn, self.cache, self.layer.input_layernorm(x),
-                       positions, mask)
-        x = x + self.layer.mlp(self.layer.post_attention_layernorm(x))
-        return self.head.norm(x)
-
     def _scores(self, out: mx.array) -> mx.array:
-        logits = (self.vocab(out) if self.vocab is not None else self.layout.head()(out))
+        read = self.head.readout(out)
+        logits = self.vocab(read) if self.vocab is not None else self.layout.head()(read)
         logits = logits.astype(mx.float32)
         return logits - mx.logsumexp(logits, axis=-1, keepdims=True)
 
@@ -113,8 +130,9 @@ class MtpDrafter:
         count = hidden.shape[0]
         self.cache, self.pairs = KVCache(), 0
         if count > 1:
-            self._step(mx.array(list(tokens[1:count]), mx.uint32), hidden[:count - 1],
-                       mx.arange(count - 1), "causal")
+            self.head.step(self.layout, self.cache,
+                           (mx.array(list(tokens[1:count]), mx.uint32), hidden[:count - 1]),
+                           mx.arange(count - 1), "causal")
             self.pairs = count - 1
         self.last = hidden[count - 1]
 
@@ -122,8 +140,8 @@ class MtpDrafter:
         self.cache.offset = self.pairs
         count = len(tokens)
         paired = mx.concatenate([self.last[None], hidden[:count - 1]], axis=0)
-        self._step(mx.array(list(tokens), mx.uint32), paired,
-                   mx.arange(self.pairs, self.pairs + count), "causal" if count > 1 else None)
+        self.head.step(self.layout, self.cache, (mx.array(list(tokens), mx.uint32), paired),
+                       mx.arange(self.pairs, self.pairs + count), "causal" if count > 1 else None)
         self.pairs += count
         self.last = hidden[count - 1]
 
@@ -148,7 +166,8 @@ class MtpDrafter:
             reach = mx.concatenate([lineage, own], axis=1)
             seen = mx.any(reach[:, :, None] == mx.arange(drafted + width)[None, None, :], axis=1)
             mask = mx.concatenate([mx.ones((width, self.pairs), dtype=mx.bool_), seen], axis=1)
-            out = self._step(tokens, states, mx.full((width,), self.pairs + level), mask)
+            out = self.head.step(self.layout, self.cache, (tokens, states),
+                                 mx.full((width,), self.pairs + level), mask)
             scores = self._scores(out)
             top = mx.argpartition(-scores, k - 1, axis=-1)[:, :k]
             top_scores = mx.take_along_axis(scores, top, axis=-1)

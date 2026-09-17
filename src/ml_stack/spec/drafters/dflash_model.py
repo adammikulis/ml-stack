@@ -59,6 +59,8 @@ class DFlashConfig:
     conv_kernel_size: int = 0        # taps; 2 for every published DFlash2 head
     conv_group_size: int = 16        # channels sharing one dynamic coefficient correction
     output_multiplier: float = 1.0   # scales the selector's unary logits
+    sample_from_anchor: bool = False  # DSpark: the root's own slot drafts the first token
+    causal: bool = True               # whether a block slot attends only to the slots before it
 
 
 def _build_rope(head_dim, rope_theta, max_position_embeddings, rope_scaling):

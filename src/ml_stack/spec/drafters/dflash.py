@@ -2,7 +2,9 @@
 
 The drafter reads the target's residual stream after ``target_layer_ids`` as context rows and
 fills ``block_size - 1`` mask slots after the root in one forward. DFlash2's selector scores
-transitions between adjacent slots, which gives each drafted token its children for free.
+transitions between adjacent slots, which gives each drafted token its children for free; a
+drafter without one (DSpark) proposes each slot's own top tokens under every node before it.
+The embedding and the output head are always the target's.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ Calibration = Callable[[list[float], list[int]], list[float]]
 def _config(path: Path) -> DFlashConfig:
     raw = json.loads((path / "config.json").read_text(encoding="utf-8"))
     extra = raw.get("dflash_config", {})
+    spark = "Qwen3DSparkModel" in raw.get("architectures", ())
     rope = raw.get("rope_parameters") or {}
     return DFlashConfig(
         hidden_size=raw["hidden_size"], num_hidden_layers=raw["num_hidden_layers"],
@@ -56,7 +59,9 @@ def _config(path: Path) -> DFlashConfig:
         selector_top_k=int(extra.get("selector_top_k") or 0),
         conv_kernel_size=int(extra.get("conv_kernel_size") or 0),
         conv_group_size=int(extra.get("conv_group_size") or 16),
-        output_multiplier=float(extra.get("output_multiplier") or 1.0))
+        output_multiplier=float(extra.get("output_multiplier") or 1.0),
+        sample_from_anchor=bool(extra.get("sample_from_anchor", spark)),
+        causal=bool(extra.get("causal", raw.get("dflash_query_causal", not spark))))
 
 
 def load_dflash(path: Path, bits: int = 4) -> tuple[DFlashDraftModel, DFlashConfig]:
@@ -231,7 +236,7 @@ class DFlashDrafter:
         keys = rope(keys.transpose(0, 2, 1, 3), offset=cache.offset)
         keys, values = cache.with_block(keys, values)
         out = mx.fast.scaled_dot_product_attention(queries, keys, values, scale=attn.scale,
-                                                   mask="causal")
+                                                   mask="causal" if self.config.causal else None)
         return attn.o_proj(out.transpose(0, 2, 1, 3).reshape(1, width, -1))
 
     def _hidden(self, block: mx.array) -> mx.array:
@@ -250,19 +255,22 @@ class DFlashDrafter:
                 hidden = hidden + layer.mlp_conv.finish(layer.mlp(x), after)
             else:
                 hidden = hidden + layer.mlp(x)
-        return self.model.norm(hidden[:, 1:])[0]
+        return self.model.norm(hidden[:, 0 if self.config.sample_from_anchor else 1:])[0]
 
     def draft(self, root: int, hidden: mx.array) -> Tree:
-        selector = self.model.candidate_selector
-        if selector is None:
-            raise ValueError("this drafter has no candidate selector; a tree needs DFlash2")
         block = mx.array([[root] + [self.config.mask_token_id] * (self.block - 1)], mx.uint32)
         states = self._hidden(block)
         logits = self.vocab(states) if self.vocab is not None else self.layout.head()(states)
-        k = selector.top_k
+        selector = self.model.candidate_selector
+        k = selector.top_k if selector is not None else self.branch
         rows = mx.argpartition(logits, kth=-k, axis=-1)[:, -k:]
-        unary = self.model._transform_unary(mx.take_along_axis(logits, rows, axis=-1))
         ids = (self.vocab.token(rows) if self.vocab is not None else rows).astype(mx.int32)
+        if selector is None:
+            probs = mx.take_along_axis(mx.softmax(logits.astype(mx.float32), axis=-1), rows,
+                                       axis=-1)
+            mx.eval(probs, ids)
+            return self._tree(root, [[row] * k for row in probs.tolist()], ids.tolist(), k)
+        unary = self.model._transform_unary(mx.take_along_axis(logits, rows, axis=-1))
         probs = mx.softmax(selector.lattice(ids, unary, states, root), axis=-1)
         mx.eval(probs, ids)
         return self._tree(root, probs.tolist(), ids.tolist(), k)

@@ -70,7 +70,7 @@ def compact(caches: Sequence[object], offset: int, path: mx.array) -> None:
 
 
 def rewind(cache: object, count: int) -> None:
-    """Cut an attention cache back to its first ``count`` tokens, indexer keys and blocks included."""
+    """Cut an attention cache back to its first ``count`` tokens, indexer rows included."""
     cache.offset = count
     if getattr(cache, "index_keys", None) is not None:
         cache.index_keys = cache.index_keys[:, :count]
