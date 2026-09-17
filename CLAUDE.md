@@ -209,9 +209,10 @@ the work actually asks for and choose. Haiku for a mechanical sweep with the jud
 already in the brief -- a rename across known sites, a parser moved to the shared one,
 a fixture swapped. Sonnet for ordinary code with tests. Opus where the agent has to decide
 *what* the right change is, not just make it -- a module boundary, a failure that needs
-diagnosing, a measurement whose meaning is in question. Fable for work whose difficulty is
-the thinking rather than the typing, and it is a fine choice for a subagent when that is
-what the task is. Nothing is barred by being the model this session runs on.
+diagnosing, a measurement whose meaning is in question. Fable sparingly: only for work whose
+difficulty is the thinking rather than the typing and that Opus has fallen short on. It is
+the exception, never the default for work that merely feels important. No more model than
+the task needs, and no less.
 
 Getting it wrong costs in both directions. Too small and the agent produces something that
 passes its tests and is wrong in a way only a reader would catch, or it fails twice and the
@@ -258,10 +259,15 @@ If the branch was pushed, delete it on the remote too. A branch nobody is workin
 still shows up in every list of branches, and the next person has to work out whether it
 matters.
 
-A subagent merges and prunes its own work. A session that spawns three agents gets three
-merges done by three agents, not three branches handed back for it to sort out.
+Whoever merges, prunes. A subagent that lands its own branch removes its own worktree and
+branch. When a subagent finishes and the main session does the merging or integrating, the
+main session removes that worktree and deletes that branch in the same step -- the subagent
+has exited and nobody else will. A merge is not finished until `git worktree list` shows
+only trees with live work in them.
 
-Do not remove a worktree you did not create — another agent may still be in it. Leave it
+Before removing a tree, check that it holds nothing unique: unmerged commits (`git cherry
+<dev-branch> <branch>`), uncommitted changes, or ignored state that is not a rebuildable
+cache. Never remove a tree while an agent is still working in it -- if one is, leave it
 and say so.
 
 What a day without this rule cost (2026-09-03, five agents in the primary checkout at
