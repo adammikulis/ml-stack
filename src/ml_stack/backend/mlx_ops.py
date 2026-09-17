@@ -25,7 +25,7 @@ def build_scatter_add(mx: Any) -> Callable[..., Tensor]:
     """``(target, index, src, axis=0) -> target + scattered src``. Never in-place."""
 
     def scatter_add(target: Tensor, index: Tensor, src: Tensor, axis: int = 0) -> Tensor:
-        idx = index.astype(mx.int32).reshape(-1)
+        idx = mx.stop_gradient(index.astype(mx.int32).reshape(-1))
 
         if axis == 0:
             if src.shape[0] != idx.shape[0]:

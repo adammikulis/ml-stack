@@ -128,6 +128,22 @@ def test_scatter_add_accumulates_duplicate_indices(name):
     assert out.tolist() == [[3.0, 3.0], [1.0, 1.0], [0.0, 0.0]]
 
 
+@needs_mlx
+def test_mlx_scatter_add_differentiates_through_a_computed_index():
+    """An index computed from the input (an argmin, a cluster assignment) is not differentiable,
+    and a gradient still flows to the scattered values."""
+    import mlx.core as mx
+
+    backend = get_backend("mlx")
+    x = mx.array(np.array([[0.0, 1.0], [2.0, -1.0], [3.0, 4.0]], dtype=np.float32))
+
+    def total(values):
+        index = mx.argmin(values, axis=1)
+        return mx.sum(backend.scatter_add(mx.zeros((2, 2)), index, values * values, 0))
+
+    assert np.allclose(np.asarray(mx.grad(total)(x)), 2.0 * np.asarray(x))
+
+
 @each_backend
 def test_scatter_add_does_not_mutate_its_target(name):
     """An in-place write into a tensor that is also an input corrupts the autograd graph."""
