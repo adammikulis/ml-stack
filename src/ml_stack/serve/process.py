@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 
+from ml_stack.client.health import reported_models
 from ml_stack.units import human_bytes
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,21 @@ def every_server() -> list[dict]:
                     "draft_max": int(ahead) if ahead.isdigit() else None,
                     "rss": rss})
     return sorted(out, key=lambda r: r["port"])
+
+
+def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
+    """Each model a live llama-server reports serving on more than one port, with the ports.
+
+    ``servers`` defaults to `every_server`; a server that does not answer ``/v1/models``
+    reports nothing and counts for no model.
+    """
+    ports_of: dict[str, list[int]] = {}
+    for server in every_server() if servers is None else servers:
+        if server.get("defunct"):
+            continue
+        for name in reported_models(f"http://127.0.0.1:{server['port']}"):
+            ports_of.setdefault(name, []).append(int(server["port"]))
+    return {name: ports for name, ports in ports_of.items() if len(ports) > 1}
 
 
 def machine_memory() -> dict | None:

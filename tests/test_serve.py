@@ -986,3 +986,18 @@ def test_a_restart_gives_the_log_a_new_file_and_leaves_the_old_one_whole(tmp_pat
         assert log.stat().st_ino != before
         assert log.read_bytes() == b"new run\n"
         assert still_reading.read() == b"the last run said this\n"
+
+
+def test_a_model_served_on_two_ports_is_reported_with_both(server):
+    from ml_stack.serve.process import loaded_twice
+
+    def serving(name):
+        return lambda m, p, b: json_reply({"data": [{"id": name}]})
+
+    first, second = server(serving("qwen3-8b")), server(serving("qwen3-8b"))
+    other = server(serving("gemma-4"))
+    silent = server(lambda m, p, b: (500, b"loading"))
+    servers = [{"port": s.port} for s in (first, second, other, silent)]
+    servers.append({"port": other.port, "defunct": True})
+
+    assert loaded_twice(servers) == {"qwen3-8b": [first.port, second.port]}
