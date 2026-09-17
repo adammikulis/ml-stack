@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.http import ServerError, request_json
+from ml_stack.http import ServerError, request_bytes, request_json
 
 HEALTH_PATHS = ("/health", "/v1/models", "/models", "/props")
 
@@ -41,10 +41,10 @@ class ServingParams:
 
 
 def is_healthy(base_url: str, *, timeout: float = 2.0, path: str | None = None) -> bool:
-    """One probe. ``True`` if the server answers on any of `HEALTH_PATHS`."""
-    for candidate in (path,) if path else HEALTH_PATHS:
+    """One probe. ``True`` if any of `HEALTH_PATHS`, or ``path``, answers 2xx."""
+    for candidate in (path,) if path is not None else HEALTH_PATHS:
         try:
-            request_json(f"{base_url.rstrip('/')}{candidate}", timeout=timeout)
+            request_bytes(f"{base_url.rstrip('/')}{candidate}", timeout=timeout)
             return True
         except ServerError:
             continue

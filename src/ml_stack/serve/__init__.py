@@ -35,6 +35,7 @@ from ml_stack.serve.ports import (
     port_is_free,
     reclaim_port,
     server_pids_on_port,
+    wait_until_free,
 )
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
 from ml_stack.serve.profile import Profile, profile_for, profiles
@@ -50,15 +51,15 @@ from ml_stack.serve.serving import (
 __all__ = [
     "DEFAULT_HOST",
     "BinaryNotFound",
+    "Config",
     "EscalationRefused",
     "LlamaServerBackend",
     "Measuring",
+    "Profile",
     "ServerBackend",
     "ServerFailed",
     "ServerInfo",
     "ServerManager",
-    "Profile",
-    "Config",
     "ServerSpec",
     "Serving",
     "Talking",
@@ -79,11 +80,12 @@ __all__ = [
     "reclaim_port",
     "recorded_servers",
     "require_binary",
-    "slot",
     "serve",
     "server_pids_on_port",
     "serving_mismatch",
+    "slot",
     "stop_all_servers",
     "tail",
     "trained_context",
+    "wait_until_free",
 ]

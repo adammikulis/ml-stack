@@ -6,11 +6,13 @@ from __future__ import annotations
 import ipaddress
 import json
 import socket
+import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 USER_AGENT = "ml-stack"
@@ -50,6 +52,23 @@ class Retry:
 
 
 ONCE = Retry()
+
+_TRUSTED: ssl.SSLContext | None = None
+
+
+def trust(cafile: str | Path | None) -> None:
+    """Verify HTTPS against this certificate authority from now on, or None for the default.
+
+    A development server signs its own certificate, and the store shipped with Python does
+    not know it. One call says where that certificate is, and every request this module
+    makes afterwards accepts it.
+    """
+    global _TRUSTED
+    _TRUSTED = ssl.create_default_context(cafile=str(cafile)) if cafile else None
+
+
+def _https_context(url: str) -> ssl.SSLContext | None:
+    return _TRUSTED if url.lower().startswith("https://") else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +114,8 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
     for attempt in range(tries):
         request = build_request(url, data=data, method=method, headers=headers, token=token)
         try:
-            return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310
+            return urllib.request.urlopen(request, timeout=timeout,  # noqa: S310
+                                          context=_https_context(url))
 
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:500]

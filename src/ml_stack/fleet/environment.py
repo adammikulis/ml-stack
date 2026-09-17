@@ -17,7 +17,7 @@ from typing import Any
 from ml_stack.files import promote
 from ml_stack.http import ServerError, open_stream, request_json
 
-__all__ = ["Environment", "Library", "CATALOG", "catalog_for"]
+__all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
 MIN_PYTHON = (3, 11)
 WANT_PYTHON = "3.12"

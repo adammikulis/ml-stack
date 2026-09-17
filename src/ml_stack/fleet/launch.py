@@ -12,7 +12,7 @@ from ml_stack.log import say, warn
 
 from .discovery import DEFAULT_PORT as DISCOVERY_PORT  # noqa: F401  (keeps ports in view)
 
-__all__ = ["main", "wait_for_health", "already_running"]
+__all__ = ["already_running", "main", "wait_for_health"]
 
 HTTP_PORT = 8770
 

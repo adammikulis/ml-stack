@@ -31,9 +31,23 @@ from ml_stack.units import human_bytes
 from .jobs import DaemonError, JobRunner
 from .jobs import Job as DaemonJob
 
-__all__ = ["BenchHost", "FAILED_MARKS", "Job", "LOCK", "Local", "Refused", "STORE",
-           "TAIL", "bench_home", "detach_bench", "ended_badly", "here",
-           "installed_commit", "jobs_from", "same_commit"]
+__all__ = [
+    "FAILED_MARKS",
+    "LOCK",
+    "STORE",
+    "TAIL",
+    "BenchHost",
+    "Job",
+    "Local",
+    "Refused",
+    "bench_home",
+    "detach_bench",
+    "ended_badly",
+    "here",
+    "installed_commit",
+    "jobs_from",
+    "same_commit",
+]
 
 LOCK = "measuring.lock"
 """What ``ml-stack-bench`` holds while it measures, under `bench_home`. A peer whose lock

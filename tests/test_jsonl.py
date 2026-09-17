@@ -1,8 +1,10 @@
-"""Compacting a JSON-lines file keeps one line per key."""
+"""Reading, writing and compacting a JSON-lines file."""
 
 import json
 
-from ml_stack.jsonl import compact, ts_key
+import pytest
+
+from ml_stack.jsonl import MalformedLine, append, compact, read, ts_key, write
 
 
 def _write(p, rows):
@@ -75,3 +77,31 @@ def test_ts_key_compares_across_digit_counts():
     assert ts_key("2.000010") < ts_key("10.000001")
     assert ts_key("5") == (5, 0)
     assert ts_key("not a number") is None
+
+
+def test_a_file_written_reads_back_as_the_records_that_went_in(tmp_path):
+    p = tmp_path / "deep" / "rows.jsonl"
+    assert write(p, [{"a": 1}, {"note": "caf\u00e9"}]) == 2
+    assert append(p, [{"a": 2}]) == 1
+    assert read(p) == [{"a": 1}, {"note": "caf\u00e9"}, {"a": 2}]
+    assert "caf\u00e9" in p.read_text(encoding="utf-8"), "non-ASCII is written as itself"
+
+
+def test_writing_replaces_rather_than_appends(tmp_path):
+    p = tmp_path / "rows.jsonl"
+    write(p, [{"a": 1}])
+    write(p, [{"a": 2}])
+    assert read(p) == [{"a": 2}]
+
+
+def test_a_line_that_is_not_json_is_named_rather_than_skipped(tmp_path):
+    p = tmp_path / "rows.jsonl"
+    p.write_text('{"a": 1}\nnot json\n', encoding="utf-8")
+    with pytest.raises(MalformedLine, match="rows.jsonl:2"):
+        read(p)
+
+
+def test_a_type_json_has_no_shape_for_is_written_by_default(tmp_path):
+    p = tmp_path / "rows.jsonl"
+    write(p, [{"when": tmp_path}], default=str)
+    assert read(p) == [{"when": str(tmp_path)}]

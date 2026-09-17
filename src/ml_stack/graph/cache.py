@@ -24,7 +24,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-__all__ = ["PREFIX", "digest", "fingerprint", "forget", "kept", "recall", "remember", "asked"]
+__all__ = ["PREFIX", "asked", "digest", "fingerprint", "forget", "kept", "recall", "remember"]
 
 PREFIX = "_answer:"
 

@@ -73,7 +73,6 @@ __all__ = [
     "ProviderError",
     "ProviderHealth",
     "Registry",
-    "register_defaults",
     "Segment",
     "SileroVAD",
     "Speech",
@@ -87,6 +86,7 @@ __all__ = [
     "VoiceActivity",
     "WhisperCppASR",
     "pcm_to_floats",
+    "register_defaults",
     "rms",
     "to_wav_16k",
 ]

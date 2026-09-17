@@ -23,6 +23,14 @@ def test_a_second_holder_is_refused_rather_than_allowed_to_overlap(tmp_path):
     assert str(os.getpid()) in str(why.value), "says who has it, for a stalled machine"
 
 
+def test_a_refusal_names_what_the_holder_is_doing(tmp_path):
+    with only_one(tmp_path / "l", note="chat_quality mlx"), pytest.raises(Busy) as why, \
+            only_one(tmp_path / "l", wait=False):
+        pass
+    assert "chat_quality mlx" in str(why.value)
+    assert held_by(tmp_path / "l") == ""
+
+
 def test_the_lock_is_released_when_the_block_ends(tmp_path):
     with only_one(tmp_path / "l"):
         pass

@@ -10,8 +10,15 @@ from typing import Any
 from ml_stack import hub
 from ml_stack.log import say
 
-__all__ = ["SERVE_EXTRA", "EXTRACT_SAMPLING", "_alive", "_run", "_sampling",
-           "_serving", "_serving_said"]
+__all__ = [
+    "EXTRACT_SAMPLING",
+    "SERVE_EXTRA",
+    "_alive",
+    "_run",
+    "_sampling",
+    "_serving",
+    "_serving_said",
+]
 
 
 SERVE_EXTRA: dict[str, Any] = {"timeout": 900.0, "cache_reuse": 256, "warmup": False,
