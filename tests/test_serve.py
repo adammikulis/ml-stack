@@ -1007,3 +1007,16 @@ def test_a_model_served_on_two_ports_is_reported_with_both(server):
     servers.append({"port": other.port, "defunct": True})
 
     assert loaded_twice(servers) == {"qwen3-8b": [first.port, second.port]}
+
+
+def test_one_port_named_twice_is_one_copy(server):
+    """Two processes carrying one port's command line are one server, not two copies.
+
+    Who is hurt when this goes red: every run behind `preflight`, which refuses to
+    start while a model looks resident twice.
+    """
+    from ml_stack.serve.process import loaded_twice
+
+    one = server(lambda m, p, b: json_reply({"data": [{"id": "qwen3-8b"}]}))
+
+    assert loaded_twice([{"port": one.port}, {"port": one.port}]) == {}

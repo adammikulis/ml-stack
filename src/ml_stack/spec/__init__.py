@@ -5,9 +5,9 @@ target; an acceptance rule keeps a path; the caches are advanced along it. `Engi
 loaded target, its drafter and the session that reuses a prompt's prefix across calls.
 """
 
-#: model_type -> the layout that verifies it, as ``module:class``
+#: model_type -> the package that loads it, and the layout that verifies it as ``module:class``
 LAYOUTS = {
-    "qwen3_5": "ml_stack.spec.layout:Qwen35Layout",
-    "qwen3_5_moe": "ml_stack.spec.layout:Qwen35Layout",
-    "qwen4_exp": "ml_stack.spec.qwen4:Qwen4ExpLayout",
+    "qwen3_5": ("mlx_lm", "ml_stack.spec.layout:Qwen35Layout"),
+    "qwen3_5_moe": ("mlx_lm", "ml_stack.spec.layout:Qwen35Layout"),
+    "qwen4_exp": ("mlx_vlm", "ml_stack.spec.qwen4:Qwen4ExpLayout"),
 }

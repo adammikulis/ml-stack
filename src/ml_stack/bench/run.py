@@ -10,6 +10,7 @@ command in its own session with `status`, `tail` and `stop` reading the same fil
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
 import json
 import os
@@ -29,12 +30,12 @@ from ml_stack.bench.askings import _asked, asking_from, halves, sampling_from, w
 from ml_stack.bench.detail import missed, shape
 from ml_stack.bench.estimate import estimate
 from ml_stack.bench.frontier import plot, rates
-from ml_stack.bench.keep import SMOKE, empties, forget, read_back, resumable, save
 from ml_stack.bench.holding import _idle
+from ml_stack.bench.keep import SMOKE, empties, forget, read_back, resumable, save
 from ml_stack.bench.measure import concurrent
-from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.ops import Refused
 from ml_stack.bench.progress import note_beside_the_run, status, stop, tail
+from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.score import _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, table
@@ -632,6 +633,11 @@ COMMANDS.add("standard", _handed_over,
                   "configuration; takes the measuring lock itself",
              allow_abbrev=False, conflict_handler="resolve",
              parents=[_module("standard")._parser()])
+COMMANDS.add("tree", lambda args: int(_module("tree").run(args)),
+             help="tree speculative decoding on MLX: the lossless witness against plain "
+                  "greedy decoding, and speed by drafter beside llama.cpp; takes the "
+                  "measuring lock itself",
+             options=options.tree_options, allow_abbrev=False)
 COMMANDS.add("animate", _handed_over,
              help="a comparison document as an animated graphic, with manim",
              options=options.animate_options, allow_abbrev=False)
@@ -733,10 +739,8 @@ def main(argv: list[str] | None = None) -> int:
         # holding the measuring lock through it makes the next run wait for the Hub.
         bench.prefetch(references_in(_parser().parse_args(rest)))
     previous = None
-    try:
+    with contextlib.suppress(ValueError):    # not the main thread: nothing to hand a signal
         previous = signal.signal(signal.SIGTERM, _stop_on_sigterm)
-    except ValueError:
-        pass                                 # not the main thread: nothing to hand a signal
     try:
         with only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
                       announce=lambda line: warn(line)):

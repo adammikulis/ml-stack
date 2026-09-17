@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -12,20 +13,26 @@ from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
+import mlx.nn as nn
 from mlx_lm import load
+from mlx_lm.utils import load_tokenizer
+from mlx_vlm.models.qwen4_exp.ple_storage import PLE_MARKER, prepare_external_ple_model
+from mlx_vlm.utils import load_model
 
 from ml_stack import home
+from ml_stack.spec import LAYOUTS
 from ml_stack.spec.accept import Rule
 from ml_stack.spec.cost import load_curve
 from ml_stack.spec.decode import Asked, Decoded, Pass, Session, decode
 from ml_stack.spec.drafters import Budget, Drafter
 from ml_stack.spec.drafters.dflash import DFlashDrafter, calibration_for, load_dflash
 from ml_stack.spec.drafters.mtp import MtpDrafter, load_head
+from ml_stack.spec.drafters.mtp_qwen4 import load_gguf_head
 from ml_stack.spec.drafters.ngram import NgramDrafter
 from ml_stack.spec.layout import Layout, layout_for
 from ml_stack.spec.sample import Sampling
 
-__all__ = ["DRAFTERS", "Engine", "EngineConfig", "Reply", "Request", "weights"]
+__all__ = ["DRAFTERS", "Engine", "EngineConfig", "Reply", "Request", "load_target", "weights"]
 
 DRAFTERS = ("dflash", "mtp", "ngram", "none")
 
@@ -34,13 +41,40 @@ SAMPLING = {True: Sampling(1.0, 20, 0.95), False: Sampling(0.7, 20, 0.8)}
 
 
 def weights(name: str | Path) -> Path:
-    """A local weights directory, or a Hub repository id brought into the Hub cache."""
+    """A local weights directory or file, or a Hub repository id brought into the Hub cache."""
     where = home.expand(name)
-    if where.is_dir():
+    if where.exists():
         return where
     from huggingface_hub import snapshot_download
 
     return Path(snapshot_download(str(name)))
+
+
+def external_ple(path: Path) -> Path:
+    """``path``, or a hard-linked view of it whose PLE n-gram table is memory-mapped."""
+    index = path / "model.safetensors.index.json"
+    if not index.is_file() or PLE_MARKER not in index.read_text(encoding="utf-8"):
+        return path
+    view = home.cache("spec", "weights", f"{path.parent.parent.name}-{path.name}")
+    if not (view / "EXTERNAL_PLE.json").is_file():
+        shutil.rmtree(view, ignore_errors=True)
+        view.parent.mkdir(parents=True, exist_ok=True)
+        prepare_external_ple_model(path, view)
+    return view
+
+
+def load_target(path: Path) -> tuple[nn.Module, Any]:
+    """The model and tokenizer in ``path``, loaded by the package ``LAYOUTS`` names for it."""
+    config = json.loads((path / "config.json").read_text(encoding="utf-8"))
+    kind = config.get("model_type", "")
+    if kind not in LAYOUTS:
+        raise ValueError(f"no tree-verification layout for model_type {kind!r}; "
+                         f"known: {', '.join(sorted(LAYOUTS))}")
+    if LAYOUTS[kind][0] == "mlx_lm":
+        loaded = load(str(path))
+        return loaded[0], loaded[1]
+    return (load_model(external_ple(path)),
+            load_tokenizer(path, eos_token_ids=config.get("eos_token_id")))
 
 
 @dataclass(frozen=True)
@@ -88,7 +122,10 @@ def make_drafter(config: EngineConfig, layout: Layout, budget: Budget) -> Drafte
         return DFlashDrafter(layout, model, dflash, budget,
                              calibration=calibration_for(path.name))
     if config.drafter == "mtp":
-        return MtpDrafter(layout, load_head(weights(config.drafter_model), layout.args), budget)
+        where = weights(config.drafter_model)
+        head = (load_gguf_head(where, layout.args) if where.suffix == ".gguf"
+                else load_head(where, layout.args))
+        return MtpDrafter(layout, head, budget)
     if config.drafter in ("ngram", "none"):
         return NgramDrafter(budget, depth=8 if config.drafter == "ngram" else 0)
     raise ValueError(f"unknown drafter {config.drafter!r}; choose from {', '.join(DRAFTERS)}")
@@ -105,7 +142,7 @@ class Engine:
         """Load on the worker thread, which is the thread MLX's streams belong to."""
         mx.set_wired_limit(mx.device_info()["max_recommended_working_set_size"])
         path = weights(config.model)
-        self.model, self.tokenizer = load(str(path))
+        self.model, self.tokenizer = load_target(path)
         self.layout = layout_for(self.model)
         curve = load_curve(self.layout, path.name, again=config.recalibrate)
         budget = Budget(max_nodes=min(32, max(1, config.max_nodes)), cost=curve)
