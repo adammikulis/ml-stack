@@ -169,16 +169,27 @@ def repo_only(model: str | Path) -> str:
     return text.lower() if len(parts) == 2 and not parts[1].endswith(".gguf") else ""
 
 
-def model_matches(reported: str, wanted: str | Path) -> bool:
+def model_matches(reported: str, wanted: str | Path, *, loaded_file: str | None = None) -> bool:
     """Whether a server reporting ``reported`` is serving ``wanted``.
 
-    A reference to a repository with no file in it -- what a server started from a
-    repository reports -- matches every file of that repository: the weights are the
-    same model, and a second copy beside it costs the memory of both.
+    ``loaded_file`` is what the server's own ``/props`` says it actually loaded (its
+    ``model_path``), when a caller has one. A reference to a repository with no file
+    in it -- what a server started from a repository reports over ``/v1/models`` --
+    is not evidence it holds any particular file of that repository: two files of one
+    repository are not the same weights. ``loaded_file`` is what breaks the tie; a
+    bare-repository report with no file requested either still matches every file of
+    that repository, since nothing named a file to check.
     """
-    repo = repo_only(reported) or repo_only(wanted)
+    if loaded_file and repo_only(reported):
+        reported = loaded_file
+    wanted_repo, reported_repo = repo_only(wanted), repo_only(reported)
+    if reported_repo and not wanted_repo:
+        # the report names only the repository, a specific file was asked for, and
+        # which file actually loaded is not known -- do not assume it is this one
+        return False
+    repo = reported_repo or wanted_repo
     if repo:
-        other = wanted if repo_only(reported) else reported
+        other = wanted if reported_repo else reported
         return repo in str(other).removeprefix("hf:").lower().replace("_", "/")
     wanted_name = Path(str(wanted).removeprefix("hf:")).name.lower()
     reported_name = Path(reported).name.lower()
@@ -195,7 +206,8 @@ def serving_mismatch(
     """Each field in which a running server differs from ``spec``. Empty when it fits."""
     out: list[str] = []
 
-    if models and not any(model_matches(m, spec.model) for m in models):
+    loaded_file = params.model if params else None
+    if models and not any(model_matches(m, spec.model, loaded_file=loaded_file) for m in models):
         serving = ", ".join(repr(Path(name).name) for name in models)
         asked = Path(str(spec.model).removeprefix("hf:")).name
         out.append(f"model: asked for {asked!r}, serving {serving}")
@@ -427,9 +439,10 @@ class ServerManager:
         if not is_healthy(base_url, timeout=1.0):
             return None
         models = reported_models(base_url)
-        if models and not any(model_matches(m, spec.model) for m in models):
-            return None
         params = serving_params(base_url)
+        loaded_file = params.model if params else None
+        if models and not any(model_matches(m, spec.model, loaded_file=loaded_file) for m in models):
+            return None
         if params is None or params.total_slots is None or params.n_ctx is None:
             return None
         wanted_slots = max(int(spec.parallel or 1), 1)
