@@ -28,10 +28,13 @@ pytestmark = pytest.mark.slow
 
 
 def wheel() -> Path:
-    """The built wheel, or a skip saying how to make one."""
+    """The wheel in dist/, built first when it is missing or older than src/."""
     built = sorted((REPO / "dist").glob("ml_stack-*.whl"))
-    if not built:
-        pytest.skip("no wheel in dist/; run `python packaging/build.py` first")
+    source = max((path.stat().st_mtime for path in (REPO / "src").rglob("*.py")), default=0.0)
+    if not built or built[-1].stat().st_mtime < source:
+        subprocess.run([sys.executable, str(REPO / "packaging" / "build.py")],
+                       check=True, stdout=subprocess.DEVNULL, timeout=900)
+        built = sorted((REPO / "dist").glob("ml_stack-*.whl"))
     return built[-1]
 
 
