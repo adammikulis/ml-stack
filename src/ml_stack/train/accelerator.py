@@ -47,11 +47,11 @@ def apple_telemetry() -> dict[str, Any]:
     """Temperature, clock, power and throttle state on Apple silicon."""
     out: dict[str, Any] = {}
     try:
-        import darwin_perf
+        import metal_smi
     except ImportError:
         return out
     try:
-        temps = darwin_perf.temperatures()
+        temps = metal_smi.temperatures()
         for key, name in (("temp_c", "gpu_avg"), ("cpu_temp_c", "cpu_avg")):
             value = temps.get(name)
             if isinstance(value, (int, float)):
@@ -59,7 +59,7 @@ def apple_telemetry() -> dict[str, Any]:
     except Exception:                                 # noqa: BLE001
         pass
     try:
-        gpu = darwin_perf.gpu_power()
+        gpu = metal_smi.gpu_power()
         for key, name in (("power_w", "gpu_power_w"), ("clock_mhz", "gpu_freq_mhz"),
                           ("power_limit_pct", "power_limit_pct")):
             value = gpu.get(name)
@@ -70,7 +70,7 @@ def apple_telemetry() -> dict[str, Any]:
     except Exception:                                 # noqa: BLE001
         pass
     try:
-        stats = darwin_perf.system_gpu_stats()
+        stats = metal_smi.system_gpu_stats()
         if stats.get("model"):
             out["gpu"] = str(stats["model"])
         if isinstance(stats.get("device_utilization"), (int, float)):

@@ -74,7 +74,7 @@ CATALOG: tuple[Library, ...] = (
             ("transformers>=4.40", "datasets>=2.19"), size_mb=300),
     Library("telemetry", "Temperature and clocks",
             "Reporting this machine's temperature and GPU clock.",
-            ("darwin-perf>=0.1",), size_mb=5, default=True,
+            ("metal-smi>=1.1.0",), size_mb=5, default=True,
             platforms=("darwin",)),
 )
 
