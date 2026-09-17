@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import time
 
 from ml_stack.serve.process import kill_pid, pid_exists
 
@@ -33,6 +34,17 @@ def free_port(host: str = DEFAULT_HOST) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((host, 0))
         return int(sock.getsockname()[1])
+
+
+def wait_until_free(port: int, host: str = DEFAULT_HOST, *, timeout: float = 5.0) -> bool:
+    """Wait for ``port`` to become bindable. False when it is still held at the deadline."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if port_is_free(port, host):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
 
 
 def server_pids_on_port(port: int) -> list[int]:

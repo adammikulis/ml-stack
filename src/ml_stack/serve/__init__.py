@@ -35,6 +35,7 @@ from ml_stack.serve.ports import (
     port_is_free,
     reclaim_port,
     server_pids_on_port,
+    wait_until_free,
 )
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
 from ml_stack.serve.profile import Profile, profile_for, profiles
@@ -73,6 +74,7 @@ __all__ = [
     "parse_context",
     "pid_exists",
     "port_is_free",
+    "wait_until_free",
     "profile_for",
     "profiles",
     "projector_for",

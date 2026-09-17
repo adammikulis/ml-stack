@@ -33,6 +33,7 @@ from ml_stack.serve import (
     recorded_servers,
     serving_mismatch,
     tail,
+    wait_until_free,
 )
 from ml_stack.serve.backend import fresh_log
 from ml_stack.serve.manager import orphaned
@@ -171,6 +172,14 @@ class TestPorts:
             sock.bind(("127.0.0.1", 0))
             sock.listen(1)
             assert not port_is_free(sock.getsockname()[1])
+
+    def test_waiting_gives_up_on_a_port_nobody_releases(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            port = sock.getsockname()[1]
+            assert not wait_until_free(port, timeout=0.3)
+        assert wait_until_free(port, timeout=0.3)
 
     def test_time_wait_does_not_read_as_busy(self):
         """SO_REUSEADDR matches how the server binds. Without it an ordinary TIME_WAIT
