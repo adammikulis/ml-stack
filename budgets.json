@@ -15,7 +15,7 @@
   "process-scans": 5,
   "pyright-errors": 1,
   "ruff-blind-except": 23,
-  "ruff-bugbear": 63,
+  "ruff-bugbear": 62,
   "ruff-other": 855,
   "ruff-security": 134,
   "subprocess-spawns": 4,
