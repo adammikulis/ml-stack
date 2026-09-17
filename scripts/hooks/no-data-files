@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Refuse graph, data and weight files, files over MAX_BYTES, and anything under a data directory.
+
+    no-data-files                  the files this commit adds or changes (pre-commit)
+    no-data-files --range BASE TIP the files commits in BASE..TIP change, as they are at TIP
+    no-data-files --tracked        every tracked file
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import PurePosixPath
+
+ZERO = "0" * 40
+MAX_BYTES = 1 << 20
+EXTENSIONS = frozenset({
+    ".lbug", ".wal", ".kgx", ".gguf", ".safetensors", ".parquet", ".arrow", ".feather",
+    ".pt", ".pth", ".ckpt", ".bin", ".onnx", ".npy", ".npz", ".h5", ".hdf5", ".pkl",
+    ".pickle", ".db", ".sqlite", ".sqlite3", ".jsonl", ".csv", ".mbox", ".eml", ".pst",
+})
+DATA_DIRS = frozenset({
+    "data", "datasets", "graphs", "state", "checkpoints", "weights", "runs", "var",
+    "exports", "dumps", "_backups", "scrapes", "messages", "patients",
+})
+PACKAGE_DATA = ("src/ml_stack/data/", "src/ml_stack/spec/data/")
+SHIPPED = frozenset({"src/ml_stack/spec/data/draft_vocab.npy"})
+
+
+def _git(*args: str) -> str:
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        raise SystemExit(f"no-data-files: git {' '.join(args)} failed: {done.stderr.strip()}")
+    return done.stdout
+
+
+def why_refused(path: str, size: int) -> str | None:
+    """The rule a path breaks, or None."""
+    pure = PurePosixPath(path)
+    if path in SHIPPED:
+        return None
+    if pure.suffix.lower() in EXTENSIONS:
+        return f"a {pure.suffix} file is data or weights"
+    if size > MAX_BYTES:
+        return f"{size} bytes is over the {MAX_BYTES}-byte limit for a tracked file"
+    if not path.startswith(PACKAGE_DATA) and DATA_DIRS.intersection(p.lower() for p in pure.parts[:-1]):
+        return "it is under a data directory"
+    return None
+
+
+def candidates(argv: list[str]) -> list[tuple[str, str]]:
+    """``(path, object)`` pairs to check, the object naming the content git would publish."""
+    if argv[:1] == ["--tracked"]:
+        return [(name, f":{name}") for name in _git("ls-files", "-z").split("\0") if name]
+    if argv[:1] == ["--range"] and len(argv) == 3:
+        base, tip = argv[1], argv[2]
+        known = base != ZERO and subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"],
+                                               capture_output=True, check=False).returncode == 0
+        if not known:
+            names = _git("log", "--format=", "--name-only", "--no-renames", tip, "--not", "--remotes")
+        else:
+            names = _git("diff", "--name-only", "--no-renames", base, tip)
+        at_tip = set(_git("ls-tree", "-r", "--name-only", tip).splitlines())
+        return [(n, f"{tip}:{n}") for n in sorted(set(names.splitlines()) & at_tip)]
+    if argv:
+        raise SystemExit(__doc__)
+    names = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z").split("\0")
+    return [(n, f":{n}") for n in names if n]
+
+
+def main(argv: list[str]) -> int:
+    """Print every refused path and return 1 when there is one."""
+    refused = []
+    for path, obj in candidates(argv):
+        reason = why_refused(path, int(_git("cat-file", "-s", obj).strip()))
+        if reason:
+            refused.append(f"  {path}: {reason}")
+    if not refused:
+        return 0
+    print("no-data-files: refused\n" + "\n".join(refused), file=sys.stderr)
+    print("\nThis repository is public. Graphs, datasets, weights and anything a person wrote "
+          "stay out of it; keep them under the machine's data directory.", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

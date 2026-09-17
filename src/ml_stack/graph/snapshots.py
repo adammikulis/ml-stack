@@ -20,6 +20,10 @@ Three facts shape the design, each learned the hard way rather than reasoned abo
    back to a real byte copy and says so loudly, because a backup that quietly costs a hundred
    megabytes a call is something an operator should hear about before the disk fills.
 
+A count whose name ends in ``DISAGREEING`` (`ml_stack.graph.cypher.census` makes them) is
+records that read differently depending on how they are reached. A snapshot keeps them like
+any count; a write is refused on a store that has any.
+
 Locking is the caller's job. Take the write lock around a snapshot or a restore.
 """
 
@@ -46,7 +50,13 @@ logger = logging.getLogger(__name__)
 SNAPSHOT_DIR = "_backups"
 WAL_SUFFIX = ".wal"
 MANIFEST_SUFFIX = ".json"
+#: the fewest snapshots of a store kept, however old
 KEEP = 10
+#: snapshots younger than this are kept, however many
+KEEP_DAYS = 7.0
+#: how long a writer's automatic snapshot stands in for the next one
+AUTO_EVERY_S = 24 * 60 * 60.0
+DISAGREEING = " disagreeing"
 
 
 class SnapshotError(RuntimeError):
@@ -71,7 +81,8 @@ class Snapshot:
 
     def describe(self) -> str:
         stamp = datetime.fromtimestamp(self.created_at, UTC).astimezone()
-        held = " / ".join(f"{v} {k}" for k, v in sorted(self.counts.items()))
+        held = " / ".join(f"{v} {k}" for k, v in sorted(self.counts.items())
+                          if not k.endswith(DISAGREEING) or v)
         return (f"{Path(self.path).name}\n"
                 f"    taken   {stamp:%Y-%m-%d %H:%M:%S}  ({self.age_days:.1f}d ago, via {self.method})\n"
                 f"    reason  {self.reason}\n    holds   {held}")
@@ -166,9 +177,9 @@ def read_manifest(path: str | Path) -> Snapshot | None:
         return None
 
 
-def _clear(path: Path) -> None:
-    path.unlink(missing_ok=True)
-    Path(str(path) + WAL_SUFFIX).unlink(missing_ok=True)
+def damage(counts: dict[str, int]) -> dict[str, int]:
+    """The counts of records that read differently depending on how they are reached."""
+    return {k: v for k, v in counts.items() if k.endswith(DISAGREEING) and v}
 
 
 def take(source: str | Path, *, reason: str, count: Any, fold: Any = None,
@@ -198,19 +209,19 @@ def take(source: str | Path, *, reason: str, count: Any, fold: Any = None,
     try:
         method = clone_store(src, dst, fold=fold)
     except (SnapshotError, OSError):
-        _clear(dst)
+        remove_store(dst)
         raise
     spent = time.perf_counter() - started
 
     try:
         after = dict(count(dst))
     except Exception as exc:
-        _clear(dst)
+        remove_store(dst)
         raise SnapshotError(
             f"the snapshot of {src.name} would not open or read back: {exc}. Discarded — "
             "whatever was about to change must not proceed.") from exc
     if after != before:
-        _clear(dst)
+        remove_store(dst)
         raise SnapshotError(
             f"the snapshot of {src.name} does not match the source. source: {before}; "
             "clone: " f"{after}. Discarded — whatever was about to change must not proceed.")
@@ -229,8 +240,10 @@ def snapshots(source: str | Path) -> list[Snapshot]:
     target = snapshot_dir(source)
     if not target.is_dir():
         return []
+    name = Path(source).expanduser().name
     out = [r for p in target.iterdir()
-           if p.suffix != MANIFEST_SUFFIX and (r := read_manifest(p)) is not None]
+           if p.suffix != MANIFEST_SUFFIX and (r := read_manifest(p)) is not None
+           and Path(r.source).name == name]
     return sorted(out, key=lambda r: r.created_at, reverse=True)
 
 
@@ -243,12 +256,14 @@ def unmanaged(source: str | Path) -> list[Path]:
                   if p.suffix not in (MANIFEST_SUFFIX, WAL_SUFFIX) and read_manifest(p) is None)
 
 
-def prune(source: str | Path, *, keep: int = KEEP) -> list[Path]:
-    """Drop all but the newest ``keep`` snapshots. Returns what went."""
+def prune(source: str | Path, *, keep: int = KEEP, days: float = KEEP_DAYS) -> list[Path]:
+    """Drop the snapshots past the newest ``keep`` that are older than ``days``. Returns what went."""
     gone: list[Path] = []
     for record in snapshots(source)[keep:]:
+        if record.age_days <= days:
+            continue
         path = Path(record.path)
-        _clear(path)
+        remove_store(path)
         _manifest(path).unlink(missing_ok=True)
         gone.append(path)
     if gone:
@@ -286,7 +301,7 @@ def restore(snapshot_path: str | Path, *, count: Any, fold: Any = None) -> Snaps
 
     # staged beside the destination so the swap is a same-filesystem rename
     staging = src.with_suffix(src.suffix + f".restoring-{os.getpid()}")
-    _clear(staging)
+    remove_store(staging)
     try:
         clone_store(snap, staging, fold=fold)
         # the source's own log must go, and go first: it holds writes against the file being
@@ -294,6 +309,39 @@ def restore(snapshot_path: str | Path, *, count: Any, fold: Any = None) -> Snaps
         Path(str(src) + WAL_SUFFIX).unlink(missing_ok=True)
         promote(staging, src)
     finally:
-        _clear(staging)
+        remove_store(staging)
+    landed = dict(count(src))
+    if landed != record.counts:
+        raise SnapshotError(f"the restore of {snap.name} did not land: expected {record.counts}, "
+                            f"{src.name} now holds {landed}")
     logger.info("restored %s from %s", src.name, snap.name)
+    return record
+
+
+_auto: dict[str, float] = {}
+
+
+def before_writing(source: str | Path, *, reason: str | None, count: Any, fold: Any = None,
+                   every_s: float = AUTO_EVERY_S) -> Snapshot | None:
+    """The snapshot a write is owed, or None when none is due.
+
+    With a reason, always. Without one, the first write this process makes to a store, then
+    once every ``every_s``. A store that does not exist yet has nothing to protect, and a
+    store that reads differently depending on how it is walked is refused a write.
+    """
+    src = Path(source).expanduser()
+    if not src.exists():
+        return None
+    if reason is None:
+        last = _auto.get(str(src))
+        if last is not None and time.time() - last < every_s:
+            return None
+        reason = f"auto: first write in pid {os.getpid()}"
+    record = take(src, reason=reason, count=count, fold=fold)
+    if damage(record.counts):
+        raise SnapshotError(
+            f"{src.name} reads differently depending on how it is walked: "
+            f"{damage(record.counts)}. Kept as {Path(record.path).name}; restore a sound "
+            "snapshot or rebuild the store before writing to it.")
+    _auto[str(src)] = time.time()
     return record

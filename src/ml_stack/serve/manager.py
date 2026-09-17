@@ -16,24 +16,24 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
-from ml_stack.files import write_json
 from ml_stack.client import is_healthy, reported_models
-from ml_stack.hub import free_memory
 from ml_stack.client.health import ServingParams, serving_params
+from ml_stack.files import write_json
 from ml_stack.http import ServerError, request_json
+from ml_stack.hub import free_memory
 from ml_stack.serve.backend import (
-    default_slot_save_path,
     Lease,
     LlamaServerBackend,
     ServerBackend,
     ServerFailed,
     ServerInfo,
     ServerSpec,
+    default_slot_save_path,
 )
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
-from ml_stack.serve.ports import free_port, port_is_free
+from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import kill_process_tree, pid_exists, self_or_ancestor
-from ml_stack.serve.ports import DEFAULT_HOST, reclaim_port
+from ml_stack.serve.python_engines import ENGINES
 from ml_stack.units import human_bytes
 
 logger = logging.getLogger(__name__)
@@ -162,8 +162,24 @@ def orphaned(entry: dict) -> bool:
             and not pid_exists(owner) and pid_exists(pid))
 
 
+def repo_only(model: str | Path) -> str:
+    """The ``owner/repo`` a reference names when it names no file in it; else ""."""
+    text = str(model).removeprefix("hf:").strip("/")
+    parts = text.split("/")
+    return text.lower() if len(parts) == 2 and not parts[1].endswith(".gguf") else ""
+
+
 def model_matches(reported: str, wanted: str | Path) -> bool:
-    """Whether a server reporting ``reported`` is serving ``wanted``."""
+    """Whether a server reporting ``reported`` is serving ``wanted``.
+
+    A reference to a repository with no file in it -- what a server started from a
+    repository reports -- matches every file of that repository: the weights are the
+    same model, and a second copy beside it costs the memory of both.
+    """
+    repo = repo_only(reported) or repo_only(wanted)
+    if repo:
+        other = wanted if repo_only(reported) else reported
+        return repo in str(other).removeprefix("hf:").lower().replace("_", "/")
     wanted_name = Path(str(wanted).removeprefix("hf:")).name.lower()
     reported_name = Path(reported).name.lower()
     if not wanted_name or not reported_name:
@@ -261,8 +277,13 @@ class ServerManager:
         self._unavailable_until: dict[int, float] = {}
 
     def backend_for(self, spec: ServerSpec) -> ServerBackend:
-        """The backend that serves ``spec``: MLX weights run tree decoding, anything else this
-        manager's own."""
+        """The backend that serves ``spec``: the engine it names, tree decoding for MLX
+        weights, anything else this manager's own."""
+        if spec.engine:
+            if spec.engine not in ENGINES:
+                raise ServerFailed(f"no serving engine {spec.engine!r}; there are "
+                                   f"{', '.join(sorted(ENGINES))}")
+            return ENGINES[spec.engine]
         return self.tree if is_mlx(spec.model) else self.backend
 
     # ------------------------------------------------------------------ leasing

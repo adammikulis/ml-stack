@@ -50,11 +50,12 @@ def _fileno(handle: Any) -> int:
     return handle if isinstance(handle, int) else handle.fileno()
 
 
-def take(handle: Any) -> bool:
+def take(handle: Any, *, shared: bool = False) -> bool:
     """Take the lock on an open file without waiting.
 
     True when it is held now, False when somebody else has it. ``handle`` is a file
-    descriptor or anything with ``fileno()``.
+    descriptor or anything with ``fileno()``. A shared lock keeps out only an exclusive
+    one; Windows has no shared lock, so there it is exclusive.
     """
     handle = _fileno(handle)
     if sys.platform == "win32":
@@ -73,7 +74,7 @@ def take(handle: Any) -> bool:
     import fcntl
 
     try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(handle, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
         return True
     except OSError as exc:
         if exc.errno in (errno.EAGAIN, errno.EACCES):
