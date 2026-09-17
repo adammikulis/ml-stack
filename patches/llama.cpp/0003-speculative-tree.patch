@@ -1,5 +1,5 @@
 diff --git a/common/arg.cpp b/common/arg.cpp
-index 79405b5..7664088 100644
+index 79405b5..9559cc4 100644
 --- a/common/arg.cpp
 +++ b/common/arg.cpp
 @@ -4146,6 +4146,16 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
@@ -15,7 +15,7 @@ index 79405b5..7664088 100644
 +            }
 +            params.speculative.tree_width = value;
 +        }
-+    ).set_spec().set_examples({LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_SPEC_TREE"));
++    ).set_spec().set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_SPEC_TREE"));
      add_opt(common_arg(
          {"--spec-draft-n-min"}, "N",
          string_format("minimum number of draft tokens to use for speculative decoding (default: %d)", params.speculative.draft.n_min),
