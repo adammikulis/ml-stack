@@ -653,6 +653,62 @@ time with the page's server down for the Ollama half.
   `CLAUDE_STREAM_IDLE_TIMEOUT_MS`), and what `Usage` reports against the server's own
   `/metrics`. Then a small task set measured the bench's way.
 
+### Tree speculative decoding on MLX
+
+- [ ] **The full tree-decoding table has not been run.** Smoke numbers only, on a busy
+  card. One model on the card at a time, the embedding and page servers down, AC power:
+  ```
+  # llama.cpp, Flash-Next UD-Q4_K_XL (the GGUF in the Hub cache): no head, then its MTP head (unsloth fork build)
+  ml-stack-bench speed --serve Qwen3.8-Flash-Next-UD-Q4_K_XL --serve-label flash-gguf --no-draft --prompts 512,4096 --streams 1 --generate 512
+  ml-stack-bench speed --serve Qwen3.8-Flash-Next-UD-Q4_K_XL --serve-label flash-gguf-mtp --serve-draft embedded --prompts 512,4096 --streams 1 --generate 512
+  # the 27B at 4 bits on MLX: one node a pass, then each drafter
+  ml-stack-bench speed --serve mlx:lmstudio-community/Qwen3.8-27B-MLX-4bit --serve-label q27-mlx-none --no-profile --prompts 512,4096 --streams 1 --generate 512
+  ml-stack-bench speed --serve mlx:lmstudio-community/Qwen3.8-27B-MLX-4bit --serve-draft ngram --serve-label q27-tree-ngram --no-profile --prompts 512,4096 --streams 1 --generate 512
+  ml-stack-bench speed --serve mlx:lmstudio-community/Qwen3.8-27B-MLX-4bit --serve-draft mlx-community/Qwen3.8-27B-MTP-bf16 --serve-label q27-tree-mtp --no-profile --prompts 512,4096 --streams 1 --generate 512
+  ml-stack-bench speed --serve mlx:lmstudio-community/Qwen3.8-27B-MLX-4bit --serve-draft JonasLoos/Qwen3.8-27B-DFlash2-b32 --serve-label q27-tree-dflash --no-profile --prompts 512,4096 --streams 1 --generate 512
+  # the same arms on real work (graph questions with tool calls), accepted tokens per pass and drafting share
+  ml-stack-draft mlx:lmstudio-community/Qwen3.8-27B-MLX-4bit --draft JonasLoos/Qwen3.8-27B-DFlash2-b32 --depth 8 --depth 16 --depth 32
+  ml-stack-draft mlx:lmstudio-community/Qwen3.8-27B-MLX-4bit --draft mlx-community/Qwen3.8-27B-MTP-bf16 --depth 16 --depth 32
+  # qwen-spec itself against the port, same prompts: its server is not a lease, so it is measured with --on
+  uvx --from git+https://github.com/JonasLoos/qwen-spec qwen-spec-server --port 8098 --greedy
+  ml-stack-bench speed --on qwen-spec=http://127.0.0.1:8098 --prompts 512,4096 --streams 1 --generate 512
+  ml-stack-bench show   # tok/s, draft acceptance; tok/pass is completion_tokens / verify_n in each row's timings
+  ```
+  Plain mlx-lm with no verifier in the way is `mlx_lm.generate --model lmstudio-community/Qwen3.8-27B-MLX-4bit --max-tokens 512 -p ...`;
+  it is not a lease, so its tok/s is read off its own report. Resident peak is the bench's
+  memory record for a leased arm; upstream's is not tracked.
+- [ ] **Flash-Next has no tree-verification layout.** `mlx-community/Qwen3.8-Flash-Next-4bit`
+  is `qwen4_exp`: mlx-lm 0.31.3 cannot load it, mlx-vlm main can (and wants mlx>=0.32.2).
+  A `Layout` for it needs: hyper-connections (4x2560 residual, GatedResidual mix/inject) in
+  `block`; its DeltaNet normalises q/k by L2 norm and gates the output with sigmoid, so
+  `deltanet.tree_mix` has to take the model's own normaliser; attention rotates through
+  `rotary_emb.apply_rotary` with (3, 1, N) positions and appends raw indexer keys on commit,
+  and is plain tree-masked attention only while every node sits below position 2051 (QSA
+  selects blocks past that); the PLE n-gram layer (layer 1) reads the token and two before it
+  along the node's own path, hashed, plus a dilation-3 conv over its own rows, so it needs
+  a per-node pass and a commit of its own. The 4-bit checkpoint is 111.5G, 32G of it the
+  n-gram table; mlx-vlm's `ple_storage.prepare_external_ple_model` memory-maps it (79.5G
+  resident). The 4-bit checkpoint carries no MTP weights; the PixelML DFlash drafter ships
+  without embeddings or head and binds the target's, taps [3, 15, 23, 35, 43] of the
+  contracted 2560-wide residual.
+- [ ] **On an M4 the verify pass costs 4.1x one token at 16 nodes.** Measured on 27B 4-bit:
+  the dense MLP's quantized matmul grows from 22 ms to 91 ms between 1 and 16 nodes, the
+  DeltaNet mixer from 12 to 46, attention from 4 to 13. A small-M 4-bit matmul kernel that
+  reads each weight group once was slower than stock at every row count (0.64 against
+  0.41 ms at 8 rows), so the cost is compute, not memory. Untried: fusing gate/up, q/k/v
+  and qkv/z projections into one matmul each, which cuts kernel launches per pass by
+  about a third.
+- [ ] **The tree pass flips one-ulp bf16 ties against sequential decoding.** On 27B, greedy,
+  one code prompt: token 22 had a 0.125 logit margin and the verifier's own single-node pass
+  took the other token; every layer differs from mlx-lm's decode step by bf16 rounding
+  from layer 0 (float32 conv and DeltaNet in the parallel form). Greedy tree decoding is
+  token-identical to mlx-lm on the float32 test model. Whether matching mlx-lm's dtypes
+  exactly (bf16 conv) removes the flip on the 27B is unmeasured.
+- [ ] **Nothing tests that the engine decodes on the thread that loaded it.** Loading on
+  the main thread and decoding on the worker failed on the 27B with its DFlash drafter
+  ("There is no Stream(gpu, 1) in current thread"), and the tiny float32 model does not
+  reproduce it, so moving the load back to the main thread leaves every test green.
+
 ### Queued
 - [ ] **Nothing has measured any model for `ingest` or `chat`.** The record now holds a
   shape per workload and the five shipped records are all `ask`, so `ml-stack-serve up
