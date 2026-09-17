@@ -31,6 +31,12 @@ class ServingParams:
     repeat_penalty: float | None = None
     total_slots: int | None = None
     chat_template: str | None = None
+    model_alias: str | None = None
+    file_type: str | None = None
+    build_info: str | None = None
+    reasoning_format: str | None = None
+    speculative: dict[str, Any] = field(default_factory=dict)
+    sampling: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -93,6 +99,7 @@ def serving_params(base_url: str, *, timeout: float = 5.0) -> ServingParams | No
         seed = None
 
     model = props.get("model_path") or settings.get("model") or props.get("model")
+    defaults = {**{k: v for k, v in settings.items() if not isinstance(v, dict)}, **nested}
     return ServingParams(
         n_ctx=settings.get("n_ctx") or props.get("n_ctx"),
         model=model,
@@ -103,8 +110,26 @@ def serving_params(base_url: str, *, timeout: float = 5.0) -> ServingParams | No
         total_slots=props.get("total_slots") or props.get("n_parallel"),
         chat_template=(props.get("chat_template")
                        if isinstance(props.get("chat_template"), str) else None),
+        model_alias=_text(props.get("model_alias")),
+        file_type=_text(props.get("model_ftype")),
+        build_info=_text(props.get("build_info")),
+        reasoning_format=_text(setting("reasoning_format")),
+        speculative={k: v for k, v in sorted(defaults.items()) if k.startswith("speculative.")},
+        sampling={k: v for k, v in sorted(defaults.items())
+                  if k in _SAMPLING_KEYS},
         raw=props,
     )
+
+
+_SAMPLING_KEYS = frozenset({
+    "temperature", "top_k", "top_p", "min_p", "typical_p", "repeat_penalty", "repeat_last_n",
+    "presence_penalty", "frequency_penalty", "seed", "n_predict", "mirostat", "mirostat_tau",
+    "mirostat_eta", "dry_multiplier", "xtc_probability", "top_n_sigma", "samplers",
+})
+
+
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def reported_models(base_url: str, *, timeout: float = 5.0) -> list[str]:

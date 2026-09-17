@@ -563,6 +563,26 @@ class TestHealth:
         assert (params.n_ctx, params.total_slots, params.seed) == (8192, 4, 1234)
         assert params.quant == "Q5_K_M"
 
+    def test_serving_params_reads_identity_and_every_sampling_default(self, server):
+        instance = server(lambda m, p, b: json_reply({
+            "model_alias": "unsloth/Qwen3.5-0.8B-GGUF",
+            "model_ftype": "Q4_K - Medium",
+            "model_path": "/hub/Qwen3.5-0.8B-Q4_K_M.gguf",
+            "build_info": "b7000-fakebuild",
+            "total_slots": 4,
+            "default_generation_settings": {"n_ctx": 262144, "params": {
+                "temperature": 0.8, "top_k": 40, "top_p": 0.95, "presence_penalty": 0.0,
+                "n_predict": -1, "reasoning_format": "deepseek",
+                "speculative.types": "draft", "speculative.n_max": 16, "lora": []}},
+        }))
+        params = serving_params(instance.base_url)
+        assert (params.model_alias, params.file_type, params.build_info) == (
+            "unsloth/Qwen3.5-0.8B-GGUF", "Q4_K - Medium", "b7000-fakebuild")
+        assert params.reasoning_format == "deepseek"
+        assert params.speculative == {"speculative.n_max": 16, "speculative.types": "draft"}
+        assert params.sampling == {"n_predict": -1, "presence_penalty": 0.0,
+                                   "temperature": 0.8, "top_k": 40, "top_p": 0.95}
+
     def test_sampling_defaults_are_read_from_nested_params(self, server):
         instance = server(lambda m, p, b: json_reply({
             "n_parallel": 2,
