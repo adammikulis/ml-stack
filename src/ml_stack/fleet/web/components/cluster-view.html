@@ -77,7 +77,7 @@
           el("div", { class: "fill vram", style: `width:${pct}%` }))));
     }
 
-    // Temperature, clock and power, when a vendor tool or darwin-perf reported them.
+    // Temperature, clock and power, when a vendor tool or metal-smi reported them.
     // A card clocking down looks exactly like a bad hyperparameter from a loss curve,
     // and the measured rates would record the box as slow and send it less work.
     const chips = [];
