@@ -613,7 +613,6 @@ def test_a_probe_that_raises_costs_detail_not_the_daemon():
 
 
 def _fake_metal_smi(monkeypatch, gpu_power):
-    import sys
     import types
 
     from ml_stack.train import accelerator
@@ -640,6 +639,13 @@ def test_the_gpu_power_sample_is_kept_rather_than_taken_per_caller(monkeypatch):
     assert accelerator.gpu_power()["gpu_power_w"] == 1
     assert len(taken) == 1
     assert accelerator.gpu_power(max_age_s=0.0)["gpu_power_w"] == 2
+
+    fake = sys.modules["metal_smi"]
+    fake.temperatures = lambda: {}
+    fake.system_gpu_stats = lambda: {}
+    accelerator.apple_telemetry()
+    accelerator.apple_telemetry()
+    assert len(taken) == 2, "the report must read the kept sample, not take its own"
 
 
 def test_a_kept_power_sample_cannot_be_edited_by_its_caller(monkeypatch):
