@@ -189,12 +189,13 @@ def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, m
     from ml_stack.serve import broker_wire
 
     holder = run(models[0], 60)
-    sharer = run(models[0], 1)
+    sharer = run(models[0], 10)
     try:
         first = json.loads(holder.stdout.readline())
         shared = json.loads(sharer.stdout.readline())
         assert shared["port"] == first["port"]
-        assert {first["shared"], shared["shared"]} == {True, False}
+        held = next(s for s in broker_wire.status()["servers"] if s["port"] == first["port"])
+        assert {h["pid"] for h in held["holders"]} == {holder.pid, sharer.pid}
 
         waiter = run(models[1], 1)
         time.sleep(3.0)
