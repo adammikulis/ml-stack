@@ -100,26 +100,27 @@ def _holder(handle: int) -> str:
     """Who has it, as written at offset 0. ``os.pread`` does not exist on Windows."""
     os.lseek(handle, 0, os.SEEK_SET)
     try:
-        return os.read(handle, 32).decode("utf-8", "replace").strip() or "somebody"
+        return os.read(handle, 512).decode("utf-8", "replace").strip() or "somebody"
     except OSError:
         return "somebody"
 
 
-def _write_holder(handle: int) -> None:
+def _write_holder(handle: int, note: str) -> None:
     os.ftruncate(handle, 0)
     os.lseek(handle, 0, os.SEEK_SET)
-    os.write(handle, f"pid {os.getpid()}".encode())
+    os.write(handle, f"pid {os.getpid()} {note}".strip().encode())
 
 
 @contextmanager
 def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
-             announce=print) -> Iterator[Path]:
+             announce=print, note: str = "") -> Iterator[Path]:
     """Hold `what` exclusively for the block, so two of these never run at once.
 
     `wait=False` raises `Busy` instead of waiting. `timeout` bounds the wait in seconds; 0
     waits as long as it takes. The holder's pid is written into the file so a person looking
     at a stalled machine can see who has it, and it is announced rather than waited on
-    silently -- a wait nobody can see is indistinguishable from a hang.
+    silently -- a wait nobody can see is indistinguishable from a hang. `note` follows the
+    pid, saying what the holder is doing.
     """
     path = Path(what).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +138,7 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
                 raise Busy(f"{path} still held by {held} after {timeout:.0f}s")
             time.sleep(0.5)
         taken = True
-        _write_holder(handle)
+        _write_holder(handle, note)
         yield path
     finally:
         # Only the holder cleans up: a refused attempt used to truncate the holder's pid on
