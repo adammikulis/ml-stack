@@ -191,8 +191,15 @@ def lossless(args: argparse.Namespace) -> int:
     if cramped:
         raise Cramped(cramped[0])
     target = Target(args.model)
+    wanted = set(args.prompt or ())
     prompts = [(name, question, False) for name, question in PROMPTS.items()]
-    prompts += [("math", PROMPTS["math"], True), ("long", long_prompt(target.tokenizer), False)]
+    prompts += [("thinking", PROMPTS["math"], True)]
+    if not wanted or "long" in wanted:
+        prompts += [("long", long_prompt(target.tokenizer), False)]
+    prompts = [one for one in prompts if not wanted or one[0] in wanted]
+    unknown = sorted(wanted - {name for name, _, _ in prompts})
+    if unknown:
+        raise SystemExit(f"error: no such prompt: {', '.join(unknown)}")
 
     results, failed = [], 0
     for kind, head in _drafters(args.drafter):

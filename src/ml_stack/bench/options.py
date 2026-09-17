@@ -625,6 +625,9 @@ def tree_options() -> tuple[Option, ...]:
         flag("--drafter", action="append", default=[], metavar="KIND[=HEAD]",
              help="ngram, mtp=HEAD or dflash=HEAD; repeat for each"),
         flag("--max-nodes", type=int, default=32, help="tree node cap (default: 32)"),
+        flag("--prompt", action="append", default=[], metavar="NAME",
+             help="lossless: the prompts to witness -- chat, code, math, thinking or long "
+                  "(default: every one)"),
         flag("--tokens", type=int, default=128,
              help="lossless: tokens each reply writes (default: 128)"),
         flag("--tokens-list", type=int, nargs="+", default=[128, 512],
