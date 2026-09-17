@@ -20,7 +20,7 @@ from ml_stack.bench.keep import SHORT, SMOKE
 from ml_stack.bench.counting import PER_QUESTION
 from ml_stack.bench.score import NOISE
 from ml_stack.command import Option, flag
-from ml_stack.graph.vectors import MARGIN
+from ml_stack.client.embed import MARGIN
 
 __all__ = ["animate_options", "asking_options", "checking", "concurrent_options",
            "drafts_options", "forget_options", "measuring_options", "prepare_options",

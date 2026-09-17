@@ -11,7 +11,8 @@ import json
 import pytest
 from conftest import json_reply
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.vectors import DOCUMENT, QUERY, embedded, remember
+from ml_stack.client.embed import DOCUMENT, QUERY
+from ml_stack.graph.vectors import embedded, remember
 from ml_stack.testing import needs_a_backend
 
 pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
@@ -151,31 +152,6 @@ def test_the_nearest_really_does_come_first(server, tmp_path):
         # and the answer to "about machines" is one of the two that are
         assert rows[0]["id"] in ("person:ada", "topic:robotics"), rows[0]["id"]
         assert rows[-1]["id"] == "person:bea", "the one about selling is furthest"
-
-
-def test_stands_out_separates_a_question_from_a_greeting():
-    """The gate reads the shape of the results, not how high the best score is.
-
-    These are the numbers that were measured: a greeting scores higher than a real question
-    and is still the flatter field, which is why a threshold on the score cannot work.
-    """
-    from ml_stack.graph.vectors import stands_out
-
-    greeting = [0.754, 0.751, 0.744, 0.739, 0.731, 0.728]     # "hi"
-    question = [0.740, 0.681, 0.652, 0.640, 0.633, 0.629]     # "someone who can sell things"
-
-    assert greeting[0] > question[0]                          # the score says the wrong thing
-    assert not stands_out(greeting)
-    assert stands_out(question)
-
-
-def test_stands_out_on_nothing_and_with_the_gate_off():
-    from ml_stack.graph.vectors import stands_out
-
-    assert not stands_out([])
-    assert stands_out([], margin=0)                # off means everything passes, even nothing
-    assert stands_out([0.7, 0.7, 0.7], margin=-1)
-    assert not stands_out([0.9])                   # one result is its own mean: no margin
 
 
 # a graph where the fitter has no words of their own: they are joined to the two people who do

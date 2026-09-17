@@ -19,11 +19,16 @@ def words(text: str) -> set[str]:
     return {w.strip(".,?!") for w in text.casefold().split()}
 
 
+# every word the examples use, fixed once: a real embedder maps one text to one vector
+# whatever else is in the batch, and a vocabulary built per call does not.
+VOCAB = sorted({w for texts in TOOL_PROMPTS.values() for t in texts for w in words(t)}
+               | {w for t in TOOLS for w in words(t["function"]["description"])})
+
+
 def fake_embedder(texts, **kw):
     """A bag of words as a vector: crude, but it prefers the same sentence to a different
     one, which is all these tests are about."""
-    vocab = sorted({w for t in texts for w in words(t)})
-    return [[1.0 if w in words(t) else 0.0 for w in vocab] for t in texts]
+    return [[1.0 if w in words(t) else 0.0 for w in VOCAB] for t in texts]
 
 
 def routed(question: str, **kw):

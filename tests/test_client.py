@@ -801,10 +801,14 @@ class TestEmbeddings:
         assert cosine([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(1.0)
 
     def test_cosine_rejects_a_dimension_mismatch(self):
-        from ml_stack.client import cosine
+        """Incomparable vectors are a caller's bug, so this is not a ServerError: a
+        handler waiting for an unreachable server must not swallow it."""
+        from ml_stack.client import VectorMismatch, cosine
+        from ml_stack.http import ServerError
 
-        with pytest.raises(EmbeddingError):
+        with pytest.raises(VectorMismatch):
             cosine([1.0], [1.0, 2.0])
+        assert not issubclass(VectorMismatch, ServerError)
 
     def test_rank_pairs_returns_every_pair_once_best_first(self):
         from ml_stack.client import rank_pairs

@@ -1,15 +1,57 @@
-"""Embeddings from a local server, and the two similarity helpers everyone rewrites."""
+"""Embeddings from a local server, the task prefixes they are asked for, and the
+similarity helpers everyone rewrites."""
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 from ml_stack.http import ServerError, request_json
 
+# embeddinggemma is trained to be told what the embedding is for. Searching is asymmetric:
+# a three-word question and a paragraph about somebody are not the same kind of text, and
+# saying so is what stops the longest, most generic entry winning every query.
+DOCUMENT = "title: none | text: "
+QUERY = "task: search result | query: "
+
+# Grouping things by how alike they are is a different task, and asks to be named as one.
+# Both sides of a question-against-questions comparison carry this one.
+TASK = "task: clustering | query: "
+
+# One request per node is a round trip per node. Big enough to be worth batching, small
+# enough that a failure loses a little work rather than all of it.
+BATCH = 32
+
+# How far the best match must stand above the rest before a ranking is worth acting on.
+MARGIN = 0.04
+
 
 class EmbeddingError(ServerError):
     """The embedding request failed, or came back the wrong shape."""
+
+
+class VectorMismatch(ValueError):
+    """Two vectors of different lengths were compared.
+
+    Not a :class:`ServerError`: the vectors are already in hand, so this is the caller
+    holding two incomparable things rather than a server that did not answer.
+    """
+
+
+def stands_out(scores: Sequence[float], *, margin: float = MARGIN) -> bool:
+    """Whether these similarities point somewhere, or are flat enough to mean nothing.
+
+    Compares the best score against the mean of the rest; the height of the best score
+    alone does not separate a greeting from a question. A ``margin`` of 0 or less turns
+    the test off and everything stands out.
+    """
+    if margin <= 0:
+        return True
+    kept = [float(s) for s in scores]
+    if not kept:
+        return False
+    return kept[0] - (sum(kept) / len(kept)) >= margin
 
 
 def embed(
@@ -70,7 +112,7 @@ def embed(
 def cosine(a: list[float], b: list[float]) -> float:
     """Cosine similarity. Raises on a dimension mismatch rather than truncating."""
     if len(a) != len(b):
-        raise EmbeddingError(f"cannot compare vectors of length {len(a)} and {len(b)}")
+        raise VectorMismatch(f"cannot compare vectors of length {len(a)} and {len(b)}")
     dot = sum(x * y for x, y in zip(a, b))
     norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
     return 0.0 if norm == 0.0 else dot / norm
