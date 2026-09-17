@@ -127,3 +127,14 @@ def test_a_record_written_before_the_key_existed_reads_as_unversioned(tmp_path):
     assert version_of(read_json(p, None)) == UNVERSIONED
     assert version_of("not a record") == UNVERSIONED
     assert version_of({"version": "not a number"}) == UNVERSIONED
+
+
+def test_sha256_file_matches_hashlib_across_chunk_boundaries(tmp_path):
+    import hashlib
+
+    from ml_stack.files import sha256_file
+
+    data = bytes(range(256)) * 1000
+    path = tmp_path / "blob.bin"
+    path.write_bytes(data)
+    assert sha256_file(path, chunk=4096) == sha256_file(path) == hashlib.sha256(data).hexdigest()

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.files import promote
+from ml_stack.files import promote, sha256_file
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
 
 _CHUNK = 1 << 16
@@ -36,14 +35,6 @@ class Progress:
 ProgressFn = Callable[[Progress], None]
 
 
-def _digest(path: Path, algorithm: str) -> str:
-    h = hashlib.new(algorithm)
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(_CHUNK), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 def _verify(path: Path, *, expect_sha256: str | None, expect_bytes: int | None, name: str) -> None:
     if expect_bytes is not None:
         actual = path.stat().st_size
@@ -53,7 +44,7 @@ def _verify(path: Path, *, expect_sha256: str | None, expect_bytes: int | None, 
                 f"{name}: expected {expect_bytes} bytes, got {actual}. Removed the partial file."
             )
     if expect_sha256:
-        actual = _digest(path, "sha256")
+        actual = sha256_file(path)
         if actual.lower() != expect_sha256.lower():
             path.unlink(missing_ok=True)
             raise DownloadError(

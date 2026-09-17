@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.files import versioned, write_json
+from ml_stack.files import sha256_file, versioned, write_json
 from ml_stack.gguf.tools import require_converter, require_quantize
 
 logger = logging.getLogger(__name__)
@@ -45,16 +44,8 @@ def _run(argv: list[str], *, what: str) -> None:
         raise ConversionError(f"{what} failed (exit {result.returncode}):\n" + "\n".join(tail))
 
 
-def _digest(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 def _describe(path: Path, outtype: str, *, write_sidecar: bool) -> ConversionResult:
-    digest = _digest(path)
+    digest = sha256_file(path)
     result = ConversionResult(path, outtype, digest, path.stat().st_size)
     if write_sidecar:
         path.with_suffix(path.suffix + ".sha256").write_text(

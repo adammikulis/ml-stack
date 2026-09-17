@@ -69,7 +69,6 @@ _WHERE = {
     "Rates": "rates",
     "Peer": "remote",
     "PeerError": "remote",
-    "sha256_file": "remote",
     "Endpoint": "serving",
     "Served": "serving",
     "Serving": "serving",

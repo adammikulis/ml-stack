@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ml_stack.files import promote
+from ml_stack.files import promote, sha256_file
 from ml_stack.http import (
     ONCE,
     Retry,
@@ -31,17 +31,6 @@ DIGEST_HEADER = "X-ML-Stack-SHA256"
 
 # A read is safe to send again; an unreachable peer is not worth waiting on twice.
 READS = Retry(tries=3, when_unreachable=False)
-
-
-def sha256_file(path: Path, chunk: int = CHUNK) -> str:
-    h = hashlib.sha256()
-    with Path(path).open("rb") as fh:
-        while True:
-            block = fh.read(chunk)
-            if not block:
-                break
-            h.update(block)
-    return h.hexdigest()
 
 
 def range_total(content_range: str) -> int | None:
@@ -82,7 +71,7 @@ class Peer:
     def discover(cls, *, timeout_s: float = 2.0, key: bytes | None = None,
                  cluster_key_path: Path | str | None = None,
                  timeout: float = 60.0, group: str | None = None,
-                 port: int | None = None) -> list["Peer"]:
+                 port: int | None = None) -> list[Peer]:
         """Every daemon on the LAN that proves it holds the cluster key."""
         key = key or load_cluster_key(cluster_key_path)
         if key is None:
@@ -98,7 +87,7 @@ class Peer:
                  timeout_s: float = 2.0, key: bytes | None = None,
                  cluster_key_path: Path | str | None = None,
                  timeout: float = 60.0, group: str | None = None,
-                 port: int | None = None) -> "Peer":
+                 port: int | None = None) -> Peer:
         """The one peer to use, or an error saying exactly why there isn't one."""
         peers = cls.discover(timeout_s=timeout_s, key=key,
                              cluster_key_path=cluster_key_path, timeout=timeout,
@@ -209,7 +198,7 @@ class Peer:
         return self._json("GET", "/speech/providers")
 
     def transcribe(self, audio: Path | str | bytes, *, language: str | None = None,
-                   provider: str | None = None, timeout: float = 600.0) -> "Transcript":
+                   provider: str | None = None, timeout: float = 600.0) -> Transcript:
         """Have this peer turn audio into text, so a machine with no speech model can still
         transcribe. ``audio`` is a path or the bytes of an audio file."""
         from ml_stack.speech.protocols import Segment, Transcript

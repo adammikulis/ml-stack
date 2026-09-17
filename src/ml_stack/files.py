@@ -9,6 +9,7 @@ renames over it, so a reader sees the old contents or the new, never the middle.
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import tempfile
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["UNVERSIONED", "CrossDevice", "promote", "prune_orphans", "read_json", "records_in",
-           "version_of", "versioned", "write_json", "write_text", "writing"]
+           "sha256_file", "version_of", "versioned", "write_json", "write_text", "writing"]
 
 #: A record with no version key.
 UNVERSIONED = 0
@@ -133,3 +134,12 @@ def records_in(path: str | Path, key: str) -> list[dict[str, Any]]:
     if not isinstance(found, list) or not found:
         raise ValueError(f"{path}: no {key}")
     return [dict(one) for one in found if isinstance(one, Mapping)]
+
+
+def sha256_file(path: Path | str, *, chunk: int = 1 << 20) -> str:
+    """The hex sha256 of a file, read ``chunk`` bytes at a time."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(chunk), b""):
+            digest.update(block)
+    return digest.hexdigest()

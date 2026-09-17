@@ -3,7 +3,6 @@ GET asks for, and the `Fetcher` that pulls one from a peer."""
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import re
 import secrets
@@ -14,9 +13,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import sha256_file
+
 from .discovery import derive_token, discover
 from .jobs import DaemonError
-from .remote import Peer, sha256_file
+from .remote import Peer
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 FILE_CHUNK = 1 << 20
@@ -35,14 +36,7 @@ def file_digest(path: Path) -> str:
         hit = _DIGESTS.get(key)
     if hit is not None:
         return hit
-    h = hashlib.sha256()
-    with path.open("rb") as fh:
-        while True:
-            block = fh.read(FILE_CHUNK)
-            if not block:
-                break
-            h.update(block)
-    digest = h.hexdigest()
+    digest = sha256_file(path, chunk=FILE_CHUNK)
     with _DIGEST_LOCK:
         if len(_DIGESTS) >= _DIGEST_CACHE_MAX:
             _DIGESTS.pop(next(iter(_DIGESTS)))
