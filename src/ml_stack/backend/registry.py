@@ -8,14 +8,14 @@ from collections.abc import Callable
 
 from ml_stack.backend.ops import ArrayBackend
 
-_FACTORIES: dict[str, "Callable[[], ArrayBackend]"] = {}
+_FACTORIES: dict[str, Callable[[], ArrayBackend]] = {}
 _BUILT: dict[str, ArrayBackend] = {}
 
 REGISTRY_GROUP = "ml_stack.backend"
 """Entry-point group a third-party backend registers itself under."""
 
 
-def register(name: str, factory: "Callable[[], ArrayBackend]", *,
+def register(name: str, factory: Callable[[], ArrayBackend], *,
              replace: bool = False) -> None:
     """Make a backend available under ``name``."""
     if name in _FACTORIES and not replace:
@@ -58,7 +58,16 @@ def _load_plugins() -> None:
 
 
 def torch_backend() -> ArrayBackend:
+    """The torch backend. One instance per process, shared with ``get_backend("torch")``."""
+    return get_backend("torch")
 
+
+def mlx_backend() -> ArrayBackend:
+    """The MLX backend. One instance per process, shared with ``get_backend("mlx")``."""
+    return get_backend("mlx")
+
+
+def _build_torch() -> ArrayBackend:
     from ml_stack.backend.torch_ops import (
         TorchArrayOps,
         build_scatter_add,
@@ -80,9 +89,10 @@ def torch_backend() -> ArrayBackend:
     return built
 
 
-def mlx_backend() -> ArrayBackend:
-
+def _build_mlx() -> ArrayBackend:
     from ml_stack.backend.mlx_ops import (
+        build_cumprod,
+        build_cumsum,
         build_make_linear,
         build_scatter_add,
         build_segment_sum,
@@ -96,8 +106,8 @@ def mlx_backend() -> ArrayBackend:
         scatter_add=build_scatter_add(mx),
         segment_sum=build_segment_sum(mx),
         make_linear=build_make_linear(nn),
-        cumsum=lambda x, axis=-1: mx.cumsum(x, axis=axis),
-        cumprod=lambda x, axis=-1: mx.cumprod(x, axis=axis),
+        cumsum=build_cumsum(mx),
+        cumprod=build_cumprod(mx),
         rfft_abs=lambda x, axis=-1: mx.abs(mx.fft.rfft(x, axis=axis)),
     )
     return built
@@ -164,8 +174,8 @@ def reset() -> None:
     _BUILT.clear()
 
 
-register("mlx", lambda: mlx_backend())
-register("torch", lambda: torch_backend())
+register("mlx", _build_mlx)
+register("torch", _build_torch)
 
 BACKENDS = ("mlx", "torch")
 """The backends that ship with this package. Prefer ``backends()``, which also sees"""

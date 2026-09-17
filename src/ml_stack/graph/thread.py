@@ -47,9 +47,26 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-__all__ = ["DREW", "EVERY", "HOW", "SUMMARY", "Turn", "WINDOW", "drew_on", "follow",
-           "forget_thread", "latest_summary", "of_node", "recall", "recent", "remember_turn",
-           "summarise", "threads", "turn_of", "write_summary"]
+__all__ = [
+    "DREW",
+    "EVERY",
+    "HOW",
+    "SUMMARY",
+    "WINDOW",
+    "Turn",
+    "drew_on",
+    "follow",
+    "forget_thread",
+    "latest_summary",
+    "of_node",
+    "recall",
+    "recent",
+    "remember_turn",
+    "summarise",
+    "threads",
+    "turn_of",
+    "write_summary",
+]
 
 TURN_TABLE = """CREATE NODE TABLE IF NOT EXISTS Turn(
     id STRING, thread STRING, seq INT64, at STRING, role STRING, text STRING,
@@ -58,7 +75,6 @@ AFTER_TABLE = """CREATE REL TABLE IF NOT EXISTS After(FROM Turn TO Turn)"""
 DREW_TABLE = """CREATE REL TABLE IF NOT EXISTS Drew(FROM Turn TO Node, how STRING)"""
 # The word index over what was said, so an earlier turn is findable by its words the way an
 # entry is findable by its label. Built by whoever writes turns: a reader cannot build one.
-TURN_INDEX = "CALL CREATE_FTS_INDEX('Turn', 'turn_index', ['text'])"
 
 # How many ordinary turns always go back with a question, newest last, chosen by recency and
 # nothing else. Raised from six when the summary took over carrying what is older: the window
@@ -80,7 +96,7 @@ DREW = "Drew"
 class Turn:
     """One thing said, and what it drew on. A plain record; the store holds the truth."""
 
-    __slots__ = ("id", "thread", "seq", "at", "role", "text", "meta", "drew")
+    __slots__ = ("at", "drew", "id", "meta", "role", "seq", "text", "thread")
 
     def __init__(self, *, id: str = "", thread: str = "", seq: int = 0, at: str = "",
                  role: str = "user", text: str = "", meta: Mapping[str, Any] | None = None,
@@ -109,23 +125,7 @@ def _tables(store: Any) -> None:
             store.query(statement)
         except Exception:  # noqa: BLE001 - a read-only store already has them, or has none
             return
-    _words_index(store)
-
-
-def _words_index(store: Any) -> bool:
-    """The word index over turns, built once per writing handle; False when it cannot be.
-
-    Measured: an index built before any turn was said sees every turn said after it, so it
-    is built with the tables and never rebuilt. Rebuilding raises "already exists", which
-    the store's own once-per-handle guard swallows. A store that cannot index -- no
-    extension, a reader -- still keeps the conversation; recall simply has one voter fewer.
-    """
-    try:
-        store._extension("fts")
-        store._index("turn_fts", TURN_INDEX)
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    store.index_words("Turn", "turn_index", ["text"])
 
 
 def _tag(thread: str) -> str:
@@ -418,15 +418,10 @@ def recall(store: Any, thread: str, question: str, *,
 
 def _by_words(store: Any, text: str, k: int) -> list[str]:
     """Turn ids whose words match, best first; empty when the store has no word index."""
-    try:
-        store._extension("fts")
-    except Exception:  # noqa: BLE001
+    if not store.has_table("Turn"):
         return []
-    rows = _rows(
-        store, "CALL QUERY_FTS_INDEX('Turn', 'turn_index', $q, TOP := $k) "
-        "RETURN node.id AS id, score AS score", {"q": text, "k": int(k)})
-    rows.sort(key=lambda r: -float(r.get("score") or 0.0))
-    return [str(r["id"]) for r in rows]
+    return [str(r["id"]) for r in store.search_words("Turn", "turn_index", text, limit=k,
+                                                     returns="node.id AS id")]
 
 
 def latest_summary(store: Any, thread: str) -> Turn | None:

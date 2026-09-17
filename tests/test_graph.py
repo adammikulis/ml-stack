@@ -261,6 +261,15 @@ class TestDAG:
         assert decompose_to_dags(6, graph.src, graph.dst) == first
 
     @needs_a_backend
+    def test_a_cached_decomposition_survives_a_caller_mutating_what_it_got(self):
+        """A model decomposes the same graph every forward, so the result is cached; a
+        caller that edits its lists must not edit the next caller's."""
+        graph = Graph.from_edges(6, [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (0, 5)])
+        first = decompose_to_dags(6, graph.src, graph.dst)
+        first[0][0].append(99)
+        assert decompose_to_dags(6, graph.src, graph.dst)[0][0][-1] != 99
+
+    @needs_a_backend
     def test_four_directions_adds_a_second_tree(self):
         graph = Graph.from_edges(5, [(0, 1), (1, 2), (2, 3), (3, 4)])
         assert len(decompose_to_dags(5, graph.src, graph.dst, directions=4)) == 4

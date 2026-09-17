@@ -150,7 +150,7 @@ def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
     assert count_store(path) == {"nodes": 5, "edges": 3, "docs": 0}
 
     kept = snapshot(path, reason="before a rebuild")
-    assert kept.counts == {"nodes": 5, "edges": 3, "docs": 0}
+    assert (kept.counts["Node"], kept.counts["Edge"], kept.counts["Edge disagreeing"]) == (5, 3, 0)
 
     with GraphStore(path) as store:      # the rebuild goes wrong, and insists
         store.drop([n["id"] for n in GRAPH["nodes"]], force=True)
@@ -253,15 +253,15 @@ def test_an_ordinary_rebuild_still_goes_through(tmp_path):
 
 
 def test_a_write_that_takes_a_tenth_leaves_a_copy_behind(tmp_path):
-    from ml_stack.graph.snapshots import snapshots
     from ml_stack.graph.rebuild import replace
+    from ml_stack.graph.snapshots import snapshots
 
     path = a_store_of(tmp_path, 10)
     keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 1, "attrs": {}}
             for i in range(8)]
     replace(path, {"nodes": keep, "edges": []})
     kept = snapshots(path)
-    assert kept and kept[0].counts["nodes"] == 10
+    assert kept and kept[0].counts["Node"] == 10
     assert "before dropping 2 of 10" in kept[0].reason
 
 
@@ -288,12 +288,11 @@ def test_a_write_that_fails_partway_leaves_nothing(tmp_path):
     path = tmp_path / "g"
     with GraphStore(path) as store:
         store.write(GRAPH)
-    with GraphStore(path) as store:
-        with pytest.raises(KeyError):
-            store.write({"nodes": [{"id": "person:cyd", "kind": "person", "label": "Cyd Marek",
-                                    "mentions": 1, "attrs": {}},
-                                   {"kind": "person"}],
-                         "edges": []})
+    with GraphStore(path) as store, pytest.raises(KeyError):
+        store.write({"nodes": [{"id": "person:cyd", "kind": "person", "label": "Cyd Marek",
+                                "mentions": 1, "attrs": {}},
+                               {"kind": "person"}],
+                     "edges": []})
     with GraphStore(path) as reopened:
         assert {n["id"] for n in reopened.nodes()} == {n["id"] for n in GRAPH["nodes"]}
 
@@ -466,9 +465,8 @@ def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(
     graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"}],
              "edges": [], "messages": {}}
     # a store as one written by the old code: the index step inside a transaction is skipped
-    with GraphStore(path) as store:
-        with store.transaction():
-            store.write(graph)
+    with GraphStore(path) as store, store.transaction():
+        store.write(graph)
     with GraphStore(path, read_only=True) as reader:
         assert reader.search("robotics", limit=5) == [], "this store is meant to lack an index"
 
@@ -560,7 +558,7 @@ def test_a_document_that_does_not_read_back_is_refused_at_the_write(tmp_path, mo
         with pytest.raises(StoreMismatch, match="doc bench:tried"):
             store.put_doc("bench:tried", {"label": "tried", "rows": [1, 2]})
         monkeypatch.setattr(store, "get_doc", lambda key, default=None: default)
-        with pytest.raises(StoreMismatch, match="bench:again.*nothing"):
+        with pytest.raises(StoreMismatch, match=r"bench:again.*nothing"):
             store.put_doc("bench:again", {"label": "again"})
 
 
@@ -580,9 +578,9 @@ def test_a_node_or_edge_that_does_not_read_back_is_refused_at_the_write(tmp_path
             return rows
 
         store.query = a_store_that_keeps_less
-        with pytest.raises(StoreMismatch, match="node person:ada: .*label \\(written 'Ada Lovelace', read ''\\)"):
+        with pytest.raises(StoreMismatch, match=r"node person:ada: .*label \(written 'Ada Lovelace', read ''\)"):
             store.upsert_node(GRAPH["nodes"][0])
-        with pytest.raises(StoreMismatch, match="edge person:ada -interested_in-> topic:compilers: .*weight \\(written 3, read 0\\)"):
+        with pytest.raises(StoreMismatch, match=r"edge person:ada -interested_in-> topic:compilers: .*weight \(written 3, read 0\)"):
             store.upsert_edge(GRAPH["edges"][0])
 
 
@@ -779,7 +777,7 @@ def test_a_node_whose_attrs_hold_a_list_is_refused_when_read(tmp_path):
     with GraphStore(tmp_path / "g") as store:
         store.write(GRAPH)
         store.query("MATCH (n:Node {id:'person:ada'}) SET n.attrs = '[\"analyst\"]' /* by hand */")
-        with pytest.raises(ValueError, match="person:ada.*attrs.*a list, not an object"):
+        with pytest.raises(ValueError, match=r"person:ada.*attrs.*a list, not an object"):
             store.nodes()
 
 

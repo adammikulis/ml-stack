@@ -7,7 +7,6 @@ nothing about it.
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import textwrap
@@ -16,8 +15,19 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.graph.access import (LockError, ReaderCache, holder, lock_path, pid_alive,
-                                   reading, recover_stale, release_all, write_lock, writing)
+from ml_stack.graph.access import (
+    LockError,
+    holder,
+    lock_path,
+    pid_alive,
+    publish,
+    read_lock,
+    reading,
+    recover_stale,
+    release_all,
+    write_lock,
+    writing,
+)
 
 
 class Fake:
@@ -90,9 +100,8 @@ def test_another_process_holding_it_is_named_rather_than_guessed(tmp_path):
         assert child.stdout.readline().strip() == "held"
         who = holder(path)
         assert who is not None and who.pid == child.pid and who.alive
-        with pytest.raises(LockError, match=f"pid={child.pid}"):
-            with write_lock(path, timeout_s=0.5):
-                pass
+        with pytest.raises(LockError, match=f"pid={child.pid}"), write_lock(path, timeout_s=0.5):
+            pass
     finally:
         child.kill()
         child.wait()
@@ -132,16 +141,14 @@ def test_a_dead_owner_does_not_keep_the_next_writer_out(tmp_path):
 
 def test_readers_in_one_process_share_a_handle(tmp_path):
     path = a_store(tmp_path)
-    with reading(path, Fake) as first:
-        with reading(path, Fake) as second:
-            assert first is second
+    with reading(path, Fake) as first, reading(path, Fake) as second:
+        assert first is second
     assert Fake.opened == 1
 
 
 def test_reading_a_store_that_is_not_there_says_so(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        with reading(tmp_path / "nothing.store", Fake):
-            pass
+    with pytest.raises(FileNotFoundError), reading(tmp_path / "nothing.store", Fake):
+        pass
 
 
 def test_a_writer_takes_the_file_back_from_a_cached_reader(tmp_path):
@@ -183,52 +190,92 @@ def until(condition, timeout_s=2.0):
     return condition()
 
 
-def a_live_foreign_holder(path):
-    # pid 1 exists, is somebody else's, and is not this process
-    lock_path(path).write_text(json.dumps(
-        {"pid": 1, "host": socket.gethostname(), "since": time.time()}), encoding="utf-8")
+def _child(body: str) -> subprocess.Popen:
+    script = textwrap.dedent(f"""
+        import sys, time
+        sys.path.insert(0, {str(Path(__file__).parent.parent / 'src')!r})
+        from pathlib import Path
+        from ml_stack.graph.access import read_lock, write_lock
+    """) + textwrap.dedent(body)
+    return subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True)
 
 
-def test_an_idle_reader_is_closed_by_the_reaper(tmp_path):
-    cache = ReaderCache(idle_ttl_s=0.05, reap_interval_s=0.02)
+def test_a_writer_waits_for_a_read_in_another_process(tmp_path):
     path = a_store(tmp_path)
-    with cache.reading(path, Fake):
+    child = _child(f"""
+        with read_lock({str(path)!r}):
+            print("reading", flush=True)
+            time.sleep(8)
+    """)
+    try:
+        assert child.stdout.readline().strip() == "reading"
+        with pytest.raises(LockError, match="waiting to write"), write_lock(path, timeout_s=0.3):
+            pass
+        with read_lock(path, timeout_s=0.3):
+            pass                                  # readers do not wait for each other
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_a_reader_waits_for_a_write_in_another_process(tmp_path):
+    path = a_store(tmp_path)
+    child = _child(f"""
+        with write_lock({str(path)!r}):
+            print("writing", flush=True)
+            time.sleep(8)
+    """)
+    try:
+        assert child.stdout.readline().strip() == "writing"
+        with pytest.raises(LockError, match=f"pid={child.pid}"), read_lock(path, timeout_s=0.3):
+            pass
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_a_cached_handle_is_reopened_once_the_store_changed_on_disk(tmp_path):
+    path = a_store(tmp_path)
+    with reading(path, Fake) as first:
         pass
-    assert Fake.closed == 0
-    assert until(lambda: Fake.closed == 1)
-    assert cache._readers == {}
+    path.write_text("rows, and more rows", encoding="utf-8")
+    with reading(path, Fake) as second:
+        assert second is not first
+    assert (Fake.opened, Fake.closed) == (2, 1)
 
 
-def test_the_reaper_ends_itself_once_the_cache_is_empty(tmp_path):
-    cache = ReaderCache(idle_ttl_s=0.05, reap_interval_s=0.02)
+def test_a_write_asked_for_inside_a_read_of_the_same_store_is_refused_at_once(tmp_path):
     path = a_store(tmp_path)
-    with cache.reading(path, Fake):
-        thread = cache._reaper
-        assert thread is not None and thread.is_alive()
-    assert until(lambda: cache._reaper is None)
-    thread.join(timeout=2)
-    assert not thread.is_alive()
-
-
-def test_the_reaper_evicts_a_reader_a_writer_is_waiting_on(tmp_path):
-    cache = ReaderCache(reap_interval_s=0.02)
-    path = a_store(tmp_path)
-    with cache.reading(path, Fake):
-        a_live_foreign_holder(path)
-        entry = cache._readers[str(path)]
-        assert until(lambda: entry.evicted)
-        assert Fake.closed == 0               # still in use; evicted, not yanked
-    assert Fake.closed == 1                   # let go the moment the last reader left
-    assert cache._readers == {}
-
-
-def test_a_new_reader_lets_go_of_a_cached_handle_while_a_writer_waits(tmp_path):
-    cache = ReaderCache(poll_s=0.01)
-    path = a_store(tmp_path)
-    with cache.reading(path, Fake):
+    with reading(path, Fake), pytest.raises(LockError, match="inside a read"), \
+            writing(path, Fake, timeout_s=5):
         pass
-    assert Fake.closed == 0
-    a_live_foreign_holder(path)
-    cache._yield_to_writer(str(path), timeout_s=0.1)
+
+
+def test_a_read_inside_this_threads_own_write_does_not_wait(tmp_path):
+    path = a_store(tmp_path)
+    with writing(path, Fake, timeout_s=1), read_lock(path, timeout_s=0.2):
+        pass
+
+
+def test_a_lease_inside_a_lease_is_the_same_handle(tmp_path):
+    path = a_store(tmp_path)
+    with writing(path, Fake) as outer:
+        with writing(path, Fake) as inner:
+            assert inner is outer
+        assert not outer.shut
+    assert (Fake.opened, Fake.closed) == (1, 1)
+
+
+def test_publishing_moves_the_store_and_its_log_and_forgets_the_old_reader(tmp_path):
+    dest = a_store(tmp_path)
+    Path(str(dest) + ".wal").write_text("an old tail", encoding="utf-8")
+    built = tmp_path / "built.store"
+    built.write_text("new rows", encoding="utf-8")
+    Path(str(built) + ".wal").write_text("a new tail", encoding="utf-8")
+    with reading(dest, Fake):
+        pass
+    assert publish(built, dest) == dest
+    assert dest.read_text(encoding="utf-8") == "new rows"
+    assert Path(str(dest) + ".wal").read_text(encoding="utf-8") == "a new tail"
+    assert not built.exists() and not Path(str(built) + ".wal").exists()
     assert Fake.closed == 1
-    assert cache._readers == {}

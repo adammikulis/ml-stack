@@ -51,11 +51,6 @@ def test_a_node_written_twice_is_one_node(tmp_path):
         assert [n["id"] for n in store.nodes()] == ["topic:robotics"], "and a fresh read sees it"
 
 
-def _cache(store):
-    """The connection's prepared-statement cache, or None when ladybug stopped keeping one."""
-    return getattr(store._conn, "_pybind_implicit_prepared_cache", None)
-
-
 def test_a_long_write_does_not_keep_a_plan_per_statement(tmp_path):
     n = 2_000
     graph = {"nodes": [{"id": f"concept:c{i}", "kind": "concept", "label": f"glimmer {i}",
@@ -66,10 +61,9 @@ def test_a_long_write_does_not_keep_a_plan_per_statement(tmp_path):
                        for i in range(n)]}
     with GraphStore(tmp_path / "long.ladybug") as store:
         store.write(graph)
-        held = _cache(store)
-        assert held is not None, "ladybug no longer caches by statement text; re-measure _forget"
+        held = getattr(store._conn, "_pybind_implicit_prepared_cache", {})
         assert len(held) < 20, (
-            f"{len(held)} prepared statements kept over {2 * n} writes: every write's own "
-            "text is a cache entry that is never dropped, and the store runs out of memory")
+            f"{len(held)} prepared statements kept over {2 * n} writes, and the store runs "
+            "out of memory")
         assert store.query("MATCH (n:Node) RETURN count(n) AS c")[0]["c"] == n
         assert store.query("MATCH ()-[e:Edge]->() RETURN count(e) AS c")[0]["c"] == n

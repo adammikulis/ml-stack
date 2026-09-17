@@ -76,37 +76,17 @@ capability; every line is something that already exists not being what it says.
   Windows job and a 3.11/3.13 matrix; then delete or wire `CHOSEN_BUILD`.
 
 ### Not losing what it read
-- [ ] **Two ladybug faults are worked around here and stay here.** Adam, 2026-09-04: no
-  upstreaming to public repositories. 0.18.x: a single `DETACH DELETE` in a ~10k-node
-  store blanks other nodes' string columns (reproduction: `tests/test_graph_store_scale.py`).
-  0.20.2: the cached-physical-plan fast path re-executes a parameterized MERGE against a
-  table rewritten since and segfaults, and the text index returns a node once per version
-  written (reproduction: the store's `_written` docstring; two lines). ml-stack is on
-  0.20.2 with the per-write guard and the pin `>=0.19,<0.21`; the probes gate any bump,
-  which is the whole of what is left to do about them.
-
-
-- [ ] **Nothing detects a stale write-ahead log, and the recovery is written down nowhere.**
-  `GraphStore.__init__` opens the database without looking for `<store>.wal`; a log left by
-  a killed writer segfaults the engine on open, which no Python `except` can catch, so
-  `ml-stack-store check`, `ml-stack-doctor` and `fold` all die the same way with no
-  message. The recovery -- `ml-stack-ingest fold --rebuild` from the `.reads.json` files --
-  appears once in `docs/ingest.md` as a note about deduplication. Warn at open when a log is
-  present, name the command, and write the recovery down where someone looking for it will
-  be. This has cost two rebuilds already.
+- [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
+  upstreaming to public repositories). `CypherStore._run` prepares every statement that
+  carries values afresh, and `access.read_lock` keeps a writer out while a read runs.
+  `tests/test_graph_engine_contract.py` has one test for each that goes red when a ladybug
+  release no longer needs it; drop the workaround in the same commit as that test.
 - [ ] **A store that is half embedded reports success with no denominator.**
   `graph/vectors.py` logs `vectors: N of M` only when it is given a log, and
   `ingest/run.py` passes none, then prints `embedded N node(s)`. An embedding server that
   dies at node 3,000 of 9,700 prints `embedded 3000 node(s)` and every question over the
   rest of the store is answered by words alone, silently. Pass the log through, and have
   `ml-stack-store check` report vector coverage.
-- [ ] **The store engine is unpinned inside its range and CI resolves it fresh.**
-  `pyproject.toml` has `ladybug>=0.19,<0.21` while the two workarounds in `graph/store.py`
-  are specific to 0.20's plan cache and its version-per-write; the pin's comment claims
-  0.20.2 returned nothing from a fresh store's scans on Linux, which is the version
-  installed here and contradicts what this file records under store integrity. Pin
-  `ladybug==0.20.2`, and fix or delete the comment. The probes that would catch a bad
-  version are `slow`, so a default test run skips them.
 
 ### Text it was never licensed to keep
 - [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,
@@ -667,20 +647,31 @@ time with the page's server down for the Ollama half.
   Plain mlx-lm with no verifier in the way is `mlx_lm.generate --model lmstudio-community/Qwen3.8-27B-MLX-4bit --max-tokens 512 -p ...`;
   it is not a lease, so its tok/s is read off its own report. Resident peak is the bench's
   memory record for a leased arm; upstream's is not tracked.
-- [ ] **Flash-Next has no tree-verification layout.** `mlx-community/Qwen3.8-Flash-Next-4bit`
-  is `qwen4_exp`: mlx-lm 0.31.3 cannot load it, mlx-vlm main can (and wants mlx>=0.32.2).
-  A `Layout` for it needs: hyper-connections (4x2560 residual, GatedResidual mix/inject) in
-  `block`; its DeltaNet normalises q/k by L2 norm and gates the output with sigmoid, so
-  `deltanet.tree_mix` has to take the model's own normaliser; attention rotates through
-  `rotary_emb.apply_rotary` with (3, 1, N) positions and appends raw indexer keys on commit,
-  and is plain tree-masked attention only while every node sits below position 2051 (QSA
-  selects blocks past that); the PLE n-gram layer (layer 1) reads the token and two before it
-  along the node's own path, hashed, plus a dilation-3 conv over its own rows, so it needs
-  a per-node pass and a commit of its own. The 4-bit checkpoint is 111.5G, 32G of it the
-  n-gram table; mlx-vlm's `ple_storage.prepare_external_ple_model` memory-maps it (79.5G
-  resident). The 4-bit checkpoint carries no MTP weights; the PixelML DFlash drafter ships
-  without embeddings or head and binds the target's, taps [3, 15, 23, 35, 43] of the
-  contracted 2560-wide residual.
+- [ ] **The Flash-Next lossless witness is unfinished, and so are its mutation checks.**
+  `ml-stack-bench tree lossless` passed for the `ngram` drafter on the chat, code and math
+  prompts (`docs/tree-flash-next-2026-09-17.md`); the `mtp` and `dflash` drafters and the
+  2,300-token prompt that decodes past the indexer budget have not been through it. The
+  three paths the witness is there to hold -- the PLE commit in `spec/qwen4.py:tree_ple`,
+  the indexer selection in `_sparse_mask`, and the hyper-connection inject in
+  `Qwen4ExpLayout.block` -- have not been mutation-checked against it, so what it catches
+  is unknown. Both want a machine with 80G free: with 25-37G of other agents' servers
+  resident, the 74G load swapped and one 2,300-token prompt took over twenty minutes.
+- [ ] **The Flash-Next speed table has not been run.** The arms and the command are
+  ```
+  ml-stack-bench tree speed --samples 3 --tokens-list 128 512 \
+      --drafter ngram --drafter mtp=<MTP/mtp-Qwen3.8-Flash-Next-shared-BF16.gguf> \
+      --drafter dflash=PixelML/Qwen3.8-Flash-Next-NVFP4-DFlash
+  ```
+  which times plain MLX and each drafter in one process and then llama.cpp with and
+  without the shared MTP head through the broker. Every sample records the bytes held
+  beside it, so a row taken under contention says so, but the run refuses a machine that
+  is not quiet unless `--anyway`.
+- [ ] **The mapped n-gram table makes a long prefill disk-bound.** A single-token step
+  reads sixteen rows and costs nothing measurable; a 2,300-token prefill reads about
+  37,000 scattered rows out of the 37G table (measured 129-285 MB/s, GPU 70-97%).
+  `mlx_vlm.models.qwen4_exp.ple_storage` offers `cache_rows` and an interleaved row store
+  (`materialize_interleaved_ple_store`); neither has been tried, and what a long prefill
+  costs with the table resident instead is unmeasured.
 - [ ] **On an M4 the verify pass costs 4.1x one token at 16 nodes.** Measured on 27B 4-bit:
   the dense MLP's quantized matmul grows from 22 ms to 91 ms between 1 and 16 nodes, the
   DeltaNet mixer from 12 to 46, attention from 4 to 13. A small-M 4-bit matmul kernel that

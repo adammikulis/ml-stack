@@ -259,10 +259,16 @@ class TestModelMatches:
         "reported,wanted",
         [("/models/Qwen3-32B-Q5_K_M.gguf", "Qwen3-32B-Q5_K_M.gguf"),
          ("Qwen3-32B-Q5_K_M.gguf", "/elsewhere/Qwen3-32B-Q5_K_M.gguf"),
-         ("weights.gguf", "hf:owner/repo/weights.gguf")],
+         ("weights.gguf", "hf:owner/repo/weights.gguf"),
+         # a server started from a repository reports the repository, not the file it picked
+         ("unsloth/embeddinggemma-300m-GGUF", "hf:unsloth/embeddinggemma-300m-GGUF/embeddinggemma-300M-Q8_0.gguf"),
+         ("unsloth_embeddinggemma-300m-GGUF_embeddinggemma-300M-Q8_0.gguf", "unsloth/embeddinggemma-300m-GGUF")],
     )
     def test_matching_names(self, reported, wanted):
         assert model_matches(reported, wanted)
+
+    def test_another_repository_does_not_match(self):
+        assert not model_matches("unsloth/gemma-4-26B-A4B-it-qat-GGUF", "hf:unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf")
 
     def test_different_models_do_not_match(self):
         assert not model_matches("gemma-4-E2B.gguf", "Qwen3-32B-Q5_K_M.gguf")
@@ -1001,3 +1007,16 @@ def test_a_model_served_on_two_ports_is_reported_with_both(server):
     servers.append({"port": other.port, "defunct": True})
 
     assert loaded_twice(servers) == {"qwen3-8b": [first.port, second.port]}
+
+
+def test_one_port_named_twice_is_one_copy(server):
+    """Two processes carrying one port's command line are one server, not two copies.
+
+    Who is hurt when this goes red: every run behind `preflight`, which refuses to
+    start while a model looks resident twice.
+    """
+    from ml_stack.serve.process import loaded_twice
+
+    one = server(lambda m, p, b: json_reply({"data": [{"id": "qwen3-8b"}]}))
+
+    assert loaded_twice([{"port": one.port}, {"port": one.port}]) == {}

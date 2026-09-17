@@ -11,6 +11,7 @@ Tensor = Any
 
 _CACHE_MAX = 64
 _TOPO_CACHE: OrderedDict[tuple[int, int], list[int] | None] = OrderedDict()
+_DECOMPOSITION_CACHE: OrderedDict[tuple[int, int, int], list[tuple[list[int], list[int]]]] = OrderedDict()
 
 
 class NotADAG(ValueError):
@@ -101,10 +102,15 @@ def decompose_to_dags(
     *,
     directions: int = 2,
 ) -> list[tuple[list[int], list[int]]]:
-    """Split an undirected graph into directed DAGs by BFS layering."""
+    """Split an undirected graph into directed DAGs by BFS layering. Cached by topology."""
     n = int(num_nodes)
     sources = [int(v) for v in _to_list(src)]
     targets = [int(v) for v in _to_list(dst)]
+
+    key = (n, hash((tuple(sources), tuple(targets))), int(directions))
+    if key in _DECOMPOSITION_CACHE:
+        _DECOMPOSITION_CACHE.move_to_end(key)
+        return [(list(a), list(b)) for a, b in _DECOMPOSITION_CACHE[key]]
 
     adjacency: list[set[int]] = [set() for _ in range(n)]
     for u, v in zip(sources, targets):
@@ -138,9 +144,13 @@ def decompose_to_dags(
         second_src, second_dst = bfs_from(root)
         result += [(list(second_src), list(second_dst)), (list(second_dst), list(second_src))]
 
-    return result
+    _DECOMPOSITION_CACHE[key] = result
+    if len(_DECOMPOSITION_CACHE) > _CACHE_MAX:
+        _DECOMPOSITION_CACHE.popitem(last=False)
+    return [(list(a), list(b)) for a, b in result]
 
 
 def clear_cache() -> None:
-    """Drop the topological-order cache. For tests, and after a memory scare."""
+    """Drop the topological-order and decomposition caches. For tests, and after a memory scare."""
     _TOPO_CACHE.clear()
+    _DECOMPOSITION_CACHE.clear()
