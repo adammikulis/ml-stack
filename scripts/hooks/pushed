@@ -20,6 +20,12 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
 
 
+def ever_moved(branch: str) -> bool:
+    """Whether the branch's reflog holds anything besides its creation."""
+    log = _git("reflog", "show", "--format=%gs", f"refs/heads/{branch}").stdout.splitlines()
+    return any(not entry.startswith("branch: Created from") for entry in log)
+
+
 def leftover_worktrees(tip: str) -> list[tuple[str, str]]:
     """``(path, branch)`` of unlocked worktrees whose branch has no commit outside ``tip``."""
     out = []
@@ -27,7 +33,7 @@ def leftover_worktrees(tip: str) -> list[tuple[str, str]]:
     for block in blocks:
         keys = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines())
         branch = keys.get("branch", "").removeprefix("refs/heads/")
-        if "locked" in keys or not branch:
+        if "locked" in keys or not branch or not ever_moved(branch):
             continue
         merged = _git("merge-base", "--is-ancestor", branch, tip).returncode == 0
         if merged or not any(ln.startswith("+") for ln in _git("cherry", tip, branch).stdout.splitlines()):

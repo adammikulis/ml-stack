@@ -107,6 +107,8 @@ def test_an_agents_push_of_a_data_file_is_refused(checkout):
 def test_a_merged_worktree_blocks_the_development_branch_until_removed_or_locked(checkout):
     tree = checkout.parent / "done"
     git(checkout, "worktree", "add", "-q", "-b", "done-work", str(tree))
+    commit(tree, "work.py", "z = 3\n")
+    git(checkout, "merge", "-q", "--ff-only", "done-work")
     done = push(checkout, "0.9dev", CLAUDECODE="1")
     assert done.returncode != 0
     assert f"git worktree remove {tree}" in done.stderr
@@ -118,4 +120,9 @@ def test_a_worktree_with_its_own_commits_does_not_block(checkout):
     tree = checkout.parent / "live"
     git(checkout, "worktree", "add", "-q", "-b", "live-work", str(tree))
     commit(tree, "new.py", "y = 2\n")
+    assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
+
+
+def test_a_fresh_worktree_with_no_commits_yet_does_not_block(checkout):
+    git(checkout, "worktree", "add", "-q", "-b", "just-started", str(checkout.parent / "fresh"))
     assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
