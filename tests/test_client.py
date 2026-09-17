@@ -563,6 +563,15 @@ class TestHealth:
         assert (params.n_ctx, params.total_slots, params.seed) == (8192, 4, 1234)
         assert params.quant == "Q5_K_M"
 
+    def test_sampling_defaults_are_read_from_nested_params(self, server):
+        instance = server(lambda m, p, b: json_reply({
+            "n_parallel": 2,
+            "default_generation_settings": {"n_ctx": 4096, "repeat_penalty": 1.0,
+                                            "params": {"min_p": 0.05, "repeat_penalty": 1.1}},
+        }))
+        params = serving_params(instance.base_url)
+        assert (params.min_p, params.repeat_penalty, params.total_slots) == (0.05, 1.1, 2)
+
     def test_sentinel_seed_is_discarded(self, server):
         """Reading -1 back as a real seed makes a run look reproducible when it is not."""
         instance = server(lambda m, p, b: json_reply(
@@ -588,6 +597,11 @@ class TestHealth:
         [("/m/Qwen3-32B-Q5_K_M.gguf", "Q5_K_M"),
          ("model-Q8_0.gguf", "Q8_0"),
          ("weights-BF16.gguf", "BF16"),
+         ("Qwen3-4B.Q4_K_M.gguf", "Q4_K_M"),
+         ("Qwen3-30B-A3B-UD-Q4_K_XL.gguf", "Q4_K_XL"),
+         ("gemma-IQ4_XS.gguf", "IQ4_XS"),
+         ("gpt-oss-120b-mxfp4-00001-of-00003.gguf", "MXFP4"),
+         ("Qwen3-8B.gguf", None),
          ("plain.gguf", None)],
     )
     def test_quant_is_recovered_from_the_filename(self, path, expected):
