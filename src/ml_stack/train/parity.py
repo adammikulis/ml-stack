@@ -114,8 +114,11 @@ CASES: dict[str, Callable[[Any, Any], Tensor]] = {
         _x(o), o.array(_ROW_INDEX, dtype=o.int32), 4, 0),
     "segment_sum(axis=1)": lambda b, o: b.segment_sum(
         _x(o), o.array(_COLUMN_INDEX, dtype=o.int32), 3, 1),
-    "cumsum": lambda b, o: b.cumsum(_x(o), -1),
-    "cumprod": lambda b, o: b.cumprod(_x(o), -1),
+    "cumsum(axis=-1)": lambda b, o: b.cumsum(_x(o), -1),
+    "cumsum(axis=0)": lambda b, o: b.cumsum(_x(o), 0),
+    "cumsum(axis=1 of 3)": lambda b, o: b.cumsum(o.reshape(_x(o), (2, 5, 2)), 1),
+    "cumprod(axis=-1)": lambda b, o: b.cumprod(_x(o), -1),
+    "cumprod(axis=0)": lambda b, o: b.cumprod(o.abs(_x(o)) + 0.5, 0),
     "rfft_abs": lambda b, o: b.rfft_abs(_x(o), -1),
 }
 """Operation name -> ``(backend, backend.ops) -> tensor``."""

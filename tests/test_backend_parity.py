@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
+from ml_stack.backend import get_backend
+from ml_stack.backend.ops import ArrayOps
 from ml_stack.testing import (
     ParityError,
     assert_grad_parity,
@@ -15,9 +18,7 @@ from ml_stack.testing import (
     run_pair,
     torch_grad_norms,
 )
-from ml_stack.backend import get_backend
 from ml_stack.train.parity import ATOL, CASES, check_all, check_op, table
-from ml_stack.backend.ops import ArrayOps
 from ml_stack.train.step import step_for
 
 STEP_ATOL = 1e-5
@@ -46,7 +47,7 @@ def test_every_backend_field_has_a_case():
 def test_axis_arguments_are_compared_on_more_than_one_axis():
     """Every operation taking an axis is compared on more than its default axis."""
     for op in ("stack", "concatenate", "softmax", "sum", "mean", "max", "min",
-               "logsumexp", "argsort", "argmin", "take", "scatter_add", "segment_sum"):
+               "logsumexp", "argsort", "argmin", "take", "scatter_add", "segment_sum", "cumsum", "cumprod"):
         axes = [n for n in CASES if n.partition("(")[0] == op]
         assert len(axes) > 1, f"{op} takes an axis but is compared on only {axes}"
 
