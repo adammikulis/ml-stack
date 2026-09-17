@@ -74,15 +74,22 @@ def long_prompt(tokenizer: Any) -> str:
         size += 200
 
 
-def room_for(path: Path, *, headroom: float = 1.2) -> str:
-    """Why the weights under ``path`` do not fit beside what this machine is already holding."""
+def _beside(pid: int) -> int:
+    """Bytes of GPU memory held by everything on this machine but ``pid``, right now."""
+    info = metal_smi.proc_info(pid)
     held = metal_smi.system_gpu_stats()["in_use_system_memory"]
+    return max(0, int(held) - int(info["memory"] if info else 0))
+
+
+def room_for(path: Path, *, headroom: float = 1.2) -> str:
+    """Why the weights under ``path`` do not fit beside what everything else is holding."""
+    held = _beside(os.getpid())
     wanted = resident_bytes(path) * headroom
     limit = mx.device_info()["max_recommended_working_set_size"]
     if held + wanted <= limit:
         return ""
     return (f"{wanted / 2**30:.0f}G of weights and working set do not fit beside the "
-            f"{held / 2**30:.0f}G this machine is already holding, under a "
+            f"{held / 2**30:.0f}G everything else on this machine is holding, under a "
             f"{limit / 2**30:.0f}G limit")
 
 
@@ -105,14 +112,15 @@ class Target:
             [{"role": "user", "content": question}], add_generation_prompt=True,
             enable_thinking=thinking))
 
-    def logits(self, tokens: Sequence[int], cache: Any) -> Any:
-        """Float32 logits [T, V] for ``tokens`` read after ``cache``."""
-        return self.text(mx.array([list(tokens)]), cache=cache).logits[0].astype(mx.float32)
+    def logits(self, tokens: Sequence[int], cache: Any, keep: int = 1) -> Any:
+        """Float32 logits [keep, V] for the last ``keep`` of ``tokens``, read after ``cache``."""
+        rows = self.text(mx.array([list(tokens)]), cache=cache).logits[0, -keep:]
+        return rows.astype(mx.float32)
 
     def plain(self, prompt: Sequence[int], count: int) -> tuple[list[int], float]:
         """Greedy tokens one forward each, and the seconds they took after the prefill."""
         cache = self.layout.make_cache()
-        row = self.logits(prompt, cache)[-1]
+        row = self.logits(prompt, cache)[0]
         out: list[int] = []
         began = time.perf_counter()
         while len(out) < count:
@@ -134,10 +142,10 @@ def witness(target: Target, prompt: Sequence[int], drafted: Sequence[int]) -> di
     if list(drafted) == reference:
         return {"exact": True, "ok": True, "tokens": len(drafted)}
     cache = target.layout.make_cache()
-    stepped = [target.logits(prompt, cache)[-1]]
+    stepped = [target.logits(prompt, cache)[0]]
     stepped += [target.logits([token], cache)[0] for token in drafted[:-1]]
-    batched = target.logits(list(prompt) + list(drafted[:-1]),
-                            target.layout.make_cache())[len(prompt) - 1:]
+    batched = target.logits(list(prompt) + list(drafted[:-1]), target.layout.make_cache(),
+                            keep=len(drafted))
     noise, gaps = 0.0, []
     for i, token in enumerate(drafted):
         best = int(stepped[i].argmax().item())
@@ -165,8 +173,23 @@ def _drafters(named: Sequence[str]) -> list[tuple[str, str]]:
     return out
 
 
+def waited(args: argparse.Namespace, reasons: Callable[[], list[str]]) -> list[str]:
+    """``reasons()`` after waiting for them to clear, in bounded checks."""
+    said = reasons()
+    for _ in range(args.wait_checks):
+        if not said:
+            break
+        warn("waiting: " + "; ".join(said) + f"; checking again in {args.wait_s:g}s")
+        time.sleep(args.wait_s)
+        said = reasons()
+    return said
+
+
 def lossless(args: argparse.Namespace) -> int:
     """Exit 0 when every drafter passes the witness on every prompt, else 1."""
+    cramped = waited(args, lambda: [w for w in [room_for(weights(args.model))] if w])
+    if cramped:
+        raise Cramped(cramped[0])
     target = Target(args.model)
     prompts = [(name, question, False) for name, question in PROMPTS.items()]
     prompts += [("math", PROMPTS["math"], True), ("long", long_prompt(target.tokenizer), False)]
@@ -176,6 +199,10 @@ def lossless(args: argparse.Namespace) -> int:
         session = target.session(kind, head, args.max_nodes)
         for name, question, thinking in prompts:
             session.reset()
+            mx.clear_cache()
+            cramped = room_for(target.path, headroom=1.05)
+            if cramped:
+                raise Cramped(cramped)
             tokens = target.prompt(question, thinking)
             out = decode(session, tokens, Asked(args.tokens, eos=target.eos))
             verdict = {"drafter": kind, "head": head, "prompt": name, "thinking": thinking,
@@ -208,6 +235,7 @@ class Sample:
     accepted_per_pass: float | None
     pass_ms: float | None
     peak_resident_bytes: int | None
+    beside_bytes: int
     peak_mlx_bytes: int | None = None
 
 
@@ -232,9 +260,10 @@ def _mlx_samples(target: Target, arm: str, run: Callable[[list[int], int], tuple
                         passes, written / passes if passes else None,
                         accepted / passes if passes else None,
                         1000 * seconds / passes if passes else None,
-                        _peak(os.getpid()), int(mx.get_peak_memory())))
+                        _peak(os.getpid()), _beside(os.getpid()), int(mx.get_peak_memory())))
                     say(f"{arm} {name} thinking={thinking} {count}: {written} tokens "
-                        f"{written / seconds:.1f} tok/s", flush=True)
+                        f"{written / seconds:.1f} tok/s, "
+                        f"{out[-1].beside_bytes / 2**30:.1f}G beside", flush=True)
     return out
 
 
@@ -284,7 +313,7 @@ def llama_arms(args: argparse.Namespace) -> tuple[list[Sample], list[dict[str, A
                             reply = client.chat([{"role": "user", "content": question}],
                                                 think=thinking)
                             samples.append(_llama_sample(arm, (name, thinking, count, n),
-                                                         reply.raw["timings"], _peak(pid)))
+                                                         reply.raw["timings"], pid))
                             say(f"{arm} {name} thinking={thinking} {count}: "
                                 f"{samples[-1].tokens_per_second:.1f} tok/s", flush=True)
         finally:
@@ -293,12 +322,13 @@ def llama_arms(args: argparse.Namespace) -> tuple[list[Sample], list[dict[str, A
 
 
 def _llama_sample(arm: str, cell: tuple[str, bool, int, int], timings: dict[str, Any],
-                  peak: int | None) -> Sample:
+                  pid: int) -> Sample:
     written, seconds = int(timings["predicted_n"]), float(timings["predicted_ms"]) / 1000
     accepted = int(timings.get("draft_n_accepted") or 0)
     passes = int(timings.get("verify_n") or written - accepted)
     return Sample(arm, *cell, written, seconds, written / seconds, passes,
-                  written / passes, accepted / passes, 1000 * seconds / passes, peak)
+                  written / passes, accepted / passes, 1000 * seconds / passes, _peak(pid),
+                  _beside(pid))
 
 
 def _quiet(args: argparse.Namespace) -> list[str]:
@@ -307,18 +337,14 @@ def _quiet(args: argparse.Namespace) -> list[str]:
     busy = metal_smi.system_gpu_stats()["device_utilization"]
     if busy > args.gpu_busy:
         reasons.append(f"the GPU is {busy}% utilized before anything was loaded")
+    if "mlx" in args.engines:
+        reasons += [w for w in [room_for(weights(args.model))] if w]
     return reasons
 
 
 def speed(args: argparse.Namespace) -> int:
     """Time every arm on a quiet machine, waiting in bounded checks; 3 when it stays busy."""
-    reasons = _quiet(args)
-    for _ in range(args.wait_checks):
-        if not reasons:
-            break
-        warn("not quiet: " + "; ".join(reasons) + f"; checking again in {args.wait_s:g}s")
-        time.sleep(args.wait_s)
-        reasons = _quiet(args)
+    reasons = waited(args, lambda: _quiet(args))
     if reasons and not args.anyway:
         warn("refused: " + "; ".join(reasons))
         return 3
