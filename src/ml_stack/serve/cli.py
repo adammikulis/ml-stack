@@ -2,13 +2,21 @@
 
 Every subcommand parses its arguments and prints; the work is in `ml_stack.serve.ops`, and
 each command group's own parsing lives beside it: `status_cli`, `lifecycle_cli` (up, down,
-escalate, build), `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim).
+escalate, build), `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim),
+`broker_cli` (broker, queue).
 """
 
 from __future__ import annotations
 
 from ml_stack.command import Group
-from ml_stack.serve import fit_cli, lifecycle_cli, machine_cli, profile_cli, status_cli
+from ml_stack.serve import (
+    broker_cli,
+    fit_cli,
+    lifecycle_cli,
+    machine_cli,
+    profile_cli,
+    status_cli,
+)
 from ml_stack.serve.ops import DEFAULT_ROOT
 
 __all__ = ["COMMANDS", "DEFAULT_ROOT", "main"]
@@ -69,6 +77,16 @@ COMMANDS.add(
     help="build llama-server from llama.cpp's own master (or download the newest "
          "release), and switch to it once it is verified",
     options=lifecycle_cli.OPTIONS_BUILD)
+
+COMMANDS.add(
+    "broker", broker_cli.cmd_broker,
+    help="run the one process on this machine every model server is asked for",
+    options=broker_cli.OPTIONS_BROKER)
+
+COMMANDS.add(
+    "queue", broker_cli.cmd_queue,
+    help="the servers the broker holds, who holds each, and who is waiting",
+    options=broker_cli.OPTIONS_QUEUE)
 
 
 if __name__ == "__main__":
