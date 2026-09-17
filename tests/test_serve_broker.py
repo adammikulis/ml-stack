@@ -45,7 +45,8 @@ def broker(tmp_path, llama_binary):
 @pytest.fixture
 def models(tmp_path):
     out = []
-    for name in ("first-M1.gguf", "second-M2.gguf"):
+    tag = tmp_path.name  # a model name no concurrently running test serves
+    for name in (f"first-M1-{tag}.gguf", f"second-M2-{tag}.gguf"):
         path = tmp_path / name
         path.write_bytes(b"GGUF" + b"\x00" * 64)
         out.append(str(path))
@@ -164,6 +165,26 @@ def test_a_held_server_is_not_stopped_on_request_and_a_foreign_one_never(
         shared = broker.lease(ask(models[1], a.pid, purpose="embed"), timeout=10)
         assert shared.port == port and shared.shared
         assert foreign.poll() is None
+    finally:
+        foreign.kill()
+        foreign.wait(timeout=10)
+
+
+def test_a_server_started_outside_the_broker_is_shared_not_loaded_twice(
+        broker, models, holders, llama_binary):
+    from ml_stack.client import is_healthy
+    from ml_stack.serve.ports import free_port
+
+    port = free_port()
+    foreign = subprocess.Popen([str(llama_binary), "--port", str(port), "-m", models[0]])
+    try:
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not is_healthy(f"http://127.0.0.1:{port}"):
+            time.sleep(0.2)
+        broker.scan = lambda: [s for s in every_server() if s["pid"] == foreign.pid]
+        grant = broker.lease(ask(models[0], holders().pid), timeout=10)
+        assert grant.port == port and grant.shared
+        assert list(broker.servers) == [port]
     finally:
         foreign.kill()
         foreign.wait(timeout=10)
