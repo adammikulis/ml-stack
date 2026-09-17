@@ -155,7 +155,7 @@ def test_ddgs_rows_are_renamed_and_its_rate_limit_becomes_search_unavailable(mon
 def test_searxng_builds_the_json_search_url_and_parses_the_reply(monkeypatch):
     opened = []
 
-    def urlopen(request, timeout=None):
+    def urlopen(request, timeout=None, context=None):
         opened.append((request.full_url, request.get_header("Accept")))
         body = json.dumps({"results": [
             {"title": "Pellard Foundry", "url": "https://pellard.example/",
@@ -178,7 +178,7 @@ def test_searxng_builds_the_json_search_url_and_parses_the_reply(monkeypatch):
 
 
 def test_a_searxng_that_is_down_is_search_unavailable_not_a_traceback(monkeypatch):
-    def urlopen(request, timeout=None):
+    def urlopen(request, timeout=None, context=None):
         raise OSError("connection refused")
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setenv("SEARXNG_URL", "http://searx.internal")
