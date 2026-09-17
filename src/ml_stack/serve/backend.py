@@ -239,6 +239,12 @@ class ServerSpec:
     # costs both. `ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-mod`, `ngram-cache`.
     spec_type: str = ""
     spec_draft_max: int | None = None       # tokens guessed ahead (server default 3)
+    # Guess ahead in a tree rather than a chain: the branches the drafter expands per depth,
+    # each proposing that many children, up to `spec_draft_max` nodes. The target verifies the
+    # whole tree in one pass, every node seeing only the prefix and its own ancestors, and keeps
+    # the path it agrees with. One conversation at a time: the server refuses a tree beside
+    # `parallel > 1`. A build without `0003-speculative-tree.patch` has no such flag.
+    spec_tree: int | None = None
     spec_draft_min: int | None = None
     spec_ngram_min: int | None = None       # ngram-mod lookup floor (server default 48)
     spec_ngram_max: int | None = None
@@ -554,6 +560,7 @@ class LlamaServerBackend(ServerBackend):
         for flag, value in (("--spec-draft-type-k", spec.spec_draft_type_k or None),
                             ("--spec-draft-type-v", spec.spec_draft_type_v or None),
                             ("--spec-draft-n-max", spec.spec_draft_max),
+                            ("--spec-tree", spec.spec_tree),
                             ("--spec-draft-n-min", spec.spec_draft_min),
                             ("--spec-ngram-mod-n-min", spec.spec_ngram_min),
                             ("--spec-ngram-mod-n-max", spec.spec_ngram_max),

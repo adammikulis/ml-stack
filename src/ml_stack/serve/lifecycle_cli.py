@@ -115,6 +115,7 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
         kv_unified=getattr(args, "kv_unified", None),
         embedding=bool(getattr(args, "embedding", False)),
         spec_draft_max=getattr(args, "spec_n_max", None),
+        spec_tree=getattr(args, "spec_tree", None),
         spec_draft_ngl=getattr(args, "draft_ngl", None),
         lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
         override_tensor=tuple(getattr(args, "on_cpu", []) or ()),
@@ -176,6 +177,10 @@ OPTIONS_UP = [
               "with --draft. Left unset, the server decides"),
     flag("--spec-n-max", type=int, default=None, metavar="N",
          help="tokens guessed ahead each step (server default 3)"),
+    flag("--spec-tree", type=int, default=None, metavar="W",
+         help="guess ahead in a tree: expand W branches per depth, each proposing W "
+              "children, up to --spec-n-max nodes, all verified in one pass. Needs "
+              "--parallel 1 and a build carrying the tree patch"),
     flag("--on-cpu", action="append", default=[], metavar="PATTERN=BUFFER",
          help="keep tensors matching a pattern off the GPU, e.g. "
               "'per_layer_token_embd=CPU' for Qwen3.8-Flash-Next's 27G n-gram table on "
