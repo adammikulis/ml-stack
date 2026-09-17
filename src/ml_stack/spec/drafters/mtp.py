@@ -17,7 +17,13 @@ from typing import Protocol
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.cache import KVCache
-from mlx_lm.models.qwen3_5 import DecoderLayer
+
+try:
+    from mlx_lm.models.qwen3_5 import DecoderLayer
+except ModuleNotFoundError as exc:  # pragma: no cover - depends on the install
+    raise ModuleNotFoundError(
+        "mlx_lm.models.qwen3_5 arrived in mlx-lm 0.31.3: "
+        "pip install 'ml-stack[spec]'") from exc
 
 from ml_stack.spec.attention import attend
 from ml_stack.spec.drafters import Budget

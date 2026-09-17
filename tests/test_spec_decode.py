@@ -11,6 +11,8 @@ from collections.abc import Sequence
 import pytest
 
 mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
+pytest.importorskip("mlx_lm.models.qwen3_5",
+                    reason="qwen3_5 arrived in mlx-lm 0.31.3: pip install 'ml-stack[spec]'")
 
 from mlx_lm.generate import generate_step  # noqa: E402
 from mlx_lm.models import qwen3_5  # noqa: E402
