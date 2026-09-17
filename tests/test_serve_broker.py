@@ -74,6 +74,30 @@ def ask(model: str, pid: int, purpose: str = "chat") -> Ask:
                spec={"context": 512})
 
 
+def test_test_runners_share_the_machine_s_cores(broker, holders):
+    """A second suite gets what the first left, and never nothing."""
+    broker.cpus = 8
+    first, second = holders(), holders()
+    mine = broker.take_cores(first.pid, 8)
+    assert mine["cores"] == 8
+    theirs = broker.take_cores(second.pid, 8)
+    assert theirs["cores"] == 1, "a suite beside a full one must run narrow, not refuse"
+
+    broker.give_back_cores(mine["lease"])
+    assert broker.take_cores(second.pid, 4)["cores"] == 4
+    assert broker.snapshot()["cores"]["cpus"] == 8
+
+
+def test_a_dead_runners_cores_go_back(broker, holders):
+    broker.cpus = 4
+    gone = holders()
+    assert broker.take_cores(gone.pid, 4)["cores"] == 4
+    gone.kill()
+    gone.wait(timeout=10)
+    broker.reap()
+    assert broker.take_cores(holders().pid, 4)["cores"] == 4
+
+
 def test_two_asks_for_one_model_share_one_server(broker, models, holders):
     a, b = holders(), holders()
     first = broker.lease(ask(models[0], a.pid), timeout=30)
@@ -188,6 +212,23 @@ def test_a_server_started_outside_the_broker_is_shared_not_loaded_twice(
     finally:
         foreign.kill()
         foreign.wait(timeout=10)
+
+
+def test_a_restarted_broker_keeps_a_live_holders_lease(broker, models, holders, llama_binary, tmp_path):
+    """A broker starting where another left off must not unload a server whose holder is
+    still using it."""
+    a = holders()
+    first = broker.lease(ask(models[0], a.pid), timeout=30)
+
+    successor = Broker(ServerManager(LlamaServerBackend(binary=llama_binary),
+                                     state_file=tmp_path / "servers.json"),
+                       idle_s=0.0, room=lambda: None, scan=lambda: [])
+    successor.adopt()
+    held = successor.servers[first.port]
+    assert {pid for pid, _ in held.holders.values()} == {a.pid}
+    assert held.purpose == "chat"
+    assert not successor.reap(), "a held server was unloaded as idle after the restart"
+    assert pid_exists(held.pid)
 
 
 def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, holders):

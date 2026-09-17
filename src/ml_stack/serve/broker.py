@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.manager import (
@@ -147,12 +148,17 @@ class Broker:
                  scan: Callable[[], list[dict]] = every_server) -> None:
         self.manager = manager or ServerManager()
         self.scan = scan
+        #: who holds what, beside the lease record, so a restart does not forget
+        self.held_file = self.manager.state_file.with_name("broker-leases.json")
         self.idle_s = idle_s
         self.room = room
         self.alive = alive
         self.servers: dict[int, Held] = {}
         self.queue: list[Waiting] = []
         self.claims: dict[str, dict[str, Any]] = {}
+        #: lease -> (pid, cores, since) for the test runners sharing this machine's cores
+        self.cores: dict[str, tuple[int, int, float]] = {}
+        self.cpus = os.cpu_count() or 1
         self._cond = threading.Condition()
 
     # ------------------------------------------------------------------ leases
@@ -189,8 +195,26 @@ class Broker:
                     if not held.holders:
                         held.idle_since = time.monotonic()
                     self._cond.notify_all()
+                    self._write_held()
                     return True
         return False
+
+    def _write_held(self) -> None:
+        """Record who holds what, so a broker that restarts does not unload a server its
+        holder is still using. Called with the lock held."""
+        write_json(self.held_file, {
+            str(held.port): {"purpose": held.purpose, "model": held.model,
+                             "holders": {lease: list(who) for lease, who in held.holders.items()}}
+            for held in self.servers.values() if held.holders and not held.loading})
+
+    def _read_held(self) -> dict[int, dict[str, Any]]:
+        """What the last broker recorded, by port; whatever cannot be read is nothing."""
+        kept = read_json(self.held_file, {})
+        out: dict[int, dict[str, Any]] = {}
+        for port, entry in (kept.items() if isinstance(kept, dict) else ()):
+            if str(port).isdigit() and isinstance(entry, dict):
+                out[int(port)] = entry
+        return out
 
     def _wait_for_turn(self, waiting: Waiting, deadline: float) -> Grant | tuple[Held, list[Held]]:
         ask = waiting.ask
@@ -261,6 +285,7 @@ class Broker:
                      waiting.lease)
         held.holders[lease] = (ask.pid, ask.label)
         self.queue.remove(waiting)
+        self._write_held()
         self._cond.notify_all()
         return Grant(lease=lease, purpose=ask.purpose, model=held.model, port=held.port,
                      base_url=held.base_url, shared=True)
@@ -295,6 +320,7 @@ class Broker:
         with self._cond:
             placeholder.info, placeholder.pid, placeholder.loading = info, info.pid, False
             placeholder.names = (str(spec.model), *reported_models(info.base_url))
+            self._write_held()
             self._cond.notify_all()
         ask = waiting.ask
         return Grant(lease=waiting.lease, purpose=ask.purpose, model=placeholder.model,
@@ -347,6 +373,26 @@ class Broker:
             self._cond.notify_all()
             return True
 
+    # ------------------------------------------------------------------ cores
+    def take_cores(self, pid: int, want: int) -> dict[str, Any]:
+        """Cores for ``pid`` to run tests on: ``want`` at most, what is free at least one.
+
+        Never refuses and never waits -- a suite that cannot have what it asked for runs
+        narrower rather than queueing.
+        """
+        with self._cond:
+            self.cores = {k: v for k, v in self.cores.items() if self.alive(v[0])}
+            taken = sum(cores for _, cores, _ in self.cores.values())
+            cores = max(1, min(max(1, want), self.cpus - taken))
+            lease = uuid.uuid4().hex
+            self.cores[lease] = (pid, cores, time.time())
+            return {"lease": lease, "cores": cores, "cpus": self.cpus, "taken": taken}
+
+    def give_back_cores(self, lease: str) -> bool:
+        """Let go of a core grant. False when nothing held it."""
+        with self._cond:
+            return self.cores.pop(lease, None) is not None
+
     # ------------------------------------------------------------------ upkeep
     def reap(self) -> list[Held]:
         """Drop every lease, wait and claim whose pid has ended, forget servers that have
@@ -362,10 +408,12 @@ class Broker:
                     del self.servers[held.port]
             self.queue = [w for w in self.queue if self.alive(w.ask.pid)]
             self.claims = {k: v for k, v in self.claims.items() if self.alive(v["pid"])}
+            self.cores = {k: v for k, v in self.cores.items() if self.alive(v[0])}
             idle = [h for h in self.servers.values() if h.ours and not h.holders
                     and not h.loading and now - h.idle_since > self.idle_s]
             for held in idle:
                 del self.servers[held.port]
+            self._write_held()
             self._cond.notify_all()
         for held in idle:
             self._stop(held)
@@ -376,16 +424,18 @@ class Broker:
         its recorded owner while that process lives; any other llama-server is shared but
         never stopped."""
         now, found = time.monotonic(), []
-        me = os.getpid()
+        me, kept = os.getpid(), self._read_held()
         for port, entry in recorded_servers(self.manager.state_file).items():
             pid, owner = entry.get("pid"), entry.get("owner_pid")
             if not (isinstance(pid, int) and self.alive(pid)):
                 continue
-            holders = ({f"recorded-{port}": (owner, "recorded owner")}
-                       if isinstance(owner, int) and owner not in (pid, me) and self.alive(owner)
-                       else {})
+            was = kept.get(port, {})
+            holders = {lease: (int(who[0]), str(who[1])) for lease, who in (was.get("holders") or {}).items()
+                       if self.alive(int(who[0]))}
+            if not holders and isinstance(owner, int) and owner not in (pid, me) and self.alive(owner):
+                holders = {f"recorded-{port}": (owner, "recorded owner")}
             found.append(Held(port=port, model=str(entry.get("model") or ""), pid=pid,
-                              idle_since=now, holders=holders,
+                              purpose=str(was.get("purpose") or ""), idle_since=now, holders=holders,
                               info=ServerInfo(base_url=f"http://{DEFAULT_HOST}:{port}",
                                               port=port, pid=pid, backend="", adopted=True)))
         known = {h.port for h in found} | set(self.servers)
@@ -399,6 +449,7 @@ class Broker:
                     continue
                 held.names = (held.model, *reported_models(held.base_url))
                 self.servers[held.port] = held
+            self._write_held()
             self._cond.notify_all()
         return found
 
@@ -413,4 +464,7 @@ class Broker:
                            "waited_s": round(now - w.since, 1), "blocked_by": w.blocked_by}
                           for w in self.queue],
                 "claims": {k: dict(v) for k, v in self.claims.items()},
+                "cores": {"cpus": self.cpus,
+                          "grants": [{"lease": lease, "pid": pid, "cores": cores}
+                                     for lease, (pid, cores, _since) in self.cores.items()]},
             }

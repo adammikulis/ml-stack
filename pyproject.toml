@@ -159,9 +159,10 @@ packages = ["src/ml_stack"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# every core by default: 2054 tests took seven minutes serially (measured 2026-09-01);
-# `-n 0` runs them in one process when a failure needs a clean order
-addopts = "--strict-markers -n auto"
+# how many workers is the broker's to say, so several suites at once do not each take every
+# core (`tests/conftest.py`); `-n` on the command line is meant and is left alone, and `-n 0`
+# runs them in one process when a failure needs a clean order
+addopts = "--strict-markers"
 # `slow` is a browser, a subprocess, a wheel build or a real network wait -- anything that
 # costs more than about two seconds every time it runs, rather than once per worker.
 # `-m "not slow"` is the subset to run while a bench has the GPU; the default runs everything.

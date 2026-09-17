@@ -29,8 +29,8 @@ from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant
 from ml_stack.serve.ports import DEFAULT_HOST
 from ml_stack.serve.process import pid_exists
 
-__all__ = ["call", "claim", "lease", "record_path", "release", "serve", "status", "stop",
-           "unclaim"]
+__all__ = ["call", "claim", "cores", "give_back_cores", "lease", "record_path", "release",
+           "serve", "status", "stop", "unclaim"]
 
 START_WAIT_S = 30.0
 REAP_EVERY_S = 1.0
@@ -84,6 +84,10 @@ class _Server(socketserver.ThreadingTCPServer):
         if op == "claim":
             return {"ok": True, **self.broker.claim(str(body["name"]), pid, body.get("info") or {},
                                                     timeout=float(body.get("wait_s") or 0.0))}
+        if op == "cores":
+            return {"ok": True, **self.broker.take_cores(pid, int(body["want"]))}
+        if op == "give_back_cores":
+            return {"ok": True, "released": self.broker.give_back_cores(str(body["lease"]))}
         if op == "unclaim":
             return {"ok": True, "released": self.broker.unclaim(str(body["name"]), pid)}
         return {"ok": False, "error": f"no such broker call: {op!r}"}
@@ -213,6 +217,16 @@ def stop(port: int, *, force: bool = False) -> dict[str, Any]:
 def claim(name: str, info: dict[str, Any], *, timeout: float = 0.0) -> dict[str, Any]:
     """Hold ``name`` for this process, or learn who holds it (``granted`` says which)."""
     return call("claim", timeout=timeout + 30.0, name=name, info=info, wait_s=timeout)
+
+
+def cores(want: int) -> dict[str, Any]:
+    """Cores for this process to run tests on, out of what the machine has free."""
+    return call("cores", want=want)
+
+
+def give_back_cores(lease: str) -> bool:
+    """Let go of a core grant."""
+    return bool(call("give_back_cores", start=False, lease=lease)["released"])
 
 
 def unclaim(name: str) -> bool:

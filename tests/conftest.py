@@ -63,7 +63,6 @@ _install_git_hooks()
 from ml_stack.testing.fakes import LLAMA_SERVER_HELP as LLAMA_SERVER_HELP  # noqa: E402
 from ml_stack.testing.fakes import fake_binary as fake_binary  # noqa: E402
 
-
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""
 
@@ -102,7 +101,7 @@ class _Server:
         self.base_url = f"http://127.0.0.1:{self.port}"
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
 
-    def __enter__(self) -> "_Server":
+    def __enter__(self) -> _Server:
         self._thread.start()
         return self
 
@@ -438,6 +437,11 @@ def pytest_configure(config):
         "real_port: exempt from _no_real_ports -- binds or connects to a real port on "
         "purpose, using its own socket",
     )
+    from ml_stack.testing.cores import pytest_workers
+
+    workers = pytest_workers(config)
+    if workers is not None:
+        print(f"conftest: {workers} test worker(s) of {os.cpu_count()} cores")
 
 
 def _call_site() -> str:
