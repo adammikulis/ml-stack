@@ -319,6 +319,16 @@ Re-running the whole suite after every intermediate commit buys nothing: the bra
 not landed, and it will be rebased onto a moved development branch before it does, which
 is what the one pre-merge run is for.
 
+### Commit before you mutate
+
+A test you rely on is one you have watched fail: break the behaviour it covers and see it
+go red. That mutation is undone by restoring the file from a commit, and `git checkout --
+<file>` or `git restore <file>` restore the *last commit* -- every uncommitted edit in the
+file goes with the mutation, the fix included. So commit the fix first, apply the
+mutation, watch it fail, restore with `git restore --source=HEAD -- <file>`, and confirm
+`git diff` is empty and the test is green again. Never mutate a file holding uncommitted
+work.
+
 ## Driving a browser
 
 A headed browser opens where `ML_STACK_WINDOW_POSITION` says (`X,Y`, set for this project
