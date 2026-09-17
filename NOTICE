@@ -1,0 +1,45 @@
+ml-stack
+Licensed under the Apache License, Version 2.0 (LICENSE).
+
+This product includes software derived from the following projects, under their own terms.
+
+------------------------------------------------------------------------------------------
+qwen-spec -- https://github.com/JonasLoos/qwen-spec
+src/ml_stack/spec/ (tree verification, tree attention mask, the DeltaNet path walk, the
+acceptance rules, the fused sampling kernel, the cost curve, the session, the ngram, MTP
+and DFlash drafters) is a port of qwen-spec, and src/ml_stack/spec/data/draft_vocab.npy
+and src/ml_stack/spec/data/calibration/Qwen3.8-27B-DFlash2-b32.json are its data files.
+
+Under the MIT license:
+
+Copyright (c) 2026 Jonas Loos
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------------------
+DFlash -- https://github.com/z-lab/dflash
+src/ml_stack/spec/drafters/dflash_model.py holds the DFlash drafter's model classes from
+dflash/model_mlx.py, under the MIT license, copyright (c) 2026 Z Lab; the full notice is at
+the top of that file. Its DFlash2 grouped convolution and candidate selector follow
+SGLang's srt/models/dflash.py (https://github.com/sgl-project/sglang, Apache-2.0).
+
+------------------------------------------------------------------------------------------
+mlx-lm -- https://github.com/ml-explore/mlx-lm
+src/ml_stack/spec/ drives mlx-lm's qwen3_5 model, cache and gated-delta code, and ports
+the verification passes over them. Under the MIT license, copyright (c) 2023 Apple Inc.
