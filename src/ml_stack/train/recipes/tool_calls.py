@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-from ml_stack.train.recipes import Built
+from ml_stack.train.recipes.built import Built
 
 IGNORE = -100
 """The label a token gets when the loss must not see it; what torch's cross entropy skips."""
@@ -114,7 +114,7 @@ def render(tokenizer: Any, messages: Sequence[Mapping[str, Any]],
         enc = tokenizer(full, add_special_tokens=False, return_offsets_mapping=True)
         ids = list(enc["input_ids"])
         labels = [tid if end > len(prefix) else IGNORE
-                  for tid, (_, end) in zip(ids, enc["offset_mapping"])]
+                  for tid, (_, end) in zip(ids, enc["offset_mapping"], strict=True)]
     else:
         ids = list(tokenizer(full, add_special_tokens=False)["input_ids"])
         head = list(tokenizer(prefix, add_special_tokens=False)["input_ids"])
@@ -197,8 +197,13 @@ def frozen_dtype(device: Any) -> Any:
 
 # -- the recipe ------------------------------------------------------------------------------------
 
-def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path,
+def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path | None,
                       framework: str) -> Built:
+    if data is None:
+        raise ValueError("tool-calls is built from its conversations; it has no build without "
+                         "data, and its trained model is read with save_pretrained")
+    if framework == "mlx":
+        raise ValueError("tool-calls trains a Hugging Face model, which is torch")
     train, holdout, manifest = read_conversations(data)
     if not train:
         raise ValueError(
@@ -262,12 +267,13 @@ def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path,
         batches=conversation_batches(train_rows, batch_size=batch_size, pad_id=pad, seed=seed),
         eval_batches=conversation_batches(holdout_rows or train_rows, batch_size=batch_size,
                                           pad_id=pad, seed=seed + 1),
-        config={"recipe": "tool-calls", "size": size, "framework": "torch", "base": base,
+        config={**config, "recipe": "tool-calls", "size": size, "framework": "torch",
+                "base": base,
                 "device": str(device), "rows": len(train) + len(holdout),
                 "train_rows": len(train_rows), "holdout_rows": len(holdout_rows),
                 "dropped_at_context": train_dropped + holdout_dropped,
                 "answer_tokens": answer_tokens, "read_tokens": all_tokens - answer_tokens,
-                **extra, **config},
+                **extra},
     )
 
 

@@ -12,7 +12,10 @@ down" is a fact with a known answer rather than a hope.
 
 from __future__ import annotations
 
+import time
+
 import pytest
+
 from ml_stack.testing import needs_mlx, needs_torch
 from ml_stack.train import (
     RunLock,
@@ -27,6 +30,7 @@ from ml_stack.train import (
     read,
     warmup_cosine,
 )
+from ml_stack.train.recipes import Hook
 
 
 # -- torch fixtures ------------------------------------------------------
@@ -293,6 +297,133 @@ class TestRecords:
 
         assert report.last_checkpoint is not None
         assert is_valid(report.last_checkpoint)
+
+
+# -- stopping, hooks, continuing -----------------------------------------
+def _notes(out, message):
+    return [r for r in read(out / "metrics.jsonl")
+            if r["event"] == "note" and r["message"] == message]
+
+
+def _mlx_setup():
+    import mlx.core as mx
+    import mlx.nn as nn
+    import mlx.optimizers as optim
+
+    mx.random.seed(0)
+    x = mx.random.normal((512, 8))
+    y = x @ mx.random.normal((8, 1))
+
+    def loss(m, batch):
+        xs, ys = batch
+        return mx.mean((m(xs) - ys) ** 2)
+
+    return (nn.Sequential(nn.Linear(8, 32), nn.ReLU(), nn.Linear(32, 1)),
+            optim.Adam(learning_rate=1e-3), loss, _batcher(x, y))
+
+
+def _setup(framework):
+    if framework == "mlx":
+        return _mlx_setup()
+    x, y = _torch_problem()
+    return (*_torch_setup(), _batcher(x, y))
+
+
+FRAMEWORKS = [pytest.param("torch", marks=needs_torch), pytest.param("mlx", marks=needs_mlx)]
+
+
+class TestStopping:
+    @pytest.mark.parametrize("framework", FRAMEWORKS)
+    def test_a_stop_ends_the_loop_and_still_checkpoints(self, tmp_path, framework):
+        model, opt, loss, batches = _setup(framework)
+        asked = []
+
+        def should_stop():
+            asked.append(1)
+            return len(asked) > 7
+
+        report = Trainer(model, opt, loss, out=tmp_path / "run").fit(
+            batches, steps=100, should_stop=should_stop)
+
+        assert report.stop_reason == "stopped" and report.steps == 7
+        assert load_state(find_latest(tmp_path / "run")).step == 7
+        assert read(tmp_path / "run" / "metrics.jsonl")[-1]["reason"] == "stopped"
+
+    @needs_torch
+    def test_a_time_budget_ends_the_run_and_says_how_few_steps_fit(self, tmp_path):
+        x, y = _torch_problem()
+        model, opt, loss = _torch_setup()
+        slow = _batcher(x, y)
+
+        def batches(step):
+            time.sleep(0.05)
+            return slow(step)
+
+        report = Trainer(model, opt, loss, out=tmp_path / "run").fit(
+            batches, steps=100, max_seconds=0.2)
+
+        assert report.stop_reason == "time_limit"
+        assert 2 <= report.steps < 10
+        [few] = _notes(tmp_path / "run", "time limit fits few steps")
+        assert few["step_seconds"] >= 0.05 and few["steps_that_fit"] < 10
+        assert load_state(find_latest(tmp_path / "run")).step == report.steps
+
+    @needs_torch
+    def test_a_run_with_room_in_its_budget_completes_without_a_note(self, tmp_path):
+        x, y = _torch_problem()
+        model, opt, loss = _torch_setup()
+        report = Trainer(model, opt, loss, out=tmp_path / "run").fit(
+            _batcher(x, y), steps=5, max_seconds=600)
+        assert report.stop_reason == "completed"
+        assert not _notes(tmp_path / "run", "time limit fits few steps")
+
+
+class TestHooks:
+    @needs_torch
+    def test_a_hook_runs_every_nth_step_and_what_it_returns_is_a_note(self, tmp_path):
+        x, y = _torch_problem()
+        model, opt, loss = _torch_setup()
+        called = []
+
+        def every_four(step):
+            called.append(step)
+            return {"seen": step} if step != 8 else None
+
+        several = Hook("pair", every=6, run=lambda step: [{"n": 1}, {"n": 2}])
+        Trainer(model, opt, loss, out=tmp_path / "run").fit(
+            _batcher(x, y), steps=12, hooks=[Hook("four", every=4, run=every_four), several])
+
+        assert called == [4, 8, 12]
+        assert [(n["step"], n["seen"]) for n in _notes(tmp_path / "run", "four")] == [
+            (4, 4), (12, 12)]
+        assert [(n["step"], n["n"]) for n in _notes(tmp_path / "run", "pair")] == [
+            (6, 1), (6, 2), (12, 1), (12, 2)]
+
+
+class TestContinuing:
+    @needs_torch
+    def test_continuing_trains_on_from_the_model_in_memory_and_appends(self, tmp_path):
+        import torch
+
+        x, y = _torch_problem()
+        model, opt, loss = _torch_setup()
+        batches = _batcher(x, y)
+        trainer = Trainer(model, opt, loss, out=tmp_path / "run")
+        trainer.fit(batches, steps=10)
+        with torch.no_grad():
+            for p in model.parameters():
+                p.zero_()
+        at_zero = float(loss(model, batches(10)))
+
+        report = trainer.fit(batches, steps=15, continue_from=10)
+
+        assert report.steps == 15 and report.resumed_from == 10
+        records = read(tmp_path / "run" / "metrics.jsonl")
+        assert [r["step"] for r in records if r["event"] == "step"] == list(range(15))
+        assert sum(r["event"] == "start" for r in records) == 2
+        first = next(r for r in records if r["event"] == "step" and r["step"] == 10)
+        assert first["loss"] == pytest.approx(at_zero), "a checkpoint was read back"
+        assert load_state(find_latest(tmp_path / "run")).step == 15
 
 
 # -- batching ------------------------------------------------------------

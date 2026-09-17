@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +17,8 @@ from ml_stack.train.checkpoint import (
     point_latest_at,
     rotate,
     save,
+    tensor_reader,
+    tensor_writer,
 )
 from ml_stack.train.guard import (
     NonFiniteBudget,
@@ -29,7 +31,19 @@ from ml_stack.train.metrics import MetricsLog, Throughput
 from ml_stack.train.schedule import Schedule, constant
 from ml_stack.train.step import Step, step_for
 
-__all__ = ["Trainer", "TrainReport", "batches_from"]
+__all__ = ["Hook", "TrainReport", "Trainer", "batches_from"]
+
+FEW_STEPS = 10
+"""A time budget that fits fewer steps than this after the first one is noted in the log."""
+
+
+@dataclass
+class Hook:
+    """``run(step)`` after every ``every``-th applied step; each mapping it returns is a note."""
+
+    name: str
+    every: int
+    run: Callable[[int], Mapping[str, Any] | Sequence[Mapping[str, Any]] | None]
 
 
 @dataclass
@@ -46,6 +60,8 @@ class TrainReport:
     stalls: list[str] = field(default_factory=list)
     seconds: float = 0.0
     history: list[dict[str, Any]] = field(default_factory=list)
+    stop_reason: str = "completed"
+    """``completed``, ``stopped``, ``time_limit`` or ``already complete``."""
 
     @property
     def steps_per_second(self) -> float:
@@ -84,6 +100,18 @@ def batches_from(data: Any, *, batch_size: int = 0) -> Callable[[int], Any]:
     return next_batch
 
 
+def run_hooks(hooks: Sequence[Hook], done: int, log: MetricsLog) -> None:
+    """Call each hook due at ``done`` applied steps and write what it returns as notes."""
+    for hook in hooks:
+        if hook.every <= 0 or done % hook.every:
+            continue
+        got = hook.run(done)
+        if got is None:
+            continue
+        for fields in [got] if isinstance(got, Mapping) else got:
+            log.note(hook.name, **{"step": done, **fields})
+
+
 class Trainer:
     """A training loop with the scaffolding already attached."""
 
@@ -98,33 +126,9 @@ class Trainer:
         self.step: Step = step or step_for(model, optimizer, loss,
                                            clip_grad_norm=clip_grad_norm)
 
-    # -- serialisation ---------------------------------------------------
-    def _writer(self) -> Callable[[Path, dict[str, Any]], None]:
-        """The framework's safetensors writer, chosen to match the step."""
-        if getattr(self.step, "name", "") == "mlx":
-            import mlx.core as mx
-
-            def write_mlx(path: Path, mapping: dict[str, Any]) -> None:
-                mx.save_safetensors(str(path), mapping)
-
-            return write_mlx
-
-        from safetensors.torch import save_file
-
-        def write_torch(path: Path, mapping: dict[str, Any]) -> None:
-            save_file({k: v.contiguous() for k, v in mapping.items()}, str(path))
-
-        return write_torch
-
-    def _reader(self) -> Callable[[Path], dict[str, Any]]:
-        if getattr(self.step, "name", "") == "mlx":
-            import mlx.core as mx
-
-            return lambda path: dict(mx.load(str(path)))
-
-        from safetensors.torch import load_file
-
-        return lambda path: dict(load_file(str(path)))
+    @property
+    def framework(self) -> str:
+        return str(getattr(self.step, "name", ""))
 
     # -- checkpoints -----------------------------------------------------
     def save_checkpoint(self, step: int, *, state: CheckpointState,
@@ -133,7 +137,7 @@ class Trainer:
         saved = save(directory, state=state,
                      tensors=self.step.parameters(),
                      optimizer=self.step.optimizer_state() or None,
-                     write_tensors=self._writer())
+                     write_tensors=tensor_writer(self.framework))
         if name is None:
             point_latest_at(self.out, saved)
         return saved
@@ -144,12 +148,21 @@ class Trainer:
         if latest is None:
             return None
         state = load_state(latest)
-        read = self._reader()
+        read = tensor_reader(self.framework)
         tensors = load_tensors(latest, read_tensors=read)
         wants_opt = (latest / "optimizer.safetensors").exists()
         opt = load_tensors(latest, read_tensors=read, optimizer=True) if wants_opt else None
         self.step.restore(tensors, opt)
         return state
+
+    def _stop_reason(self, should_stop: Callable[[], bool] | None, max_seconds: float,
+                     began: float | None) -> str:
+        """Why the loop ends before the next step, or ``""`` when it goes on."""
+        if should_stop is not None and should_stop():
+            return "stopped"
+        if max_seconds > 0 and began is not None and time.monotonic() - began >= max_seconds:
+            return "time_limit"
+        return ""
 
     # -- the loop --------------------------------------------------------
     def fit(self, data: Any, *, steps: int,
@@ -168,8 +181,12 @@ class Trainer:
             stall_factor: float = 3.0,
             config: dict[str, Any] | None = None,
             on_step: Callable[[int, float], None] | None = None,
+            should_stop: Callable[[], bool] | None = None,
+            max_seconds: float = 0.0,
+            hooks: Sequence[Hook] = (),
+            continue_from: int | None = None,
             ) -> TrainReport:
-        """Train for ``steps`` steps. Returns what happened."""
+        """Train until ``steps`` steps are done, a stop is asked, or time is up."""
         lr: Schedule = schedule if callable(schedule) else constant(float(schedule))
         next_batch = batches_from(data, batch_size=batch_size)
         next_eval = batches_from(eval_data, batch_size=batch_size) if eval_data is not None else None
@@ -179,24 +196,31 @@ class Trainer:
         watchdog = StallWatchdog(factor=stall_factor)
         throughput = Throughput()
         started_at = time.time()
+        continuing = continue_from is not None
 
         self.out.mkdir(parents=True, exist_ok=True)
-        with RunLock(self.out), MetricsLog(self.out / "metrics.jsonl", resume=resume) as log:
-            state = self.resume() if resume else None
-            start = state.step if state else 0
-            report.resumed_from = start
+        with RunLock(self.out), MetricsLog(self.out / "metrics.jsonl",
+                                           resume=resume or continuing) as log:
+            state = self.resume() if resume and not continuing else None
+            start = int(continue_from or 0) if continuing else (state.step if state else 0)
+            report.resumed_from = report.steps = start
             best = state.best_metric if state else None
 
             log.start({"steps": steps, "resumed_from": start,
-                       "framework": getattr(self.step, "name", "?"),
-                       **(config or {})})
+                       "framework": self.framework, **(config or {})})
             if start >= steps:
-                report.steps = start
+                report.stop_reason = "already complete"
                 report.seconds = time.time() - started_at
-                log.finish(reason="already complete", step=start)
+                log.finish(reason=report.stop_reason, step=start)
                 return report
 
+            began: float | None = None
             for step in range(start, steps):
+                reason = self._stop_reason(should_stop, max_seconds, began)
+                if reason:
+                    report.stop_reason = reason
+                    break
+                began = time.monotonic() if began is None else began
                 rate = lr(step)
                 self.step.learning_rate(rate)
 
@@ -215,6 +239,12 @@ class Trainer:
                             "writing checkpoints of a model that is already NaN.")
                     continue
 
+                if max_seconds > 0 and report.steps == start and timer.elapsed > 0:
+                    fits = int(max_seconds / timer.elapsed)
+                    if fits < FEW_STEPS:
+                        log.note("time limit fits few steps", step=step,
+                                 step_seconds=round(timer.elapsed, 3), steps_that_fit=fits,
+                                 max_seconds=max_seconds)
                 throughput.record(1, timer.elapsed)
                 stall = watchdog.record(timer.elapsed)
                 if stall:
@@ -251,6 +281,7 @@ class Trainer:
                                               config=dict(config or {})))
                     rotate(self.out, keep_last=keep_last,
                            milestone_every=milestone_every)
+                run_hooks(hooks, step + 1, log)
 
             if write_checkpoints:
                 report.last_checkpoint = self.save_checkpoint(
@@ -261,6 +292,6 @@ class Trainer:
                        milestone_every=milestone_every)
             report.best_metric = best
             report.seconds = time.time() - started_at
-            log.finish(step=report.steps, loss=report.final_loss,
-                       seconds=round(report.seconds, 2))
+            log.finish(reason=report.stop_reason, step=report.steps,
+                       loss=report.final_loss, seconds=round(report.seconds, 2))
         return report

@@ -117,15 +117,14 @@ class MLXStep:
     def __init__(self, model: Any, optimizer: Any, loss: Loss,
                  *, clip_grad_norm: float = 0.0) -> None:
         import mlx.core as mx
-        import mlx.nn as nn                            # noqa: F401
+        import mlx.nn as nn
 
         self.mx = mx
         self.model = model
         self.opt = optimizer
         self.loss = loss
         self.clip = clip_grad_norm
-        self._value_and_grad = mx.value_and_grad(
-            lambda m, b: self.loss(m, b))
+        self._value_and_grad = nn.value_and_grad(model, lambda m, b: self.loss(m, b))
 
     def learning_rate(self, lr: float) -> None:
         self.opt.learning_rate = lr

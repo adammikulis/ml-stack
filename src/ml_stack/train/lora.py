@@ -38,8 +38,8 @@ from ml_stack import home
 from ml_stack.train.step import TorchStep
 from ml_stack.units import span
 
-__all__ = ["CEILING_ENV", "CEILING_MIN", "DEFAULT_TARGETS", "Fit", "Lora", "LoraStep",
-           "OverCeiling", "PEFT_MISSING", "attach", "adapter_tensors", "converter",
+__all__ = ["CEILING_ENV", "CEILING_MIN", "DEFAULT_TARGETS", "PEFT_MISSING", "Fit", "Lora",
+           "LoraStep", "OverCeiling", "adapter_tensors", "attach", "converter",
            "export_gguf", "fingerprint", "merge", "parameters_b", "plan",
            "preflight_export", "quantizer", "refuse_over_ceiling", "require_peft",
            "save_adapter", "span", "summarise", "trainable_parameters"]
@@ -341,7 +341,7 @@ class Fit:
         how = "measured" if self.measured else "estimated"
         out = [f"lora: {self.lora.said()}"
                + (f"; {self.trainable_b * 1000:.0f}M trainable" if self.trainable_b else ""),
-               f"plan: {self.base} on {self.device}, batch {self.batch} × context "
+               f"plan: {self.base} on {self.device}, batch {self.batch} x context "
                f"{self.context} = {self.tokens_per_step} tokens a step, {self.steps} steps"
                + (f" over {self.examples} examples ({self.epochs:.2f} epochs)"
                   if self.examples else "")]
@@ -402,7 +402,7 @@ def plan(config: Mapping[str, Any], *, base: str, device: str, examples: int = 0
               ceiling_min=ceiling_default() if ceiling_min is None else float(ceiling_min),
               seconds_per_step=per_step, measured=bool(seconds_per_step))
     if not trainable and params:
-        # rank r on each of t projections costs r × (in + out) per module; for a Gemma-shaped
+        # rank r on each of t projections costs r x (in + out) per module; for a Gemma-shaped
         # model that lands near half a percent of the weights at rank 16.
         fit.trainable_b = params * 0.005 * (lora.rank / 16)
     return fit
@@ -521,9 +521,11 @@ def preflight_export(gguf: Path | str, *, binary: Path | str | None = None,
     from ml_stack.serve.preflight import Preflight
 
     if binary is None:
-        from ml_stack.serve.binary import find_binary
+        from ml_stack.serve.binary import BinaryNotFound, find_binary
 
         binary = find_binary()
+        if binary is None:
+            raise BinaryNotFound("no llama-server to preflight the export with")
     spec = ServerSpec(model=str(Path(gguf).expanduser()), context=context)
     return Preflight(spec, binary=binary, **seams)
 

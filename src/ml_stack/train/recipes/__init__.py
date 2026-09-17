@@ -3,59 +3,86 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Built", "Recipe", "build", "known", "validate"]
+from ml_stack.contracts import ContractError, recipes
+from ml_stack.train.checkpoint import find_latest, is_valid, load_state, load_tensors, tensor_reader
+from ml_stack.train.recipes.built import Built, Hook, Phase
+from ml_stack.train.recipes.classify_text import build_classifier
+from ml_stack.train.recipes.text_lm import build_text_lm
+from ml_stack.train.recipes.tool_calls import build_tool_caller
+from ml_stack.train.step import step_for
+
+__all__ = ["Builder", "Built", "Hook", "Phase", "build", "known", "load", "register", "spec",
+           "specs", "validate"]
+
+Builder = Callable[[dict[str, Any], dict[str, Any], "Path | None", str], Built]
+"""``(spec, config, data or None, framework) -> Built``."""
+
+FRAMEWORKS = ("torch", "mlx", "")
+UNIVERSAL = {"size": "", "data": None, "out": None, "seed": None, "eval_every": None,
+             "checkpoint_every": None, "framework": "", "max_minutes": 0.0}
+"""Settings every recipe accepts, and their defaults; None is left out unless given."""
+
+_BUILDERS: dict[str, Builder] = {
+    "classify-text": build_classifier,
+    "text-lm": build_text_lm,
+    "tool-calls": build_tool_caller,
+}
+_REGISTERED: dict[str, dict[str, Any]] = {}
 
 
-@dataclass
-class Built:
-    """Everything Trainer needs, plus what the run should record."""
-
-    model: Any
-    optimizer: Any
-    loss: Callable[[Any, Any], Any]
-    batches: Callable[[int], Any]
-    eval_batches: Callable[[int], Any] | None = None
-    config: dict[str, Any] = field(default_factory=dict)
-    step: Any = None
-    """How to advance one step, when the framework's default is the wrong one. A LoRA's is
-    `train.lora.LoraStep`, whose checkpoints hold the adapter rather than the frozen 16G
-    base underneath it."""
+def specs() -> list[dict[str, Any]]:
+    """Every recipe contract, shipped and registered, sorted by id."""
+    return sorted([*recipes(), *_REGISTERED.values()], key=lambda s: s["id"])
 
 
-Recipe = Callable[..., Built]
+def spec(recipe_id: str) -> dict[str, Any]:
+    """One recipe contract by id."""
+    for found in specs():
+        if found["id"] == recipe_id:
+            return found
+    raise ContractError(f"no recipe {recipe_id!r}; have {', '.join(known()) or 'none'}")
 
 
 def known() -> list[str]:
-    from ml_stack.contracts import recipes
-    return [r["id"] for r in recipes()]
+    return [s["id"] for s in specs()]
+
+
+def register(spec: dict[str, Any], builder: Builder) -> None:
+    """Add a recipe defined outside the library. Raises when its id is taken."""
+    recipe_id = str(spec.get("id") or "")
+    if not recipe_id:
+        raise ValueError("a recipe spec needs an id")
+    if recipe_id in known():
+        raise ValueError(f"a recipe called {recipe_id!r} already exists")
+    _REGISTERED[recipe_id] = dict(spec)
+    _BUILDERS[recipe_id] = builder
 
 
 def validate(recipe_id: str, config: dict[str, Any]) -> dict[str, Any]:
     """Config with defaults filled in. Raises on an unknown or out-of-range field."""
-    from ml_stack.contracts import recipe
-
-    spec = recipe(recipe_id)
-    fields = {f["name"]: f for f in spec.get("fields", [])}
-    allowed = set(fields) | {"size", "data", "out", "seed", "eval_every",
-                             "checkpoint_every"}
+    found = spec(recipe_id)
+    fields = {f["name"]: f for f in found.get("fields", [])}
+    allowed = set(fields) | set(UNIVERSAL)
     unknown = sorted(set(config) - allowed)
     if unknown:
         raise ValueError(
             f"{recipe_id} has no setting called {unknown[0]!r}; "
             f"it accepts {sorted(allowed)}")
 
-    out = dict(config)
+    out = {**{k: v for k, v in UNIVERSAL.items() if v is not None}, **config}
+    if out["framework"] not in FRAMEWORKS:
+        raise ValueError(f"framework must be torch or mlx, got {out['framework']!r}")
+    out["max_minutes"] = float(out["max_minutes"] or 0.0)
+    if out["max_minutes"] < 0:
+        raise ValueError(f"max_minutes must be at least 0, got {out['max_minutes']}")
     size = out.get("size") or ""
-    sizes = spec.get("sizes", {})
+    sizes = found.get("sizes", {})
     if size and size not in sizes:
         raise ValueError(f"{recipe_id} has no size {size!r}; it has {sorted(sizes)}")
-    # A size may carry its own defaults: what fits and what is worth trying for *that*
-    # model, rather than one set of numbers that suits a 270m and starves an 8B. They fill
-    # in only where the caller said nothing, so --set always wins.
+    # A size's defaults fill in only where the caller said nothing, so --set always wins.
     by_size = dict(sizes.get(size, {}).get("defaults", {})) if size else {}
 
     for name, f in fields.items():
@@ -80,21 +107,36 @@ def validate(recipe_id: str, config: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def build(recipe_id: str, config: dict[str, Any], data: Path | str,
+def build(recipe_id: str, config: dict[str, Any], data: Path | str | None,
           *, framework: str = "") -> Built:
-    """Construct the model, optimizer, loss and batches for one recipe."""
-    from ml_stack.contracts import recipe
-
+    """The model, optimizer and loss for one recipe, and its batches when ``data`` is given."""
     config = validate(recipe_id, config)
-    spec = recipe(recipe_id)
+    return _built(recipe_id, config, data, framework or config["framework"])
 
-    if recipe_id == "text-lm":
-        from ml_stack.train.recipes.text_lm import build_text_lm
-        return build_text_lm(spec, config, Path(data), framework)
-    if recipe_id == "classify-text":
-        from ml_stack.train.recipes.classify_text import build_classifier
-        return build_classifier(spec, config, Path(data), framework)
-    if recipe_id == "tool-calls":
-        from ml_stack.train.recipes.tool_calls import build_tool_caller
-        return build_tool_caller(spec, config, Path(data), framework)
-    raise ValueError(f"no builder for recipe {recipe_id!r}")
+
+def _built(recipe_id: str, config: dict[str, Any], data: Path | str | None,
+           framework: str) -> Built:
+    if framework not in FRAMEWORKS:
+        raise ValueError(f"framework must be torch or mlx, got {framework!r}")
+    builder = _BUILDERS.get(recipe_id)
+    if builder is None:
+        raise ValueError(f"no builder for recipe {recipe_id!r}")
+    return builder(spec(recipe_id), config, None if data is None else Path(data), framework)
+
+
+def load(directory: Path | str, *, which: str = "latest") -> Built:
+    """The recipe a run trained, rebuilt without data and holding ``which`` checkpoint's weights."""
+    root = Path(directory).expanduser()
+    where = find_latest(root) if which == "latest" else root / which
+    if where is None or not is_valid(where):
+        raise FileNotFoundError(f"no checkpoint {which!r} under {root}")
+    recorded = dict(load_state(where).config)
+    recipe_id, framework = recorded.get("recipe"), recorded.get("framework")
+    if not recipe_id or framework not in ("torch", "mlx"):
+        raise ValueError(f"{where} does not record the recipe and framework it was trained with")
+    accepted = set(UNIVERSAL) | {f["name"] for f in spec(recipe_id).get("fields", [])}
+    settings = validate(recipe_id, {k: v for k, v in recorded.items() if k in accepted})
+    built = _built(recipe_id, {**recorded, **settings, "framework": framework}, None, framework)
+    step = built.step or step_for(built.model, built.optimizer, built.loss)
+    step.restore(load_tensors(where, read_tensors=tensor_reader(framework)), None)
+    return built

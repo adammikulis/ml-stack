@@ -6,6 +6,7 @@ import json
 import math
 
 import pytest
+
 from ml_stack.contracts import ContractError, recipe, recipes
 from ml_stack.testing import needs_a_backend
 from ml_stack.train.holdout import LeakageError, stratified

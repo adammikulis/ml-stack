@@ -233,3 +233,33 @@ def rotate(
 def checkpoint_name(step: int, *, width: int = 9) -> str:
     """``step_000001000``. Zero-padded so lexical order is numeric order."""
     return f"step_{step:0{width}d}"
+
+
+def tensor_writer(framework: str) -> Callable[[Path, dict[str, Any]], None]:
+    """The safetensors writer for ``framework``: ``"mlx"``, else torch."""
+    if framework == "mlx":
+        import mlx.core as mx
+
+        def write_mlx(path: Path, mapping: dict[str, Any]) -> None:
+            mx.save_safetensors(str(path), mapping)
+
+        return write_mlx
+
+    from safetensors.torch import save_file
+
+    def write_torch(path: Path, mapping: dict[str, Any]) -> None:
+        save_file({k: v.contiguous() for k, v in mapping.items()}, str(path))
+
+    return write_torch
+
+
+def tensor_reader(framework: str) -> Callable[[Path], dict[str, Any]]:
+    """The safetensors reader for ``framework``: ``"mlx"``, else torch."""
+    if framework == "mlx":
+        import mlx.core as mx
+
+        return lambda path: dict(mx.load(str(path)))
+
+    from safetensors.torch import load_file
+
+    return lambda path: dict(load_file(str(path)))
