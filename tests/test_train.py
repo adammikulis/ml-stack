@@ -13,6 +13,8 @@ import time
 
 import numpy as np
 import pytest
+
+from ml_stack.testing import needs_mlx
 from ml_stack.train import (
     CheckpointError,
     CheckpointState,
@@ -723,3 +725,48 @@ class TestTorchStepTiedWeights:
         tensors = {**step.parameters(), "extra": torch.zeros(1)}
         with pytest.raises(CheckpointError, match="extra"):
             step.restore(tensors, None)
+
+
+class TestMLXStepRestore:
+    @staticmethod
+    def step():
+        import mlx.core as mx
+        import mlx.nn as nn
+        import mlx.optimizers as optim
+
+        from ml_stack.train.step import MLXStep
+
+        model = nn.Linear(3, 2)
+        mx.eval(model.parameters())
+        return MLXStep(model, optim.SGD(learning_rate=0.1), lambda m, batch: m(batch).sum())
+
+    @needs_mlx
+    def test_a_checkpoint_missing_a_tensor_is_refused(self):
+        step = self.step()
+        tensors = step.parameters()
+        del tensors["bias"]
+        with pytest.raises(CheckpointError, match="bias"):
+            step.restore(tensors, None)
+
+    @needs_mlx
+    def test_a_checkpoint_with_a_tensor_the_model_lacks_is_refused(self):
+        step = self.step()
+        tensors = {**step.parameters(), "extra": step.parameters()["bias"]}
+        with pytest.raises(CheckpointError, match="extra"):
+            step.restore(tensors, None)
+
+    @needs_mlx
+    def test_a_reshaped_tensor_is_refused(self):
+        import mlx.core as mx
+
+        step = self.step()
+        tensors = {**step.parameters(), "weight": mx.zeros((2, 4))}
+        with pytest.raises(CheckpointError, match="weight"):
+            step.restore(tensors, None)
+
+    @needs_mlx
+    def test_a_matching_checkpoint_restores_its_values(self):
+        step = self.step()
+        tensors = {name: value * 0 + 7 for name, value in step.parameters().items()}
+        step.restore(tensors, None)
+        assert all((value == 7).all().item() for value in step.parameters().values())

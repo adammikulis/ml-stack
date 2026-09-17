@@ -6,8 +6,10 @@ import math
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from ml_stack.train.checkpoint import CheckpointError, assert_exact_restore
+
 __all__ = ["Step", "TorchStep", "MLXStep", "step_for",
-           "tied_names", "state_once", "load_state_once"]
+           "tied_names", "state_once", "load_state_once", "load_mlx_state"]
 
 Batch = Any
 Loss = Callable[[Any, Batch], Any]
@@ -165,10 +167,9 @@ class MLXStep:
     def restore(self, tensors: dict[str, Any], optimizer: dict[str, Any] | None) -> None:
         from mlx.utils import tree_unflatten
 
-        self.model.update(tree_unflatten(list(tensors.items())))
+        load_mlx_state(self.model, tensors)
         if optimizer:
             self.opt.state = tree_unflatten(list(optimizer.items()))
-        self.mx.eval(self.model.parameters())
 
 
 def tied_names(model: Any) -> dict[str, str]:
@@ -204,8 +205,6 @@ def load_state_once(model: Any, tensors: dict[str, Any]) -> None:
     Strict in every other way: a tensor the module has and the file lacks, or the reverse,
     is a checkpoint that does not fit, and nothing of it is kept.
     """
-    from ml_stack.train.checkpoint import CheckpointError
-
     tied = tied_names(model)
     missing = [k for k in state_once(model) if k not in tensors]
     unexpected = [k for k in tensors if k not in model.state_dict()]
@@ -217,6 +216,16 @@ def load_state_once(model: Any, tensors: dict[str, Any]) -> None:
     # explicitly (a Hugging Face one) is asked to as well, in case a load untied it.
     if any(name not in tensors for name in tied) and callable(getattr(model, "tie_weights", None)):
         model.tie_weights()
+
+
+def load_mlx_state(model: Any, tensors: dict[str, Any]) -> None:
+    """Put a flat parameter dict into an MLX module. Refuses a missing, extra or reshaped tensor."""
+    import mlx.core as mx
+    from mlx.utils import tree_flatten, tree_unflatten
+
+    assert_exact_restore(tensors, dict(tree_flatten(model.parameters())))
+    model.update(tree_unflatten(list(tensors.items())))
+    mx.eval(model.parameters())
 
 
 def step_for(model: Any, optimizer: Any, loss: Loss,
