@@ -91,6 +91,7 @@ def _build_torch() -> ArrayBackend:
 
 def _build_mlx() -> ArrayBackend:
     from ml_stack.backend.mlx_ops import (
+        IndexOps,
         build_cumprod,
         build_cumsum,
         build_make_linear,
@@ -102,7 +103,7 @@ def _build_mlx() -> ArrayBackend:
     mx, nn = require_mlx()
     built = ArrayBackend(
         name="mlx",
-        ops=mx,
+        ops=IndexOps(mx),
         scatter_add=build_scatter_add(mx),
         segment_sum=build_segment_sum(mx),
         make_linear=build_make_linear(nn),

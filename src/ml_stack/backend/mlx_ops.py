@@ -21,6 +21,33 @@ def require_mlx() -> tuple[Any, Any]:
     return mx, nn
 
 
+class IndexOps:
+    """``mlx.core`` with its index-producing ops held off the tape.
+
+    An index has no derivative, and a gather refuses to differentiate through its
+    indices, so ``argsort``/``argmin``/``argmax`` return stop-gradient'd arrays --
+    as torch does, where an integer result never requires grad. Every other
+    attribute is ``mlx.core``'s own.
+    """
+
+    def __init__(self, mx: Any) -> None:
+        self._mx = mx
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._mx, name)
+        setattr(self, name, value)
+        return value
+
+    def argsort(self, x: Tensor, axis: int = -1) -> Tensor:
+        return self._mx.stop_gradient(self._mx.argsort(x, axis=axis))
+
+    def argmin(self, x: Tensor, axis: int = -1) -> Tensor:
+        return self._mx.stop_gradient(self._mx.argmin(x, axis=axis))
+
+    def argmax(self, x: Tensor, axis: int = -1) -> Tensor:
+        return self._mx.stop_gradient(self._mx.argmax(x, axis=axis))
+
+
 def build_scatter_add(mx: Any) -> Callable[..., Tensor]:
     """``(target, index, src, axis=0) -> target + scattered src``. Never in-place."""
 

@@ -144,6 +144,27 @@ def test_mlx_scatter_add_differentiates_through_a_computed_index():
     assert np.allclose(np.asarray(mx.grad(total)(x)), 2.0 * np.asarray(x))
 
 
+@needs_mlx
+def test_mlx_takes_along_an_index_the_input_produced():
+    """A gather whose index comes from the values still differentiates.
+
+    Who is hurt when this goes red: every model that sorts or selects inside its
+    forward pass -- a top-k router, a pooling that reorders -- which cannot train
+    on MLX at all if an index carries a gradient into the gather.
+    """
+    import mlx.core as mx
+
+    backend = get_backend("mlx")
+    ops = backend.ops
+    x = mx.array(np.array([[3.0, 1.0, 2.0], [0.5, 4.0, 1.5]], dtype=np.float32))
+
+    def total(values):
+        order = ops.argsort(values, axis=-1)
+        return mx.sum(mx.take_along_axis(values * values, order, axis=-1))
+
+    assert np.allclose(np.asarray(mx.grad(total)(x)), 2.0 * np.asarray(x))
+
+
 @each_backend
 def test_scatter_add_does_not_mutate_its_target(name):
     """An in-place write into a tensor that is also an input corrupts the autograd graph."""
