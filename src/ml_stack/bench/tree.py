@@ -81,7 +81,7 @@ def _beside(pid: int) -> int:
     return max(0, int(held) - int(info["memory"] if info else 0))
 
 
-def room_for(path: Path, *, headroom: float = 1.2) -> str:
+def room_for(path: Path, *, headroom: float = 1.1) -> str:
     """Why the weights under ``path`` do not fit beside what everything else is holding."""
     held = _beside(os.getpid())
     wanted = resident_bytes(path) * headroom
