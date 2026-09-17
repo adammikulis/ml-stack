@@ -19,13 +19,12 @@ migrate.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
 from ml_stack.graph.columns import as_json, column, differences, from_json, refused
+from ml_stack.graph.cypher import CypherStore, GraphStoreUnavailable
 
 NODE_TABLE = """CREATE NODE TABLE IF NOT EXISTS Node(
     id STRING, kind STRING, label STRING, mentions INT64, attrs STRING, data STRING,
@@ -44,10 +43,6 @@ MAX_HOPS = 6
 # doc keys starting "_" belong to the store itself, not to the graph
 SCHEMA_VERSION = 2
 SCHEMA_KEY = "_schema"
-
-
-class GraphStoreUnavailable(RuntimeError):
-    """Ladybug is not installed. `pip install ml-stack[store]`."""
 
 
 class StoreNeedsUpgrade(RuntimeError):
@@ -82,49 +77,18 @@ NODE_BY_ID = ("MATCH (n:Node {id:$id}) RETURN n.id AS id, n.kind AS kind, n.labe
 
 
 
-def store_memory() -> int:
-    """The buffer pool a store opens with, in bytes, from ``$MLSTACK_STORE_MEMORY``.
-
-    Zero leaves the engine to size it, which it does as a share of this machine's memory.
-    """
-    try:
-        return max(0, int(os.environ.get("MLSTACK_STORE_MEMORY", "") or 0))
-    except ValueError:
-        return 0
-
-
-class GraphStore:
+class GraphStore(CypherStore):
     """Nodes and edges on disk, asked about in Cypher."""
 
     def __init__(self, path: str | Path, *, read_only: bool = False,
                  buffer_pool_size: int | None = None) -> None:
-        try:
-            import ladybug as lb
-        except ImportError as exc:  # pragma: no cover - depends on what is installed
-            raise GraphStoreUnavailable(str(exc)) from exc
-        self.path = Path(path).expanduser()
+        super().__init__(path, read_only=read_only, buffer_pool_size=buffer_pool_size)
         if not read_only:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        pool = store_memory() if buffer_pool_size is None else max(0, int(buffer_pool_size))
-        self._db = lb.Database(str(self.path), read_only=read_only, buffer_pool_size=pool)
-        self._conn = lb.Connection(self._db)
-        self.read_only = read_only
-        self._in_tx = False
-        self._extensions: set[str] = set()
-        self._indexed: set[str] = set()
-        if not read_only:
-            self._conn.execute(NODE_TABLE)
-            self._conn.execute(EDGE_TABLE)
-            self._conn.execute(DOC_TABLE)
-            self._conn.execute(ASSET_TABLE)
+            for table in (NODE_TABLE, EDGE_TABLE, DOC_TABLE, ASSET_TABLE):
+                self.query(table)
             self._upgrade()
-            # A table carrying an index cannot be written to unless the extension that owns
-            # the index is loaded, and the message when it is not — "trying to insert into an
-            # index on table Node", "trying to delete from an index on table Embedding" —
-            # arrives at the write, nowhere near the index. A writer loads them up front
-            # because a writer may meet either.
-            self._extension("fts")
-            self._extension("vector")
+            self.load("fts")
+            self.load("vector")
         else:
             try:
                 self._require_current()
@@ -137,7 +101,7 @@ class GraphStore:
         for table in ("Node", "Edge"):
             cols = {r["name"] for r in self.query(f"CALL TABLE_INFO('{table}') RETURN *")}
             if "data" not in cols:
-                self._conn.execute(f"ALTER TABLE {table} ADD data STRING")
+                self.query(f"ALTER TABLE {table} ADD data STRING")
         if self.get_doc(SCHEMA_KEY, {}).get("version") != SCHEMA_VERSION:
             self.put_doc(SCHEMA_KEY, {"version": SCHEMA_VERSION})
 
@@ -153,107 +117,7 @@ class GraphStore:
                 f"{self.path} was written by an older ml-stack. "
                 "Open it once for writing (GraphStore(path)) to upgrade it in place.")
 
-    # -- lifetime
-
-    def __enter__(self) -> GraphStore:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        for handle in (getattr(self, "_conn", None), getattr(self, "_db", None)):
-            try:
-                handle.close()  # type: ignore[union-attr]
-            except Exception:  # noqa: BLE001 - closing twice is not worth an error
-                pass
-
-    # -- asking
-
-    def query(self, cypher: str, params: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
-        """Any Cypher, as a list of rows keyed by what the query returned."""
-        result = self._conn.execute(cypher, dict(params or {}))
-        if isinstance(result, list):  # a multi-statement query returns one result each
-            result = result[-1]
-        names = result.get_column_names()
-        return [dict(zip(names, row)) for row in result.get_all()]
-
     # -- writing
-
-    def _written(self, cypher: str) -> str:
-        """A write statement's text, made unique for this execution.
-
-        ladybug 0.20 caches the physical plan of a parameterized statement by its text and
-        re-executes it on a fast path. Re-executing the store's edge MERGE after the node
-        table it matches against was rewritten reused state the rewrite had invalidated and
-        segfaulted (measured 2026-09-03: `write(GRAPH)` twice; nodes-only twice fine, edges
-        alone twice fine, a transaction boundary between them no help, the same statement
-        with a comment appended per execution fine). A comment carrying a counter makes
-        each write its own text, so no plan is ever reused for a write; reads keep theirs.
-        The cost is one plan compile per write, which is what every version before 0.20
-        paid anyway.
-        """
-        self._writes = getattr(self, "_writes", 0) + 1
-        text = f"{cypher} /* w{self._writes} */"
-        self._forget(getattr(self, "_wrote", ""))
-        self._wrote = text
-        return text
-
-    def _asked(self, cypher: str) -> str:
-        """A word-index query's text, made unique for this execution.
-
-        The cached plan of QUERY_FTS_INDEX keeps its result set and its view of the index:
-        run again with another term it adds the earlier answers to the new ones, and after
-        a label was rewritten it answers for the label it first saw.
-        """
-        self._asks = getattr(self, "_asks", 0) + 1
-        text = f"{cypher} /* q{self._asks} */"
-        self._forget(getattr(self, "_askedtext", ""))
-        self._askedtext = text
-        return text
-
-    def _forget(self, cypher: str) -> None:
-        """Drop the connection's cached plan for one statement, and close what it held.
-
-        ladybug keeps a prepared statement per statement text for the life of the
-        connection, and `_written`/`_asked` give every one its own text: 12,000 edge
-        upserts reached 18 GB resident and then a buffer-manager allocation failure, and
-        stay at 247 MB over 26,000 when each is dropped as the next is made (2026-09-04).
-        """
-        cache = getattr(self._conn, "_pybind_implicit_prepared_cache", None)
-        if not cypher or not isinstance(cache, dict):
-            return
-        lock = getattr(self._conn, "_prepared_cache_lock", None)
-        with lock if lock is not None else nullcontext():
-            for key in [k for k in cache if isinstance(k, tuple) and k[:1] == (cypher,)]:
-                held = cache.pop(key, None)
-                close = getattr(held, "close", None)
-                if callable(close):
-                    try:
-                        close()
-                    except Exception:  # noqa: BLE001 - a statement closed twice is closed
-                        pass
-
-    @contextmanager
-    def transaction(self):
-        """Everything inside lands together, or none of it does."""
-        if self._in_tx:
-            yield
-            return
-        self._conn.execute("BEGIN TRANSACTION")
-        self._in_tx = True
-        try:
-            yield
-        except BaseException:
-            try:
-                self._conn.execute("ROLLBACK")
-            except RuntimeError:
-                pass              # a failed statement already rolled the transaction back
-            raise
-        else:
-            self._conn.execute("COMMIT")
-        finally:
-            self._in_tx = False
 
     def upsert_node(self, node: Mapping[str, Any]) -> None:
         """Put one node in, or update the one already there. ``id`` is what makes it the same.
@@ -265,9 +129,9 @@ class GraphStore:
                 "label": str(node.get("label") or ""), "mentions": int(node.get("mentions") or 0),
                 "attrs": as_json(node.get("attrs")),
                 "data": as_json({k: v for k, v in node.items() if k not in NODE_COLUMNS})}
-        self._conn.execute(self._written(
+        self.query(
             "MERGE (n:Node {id: $id}) SET n.kind=$kind, n.label=$label, "
-            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data"), sent)
+            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data", sent)
         back = self.query(NODE_BY_ID, {"id": sent["id"]})
         if not back or back[0] != sent:
             raise StoreMismatch(
@@ -279,10 +143,10 @@ class GraphStore:
         sent = {"s": str(edge["source"]), "t": str(edge["target"]),
                 "rel": str(edge.get("rel") or ""), "weight": int(edge.get("weight") or 1),
                 "data": as_json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})}
-        rows = self.query(self._written(
+        rows = self.query(
             "MATCH (a:Node {id:$s}), (b:Node {id:$t}) "
             "MERGE (a)-[e:Edge {rel:$rel}]->(b) SET e.weight=$weight, e.data=$data "
-            "RETURN e.rel AS rel, e.weight AS weight, e.data AS data"), sent)
+            "RETURN e.rel AS rel, e.weight AS weight, e.data AS data", sent)
         if not rows:
             return False
         # the RETURN reads the edge after the SET, which is a read-back for free
@@ -323,10 +187,7 @@ class GraphStore:
         Building one is schema work, and schema work inside a transaction takes the
         transaction with it, so this waits until there is none.
         """
-        if self.read_only or self._in_tx:
-            return
-        self._extension("fts")
-        self._index("fts", "CALL CREATE_FTS_INDEX('Node', 'node_index', ['label'])")
+        self.index_words("Node", "node_index", ["label"])
 
     def has(self, node_id: str) -> bool:
         """Whether a node with this id is in the store."""
@@ -336,8 +197,8 @@ class GraphStore:
         """Give a node a different label. False when it is not in the store."""
         if not self.has(node_id):
             return False
-        self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.label = $label"),
-                           {"id": str(node_id), "label": str(label)})
+        self.query("MATCH (n:Node {id:$id}) SET n.label = $label",
+                   {"id": str(node_id), "label": str(label)})
         return True
 
     def _attrs(self, node_id: str) -> dict[str, Any] | None:
@@ -346,8 +207,8 @@ class GraphStore:
         return column(rows[0]["attrs"], f"node {node_id}: attrs") if rows else None
 
     def _set_attrs(self, node_id: str, attrs: Mapping[str, Any]) -> None:
-        self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.attrs = $attrs"),
-                           {"id": str(node_id), "attrs": as_json(attrs)})
+        self.query("MATCH (n:Node {id:$id}) SET n.attrs = $attrs",
+                   {"id": str(node_id), "attrs": as_json(attrs)})
 
     def set_attribute(self, node_id: str, name: str, value: Any) -> bool:
         """Set one attribute of a node, keeping the others. False when it is not in the store."""
@@ -374,8 +235,8 @@ class GraphStore:
             {"s": str(source), "t": str(target), "rel": str(rel)})
         if not found:
             return False
-        self._conn.execute(self._written(
-            "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) DELETE e"),
+        self.query(
+            "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) DELETE e",
             {"s": str(source), "t": str(target), "rel": str(rel)})
         return True
 
@@ -409,7 +270,7 @@ class GraphStore:
         documents can afford, and a store of measurements cannot afford to be without.
         """
         raw = as_json(value)
-        self._conn.execute(self._written("MERGE (d:Doc {key: $key}) SET d.value = $value"),
+        self.query("MERGE (d:Doc {key: $key}) SET d.value = $value",
                            {"key": str(key), "value": raw})
         back = self.get_doc(str(key), _MISSING)
         if back is _MISSING or back != from_json(raw):
@@ -425,7 +286,7 @@ class GraphStore:
         """Take one document out. False when there was none under that key."""
         if not self.query("MATCH (d:Doc {key:$key}) RETURN d.key AS key", {"key": str(key)}):
             return False
-        self._conn.execute(self._written("MATCH (d:Doc {key:$key}) DELETE d"), {"key": str(key)})
+        self.query("MATCH (d:Doc {key:$key}) DELETE d", {"key": str(key)})
         return True
 
     def doc_keys(self) -> list[str]:
@@ -595,28 +456,6 @@ class GraphStore:
 
     # -- searching by meaning, and by word
 
-    def _extension(self, name: str) -> None:
-        """Load an extension. Allowed on a read-only handle; only building an index is a write."""
-        if name in self._extensions:
-            return
-        self._conn.execute(f"INSTALL {name}")
-        self._conn.execute(f"LOAD EXTENSION {name}")
-        self._extensions.add(name)
-
-    def _index(self, name: str, cypher: str) -> None:
-        """Build an index once per handle. A read-only handle uses whatever a writer built.
-
-        A read-only handle attempting to create one would raise and break every search made
-        through it, so it does not try.
-        """
-        if self.read_only or name in self._indexed:
-            return
-        self._indexed.add(name)
-        try:
-            self._conn.execute(cypher)
-        except RuntimeError:
-            pass                      # already there, or this build will not take the arguments
-
     def set_embedding(self, node_id: str, vector: Sequence[float], *, model: str = "") -> None:
         """Remember what a node means, as a vector.
 
@@ -625,88 +464,62 @@ class GraphStore:
         invisible for ever.
         """
         values = [float(x) for x in vector]
-        self._conn.execute(
+        self.query(
             f"CREATE NODE TABLE IF NOT EXISTS Embedding(id STRING, node_id STRING, "
             f"model STRING, vector FLOAT[{len(values)}], PRIMARY KEY (id))")
-        self._extension("vector")
         key = f"{node_id}\u0000{model}"
         if self.query("MATCH (e:Embedding {id:$id}) RETURN e.id AS id", {"id": key}):
-            self._conn.execute(self._written("MATCH (e:Embedding {id:$id}) SET e.vector = $v"),
-                               {"id": key, "v": values})
+            self.query("MATCH (e:Embedding {id:$id}) SET e.vector = $v", {"id": key, "v": values})
         else:
-            self._conn.execute(
-                "CREATE (e:Embedding {id:$id, node_id:$n, model:$m, vector:$v})",
-                {"id": key, "n": str(node_id), "m": str(model), "v": values})
-        # cosine, said explicitly, because the distance-to-similarity mapping below assumes it
-        self._index("vector", "CALL CREATE_VECTOR_INDEX('Embedding', 'embedding_index', "
-                              "'vector', metric := 'cosine')")
+            self.query("CREATE (e:Embedding {id:$id, node_id:$n, model:$m, vector:$v})",
+                       {"id": key, "n": str(node_id), "m": str(model), "v": values})
+        self._index_embeddings()
+
+    def _index_embeddings(self) -> None:
+        # cosine, because the distance-to-similarity mapping in `similar` assumes it
+        if self.has_table("Embedding"):
+            self.index_vectors("Embedding", "embedding_index", "vector", metric="cosine")
 
     def embeddings(self, *, model: str = "") -> dict[str, list[float]]:
         """Every vector the store holds, as ``{node id: vector}``. Empty when there are none."""
-        try:
-            rows = self.query(
-                "MATCH (e:Embedding) WHERE $m = '' OR e.model = $m "
-                "RETURN e.node_id AS id, e.vector AS vector ORDER BY e.node_id",
-                {"m": str(model)})
-        except RuntimeError:
-            return {}                 # no Embedding table yet, which is no vectors
+        if not self.has_table("Embedding"):
+            return {}
+        rows = self.query(
+            "MATCH (e:Embedding) WHERE $m = '' OR e.model = $m "
+            "RETURN e.node_id AS id, e.vector AS vector ORDER BY e.node_id",
+            {"m": str(model)})
         return {str(row["id"]): [float(x) for x in row["vector"] or ()] for row in rows}
 
     def similar(self, vector: Sequence[float], *, model: str = "", limit: int = 10
                 ) -> list[dict[str, Any]]:
         """The nodes closest in meaning to a vector, nearest first."""
-        self._extension("vector")
-        self._index("vector", "CALL CREATE_VECTOR_INDEX('Embedding', 'embedding_index', "
-                              "'vector', metric := 'cosine')")
-        try:
-            rows = self.query(
-                "CALL QUERY_VECTOR_INDEX('Embedding', 'embedding_index', $v, $k) "
-                "RETURN node.node_id AS id, node.model AS model, distance AS distance",
-                {"v": [float(x) for x in vector], "k": int(limit)})
-        except RuntimeError:
-            return []                 # nothing embedded yet, so nothing is close to anything
+        self._index_embeddings()
+        rows = self.nearest("Embedding", "embedding_index", vector, limit=limit,
+                            returns="node.node_id AS id, node.model AS model")
         label = {n["id"]: n["label"] for n in self.nodes()}
         out = []
         for row in rows:
             if model and row.get("model") != model:
                 continue
-            far = row.get("distance")
+            far = float(row["distance"])
             # cosine distance runs 0 (identical) to 2 (opposite); this reads as a similarity
-            near = max(0.0, min(1.0, (2.0 - float(far)) / 2.0)) if isinstance(far, (int, float)) else 0.0
-            out.append({"id": row["id"], "label": label.get(row["id"], ""), "similarity": near,
-                        "distance": float(far) if isinstance(far, (int, float)) else None})
-        # Nearest first, said and then done. What comes back from the index arrives in its
-        # own order — measured, alphabetical by id — and every caller that fuses rankings
-        # reads position as meaning. Unsorted, the vector half of a search votes at random:
-        # "who fixes machines" put `repair` (0.7375) below `benchsight` (0.7011) purely
-        # because b comes before r.
-        out.sort(key=lambda r: -r["similarity"])
-        return out[:limit]
+            out.append({"id": row["id"], "label": label.get(row["id"], ""),
+                        "similarity": max(0.0, min(1.0, (2.0 - far) / 2.0)), "distance": far})
+        return out
 
     def search(self, text: str, *, limit: int = 10) -> list[dict[str, Any]]:
         """Nodes whose label matches some words, stemmed and ranked."""
-        self._extension("fts")
-        self._index("fts", "CALL CREATE_FTS_INDEX('Node', 'node_index', ['label'])")
-        try:
-            rows = self.query(self._asked(
-                "CALL QUERY_FTS_INDEX('Node', 'node_index', $q, TOP := $k) "
-                "RETURN node.id AS id, node.label AS label, node.kind AS kind, score AS score"),
-                {"q": str(text), "k": int(limit)})
-        except RuntimeError:
-            return []                 # no index yet, which is not the same as no match
-        # ladybug 0.20 hands a node back once per version it was written -- an upsert
-        # that MERGEd twice reads twice from the index -- so one row per id, first wins
-        seen: set[str] = set()
-        unique = [r for r in rows if not (r.get("id") in seen or seen.add(r.get("id")))]
-        return unique[:limit]
+        self.index()
+        return self.search_words("Node", "node_index", text, limit=limit,
+                                 returns="node.id AS id, node.label AS label, node.kind AS kind")
 
     # -- files that belong to something in the graph
 
     def add_asset(self, asset_id: str, node_id: str, blob: bytes, *, mime: str = "",
                   meta: Mapping[str, Any] | None = None) -> None:
         """Keep a file with the node it belongs to."""
-        self._conn.execute(self._written(
-            "MERGE (a:Asset {id:$id}) SET a.node_id=$n, a.mime=$m, a.bytes=$b, a.meta=$meta"),
+        self.query(
+            "MERGE (a:Asset {id:$id}) SET a.node_id=$n, a.mime=$m, a.bytes=$b, a.meta=$meta",
             {"id": str(asset_id), "n": str(node_id), "m": str(mime), "b": bytes(blob),
              "meta": as_json(meta)})
 
@@ -763,6 +576,6 @@ class GraphStore:
         with self.transaction():
             for node_id in wanted:
                 if self.has(node_id):
-                    self._conn.execute(self._written("MATCH (n:Node {id:$id}) DETACH DELETE n"), {"id": node_id})
+                    self.query("MATCH (n:Node {id:$id}) DETACH DELETE n", {"id": node_id})
                     gone += 1
         return gone

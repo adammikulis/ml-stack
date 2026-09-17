@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_stack.graph.cypher import census
 from ml_stack.graph.snapshots import restore, take
 from ml_stack.graph.store import MOST, GraphStore, StoreMismatch, WouldLoseTooMuch
 
@@ -38,7 +39,7 @@ def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
             "pass force=True; if it is not, something upstream read nothing.")
     if keep_copy and held and len(gone) > len(held) * COPY_OVER:
         take(path, reason=f"before dropping {len(gone)} of {len(held)} nodes",
-             count=count_store, fold=fold_log)
+             count=census, fold=fold_log)
     with GraphStore(path) as store:
         with store.transaction():
             store.drop(gone, force=True)  # already judged, above, against the whole store
@@ -53,11 +54,7 @@ def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
 
 
 def count_store(path: str | Path) -> dict[str, int]:
-    """Open a store read-only on a fresh handle and count it.
-
-    A bulk write can report every row written while reading back on the same connection,
-    and be short when reopened; only a fresh open sees what reached the disk.
-    """
+    """Open a store read-only on a fresh handle and count its nodes, edges and documents."""
     with GraphStore(path, read_only=True) as store:
         return store.counts()
 
@@ -69,9 +66,9 @@ def fold_log(path: str | Path) -> None:
 
 def snapshot(path: str | Path, *, reason: str, keep: int = 10):
     """A verified copy of a store, taken before something that cannot be undone."""
-    return take(path, reason=reason, count=count_store, fold=fold_log, keep=keep)
+    return take(path, reason=reason, count=census, fold=fold_log, keep=keep)
 
 
 def roll_back(snapshot_path: str | Path):
     """Put a snapshot back, saving what is there now first."""
-    return restore(snapshot_path, count=count_store, fold=fold_log)
+    return restore(snapshot_path, count=census, fold=fold_log)

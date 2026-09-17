@@ -162,8 +162,24 @@ def orphaned(entry: dict) -> bool:
             and not pid_exists(owner) and pid_exists(pid))
 
 
+def repo_only(model: str | Path) -> str:
+    """The ``owner/repo`` a reference names when it names no file in it; else ""."""
+    text = str(model).removeprefix("hf:").strip("/")
+    parts = text.split("/")
+    return text.lower() if len(parts) == 2 and not parts[1].endswith(".gguf") else ""
+
+
 def model_matches(reported: str, wanted: str | Path) -> bool:
-    """Whether a server reporting ``reported`` is serving ``wanted``."""
+    """Whether a server reporting ``reported`` is serving ``wanted``.
+
+    A reference to a repository with no file in it -- what a server started from a
+    repository reports -- matches every file of that repository: the weights are the
+    same model, and a second copy beside it costs the memory of both.
+    """
+    repo = repo_only(reported) or repo_only(wanted)
+    if repo:
+        other = wanted if repo_only(reported) else reported
+        return repo in str(other).removeprefix("hf:").lower().replace("_", "/")
     wanted_name = Path(str(wanted).removeprefix("hf:")).name.lower()
     reported_name = Path(reported).name.lower()
     if not wanted_name or not reported_name:

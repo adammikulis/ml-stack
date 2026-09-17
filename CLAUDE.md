@@ -209,7 +209,9 @@ branch, in its own worktree.
 
 **Pick the model the task needs.** Not a rank to stay under and not a default: read what
 the work actually asks for and choose. Haiku only to explore -- a search, a read, a lookup across files -- never to
-edit: a change it writes is a change someone has to redo. Sonnet for ordinary code with tests. Opus where the agent has to decide
+edit: a change it writes is a change someone has to redo. Exploration is Haiku's job and it
+gets every read-only search, unless the search itself needs judgement a larger model has to
+supply -- say so in the brief when you go above it. Sonnet for ordinary code with tests. Opus where the agent has to decide
 *what* the right change is, not just make it -- a module boundary, a failure that needs
 diagnosing, a measurement whose meaning is in question. Fable sparingly: only for work whose
 difficulty is the thinking rather than the typing and that Opus has fallen short on. It is
