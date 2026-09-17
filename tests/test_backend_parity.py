@@ -139,16 +139,63 @@ def test_a_module_agrees_forward_and_backward():
     import mlx.core as mx
     import torch
 
+    x = inputs((8, 4))
     report = run_pair(
         build_torch_mlp,
         build_mlx_mlp,
-        lambda m, x: m(torch.tensor(x)),
-        lambda m, x: m(mx.array(x)),
-        (8, 4),
+        lambda m: m(torch.tensor(x)),
+        lambda m: m(mx.array(x)),
+        (8, 2),
     )
     assert report.checked_parameters == 4
     assert report.max_forward_diff < STEP_ATOL
     assert set(report.grad_norms) == {"0.weight", "0.bias", "2.weight", "2.bias"}
+
+
+@needs_both
+def test_a_parameter_the_loss_never_reaches_compares_as_zero_on_both():
+    """Torch leaves such a gradient as None where MLX returns zeros; both mean zero."""
+    import mlx.core as mx
+    import mlx.nn as mlx_nn
+    import torch
+    import torch.nn as torch_nn
+
+    class TorchPair(torch_nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch_nn.ModuleList([torch_nn.Linear(4, 2), torch_nn.Linear(4, 2)])
+
+    class MLXPair(mlx_nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = [mlx_nn.Linear(4, 2), mlx_nn.Linear(4, 2)]
+
+    x = inputs((8, 4))
+    report = run_pair(
+        TorchPair,
+        MLXPair,
+        lambda m: m.layers[0](torch.tensor(x)),
+        lambda m: m.layers[0](mx.array(x)),
+        (8, 2),
+    )
+    assert report.grad_norms["1.weight"] == (0.0, 0.0)
+    assert report.grad_norms["0.weight"][0] > 0.0
+
+
+@needs_both
+def test_a_module_that_computes_something_else_is_caught():
+    import mlx.core as mx
+    import torch
+
+    x = inputs((8, 4))
+    with pytest.raises(ParityError, match="outputs differ"):
+        run_pair(
+            build_torch_mlp,
+            build_mlx_mlp,
+            lambda m: m(torch.tensor(x)),
+            lambda m: m(mx.array(x)) * 1.01,
+            (8, 2),
+        )
 
 
 # --------------------------------------------------------------------------- a step
