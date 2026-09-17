@@ -419,6 +419,45 @@ class ServerBackend(ABC):
         """The argv this backend would run. Separate from ``start`` so it is testable"""
 
 
+def claim_port(spec: ServerSpec, lease: Lease) -> None:
+    """Refuse a start whose lease names another port, or a port held by a process not ours."""
+    if lease.port != spec.port:
+        raise ServerFailed(f"the lease is for port {lease.port}, not {spec.port}: a server "
+                           "starts only on the port its record names")
+    if not port_is_free(spec.port):
+        reclaim_port(spec.port)
+        if not port_is_free(spec.port):
+            raise ServerFailed(
+                f"port {spec.port} is held by a process that is not one of ours; "
+                "refusing to kill it"
+            )
+
+
+def launch(argv: list[str], *, port: int, log_path: Path, timeout: float,
+           env: dict[str, str]) -> tuple[Any, str, float]:
+    """``(process, base_url, load seconds)`` for ``argv`` started and answering its health check.
+
+    Raises ``ServerFailed`` with the log's tail when it exits or never answers.
+    """
+    started_at = time.monotonic()
+    with log_path.open("wb") as log_handle:
+        process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
+                                   **process_group_kwargs())
+    base_url = f"http://{DEFAULT_HOST}:{port}"
+    if not wait_for_health(base_url, timeout=timeout, is_alive=lambda: process.poll() is None):
+        code = process.poll()
+        process.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5.0)
+        raise ServerFailed(
+            f"{Path(argv[0]).name} did not become healthy on {base_url}"
+            + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
+            + f"\n--- {log_path} ---\n"
+            + tail(log_path)
+        )
+    return process, base_url, time.monotonic() - started_at
+
+
 class LlamaServerBackend(ServerBackend):
     """llama.cpp's ``llama-server``."""
 
@@ -655,16 +694,7 @@ class LlamaServerBackend(ServerBackend):
         if check_flags:
             argv = self.checked(argv)
 
-        if lease.port != spec.port:
-            raise ServerFailed(f"the lease is for port {lease.port}, not {spec.port}: a server "
-                               "starts only on the port its record names")
-        if not port_is_free(spec.port):
-            reclaim_port(spec.port)
-            if not port_is_free(spec.port):
-                raise ServerFailed(
-                    f"port {spec.port} is held by a process that is not one of ours; "
-                    "refusing to kill it"
-                )
+        claim_port(spec, lease)
 
         if preflight:
             from ml_stack.hub import room
@@ -691,36 +721,9 @@ class LlamaServerBackend(ServerBackend):
             # nothing to summarise.
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
 
-        started_at = time.monotonic()
-        with log_path.open("wb") as log_handle:
-            process = subprocess.Popen(
-                argv,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                env=child_env(self.binary, extra_env or None),
-                **process_group_kwargs(),
-            )
-
-        base_url = f"http://{DEFAULT_HOST}:{spec.port}"
-        healthy = wait_for_health(
-            base_url,
-            timeout=timeout,
-            is_alive=lambda: process.poll() is None,
-        )
-
-        if not healthy:
-            code = process.poll()
-            process.terminate()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5.0)
-            raise ServerFailed(
-                f"llama-server did not become healthy on {base_url}"
-                + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
-                + f"\n--- {log_path} ---\n"
-                + tail(log_path)
-            )
-
-        load_s = time.monotonic() - started_at
+        process, base_url, load_s = launch(
+            argv, port=spec.port, log_path=log_path, timeout=timeout,
+            env=child_env(self.binary, extra_env or None))
 
         warmup_s = None
         if warmup_request:

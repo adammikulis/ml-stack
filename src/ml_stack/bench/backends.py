@@ -139,10 +139,10 @@ def llama_served_by(base_url: str, props: Mapping[str, Any] | None = None
     path = str(props.get("model_path") or "")
     name = path.rsplit("/", 1)[-1]
     out: dict[str, Any] = {
-        "program": "llama.cpp",
+        "program": str(props.get("program") or "llama.cpp"),
         "version": str(props.get("build_info") or "") or None,
-        "format": "gguf" if name.lower().endswith(".gguf") else None,
-        "runtime": None,
+        "format": props.get("format") or ("gguf" if name.lower().endswith(".gguf") else None),
+        "runtime": props.get("runtime"),
         "quant": quant_from_model_path(name) if name else None,
         "model": name or None,
         "weights_bytes": weights_of(path),
@@ -213,7 +213,7 @@ def timings_of(reply: Any) -> dict[str, float | int | None]:
     read from those, and it has no cache or draft figure. Anything else says nothing.
     """
     raw = getattr(reply, "raw", None) or {}
-    out: dict[str, float | int | None] = {key: None for key in TIMING_KEYS}
+    out: dict[str, float | int | None] = dict.fromkeys(TIMING_KEYS)
     timings = raw.get("timings") if isinstance(raw, Mapping) else None
     if isinstance(timings, Mapping):
         # a key written as null is a figure this program does not measure; a key left

@@ -25,6 +25,7 @@ from ml_stack.bench.measure import found as finder_of
 from ml_stack.bench.score import Row, _which
 from ml_stack.bench.show import drafted
 from ml_stack.log import say, warn
+from ml_stack.serve import mlx_tree
 from ml_stack.serve.profile import ASK
 
 
@@ -162,7 +163,8 @@ def up(config: Any, *, binary: str = "", name: str = "", serve_timeout: float = 
             manager = None
             say(f"    the profile names build {config.serving.build!r}, not found here: {exc}")
     build = build or str(find_binary() or "llama-server")
-    report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
+    report = (mlx_tree.report_for(spec, limit_bytes=hub.room()) if mlx_tree.is_mlx(model)
+              else checks.Preflight(spec, binary=build, limit_bytes=hub.room()))
     if not report.ok:
         raise NotLoaded(report.said())
     checked = {"kv_estimate_bytes": int(report.kv_estimate_bytes),
@@ -304,7 +306,6 @@ def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[s
             say(f"      look_up by {finder}" + (f" ({why})" if why else ""))
             loaded = float(held_up.pop("loaded", 0.0))
             before_load = held_up.pop("baseline", None)
-            load_s = held_up.get("load_s")
 
             if needs_draft_depth:
                 reading = draft_depth_support(config.client(server.base_url))

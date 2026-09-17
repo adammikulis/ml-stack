@@ -69,6 +69,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from ml_stack.asking import ASKING
+from ml_stack.graph.completions import CompletionRoutes
 from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.metrics import MetricsRoutes
 from ml_stack.graph.payloads import answer_payload, drained, sse, thread_request
@@ -480,8 +481,8 @@ class AskRoutes(MetricsRoutes):
             self.asking = None
 
 
-class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes,
-              BaseHTTPRequestHandler):
+class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, CompletionRoutes,
+              AskRoutes, BaseHTTPRequestHandler):
     """The page, its exports and every route the page's components talk to, on one
     ``http.server`` handler.
 
@@ -552,6 +553,12 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
             self.handle_refresh()
         elif (want := thread_request(self.path)):
             self.handle_thread(*want)
+        elif path == "/health":
+            self.handle_health()
+        elif path == "/v1/models":
+            self.handle_models()
+        elif path == "/props":
+            self.handle_props()
         else:
             self.send_error(404)
 
@@ -568,6 +575,8 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
             self.handle_request(body)
         elif path == "/draft":
             self.handle_draft(body or {})
+        elif path == "/v1/chat/completions":
+            self.handle_completion(body)
         else:
             self.send_error(404)
 

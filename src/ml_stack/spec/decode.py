@@ -33,11 +33,13 @@ class Asked:
 
 @dataclass(frozen=True)
 class Pass:
-    """One verification pass: tokens it emitted, its tree size, its seconds, forced tokens."""
+    """One pass: tokens emitted, drafted tokens kept, tree size, seconds in all and drafting."""
 
     emitted: int
+    accepted: int
     nodes: int
     seconds: float
+    drafting: float
     forced: int = 0
 
 
@@ -172,6 +174,7 @@ def decode(session: Session, prompt: Sequence[int], asked: Asked,
             break
         started = time.perf_counter()
         tree = drafter.draft(root, hidden)
+        drafted = time.perf_counter() - started
         logits, states = verifier.forward(tree)
         kept = accept(tree, logits, sampling, rule)
         verifier.commit(kept.path)
@@ -191,7 +194,8 @@ def decode(session: Session, prompt: Sequence[int], asked: Asked,
         out.tokens.extend(emitted)
         if on_tokens is not None:
             on_tokens(emitted)
-        out.passes.append(Pass(len(emitted), tree.n, time.perf_counter() - started, kept.forced))
+        out.passes.append(Pass(len(emitted), len(kept.path) - 1, tree.n,
+                               time.perf_counter() - started, drafted, kept.forced))
         if out.finish == "stop":
             break
         root = kept.bonus

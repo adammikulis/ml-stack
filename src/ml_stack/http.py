@@ -113,7 +113,8 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
             time.sleep(delay)
             delay = min(delay * 1.5, 2.0)
 
-    assert last is not None
+    if last is None:
+        raise ServerError(f"{url}: no attempt was made")
     raise last
 
 
@@ -162,9 +163,14 @@ def request_stream(url: str, *, payload: dict[str, Any], timeout: float = 180.0,
                 if body == "[DONE]":
                     return
                 try:
-                    yield json.loads(body)
+                    event = json.loads(body)
                 except json.JSONDecodeError:
                     continue
+                if isinstance(event, dict) and "error" in event and "choices" not in event:
+                    said = event["error"]
+                    said = said.get("message", said) if isinstance(said, dict) else said
+                    raise ServerError(f"{url} -> error mid-stream: {said}", body=body)
+                yield event
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
         raise ServerUnreachable(f"cannot reach {url} ({exc})") from exc
 

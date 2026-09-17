@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import subprocess
 import threading
 import time
-from contextlib import contextmanager
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from ml_stack.serve.backend import (
     ServerInfo,
     ServerSpec,
 )
+from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import free_port, port_is_free
 from ml_stack.serve.process import kill_process_tree, pid_exists, self_or_ancestor
 from ml_stack.serve.ports import DEFAULT_HOST, reclaim_port
@@ -149,10 +151,8 @@ def _reap_one(held: Any, *, grace_s: float) -> None:
     """Wait on a child this process started, so its pid leaves the table."""
     if held is None:
         return
-    try:
+    with contextlib.suppress(subprocess.TimeoutExpired, ChildProcessError, OSError):
         held.wait(timeout=grace_s)
-    except (subprocess.TimeoutExpired, ChildProcessError, OSError):
-        pass
 
 
 def orphaned(entry: dict) -> bool:
@@ -251,6 +251,7 @@ class ServerManager:
         state_file: Path | None = None,
     ) -> None:
         self.backend = backend or LlamaServerBackend()
+        self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
         self.say: Callable[[str], None] | None = None
         self._mine: dict[str, dict] = {}
@@ -258,6 +259,11 @@ class ServerManager:
         self._lock = threading.Lock()
         self._port_locks: dict[int, threading.Lock] = {}
         self._unavailable_until: dict[int, float] = {}
+
+    def backend_for(self, spec: ServerSpec) -> ServerBackend:
+        """The backend that serves ``spec``: MLX weights run tree decoding, anything else this
+        manager's own."""
+        return self.tree if is_mlx(spec.model) else self.backend
 
     # ------------------------------------------------------------------ leasing
 
@@ -386,7 +392,7 @@ class ServerManager:
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
         _emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
-        info = self.backend.start(spec, lease=self._pending(spec), timeout=timeout,
+        info = self.backend_for(spec).start(spec, lease=self._pending(spec), timeout=timeout,
                                   **starting)
         _emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
         return info
@@ -474,7 +480,7 @@ class ServerManager:
             base_url=base_url,
             port=spec.port,
             pid=self._recorded_pid(spec.port),
-            backend=self.backend.name,
+            backend=self.backend_for(spec).name,
             adopted=True,
         )
 
@@ -728,7 +734,7 @@ class ServerManager:
         manager is starting on -- never one it may kill.
         """
         self._mine[str(spec.port)] = {
-            "port": spec.port, "pid": None, "backend": self.backend.name,
+            "port": spec.port, "pid": None, "backend": self.backend_for(spec).name,
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
         }
         self._save()
