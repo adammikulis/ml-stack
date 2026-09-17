@@ -34,6 +34,7 @@ __all__ = ["call", "claim", "lease", "record_path", "release", "serve", "status"
 
 START_WAIT_S = 30.0
 REAP_EVERY_S = 1.0
+ADOPT_EVERY_S = 30.0
 
 
 def record_path() -> Path:
@@ -116,8 +117,14 @@ def serve(*, idle_s: float = IDLE_S, say=say_out) -> int:
 
 
 def _upkeep(broker: Broker, done: threading.Event) -> None:
+    """Reap every second, and take in servers started since the last look every
+    ``ADOPT_EVERY_S``."""
+    looked = time.monotonic()
     while not done.wait(REAP_EVERY_S):
         broker.reap()
+        if time.monotonic() - looked >= ADOPT_EVERY_S:
+            broker.adopt()
+            looked = time.monotonic()
 
 
 def _record() -> dict[str, Any]:
