@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.client import is_healthy, reported_models
+from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
@@ -93,6 +93,10 @@ class Held:
     idle_since: float = 0.0
     holders: dict[str, tuple[int, str]] = field(default_factory=dict)
     info: ServerInfo | None = None
+    #: what ``/props`` said this server actually loaded (its ``model_path``), fetched
+    #: once when the server was found rather than per ask -- ``None`` when it could
+    #: not be read.
+    loaded_file: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -101,7 +105,8 @@ class Held:
     def serves(self, models: Iterable[str]) -> bool:
         """Whether this server is serving one of ``models``."""
         names = self.names or (self.model,)
-        return any(model_matches(name, wanted) for name in names for wanted in models)
+        return any(model_matches(name, wanted, loaded_file=self.loaded_file)
+                   for name in names for wanted in models)
 
     def held_by_others(self, pid: int) -> list[tuple[int, str]]:
         return [who for who in self.holders.values() if who[0] != pid]
@@ -317,9 +322,11 @@ class Broker:
                 self.servers.pop(placeholder.port, None)
                 self._cond.notify_all()
             raise BrokerError(f"{spec.model} did not start on port {spec.port}: {exc}") from exc
+        params = serving_params(info.base_url)
         with self._cond:
             placeholder.info, placeholder.pid, placeholder.loading = info, info.pid, False
             placeholder.names = (str(spec.model), *reported_models(info.base_url))
+            placeholder.loaded_file = params.model if params else None
             self._write_held()
             self._cond.notify_all()
         ask = waiting.ask
@@ -448,6 +455,8 @@ class Broker:
                 if held.port in self.servers or not is_healthy(held.base_url, timeout=2.0):
                     continue
                 held.names = (held.model, *reported_models(held.base_url))
+                params = serving_params(held.base_url)
+                held.loaded_file = params.model if params else None
                 self.servers[held.port] = held
             self._write_held()
             self._cond.notify_all()

@@ -269,8 +269,8 @@ class TestModelMatches:
         [("/models/Qwen3-32B-Q5_K_M.gguf", "Qwen3-32B-Q5_K_M.gguf"),
          ("Qwen3-32B-Q5_K_M.gguf", "/elsewhere/Qwen3-32B-Q5_K_M.gguf"),
          ("weights.gguf", "hf:owner/repo/weights.gguf"),
-         # a server started from a repository reports the repository, not the file it picked
-         ("unsloth/embeddinggemma-300m-GGUF", "hf:unsloth/embeddinggemma-300m-GGUF/embeddinggemma-300M-Q8_0.gguf"),
+         # a server that reports a file, asked for by bare repository, is a match --
+         # only a bare-repository *report* against a wanted file is the ambiguous case
          ("unsloth_embeddinggemma-300m-GGUF_embeddinggemma-300M-Q8_0.gguf", "unsloth/embeddinggemma-300m-GGUF")],
     )
     def test_matching_names(self, reported, wanted):
@@ -284,6 +284,31 @@ class TestModelMatches:
 
     def test_empty_names_do_not_match(self):
         assert not model_matches("", "model.gguf")
+
+    def test_a_bare_repository_report_with_an_unknown_loaded_file_does_not_match_a_file(self):
+        """A server started from a repository reports the repository, not the file it
+        picked -- unsloth/gpt-oss-20b-GGUF holds both a Q4_K_M and an F16 gguf. Without
+        knowing which one actually loaded, a request for either specific file is not
+        assumed to be served here."""
+        reported = "unsloth/gpt-oss-20b-GGUF"
+        wanted = "hf:unsloth/gpt-oss-20b-GGUF/gpt-oss-20b-F16.gguf"
+        assert not model_matches(reported, wanted)
+
+    def test_a_bare_repository_report_matches_the_file_its_props_says_it_loaded(self):
+        """embeddinggemma-300m-GGUF holds one file; /props reporting that same file
+        back is what makes sharing it honest rather than assumed."""
+        reported = "unsloth/embeddinggemma-300m-GGUF"
+        wanted = "hf:unsloth/embeddinggemma-300m-GGUF/embeddinggemma-300M-Q8_0.gguf"
+        loaded_file = "/models/embeddinggemma-300M-Q8_0.gguf"
+        assert model_matches(reported, wanted, loaded_file=loaded_file)
+
+    def test_a_bare_repository_report_does_not_match_a_different_loaded_file(self):
+        """gpt-oss-20b-GGUF holds both a Q4_K_M and an F16 gguf -- a server whose
+        /props says it loaded the Q4_K_M does not serve a request for the F16."""
+        reported = "unsloth/gpt-oss-20b-GGUF"
+        wanted = "hf:unsloth/gpt-oss-20b-GGUF/gpt-oss-20b-F16.gguf"
+        loaded_file = "/models/gpt-oss-20b-Q4_K_M.gguf"
+        assert not model_matches(reported, wanted, loaded_file=loaded_file)
 
 
 class TestAdoption:
@@ -312,6 +337,43 @@ class TestAdoption:
 
         with pytest.raises(ServerFailed, match="model: asked for 'model.gguf'"):
             manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
+
+    @staticmethod
+    def _repo_handler(model_path: str):
+        """A server that reports only the bare repository over /v1/models, the way
+        llama-server does when started from ``-hf owner/repo`` with no file named --
+        and reports the file it actually loaded over /props, the way real weights do."""
+        def handle(method, path, body):
+            bare = path.partition("?")[0]
+            if bare.startswith("/v1/models"):
+                return json_reply({"data": [{"id": "unsloth/gpt-oss-20b-GGUF"}]})
+            if bare.startswith("/props"):
+                return json_reply({"model_path": model_path})
+            return json_reply({"status": "ok"})
+        return handle
+
+    def test_a_server_reporting_only_its_repository_is_not_adopted_for_a_different_file(
+            self, server, tmp_path, binary):
+        """unsloth/gpt-oss-20b-GGUF holds a Q4_K_M and an F16 gguf. A server that loaded
+        the Q4_K_M and reports only its repository must not be handed out for the F16 --
+        that mismatch served @@@@@@@@ from the wrong weights."""
+        instance = server(self._repo_handler("/models/gpt-oss-20b-Q4_K_M.gguf"))
+        manager = self._manager(tmp_path, binary)
+
+        with pytest.raises(ServerFailed, match="model:"):
+            manager.adopt(ServerSpec(
+                model="hf:unsloth/gpt-oss-20b-GGUF/gpt-oss-20b-F16.gguf", port=instance.port))
+
+    def test_a_server_reporting_only_its_repository_is_adopted_for_the_file_it_loaded(
+            self, server, tmp_path, binary):
+        """The same repository, asked for the exact file /props says is loaded, is
+        shared rather than loaded a second time."""
+        instance = server(self._repo_handler("/models/gpt-oss-20b-Q4_K_M.gguf"))
+        manager = self._manager(tmp_path, binary)
+
+        info = manager.adopt(ServerSpec(
+            model="hf:unsloth/gpt-oss-20b-GGUF/gpt-oss-20b-Q4_K_M.gguf", port=instance.port))
+        assert info is not None and info.adopted
 
     def test_release_leaves_an_adopted_server_running(self, server, tmp_path, binary):
         """Terminate only what you launched."""
