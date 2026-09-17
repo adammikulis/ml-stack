@@ -11,29 +11,18 @@ import pytest
 from ml_stack.graph.looking import tools_for
 from ml_stack.graph.prompts import CHAT, TOOL_PROMPTS, TOOLS, prompts_for
 from ml_stack.graph.route import Routed, narrow, rank
+from ml_stack.testing.embedding import bag_of_words_embedder
 
 GRAPH = {"nodes": [], "edges": [], "messages": {}}
 
 
-def words(text: str) -> set[str]:
-    return {w.strip(".,?!") for w in text.casefold().split()}
-
-
-# every word the examples use, fixed once: a real embedder maps one text to one vector
-# whatever else is in the batch, and a vocabulary built per call does not.
-VOCAB = sorted({w for texts in TOOL_PROMPTS.values() for t in texts for w in words(t)}
-               | {w for t in TOOLS for w in words(t["function"]["description"])})
-
-
-def fake_embedder(texts, **kw):
-    """A bag of words as a vector: crude, but it prefers the same sentence to a different
-    one, which is all these tests are about."""
-    return [[1.0 if w in words(t) else 0.0 for w in VOCAB] for t in texts]
+embedder = bag_of_words_embedder(
+    *TOOL_PROMPTS.values(), [t["function"]["description"] for t in TOOLS])
 
 
 def routed(question: str, **kw):
     return rank(question, TOOL_PROMPTS, base_url="http://nowhere.invalid",
-                model="pretend", embedder=fake_embedder, **kw)
+                model="pretend", embedder=embedder, **kw)
 
 
 def test_the_examples_are_questions_and_never_reach_the_model():
@@ -121,7 +110,7 @@ def test_a_tool_scores_as_its_best_example_not_its_average():
     prompts = {"right": ("who fixes machines?", "aaa", "bbb", "ccc", "ddd"),
                "wrong": ("who fixes bicycles?", "who fixes boats?", "who fixes cars?")}
     out = rank("who fixes machines?", prompts, base_url="http://nowhere.invalid",
-               model="pretend", embedder=fake_embedder)
+               model="pretend", embedder=embedder)
     assert out.order[0] == "right"
 
 
