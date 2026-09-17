@@ -26,6 +26,7 @@ from ml_stack.serve.backend import (
     log_dir,
 )
 from ml_stack.serve.preflight import Check, Report
+from ml_stack.spec import LAYOUTS
 
 __all__ = ["PREFIX", "MlxTreeBackend", "drafter_of", "is_mlx", "located", "report_for"]
 
@@ -76,10 +77,22 @@ def drafter_of(draft: str | Path | None) -> str:
                        "or 'ngram'")
 
 
+#: the tensors a load memory-maps from disk instead of holding in memory
+MAPPED = ".ple.ple_embedding.ngram_embedding."
+
+
 def _bytes_under(where: Path | None) -> int:
+    """Bytes of the safetensors under ``where`` a load holds in memory."""
     if where is None:
         return 0
-    return sum(p.stat().st_size for p in where.glob("*.safetensors"))
+    held = 0
+    for shard in where.glob("*.safetensors"):
+        with shard.open("rb") as stream:
+            header = json.loads(stream.read(int.from_bytes(stream.read(8), "little")))
+        held += sum(entry["data_offsets"][1] - entry["data_offsets"][0]
+                    for name, entry in header.items()
+                    if name != "__metadata__" and MAPPED not in name)
+    return held
 
 
 def report_for(spec: ServerSpec, *, limit_bytes: int = 0) -> Report:
@@ -92,7 +105,7 @@ def report_for(spec: ServerSpec, *, limit_bytes: int = 0) -> Report:
     if weights is not None:
         kind = json.loads((weights / "config.json").read_text(encoding="utf-8")).get(
             "model_type", "")
-        known = kind in ("qwen3_5", "qwen3_5_moe")
+        known = kind in LAYOUTS
         report.checks.append(Check("layout", known, f"model_type {kind!r}"
                                    + ("" if known else " has no tree-verification layout")))
     try:
