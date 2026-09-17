@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-__all__ = ["Sessions", "Throttle", "COOKIE", "parse_cookie"]
+__all__ = ["COOKIE", "Sessions", "Throttle", "parse_cookie"]
 
 COOKIE = "ml_stack_ui"
 TTL_S = 12 * 3600

@@ -27,8 +27,19 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["ARCS", "Arc", "KINDS", "OUTCOMES", "calendar", "facts_for", "groups", "kind_of",
-           "people_of", "place_of", "slug"]
+__all__ = [
+    "ARCS",
+    "KINDS",
+    "OUTCOMES",
+    "Arc",
+    "calendar",
+    "facts_for",
+    "groups",
+    "kind_of",
+    "people_of",
+    "place_of",
+    "slug",
+]
 
 # The organised groups this knows how to schedule a life for.
 KINDS = ("company", "community", "university", "open-source", "nonprofit")

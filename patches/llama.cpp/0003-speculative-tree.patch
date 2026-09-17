@@ -1,0 +1,1662 @@
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 79405b5..9559cc4 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -4146,6 +4146,16 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+             params.speculative.draft.n_max = value;
+         }
+     ).set_spec().set_examples({LLAMA_EXAMPLE_SPECULATIVE, LLAMA_EXAMPLE_LOOKUP, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_SPEC_DRAFT_N_MAX"));
++    add_opt(common_arg(
++        {"--spec-tree"}, "W",
++        string_format("draft a tree: expand W branches per depth, each proposing W children, up to --spec-draft-n-max nodes; 0 drafts a chain (default: %d)", params.speculative.tree_width),
++        [](common_params & params, int value) {
++            if (value < 0) {
++                throw std::invalid_argument("invalid value");
++            }
++            params.speculative.tree_width = value;
++        }
++    ).set_spec().set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_SPEC_TREE"));
+     add_opt(common_arg(
+         {"--spec-draft-n-min"}, "N",
+         string_format("minimum number of draft tokens to use for speculative decoding (default: %d)", params.speculative.draft.n_min),
+diff --git a/common/common.h b/common/common.h
+index 4e9448b..4f72828 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -373,6 +373,10 @@ struct common_params_speculative {
+     double synth_len = -1.0;
+     std::vector<double> synth_rates;
+ 
++    // draft a tree instead of a chain: the branches expanded per depth, and the children each proposes.
++    // 0 drafts a chain. draft.n_max bounds the drafted nodes.
++    int32_t tree_width = 0;
++
+     // used by Simple, MTP, Eagle3, etc. - all methods that require some kind of draft model
+     common_params_speculative_draft draft;
+ 
+@@ -396,7 +400,7 @@ struct common_params_speculative {
+             return t == COMMON_SPECULATIVE_TYPE_DRAFT_MTP || t == COMMON_SPECULATIVE_TYPE_DRAFT_EAGLE3 || t == COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH || t == COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK;
+         });
+ 
+-        return needs_rs_seq ? draft.n_max : 0u;
++        return needs_rs_seq || tree_width > 0 ? draft.n_max : 0u;
+     }
+ };
+ 
+diff --git a/common/speculative.cpp b/common/speculative.cpp
+index d0b411b..8d55d24 100644
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -13,6 +13,7 @@
+ #include "../src/llama-ext.h" // staging API: llama_set_embeddings_nextn / llama_get_embeddings_nextn_ith (used by MTP)
+ 
+ #include <algorithm>
++#include <functional>
+ #include <cassert>
+ #include <cmath>
+ #include <cstring>
+@@ -171,6 +172,11 @@ struct common_speculative_impl {
+ 
+     virtual void accept(llama_seq_id seq_id, uint16_t n_accepted, bool is_other) = 0;
+ 
++    // the root-to-node path of a drafted tree the target kept; a chain drafter reads its length
++    virtual void accept_path(llama_seq_id seq_id, const std::vector<int32_t> & path) {
++        accept(seq_id, (uint16_t) (path.size() - 1), false);
++    }
++
+     // (optional) serialize/restore per-seq internal state (e.g. eagle3's deferred boundary).
+     virtual bool get_state(llama_seq_id /*seq_id*/, std::vector<uint8_t> & /*data*/) const { return false; }
+     virtual void set_state(llama_seq_id /*seq_id*/, const std::vector<uint8_t> & /*data*/) {}
+@@ -1358,6 +1364,18 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+     std::vector<int>                i_last;
+     std::vector<std::vector<float>> chain_h;
+ 
++    // tree drafting: branches expanded per depth (0 drafts a chain)
++    int32_t tree_width = 0;
++
++    // the tree drafted last per seq, until its path is accepted: node tokens (node 0 = id_last) and parents
++    struct tree_draft {
++        llama_tokens         tokens;
++        std::vector<int32_t> parents;
++        llama_pos            n_past   = 0;
++        bool                 verified = false;
++    };
++    std::vector<tree_draft> trees;
++
+     common_speculative_impl_draft_mtp(const common_params_speculative & params, uint32_t n_seq)
+         : common_speculative_impl(COMMON_SPECULATIVE_TYPE_DRAFT_MTP, n_seq, params.draft.n_max)
+         , params(params.draft)
+@@ -1387,6 +1405,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+         // TODO: fix, how to call without malloc
+         batch.token = (llama_token *) malloc(sizeof(llama_token) * n_b);
+ 
++        tree_width = params.tree_width;
++        trees.assign(n_seq, {});
++
+         smpls.resize(n_seq);
+         for (auto & s : smpls) {
+             common_params_sampling sparams;
+@@ -1398,7 +1419,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+ 
+         // offload draft sampling to the backend
+         backend_chains.assign(n_seq, nullptr);
+-        if (this->params.backend_sampling) {
++        if (this->params.backend_sampling && tree_width == 0) {
+             for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
+                 llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
+                 llama_sampler_chain_add(chain, llama_sampler_init_top_k(10));
+@@ -1510,8 +1531,24 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+ 
+         const size_t row_bytes = (size_t) n_embd * sizeof(float);
+ 
++        // a verified tree: keep every node's hidden row; accept_path catches the head up along the kept path
++        bool is_tree = false;
++        for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
++            auto & tr = trees[seq_id];
++            if (i_batch_beg[seq_id] < 0 || tr.tokens.empty() || tr.verified) {
++                continue;
++            }
++            GGML_ASSERT(i_batch_end[seq_id] - i_batch_beg[seq_id] + 1 == (int32_t) tr.tokens.size() && "a tree batch holds the whole tree");
++            tr.verified = true;
++            is_tree = true;
++        }
++
++        if (is_tree) {
++            GGML_ASSERT(n_seq == 1 && "draft trees serve one sequence");
++        }
++
+         // if kv is shared with target (e.g Gemma4), then we can skip this catch-up decode
+-        if (!is_mem_shared) {
++        if (!is_mem_shared && !is_tree) {
+             common_batch_clear(batch);
+ 
+             for (int k = 0; k < n_tokens; ++k) {
+@@ -1587,14 +1624,148 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+                 std::memcpy(verify_h[seq_id].data() + (size_t) i * n_embd, h, row_bytes);
+             }
+ 
+-            std::memcpy(pending_h[seq_id].data(),
+-                    verify_h[seq_id].data() + (size_t) (n_rows - 1) * n_embd, row_bytes);
++            if (!is_tree) {
++                std::memcpy(pending_h[seq_id].data(),
++                        verify_h[seq_id].data() + (size_t) (n_rows - 1) * n_embd, row_bytes);
++            }
+         }
+ 
+         return true;
+     }
+ 
++    // draft a tree per drafting seq: expand the tree_width most likely nodes of each depth by the head's
++    // tree_width most likely children each, ranked by path probability, until n_max nodes
++    void draft_tree(common_speculative_draft_params_vec & dparams) {
++        auto * ctx_dft = params.ctx_dft;
++
++        const int32_t n_vocab   = llama_vocab_n_tokens(llama_model_get_vocab(llama_get_model(ctx_dft)));
++        const size_t  row_bytes = (size_t) n_embd * sizeof(float);
++
++        struct cand {
++            float       score;
++            int32_t     parent;
++            llama_token id;
++        };
++
++        for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
++            auto & dp = dparams[seq_id];
++            if (!dp.drafting) {
++                continue;
++            }
++            GGML_ASSERT(dp.parents && "a tree draft needs somewhere to put its parents");
++
++            int32_t budget = params.n_max;
++            if (dp.n_max > 0) {
++                budget = std::min(budget, dp.n_max);
++            }
++
++            llama_tokens         tok   = { dp.id_last };
++            std::vector<int32_t> par   = { -1 };
++            std::vector<int32_t> depth = { 0 };
++            std::vector<float>   score = { 0.0f };
++            std::vector<int32_t> sess  = { -1 };
++            std::vector<std::vector<float>> h_out(1);
++
++            std::vector<int32_t> frontier = { 0 };
++            int32_t n_sess = 0;
++
++            while (budget > 0 && !frontier.empty()) {
++                common_batch_clear(batch);
++                std::vector<int32_t> sess_parent;
++                for (size_t k = 0; k < frontier.size(); ++k) {
++                    const int32_t f = frontier[k];
++                    common_batch_add(batch, tok[f], dp.n_past + depth[f], { seq_id }, true);
++                    const float * h = f == 0 ? pending_h[seq_id].data() : h_out[par[f]].data();
++                    std::memcpy(batch.embd + k * n_embd, h, row_bytes);
++                    sess_parent.push_back(f == 0 ? -1 : sess[par[f]]);
++                    sess[f] = n_sess + (int32_t) k;
++                }
++
++                llama_set_tree(ctx_dft, sess_parent.data(), (int32_t) sess_parent.size());
++                if (llama_decode(ctx_dft, batch) != 0) {
++                    SPC_ERR("llama_decode(ctx_dft) failed for a tree of %zu nodes\n", tok.size());
++                    break;
++                }
++                n_sess += (int32_t) frontier.size();
++
++                std::vector<cand> cands;
++                for (size_t k = 0; k < frontier.size(); ++k) {
++                    const int32_t f = frontier[k];
++                    const float * h = llama_get_embeddings_nextn_ith(ctx_dft, (int32_t) k);
++                    h_out[f].assign(h, h + n_embd);
++
++                    const float * logits = llama_get_logits_ith(ctx_dft, (int32_t) k);
++                    const float   l_max  = *std::max_element(logits, logits + n_vocab);
++                    double sum = 0.0;
++                    for (int32_t v = 0; v < n_vocab; ++v) {
++                        sum += std::exp((double) (logits[v] - l_max));
++                    }
++                    const float lse = l_max + (float) std::log(sum);
++
++                    std::vector<std::pair<float, llama_token>> top;
++                    for (int32_t v = 0; v < n_vocab; ++v) {
++                        if ((int32_t) top.size() < tree_width) {
++                            top.emplace_back(logits[v], v);
++                            std::push_heap(top.begin(), top.end(), std::greater<>());
++                        } else if (logits[v] > top.front().first) {
++                            std::pop_heap(top.begin(), top.end(), std::greater<>());
++                            top.back() = { logits[v], v };
++                            std::push_heap(top.begin(), top.end(), std::greater<>());
++                        }
++                    }
++                    for (const auto & [l, id] : top) {
++                        cands.push_back({ score[f] + (l - lse), f, id });
++                    }
++                }
++
++                std::sort(cands.begin(), cands.end(), [](const cand & a, const cand & b) { return a.score > b.score; });
++
++                const int32_t room = budget - ((int32_t) tok.size() - 1);
++                frontier.clear();
++                for (const auto & c : cands) {
++                    if ((int32_t) frontier.size() >= std::min(tree_width, room) || std::exp(c.score) < params.p_min) {
++                        break;
++                    }
++                    tok.push_back(c.id);
++                    par.push_back(c.parent);
++                    depth.push_back(depth[c.parent] + 1);
++                    score.push_back(c.score);
++                    sess.push_back(-1);
++                    h_out.emplace_back();
++                    frontier.push_back((int32_t) tok.size() - 1);
++                }
++
++                if ((int32_t) tok.size() - 1 >= budget) {
++                    break;
++                }
++            }
++
++            if (!llama_tree_commit(ctx_dft, seq_id, nullptr, 0)) {
++                GGML_ABORT("the draft context cannot drop a tree; a tree drafter needs a context whose memory keeps one");
++            }
++
++            auto & result = *dp.result;
++            result.assign(tok.begin() + 1, tok.end());
++            dp.parents->assign(par.begin() + 1, par.end());
++
++            if ((int32_t) result.size() < params.n_min) {
++                result.clear();
++                dp.parents->clear();
++            }
++
++            trees[seq_id] = {};
++            if (!result.empty()) {
++                trees[seq_id] = { tok, par, dp.n_past, false };
++            }
++        }
++    }
++
+     void draft(common_speculative_draft_params_vec & dparams) override {
++        if (tree_width > 0) {
++            draft_tree(dparams);
++            return;
++        }
++
+         auto & ctx_dft = params.ctx_dft;
+ 
+         common_batch_clear(batch);
+@@ -1760,6 +1931,34 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+         const size_t row_bytes = (size_t) n_embd * sizeof(float);
+         std::memcpy(pending_h[seq_id].data(), verify_h[seq_id].data() + (size_t) i_h * n_embd, row_bytes);
+     }
++
++    void accept_path(llama_seq_id seq_id, const std::vector<int32_t> & path) override {
++        auto & tr = trees[seq_id];
++        if (tr.tokens.empty()) {
++            accept(seq_id, (uint16_t) (path.size() - 1), false);
++            return;
++        }
++        GGML_ASSERT(tr.verified && !path.empty() && path[0] == 0);
++
++        const size_t row_bytes = (size_t) n_embd * sizeof(float);
++        const auto & rows = verify_h[seq_id];
++
++        // the head reads (token, hidden state of the token before it) along the kept path
++        common_batch_clear(batch);
++        for (size_t t = 0; t < path.size(); ++t) {
++            common_batch_add(batch, tr.tokens[path[t]], tr.n_past + (llama_pos) t, { seq_id }, false);
++            const float * h = t == 0 ? pending_h[seq_id].data() : rows.data() + (size_t) path[t - 1] * n_embd;
++            std::memcpy(batch.embd + t * n_embd, h, row_bytes);
++        }
++
++        if (llama_decode(params.ctx_dft, batch) != 0) {
++            SPC_ERR("llama_decode(ctx_dft) failed catching up %zu kept tokens\n", path.size());
++        }
++
++        std::memcpy(pending_h[seq_id].data(), rows.data() + (size_t) path.back() * n_embd, row_bytes);
++
++        tr = {};
++    }
+ };
+ 
+ // state of self-speculation (simple implementation, not ngram-map)
+@@ -1769,12 +1968,15 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
+     // shared across all sequences
+     common_ngram_simple_config config;
+ 
++    int32_t tree_width = 0;
++
+     common_speculative_impl_ngram_simple(
+             const common_params_speculative & params, uint32_t n_seq,
+             common_ngram_simple_config config)
+         : common_speculative_impl(COMMON_SPECULATIVE_TYPE_NGRAM_SIMPLE, n_seq, params.ngram_simple.size_m)
+         , params(params.ngram_simple)
+         , config(config)
++        , tree_width(params.tree_width)
+     {
+         SPC_TRC("%s", "adding speculative implementation 'ngram-simple'\n");
+         SPC_TRC("- size_n=%d, size_m=%d, min_hits=%d\n",
+@@ -1799,7 +2001,76 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
+                 continue;
+             }
+ 
+-            *dp.result = common_ngram_simple_draft(config, *dp.prompt, dp.id_last);
++            if (tree_width > 0) {
++                draft_tree(dp);
++            } else {
++                *dp.result = common_ngram_simple_draft(config, *dp.prompt, dp.id_last);
++            }
++        }
++    }
++
++    // a trie of the continuations that followed earlier occurrences of the last size_ngram tokens,
++    // most recent first, at most tree_width children a node, size_mgram deep and n_max nodes
++    void draft_tree(common_speculative_draft_params & dp) const {
++        GGML_ASSERT(dp.parents && "a tree draft needs somewhere to put its parents");
++
++        llama_tokens full = *dp.prompt;
++        full.push_back(dp.id_last);
++
++        const int32_t n      = (int32_t) config.size_ngram;
++        const int32_t len    = (int32_t) full.size();
++        const int32_t budget = dp.n_max > 0 ? std::min<int32_t>(dp.n_max, n_max) : n_max;
++
++        llama_tokens         tok   = { dp.id_last };
++        std::vector<int32_t> par   = { -1 };
++        std::vector<int32_t> depth = { 0 };
++        std::vector<std::vector<int32_t>> children(1);
++
++        for (int32_t j = len - n - 1; j >= 0 && (int32_t) tok.size() - 1 < budget; --j) {
++            if (!std::equal(full.begin() + j, full.begin() + j + n, full.end() - n)) {
++                continue;
++            }
++            int32_t node = 0;
++            for (int32_t d = 0; d < (int32_t) config.size_mgram && j + n + d < len; ++d) {
++                const llama_token t = full[j + n + d];
++                int32_t next = -1;
++                for (int32_t c : children[node]) {
++                    if (tok[c] == t) {
++                        next = c;
++                        break;
++                    }
++                }
++                if (next < 0) {
++                    if ((int32_t) tok.size() - 1 >= budget || (int32_t) children[node].size() >= tree_width) {
++                        break;
++                    }
++                    next = (int32_t) tok.size();
++                    tok.push_back(t);
++                    par.push_back(node);
++                    depth.push_back(depth[node] + 1);
++                    children.emplace_back();
++                    children[node].push_back(next);
++                }
++                node = next;
++            }
++        }
++
++        // nodes in depth order, parents renumbered
++        std::vector<int32_t> order(tok.size());
++        for (size_t i = 0; i < order.size(); ++i) {
++            order[i] = (int32_t) i;
++        }
++        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) { return depth[a] < depth[b]; });
++        std::vector<int32_t> rank(tok.size());
++        for (size_t i = 0; i < order.size(); ++i) {
++            rank[order[i]] = (int32_t) i;
++        }
++
++        dp.result->clear();
++        dp.parents->clear();
++        for (size_t i = 1; i < order.size(); ++i) {
++            dp.result->push_back(tok[order[i]]);
++            dp.parents->push_back(rank[par[order[i]]]);
+         }
+     }
+ 
+@@ -2485,6 +2756,12 @@ common_params common_base_params_to_speculative(const common_params & params) {
+     result.n_outputs_max = params.n_parallel;
+     result.n_outputs_max_per_seq = 1;
+ 
++    if (params.speculative.tree_width > 0) {
++        // a tree draft decodes up to tree_width nodes of a depth at once
++        result.n_outputs_max         = params.n_parallel * params.speculative.tree_width;
++        result.n_outputs_max_per_seq = params.speculative.tree_width;
++    }
++
+     // dflash/dspark decode the whole noise block in a single pass and sample every block position on the backend
+     // TODO: refactor such properties to be announced by the speculative types
+     //       something like `struct common_speculative_type_props common_speculative_type_get_props(...);`
+@@ -2802,6 +3079,10 @@ void common_speculative_draft(common_speculative * spec) {
+         for (auto & dp : dparams) {
+             GGML_ASSERT(!dp.drafting || dp.result->empty());
+ 
++            if (dp.drafting && dp.parents) {
++                dp.parents->clear();
++            }
++
+             if (dp.drafting) {
+                 n_drafting++;
+             }
+@@ -2838,6 +3119,9 @@ void common_speculative_draft(common_speculative * spec) {
+                     if (!result.empty() && (int) result.size() > dp.n_max) {
+                         SPC_DBG("truncating draft to %d tokens\n", dp.n_max);
+                         result.resize(dp.n_max);
++                        if (dp.parents && !dp.parents->empty()) {
++                            dp.parents->resize(dp.n_max);
++                        }
+                     }
+                 }
+ 
+@@ -2910,6 +3194,45 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
+     }
+ }
+ 
++void common_speculative_accept_path(common_speculative * spec, llama_seq_id seq_id, const std::vector<int32_t> & path) {
++    GGML_ASSERT(!path.empty() && path[0] == 0);
++
++    common_speculative_impl * impl = spec->impl_last[seq_id];
++
++    const uint16_t n_accepted = (uint16_t) (path.size() - 1);
++
++    if (impl == nullptr) {
++        GGML_ASSERT(n_accepted == 0);
++        return;
++    }
++
++    {
++        common_time_meas tm(impl->t_accept_us, !impl->gen_perf);
++
++        if (impl->n_acc_tokens_per_pos.size() < n_accepted) {
++            impl->n_acc_tokens_per_pos.resize(n_accepted, 0);
++        }
++
++        for (size_t i = 0; i < n_accepted; ++i) {
++            impl->n_acc_tokens_per_pos[i]++;
++        }
++
++        if (n_accepted > 0) {
++            impl->n_acc_drafts++;
++            impl->n_acc_tokens += n_accepted;
++        }
++
++        impl->accept_path(seq_id, path);
++        impl->n_call_accept++;
++    }
++
++    for (auto & impl_other : spec->impls) {
++        if (impl_other.get() != impl) {
++            impl_other->accept(seq_id, n_accepted, true);
++        }
++    }
++}
++
+ // TODO: support the case of more than one speculative implementations having a state
+ bool common_speculative_get_state(common_speculative * spec, llama_seq_id seq_id, std::vector<uint8_t> & data) {
+     if (spec == nullptr) {
+diff --git a/common/speculative.h b/common/speculative.h
+index 2250589..f70cddd 100644
+--- a/common/speculative.h
++++ b/common/speculative.h
+@@ -69,6 +69,10 @@ struct common_speculative_draft_params {
+ 
+     // the generated draft from the last _draft() call
+     llama_tokens * result;
++
++    // when the draft is a tree: (*parents)[i] is the node result[i] hangs off, where node 0 is id_last
++    // and node i + 1 is result[i]; left empty for a chain
++    std::vector<int32_t> * parents = nullptr;
+ };
+ 
+ common_speculative_draft_params & common_speculative_get_draft_params(common_speculative * spec, llama_seq_id seq_id);
+@@ -85,6 +89,9 @@ void common_speculative_draft(common_speculative * spec);
+ // informs the speculative context that n_accepted tokens were accepted by the target model
+ void common_speculative_accept(common_speculative * spec, llama_seq_id, uint16_t n_accepted);
+ 
++// informs the speculative context which root-to-node path of a draft tree the target model kept
++void common_speculative_accept_path(common_speculative * spec, llama_seq_id seq_id, const std::vector<int32_t> & path);
++
+ // (optional) get/set internal state
+ bool common_speculative_get_state(common_speculative * spec, llama_seq_id seq_id, std::vector<uint8_t> & data);
+ void common_speculative_set_state(common_speculative * spec, llama_seq_id seq_id, const std::vector<uint8_t> & data);
+diff --git a/examples/CMakeLists.txt b/examples/CMakeLists.txt
+index 39f802d..75de5ad 100644
+--- a/examples/CMakeLists.txt
++++ b/examples/CMakeLists.txt
+@@ -31,6 +31,7 @@ else()
+     add_subdirectory(simple-chat)
+     add_subdirectory(speculative)
+     add_subdirectory(speculative-simple)
++    add_subdirectory(tree-verify)
+     add_subdirectory(gen-docs)
+     add_subdirectory(training)
+     add_subdirectory(diffusion)
+diff --git a/examples/tree-verify/CMakeLists.txt b/examples/tree-verify/CMakeLists.txt
+new file mode 100644
+index 0000000..b526de5
+--- /dev/null
++++ b/examples/tree-verify/CMakeLists.txt
+@@ -0,0 +1,5 @@
++set(TARGET llama-tree-verify)
++add_executable(${TARGET} tree-verify.cpp)
++install(TARGETS ${TARGET} RUNTIME)
++target_link_libraries(${TARGET} PRIVATE llama ${CMAKE_THREAD_LIBS_INIT})
++target_compile_features(${TARGET} PRIVATE cxx_std_17)
+diff --git a/examples/tree-verify/tree-verify.cpp b/examples/tree-verify/tree-verify.cpp
+new file mode 100644
+index 0000000..0808b40
+--- /dev/null
++++ b/examples/tree-verify/tree-verify.cpp
+@@ -0,0 +1,174 @@
++// Checks draft-tree verification against plain greedy decoding on one model.
++//
++// Greedy decodes n tokens one at a time, then decodes again verifying trees built around that
++// continuation: each tree mixes the true next tokens with wrong siblings, in shuffled order, and
++// one branch goes wrong partway down. The tree run must reproduce the greedy tokens exactly.
++
++#include "llama.h"
++#include "../src/llama-ext.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <random>
++#include <string>
++#include <vector>
++
++static llama_token argmax(llama_context * ctx, int32_t i, int32_t n_vocab) {
++    const float * logits = llama_get_logits_ith(ctx, i);
++    return (llama_token) (std::max_element(logits, logits + n_vocab) - logits);
++}
++
++static llama_context * make_ctx(llama_model * model, uint32_t n_rs_seq) {
++    auto cparams = llama_context_default_params();
++    cparams.n_ctx     = 4096;
++    cparams.n_batch   = 512;
++    cparams.n_ubatch  = 512;
++    cparams.n_seq_max = 1;
++    cparams.n_rs_seq  = n_rs_seq;
++    return llama_init_from_model(model, cparams);
++}
++
++int main(int argc, char ** argv) {
++    if (argc < 2) {
++        fprintf(stderr, "usage: %s MODEL.gguf [n_predict] [prompt] [max_nodes]\n", argv[0]);
++        return 2;
++    }
++
++    const std::string path      = argv[1];
++    const int         n_predict = argc > 2 ? atoi(argv[2]) : 128;
++    const std::string prompt    = argc > 3 ? argv[3] : "Write a short story about a lighthouse keeper who finds a map.";
++    const int         max_nodes = argc > 4 ? atoi(argv[4]) : 12;
++
++    llama_backend_init();
++
++    auto mparams = llama_model_default_params();
++    llama_model * model = llama_model_load_from_file(path.c_str(), mparams);
++    if (!model) {
++        return 1;
++    }
++
++    const llama_vocab * vocab   = llama_model_get_vocab(model);
++    const int32_t       n_vocab = llama_vocab_n_tokens(vocab);
++
++    std::vector<llama_token> toks(prompt.size() + 16);
++    const int n_prompt = llama_tokenize(vocab, prompt.c_str(), prompt.size(), toks.data(), toks.size(), true, true);
++    toks.resize(n_prompt);
++
++    // plain greedy
++    std::vector<llama_token> want;
++    {
++        llama_context * ctx = make_ctx(model, 0);
++        llama_decode(ctx, llama_batch_get_one(toks.data(), n_prompt));
++        llama_token t = argmax(ctx, -1, n_vocab);
++        for (int i = 0; i < n_predict; ++i) {
++            want.push_back(t);
++            llama_decode(ctx, llama_batch_get_one(&t, 1));
++            t = argmax(ctx, -1, n_vocab);
++        }
++        want.push_back(t);
++        llama_free(ctx);
++    }
++
++    // tree verification
++    llama_context * ctx = make_ctx(model, max_nodes - 1);
++    llama_decode(ctx, llama_batch_get_one(toks.data(), n_prompt));
++
++    std::mt19937 rng(1234);
++    std::vector<llama_token> got;
++    llama_token root = argmax(ctx, -1, n_vocab);
++    llama_pos   base = n_prompt;
++    int passes = 0;
++
++    llama_batch batch = llama_batch_init(max_nodes, 0, 1);
++
++    while ((int) got.size() < n_predict) {
++        const size_t at = got.size();
++
++        // nodes in depth order: the true chain, a wrong sibling at every depth, and a branch that goes wrong
++        std::vector<llama_token> tok   = { root };
++        std::vector<int32_t>     par   = { -1 };
++        std::vector<int32_t>     depth = { 0 };
++        const int wrong_at = std::uniform_int_distribution<int>(1, 6)(rng);
++        int32_t true_node = 0;
++        for (int d = 1; (int) tok.size() + 2 <= max_nodes && at + d < want.size(); ++d) {
++            llama_token right = want[at + d];
++            if (d == wrong_at) {
++                right = (right + 7) % n_vocab;
++            }
++            llama_token sibling = (want[at + d] + 1 + d) % n_vocab;
++            const bool swap = std::uniform_int_distribution<int>(0, 1)(rng) == 1;
++            int32_t parent = true_node;
++            for (int k = 0; k < 2; ++k) {
++                const bool is_true = (k == 0) != swap;
++                tok.push_back(is_true ? right : sibling);
++                par.push_back(parent);
++                depth.push_back(d);
++                if (is_true) {
++                    true_node = (int32_t) tok.size() - 1;
++                }
++            }
++        }
++
++        batch.n_tokens = 0;
++        for (size_t n = 0; n < tok.size(); ++n) {
++            batch.token   [n]    = tok[n];
++            batch.pos     [n]    = base + depth[n];
++            batch.n_seq_id[n]    = 1;
++            batch.seq_id  [n][0] = 0;
++            batch.logits  [n]    = true;
++            batch.n_tokens++;
++        }
++
++        llama_set_tree(ctx, par.data(), (int32_t) par.size());
++        if (llama_decode(ctx, batch) != 0) {
++            fprintf(stderr, "decode failed\n");
++            return 1;
++        }
++        passes++;
++
++        std::vector<int32_t> path = { 0 };
++        llama_token next = argmax(ctx, 0, n_vocab);
++        while (true) {
++            int32_t child = -1;
++            for (size_t n = 1; n < tok.size(); ++n) {
++                if (par[n] == path.back() && tok[n] == next) {
++                    child = (int32_t) n;
++                    break;
++                }
++            }
++            got.push_back(next);
++            if (child < 0) {
++                break;
++            }
++            path.push_back(child);
++            next = argmax(ctx, child, n_vocab);
++        }
++
++        if (!llama_tree_commit(ctx, 0, path.data(), (int32_t) path.size())) {
++            fprintf(stderr, "commit failed\n");
++            return 1;
++        }
++
++        base += (llama_pos) path.size();
++        root  = got.back();
++    }
++
++    got.resize(n_predict);
++    int first_diff = -1;
++    for (int i = 0; i < n_predict; ++i) {
++        if (got[i] != want[i + 1] && first_diff < 0) {
++            first_diff = i;
++        }
++    }
++
++    printf("tokens %d, passes %d, tokens/pass %.2f, first difference %d\n",
++            n_predict, passes, (double) n_predict / passes, first_diff);
++
++    llama_batch_free(batch);
++    llama_free(ctx);
++    llama_model_free(model);
++
++    return first_diff < 0 ? 0 : 3;
++}
+diff --git a/src/llama-batch.cpp b/src/llama-batch.cpp
+index 2b98a55..134b3f9 100644
+--- a/src/llama-batch.cpp
++++ b/src/llama-batch.cpp
+@@ -744,6 +744,8 @@ void llama_batch_allocr::clear() {
+     seq_set_map.clear();
+ 
+     std::fill(seq_idx.begin(), seq_idx.end(), -1);
++
++    tree_parent = nullptr;
+ }
+ 
+ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, uint32_t n_seqs, bool equal_seqs) {
+@@ -834,6 +836,17 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
+         /*.data         =*/ std::move(udata),
+     };
+ 
++    if (tree_parent) {
++        GGML_ASSERT(n_tokens == (uint32_t) batch.n_tokens && "a draft tree must fit in one ubatch");
++        auto & parent = res.data->parent;
++        parent.resize(n_tokens);
++        for (size_t i = 0; i < idxs.size(); ++i) {
++            GGML_ASSERT(idxs[i] == (int32_t) i && "a draft tree keeps its token order");
++            parent[i] = tree_parent[i];
++        }
++        res.parent = parent.data();
++    }
++
+     if (debug > 0) {
+         LLAMA_LOG_DEBUG("%s: added ubatch to split:\n", __func__);
+ 
+diff --git a/src/llama-batch.h b/src/llama-batch.h
+index a3d1889..f59e3a9 100644
+--- a/src/llama-batch.h
++++ b/src/llama-batch.h
+@@ -60,12 +60,17 @@ struct llama_ubatch {
+         std::vector<llama_seq_id>   seq_id_unq;
+         std::vector<int32_t>        seq_idx;
+         std::vector<int8_t>         output;
++        std::vector<int32_t>        parent;
+ 
+         std::vector<llama_seq_id> seq_id_data;
+     };
+ 
+     // the llama_ubatch pointers above point to this data if set. otherwise - point to external non-owning data
+     std::shared_ptr<data_t> data;
++
++    // draft tree: parent[i] is the tree node index of token i's parent (-1: the committed prefix),
++    // where the nodes decoded since the last commit are numbered in order; nullptr for a plain batch
++    int32_t * parent = nullptr; // [n_tokens]
+ };
+ 
+ // a helper for sanitizing, fulfilling and splitting a batch
+@@ -110,6 +115,9 @@ public:
+     // sequence-set-wise split - each ubatch contains a single sequence-set
+     llama_ubatch split_seq(uint32_t n_ubatch);
+ 
++    // tree parents of the batch tokens for the next split (see llama_ubatch::parent), nullptr for none
++    const int32_t * tree_parent = nullptr;
++
+     // a helper method for creating a well-defined ubatch of tokens
+     // TODO: support embeddings if needed in the future
+     llama_ubatch ubatch_reserve(uint32_t n_seq_tokens, uint32_t n_seqs);
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index f286bd1..fed9313 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1645,6 +1645,9 @@ int llama_context::decode(const llama_batch & batch_inp) {
+     // so accept either present rather than requiring exactly one.
+     GGML_ASSERT(batch_inp.token || batch_inp.embd);
+ 
++    const std::vector<int32_t> tree = std::move(tree_parent);
++    tree_parent.clear();
++
+     if (!memory) {
+         LLAMA_LOG_DEBUG("%s: cannot decode batches with this context (calling encode() instead)\n", __func__);
+         return encode(batch_inp);
+@@ -1706,6 +1709,15 @@ int llama_context::decode(const llama_batch & batch_inp) {
+         return -1;
+     }
+ 
++    if (!tree.empty()) {
++        if ((int32_t) tree.size() != batch_inp.n_tokens || (uint32_t) batch_inp.n_tokens > cparams.n_ubatch) {
++            LLAMA_LOG_ERROR("%s: a draft tree of %zu parents needs a batch of that many tokens within n_ubatch = %u (got %d)\n",
++                    __func__, tree.size(), cparams.n_ubatch, batch_inp.n_tokens);
++            return -1;
++        }
++        balloc->tree_parent = tree.data();
++    }
++
+     const uint32_t n_tokens_all  = balloc->get_n_tokens();
+     const uint32_t n_outputs_all = balloc->get_n_outputs();
+ 
+@@ -3886,6 +3898,23 @@ void llama_set_nextn_layer_offset(llama_context * ctx, int32_t offset) {
+     ctx->set_nextn_layer_offset(offset);
+ }
+ 
++void llama_context::set_tree(const int32_t * parent, int32_t n_tokens) {
++    tree_parent.assign(parent, parent + n_tokens);
++}
++
++void llama_set_tree(llama_context * ctx, const int32_t * parent, int32_t n_tokens) {
++    ctx->set_tree(parent, n_tokens);
++}
++
++bool llama_tree_commit(llama_context * ctx, llama_seq_id seq_id, const int32_t * path, int32_t n_path) {
++    llama_memory_t mem = ctx->get_memory();
++    if (mem == nullptr || !mem->tree_commit(seq_id, path, n_path)) {
++        LLAMA_LOG_ERROR("%s: could not keep a path of %d nodes for seq_id %d\n", __func__, n_path, seq_id);
++        return false;
++    }
++    return true;
++}
++
+ llama_memory_t llama_get_memory(const struct llama_context * ctx) {
+     if (!ctx) {
+         return nullptr;
+diff --git a/src/llama-context.h b/src/llama-context.h
+index bf91daa..11fe2d4 100644
+--- a/src/llama-context.h
++++ b/src/llama-context.h
+@@ -116,6 +116,7 @@ struct llama_context {
+     void set_embeddings_nextn(bool value, bool masked);
+     void set_embeddings_layer_inp(uint32_t lid, bool enable);
+     void set_nextn_layer_offset(int32_t offset);
++    void set_tree(const int32_t * parent, int32_t n_tokens);
+     void set_causal_attn(bool value);
+     void set_warmup(bool value);
+ 
+@@ -330,6 +331,9 @@ private:
+     // reuse the batch_allocr to avoid unnecessary memory allocations
+     std::unique_ptr<llama_batch_allocr> balloc;
+ 
++    // draft-tree parents for the next decode, empty for a plain batch
++    std::vector<int32_t> tree_parent;
++
+     uint32_t n_outputs = 0; // number of actually-used outputs in the current ubatch or last logical batch
+ 
+     std::vector<int32_t> output_ids; // map batch token positions to ids of the logits and embd buffers
+diff --git a/src/llama-ext.h b/src/llama-ext.h
+index 92a759b..f50922f 100644
+--- a/src/llama-ext.h
++++ b/src/llama-ext.h
+@@ -116,6 +116,20 @@ LLAMA_API float * llama_get_embeddings_layer_inp(struct llama_context * ctx, uin
+ 
+ LLAMA_API llama_context * llama_get_ctx_other(struct llama_context * ctx);
+ 
++//
++// draft trees
++//
++
++// Marks the next llama_decode on ctx as part of a draft tree on one sequence. parent[i] is the tree
++// node index of batch token i's parent, or -1 for the committed prefix. Nodes are numbered in the
++// order they are decoded, across decodes, until llama_tree_commit. Token i attends to the prefix and
++// to its own ancestors only; recurrent layers carry state along each root-to-node path.
++LLAMA_API void llama_set_tree(struct llama_context * ctx, const int32_t * parent, int32_t n_tokens);
++
++// Keeps the tree nodes path[0..n_path) -- a root and its descendants in order -- as the sequence's
++// next tokens and drops every other node of the tree. n_path == 0 drops the whole tree.
++LLAMA_API bool llama_tree_commit(struct llama_context * ctx, llama_seq_id seq_id, const int32_t * path, int32_t n_path);
++
+ //
+ // model/context data extraction
+ //
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index 72db486..5ead990 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -342,6 +342,18 @@ void llm_graph_input_rs::set_input(const llama_ubatch * ubatch) {
+     }
+ }
+ 
++void llm_graph_input_tree::set_input(const llama_ubatch * ubatch) {
++    GGML_UNUSED(ubatch);
++
++    GGML_ASSERT(ggml_backend_buffer_is_host(parent_rows->buffer));
++    GGML_ASSERT(ggml_backend_buffer_is_host(conv_taps->buffer));
++    GGML_ASSERT(ggml_backend_buffer_is_host(state_dst->buffer));
++
++    memcpy(parent_rows->data, parent_data.data(), ggml_nbytes(parent_rows));
++    memcpy(conv_taps->data,   taps_data.data(),   ggml_nbytes(conv_taps));
++    memcpy(state_dst->data,   dst_data.data(),    ggml_nbytes(state_dst));
++}
++
+ bool llm_graph_input_rs::can_reuse(const llm_graph_params & params) {
+     const auto * mctx = static_cast<const llama_memory_recurrent_context *>(params.mctx);
+ 
+diff --git a/src/llama-graph.h b/src/llama-graph.h
+index b388e02..180c976 100644
+--- a/src/llama-graph.h
++++ b/src/llama-graph.h
+@@ -281,6 +281,24 @@ public:
+     int32_t rs_z;
+ };
+ 
++// the rows a draft-tree ubatch gathers and scatters with in its recurrent layers
++class llm_graph_input_tree : public llm_graph_input_i {
++public:
++    virtual ~llm_graph_input_tree() = default;
++
++    void set_input(const llama_ubatch * ubatch) override;
++
++    ggml_tensor * parent_rows = nullptr; // I32 [n_nodes]        each node's parent state in [prefix | node states]
++    ggml_tensor * conv_taps   = nullptr; // I32 [n_nodes*d_conv] each node's convolution window in [prefix rows | node rows], oldest first
++    ggml_tensor * state_dst   = nullptr; // I64 [n_nodes]        the snapshot row each node's state is written to
++
++    std::vector<int32_t> parent_data;
++    std::vector<int32_t> taps_data;
++    std::vector<int64_t> dst_data;
++
++    int32_t n_iter = 0; // max depth + 1: rounds for every node to read its parent's final state
++};
++
+ class llm_graph_input_cross_embd : public llm_graph_input_i {
+ public:
+     llm_graph_input_cross_embd(
+@@ -843,6 +861,10 @@ struct llm_graph_params {
+             return false;
+         }
+ 
++        if (ubatch.parent || other.ubatch.parent) {
++            return false;
++        }
++
+         if (n_outputs != other.n_outputs) {
+             return false;
+         }
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 3e4a4d5..448a0b3 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -367,6 +367,10 @@ llama_kv_cache::llama_kv_cache(
+ }
+ 
+ void llama_kv_cache::clear(bool data) {
++    for (auto & tree : trees) {
++        tree.clear();
++    }
++
+     for (uint32_t s = 0; s < n_stream; ++s) {
+         v_cells[s].reset();
+         v_heads[s] = 0;
+@@ -396,6 +400,14 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+         p1 = std::numeric_limits<llama_pos>::max();
+     }
+ 
++    if (seq_id >= 0) {
++        tree_forget(seq_id, p0, p1);
++    } else {
++        for (llama_seq_id s = 0; s < (llama_seq_id) seq_to_stream.size(); ++s) {
++            tree_forget(s, p0, p1);
++        }
++    }
++
+     if (seq_id >= 0) {
+         auto & cells = v_cells[seq_to_stream[seq_id]];
+         auto & head  = v_heads[seq_to_stream[seq_id]];
+@@ -448,6 +460,98 @@ bool llama_kv_cache::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+     return true;
+ }
+ 
++void llama_kv_cache::tree_forget(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
++    auto & tree = trees[seq_id];
++    if (tree.empty()) {
++        return;
++    }
++
++    const auto & cells = v_cells[seq_to_stream[seq_id]];
++
++    uint32_t n_in = 0;
++    for (const auto & node : tree) {
++        if (cells.pos_in(node.cell, p0, p1)) {
++            n_in++;
++        }
++    }
++
++    if (n_in == 0) {
++        return;
++    }
++
++    GGML_ASSERT(n_in == tree.size() && "a removed range must cover the whole draft tree");
++
++    tree.clear();
++}
++
++void llama_kv_cache::tree_add(const slot_info & sinfo, const llama_ubatch & ubatch) {
++    if (!ubatch.parent) {
++        return;
++    }
++
++    GGML_ASSERT(sinfo.n_stream() == 1 && ubatch.n_seqs_unq == 1 && "a draft tree holds one sequence");
++
++    const llama_seq_id seq_id = ubatch.seq_id[0][0];
++
++    auto & tree = trees[seq_id];
++
++    for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
++        const int32_t parent = ubatch.parent[i];
++        GGML_ASSERT(parent >= -1 && parent < (int32_t) tree.size() && "a tree node comes after its parent");
++        tree.push_back({ sinfo.idxs[0][i], parent });
++    }
++}
++
++uint32_t llama_kv_cache::tree_size(llama_seq_id seq_id) const {
++    return trees[seq_id].size();
++}
++
++bool llama_kv_cache::tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) {
++    if (other) {
++        return true;
++    }
++
++    GGML_ASSERT(seq_id >= 0 && (size_t) seq_id < seq_to_stream.size());
++
++    auto & tree  = trees[seq_id];
++    auto & cells = v_cells[seq_to_stream[seq_id]];
++    auto & head  = v_heads[seq_to_stream[seq_id]];
++
++    std::vector<bool> keep(tree.size(), false);
++    for (int32_t t = 0; t < n_path; ++t) {
++        const int32_t node = path[t];
++        if (node < 0 || node >= (int32_t) tree.size()) {
++            LLAMA_LOG_ERROR("%s: path node %d is not in the tree of %zu nodes\n", __func__, node, tree.size());
++            return false;
++        }
++        if (tree[node].parent != (t == 0 ? -1 : path[t - 1])) {
++            LLAMA_LOG_ERROR("%s: path node %d does not descend from the node before it\n", __func__, node);
++            return false;
++        }
++        keep[node] = true;
++    }
++
++    uint32_t new_head = cells.size();
++
++    for (size_t k = 0; k < tree.size(); ++k) {
++        const uint32_t idx = tree[k].cell;
++        if (keep[k] || !cells.seq_has(idx, seq_id)) {
++            continue;
++        }
++        if (cells.seq_rm(idx, seq_id) && idx < new_head) {
++            new_head = idx;
++        }
++    }
++
++    if (new_head != cells.size() && new_head < head) {
++        head = new_head;
++    }
++
++    tree.clear();
++
++    return true;
++}
++
+ void llama_kv_cache::seq_cp(llama_seq_id seq_id_src, llama_seq_id seq_id_dst, llama_pos p0, llama_pos p1) {
+     // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
+     if (other) {
+@@ -1772,6 +1876,39 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
+         set_input_kq_mask_impl<float>(args, (float *) dst->data, causal_attn);
+     }
+ 
++    if (ubatch->parent) {
++        // a tree node sees the prefix and its own ancestors, never another branch
++        GGML_ASSERT(n_stream == 1);
++
++        const llama_seq_id seq_id = ubatch->seq_id[0][0];
++        const auto & tree = trees[seq_id];
++
++        GGML_ASSERT(tree.size() >= n_tokens);
++
++        const size_t base = tree.size() - n_tokens;
++
++        std::vector<bool> visible(tree.size());
++
++        for (uint32_t i = 0; i < n_tokens; ++i) {
++            std::fill(visible.begin(), visible.end(), false);
++            for (int32_t k = (int32_t) (base + i); k >= 0; k = tree[k].parent) {
++                visible[k] = true;
++            }
++
++            for (size_t k = 0; k < tree.size(); ++k) {
++                const int64_t j = tree[k].cell;
++                if (visible[k] || j >= n_kv) {
++                    continue;
++                }
++                if (dst->type == GGML_TYPE_F16) {
++                    ((ggml_fp16_t *) dst->data)[n_kv*i + j] = ggml_fp32_to_fp16(-INFINITY);
++                } else {
++                    ((float *) dst->data)[n_kv*i + j] = -INFINITY;
++                }
++            }
++        }
++    }
++
+     //const int64_t t_end = ggml_time_us();
+ 
+     //LLAMA_LOG_ERROR("%s: kq mask time: %0.3f ms\n", __func__, (t_end - t_start)/1000.0);
+@@ -2715,6 +2852,7 @@ bool llama_kv_cache_context::apply() {
+     }
+ 
+     kv->apply_ubatch(sinfos[i_cur], ubatches[i_cur]);
++    kv->tree_add(sinfos[i_cur], ubatches[i_cur]);
+     n_kv = kv->get_n_kv(sinfos[i_cur]);
+ 
+     return true;
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index c4d8699..4c76f94 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -141,6 +141,8 @@ public:
+     void seq_add (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, llama_pos shift) override;
+     void seq_div (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, int d) override;
+ 
++    bool tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) override;
++
+     llama_pos seq_pos_min(llama_seq_id seq_id) const override;
+     llama_pos seq_pos_max(llama_seq_id seq_id) const override;
+ 
+@@ -155,6 +157,12 @@ public:
+     // llama_kv_cache specific API
+     //
+ 
++    // record the cells a draft-tree ubatch was placed in
++    void tree_add(const slot_info & sinfo, const llama_ubatch & ubatch);
++
++    // number of draft-tree nodes held for seq_id
++    uint32_t tree_size(llama_seq_id seq_id) const;
++
+     uint32_t get_size()     const;
+     uint32_t get_n_stream() const;
+ 
+@@ -247,6 +255,17 @@ private:
+     const llama_model & model;
+     const llama_hparams & hparams;
+ 
++    struct tree_node {
++        uint32_t cell;
++        int32_t  parent;
++    };
++
++    // draft-tree nodes per sequence, in decode order, until committed
++    std::vector<std::vector<tree_node>> trees = std::vector<std::vector<tree_node>>(LLAMA_MAX_SEQ);
++
++    // drop the tree of seq_id when [p0, p1) reaches one of its nodes
++    void tree_forget(llama_seq_id seq_id, llama_pos p0, llama_pos p1);
++
+     struct kv_layer {
+         // layer index in the model
+         // note: can be different from the layer index in the KV cache
+diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
+index 42c7381..b1d8845 100644
+--- a/src/llama-memory-hybrid.cpp
++++ b/src/llama-memory-hybrid.cpp
+@@ -149,6 +149,10 @@ bool llama_memory_hybrid::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1
+     return mem_attn->seq_rm(seq_id, p0, p1);
+ }
+ 
++bool llama_memory_hybrid::tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) {
++    return mem_recr->tree_commit(seq_id, path, n_path) && mem_attn->tree_commit(seq_id, path, n_path);
++}
++
+ void llama_memory_hybrid::seq_cp(llama_seq_id seq_id_src, llama_seq_id seq_id_dst, llama_pos p0, llama_pos p1) {
+     mem_attn->seq_cp(seq_id_src, seq_id_dst, p0, p1);
+     mem_recr->seq_cp(seq_id_src, seq_id_dst, p0, p1);
+diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
+index 484eafb..ee13c9f 100644
+--- a/src/llama-memory-hybrid.h
++++ b/src/llama-memory-hybrid.h
+@@ -66,6 +66,8 @@ public:
+     void seq_add (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, llama_pos shift) override;
+     void seq_div (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, int d) override;
+ 
++    bool tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) override;
++
+     llama_pos seq_pos_min(llama_seq_id seq_id) const override;
+     llama_pos seq_pos_max(llama_seq_id seq_id) const override;
+ 
+diff --git a/src/llama-memory-recurrent.cpp b/src/llama-memory-recurrent.cpp
+index 57919ac..6c3d5df 100644
+--- a/src/llama-memory-recurrent.cpp
++++ b/src/llama-memory-recurrent.cpp
+@@ -34,6 +34,7 @@ llama_memory_recurrent::llama_memory_recurrent(
+ 
+     this->n_rs_seq = n_rs_seq;
+     rs_idx.assign(n_seq_max, 0);
++    tree_pos.assign(n_seq_max, {});
+ 
+     cells.clear();
+     cells.resize(mem_size);
+@@ -156,6 +157,10 @@ void llama_memory_recurrent::clear(bool data) {
+     }
+ 
+     std::fill(rs_idx.begin(), rs_idx.end(), 0);
++
++    for (auto & tp : tree_pos) {
++        tp.clear();
++    }
+ }
+ 
+ bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+@@ -174,6 +179,15 @@ bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos
+         return false;
+     }
+ 
++    if (seq_id >= 0 && !tree_pos[seq_id].empty()) {
++        // an uncommitted draft tree has no chain of snapshots to roll back along
++        if (p0 > *std::max_element(tree_pos[seq_id].begin(), tree_pos[seq_id].end())) {
++            return true;
++        }
++        LLAMA_LOG_ERROR("%s: seq_id %d holds an uncommitted draft tree\n", __func__, seq_id);
++        return false;
++    }
++
+     const bool rm_all = p0 == 0 && p1 == std::numeric_limits<llama_pos>::max();
+     if (rm_all) {
+         set_rs_idx(seq_id, 0);
+@@ -403,6 +417,54 @@ llama_pos llama_memory_recurrent::seq_pos_max(llama_seq_id seq_id) const {
+     return result;
+ }
+ 
++void llama_memory_recurrent::tree_add(const llama_ubatch & ubatch) {
++    if (!ubatch.parent) {
++        return;
++    }
++
++    GGML_ASSERT(ubatch.n_seqs == 1 && ubatch.n_seqs_unq == 1 && "a draft tree holds one sequence");
++    GGML_ASSERT(ubatch.n_tokens <= n_rs_seq + 1 && "a draft tree on a recurrent memory needs n_rs_seq >= n_nodes - 1");
++
++    const llama_seq_id seq_id = ubatch.seq_id[0][0];
++
++    auto & tp = tree_pos[seq_id];
++    GGML_ASSERT(tp.empty() && "a draft tree on a recurrent memory is decoded in one batch and committed before the next");
++
++    for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
++        GGML_ASSERT(ubatch.parent[i] >= -1 && ubatch.parent[i] < (int32_t) i);
++        tp.push_back(ubatch.pos[i]);
++    }
++}
++
++bool llama_memory_recurrent::tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) {
++    GGML_ASSERT(seq_id >= 0 && (uint32_t) seq_id < n_seq_max);
++
++    auto & tp = tree_pos[seq_id];
++
++    if (tp.empty() || n_path <= 0) {
++        LLAMA_LOG_ERROR("%s: seq_id %d has no tree to keep a path of\n", __func__, seq_id);
++        return false;
++    }
++
++    const int32_t n_nodes = (int32_t) tp.size();
++    const int32_t last    = path[n_path - 1];
++
++    if (last < 0 || last >= n_nodes) {
++        LLAMA_LOG_ERROR("%s: path node %d is not in the tree of %d nodes\n", __func__, last, n_nodes);
++        return false;
++    }
++
++    const int32_t tail_id = cells[seq_id].tail;
++    GGML_ASSERT(tail_id >= 0);
++
++    set_rs_idx(seq_id, (uint32_t) (n_nodes - 1 - last));
++    cells[tail_id].pos = tp[last];
++
++    tp.clear();
++
++    return true;
++}
++
+ void llama_memory_recurrent::set_rs_idx(llama_seq_id seq_id, uint32_t idx) {
+     if (seq_id < 0) {
+         std::fill(rs_idx.begin(), rs_idx.end(), 0);
+@@ -656,7 +718,7 @@ bool llama_memory_recurrent::find_slot(const llama_ubatch & ubatch) {
+         const int32_t cell_id = s + min;
+         auto & cell = cells[cell_id];
+ 
+-        if (cell.pos >= 0 && last_pos != cell.pos + (llama_pos) n_seq_tokens) {
++        if (!ubatch.parent && cell.pos >= 0 && last_pos != cell.pos + (llama_pos) n_seq_tokens) {
+             // What should happen when the pos backtracks or skips a value?
+             // Clearing the state mid-batch would require special-casing which isn't done.
+             LLAMA_LOG_WARN("%s: non-consecutive token position %d after %d for sequence %d with %u new tokens\n",
+@@ -1261,6 +1323,7 @@ bool llama_memory_recurrent_context::apply() {
+     }
+ 
+     mem->find_slot(ubatches[i_next]);
++    mem->tree_add(ubatches[i_next]);
+ 
+     return true;
+ }
+diff --git a/src/llama-memory-recurrent.h b/src/llama-memory-recurrent.h
+index 4abb3f5..e16ca83 100644
+--- a/src/llama-memory-recurrent.h
++++ b/src/llama-memory-recurrent.h
+@@ -49,6 +49,8 @@ public:
+     void seq_add (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, llama_pos shift) override;
+     void seq_div (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, int d) override;
+ 
++    bool tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) override;
++
+     llama_pos seq_pos_min(llama_seq_id seq_id) const override;
+     llama_pos seq_pos_max(llama_seq_id seq_id) const override;
+ 
+@@ -78,6 +80,12 @@ public:
+ 
+     void set_rs_idx(llama_seq_id seq_id, uint32_t idx);
+ 
++    // positions of the nodes of the draft tree decoded last, per seq, until committed; node n's state is
++    // written to snapshot group (n_nodes - 1 - n)
++    std::vector<std::vector<llama_pos>> tree_pos;
++
++    void tree_add(const llama_ubatch & ubatch);
++
+     // computed before each graph build
+     uint32_t n = 0;
+ 
+diff --git a/src/llama-memory.h b/src/llama-memory.h
+index db82539..1217468 100644
+--- a/src/llama-memory.h
++++ b/src/llama-memory.h
+@@ -113,6 +113,12 @@ struct llama_memory_i {
+     virtual void seq_add (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, llama_pos shift) = 0;
+     virtual void seq_div (llama_seq_id seq_id,                              llama_pos p0, llama_pos p1, int d) = 0;
+ 
++    // keep the draft-tree nodes path[0..n_path) of seq_id and drop the other nodes; false when the memory keeps no trees
++    virtual bool tree_commit(llama_seq_id seq_id, const int32_t * path, int32_t n_path) {
++        GGML_UNUSED(seq_id); GGML_UNUSED(path); GGML_UNUSED(n_path);
++        return false;
++    }
++
+     virtual llama_pos seq_pos_min(llama_seq_id seq_id) const = 0;
+     virtual llama_pos seq_pos_max(llama_seq_id seq_id) const = 0;
+ 
+diff --git a/src/models/delta-net-base.cpp b/src/models/delta-net-base.cpp
+index ad66126..eebc160 100644
+--- a/src/models/delta-net-base.cpp
++++ b/src/models/delta-net-base.cpp
+@@ -446,6 +446,53 @@ std::pair<ggml_tensor *, ggml_tensor *> llm_build_delta_net_base::build_delta_ne
+     return build_delta_net_chunking(q, k, v, g, b, s, il);
+ }
+ 
++llm_graph_input_tree * llm_build_delta_net_base::build_inp_tree(int64_t conv_kernel_size, uint32_t kv_head, uint32_t mem_size) {
++    if (inp_tree) {
++        return inp_tree;
++    }
++
++    GGML_ASSERT(ubatch.parent && ubatch.n_seqs == 1);
++
++    const int32_t N   = (int32_t) ubatch.n_tokens;
++    const int32_t pad = (int32_t) conv_kernel_size - 1;
++
++    auto inp = std::make_unique<llm_graph_input_tree>();
++
++    std::vector<int32_t> depth(N, 0);
++    for (int32_t n = 0; n < N; ++n) {
++        const int32_t p = ubatch.parent[n];
++        GGML_ASSERT(p >= -1 && p < n);
++        depth[n] = p < 0 ? 0 : depth[p] + 1;
++        inp->n_iter = std::max(inp->n_iter, depth[n] + 1);
++        inp->parent_data.push_back(p + 1);
++        inp->dst_data.push_back((int64_t) (N - 1 - n) * mem_size + kv_head);
++    }
++
++    for (int32_t n = 0; n < N; ++n) {
++        for (int32_t s = pad; s >= 0; --s) {
++            int32_t node = n;
++            int32_t up   = 0;
++            while (up < s && node >= 0) {
++                node = ubatch.parent[node];
++                up++;
++            }
++            // s steps back is a node on the path, or the (s - depth - 1)-th row before the root
++            inp->taps_data.push_back(node >= 0 ? pad + node : pad - (s - depth[n]));
++        }
++    }
++
++    inp->parent_rows = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, N);
++    inp->conv_taps   = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, (int64_t) N * conv_kernel_size);
++    inp->state_dst   = ggml_new_tensor_1d(ctx0, GGML_TYPE_I64, N);
++    ggml_set_input(inp->parent_rows);
++    ggml_set_input(inp->conv_taps);
++    ggml_set_input(inp->state_dst);
++
++    inp_tree = static_cast<llm_graph_input_tree *>(res->add_input(std::move(inp)));
++
++    return inp_tree;
++}
++
+ ggml_tensor * llm_build_delta_net_base::build_conv_state(
+         llm_graph_input_rs * inp,
+         ggml_tensor *        conv_states_all,
+@@ -476,6 +523,29 @@ ggml_tensor * llm_build_delta_net_base::build_conv_state(
+ 
+     const size_t row_size  = ggml_row_size(conv_states_all->type, row_count);
+ 
++    if (ubatch.parent) {
++        // each node convolves the rows along its own path; its state is the window without the oldest row
++        GGML_ASSERT(n_seqs == 1 && ubatch.n_tokens <= cparams.n_rs_seq + 1);
++
++        const int64_t n_nodes = ubatch.n_tokens;
++
++        auto * tree = build_inp_tree(conv_kernel_size, kv_head, mem_size);
++
++        ggml_tensor * rows = ggml_cont(ctx0, ggml_permute(ctx0, conv_input, 1, 0, 2, 3));   // [channels, pad + n_nodes, 1]
++        ggml_tensor * win  = ggml_get_rows(ctx0, rows, tree->conv_taps);                   // [channels, n_nodes*kernel, 1]
++        win = ggml_reshape_3d(ctx0, win, conv_channels, conv_kernel_size, n_nodes);
++        win = ggml_cont(ctx0, ggml_permute(ctx0, win, 1, 0, 2, 3));                         // [kernel, channels, n_nodes]
++        cb(win, "conv_input_tree", il);
++
++        ggml_tensor * kept = ggml_view_3d(ctx0, win, conv_kernel_size - 1, conv_channels, n_nodes,
++                win->nb[1], win->nb[2], win->nb[0]);
++        kept = ggml_reshape_2d(ctx0, ggml_cont(ctx0, kept), row_count, n_nodes);
++
++        ggml_build_forward_expand(gf, ggml_set_rows(ctx0, conv_states_all, kept, tree->state_dst));
++
++        return win;
++    }
++
+     if (cparams.n_rs_seq == 0) {
+         const int64_t s_idx  = conv_input->ne[0] - conv_states->ne[0];
+         const int64_t s_slot = 0;
+@@ -545,6 +615,53 @@ ggml_tensor * llm_build_delta_net_base::build_recurrent_attn(
+ 
+     const bool keep = cparams.n_rs_seq > 0;
+ 
++    if (ubatch.parent) {
++        // every node starts from its parent's state; after max-depth + 1 rounds each has read its parent's final one
++        GGML_ASSERT(n_seqs == 1);
++
++        const int64_t n_nodes = n_seq_tokens;
++        const int64_t D       = S_v * S_v * H_v;
++
++        auto * tree = build_inp_tree(hparams.ssm_d_conv, kv_head, mem_size);
++
++        auto per_node = [&](ggml_tensor * t) {
++            return ggml_reshape_4d(ctx0, ggml_cont(ctx0, t), t->ne[0], t->ne[1], 1, n_nodes);
++        };
++
++        ggml_tensor * qn = per_node(q);
++        ggml_tensor * kn = per_node(k);
++        ggml_tensor * vn = per_node(v);
++        ggml_tensor * gn = per_node(g);
++        ggml_tensor * bn = per_node(b);
++
++        ggml_tensor * prefix = ggml_reshape_2d(ctx0, ggml_cont(ctx0, s), D, 1);
++        ggml_tensor * states = ggml_repeat_4d(ctx0, prefix, D, n_nodes, 1, 1);
++        ggml_tensor * out    = nullptr;
++
++        for (int32_t it = 0; it < tree->n_iter; ++it) {
++            ggml_tensor * from = ggml_get_rows(ctx0, ggml_concat(ctx0, prefix, states, 1), tree->parent_rows);
++            from = ggml_reshape_4d(ctx0, from, S_v, S_v, H_v, n_nodes);
++
++            ggml_tensor * res_it = ggml_gated_delta_net(ctx0, qn, kn, vn, gn, bn, from, 1);
++
++            out = ggml_view_4d(ctx0, res_it, S_v, H_v, 1, n_nodes,
++                    ggml_row_size(res_it->type, S_v),
++                    ggml_row_size(res_it->type, S_v * H_v),
++                    ggml_row_size(res_it->type, S_v * H_v),
++                    0);
++            states = ggml_view_2d(ctx0, res_it, D, n_nodes,
++                    ggml_row_size(res_it->type, D),
++                    ggml_row_size(res_it->type, S_v * H_v * n_nodes));
++        }
++
++        ggml_build_forward_expand(gf, ggml_set_rows(ctx0, ssm_states_all, states, tree->state_dst));
++
++        out = ggml_reshape_4d(ctx0, ggml_cont(ctx0, out), S_v, H_v, n_nodes, 1);
++        cb(out, "attn_output", il);
++
++        return out;
++    }
++
+     if (!keep) {
+         auto attn_out = build_delta_net(q, k, v, g, b, s, il);
+         ggml_tensor * output    = attn_out.first;
+diff --git a/src/models/models.h b/src/models/models.h
+index 9b87a40..fb46bc6 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -69,6 +69,10 @@ struct llm_build_delta_net_base : public llm_graph_context {
+                 ggml_tensor * s,
+                         int   il);
+ 
++    // the gather/scatter rows of a draft-tree ubatch, built on first use in a graph
++    llm_graph_input_tree * inp_tree = nullptr;
++    llm_graph_input_tree * build_inp_tree(int64_t conv_kernel_size, uint32_t kv_head, uint32_t mem_size);
++
+     // read conv state from cache, concat with qkv_mixed, write back (single slot or per-token)
+     // qkv_mixed: (qkv_dim, n_seq_tokens, n_seqs); returns conv_input: (kernel_size + n_seq_tokens - 1, channels, n_seqs)
+     ggml_tensor * build_conv_state(
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 5799d8b..0e19c2a 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -14,6 +14,7 @@
+ #include "log.h"
+ #include "sampling.h"
+ #include "speculative.h"
++#include "../../src/llama-ext.h"
+ #include "mtmd.h"
+ #include "mtmd-helper.h"
+ 
+@@ -252,6 +253,7 @@ struct server_slot {
+     common_speculative * spec;
+ 
+     llama_tokens spec_draft;
++    std::vector<int32_t> spec_parents; // a tree draft: the node each draft token hangs off (0 = sampled); empty for a chain
+     llama_tokens spec_prompt;
+     std::vector<int32_t> spec_i_batch;
+     common_prompt_checkpoint spec_ckpt;
+@@ -381,6 +383,7 @@ struct server_slot {
+ 
+         if (can_speculate()) {
+             spec_draft.clear();
++            spec_parents.clear();
+             spec_i_batch.clear();
+             spec_ckpt.clear();
+         }
+@@ -529,11 +532,20 @@ struct server_slot {
+                 spec_i_batch.push_back(batch.size() + i + 1);
+             }
+ 
+-            auto pos0 = prompt.tokens.pos_next();
++            const auto pos0 = prompt.tokens.pos_next();
+ 
+-            add_ok &= batch.add(id, sampled, pos0++, true, false);
+-            for (auto token : spec_draft) {
+-                add_ok &= batch.add(this->id, token, pos0++, true, false);
++            add_ok &= batch.add(id, sampled, pos0, true, false);
++            if (spec_parents.empty()) {
++                for (size_t i = 0; i < spec_draft.size(); i++) {
++                    add_ok &= batch.add(this->id, spec_draft[i], pos0 + 1 + (llama_pos) i, true, false);
++                }
++            } else {
++                // a tree node sits one position past its parent
++                std::vector<llama_pos> depth = { 0 };
++                for (size_t i = 0; i < spec_draft.size(); i++) {
++                    depth.push_back(depth[spec_parents[i]] + 1);
++                    add_ok &= batch.add(this->id, spec_draft[i], pos0 + depth.back(), true, false);
++                }
+             }
+         }
+ 
+@@ -1261,6 +1273,18 @@ private:
+             slots.emplace_back();
+         }
+ 
++        if (params_base.speculative.tree_width > 0) {
++            if (params_base.n_parallel != 1) {
++                SRV_ERR("draft trees verify one slot at a time; --spec-tree needs --parallel 1 (got %d)\n", params_base.n_parallel);
++                return false;
++            }
++            if (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
++                (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && llama_n_rs_seq(ctx_tgt) < (uint32_t) params_base.speculative.draft.n_max)) {
++                SRV_ERR("%s", "--spec-tree needs a model whose memory keeps a state per drafted node\n");
++                return false;
++            }
++        }
++
+         // try speculative decoding
+         if (ctx_tgt_seq_rm_type != COMMON_CONTEXT_SEQ_RM_TYPE_NO) {
+             try {
+@@ -3011,6 +3035,7 @@ private:
+                             /* .id_last  = */ slot.sampled,
+                             /* .prompt   = */ &slot.spec_prompt,
+                             /* .result   = */ &slot.spec_draft,
++                            /* .parents  = */ &slot.spec_parents,
+                         };
+ 
+                         drafting.push_back(&slot);
+@@ -3693,11 +3718,28 @@ private:
+             has_output |= batch.tokens[i].output;
+         }
+ 
++        std::vector<int32_t> tree_parents;
++        for (const auto & slot : slots) {
++            if (slot.spec_parents.empty() || slot.spec_i_batch.empty()) {
++                continue;
++            }
++            const int32_t first = slot.spec_i_batch.front();
++            if (first != off || (int32_t) slot.spec_i_batch.size() != batch_view.n_tokens) {
++                throw std::runtime_error(string_format("a draft tree of %zu nodes at batch index %d is not the whole sub-batch [%d, %d)",
++                        slot.spec_i_batch.size(), first, off, off + batch_view.n_tokens));
++            }
++            tree_parents.push_back(-1);
++            tree_parents.insert(tree_parents.end(), slot.spec_parents.begin(), slot.spec_parents.end());
++        }
++
+         // yield to the queue, so we can still handle metrics tasks while decoding
+         // note: the sync is done here too, so that the wait is also covered by the yield
+         int ret = 0;
+         const int64_t t_start = ggml_time_us();
+         queue_tasks.yield_to_queue([&]() {
++            if (!tree_parents.empty()) {
++                llama_set_tree(ctx_tgt, tree_parents.data(), (int32_t) tree_parents.size());
++            }
+             ret = llama_decode(ctx_tgt, batch_view);
+             if (ret == 0 && has_output) {
+                 llama_synchronize(ctx_tgt);
+@@ -3926,6 +3968,44 @@ private:
+ 
+             GGML_ASSERT(n_draft > 0);
+ 
++            if (!slot.spec_parents.empty()) {
++                // follow the child that matches each sampled token; stop at the first node with none
++                GGML_ASSERT(slot.spec_i_batch.size() == n_draft + 1);
++
++                std::vector<int32_t>     path = { 0 };
++                std::vector<llama_token> ids;
++                while (true) {
++                    const llama_token id = common_sampler_sample(slot.smpl.get(), slot.ctx_tgt, slot.spec_i_batch[path.back()]);
++                    common_sampler_accept(slot.smpl.get(), id, true);
++                    ids.push_back(id);
++
++                    int32_t child = -1;
++                    for (size_t i = 0; i < n_draft; ++i) {
++                        if (slot.spec_parents[i] == path.back() && slot.spec_draft[i] == id) {
++                            child = (int32_t) i + 1;
++                            break;
++                        }
++                    }
++                    if (child < 0) {
++                        break;
++                    }
++                    path.push_back(child);
++                }
++                slot.spec_i_batch.clear();
++
++                if (!llama_tree_commit(slot.ctx_tgt, slot.id, path.data(), (int32_t) path.size())) {
++                    throw std::runtime_error("failed to keep the accepted path of a draft tree");
++                }
++
++                if (trace > 0) {
++                    SLT_INF(slot, "accepted %2zu/%2zu draft tree nodes\n", ids.size() - 1, n_draft);
++                }
++
++                common_speculative_accept_path(spec.get(), slot.id, path);
++
++                slot.spec_parents.clear();
++                slot.spec_draft = std::move(ids);
++            } else
+             // verify and try to accept the draft
+             {
+                 common_sampler_ptr smpl_save(common_sampler_clone(slot.smpl.get()));

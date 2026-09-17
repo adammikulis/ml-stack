@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from typing import Any
 
-__all__ = ["nvidia", "amd", "gpu_telemetry"]
+__all__ = ["amd", "gpu_telemetry", "nvidia"]
 
 TIMEOUT_S = 4.0
 """Short. This is called every time a beacon goes out, and a driver tool that has wedged"""

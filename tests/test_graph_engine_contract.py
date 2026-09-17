@@ -11,9 +11,27 @@ import random
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import ladybug as lb
+
+REPO = Path(__file__).resolve().parents[1]
 import pytest
+
+
+def test_the_installed_engine_is_the_one_the_store_extra_asks_for():
+    """Every test here measures the installed ladybug, so a stale environment is said once.
+
+    Red means `pip install -e '.[store]'` has not been run since the pin moved, and the reds
+    below it are about that engine rather than about this code.
+    """
+    declared = [line.split("=", 1)[1].strip().strip('"[]')
+                for line in (REPO / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+                if line.startswith("store = ")][0]
+    floor = declared.split(">=", 1)[1].split(",")[0].strip().strip('"')
+    parts = tuple(int(x) for x in lb.__version__.split(".")[:3])
+    assert parts >= tuple(int(x) for x in floor.split(".")), (
+        f"ladybug {lb.__version__} is installed and pyproject asks for {declared}")
 
 
 def _child(body: str, *args: str) -> subprocess.CompletedProcess:
@@ -290,6 +308,35 @@ def test_a_bulk_relation_set_reaches_the_disk_whole_and_nowhere_else(tmp_path):
     assert _fresh_count(path, "MATCH ()-[r:R]->() WHERE r.tag = 'after' RETURN count(r)") == 5000
     assert _fresh_count(path, "MATCH (a:N)-[r:R]->() WHERE a.id >= 5000 AND r.tag = 'before' "
                               "RETURN count(r)") == 5000
+
+
+def test_a_recursive_patterns_predicate_takes_no_parameter(tmp_path):
+    """`literal` writes values into a path predicate because of this.
+
+    A statement is planned without its values (`CypherStore._run`), and a path predicate's
+    parameter cannot be bound then: the binder cannot tell whether it belongs to the node or
+    to the relationship. Red means it can, and a path predicate can carry a parameter.
+    """
+    db = lb.Database(str(tmp_path / "params.lbug"))
+    conn = lb.Connection(db)
+    conn.execute("CREATE NODE TABLE N(id STRING, PRIMARY KEY(id))")
+    conn.execute("CREATE REL TABLE R(FROM N TO N, eid STRING)")
+    conn.execute("CREATE (:N {id: 'A'}), (:N {id: 'B'})")
+    conn.execute("MATCH (a:N {id: 'A'}), (b:N {id: 'B'}) CREATE (a)-[:R {eid: 'AB'}]->(b)")
+    import warnings
+
+    warnings.simplefilter("ignore", DeprecationWarning)
+    try:
+        statement = conn.prepare("MATCH (a:N {id: 'A'})-[r:R* SHORTEST 1..4 "
+                                 "(e, n | WHERE e.eid <> $skip)]-(b:N {id: 'B'}) RETURN length(r)")
+        assert not statement.is_success()
+        assert "does not depend on" in statement.get_error_message()
+        rows = conn.execute("MATCH (a:N {id: 'A'})-[r:R* SHORTEST 1..4 (e, n | WHERE e.eid <> 'XX')]-"
+                            "(b:N {id: 'B'}) RETURN length(r)").get_all()
+        assert rows == [[1]]
+    finally:
+        conn.close()
+        db.close()
 
 
 def test_shortest_honours_a_node_predicate_and_a_relation_predicate(tmp_path):

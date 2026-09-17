@@ -22,7 +22,7 @@ from typing import Any
 
 from ml_stack.graph.snapshots import DISAGREEING
 
-__all__ = ["CypherStore", "GraphStoreUnavailable", "census", "store_memory"]
+__all__ = ["CypherStore", "GraphStoreUnavailable", "census", "literal", "store_memory"]
 
 
 class GraphStoreUnavailable(RuntimeError):
@@ -51,6 +51,23 @@ def _quoted(name: str) -> str:
 def _text(value: str) -> str:
     """A name as a Cypher string literal, for the procedures that take names as strings."""
     return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def literal(value: Any) -> str:
+    """A value as Cypher source, for the one place the engine takes no parameter.
+
+    A recursive pattern's predicate -- ``-[r:R* SHORTEST 1..4 (e, n | WHERE ...)]-`` -- refuses
+    every parameter, so what it compares against is written into the statement.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return _text(value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return "[" + ", ".join(literal(one) for one in value) + "]"
+    raise TypeError(f"{type(value).__name__} has no Cypher literal; pass it as a parameter")
 
 
 class CypherStore:

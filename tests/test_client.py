@@ -526,6 +526,12 @@ class TestHealth:
                           if p == "/models" else (404, b"no such route"))
         assert is_healthy(instance.base_url)
 
+    def test_a_page_that_is_not_json_is_healthy_at_its_own_path(self, server):
+        instance = server(lambda m, p, b: (200, b"<html></html>") if p == "/"
+                          else (404, b"no such route"))
+        assert is_healthy(instance.base_url, path="/")
+        assert not is_healthy(instance.base_url)
+
     def test_wait_returns_as_soon_as_the_server_answers(self, server):
         ready_at = time.monotonic() + 0.5
 

@@ -239,6 +239,26 @@ class TestEmittedFlags:
         assert not any(token.endswith(".gguf") for token in flags)
 
 
+class TestDraftTree:
+    """Guessing ahead in a tree rather than a chain, for a build carrying the tree patch."""
+
+    def test_a_width_is_passed_to_the_server(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP + "--spec-tree W\n")).command(
+            ServerSpec(model="m.gguf", spec_type="draft-mtp", spec_draft_max=12, spec_tree=3))
+        assert argv[argv.index("--spec-tree") + 1] == "3"
+        assert argv[argv.index("--spec-draft-n-max") + 1] == "12"
+
+    def test_no_width_passes_no_flag(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
+            ServerSpec(model="m.gguf", spec_type="draft-mtp", spec_draft_max=12))
+        assert "--spec-tree" not in argv
+
+    def test_a_build_without_the_flag_is_refused_before_the_load(self, tmp_path):
+        server = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
+        with pytest.raises(UnknownFlag):
+            server.checked(server.command(ServerSpec(model="m.gguf", spec_tree=3)))
+
+
 class TestMemoryFlags:
     """How the KV cache is stored, and whether the weights are mmapped or locked -- typed
     so a preflight's fit estimate can read the cache type back, and so a bench can vary

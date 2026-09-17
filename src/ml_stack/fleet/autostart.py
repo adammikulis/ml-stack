@@ -26,10 +26,28 @@ from ml_stack.files import promote
 from ml_stack import home
 from ml_stack.log import say, warn
 
-__all__ = ["ADOPTED", "Autostart", "CachePlan", "DEFAULT_MODEL", "IN_PLACE", "LABEL",
-           "LEFT_ALONE", "SYSTEM_LABEL", "SystemService", "choose_model", "install",
-           "main", "models_in", "plan", "plan_cache", "restart", "service_environment",
-           "status", "system_service", "uninstall"]
+__all__ = [
+    "ADOPTED",
+    "DEFAULT_MODEL",
+    "IN_PLACE",
+    "LABEL",
+    "LEFT_ALONE",
+    "SYSTEM_LABEL",
+    "Autostart",
+    "CachePlan",
+    "SystemService",
+    "choose_model",
+    "install",
+    "main",
+    "models_in",
+    "plan",
+    "plan_cache",
+    "restart",
+    "service_environment",
+    "status",
+    "system_service",
+    "uninstall",
+]
 
 LABEL = "com.ml-stack.traind"
 SERVICE = "ml-stack-traind"

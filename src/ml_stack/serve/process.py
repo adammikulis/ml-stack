@@ -154,11 +154,18 @@ def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
     reports nothing and counts for no model.
     """
     ports_of: dict[str, list[int]] = {}
+    asked: set[int] = set()
     for server in every_server() if servers is None else servers:
         if server.get("defunct"):
             continue
-        for name in reported_models(f"http://127.0.0.1:{server['port']}"):
-            ports_of.setdefault(name, []).append(int(server["port"]))
+        port = int(server["port"])
+        # One port answers for one server, however many processes carry its command
+        # line: a second copy of a model is a second port, never a second process.
+        if port in asked:
+            continue
+        asked.add(port)
+        for name in reported_models(f"http://127.0.0.1:{port}"):
+            ports_of.setdefault(name, []).append(port)
     return {name: ports for name, ports in ports_of.items() if len(ports) > 1}
 
 

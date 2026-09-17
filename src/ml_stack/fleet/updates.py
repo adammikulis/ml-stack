@@ -35,10 +35,27 @@ from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_j
 
 from .measuring import installed_commit
 
-__all__ = ["Pulled", "Release", "UpdateError", "apply_if_newer", "asset_for", "check",
-           "checkout_here", "current_version", "in_the_way", "quiet", "state", "track",
-           "track_once", "restart_after_update", "watch",
-           "download", "install", "REPO", "GIT_URL"]
+__all__ = [
+    "GIT_URL",
+    "REPO",
+    "Pulled",
+    "Release",
+    "UpdateError",
+    "apply_if_newer",
+    "asset_for",
+    "check",
+    "checkout_here",
+    "current_version",
+    "download",
+    "in_the_way",
+    "install",
+    "quiet",
+    "restart_after_update",
+    "state",
+    "track",
+    "track_once",
+    "watch",
+]
 
 REPO = "adammikulis/ml-stack"
 GIT_URL = f"https://github.com/{REPO}"

@@ -44,8 +44,15 @@ from typing import Any
 from ml_stack import home
 from ml_stack.files import write_json
 
-__all__ = ["Idleness", "TRUST_S", "busy_now", "ports_idle", "state_path",
-           "reclaim_idle", "watching"]
+__all__ = [
+    "TRUST_S",
+    "Idleness",
+    "busy_now",
+    "ports_idle",
+    "reclaim_idle",
+    "state_path",
+    "watching",
+]
 
 #: How often the watcher looks, unless told otherwise.
 EVERY_S = 60.0

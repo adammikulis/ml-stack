@@ -144,5 +144,5 @@ def layout_for(model: nn.Module) -> Layout:
     if named is None:
         raise ValueError(f"no tree-verification layout for model_type {kind!r}; "
                          f"known: {', '.join(sorted(LAYOUTS))}")
-    module, _, attribute = named.partition(":")
+    module, _, attribute = named[1].partition(":")
     return getattr(importlib.import_module(module), attribute)(model)

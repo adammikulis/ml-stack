@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.cypher import CypherStore, census
+from ml_stack.graph.cypher import CypherStore, census, literal
 from ml_stack.graph.snapshots import take
 
 
@@ -90,3 +90,29 @@ def test_a_statement_that_will_not_prepare_raises_with_the_engines_reason(tmp_pa
     with CypherStore(a_people_store(tmp_path / "p.lbug"), read_only=True) as db, \
             pytest.raises(RuntimeError, match=r"(?i)binder|parser|exist"):
         db.query("MATCH (n:Nobody {id: $id}) RETURN n", {"id": "x"})
+
+
+def test_a_value_written_into_a_statement_is_written_as_the_engine_reads_it():
+    assert literal("ada") == "'ada'"
+    assert literal("it's") == "'it\\'s'"
+    assert literal("a\\b") == "'a\\\\b'"
+    assert literal(["a", "b"]) == "['a', 'b']"
+    assert literal(0.5) == "0.5" and literal(3) == "3" and literal(True) == "true"
+    with pytest.raises(TypeError, match="no Cypher literal"):
+        literal({"a": 1})
+
+
+def test_a_path_predicate_written_with_literals_filters_what_it_names(tmp_path):
+    path = tmp_path / "p.lbug"
+    with CypherStore(path) as db:
+        db.query("CREATE NODE TABLE N(id STRING, PRIMARY KEY(id))")
+        db.query("CREATE REL TABLE R(FROM N TO N, eid STRING)")
+        for node in ("A", "X", "B", "M", "N"):
+            db.query("CREATE (:N {id: $id})", {"id": node})
+        for src, dst in (("A", "X"), ("X", "B"), ("A", "M"), ("M", "N"), ("N", "B")):
+            db.query("MATCH (a:N {id: $a}), (b:N {id: $b}) CREATE (a)-[:R {eid: $e}]->(b)",
+                     {"a": src, "b": dst, "e": src + dst})
+        skipped = literal(["AX", "XB"])
+        rows = db.query(f"MATCH (a:N {{id: 'A'}})-[r:R* SHORTEST 1..4 (e, n | WHERE NOT e.eid IN "
+                        f"{skipped})]-(b:N {{id: 'B'}}) RETURN properties(nodes(r), 'id') AS mids")
+        assert [row["mids"] for row in rows] == [["M", "N"]]

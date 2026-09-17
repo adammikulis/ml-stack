@@ -190,6 +190,25 @@ def test_a_server_started_outside_the_broker_is_shared_not_loaded_twice(
         foreign.wait(timeout=10)
 
 
+def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, holders):
+    """The card being measured is a holder like any other: the lease waits for it."""
+    from ml_stack.serve.manager import Measuring
+
+    started = broker.manager.lease
+    refusals = {"left": 2}
+
+    def measuring_first(spec, **kwargs):
+        if refusals["left"]:
+            refusals["left"] -= 1
+            raise Measuring("the card is being measured by ml-stack-bench (pid 1)")
+        return started(spec, **kwargs)
+
+    broker.manager.lease = measuring_first
+    grant = broker.lease(ask(models[0], holders().pid), timeout=30)
+    assert refusals["left"] == 0
+    assert grant.model == models[0] and not grant.shared
+
+
 @pytest.mark.slow
 def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, models):
     """Real entry point: each client process calls `broker_wire.lease`, which starts the

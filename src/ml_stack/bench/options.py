@@ -10,14 +10,15 @@ each set is built at the moment a parser is.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.home_dir()` -- so
 # anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
 from ml_stack.bench.askings import REACH
+from ml_stack.bench.counting import PER_QUESTION
 from ml_stack.bench.estimate import ceiling_default
 from ml_stack.bench.keep import SHORT, SMOKE
-from ml_stack.bench.counting import PER_QUESTION
 from ml_stack.bench.score import NOISE
 from ml_stack.command import Option, flag
 from ml_stack.client.embed import MARGIN
@@ -612,6 +613,42 @@ def queue_options() -> tuple[Option, ...]:
                   f"detaches: a log under {bench.home_dir() / 'logs'}, `status` for "
                   "the step it is on and what is left, `tail -f` for the log, "
                   "`stop` to end the queue and the step inside it"),
+    )
+
+
+def tree_options() -> tuple[Option, ...]:
+    """``tree``: the lossless witness and the speed table for MLX tree decoding."""
+    return (
+        flag("action", choices=("lossless", "speed")),
+        flag("--model", default="mlx-community/Qwen3.8-Flash-Next-4bit",
+             help="MLX weights (default: mlx-community/Qwen3.8-Flash-Next-4bit)"),
+        flag("--drafter", action="append", default=[], metavar="KIND[=HEAD]",
+             help="ngram, mtp=HEAD or dflash=HEAD; repeat for each"),
+        flag("--max-nodes", type=int, default=32, help="tree node cap (default: 32)"),
+        flag("--prompt", action="append", default=[], metavar="NAME",
+             help="lossless: the prompts to witness -- chat, code, math, thinking or long "
+                  "(default: every one)"),
+        flag("--tokens", type=int, default=128,
+             help="lossless: tokens each reply writes (default: 128)"),
+        flag("--tokens-list", type=int, nargs="+", default=[128, 512],
+             help="speed: tokens per completion (default: 128 512)"),
+        flag("--samples", type=int, default=3, help="speed: samples a cell (default: 3)"),
+        flag("--engines", nargs="+", default=["mlx", "llama"], choices=("mlx", "llama"),
+             help="speed: MLX in this process, llama.cpp leased through the broker"),
+        flag("--gguf", default="Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+             help="speed: the llama.cpp model"),
+        flag("--gguf-mtp", default="mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+             help="speed: the llama.cpp MTP head"),
+        flag("--draft-max", type=int, default=4, help="speed: llama.cpp MTP depth (default: 4)"),
+        flag("--context", type=int, default=16384, help="speed: llama.cpp context"),
+        flag("--gpu-busy", type=int, default=5,
+             help="GPU utilization percent over which the machine is busy (default: 5)"),
+        flag("--wait-checks", type=int, default=6,
+             help="speed: quiet checks before refusing a busy machine (default: 6)"),
+        flag("--wait-s", type=float, default=300.0,
+             help="speed: seconds between quiet checks (default: 300)"),
+        flag("--anyway", action="store_true", help="time a busy machine, recorded so"),
+        flag("--out", type=Path, default=None, help="the JSON to keep (default: bench home)"),
     )
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from ml_stack.backend import (
     ArrayBackend,
     BackendUnavailable,
@@ -127,6 +128,22 @@ def test_scatter_add_accumulates_duplicate_indices(name):
     assert out.tolist() == [[3.0, 3.0], [1.0, 1.0], [0.0, 0.0]]
 
 
+@needs_mlx
+def test_mlx_scatter_add_differentiates_through_a_computed_index():
+    """An index computed from the input (an argmin, a cluster assignment) is not differentiable,
+    and a gradient still flows to the scattered values."""
+    import mlx.core as mx
+
+    backend = get_backend("mlx")
+    x = mx.array(np.array([[0.0, 1.0], [2.0, -1.0], [3.0, 4.0]], dtype=np.float32))
+
+    def total(values):
+        index = mx.argmin(values, axis=1)
+        return mx.sum(backend.scatter_add(mx.zeros((2, 2)), index, values * values, 0))
+
+    assert np.allclose(np.asarray(mx.grad(total)(x)), 2.0 * np.asarray(x))
+
+
 @each_backend
 def test_scatter_add_does_not_mutate_its_target(name):
     """An in-place write into a tensor that is also an input corrupts the autograd graph."""
@@ -163,6 +180,45 @@ def test_scan_and_fft_primitives_work(name):
     spectrum = np.asarray(backend.rfft_abs(ops.array(np.ones(8, dtype=np.float32)), -1))
     assert spectrum[0] == pytest.approx(8.0, abs=1e-4)
     assert np.allclose(spectrum[1:], 0.0, atol=1e-4)
+
+
+@needs_mlx
+def test_mlx_scans_only_ever_run_on_the_innermost_axis():
+    """MLX's scan kernel for any other axis reads out of bounds; those scans are matmuls."""
+    import mlx.core as mx
+
+    from ml_stack.backend.mlx_ops import build_cumprod, build_cumsum
+
+    scanned: list[tuple[int, int]] = []
+
+    class Recording:
+        def __getattr__(self, name):
+            return getattr(mx, name)
+
+        def cumsum(self, x, axis):
+            scanned.append((x.ndim, axis))
+            return mx.cumsum(x, axis=axis)
+
+        def cumprod(self, x, axis):
+            scanned.append((x.ndim, axis))
+            return mx.cumprod(x, axis=axis)
+
+    x = mx.array(np.arange(1, 25, dtype=np.float32).reshape(2, 3, 4))
+    for axis in (0, 1, 2, -1):
+        expected_sum = np.cumsum(np.asarray(x), axis=axis)
+        expected_prod = np.cumprod(np.asarray(x), axis=axis)
+        assert np.allclose(np.asarray(build_cumsum(Recording())(x, axis)), expected_sum)
+        assert np.allclose(np.asarray(build_cumprod(Recording())(x, axis)), expected_prod, rtol=1e-4)
+    assert scanned and all(axis == ndim - 1 for ndim, axis in scanned), scanned
+
+
+@needs_both
+def test_a_named_backend_is_the_one_instance_get_backend_returns():
+    """A device bound through one handle is the device every other handle creates on."""
+    from ml_stack.backend import mlx_backend, torch_backend
+
+    assert torch_backend() is get_backend("torch") is torch_backend()
+    assert mlx_backend() is get_backend("mlx") is mlx_backend()
 
 
 # --------------------------------------------------------------------------- determinism
@@ -320,8 +376,7 @@ class TestRegistryIsExtensible:
     def test_one_broken_backend_does_not_make_the_others_unlistable(self):
         """`available()` is what the fleet's device report calls. A plugin that raises
         on import must cost its own entry, not every entry."""
-        from ml_stack.backend import available, register
-        from ml_stack.backend import registry
+        from ml_stack.backend import available, register, registry
 
         before = available()
         register("broken", lambda: (_ for _ in ()).throw(ImportError("no driver")),
