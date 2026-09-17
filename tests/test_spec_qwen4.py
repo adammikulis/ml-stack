@@ -13,7 +13,7 @@ from collections.abc import Sequence
 import pytest
 
 mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
-pytest.importorskip("mlx_vlm", reason="ml-stack[spec]")
+pytest.importorskip("mlx_vlm.models.qwen4_exp", reason="ml-stack[spec]")
 
 from mlx_vlm.models.qwen4_exp.config import ModelConfig  # noqa: E402
 from mlx_vlm.models.qwen4_exp.language import LanguageModel  # noqa: E402
