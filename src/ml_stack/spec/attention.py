@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import mlx.core as mx
 import mlx.nn as nn
 
-__all__ = ["attend", "compact", "tree_mask"]
+__all__ = ["attend", "compact", "rewind", "tree_mask"]
 
 
 def tree_mask(ancestors: Sequence[Sequence[int]], offset: int) -> mx.array:
@@ -41,12 +41,40 @@ def attend(mod: nn.Module, cache: object, x: mx.array, positions: mx.array,
     return mod.o_proj(out * mx.sigmoid(gate.reshape(count, -1)))
 
 
+def _index_rows(cache: object) -> tuple[mx.array, mx.array] | None:
+    keys = getattr(cache, "index_keys", None)
+    return None if keys is None else (keys, cache.index_position_ids)
+
+
 def compact(caches: Sequence[object], offset: int, path: mx.array) -> None:
-    """Move the accepted rows of every attention cache to ``offset`` and cut the rest."""
+    """Move the accepted rows of every attention cache to ``offset`` and cut the rest.
+
+    A cache that also keeps indexer keys (``index_keys`` [B, L, D] and their positions) has
+    those rows moved the same way.
+    """
     rows = [(c.keys[..., offset + path, :], c.values[..., offset + path, :]) for c in caches]
-    mx.eval(*[half for pair in rows for half in pair])
+    indexed = [_index_rows(c) for c in caches]
+    kept = [None if held is None else
+            (mx.concatenate([held[0][:, :offset], held[0][:, offset + path]], axis=1),
+             mx.concatenate([held[1][..., :offset], held[1][..., offset + path]], axis=-1))
+            for held in indexed]
+    mx.eval(*[half for pair in rows for half in pair],
+            *[half for pair in kept if pair is not None for half in pair])
     accepted = int(path.size)
-    for cache, (keys, values) in zip(caches, rows, strict=True):
+    for cache, (keys, values), index in zip(caches, rows, kept, strict=True):
         cache.keys[..., offset:offset + accepted, :] = keys
         cache.values[..., offset:offset + accepted, :] = values
         cache.offset = offset + accepted
+        if index is not None:
+            cache.index_keys, cache.index_position_ids = index
+
+
+def rewind(cache: object, count: int) -> None:
+    """Cut an attention cache back to its first ``count`` tokens, indexer keys and blocks included."""
+    cache.offset = count
+    if getattr(cache, "index_keys", None) is not None:
+        cache.index_keys = cache.index_keys[:, :count]
+        cache.index_position_ids = cache.index_position_ids[..., :count]
+    blocks = getattr(cache, "index_block_keys", None)
+    if blocks is not None:
+        cache.index_block_keys = blocks[:, :, :count // int(cache.index_block_ratio)]

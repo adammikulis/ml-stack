@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 import mlx.core as mx
@@ -11,17 +12,50 @@ from ml_stack.spec import attention, deltanet
 from ml_stack.spec.layout import Layout
 from ml_stack.spec.tree import Tree
 
-__all__ = ["TreeVerifier"]
+__all__ = ["TreePass", "TreeVerifier"]
 
 #: dispatch the graph every this many layers so the GPU starts while the rest is built
 ASYNC_EVERY = 8
 
 
+@dataclass
+class TreePass:
+    """What every layer of one tree pass shares, and what its layers leave to commit.
+
+    ``attention`` collects the attention caches the pass appended to, compacted together on
+    commit; each of ``commits`` is called with the accepted path's node indices.
+    """
+
+    tree: Tree
+    offset: int
+    ancestors: mx.array
+    positions: mx.array
+    mask: mx.array
+    attention: list[Any] = field(default_factory=list)
+    commits: list[Callable[[mx.array], None]] = field(default_factory=list)
+    taps: dict[tuple[int, int], mx.array] = field(default_factory=dict)
+
+    @classmethod
+    def over(cls, tree: Tree, offset: int) -> TreePass:
+        """The pass for ``tree`` hanging off ``offset`` cached tokens."""
+        return cls(tree, offset, mx.array(tree.ancestors, mx.int32),
+                   mx.array([offset + d for d in tree.depth], mx.int32),
+                   attention.tree_mask(tree.ancestors, offset))
+
+    def conv_taps(self, width: int, dilation: int = 1) -> mx.array:
+        """Rows into ``[prefix rows | tree rows]`` for a causal convolution along each path."""
+        key = (width, dilation)
+        if key not in self.taps:
+            self.taps[key] = deltanet.conv_taps(self.tree.depth, self.tree.ancestors, width,
+                                                dilation)
+        return self.taps[key]
+
+
 class TreeVerifier:
     """Next-token logits for every node of a tree hanging off ``cache``, then a commit.
 
-    ``taps`` are layer indices whose outputs are concatenated into ``fused`` on every pass,
-    for a drafter that reads the target's residual stream.
+    ``taps`` are layer indices whose outputs, as the layout taps them, are concatenated into
+    ``fused`` on every pass, for a drafter that reads the target's residual stream.
     """
 
     def __init__(self, layout: Layout, cache: list[Any], taps: Sequence[int] = ()) -> None:
@@ -29,14 +63,10 @@ class TreeVerifier:
         self.cache = cache
         self.taps = tuple(taps)
         self.fused: mx.array | None = None
-        self._pending: dict[int, deltanet.Pending] = {}
-        self._offset = 0
-        linear = [i for i in range(layout.layer_count) if layout.is_linear(i)]
-        self._linear = set(linear)
-        self._attention = [i for i in range(layout.layer_count) if i not in self._linear]
+        self._pass: TreePass | None = None
 
     def prefill(self, tokens: Sequence[int], chunk: int = 2048) -> mx.array:
-        """Run ``tokens`` into the cache; returns their pre-norm hidden states [T, D]."""
+        """Run ``tokens`` into the cache; returns their residual states [T, D]."""
         hidden, fused = [], []
         for start in range(0, len(tokens), chunk):
             ids = mx.array(list(tokens[start:start + chunk]), mx.uint32)[None]
@@ -50,34 +80,21 @@ class TreeVerifier:
 
     @property
     def offset(self) -> int:
-        """Tokens already in the attention caches."""
-        return int(self.cache[self._attention[0]].offset) if self._attention else 0
+        """Tokens already in the caches."""
+        return self.layout.offset(self.cache)
 
     def forward(self, tree: Tree) -> tuple[mx.array, mx.array]:
-        """``(logits [N, V], pre-norm hidden [N, D])`` for every node of ``tree``."""
+        """``(logits [N, V], residual [N, D])`` for every node of ``tree``."""
         layout = self.layout
-        offset = self.offset
-        self._offset = offset
-        ancestors = mx.array(tree.ancestors, mx.int32)
-        width = self._conv_width()
-        taps = deltanet.conv_taps(tree.depth, tree.ancestors, width) if width else None
-        mask = attention.tree_mask(tree.ancestors, offset)
-        positions = mx.array([offset + d for d in tree.depth], mx.int32)
-        hidden = layout.embed(mx.array(tree.tokens, mx.uint32))
+        walk = TreePass.over(tree, self.offset)
+        self._pass = walk
+        hidden = layout.enter(mx.array(tree.tokens, mx.uint32))
         tapped = []
         wanted = set(self.taps)
         for index in range(layout.layer_count):
-            mod, held = layout.mixer(index), self.cache[index]
-            if index in self._linear:
-                def mix(x, mod=mod, held=held, index=index):
-                    out, self._pending[index] = deltanet.tree_mix(mod, held, x, taps, ancestors)
-                    return out
-            else:
-                def mix(x, mod=mod, held=held):
-                    return attention.attend(mod, held, x, positions, mask)
-            hidden = layout.block(index, hidden, mix)
+            hidden = layout.block(index, hidden, self.cache[index], walk)
             if index in wanted:
-                tapped.append(hidden)
+                tapped.append(layout.tap(index, hidden))
             if index % ASYNC_EVERY == ASYNC_EVERY - 1:
                 mx.async_eval(hidden)
         self.fused = mx.concatenate(tapped, axis=-1) if tapped else None
@@ -85,13 +102,11 @@ class TreeVerifier:
 
     def commit(self, path: Sequence[int]) -> None:
         """Keep the root-to-node ``path`` (node indices, starting at 0) in every cache."""
+        walk = self._pass
+        if walk is None:
+            raise RuntimeError("commit follows a forward pass")
         rows = mx.array(list(path), mx.int32)
-        attention.compact([self.cache[i] for i in self._attention], self._offset, rows)
-        for index in self._linear:
-            deltanet.commit(self.layout.mixer(index), self.cache[index],
-                            self._pending.pop(index), rows)
-
-    def _conv_width(self) -> int:
-        for index in self._linear:
-            return int(self.layout.mixer(index).conv_kernel_size)
-        return 0
+        attention.compact(walk.attention, walk.offset, rows)
+        for keep in walk.commits:
+            keep(rows)
+        self._pass = None

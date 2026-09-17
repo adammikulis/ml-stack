@@ -9,8 +9,8 @@ from typing import Any
 
 import mlx.core as mx
 import numpy as np
-from mlx_lm.models.cache import ArraysCache, KVCache
 
+from ml_stack.spec import attention
 from ml_stack.spec.accept import Accepted, Rule, walk
 from ml_stack.spec.drafters import Drafter
 from ml_stack.spec.layout import Layout
@@ -70,7 +70,7 @@ class Decoded:
 @dataclass
 class _Snapshot:
     count: int
-    linear: dict[int, tuple[Any, Any]]
+    linear: dict[int, list[Any]]
     drafter: object
     hidden: mx.array
 
@@ -97,17 +97,18 @@ class Session:
         """Remember the current state; ``hidden`` is the last cached token's pre-norm hidden."""
         if not self.keep or self.cache is None:
             return
-        linear = {i: (c[0], c[1]) for i, c in enumerate(self.cache) if isinstance(c, ArraysCache)}
+        linear = {i: list(c.cache) for i, c in enumerate(self.cache)
+                  if not hasattr(c, "update_and_fetch")}
         taken = _Snapshot(len(self.tokens), linear, self.drafter.state(), hidden)
         self._snapshots = [s for s in self._snapshots if s.count < taken.count] + [taken]
         del self._snapshots[:-self.keep]
 
     def _restore(self, cache: list[Any], snap: _Snapshot) -> None:
-        for index, (conv, state) in snap.linear.items():
-            cache[index][0], cache[index][1] = conv, state
+        for index, arrays in snap.linear.items():
+            cache[index].cache = list(arrays)
         for held in cache:
-            if isinstance(held, KVCache):
-                held.offset = snap.count
+            if hasattr(held, "update_and_fetch"):
+                attention.rewind(held, snap.count)
         self.drafter.restore(snap.drafter)
         del self.tokens[snap.count:]
         self._snapshots = [s for s in self._snapshots if s.count <= snap.count]

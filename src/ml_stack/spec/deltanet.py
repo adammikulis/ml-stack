@@ -13,7 +13,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.gated_delta import compute_g, gated_delta_update
 
-__all__ = ["Pending", "commit", "conv_taps", "tree_mix", "walk"]
+__all__ = ["Pending", "commit", "conv_taps", "gates_of", "normalized", "tree_mix", "walk"]
 
 _WALK = r"""
     const uint g = thread_position_in_grid.x;
@@ -78,16 +78,36 @@ class Pending:
     b: mx.array
 
 
-def conv_taps(depth: list[int], ancestors: list[list[int]], width: int) -> mx.array:
-    """Row index into ``[prefix conv rows | tree rows]`` for every node's convolution taps."""
-    pad = width - 1
+def conv_taps(depth: list[int], ancestors: list[list[int]], width: int,
+              dilation: int = 1) -> mx.array:
+    """Row index into ``[prefix rows | tree rows]`` for every node's convolution taps, oldest first.
+
+    The prefix holds the last ``(width - 1) * dilation`` rows before the tree.
+    """
+    pad = (width - 1) * dilation
     rows = []
     for node, d in enumerate(depth):
         row = []
-        for s in range(pad, -1, -1):
+        for s in range(pad, -1, -dilation):
             row.append(pad + ancestors[node][s] if s <= d else pad - 1 - (s - d - 1))
         rows.append(row)
     return mx.array(rows, mx.int32)
+
+
+def gates_of(mod: nn.Module, x: mx.array) -> tuple[mx.array, mx.array]:
+    """The write and decay gate projections ``(b, a)``, through the model's own when it has one."""
+    own = getattr(mod, "_project_gates", None)
+    return own(x) if own is not None else (mod.in_proj_b(x), mod.in_proj_a(x))
+
+
+def normalized(mod: nn.Module, q: mx.array, k: mx.array) -> tuple[mx.array, mx.array]:
+    """q and k normalised and scaled as the model does: its own normaliser, or RMS with 1/d."""
+    own = getattr(mod, "_normalize_qk", None)
+    if own is not None:
+        return own(q, k)
+    inv_scale = q.shape[-1] ** -0.5
+    return ((inv_scale ** 2) * mx.fast.rms_norm(q, None, 1e-6),
+            inv_scale * mx.fast.rms_norm(k, None, 1e-6))
 
 
 def tree_mix(mod: nn.Module, cache: list, x: mx.array, taps: mx.array,
@@ -96,8 +116,7 @@ def tree_mix(mod: nn.Module, cache: list, x: mx.array, taps: mx.array,
     count = x.shape[0]
     qkv = mod.in_proj_qkv(x)
     z = mod.in_proj_z(x).reshape(count, mod.num_v_heads, mod.head_v_dim)
-    b = mod.in_proj_b(x)
-    a = mod.in_proj_a(x)
+    b, a = gates_of(mod, x)
     pad = mod.conv_kernel_size - 1
     held = cache[0][0] if cache[0] is not None else mx.zeros((pad, qkv.shape[-1]), dtype=x.dtype)
     history = mx.concatenate([held, qkv], axis=0)
@@ -108,9 +127,7 @@ def tree_mix(mod: nn.Module, cache: list, x: mx.array, taps: mx.array,
     q = q.reshape(count, mod.num_k_heads, mod.head_k_dim)
     k = k.reshape(count, mod.num_k_heads, mod.head_k_dim)
     v = v.reshape(count, mod.num_v_heads, mod.head_v_dim)
-    inv_scale = mod.head_k_dim ** -0.5
-    q = (inv_scale ** 2) * mx.fast.rms_norm(q, None, 1e-6)
-    k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
+    q, k = normalized(mod, q, k)
     beta = mx.sigmoid(b)
     alpha = compute_g(mod.A_log, a, mod.dt_bias)
     p, y = walk(q, k, v, (alpha, beta), ancestors)

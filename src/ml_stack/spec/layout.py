@@ -1,26 +1,30 @@
-"""How a hybrid model lays out its layers, for a verifier that swaps in its own token mixers.
+"""How a hybrid model lays out its layers, for a verifier that runs them over a draft tree.
 
-A layout names the embedding, the head, which layers are gated DeltaNet and which are full
-attention, and how one layer wraps its mixer. The verifier supplies the mixer; the layout
-runs everything around it, so two architectures share one verifier.
+A layout names the embedding, the head and the residual stream, runs one layer over every
+node of a tree with the tree mixers of `deltanet` and `attention`, and prefills a prompt
+through the model's own layers, so one verifier serves every architecture that has one.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from typing import Any, Protocol
+import importlib
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Protocol
 
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_lm.models.base import create_attention_mask, create_ssm_mask
 
-__all__ = ["Layout", "Qwen35Layout", "layout_for"]
+from ml_stack.spec import LAYOUTS, attention, deltanet
 
-Mixer = Callable[[mx.array], mx.array]
+if TYPE_CHECKING:
+    from ml_stack.spec.verify import TreePass
+
+__all__ = ["Layout", "Qwen35Layout", "layout_for", "offset_of"]
 
 
 class Layout(Protocol):
-    """What the verifier needs to know about a hybrid model."""
+    """What the verifier and the drafters need to know about a hybrid model."""
 
     model: nn.Module
     args: Any
@@ -28,22 +32,37 @@ class Layout(Protocol):
     @property
     def layer_count(self) -> int: ...
 
-    def is_linear(self, index: int) -> bool: ...
-
-    def mixer(self, index: int) -> nn.Module: ...
-
     def embed(self, tokens: mx.array) -> mx.array: ...
+
+    def enter(self, tokens: mx.array) -> mx.array: ...
 
     def logits(self, hidden: mx.array) -> mx.array: ...
 
     def head(self) -> nn.Module: ...
 
-    def block(self, index: int, hidden: mx.array, mix: Mixer) -> mx.array: ...
+    def tap(self, index: int, hidden: mx.array) -> mx.array: ...
+
+    def block(self, index: int, hidden: mx.array, cache: Any, walk: TreePass) -> mx.array: ...
 
     def prefill(self, tokens: mx.array, cache: list[Any],
                 taps: Sequence[int]) -> tuple[mx.array, list[mx.array]]: ...
 
     def make_cache(self) -> list[Any]: ...
+
+    def offset(self, cache: list[Any]) -> int: ...
+
+
+def offset_of(cache: list[Any]) -> int:
+    """Tokens held by the first attention cache in ``cache``, 0 when there is none."""
+    return next((int(held.offset) for held in cache if hasattr(held, "update_and_fetch")), 0)
+
+
+def linear_block(mod: nn.Module, cache: Any, x: mx.array, walk: TreePass) -> mx.array:
+    """A gated DeltaNet mixer over the tree, leaving its conv and state commit on ``walk``."""
+    taps = walk.conv_taps(int(mod.conv_kernel_size))
+    out, pending = deltanet.tree_mix(mod, cache, x, taps, walk.ancestors)
+    walk.commits.append(lambda rows: deltanet.commit(mod, cache, pending, rows))
+    return out
 
 
 class Qwen35Layout:
@@ -59,15 +78,12 @@ class Qwen35Layout:
     def layer_count(self) -> int:
         return len(self.inner.layers)
 
-    def is_linear(self, index: int) -> bool:
-        return bool(self.inner.layers[index].is_linear)
-
-    def mixer(self, index: int) -> nn.Module:
-        layer = self.inner.layers[index]
-        return layer.linear_attn if layer.is_linear else layer.self_attn
-
     def embed(self, tokens: mx.array) -> mx.array:
         return self.inner.embed_tokens(tokens)
+
+    def enter(self, tokens: mx.array) -> mx.array:
+        """The residual stream a pass starts from."""
+        return self.embed(tokens)
 
     def logits(self, hidden: mx.array) -> mx.array:
         normed = self.inner.norm(hidden)
@@ -79,9 +95,19 @@ class Qwen35Layout:
         """The output projection a drafter scores its own hidden states with."""
         return self.inner.embed_tokens if self.args.tie_word_embeddings else self.text.lm_head
 
-    def block(self, index: int, hidden: mx.array, mix: Mixer) -> mx.array:
+    def tap(self, index: int, hidden: mx.array) -> mx.array:
+        """What a drafter reads of layer ``index``'s output."""
+        return hidden
+
+    def block(self, index: int, hidden: mx.array, cache: Any, walk: TreePass) -> mx.array:
         layer = self.inner.layers[index]
-        hidden = hidden + mix(layer.input_layernorm(hidden))
+        x = layer.input_layernorm(hidden)
+        if layer.is_linear:
+            mixed = linear_block(layer.linear_attn, cache, x, walk)
+        else:
+            walk.attention.append(cache)
+            mixed = attention.attend(layer.self_attn, cache, x, walk.positions, walk.mask)
+        hidden = hidden + mixed
         return hidden + layer.mlp(layer.post_attention_layernorm(hidden))
 
     def prefill(self, tokens: mx.array, cache: list[Any],
@@ -100,18 +126,23 @@ class Qwen35Layout:
     def make_cache(self) -> list[Any]:
         return self.model.make_cache()
 
+    def offset(self, cache: list[Any]) -> int:
+        return offset_of(cache)
 
-LAYOUTS: dict[str, type[Qwen35Layout]] = {
-    "qwen3_5": Qwen35Layout,
-    "qwen3_5_moe": Qwen35Layout,
-}
+
+def model_type_of(model: nn.Module) -> str:
+    """The ``model_type`` of a loaded mlx-lm or mlx-vlm model."""
+    kind = getattr(model, "model_type", None) or getattr(getattr(model, "config", None),
+                                                          "model_type", "")
+    return str(kind or "")
 
 
 def layout_for(model: nn.Module) -> Layout:
-    """The layout for a loaded mlx-lm model, by its ``model_type``."""
-    kind = str(getattr(model, "model_type", "") or "")
-    made = LAYOUTS.get(kind)
-    if made is None:
+    """The layout for a loaded model, by its ``model_type``."""
+    kind = model_type_of(model)
+    named = LAYOUTS.get(kind)
+    if named is None:
         raise ValueError(f"no tree-verification layout for model_type {kind!r}; "
                          f"known: {', '.join(sorted(LAYOUTS))}")
-    return made(model)
+    module, _, attribute = named.partition(":")
+    return getattr(importlib.import_module(module), attribute)(model)
