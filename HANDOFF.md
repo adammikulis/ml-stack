@@ -5,7 +5,8 @@ why is in `README.md`, `docs/`, the code and `git log`. Each carries the context
 up cold. Rules: invented names only, everywhere (`tests/known-fixtures.txt`, or a rule in
 `contracts/name-shapes.json` when the refusal is a code fragment); tests build their own
 fixtures and never read `~/.ml-stack`; a measurement is estimated before it runs and smoked
-before it is paid for; nothing is pushed without Adam's go-ahead (a push cuts a release).
+before it is paid for; the development branch is pushed after every merge and `main` is
+pushed by Adam alone (a push there cuts a release).
 The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
 Slack-specific. What was measured on 2026-09-02 and what it settled is
 `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `docs/architectures/` and

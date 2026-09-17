@@ -1,19 +1,31 @@
 #!/bin/sh
-# Refuse a push from an agent. Claude Code sets CLAUDECODE for every command it runs, and
-# a person's shell does not; ML_STACK_PUSH=yes pushes anyway.
+# Refuse an agent's push of anything but the development branch. Claude Code sets CLAUDECODE
+# for every command it runs, and a person's shell does not. The development branch is the one
+# the primary checkout is on, and `main` is never it.
 [ -z "$CLAUDECODE" ] && exit 0
-[ "$ML_STACK_PUSH" = yes ] && exit 0
-cat >&2 <<'WHY'
-pre-push: refused.
 
-A push is the repository owner's to make. release-please reads the commit subjects on
-`main`, so pushing moves the release pull request, and a local `main` that is ahead
-publishes every commit on it at once.
+primary=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+dev=$(git -C "$primary" branch --show-current)
+zero=0000000000000000000000000000000000000000
 
-Land your branch into the development branch the primary checkout is on -- `git branch
---show-current` there says which -- and stop. Never into `main`. Say in your report that
-it is unpushed.
+refused=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -z "$remote_ref" ] && continue
+    if [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ] \
+            || [ "$local_sha" = "$zero" ]; then
+        refused="$refused $remote_ref"
+    fi
+done
 
-To push on purpose:  ML_STACK_PUSH=yes git push
+[ -z "$refused" ] && exit 0
+cat >&2 <<WHY
+pre-push: refused:$refused
+
+An agent pushes the development branch and nothing else. release-please reads the commit
+subjects on \`main\`, so a push there moves the release pull request and publishes every
+commit on it at once; that push is the repository owner's.
+
+Land your branch into the development branch the primary checkout is on, then push it by
+name: git push origin ${dev:-<development branch>}
 WHY
 exit 1
