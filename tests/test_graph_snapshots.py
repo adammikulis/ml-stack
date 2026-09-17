@@ -9,8 +9,18 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.graph.snapshots import (SnapshotError, clone_file, read_manifest,
-                                      remove_store, restore, snapshots, take, unmanaged)
+from ml_stack.graph.snapshots import (
+    SnapshotError,
+    before_writing,
+    clone_file,
+    prune,
+    read_manifest,
+    remove_store,
+    restore,
+    snapshots,
+    take,
+    unmanaged,
+)
 
 
 def counter(path):
@@ -92,15 +102,71 @@ def test_two_snapshots_in_one_second_do_not_overwrite_each_other(tmp_path):
     assert len(snapshots(src)) == 2
 
 
-def test_only_the_newest_are_kept(tmp_path):
+def _aged(record, days):
+    """Back-date a snapshot's manifest by some days."""
+    manifest = Path(record.path + ".json")
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["created_at"] -= days * 86400
+    manifest.write_text(json.dumps(raw), encoding="utf-8")
+
+
+def test_the_newest_are_kept_and_so_is_anything_from_the_last_week(tmp_path):
     src = a_store(tmp_path)
-    for i in range(5):
-        take(src, reason=f"take {i}", count=counter, keep=3)
+    taken = [take(src, reason=f"take {i}", count=counter, keep=100) for i in range(5)]
+    for record in taken[:3]:
+        _aged(record, 30)
+    prune(src, keep=1)
+    assert [r.reason for r in snapshots(src)] == ["take 4", "take 3"]
+    assert len(list((tmp_path / "_backups").glob("*.json"))) == 2
+    prune(src, keep=1, days=0)
+    assert [r.reason for r in snapshots(src)] == ["take 4"]
+
+
+def test_two_stores_beside_each_other_keep_their_snapshots_apart(tmp_path):
+    one, two = a_store(tmp_path, name="one.store"), a_store(tmp_path, name="two.store")
+    take(one, reason="one", count=counter)
+    for i in range(3):
+        _aged(take(two, reason=f"two {i}", count=counter), 30)
+    prune(two, keep=0)
+    assert [r.reason for r in snapshots(one)] == ["one"]
+    assert snapshots(two) == []
+
+
+def test_a_store_that_reads_two_ways_is_kept_as_it_is_and_refused_a_write(tmp_path):
+    src = a_store(tmp_path)
+
+    def damaged(path):
+        return {"lines": 3, "Edge disagreeing": 2}
+
+    with pytest.raises(SnapshotError, match="reads differently"):
+        before_writing(src, reason="a migration", count=damaged)
     kept = snapshots(src)
-    assert len(kept) == 3
-    assert [r.reason for r in kept] == ["take 4", "take 3", "take 2"]
-    # the manifests of the pruned ones went too
-    assert len(list((tmp_path / "_backups").glob("*.json"))) == 3
+    assert [r.counts["Edge disagreeing"] for r in kept] == [2]
+    assert "2 Edge disagreeing" in kept[0].describe()
+    assert "disagreeing" not in take(src, reason="sound", count=counter).describe()
+
+
+def test_a_write_is_owed_a_snapshot_once_per_process_until_one_is_asked_for(tmp_path):
+    src = a_store(tmp_path)
+    assert before_writing(tmp_path / "absent.store", reason=None, count=counter) is None
+    first = before_writing(src, reason=None, count=counter)
+    assert first is not None and first.reason.startswith("auto:")
+    assert before_writing(src, reason=None, count=counter) is None
+    assert before_writing(src, reason="a migration", count=counter).reason == "a migration"
+    assert before_writing(src, reason=None, count=counter, every_s=0) is not None
+
+
+def test_a_restore_that_does_not_land_says_so(tmp_path):
+    src = a_store(tmp_path, 3)
+    record = take(src, reason="known good", count=counter)
+    calls = []
+
+    def lands_short(path):
+        calls.append(path)
+        return {"lines": 1} if Path(path) == src and len(calls) > 3 else counter(path)
+
+    with pytest.raises(SnapshotError, match="did not land"):
+        restore(record.path, count=lands_short)
 
 
 def test_restoring_puts_it_back_and_keeps_what_was_there(tmp_path):

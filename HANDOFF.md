@@ -76,37 +76,17 @@ capability; every line is something that already exists not being what it says.
   Windows job and a 3.11/3.13 matrix; then delete or wire `CHOSEN_BUILD`.
 
 ### Not losing what it read
-- [ ] **Two ladybug faults are worked around here and stay here.** Adam, 2026-09-04: no
-  upstreaming to public repositories. 0.18.x: a single `DETACH DELETE` in a ~10k-node
-  store blanks other nodes' string columns (reproduction: `tests/test_graph_store_scale.py`).
-  0.20.2: the cached-physical-plan fast path re-executes a parameterized MERGE against a
-  table rewritten since and segfaults, and the text index returns a node once per version
-  written (reproduction: the store's `_written` docstring; two lines). ml-stack is on
-  0.20.2 with the per-write guard and the pin `>=0.19,<0.21`; the probes gate any bump,
-  which is the whole of what is left to do about them.
-
-
-- [ ] **Nothing detects a stale write-ahead log, and the recovery is written down nowhere.**
-  `GraphStore.__init__` opens the database without looking for `<store>.wal`; a log left by
-  a killed writer segfaults the engine on open, which no Python `except` can catch, so
-  `ml-stack-store check`, `ml-stack-doctor` and `fold` all die the same way with no
-  message. The recovery -- `ml-stack-ingest fold --rebuild` from the `.reads.json` files --
-  appears once in `docs/ingest.md` as a note about deduplication. Warn at open when a log is
-  present, name the command, and write the recovery down where someone looking for it will
-  be. This has cost two rebuilds already.
+- [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
+  upstreaming to public repositories). `CypherStore._run` prepares every statement that
+  carries values afresh, and `access.read_lock` keeps a writer out while a read runs.
+  `tests/test_graph_engine_contract.py` has one test for each that goes red when a ladybug
+  release no longer needs it; drop the workaround in the same commit as that test.
 - [ ] **A store that is half embedded reports success with no denominator.**
   `graph/vectors.py` logs `vectors: N of M` only when it is given a log, and
   `ingest/run.py` passes none, then prints `embedded N node(s)`. An embedding server that
   dies at node 3,000 of 9,700 prints `embedded 3000 node(s)` and every question over the
   rest of the store is answered by words alone, silently. Pass the log through, and have
   `ml-stack-store check` report vector coverage.
-- [ ] **The store engine is unpinned inside its range and CI resolves it fresh.**
-  `pyproject.toml` has `ladybug>=0.19,<0.21` while the two workarounds in `graph/store.py`
-  are specific to 0.20's plan cache and its version-per-write; the pin's comment claims
-  0.20.2 returned nothing from a fresh store's scans on Linux, which is the version
-  installed here and contradicts what this file records under store integrity. Pin
-  `ladybug==0.20.2`, and fix or delete the comment. The probes that would catch a bad
-  version are `slow`, so a default test run skips them.
 
 ### Text it was never licensed to keep
 - [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,
