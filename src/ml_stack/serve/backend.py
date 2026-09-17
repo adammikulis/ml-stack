@@ -12,7 +12,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from ml_stack import home
 from ml_stack.client import wait_for_health
@@ -692,7 +692,7 @@ class LlamaServerBackend(ServerBackend):
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
 
         started_at = time.monotonic()
-        with log_path.open("wb") as log_handle:
+        with fresh_log(log_path) as log_handle:
             process = subprocess.Popen(
                 argv,
                 stdout=log_handle,
@@ -754,6 +754,16 @@ class LlamaServerBackend(ServerBackend):
             logger.debug("warm-up request to %s did not complete: %s", base_url, exc)
             return None
         return time.monotonic() - started
+
+
+def fresh_log(path: Path) -> BinaryIO:
+    """A new, empty log file under ``path``'s name, opened for writing.
+
+    The previous file is unlinked rather than truncated, so a restart gets a new inode
+    and anything still reading the last run's log keeps what it holds.
+    """
+    path.unlink(missing_ok=True)
+    return path.open("wb")
 
 
 def tail(path: Path, lines: int = 40) -> str:
