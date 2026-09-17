@@ -22,8 +22,8 @@ def estimate(model: str, *, context: int = 32768, draft: str = "auto",
     peer and lets that peer's preflight be the judge, as `weight_of` leaves it to the load.
     ``preflight`` is `serve.preflight.Preflight` unless a test hands in a fake.
     """
-    from ml_stack.serve.manager import weight_of
     from ml_stack.serve.preflight import RUNTIME_ALLOWANCE_BYTES
+    from ml_stack.serve.weights import weight_of
 
     path = _at_hand(model)
     if path is None:

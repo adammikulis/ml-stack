@@ -380,7 +380,8 @@ def served(config: Config, *, say: Callable[[str], None] | None = None,
     and left up; otherwise ``config`` is leased and the lease goes when the block ends. ``over``
     goes to :func:`ml_stack.serve.serve`.
     """
-    from ml_stack.serve.manager import already_up, serve
+    from ml_stack.serve.leases import already_up
+    from ml_stack.serve.manager import serve
 
     told = say or (lambda _line: None)
     up = already_up(config.model, config.port)

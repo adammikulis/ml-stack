@@ -12,10 +12,10 @@ from ml_stack.log import say, warn
 from ml_stack.serve import build, ops
 from ml_stack.serve.backend import ServerFailed, ServerSpec, UnknownFlag, parse_context
 from ml_stack.serve.binary import BinaryNotFound
-from ml_stack.serve.manager import DEFAULT_TIMEOUT_S
 from ml_stack.serve.ops import DEFAULT_ROOT, Refused
 from ml_stack.serve.profile import ASK, WORKLOADS, profile_for, resolved
 from ml_stack.serve.serving import said_cache, split_cache_type
+from ml_stack.serve.weights import DEFAULT_TIMEOUT_S
 
 __all__ = ["OPTIONS_BUILD", "OPTIONS_DOWN", "OPTIONS_ESCALATE", "OPTIONS_UP",
            "cmd_build", "cmd_down", "cmd_escalate", "cmd_up", "from_profile"]

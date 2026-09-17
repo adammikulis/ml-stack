@@ -37,12 +37,8 @@ from ml_stack.serve.backend import (
     default_slot_save_path,
 )
 from ml_stack.serve.binary import BinaryNotFound
-from ml_stack.serve.manager import (
-    ServerManager,
-    lease_file,
-    orphaned,
-    recorded_servers,
-)
+from ml_stack.serve.leases import lease_file, orphaned, recorded_servers
+from ml_stack.serve.manager import ServerManager
 from ml_stack.serve.mlx_tree import is_mlx, report_for
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import every_server, machine_memory, pid_exists
@@ -533,7 +529,7 @@ def measure(names: Sequence[str], *, spec: ServerSpec, backend: LlamaServerBacke
             timeout: float | None = None, room: int = 0, draft: str = "",
             resident: tuple[int, int] = (0, 0)) -> list[Recorded]:
     """Serve each named model once at ``-lv 4`` and record what it allocated."""
-    from ml_stack.serve.manager import weight_of
+    from ml_stack.serve.weights import weight_of
 
     out: list[Recorded] = []
     for named in names:

@@ -18,17 +18,15 @@ from ml_stack.serve.binary import (
     find_binary,
     require_binary,
 )
+from ml_stack.serve.escalation import EscalationRefused
+from ml_stack.serve.leases import merge_state, recorded_servers
 from ml_stack.serve.manager import (
-    EscalationRefused,
     Measuring,
     ServerManager,
-    merge_state,
-    model_matches,
-    recorded_servers,
     serve,
-    serving_mismatch,
     stop_all_servers,
 )
+from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.ports import (
     DEFAULT_HOST,
     free_port,

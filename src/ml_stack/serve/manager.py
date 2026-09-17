@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -15,12 +13,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
 from ml_stack.client import is_healthy, reported_models
-from ml_stack.client.health import ServingParams, serving_params
+from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
-from ml_stack.http import ServerError, request_json
 from ml_stack.hub import free_memory
+from ml_stack.hub import room as machine_room
 from ml_stack.serve.backend import (
     Lease,
     LlamaServerBackend,
@@ -30,38 +27,30 @@ from ml_stack.serve.backend import (
     ServerSpec,
     default_slot_save_path,
 )
+from ml_stack.serve.escalation import (
+    Escalating,
+    plan_for,
+    restore,
+    save_live,
+    slots_on,
+    summarise,
+)
+from ml_stack.serve.events import Event, emit
+from ml_stack.serve.leases import (
+    lease_file,
+    merge_state,
+    orphaned,
+    reap_one,
+    recorded_servers,
+)
+from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import kill_process_tree, pid_exists, self_or_ancestor
 from ml_stack.serve.python_engines import ENGINES
-from ml_stack.units import human_bytes
+from ml_stack.serve.weights import scaled_timeout, weight_of
 
 logger = logging.getLogger(__name__)
-
-Event = Callable[[dict[str, Any]], None]
-"""``on_event({"event": name, ...fields})`` -- a step a caller waiting on a lease or an
-escalation can show as it happens, not after. A handler's own errors are swallowed: a
-broken display must not fail the lease it is only reporting on."""
-
-# What a slot's cache is asked to become when a live conversation cannot be summarised.
-SUMMARY_PROMPT = (
-    "Summarise this conversation so far in under 200 words. Keep every fact, decision "
-    "and open question a continuation of it would need.")
-
-# Appended to a slot's own cached prompt text for a raw /completion continuation, so the
-# shared prefix is a cache hit and only this tail and the generation are new work.
-SUMMARY_SUFFIX = (
-    "\n\nSummarise the conversation above in under 200 words. Keep every fact, decision "
-    "and open question a continuation of it would need.\n\nSummary:")
-
-
-def _emit(on_event: Event | None, event: str, **fields: Any) -> None:
-    if on_event is None:
-        return
-    try:
-        on_event({"event": event, **fields})
-    except Exception:  # noqa: BLE001 - a caller's display is not this lease's problem
-        pass
 
 
 class Measuring(ServerFailed):
@@ -89,13 +78,6 @@ def measurement_said(held: dict[str, Any]) -> str:
     return f"{what} (pid {held.get('pid')}){since}"
 
 
-class EscalationRefused(ServerFailed):
-    """Growing or splitting a server's slots would drop a live conversation's cache, and
-    summarising it did not rescue that. The saved cache named in the message is kept."""
-
-def lease_file() -> Path:
-    """The file recording which model servers this machine is running."""
-    return home.moved("servers.json")
 UNAVAILABLE_COOLDOWN_S = 3.0
 STATE_LOCK_TIMEOUT_S = 30.0
 
@@ -103,170 +85,6 @@ STATE_LOCK_TIMEOUT_S = 30.0
 # because a model needs its weights *and* room to work in, and a machine that fills itself
 # exactly swaps instead of serving.
 BESIDE_HEADROOM = 0.8
-
-# The flat timeout this used to be, kept as the floor: a small model that always loaded in
-# ten seconds must not suddenly wait less than 300 just because it is small.
-DEFAULT_TIMEOUT_S = 300.0
-_GB = 1024 ** 3
-
-
-def scaled_timeout(weights_bytes: int, *, base: float = DEFAULT_TIMEOUT_S) -> float:
-    """A load timeout that grows with the weights, so an 87G model is not raced against a
-    timeout sized for a 4G one. 60s plus 1.5s per GB of weights, or ``base`` -- whichever is
-    larger. ``weights_bytes`` is 0 for an `hf:` reference not yet on disk, and 0 leaves the
-    floor untouched: an unknown size is not the same as an enormous one."""
-    return max(base, 60.0 + 1.5 * (weights_bytes / _GB))
-
-
-def weight_of(model: str | Path) -> int:
-    """Roughly what a model will take, from the weights on disk. 0 when they are not here.
-
-    A `hf:` reference has not been downloaded yet the first time, so its size is unknown and
-    unknown is not the same as enormous — it is left to the load to find out.
-    """
-    if isinstance(model, str) and model.startswith("hf:"):
-        return 0
-    where = Path(model)
-    if not where.exists():
-        return 0
-    # a sharded model names its first file; the others sit beside it
-    shards = sorted(where.parent.glob(where.name.replace("00001", "*"))) or [where]
-    return sum(s.stat().st_size for s in shards if s.is_file())
-
-
-def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
-    """This process's servers, merged over every other record whose owner or server is alive."""
-    merged = {
-        key: entry
-        for key, entry in on_disk.items()
-        if isinstance(entry, dict)
-        and entry.get("owner_pid") != owner_pid
-        and (pid_exists(entry.get("owner_pid")) or pid_exists(entry.get("pid")))
-    }
-    merged.update(mine)
-    return merged
-
-
-def _reap_one(held: Any, *, grace_s: float) -> None:
-    """Wait on a child this process started, so its pid leaves the table."""
-    if held is None:
-        return
-    with contextlib.suppress(subprocess.TimeoutExpired, ChildProcessError, OSError):
-        held.wait(timeout=grace_s)
-
-
-def orphaned(entry: dict) -> bool:
-    """Whether a record's server is running on after the process that leased it has gone."""
-    owner, pid = entry.get("owner_pid"), entry.get("pid")
-    return (isinstance(owner, int) and isinstance(pid, int) and owner != pid
-            and not pid_exists(owner) and pid_exists(pid))
-
-
-def repo_only(model: str | Path) -> str:
-    """The ``owner/repo`` a reference names when it names no file in it; else ""."""
-    text = str(model).removeprefix("hf:").strip("/")
-    parts = text.split("/")
-    return text.lower() if len(parts) == 2 and not parts[1].endswith(".gguf") else ""
-
-
-def model_matches(reported: str, wanted: str | Path, *, loaded_file: str | None = None) -> bool:
-    """Whether a server reporting ``reported`` is serving ``wanted``.
-
-    ``loaded_file`` is what the server's own ``/props`` says it actually loaded (its
-    ``model_path``), when a caller has one. A reference to a repository with no file
-    in it -- what a server started from a repository reports over ``/v1/models`` --
-    is not evidence it holds any particular file of that repository: two files of one
-    repository are not the same weights. ``loaded_file`` is what breaks the tie; a
-    bare-repository report with no file requested either still matches every file of
-    that repository, since nothing named a file to check.
-    """
-    if loaded_file and repo_only(reported):
-        reported = loaded_file
-    wanted_repo, reported_repo = repo_only(wanted), repo_only(reported)
-    if reported_repo and not wanted_repo:
-        # the report names only the repository, a specific file was asked for, and
-        # which file actually loaded is not known -- do not assume it is this one
-        return False
-    repo = reported_repo or wanted_repo
-    if repo:
-        other = wanted if reported_repo else reported
-        return repo in str(other).removeprefix("hf:").lower().replace("_", "/")
-    wanted_name = Path(str(wanted).removeprefix("hf:")).name.lower()
-    reported_name = Path(reported).name.lower()
-    if not wanted_name or not reported_name:
-        return False
-    return wanted_name in reported_name or reported_name in wanted_name
-
-
-def serving_mismatch(
-    spec: ServerSpec,
-    models: list[str],
-    params: ServingParams | None,
-) -> list[str]:
-    """Each field in which a running server differs from ``spec``. Empty when it fits."""
-    out: list[str] = []
-
-    loaded_file = params.model if params else None
-    if models and not any(model_matches(m, spec.model, loaded_file=loaded_file) for m in models):
-        serving = ", ".join(repr(Path(name).name) for name in models)
-        asked = Path(str(spec.model).removeprefix("hf:")).name
-        out.append(f"model: asked for {asked!r}, serving {serving}")
-
-    if params is None:
-        return out
-
-    slots = max(int(spec.parallel or 1), 1)
-    if params.total_slots is not None and params.total_slots < slots:
-        out.append(f"slots: asked for {slots}, serving {params.total_slots}")
-
-    # llama-server reports the context of one slot: --ctx-size divided by -np.
-    per_slot = int(spec.context) // slots
-    if params.n_ctx is not None and params.n_ctx < per_slot:
-        out.append(f"context: asked for {per_slot} per slot, serving {params.n_ctx}")
-
-    # a spec that brings its own template wants one that renders a late system message;
-    # a server still on the model's own, which refuses one, is not what was asked for
-    if spec.chat_template_file and params.chat_template:
-        from ml_stack.serve.chat_template import needs_forgiving
-
-        if needs_forgiving(params.chat_template):
-            out.append("chat template: asked for one that renders a late system message, "
-                       "serving one that refuses it")
-
-    return out
-
-
-def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict | None:
-    """The recorded server on ``port`` if it serves ``model`` (by file name) and its
-    process is alive -- whatever its settings. A conversation that would lease one slot on a
-    port already holding the same weights with other settings uses what is up rather than
-    reloading them: the reload is the cost, the settings are not (Adam, 2026-09-03)."""
-    entry = recorded_servers(state_file).get(int(port))
-    if not entry:
-        return None
-    if Path(str(entry.get("model") or "")).name != Path(str(model)).name:
-        return None
-    return entry if pid_exists(int(entry.get("pid") or 0)) else None
-
-
-def recorded_servers(state_file: Path | None = None) -> dict[int, dict]:
-    """Every server in the lease file, keyed by port."""
-    try:
-        parsed = json.loads((state_file or lease_file()).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-
-    out: dict[int, dict] = {}
-    for key, entry in parsed.items():
-        if not isinstance(entry, dict):
-            continue
-        try:
-            out[int(entry.get("port", key))] = entry
-        except (TypeError, ValueError):
-            continue
-    return out
 
 
 class ServerManager:
@@ -390,7 +208,7 @@ class ServerManager:
                 if adopted is not None:
                     if stray is not None:
                         self._take_over(spec.port, stray, say=told)
-                    _emit(on_event, "ready", port=spec.port, adopted=True)
+                    emit(on_event, "ready", port=spec.port, adopted=True)
                     return adopted
 
             try:
@@ -423,11 +241,11 @@ class ServerManager:
                 f"{measurement_said(held)}. Loading a second model onto it would spoil "
                 f"that measurement and this one. Wait for it to finish, stop it with "
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
-        _emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
+        emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
         info = self.backend_for(spec).start(spec, lease=self._pending(spec), timeout=timeout,
                                   **starting)
-        _emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
+        emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
         return info
 
     def _slots_shortfall(self, spec: ServerSpec) -> ServerSpec | None:
@@ -529,28 +347,22 @@ class ServerManager:
         what the port is serving now, not what a caller wishes it were (:meth:`lease`'s
         ``escalate=True`` works this out with :meth:`_slots_shortfall` before calling
         here). Every slot with a live conversation is saved through
-        ``/slots/{id}?action=save`` before anything stops.
-
-        Grows the whole cache -- every slot keeping its size -- when ``fit`` says the
-        extra room is there. Otherwise splits the existing total across the larger slot
-        count, when every live conversation is short enough for the smaller per-slot
-        context that leaves each with. A conversation that is not short enough is
-        summarised on the model itself, on the slot that already holds it, and the
-        summary is re-seeded in its place after the relaunch rather than the saved cache
-        -- which is kept regardless, named in every message about that slot. Raises
-        :class:`EscalationRefused` only when a live conversation would be dropped and
-        summarising it did not rescue that.
+        ``/slots/{id}?action=save`` before anything stops. The whole cache grows when
+        ``fit`` says the extra room is there; otherwise the existing total is split
+        across the larger slot count, and any conversation too long for what that leaves
+        it is summarised on the model itself and re-seeded in place of its cache -- which
+        is kept regardless, named in every message about that slot. Raises
+        :class:`~ml_stack.serve.escalation.EscalationRefused` only when a live
+        conversation would be dropped and summarising it did not rescue that.
         """
-        from ml_stack.client.chat import Client
-        from ml_stack.hub import room as machine_room
-
         told = say or self.say or logger.info
         current_slots = max(1, int(spec.parallel or 1))
         new_slots = current_slots + max(1, int(add_slots))
         per_slot = max(1, int(spec.context) // current_slots)
-        base_url = f"http://{DEFAULT_HOST}:{spec.port}"
+        run = Escalating(f"http://{DEFAULT_HOST}:{spec.port}", spec.port,
+                         timeout=timeout, on_event=on_event)
 
-        if not is_healthy(base_url, timeout=2.0):
+        if not is_healthy(run.base_url, timeout=2.0):
             raise ServerFailed(f"nothing is answering on port {spec.port} to escalate")
         if not spec.slot_save_path:
             raise ServerFailed(
@@ -558,165 +370,44 @@ class ServerManager:
                 "conversations cannot be saved before a relaunch"
             )
 
-        try:
-            slots = request_json(f"{base_url}/slots", method="GET", timeout=timeout or 30.0)
-        except ServerError as exc:
-            raise ServerFailed(
-                f"port {spec.port} has no /slots endpoint to escalate from: {exc}") from exc
-        if not isinstance(slots, list):
-            raise ServerFailed(
-                f"port {spec.port}: /slots answered with {type(slots).__name__}, not a list")
-
-        live = sorted((int(s["id"]), int(s.get("n_prompt_tokens") or 0)) for s in slots
-                     if isinstance(s, dict) and int(s.get("n_prompt_tokens") or 0) > 0)
-        # Only present with LLAMA_SERVER_SLOTS_DEBUG=1 (backend.py sets it whenever
-        # slot_save_path is), which is what a summary is asked to read rather than the
-        # bare instruction a slot's cache cannot answer on its own.
-        prompts = {int(s["id"]): str(s.get("prompt") or "")
-                  for s in slots if isinstance(s, dict) and s.get("id") is not None}
-
+        live, prompts = slots_on(run)
         room_bytes = int(room) if room is not None else machine_room()
-        fit = self._fit_for(spec.model, room=room_bytes)
+        plan = plan_for(spec, new_slots=new_slots, per_slot=per_slot, live=live,
+                        room_bytes=room_bytes)
 
-        mode = ""
-        new_context = per_slot * new_slots
-        reason = ""
-        if fit is not None:
-            loaded, each = fit.line(per_slot)
-            need = loaded + new_slots * each
-            if need <= room_bytes:
-                mode = "grow"
-                reason = (f"{new_slots} slots of {per_slot:,} tokens need {human_bytes(need)}, "
-                          f"which fits in {human_bytes(room_bytes)} of room")
-
-        too_long: list[tuple[int, int]] = []
-        if mode != "grow":
-            new_context = int(spec.context)
-            split_per_slot = max(1, new_context // new_slots)
-            too_long = [(sid, tok) for sid, tok in live if tok > split_per_slot]
-            if too_long:
-                mode = "summarize"
-                reason = (f"{len(too_long)} live conversation(s) do not fit the "
-                          f"{split_per_slot:,}-token slot a split leaves them and will be "
-                          "summarised")
-            else:
-                mode = "split"
-                reason = (f"the existing {new_context:,}-token cache split across "
-                          f"{new_slots} slots is {split_per_slot:,} each")
-
-        _emit(on_event, "escalating", port=spec.port, mode=mode, reason=reason,
-              from_slots=current_slots, to_slots=new_slots)
+        emit(on_event, "escalating", port=spec.port, mode=plan.mode, reason=plan.reason,
+             from_slots=current_slots, to_slots=new_slots)
         told(f"port {spec.port}: escalating from {current_slots} to {new_slots} slot(s) "
-            f"by {mode} -- {reason}")
+            f"by {plan.mode} -- {plan.reason}")
 
-        stamp = time.strftime("%Y%m%dT%H%M%S")
-        saved: dict[int, str] = {}
-        for sid, tok in live:
-            filename = f"escalate-{spec.port}-{sid}-{stamp}.bin"
-            _emit(on_event, "saving", port=spec.port, slot=sid, tokens=tok,
-                  filename=filename)
-            try:
-                request_json(f"{base_url}/slots/{sid}?action=save",
-                            payload={"filename": filename}, timeout=timeout or 120.0)
-            except ServerError as exc:
-                raise ServerFailed(
-                    f"could not save slot {sid} on port {spec.port}: {exc}") from exc
-            saved[sid] = filename
-
-        summaries: dict[int, str] = {}
-        for sid, tok in too_long:
-            _emit(on_event, "summarizing", port=spec.port, slot=sid, tokens=tok)
-            prior = prompts.get(sid, "")
-            try:
-                if prior:
-                    # A raw continuation of the slot's own cached prompt: the shared
-                    # prefix is a cache hit, so this costs the generation and nothing
-                    # about the reprocessing the coordinator's cheap-summary case rests on.
-                    summary = Client(base_url, slot=sid, timeout=timeout or 120.0).complete(
-                        prior + SUMMARY_SUFFIX, n_predict=512)
-                else:
-                    # No prompt text to read (LLAMA_SERVER_SLOTS_DEBUG was not on for
-                    # this server) -- the model is asked cold and told nothing.
-                    reply = Client(base_url, slot=sid, timeout=timeout or 120.0).chat(
-                        [{"role": "user", "content": SUMMARY_PROMPT}], n_predict=512)
-                    summary = (getattr(reply, "content", "") or "").strip()
-            except Exception as exc:
-                raise EscalationRefused(
-                    f"slot {sid} on port {spec.port} holds {tok:,} tokens, too long for "
-                    f"the slot a split leaves it, and summarising it failed: {exc}. Its "
-                    f"cache is kept at {saved[sid]}."
-                ) from exc
-            if not summary:
-                raise EscalationRefused(
-                    f"slot {sid} on port {spec.port} holds {tok:,} tokens, too long for "
-                    f"the slot a split leaves it, and summarising it returned nothing. "
-                    f"Its cache is kept at {saved[sid]}."
-                )
-            summaries[sid] = summary
-            # The text itself, not just its length: llama-server's chat API is stateless
-            # per request, so a slot's cache being re-seeded with this summary carries no
-            # memory a later /v1/chat/completions call will see on its own -- the caller
-            # holding the conversation has to fold the summary into its own transcript to
-            # actually continue from it, and can only do that if this event carries it.
-            _emit(on_event, "summarized", port=spec.port, slot=sid, summary=summary,
-                  tokens=len(summary.split()))
+        saved = save_live(run, live)
+        summaries = summarise(run, plan.too_long, prompts=prompts, saved=saved)
 
         pid = self._recorded_pid(spec.port)
-        _emit(on_event, "stopping", port=spec.port, pid=pid)
+        emit(on_event, "stopping", port=spec.port, pid=pid)
         if pid:
             kill_process_tree(pid)
         self._forget(spec.port)
 
         # kv_unified keeps the cache's stream count at 1 across the relaunch; any other
-        # value makes a save from the old slot count unrestorable into the new one, "n_stream
-        # mismatch" thrown by llama.cpp's own state reader regardless of which slot.
-        new_spec = replace(spec, parallel=new_slots, context=new_context, kv_unified=True)
+        # value makes a save from the old slot count unrestorable into the new one,
+        # "n_stream mismatch" thrown by llama.cpp's own state reader whichever slot it is.
+        new_spec = replace(spec, parallel=new_slots, context=plan.new_context,
+                           kv_unified=True)
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
         info = self._launch(new_spec, timeout=resolved_timeout, on_event=on_event,
                             anyway=anyway)
-        new_base = info.base_url
         # recorded now, not after every restore: a restore failure below must not leave a
         # live, healthy process this manager has forgotten it started
         self._record(new_spec, info)
 
-        for sid, tok in live:
-            if sid in summaries:
-                _emit(on_event, "restoring", port=spec.port, slot=sid, mode="summary")
-                try:
-                    Client(new_base, slot=sid, timeout=timeout or 120.0).complete(
-                        summaries[sid], n_predict=1)
-                except Exception as exc:
-                    raise ServerFailed(
-                        f"could not re-seed the summary for slot {sid} on port "
-                        f"{spec.port}: {exc}. Its full cache is kept at {saved[sid]}."
-                    ) from exc
-            else:
-                _emit(on_event, "restoring", port=spec.port, slot=sid, mode="cache")
-                try:
-                    request_json(f"{new_base}/slots/{sid}?action=restore",
-                                payload={"filename": saved[sid]}, timeout=timeout or 120.0)
-                except ServerError as exc:
-                    raise ServerFailed(
-                        f"could not restore slot {sid} on port {spec.port} from "
-                        f"{saved[sid]}: {exc}"
-                    ) from exc
+        restore(replace(run, base_url=info.base_url), live, summaries=summaries,
+                saved=saved)
 
-        _emit(on_event, "done", port=spec.port, slots=new_slots, mode=mode)
+        emit(on_event, "done", port=spec.port, slots=new_slots, mode=plan.mode)
         told(f"port {spec.port}: now serving {new_slots} slot(s)")
         return info
-
-    @staticmethod
-    def _fit_for(model: str | Path, *, room: int) -> Any:
-        """The measured :class:`~ml_stack.serve.fit.Fit` for ``model`` at ``room``, or
-        ``None`` when nothing has measured it -- an escalation with no fit record cannot
-        claim growing fits, and falls to splitting instead."""
-        from ml_stack.serve.fit import records
-
-        for one in records(room=room):
-            if model_matches(one.model, model):
-                return one
-        return None
 
     def release(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Stop a server this process started. Adopted servers are left running."""
@@ -728,7 +419,7 @@ class ServerManager:
             held = info.process
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
-        _reap_one(held, grace_s=grace_s)
+        reap_one(held, grace_s=grace_s)
         self._forget(info.port)
 
     def detach(self, info: ServerInfo) -> None:
@@ -751,7 +442,7 @@ class ServerManager:
             if isinstance(pid, int) and pid_exists(pid):
                 stopped += kill_process_tree(pid, grace_s=grace_s)
         for held in list(self._processes.values()):
-            _reap_one(held, grace_s=grace_s)
+            reap_one(held, grace_s=grace_s)
         self._processes.clear()
         self._mine.clear()
         self._save()
@@ -790,7 +481,7 @@ class ServerManager:
         self._save()
 
     def _forget(self, port: int, *, grace_s: float = 5.0) -> None:
-        _reap_one(self._processes.pop(port, None), grace_s=grace_s)
+        reap_one(self._processes.pop(port, None), grace_s=grace_s)
         self._mine.pop(str(port), None)
         self._save()
 

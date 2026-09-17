@@ -20,8 +20,8 @@ import sys
 import textwrap
 import time
 from collections.abc import Callable, Iterable, Sequence
-from functools import partial
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -257,8 +257,7 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
         from ml_stack.bench.underway import detach as start
 
         log = start([sub, *args])
-        from ml_stack import jobs
-        from ml_stack import bench
+        from ml_stack import bench, jobs
 
         record = jobs.recorded("bench", home=bench.home_dir() / "jobs")
         return {"log": str(log), "pid": record.get("pid"), "argv": [sub, *args]}
@@ -291,8 +290,7 @@ def _jobs_home(kind: str) -> Path | None:
 def jobs_status() -> dict[str, Any]:
     """Every long command this machine records -- the bench's and the rest -- running or
     ended, since when, with its log."""
-    from ml_stack import jobs
-    from ml_stack import bench
+    from ml_stack import bench, jobs
 
     said: list[str] = []
     for home in (jobs.home_dir(), bench.home_dir() / "jobs"):
@@ -645,7 +643,7 @@ def client_for(args: argparse.Namespace) -> Any:
     from pathlib import Path
 
     from ml_stack.client import Client
-    from ml_stack.serve.manager import already_up
+    from ml_stack.serve.leases import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.recent import note
     from ml_stack.serve.serving import Config, Serving, drafted, slot

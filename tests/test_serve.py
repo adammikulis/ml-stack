@@ -36,7 +36,7 @@ from ml_stack.serve import (
     wait_until_free,
 )
 from ml_stack.serve.backend import fresh_log
-from ml_stack.serve.manager import orphaned
+from ml_stack.serve.leases import orphaned
 from ml_stack.testing.fakes import (
     FakeLlamaServer,
     Served,
@@ -418,7 +418,7 @@ class TestScaledTimeout:
     it, and gets exactly that."""
 
     def test_it_grows_with_the_weights_and_never_drops_below_the_floor(self):
-        from ml_stack.serve.manager import DEFAULT_TIMEOUT_S, scaled_timeout
+        from ml_stack.serve.weights import DEFAULT_TIMEOUT_S, scaled_timeout
 
         assert scaled_timeout(0) == DEFAULT_TIMEOUT_S
         # 10 GiB -> 60 + 15 = 75s, still under the 300s floor
@@ -448,7 +448,7 @@ class TestScaledTimeout:
 
     def test_none_scales_from_the_weights_already_on_disk(self, tmp_path, monkeypatch):
         from ml_stack.serve import manager as manager_module
-        from ml_stack.serve.manager import scaled_timeout
+        from ml_stack.serve.weights import scaled_timeout
 
         monkeypatch.setattr(manager_module, "weight_of", lambda model: 200 * 1024**3)
         started: list[float] = []
@@ -892,16 +892,16 @@ def test_the_serving_knobs_that_shorten_a_run(binary):
 def test_already_up_names_the_recorded_server_that_holds_the_same_weights(tmp_path, monkeypatch):
     import json
 
-    from ml_stack.serve.manager import already_up
+    from ml_stack.serve.leases import already_up
 
     state = tmp_path / "servers.json"
     state.write_text(json.dumps({"8080": {"port": 8080, "pid": 4242, "model": "/models/quince-2b.gguf",
                                           "base_url": "http://127.0.0.1:8080", "slots": 2}}))
-    monkeypatch.setattr("ml_stack.serve.manager.pid_exists", lambda pid: pid == 4242)
+    monkeypatch.setattr("ml_stack.serve.leases.pid_exists", lambda pid: pid == 4242)
     assert already_up("quince-2b.gguf", 8080, state_file=state)["base_url"] == "http://127.0.0.1:8080"
     assert already_up("ember-1b.gguf", 8080, state_file=state) is None
     assert already_up("quince-2b.gguf", 8081, state_file=state) is None
-    monkeypatch.setattr("ml_stack.serve.manager.pid_exists", lambda pid: False)
+    monkeypatch.setattr("ml_stack.serve.leases.pid_exists", lambda pid: False)
     assert already_up("quince-2b.gguf", 8080, state_file=state) is None
 
 

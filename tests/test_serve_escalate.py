@@ -13,9 +13,11 @@ import json
 import os
 
 import pytest
+
 from ml_stack import home
 from ml_stack.serve.backend import ServerFailed, ServerSpec
-from ml_stack.serve.manager import EscalationRefused, ServerManager
+from ml_stack.serve.escalation import EscalationRefused
+from ml_stack.serve.manager import ServerManager
 from ml_stack.testing.fakes import FakeBackend, FakeLlamaServer, Served
 
 MODEL = "quince-2b.gguf"
@@ -185,7 +187,7 @@ class TestSummarize:
         seen: list[dict] = []
         manager.escalate(current, add_slots=1, room=1, on_event=seen.append)
 
-        from ml_stack.serve.manager import SUMMARY_SUFFIX
+        from ml_stack.serve.escalation import SUMMARY_SUFFIX
 
         prompts_sent = [c["prompt"] for c in instance.sent_to("/completion")
                         if "prompt" in c]

@@ -151,7 +151,7 @@ def measured(kept: Sequence[Mapping[str, Any]], *, model: str = "", labels: Sequ
 def guessed(model: str) -> tuple[float, str]:
     """``(seconds per question, why)`` for a model with no run kept: from its weights on
     disk when they are here, else `GUESS_S` -- and the line says which."""
-    from ml_stack.serve.manager import weight_of
+    from ml_stack.serve.weights import weight_of
 
     size = weight_of(model) if model else 0
     if size > 0:

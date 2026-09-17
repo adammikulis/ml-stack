@@ -23,16 +23,12 @@ from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
-from ml_stack.serve.manager import (
-    BESIDE_HEADROOM,
-    Measuring,
-    ServerManager,
-    model_matches,
-    recorded_servers,
-    weight_of,
-)
+from ml_stack.serve.leases import recorded_servers
+from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager
+from ml_stack.serve.matching import model_matches
 from ml_stack.serve.ports import DEFAULT_HOST, free_port
 from ml_stack.serve.process import every_server, kill_process_tree, pid_exists
+from ml_stack.serve.weights import weight_of
 
 __all__ = ["Ask", "Broker", "BrokerError", "Grant", "Held", "Waiting"]
 

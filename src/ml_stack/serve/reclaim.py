@@ -165,7 +165,7 @@ class Idleness:
 
 
 def _recorded() -> dict[int, dict]:
-    from ml_stack.serve.manager import recorded_servers
+    from ml_stack.serve.leases import recorded_servers
 
     return recorded_servers()
 

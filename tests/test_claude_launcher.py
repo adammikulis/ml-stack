@@ -188,11 +188,11 @@ class TestJoiningAServerAlreadyUp:
     """Weights already loaded on the port are talked to, not loaded a second time."""
 
     def test_the_server_on_the_port_is_used_and_left_running(self, monkeypatch, tmp_path):
-        from ml_stack.serve import manager
+        from ml_stack.serve import leases
 
         seen: dict = {}
         monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
-        monkeypatch.setattr(manager, "already_up",
+        monkeypatch.setattr(leases, "already_up",
                             lambda model, port, **_: {"base_url": f"http://127.0.0.1:{port}",
                                                       "pid": 1, "model": model})
         monkeypatch.setattr("ml_stack.serve.serving.serving_said", lambda url: "1 slot x 32k")
@@ -214,11 +214,11 @@ class TestJoiningAServerAlreadyUp:
         assert where["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8123"
 
     def test_nothing_up_on_the_port_leases_the_model(self, monkeypatch, tmp_path):
-        from ml_stack.serve import manager
+        from ml_stack.serve import leases
 
         seen: dict = {}
         monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
-        monkeypatch.setattr(manager, "already_up", lambda model, port, **_: None)
+        monkeypatch.setattr(leases, "already_up", lambda model, port, **_: None)
         monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
         monkeypatch.setattr("ml_stack.hub.located",
                             lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))

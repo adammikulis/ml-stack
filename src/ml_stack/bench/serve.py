@@ -53,7 +53,7 @@ def prefetch(references: Sequence[str], log: Callable[[str], None] = say) -> lis
     on that model is what refuses it, with the shard named.
     """
     from ml_stack import hub
-    from ml_stack.serve.manager import weight_of
+    from ml_stack.serve.weights import weight_of
 
     out: list[tuple[str, int]] = []
     for ref in references:

@@ -141,7 +141,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
     takes the smallest one on this machine, 'none' takes none -- and a measured record's
     own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
     allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...)."""
-    from ml_stack.serve import chat_template, manager
+    from ml_stack.serve import chat_template, leases
     from ml_stack.serve import profile as records
     from ml_stack.serve.recent import note
     from ml_stack.serve.serving import Config, Serving, drafted, served
@@ -149,7 +149,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
     found = str(hub.located(model, loose=True) or model)
     note(found, by="agent")
     # a server already holding these weights is joined, so nothing below is what it serves
-    leasing = say if manager.already_up(found, port) is None else (lambda _line: None)
+    leasing = say if leases.already_up(found, port) is None else (lambda _line: None)
     measured = records.profile_for(found) if profile else None
     if measured is not None:
         config = measured.config(port=port, slots=slots, model=found)

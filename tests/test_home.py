@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ml_stack import bench, home, hub, ingest, jobs, limits
-from ml_stack.serve import binary, build, manager, reclaim
+from ml_stack.serve import binary, build, leases, reclaim
 
 
 class TestTheStateRoot:
@@ -95,7 +95,7 @@ class TestOneVariableMovesEveryPathTheProjectWrites:
             "hub cache": hub.hub_cache(),
             "limits": limits.where(),
             "idle": reclaim.state_path(),
-            "lease": manager.lease_file(),
+            "lease": leases.lease_file(),
             "jobs": jobs.home_dir(),
             "bench": bench.home_dir(),
             "ingest": ingest.home_dir(),

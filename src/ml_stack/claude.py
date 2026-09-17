@@ -174,14 +174,14 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))
         return int(runner(command, env))
 
-    from ml_stack.serve import chat_template, manager, profile
+    from ml_stack.serve import chat_template, leases, profile
     from ml_stack.serve.recent import note
     from ml_stack.serve.serving import Config, Serving, drafted, served
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="claude")
     # a server already holding these weights is joined, so nothing below is what it serves
-    leasing = say if manager.already_up(found, args.port) is None else (lambda _line: None)
+    leasing = say if leases.already_up(found, args.port) is None else (lambda _line: None)
     measured = None if args.no_profile else profile.profile_for(found)
     if measured is not None:
         config = measured.config(port=args.port, slots=args.slots, model=found)

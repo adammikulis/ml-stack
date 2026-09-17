@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from ml_stack import do, mcp
 from ml_stack.testing import ScriptedModel
 from ml_stack.testing.fakes import reply_from
@@ -525,7 +526,7 @@ def test_a_model_already_up_on_the_port_is_used_as_it_stands(monkeypatch, tmp_pa
     here = tmp_path / "quince-2b.gguf"
     here.write_bytes(b"gguf")
     monkeypatch.setattr("ml_stack.hub.located", lambda *a, **k: here)
-    monkeypatch.setattr("ml_stack.serve.manager.already_up",
+    monkeypatch.setattr("ml_stack.serve.leases.already_up",
                         lambda model, port, **_: {"base_url": "http://127.0.0.1:8080", "slots": 2,
                                                   "model": str(here), "pid": 1})
     built = {}
