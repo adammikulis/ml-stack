@@ -15,7 +15,7 @@ from test_ingest import a_part_read_source, a_read, said
 from ml_stack import ingest
 from ml_stack.testing import ScriptedModel
 
-pytest.importorskip("ladybug")
+pytest.importorskip("ladybug", reason="ml-stack[store]")
 
 OPEN_TEXTS = "velthorne-open-texts"
 

@@ -34,8 +34,8 @@ from ml_stack.gguf import (  # noqa: E402  -- after REAL_SOURCE_DIRS, on purpose
     set_metadata,
 )
 
-gguf = pytest.importorskip("gguf")
-np = pytest.importorskip("numpy")
+gguf = pytest.importorskip("gguf", reason="ml-stack[gguf]")
+np = pytest.importorskip("numpy", reason="ml-stack[arrays]")
 
 
 @pytest.fixture

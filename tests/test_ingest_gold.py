@@ -12,7 +12,7 @@ from test_ingest import EMPTY, a_model
 
 from ml_stack import ingest
 
-pytest.importorskip("pymupdf")
+pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
 
 GOLD = Path(__file__).parent / "fixtures" / "extraction-gold.json"
 

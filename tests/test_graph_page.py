@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 
 #: Every test here launches headless Chromium and drives a real page. Nothing in
 #: the module is under a second, so the whole of it is what `-m "not slow"` drops.

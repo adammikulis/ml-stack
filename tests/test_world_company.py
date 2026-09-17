@@ -197,7 +197,7 @@ def test_a_nonprofit_has_a_board_that_advises_the_director_and_volunteers_who_re
 # --- through the store and the bench, unchanged ------------------------------------------------
 
 def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.rebuild import replace
     from ml_stack.graph.store import GraphStore
 

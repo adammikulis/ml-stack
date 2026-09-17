@@ -302,7 +302,7 @@ def test_a_persona_speaks_over_the_subgraph_it_knows_with_its_own_system_prompt(
 
 
 def test_what_a_persona_said_last_time_in_an_arc_is_a_turn_when_it_speaks_again(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
     from ml_stack.graph.thread import follow, threads
 
@@ -425,7 +425,7 @@ def test_the_template_writer_never_says_the_same_thing_twice_in_a_thread():
 
 def test_run_with_a_model_takes_the_lock_keeps_memory_beside_the_output_and_prices_it(
         tmp_path, monkeypatch):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
 
     world = tiny_world()
@@ -619,7 +619,7 @@ def test_reconcilable_carries_a_nodes_own_quotes_as_provenance_and_passage():
 
 
 def test_absorbed_leaves_an_empty_store_unchanged(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
     from ml_stack.world.simulate import _absorbed
 
@@ -632,7 +632,7 @@ def test_absorbed_leaves_an_empty_store_unchanged(tmp_path):
 
 
 def test_absorbed_lands_a_plural_variant_on_the_existing_node_with_provenance_unioned(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
     from ml_stack.world.simulate import _absorbed, _reconcilable
 
@@ -669,7 +669,7 @@ def test_absorbed_lands_a_plural_variant_on_the_existing_node_with_provenance_un
 
 
 def test_run_absorbs_a_second_worlds_graph_into_the_store_the_first_left(tmp_path, monkeypatch):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack.graph.store import GraphStore
 

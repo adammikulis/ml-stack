@@ -879,7 +879,7 @@ class TestTheStartedProcess:
         assert os.getsid(info.pid) != os.getsid(0)
 
     def test_the_log_is_not_held_open_while_the_load_is_waited_on(self, tmp_path, monkeypatch):
-        psutil = pytest.importorskip("psutil")
+        psutil = pytest.importorskip("psutil", reason="ml-stack[serve]")
         from ml_stack.serve import backend as backend_module
 
         real = backend_module.wait_for_health

@@ -157,7 +157,7 @@ def test_an_answer_that_selected_nothing_grounds_nothing():
 def test_a_store_is_read_the_same_way_as_a_graph(tmp_path):
     import pytest
 
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     with GraphStore(tmp_path / "sources.ladybug") as store:

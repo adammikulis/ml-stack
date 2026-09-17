@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 
 #: Every test here launches headless Chromium and drives a real page.
 pytestmark = pytest.mark.slow

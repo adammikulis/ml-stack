@@ -281,7 +281,7 @@ def test_measure_scores_the_sender_only_reader_at_full_people_precision(tmp_path
 
 
 def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     graph, messages = talked()
     picked = bx.sample_messages(messages, 5, seed=0)
     rows, scores = bx.measure(Reader(), picked, graph)
@@ -306,7 +306,7 @@ def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
 
 
 def test_the_estimate_comes_from_earlier_runs_of_the_same_model_else_a_guess(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     graph, messages = talked()
     rows, scores = bx.measure(Reader(), bx.sample_messages(messages, 4, seed=0), graph)
     for r in rows:
@@ -336,7 +336,7 @@ def test_a_world_without_messages_is_simulated_and_said_so(tmp_path):
 
 
 def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack import bench
 
@@ -359,7 +359,7 @@ def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, mon
 
 
 def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack import bench
 
@@ -381,7 +381,7 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
 
 
 def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack import bench
 
@@ -401,7 +401,7 @@ def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_pat
 
 
 def test_show_prints_extraction_runs_under_the_answering_table_or_alone(tmp_path, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack import bench
 
     graph, messages = talked()

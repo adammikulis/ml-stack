@@ -8,7 +8,7 @@ import pytest
 from ml_stack.files import read_json, write_json
 from ml_stack.graph.review import Queue, as_change, listed
 
-pytest.importorskip("ladybug")
+pytest.importorskip("ladybug", reason="ml-stack[store]")
 
 from ml_stack.graph.store import GraphStore
 

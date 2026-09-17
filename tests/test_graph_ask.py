@@ -1118,7 +1118,7 @@ def test_pictures_a_tool_brings_back_are_shown_in_a_message_of_their_own():
     import json
     import pytest
 
-    pytest.importorskip("PIL")
+    pytest.importorskip("PIL", reason="ml-stack[vision]")
     model = ScriptedModel([call("web_look", url="https://example.invalid/kiln")])
     events = []
     out = converse_stream("what does the page show?", GRAPH, model, on_event=events.append,

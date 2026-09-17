@@ -21,7 +21,7 @@ from test_sources_pdf import a_textbook
 from ml_stack import hub, ingest, jobs
 from ml_stack.contracts import grammar_for
 
-pytest.importorskip("pymupdf")
+pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
 
 
 # What a model is scripted to say about the invented lattice textbook.
@@ -87,8 +87,8 @@ def test_the_document_schema_compiles_to_a_grammar():
 def test_the_schema_takes_a_verb_and_a_kind_the_model_coined_and_refuses_another_shape():
     """A book states relations the core nineteen have no word for. The shape is the fence,
     not the list."""
-    validate = pytest.importorskip("jsonschema").validate
-    ValidationError = pytest.importorskip("jsonschema").ValidationError
+    jsonschema = pytest.importorskip("jsonschema", reason="pip install jsonschema")
+    validate, ValidationError = jsonschema.validate, jsonschema.ValidationError
     schema = ingest.schema()
 
     validate(LATTICE, schema)
@@ -117,8 +117,8 @@ def test_the_schema_takes_a_verb_and_a_kind_the_model_coined_and_refuses_another
 
 
 def test_core_only_fences_the_verbs_and_the_kinds_back_to_the_core_lists():
-    validate = pytest.importorskip("jsonschema").validate
-    ValidationError = pytest.importorskip("jsonschema").ValidationError
+    jsonschema = pytest.importorskip("jsonschema", reason="pip install jsonschema")
+    validate, ValidationError = jsonschema.validate, jsonschema.ValidationError
     schema = ingest.schema(core_only=True)
 
     validate(LATTICE, schema)
@@ -150,7 +150,7 @@ def test_the_vague_predicates_are_one_shared_list_and_not_a_refusal():
     assert "associated_with" in ingest.VAGUE and ingest.vague("associated_with")
 
     shape = ingest.schema()
-    validate = pytest.importorskip("jsonschema").validate
+    validate = pytest.importorskip("jsonschema", reason="pip install jsonschema").validate
     said = json.loads(json.dumps(LATTICE))
     said["relations"][0]["rel"] = "associated_with"
     validate(said, shape), "a hedged relation is still a relation the schema takes"
@@ -286,7 +286,7 @@ def test_a_plural_and_its_singular_fold_into_the_name_the_source_uses_more():
 
 
 def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     unit = a_unit()
@@ -308,7 +308,7 @@ def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
 def test_a_verb_and_a_kind_from_outside_the_core_lists_survive_the_fold_and_the_store(tmp_path):
     """A book's own vocabulary is a finding: which relations and kinds came out of the core
     lists and which the reader named itself reaches the store."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     said = json.loads(json.dumps(LATTICE))
@@ -338,7 +338,7 @@ def test_a_verb_and_a_kind_from_outside_the_core_lists_survive_the_fold_and_the_
 
 def test_a_kind_a_later_read_takes_from_the_core_list_stops_being_an_extension(tmp_path):
     """The mark is derived from the kind the store ends up holding, never merged into it."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     unit = a_unit()
@@ -485,7 +485,7 @@ def run(argv):
 
 
 def test_a_source_is_read_section_by_section_into_a_store(tmp_path, server, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     source, instance, asked = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
 
@@ -502,7 +502,7 @@ def test_a_source_is_read_section_by_section_into_a_store(tmp_path, server, caps
 
 
 def test_resume_skips_what_is_already_done_and_asks_the_model_nothing_more(tmp_path, server):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     source, instance, asked = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
 
@@ -519,7 +519,7 @@ def test_resume_skips_what_is_already_done_and_asks_the_model_nothing_more(tmp_p
 def test_resume_still_folds_what_an_earlier_run_extracted(tmp_path, server):
     """A resumed run that folded only the sections it read itself would write a graph
     missing everything the run before it found."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     source, instance, _ = a_reading(tmp_path, server)
@@ -536,7 +536,7 @@ def test_resume_still_folds_what_an_earlier_run_extracted(tmp_path, server):
 
 
 def test_sample_reads_only_the_first_sections(tmp_path, server):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     source, instance, asked = a_reading(tmp_path, server)
     run([source, "--out", str(tmp_path / "sources.ladybug"), "--base-url", instance.base_url,
          "--sample", "1"])
@@ -544,7 +544,7 @@ def test_sample_reads_only_the_first_sections(tmp_path, server):
 
 
 def test_a_chapter_reads_only_that_chapter(tmp_path, server):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     source, instance, asked = a_reading(tmp_path, server)
     run([source, "--out", str(tmp_path / "sources.ladybug"), "--base-url", instance.base_url,
          "--chapter", "2"])
@@ -552,7 +552,7 @@ def test_a_chapter_reads_only_that_chapter(tmp_path, server):
 
 
 def test_status_reports_the_sources_the_sections_and_the_rate(tmp_path, server, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     source, instance, _ = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
     run([source, "--out", str(store), "--base-url", instance.base_url])
@@ -570,7 +570,7 @@ def test_status_on_a_store_nothing_was_ingested_into_says_so(tmp_path, capsys):
 
 
 def test_a_failed_section_is_recorded_and_the_next_one_is_still_read(tmp_path, server, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
 
     def script(prompt):
         return LATTICE if "1.1" in prompt else "not json at all"
@@ -597,7 +597,7 @@ def test_gold_through_the_command_prints_the_rates(tmp_path, server, capsys):
 
 def test_core_only_reads_a_section_under_the_core_lists_alone(tmp_path, server, capsys):
     """The two ways of reading, through the command: what the server is sent says which."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
 
     def sent_rel(argv):
         source, instance, asked = a_reading(tmp_path, server)
@@ -1067,7 +1067,7 @@ def in_store(where):
 
 
 def test_fold_writes_a_part_read_source_into_the_store_and_says_it_is_partial(tmp_path, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     store = a_part_read_source(tmp_path)
 
     assert ingest.main(["fold", "--out", str(store)]) == 0
@@ -1082,7 +1082,7 @@ def test_fold_writes_a_part_read_source_into_the_store_and_says_it_is_partial(tm
 
 
 def test_fold_twice_leaves_the_store_exactly_as_it_was(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
     with ingest.Sources(store).store() as held:
@@ -1097,7 +1097,7 @@ def test_a_second_fold_adds_to_the_source_and_only_rebuild_takes_anything_out(tm
     """Adam: "if the source already exists, it should append new nodes/connect new edges.
     additive." A section re-read into something else adds what it now says; what the
     first fold wrote stays until a person asks for a rebuild."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     slug = "velthorne-open-texts"
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
@@ -1124,7 +1124,7 @@ def test_a_second_fold_adds_to_the_source_and_only_rebuild_takes_anything_out(tm
 
 
 def test_a_concept_two_sources_name_survives_one_of_them_being_rebuilt(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     store = tmp_path / "sources.ladybug"
     a_part_read_source(tmp_path, store=store)
     a_part_read_source(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
@@ -1210,7 +1210,7 @@ def test_a_unit_read_in_parts_keeps_the_id_its_provenance_names(tmp_path):
 
 def test_the_sources_view_opens_the_store_read_only_while_a_writer_has_it_open(tmp_path):
     """An application reads a sources the run is still writing into."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     store = a_part_read_source(tmp_path)
@@ -1228,7 +1228,7 @@ def test_the_sources_view_opens_the_store_read_only_while_a_writer_has_it_open(t
 def test_the_store_holds_the_first_chapter_before_the_second_is_read(tmp_path, server,
                                                                     monkeypatch):
     """The whole point: a sources that takes days is answerable while it is being read."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     monkeypatch.setattr(ingest, "FOLD_EVERY", 1)
     store = tmp_path / "sources.ladybug"
     seen: list[set] = []
@@ -1246,7 +1246,7 @@ def test_the_store_holds_the_first_chapter_before_the_second_is_read(tmp_path, s
 
 
 def test_the_progress_file_records_how_far_each_source_is_folded(tmp_path, server):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     source, instance, _ = a_reading(tmp_path, server)
     store = tmp_path / "sources.ladybug"
     run([source, "--out", str(store), "--base-url", instance.base_url])
@@ -1267,7 +1267,7 @@ def test_a_chapter_ends_a_fold_and_a_long_chapter_folds_inside_itself():
 def test_folding_a_few_hundred_units_of_one_source_costs_a_second_or_two(tmp_path):
     """What the interval is chosen from. The fold itself is `entities.fold_names`, which
     grows with the square of the vocabulary; the write grows with the units."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     slug = "velthorne-open-texts"
     words = [f"vault {n}" for n in range(120)] + [f"seam {n}" for n in range(120)]
     rows = []
@@ -1293,7 +1293,7 @@ def test_folding_a_few_hundred_units_of_one_source_costs_a_second_or_two(tmp_pat
 
 def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
     """SIGTERM mid-source: the unit in flight is lost, the units before it are in the store."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import subprocess
     import threading
 
@@ -1438,7 +1438,7 @@ def test_status_says_what_is_in_the_store_and_how_long_the_rest_will_take(tmp_pa
     assert "in store: nothing folded yet" in out
     assert "~6 min left" in out, "four units at the 86 s each this source measured"
 
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     ingest.fold(store, say=lambda _: None)
     capsys.readouterr()
     ingest.status(store)

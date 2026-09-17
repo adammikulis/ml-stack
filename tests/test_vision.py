@@ -26,7 +26,7 @@ from ml_stack.vision import (
     to_supported_format,
 )
 
-PIL = pytest.importorskip("PIL")
+PIL = pytest.importorskip("PIL", reason="ml-stack[vision]")
 from PIL import Image  # noqa: E402
 
 

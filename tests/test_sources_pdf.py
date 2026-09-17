@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-pymupdf = pytest.importorskip("pymupdf")
+pymupdf = pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
 
 from ml_stack.sources import pdf  # noqa: E402
 

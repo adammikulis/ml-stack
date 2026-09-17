@@ -225,8 +225,8 @@ SPECIAL = ["<pad>", "<bos>", "<eos>", "<unk>", "<start_of_turn>", "<end_of_turn>
 
 def make_tiny_base(path, texts):
     """A two-layer Gemma3 with tied embeddings and a BPE tokenizer over ``texts``."""
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("transformers")
+    torch = pytest.importorskip("torch", reason="ml-stack[torch]")
+    pytest.importorskip("transformers", reason="ml-stack[train-lora]")
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
     from transformers import Gemma3ForCausalLM, Gemma3TextConfig, PreTrainedTokenizerFast
 

@@ -14,7 +14,7 @@ import pytest
 
 from ml_stack import ingest
 
-pytest.importorskip("ladybug")
+pytest.importorskip("ladybug", reason="ml-stack[store]")
 
 
 NODE_COLUMNS = ["node_id", "label", "category", "definition", "aliases", "source_text",

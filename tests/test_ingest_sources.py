@@ -15,7 +15,7 @@ from test_ingest import a_part_read_source, a_read, in_store, said
 
 from ml_stack import ingest
 
-pytest.importorskip("ladybug")
+pytest.importorskip("ladybug", reason="ml-stack[store]")
 
 FIELD_GUIDE = "ambleford-field-guide"
 OPEN_TEXTS = "velthorne-open-texts"

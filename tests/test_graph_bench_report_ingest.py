@@ -24,7 +24,7 @@ from test_ingest import a_part_read_source, a_read
 from ml_stack import ingest
 from ml_stack.bench.report import report
 
-pytest.importorskip("ladybug")
+pytest.importorskip("ladybug", reason="ml-stack[store]")
 
 RUN = "run:20260101T090000"
 RUN2 = "run:20260101T113000"
@@ -203,7 +203,7 @@ def test_one_empty_store_beside_one_real_one_only_tables_the_real_one(tmp_path):
 # -- alongside the rest of the document ---------------------------------------------------
 
 def test_ingest_sits_beside_answering_runs_in_the_same_document(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack import bench
 
     answering_store = str(tmp_path / "runs.ladybug")
