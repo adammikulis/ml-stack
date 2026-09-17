@@ -43,6 +43,7 @@ from ml_stack.serve.manager import (
     orphaned,
     recorded_servers,
 )
+from ml_stack.serve.mlx_tree import is_mlx, report_for
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import every_server, machine_memory, pid_exists
 from ml_stack.units import human_bytes
@@ -457,12 +458,12 @@ def resolve_spec(spec: ServerSpec, *, manager: ServerManager) -> Resolved:
 
 def preflight(spec: ServerSpec, *, manager: ServerManager) -> Any:
     """Every check a load would run, without starting or adopting anything."""
-    from ml_stack.hub import room
-
+    if is_mlx(spec.model):
+        return report_for(spec, limit_bytes=hub.room())
     binary = manager.backend.binary
     # a draft named by hf: file is fetched and served by path, exactly as start() does
     return preflight_mod.Preflight(LlamaServerBackend.resolved_draft(spec), binary=binary,
-                                   limit_bytes=room())
+                                   limit_bytes=hub.room())
 
 
 def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None,

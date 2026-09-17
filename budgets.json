@@ -10,7 +10,7 @@
   "file-locks": 0,
   "home-paths": 0,
   "http-servers": 2,
-  "local-imports": 551,
+  "local-imports": 550,
   "long-docstrings": 115,
   "long-functions": 14,
   "print-calls": 0,

@@ -26,6 +26,7 @@ from ml_stack.ingest.extract import extract_unit, schema
 from ml_stack.log import say, warn
 from ml_stack.serve.backend import LlamaServerBackend
 from ml_stack.serve.binary import find_binary
+from ml_stack.serve.mlx_tree import is_mlx
 from ml_stack.serve.profile import profile_for, profiles
 from ml_stack.serve.serving import Config, Serving, Talking
 from ml_stack.sources import pdf
@@ -211,14 +212,15 @@ def recommendation(measured: Sequence[Measured], *, model: str, head: str,
         return ["no baseline to recommend against: measure the no-head arm too"]
     best = max(drafted, key=lambda one: one.tokens_per_second or 0.0)
     faster = (best.tokens_per_second or 0.0) / theirs
-    name = Path(model).name
+    # MLX weights are named by their repository, a GGUF by its file
+    name, said = (model, head) if is_mlx(model) else (Path(model).name, Path(head).name)
     if faster <= 1.0:
         return [f"serve no head: the best arm, {best.label}, runs at {faster:.2f}x the "
                 f"no-head arm.",
                 f"  ml-stack-serve up {name}"]
     depth = str(best.label.split("@n")[-1].split("-")[0])
     kind = best.label.split("-kv-")[-1] if "-kv-" in best.label else ""
-    line = (f"  ml-stack-serve up {name} --draft {Path(head).name} --spec-n-max {depth}"
+    line = (f"  ml-stack-serve up {name} --draft {said} --spec-n-max {depth}"
             + (f" --draft-kv {kind}" if kind else "")
             + (f" --build {build}" if build else ""))
     return [f"serve {best.label}: {faster:.2f}x the no-head arm at "

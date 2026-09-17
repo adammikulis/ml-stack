@@ -167,6 +167,14 @@ class TestWhatToServe:
             build="unsloth")
         assert "--spec-n-max 4 --draft-kv q4_0 --build unsloth" in said[1]
 
+    def test_mlx_weights_are_recommended_by_the_names_a_lease_reads(self):
+        said = recommendation(
+            [Measured("none", rows(40.0, 1000)),
+             Measured("head@n32", rows(20.0, 1000, drafted=(800, 600)))],
+            model="mlx:quarry-lab/marrowgate-MLX-4bit", head="quarry-lab/marrowgate-DFlash2")
+        assert said[1].strip() == ("ml-stack-serve up mlx:quarry-lab/marrowgate-MLX-4bit "
+                                   "--draft quarry-lab/marrowgate-DFlash2 --spec-n-max 32")
+
     def test_without_a_baseline_it_recommends_nothing(self):
         said = recommendation([Measured("head@n4", rows(20.0, 1000))],
                               model="m.gguf", head="h.gguf")
