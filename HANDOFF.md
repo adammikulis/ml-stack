@@ -629,20 +629,31 @@ time with the page's server down for the Ollama half.
   Plain mlx-lm with no verifier in the way is `mlx_lm.generate --model lmstudio-community/Qwen3.8-27B-MLX-4bit --max-tokens 512 -p ...`;
   it is not a lease, so its tok/s is read off its own report. Resident peak is the bench's
   memory record for a leased arm; upstream's is not tracked.
-- [ ] **Flash-Next has no tree-verification layout.** `mlx-community/Qwen3.8-Flash-Next-4bit`
-  is `qwen4_exp`: mlx-lm 0.31.3 cannot load it, mlx-vlm main can (and wants mlx>=0.32.2).
-  A `Layout` for it needs: hyper-connections (4x2560 residual, GatedResidual mix/inject) in
-  `block`; its DeltaNet normalises q/k by L2 norm and gates the output with sigmoid, so
-  `deltanet.tree_mix` has to take the model's own normaliser; attention rotates through
-  `rotary_emb.apply_rotary` with (3, 1, N) positions and appends raw indexer keys on commit,
-  and is plain tree-masked attention only while every node sits below position 2051 (QSA
-  selects blocks past that); the PLE n-gram layer (layer 1) reads the token and two before it
-  along the node's own path, hashed, plus a dilation-3 conv over its own rows, so it needs
-  a per-node pass and a commit of its own. The 4-bit checkpoint is 111.5G, 32G of it the
-  n-gram table; mlx-vlm's `ple_storage.prepare_external_ple_model` memory-maps it (79.5G
-  resident). The 4-bit checkpoint carries no MTP weights; the PixelML DFlash drafter ships
-  without embeddings or head and binds the target's, taps [3, 15, 23, 35, 43] of the
-  contracted 2560-wide residual.
+- [ ] **The Flash-Next lossless witness is unfinished, and so are its mutation checks.**
+  `ml-stack-bench tree lossless` passed for the `ngram` drafter on the chat, code and math
+  prompts (`docs/tree-flash-next-2026-09-17.md`); the `mtp` and `dflash` drafters and the
+  2,300-token prompt that decodes past the indexer budget have not been through it. The
+  three paths the witness is there to hold -- the PLE commit in `spec/qwen4.py:tree_ple`,
+  the indexer selection in `_sparse_mask`, and the hyper-connection inject in
+  `Qwen4ExpLayout.block` -- have not been mutation-checked against it, so what it catches
+  is unknown. Both want a machine with 80G free: with 25-37G of other agents' servers
+  resident, the 74G load swapped and one 2,300-token prompt took over twenty minutes.
+- [ ] **The Flash-Next speed table has not been run.** The arms and the command are
+  ```
+  ml-stack-bench tree speed --samples 3 --tokens-list 128 512 \
+      --drafter ngram --drafter mtp=<MTP/mtp-Qwen3.8-Flash-Next-shared-BF16.gguf> \
+      --drafter dflash=PixelML/Qwen3.8-Flash-Next-NVFP4-DFlash
+  ```
+  which times plain MLX and each drafter in one process and then llama.cpp with and
+  without the shared MTP head through the broker. Every sample records the bytes held
+  beside it, so a row taken under contention says so, but the run refuses a machine that
+  is not quiet unless `--anyway`.
+- [ ] **The mapped n-gram table makes a long prefill disk-bound.** A single-token step
+  reads sixteen rows and costs nothing measurable; a 2,300-token prefill reads about
+  37,000 scattered rows out of the 37G table (measured 129-285 MB/s, GPU 70-97%).
+  `mlx_vlm.models.qwen4_exp.ple_storage` offers `cache_rows` and an interleaved row store
+  (`materialize_interleaved_ple_store`); neither has been tried, and what a long prefill
+  costs with the table resident instead is unmeasured.
 - [ ] **On an M4 the verify pass costs 4.1x one token at 16 nodes.** Measured on 27B 4-bit:
   the dense MLP's quantized matmul grows from 22 ms to 91 ms between 1 and 16 nodes, the
   DeltaNet mixer from 12 to 46, attention from 4 to 13. A small-M 4-bit matmul kernel that
