@@ -513,6 +513,22 @@ says what it does and what it refuses.
   tree batch is one sequence, and the KV cache keeps one tree per sequence. Several slots
   need the drafted trees of each slot in one batch, which is a batch-level tree rather than a
   context-level one.
+- [ ] **A tree pass costs 2.6x a chain pass of the same width, and the recurrent layers are
+  why.** Measured 2026-09-17 on Qwen3.8-27B Q4_K_M, f16 KV, one slot, 3 prompts x 128 tokens
+  greedy, `llama-server` at commit 3466812 + the three patches: no draft 19.3 tok/s (51.6 ms a
+  pass); chain at 4 drafted 12.9 tok/s, 2.81 tokens a pass, 198 ms; chain at 12 drafted 11.5
+  tok/s, 3.09 tokens a pass, 228 ms; tree W=2/6 nodes 5.6 tok/s, 3.01 tokens a pass, 516 ms;
+  tree W=3/12 nodes 5.4 tok/s, 3.48 tokens a pass, 603 ms. The tree keeps more tokens a pass
+  than the chain of the same width, and loses several times over on the pass itself. Graph
+  rebuilding is not the cause: letting a repeated tree shape reuse its graph left the pass at
+  644 ms (shapes rarely repeat), so that narrowing was taken back out. What is left is
+  `build_recurrent_attn`'s tree branch, which materialises a full DeltaNet state per node and
+  runs `max depth + 1` rounds of gather-and-update over all of them -- tens of GB of state
+  traffic a layer a pass. The fix is the shape the MLX engine already uses
+  (`ml_stack/spec/deltanet.py:walk`): walk each node's ancestors carrying the `p` vector rather
+  than the state matrix, as one op, so a tree pass costs what a chain pass of the same width
+  costs. Until then a tree is slower than a chain on this model and the numbers above are the
+  baseline to beat.
 - [ ] **Width and node budget have not been swept.** 3 branches and 12 nodes was the first
   shape tried. What the curve looks like against depth, and against the chain at the same
   verification cost, is a `ml-stack-draft`-shaped question once the bench can ask for a tree.
