@@ -12,11 +12,13 @@ OWNER = ""
 ROOTS = ("src/ml_stack",)
 SUFFIXES = (".html", ".js", ".css")
 LIMIT = 500
+HARD = True
 
 
 def describe() -> str:
     return (f"A component over {LIMIT} lines; it holds more than one screen. "
-            "Split it and name each part in the page that assembles them.")
+            "Split it and name each part in the page that assembles them. "
+            "There is no allowance: the limit is the limit.")
 
 
 def find(root: Path) -> list[Finding]:

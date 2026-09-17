@@ -20,7 +20,7 @@ from typing import Any
 from ml_stack import bench
 from ml_stack.bench.askings import sampling_from
 from ml_stack.bench.keep import _commit
-from ml_stack.bench.measure import PER_QUESTION
+from ml_stack.bench.counting import PER_QUESTION
 from ml_stack.bench.record import of
 from ml_stack.bench.score import derived
 from ml_stack.bench.show import NOT_ANSWERING

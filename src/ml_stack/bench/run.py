@@ -30,7 +30,9 @@ from ml_stack.bench.detail import missed, shape
 from ml_stack.bench.estimate import estimate
 from ml_stack.bench.frontier import plot, rates
 from ml_stack.bench.keep import SMOKE, empties, forget, read_back, resumable, save
-from ml_stack.bench.measure import _how_many, _idle, concurrent, read_questions, sample
+from ml_stack.bench.holding import _idle
+from ml_stack.bench.measure import concurrent
+from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.ops import Refused
 from ml_stack.bench.progress import note_beside_the_run, status, stop, tail
 from ml_stack.bench.score import _which, export, ranking
@@ -252,7 +254,7 @@ def cmd_prepare(args: Any) -> int:
 
     graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
     if getattr(args, "mix", False):
-        from ml_stack.bench.measure import mix
+        from ml_stack.bench.questions import mix
         from ml_stack.graph.community import QUESTIONS
 
         everything = read_questions(args.questions) if args.questions else QUESTIONS

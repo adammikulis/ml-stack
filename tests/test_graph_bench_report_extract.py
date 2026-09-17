@@ -25,14 +25,14 @@ import pytest
 from ml_stack import bench
 from ml_stack.bench import Row
 from ml_stack.bench import extract as bx
-from ml_stack.bench.report import (
+from ml_stack.bench.gathered import (
     MIN_MESSAGES,
     best_extractor,
     extract_model_of,
     extractions,
     read_messages,
-    report,
 )
+from ml_stack.bench.report import report
 
 GIB = 1024 ** 3
 
@@ -131,7 +131,7 @@ def store(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> str:
     and a relation vocabulary, so its topic precision and relation F1 are the low pair and
     the newer reader's are the high one -- the shape of the record the section exists for.
     """
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     where = str(tmp_path / "runs.ladybug")
     _clock(monkeypatch, 0)
     _answering(where, "kestrel-plain", questions=20, hits=15, seconds=200.0)
@@ -329,7 +329,7 @@ def test_the_subcommand_narrows_the_extraction_runs_by_model_too(store, measured
 
 
 def test_a_model_with_no_extraction_run_prints_no_section(tmp_path, measured_fit, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     where = str(tmp_path / "answering.ladybug")
     _answering(where, "kestrel-plain")
     assert bench.main(["report", "--kept", where]) == 0

@@ -34,8 +34,8 @@ from ml_stack.gguf import (  # noqa: E402  -- after REAL_SOURCE_DIRS, on purpose
     set_metadata,
 )
 
-gguf = pytest.importorskip("gguf")
-np = pytest.importorskip("numpy")
+gguf = pytest.importorskip("gguf", reason="ml-stack[gguf]")
+np = pytest.importorskip("numpy", reason="ml-stack[arrays]")
 
 
 @pytest.fixture
@@ -301,3 +301,25 @@ def test_the_sidecar_beside_a_converted_file_says_which_shape_it_is(tmp_path):
     record = json.loads(made.with_suffix(".gguf.json").read_text(encoding="utf-8"))
     assert version_of(record) == SIDECAR_VERSION
     assert record["sha256"] == result.sha256 and record["outtype"] == "f16"
+
+
+def test_convert_passes_the_dense_module_flag_to_the_converter(tmp_path):
+    from ml_stack.gguf.convert import convert
+
+    model = tmp_path / "model"
+    model.mkdir()
+    seen = tmp_path / "argv.json"
+    script = tmp_path / "convert_hf_to_gguf.py"
+    script.write_text(
+        "import json, sys\n"
+        f"open({str(seen)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+        "out = sys.argv[sys.argv.index('--outfile') + 1]\n"
+        "open(out, 'wb').write(b'GGUF')\n",
+        encoding="utf-8",
+    )
+    plain = convert(model, tmp_path / "plain.gguf", converter=script, write_sidecar=False)
+    assert "--sentence-transformers-dense-modules" not in json.loads(seen.read_text())
+    dense = convert(model, tmp_path / "dense.gguf", converter=script, write_sidecar=False,
+                    sentence_transformers_dense_modules=True)
+    assert "--sentence-transformers-dense-modules" in json.loads(seen.read_text())
+    assert plain.path.is_file() and dense.path.is_file()

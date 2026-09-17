@@ -73,7 +73,7 @@ class TestWhatItPrints:
 
 # -- a real daemon, driven ------------------------------------------------------------------
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 
 
 @pytest.fixture

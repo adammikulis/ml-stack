@@ -195,7 +195,7 @@ class TestTheAdapter:
     def test_a_checkpoint_holds_the_adapter_and_not_the_frozen_base(self, dataset, tmp_path):
         """E4B's base is 16G and identical at every step; writing it every checkpoint
         would spend the disk on a copy of something already on this machine."""
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         from safetensors.torch import load_file
 
         data, base = dataset
@@ -214,7 +214,7 @@ class TestTheAdapter:
             got["lora"]["trainable_parameters"]
 
     def test_it_resumes_from_its_own_adapter(self, dataset, tmp_path):
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         data, base = dataset
         out = tmp_path / "run"
         config = {"lora": True, "steps": 20, "context": 256, "batch_size": 2,
@@ -226,7 +226,7 @@ class TestTheAdapter:
     def test_a_checkpoint_of_another_rank_does_not_fit(self, dataset, tmp_path):
         """A LoRA checkpoint only fits the rank and modules it was trained with, and a
         partial restore of an adapter is a silently different model."""
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         from ml_stack.train.checkpoint import CheckpointError
 
         data, _ = dataset
@@ -238,7 +238,7 @@ class TestTheAdapter:
                                "batch_size": 2, "learning_rate": 0.001}, data, out)
 
     def test_a_target_this_architecture_does_not_have_says_so(self, dataset, tmp_path):
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         from ml_stack.train.recipes import build
 
         data, _ = dataset
@@ -248,7 +248,7 @@ class TestTheAdapter:
 
     def test_the_full_fine_tune_export_refuses_a_lora_run_and_names_the_merge(self, dataset,
                                                                              tmp_path):
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         from ml_stack.train.recipes.tool_calls import save_pretrained
 
         data, base = dataset
@@ -314,7 +314,7 @@ class TestEndToEnd:
             self, dataset, llama_cpp, tmp_path, capsys):
         """One command, the whole path: an adapter, the base with it folded in, a GGUF the
         serve path can read, and a manifest that identifies the data by hash."""
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         data, base = dataset
         out = tmp_path / "out"
 
@@ -386,7 +386,7 @@ class TestEndToEnd:
         assert "invented-arch" in lora_mod.summarise(report)
 
     def test_a_dry_run_measures_a_step_and_writes_nothing(self, dataset, tmp_path, capsys):
-        pytest.importorskip("peft")
+        pytest.importorskip("peft", reason="ml-stack[train-lora]")
         data, _ = dataset
         out = tmp_path / "dry"
         code = main(["--recipe", "tool-calls", "--data", str(data), "--out", str(out),

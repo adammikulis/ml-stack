@@ -122,10 +122,12 @@ the other does not import it back. `KNOWN` lists what still crosses; it only shr
 script, or be named in `STANDALONE` with a reason. Code nothing calls is a gap to close,
 never a reason to delete.
 
-The size gates cover both halves of the tree: `deep-files` for Python at 900 lines,
-`deep-components` for the HTML, JavaScript and CSS a page is assembled from at 500. A file
-already over its limit may only get shorter -- `claude-edit-guard` refuses the write that
-lengthens it, at the moment it is written.
+The size gates carry no number. `deep-files` (900 lines of Python) and `deep-components`
+(500 lines of the HTML, JavaScript and CSS a page is assembled from) set `HARD = True`,
+take no line in `budgets.json`, and fail on a single finding. A file over the limit is a
+file to split, never an allowance to record. `claude-edit-guard` refuses the write that
+takes a file over its limit or lengthens one that is already over, at the moment it is
+written.
 
 `scripts/gates/duplicates.py` hashes normalised function bodies and reports the pairs.
 `tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
@@ -136,12 +138,13 @@ both: `ruff-blind-except`, `ruff-bugbear`, `ruff-security`, `ruff-other`, `pyrig
 Neither tool is a dependency, so a checker that cannot find its tool prints why and its
 metric is left out rather than counted as zero.
 
-`scripts/hooks/pre-push` refuses a push from an agent and lets your own through: Claude Code
-sets `CLAUDECODE` for every command it runs and a terminal sets nothing, so the hook can tell
-them apart. release-please reads the subjects on `main`, so a push moves the release pull
-request and a `main` that is ahead publishes every commit on it at once; an agent told to
-push anyway runs `ML_STACK_PUSH=yes git push`. The Bash guard refuses the command as well, so
-an agent is told before it runs.
+`scripts/hooks/pre-push` lets an agent push the development branch and nothing else, and lets
+your own push through: Claude Code sets `CLAUDECODE` for every command it runs and a terminal
+sets nothing, so the hook can tell them apart. The development branch is the one the primary
+checkout is on, and `main` is never it. release-please reads the subjects on `main`, so a
+push there moves the release pull request and publishes every commit on it at once; that push
+is Adam's. The Bash guard refuses a push naming `main`, a force, a deletion, `--all` or
+`--tags`, so an agent is told before it runs.
 
 `scripts/hooks/claude-edit-guard` refuses a function whose body already exists elsewhere, a
 raw HTTP call, a docstring over twelve lines, a signature over eight parameters, and a write
@@ -209,9 +212,10 @@ the work actually asks for and choose. Haiku for a mechanical sweep with the jud
 already in the brief -- a rename across known sites, a parser moved to the shared one,
 a fixture swapped. Sonnet for ordinary code with tests. Opus where the agent has to decide
 *what* the right change is, not just make it -- a module boundary, a failure that needs
-diagnosing, a measurement whose meaning is in question. Fable for work whose difficulty is
-the thinking rather than the typing, and it is a fine choice for a subagent when that is
-what the task is. Nothing is barred by being the model this session runs on.
+diagnosing, a measurement whose meaning is in question. Fable sparingly: only for work whose
+difficulty is the thinking rather than the typing and that Opus has fallen short on. It is
+the exception, never the default for work that merely feels important. No more model than
+the task needs, and no less.
 
 Getting it wrong costs in both directions. Too small and the agent produces something that
 passes its tests and is wrong in a way only a reader would catch, or it fails twice and the
@@ -245,23 +249,30 @@ git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch -
 commit queued to publish. Work lands on the development branch, and promoting that to
 `main` is Adam's, on his own timing, like the push it implies.
 
-Whoever made it finishes it. Merge into the development branch, then take the worktree and
-the branch away:
+Whoever made it finishes it. Fetch, merge into the development branch, push the development
+branch, then take the worktree and the branch away:
 
 ```
+git fetch origin
+git merge --ff-only <branch>
+git push origin "$(git branch --show-current)"
 git worktree remove ../ml-stack-<branch>
 git branch -d <branch>
 git worktree prune
 ```
 
-If the branch was pushed, delete it on the remote too. A branch nobody is working on
-still shows up in every list of branches, and the next person has to work out whether it
-matters.
+The development branch is pushed after every merge that lands on it, so the remote is never
+behind what has landed. A work branch is not pushed.
 
-A subagent merges and prunes its own work. A session that spawns three agents gets three
-merges done by three agents, not three branches handed back for it to sort out.
+Whoever merges, prunes. A subagent that lands its own branch removes its own worktree and
+branch. When a subagent finishes and the main session does the merging or integrating, the
+main session removes that worktree and deletes that branch in the same step -- the subagent
+has exited and nobody else will. A merge is not finished until `git worktree list` shows
+only trees with live work in them.
 
-Do not remove a worktree you did not create — another agent may still be in it. Leave it
+Before removing a tree, check that it holds nothing unique: unmerged commits (`git cherry
+<dev-branch> <branch>`), uncommitted changes, or ignored state that is not a rebuildable
+cache. Never remove a tree while an agent is still working in it -- if one is, leave it
 and say so.
 
 What a day without this rule cost (2026-09-03, five agents in the primary checkout at
@@ -307,6 +318,16 @@ needs a clean order.
 Re-running the whole suite after every intermediate commit buys nothing: the branch has
 not landed, and it will be rebased onto a moved development branch before it does, which
 is what the one pre-merge run is for.
+
+### Commit before you mutate
+
+A test you rely on is one you have watched fail: break the behaviour it covers and see it
+go red. That mutation is undone by restoring the file from a commit, and `git checkout --
+<file>` or `git restore <file>` restore the *last commit* -- every uncommitted edit in the
+file goes with the mutation, the fix included. So commit the fix first, apply the
+mutation, watch it fail, restore with `git restore --source=HEAD -- <file>`, and confirm
+`git diff` is empty and the test is green again. Never mutate a file holding uncommitted
+work.
 
 ## Driving a browser
 

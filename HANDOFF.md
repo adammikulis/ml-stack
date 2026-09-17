@@ -5,7 +5,8 @@ why is in `README.md`, `docs/`, the code and `git log`. Each carries the context
 up cold. Rules: invented names only, everywhere (`tests/known-fixtures.txt`, or a rule in
 `contracts/name-shapes.json` when the refusal is a code fragment); tests build their own
 fixtures and never read `~/.ml-stack`; a measurement is estimated before it runs and smoked
-before it is paid for; nothing is pushed without Adam's go-ahead (a push cuts a release).
+before it is paid for; the development branch is pushed after every merge and `main` is
+pushed by Adam alone (a push there cuts a release).
 The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
 Slack-specific. What was measured on 2026-09-02 and what it settled is
 `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `docs/architectures/` and
@@ -228,47 +229,6 @@ across `src/`.
   communities, 85% of each node's edges inside its own, settled into one blob under every
   setting tried, and a citation or hierarchy graph may not.
 
-### Files that hold more than one job
-
-`deep-files` refuses a Python file over 900 lines and `deep-components` an HTML, JavaScript
-or CSS file over 500. No component is over any more; eight Python files are.
-`claude-edit-guard` refuses a write that lengthens one of them, so each can only get
-shorter from here, but nothing shortens them except somebody splitting them.
-`scripts/budgets --show deep-files` lists them.
-
-Each is a file to read before it is a file to split: the answer is a module per job with a
-name, not a line count met by moving code sideways.
-
-- [ ] **`serve/fit.py` (1,390)** -- parsing the llama.cpp load log (`Segment`, `Measured`,
-  `parse_load_log`), the `Fit` record and its file, the rendering (`render`, `_block`,
-  `_block_md`), the GGUF tensor table (`Tensor`, `tensors_of`, `render_tensors`) and the
-  matplotlib plot.
-- [ ] **`bench/measure.py` (1,279)** -- the questions (`read_questions`, `sample`), one
-  question through the client with its bill (`Counting`, `_ask_once`) and its trace, a set
-  of them (`measure`, `concurrent`), and what the server costs (`footprint`, `busy`,
-  `slot_count`).
-- [ ] **`hub.py` (1,215)** -- `Found` and the search, `Head` and the draft head, `Chosen`
-  and the pick, plus a `ctypes` memory probe that belongs nowhere near any of them.
-- [ ] **`bench/extract.py` (1,095)** -- `MessageRow` and the truth behind a message, the
-  resolution of a name to a node, and `_Extracting`, which runs the model.
-- [ ] **`bench/report.py` (1,081)** -- the gathering of kept runs, and `Doc` with the
-  sections it renders.
-- [ ] **`serve/cli.py` (1,062)** -- twenty subcommands, each parsing its own arguments; the
-  work is already in `serve/ops.py`, so this is parsers and printing. The one a newcomer
-  meets first, and the file in the commands entry below.
-- [ ] **`serve/build.py` (1,000)** -- finding a toolchain, the cmake invocation, the cache of
-  what was built, and choosing the binary to run.
-- [ ] **`train/tools.py` (953)** -- reading the worked examples out of tool schemas,
-  inventing arguments and paraphrases, the synthesiser, turning kept bench traces into
-  rows, and the command. Its own section banners name the seams.
-- [ ] **`bench/extract.py` and `bench/measure.py` are both read by the extraction
-  bench**, so splitting them is one reader's job rather than two.
-
-`fleet/models.py` (930) went that way, into `fleet/models.py` (the machine's model files),
-`fleet/catalogue.py` (what the hub offers and what fits here) and `fleet/weights.py` (which
-file in a repository is the model); the five helpers that crossed a module boundary lost
-their leading underscore and every importer moved rather than being re-exported.
-
 ### The commands
 
 - [ ] **Nineteen commands still build their own parser and keep their work in the handler.**
@@ -448,14 +408,6 @@ their leading underscore and every importer moved rather than being re-exported.
 
 ### The code itself
 
-- [ ] **A branch's worth of honest skips is sitting in `git stash`, and its branch is gone.**
-  `stash@{0}`, "On honest-skips: wip: honest-skips fixes", 17 files off `aeb04db`. It gives
-  every skip a reason that names what to install -- "torch is not importable: ml-stack[torch]"
-  rather than "not importable on this platform", which is the passive voice `CLAUDE.md` bans --
-  adds `needs_a_backend` for the tests that want either torch or mlx, and stops
-  `test_findings_are_named_relative_to_the_tree_they_were_found_in` counting a checker that
-  could not run as one that found nothing. The branch was deleted without landing it. Rebase
-  it onto the development branch, land what still applies, and drop the stash.
 - [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
   that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
   `graph/replies.py`, `graph/answers.py` and `graph/conversation.py`, and every test still

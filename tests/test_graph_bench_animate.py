@@ -293,7 +293,7 @@ def test_a_document_without_configs_is_refused(tmp_path, capsys):
 
 @pytest.mark.slow
 def test_the_title_card_renders_to_a_video_and_a_last_frame(tmp_path):
-    pytest.importorskip("manim")
+    pytest.importorskip("manim", reason="ml-stack[viz]")
     out = tmp_path / "title.mp4"
     png = tmp_path / "title.png"
     a.render(a_document(), out=out, png=png, quality="l", seconds=3, only=["title"],

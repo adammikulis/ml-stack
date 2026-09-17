@@ -74,7 +74,7 @@ class TestGraph:
         assert Graph.from_edges(4, PATH).num_edges == 3
 
     def test_to_networkx_round_trips_the_structure(self):
-        nx = pytest.importorskip("networkx")
+        nx = pytest.importorskip("networkx", reason="pip install networkx")
         graph = Graph.from_edges(4, PATH).to_networkx()
         assert graph.number_of_nodes() == 4
         assert sorted(graph.edges()) == PATH
@@ -85,6 +85,7 @@ class TestGraph:
     def test_isolated_nodes_survive_the_networkx_conversion(self):
         """A node with no edges is still a node. Building the graph from the edge list
         alone would silently drop it and renumber everything after it."""
+        pytest.importorskip("networkx", reason="pip install networkx")
         graph = Graph.from_edges(6, PATH).to_networkx()
         assert graph.number_of_nodes() == 6
 
@@ -327,7 +328,7 @@ class TestTopology:
     def test_build_topology_is_connected_thanks_to_the_mst(self):
         """kNN alone can leave a cluster with no edge out of it, and no amount of message
         passing will ever move information across that gap."""
-        nx = pytest.importorskip("networkx")
+        nx = pytest.importorskip("networkx", reason="pip install networkx")
         points = np.concatenate([
             np.random.default_rng(0).standard_normal((6, 2)),
             np.random.default_rng(1).standard_normal((6, 2)) + 100.0,  # a far-away cluster
@@ -339,7 +340,7 @@ class TestTopology:
         assert nx.number_connected_components(graph) == 1
 
     def test_without_the_mst_the_clusters_stay_separate(self):
-        nx = pytest.importorskip("networkx")
+        nx = pytest.importorskip("networkx", reason="pip install networkx")
         points = np.concatenate([
             np.random.default_rng(0).standard_normal((6, 2)),
             np.random.default_rng(1).standard_normal((6, 2)) + 100.0,

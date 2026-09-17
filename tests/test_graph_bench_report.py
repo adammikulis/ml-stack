@@ -18,16 +18,16 @@ import pathlib
 import pytest
 
 from ml_stack import bench
-from ml_stack.bench.report import (
+from ml_stack.bench.gathered import (
     across,
     answering,
     asking_of,
     cache_of,
     model_of,
     recommended_head,
-    report,
     thinking_of,
 )
+from ml_stack.bench.report import report
 from ml_stack.serve.fit import Fit
 
 from conftest import scored_rows

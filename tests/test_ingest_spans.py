@@ -163,7 +163,7 @@ def _keep(tmp_path, slug, reads):
 
 
 def test_the_store_reads_the_spans_back_and_the_pointers_resolve(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     unit = _unit()
@@ -190,7 +190,7 @@ def test_the_store_reads_the_spans_back_and_the_pointers_resolve(tmp_path):
 
 
 def test_a_node_with_no_span_quotes_what_it_was_given(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
 
     node = {"id": "concept:sablon", "label": "sablon", "provenance": ["lattice:2:2.4"],
             "attrs": {"definition": "the grey mineral the plates are ground from"}}
@@ -209,8 +209,8 @@ def test_a_node_with_no_span_quotes_what_it_was_given(tmp_path):
 def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path):
     """The whole path, driven the way a run drives it: a document, a fold that re-reads it
     for the text, a store, and a model that reads a cited entry and quotes the passage."""
-    pytest.importorskip("ladybug")
-    pytest.importorskip("pymupdf")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
     from ml_stack.graph.looking import tools_for
     from ml_stack.ingest.ask import graph_of
     from ml_stack.sources import pdf

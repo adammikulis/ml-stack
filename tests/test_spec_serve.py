@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-mx = pytest.importorskip("mlx.core")
-pytest.importorskip("tokenizers")
+mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
+pytest.importorskip("tokenizers", reason="pip install tokenizers")
 
 from mlx.utils import tree_flatten  # noqa: E402
 from mlx_lm import load  # noqa: E402

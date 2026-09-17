@@ -5,7 +5,7 @@
 # wrapper in .git/hooks/ that exports NAMES_GRAPH / NAMES_SCRAPE and execs the script
 # here; this installer leaves any hook it did not put there alone.
 #
-# pre-push refuses a push unless ML_STACK_PUSH=yes is set for that command.
+# pre-push refuses an agent's push of any ref but the development branch.
 #
 # pre-commit runs no-real-names, then budgets, then budgets-only-fall. budgets refuses a
 # staged file that adds a site to any metric in budgets.json (SKIP_BUDGETS=1 to override);

@@ -17,7 +17,7 @@ from ml_stack import bench
 from ml_stack.bench.askings import REACH
 from ml_stack.bench.estimate import ceiling_default
 from ml_stack.bench.keep import SHORT, SMOKE
-from ml_stack.bench.measure import PER_QUESTION
+from ml_stack.bench.counting import PER_QUESTION
 from ml_stack.bench.score import NOISE
 from ml_stack.command import Option, flag
 from ml_stack.graph.vectors import MARGIN

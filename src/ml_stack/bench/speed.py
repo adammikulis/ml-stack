@@ -331,7 +331,7 @@ def _client_settings(args: Any, *, timeout: float) -> dict[str, Any]:
 def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
                smoking_first: bool) -> list[str]:
     """Every ``--on`` server: the grid, kept as one run of kind ``speed`` per label."""
-    from ml_stack.bench.measure import _idle
+    from ml_stack.bench.holding import _idle
     from ml_stack.bench.askings import sampling_from
 
     keys = []
@@ -361,7 +361,7 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
 
 def _server_record(url: str, client: Any) -> dict[str, Any]:
     """The run's ``server`` record: what serves on ``url``, and what it holds."""
-    from ml_stack.bench.measure import said_by
+    from ml_stack.bench.holding import said_by
 
     server = bench.footprint(url, client)
     server.setdefault("base_url", url)

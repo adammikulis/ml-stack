@@ -55,7 +55,7 @@ def _store(path: Path, at: list[tuple[str, str]]) -> None:
 @pytest.fixture
 def day(tmp_path: Path) -> Path:
     """A bench home holding the four logs, `measuring.json` and the runs store."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     home = tmp_path / "home"
     logs = home / "logs"
     logs.mkdir(parents=True)

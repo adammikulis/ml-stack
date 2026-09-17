@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -11,7 +12,11 @@ from ml_stack.http import ServerError, request_json
 
 HEALTH_PATHS = ("/health", "/v1/models", "/models", "/props")
 
-_SENTINEL_SEEDS = frozenset({-1, 0xFFFFFFFF, 4294967295})
+_QUANT = re.compile(
+    r"(?<![A-Za-z0-9])(MXFP4|IQ\d+_[A-Z]+(?:_[A-Z]+)?|Q\d+_K_[A-Z]+|Q\d+_K|Q\d+_\d+|BF16|FP16|FP32|F16|F32)"
+    r"(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +27,8 @@ class ServingParams:
     model: str | None = None
     quant: str | None = None
     seed: int | None = None
+    min_p: float | None = None
+    repeat_penalty: float | None = None
     total_slots: int | None = None
     chat_template: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
@@ -74,9 +81,15 @@ def serving_params(base_url: str, *, timeout: float = 5.0) -> ServingParams | No
 
     settings = props.get("default_generation_settings")
     settings = settings if isinstance(settings, dict) else {}
+    nested = settings.get("params")
+    nested = nested if isinstance(nested, dict) else {}
 
-    seed = settings.get("seed")
-    if isinstance(seed, int) and seed in _SENTINEL_SEEDS:
+    def setting(name: str) -> Any:
+        value = nested.get(name)
+        return settings.get(name) if value is None else value
+
+    seed = setting("seed")
+    if not isinstance(seed, int) or seed < 0 or seed >= 0xFFFFFFFF:
         seed = None
 
     model = props.get("model_path") or settings.get("model") or props.get("model")
@@ -84,8 +97,10 @@ def serving_params(base_url: str, *, timeout: float = 5.0) -> ServingParams | No
         n_ctx=settings.get("n_ctx") or props.get("n_ctx"),
         model=model,
         quant=quant_from_model_path(model) if isinstance(model, str) else None,
-        seed=seed if isinstance(seed, int) else None,
-        total_slots=props.get("total_slots"),
+        seed=seed,
+        min_p=setting("min_p"),
+        repeat_penalty=setting("repeat_penalty"),
+        total_slots=props.get("total_slots") or props.get("n_parallel"),
         chat_template=(props.get("chat_template")
                        if isinstance(props.get("chat_template"), str) else None),
         raw=props,
@@ -108,12 +123,6 @@ def reported_models(base_url: str, *, timeout: float = 5.0) -> list[str]:
 
 
 def quant_from_model_path(path: str) -> str | None:
-    """Pull ``Q4_K_M`` / ``Q8_0`` / ``BF16`` out of a GGUF filename."""
-    stem = path.rsplit("/", 1)[-1]
-    for part in reversed(stem.replace(".gguf", "").split("-")):
-        upper = part.upper()
-        if upper.startswith("Q") and any(c.isdigit() for c in upper):
-            return upper
-        if upper in ("BF16", "F16", "F32", "FP16", "FP32"):
-            return upper
-    return None
+    """The quantisation a GGUF filename names (``Q4_K_M``, ``IQ4_XS``, ``MXFP4``, ``BF16``)."""
+    match = _QUANT.search(path.rsplit("/", 1)[-1])
+    return match.group(1).upper() if match else None

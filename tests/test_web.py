@@ -130,7 +130,7 @@ def test_the_engine_is_picked_by_env_and_an_unknown_name_is_refused(monkeypatch)
 def test_ddgs_rows_are_renamed_and_its_rate_limit_becomes_search_unavailable(monkeypatch):
     """ddgs 9 returns ``title/href/body`` and raises ``RatelimitException`` (a
     ``DDGSException``) rather than returning nothing; ``backend`` is still a keyword."""
-    ddgs = pytest.importorskip("ddgs")
+    ddgs = pytest.importorskip("ddgs", reason="ml-stack[web]")
     from ddgs.exceptions import RatelimitException
 
     calls = []

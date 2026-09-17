@@ -675,7 +675,7 @@ def leased(backend, spec, **starting):
 @pytest.fixture(scope="session")
 def playwright():
     """The one Playwright this worker gets; a second in the same thread refuses."""
-    pw = pytest.importorskip("playwright.sync_api")
+    pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
     with pw.sync_playwright() as play:
         yield play
 

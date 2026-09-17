@@ -13,7 +13,7 @@ import pytest
 
 from ml_stack import ingest
 
-pytest.importorskip("ladybug")
+pytest.importorskip("ladybug", reason="ml-stack[store]")
 
 migrate_module = import_module("ml_stack.ingest.migrate")
 

@@ -183,7 +183,7 @@ def test_no_selfcheck_skips_it_and_a_passing_one_is_said_before_the_lock(monkeyp
 
 def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_fails(
         monkeypatch, tmp_path, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from contextlib import contextmanager
 
     import ml_stack.client

@@ -45,10 +45,15 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('git add . ', "the dot is the same"),
     ('git add -u', "every tracked change is the same"),
     ('git commit -am "x"', "commit -a stages everything too"),
-    ('git push', "a push is the owner's to make"),
-    ('git push origin main', "the same, named"),
+    ('git push origin main', "a push to main is the owner's to make"),
+    ('git push origin 0.2dev:main', "the same, through a refspec"),
     ('git push --force origin main', "a forced push most of all"),
-    ('git merge --ff-only work && git push', "still a push after a merge"),
+    ('git push --force origin 0.2dev', "a forced push rewrites the development branch"),
+    ('git push -f origin 0.2dev', "the short spelling of the same"),
+    ('git push --all origin', "every branch at once includes main"),
+    ('git push --tags', "a tag is a release"),
+    ('git push origin --delete work', "a deletion is not a push of the development branch"),
+    ('git merge --ff-only work && git push origin main', "still main after a merge"),
 ])
 def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     assert guard(command) == BLOCKED, why
@@ -68,6 +73,8 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git commit -m "x"',
     'git commit -m "docs: the guard refuses git add -A"',
     "grep -rn 'git push' docs/",
+    'git push origin 0.2dev',
+    'git merge --ff-only work && git push origin 0.2dev',
     'git log --oneline origin/main..main',
     'git rev-list --left-right --count origin/main...main',
 ])

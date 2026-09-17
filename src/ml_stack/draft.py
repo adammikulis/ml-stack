@@ -14,7 +14,7 @@ from typing import Any
 
 from ml_stack.bench import home_dir
 from ml_stack.bench.keep import save
-from ml_stack.bench.measure import sample as sampled
+from ml_stack.bench.questions import sample as sampled
 from ml_stack.bench.quiet import look
 from ml_stack.bench.score import Row
 from ml_stack.bench.serve import served, up

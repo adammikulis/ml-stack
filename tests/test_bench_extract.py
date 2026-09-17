@@ -11,17 +11,17 @@ import contextlib
 import dataclasses
 import json
 import random
+from pathlib import Path
 
 import pytest
 
 from ml_stack import hub
-from ml_stack.client.families import GENERIC
-from ml_stack.bench import extract as bx
 from ml_stack.bench import MEASURING, RunNotKept, _parser, runs
+from ml_stack.bench import extract as bx
+from ml_stack.bench import truth as bt
+from ml_stack.client.families import GENERIC
 from ml_stack.world.organisation import make
 from ml_stack.world.simulate import simulate
-from pathlib import Path
-
 
 # -- a tiny world with messages -----------------------------------------------------------------
 
@@ -41,11 +41,11 @@ def labels(graph: dict) -> dict[str, str]:
 
 def test_the_sample_keeps_arcs_and_chatter_both_and_is_the_same_for_a_seed():
     _, messages = talked(days=10)
-    strata = {bx._stratum(m) for m in messages}
+    strata = {bt._stratum(m) for m in messages}
     assert any(s.startswith("arc:") for s in strata) and any(s.startswith("chat:") for s in strata)
     picked = bx.sample_messages(messages, 12, seed=0)
     assert len(picked) == 12
-    got = {bx._stratum(m) for m in picked}
+    got = {bt._stratum(m) for m in picked}
     assert any(s.startswith("arc:") for s in got), "an arc's thread is a handful in a fortnight"
     assert any(s.startswith("chat:") for s in got)
     assert [m["id"] for m in picked] == [m["id"] for m in bx.sample_messages(messages, 12, seed=0)]
@@ -113,7 +113,7 @@ def test_the_gold_fed_back_scores_everything_and_invents_nothing():
     graph, messages = talked("community", days=10)
     picked = bx.sample_messages(messages, 40, seed=0)
     held = bx.gold(graph, picked)
-    folded = bx.fold([bx.as_extraction(bx.gold(graph, [m])) for m in picked])
+    folded = bx.fold([bt.as_extraction(bx.gold(graph, [m])) for m in picked])
     scores = bx.score(folded, held, per_message=[m["attrs"]["asserts"] for m in picked])
     assert scores["nodes"]["coverage"] == scores["nodes"]["precision"] == scores["nodes"]["f1"] == 1.0
     for bucket in bx.BUCKETS:
@@ -136,7 +136,7 @@ def test_an_invented_person_counts_against_precision_and_as_invented():
     graph, messages = talked()
     picked = bx.sample_messages(messages, 10, seed=0)
     held = bx.gold(graph, picked)
-    truth = [bx.as_extraction(bx.gold(graph, [m])) for m in picked]
+    truth = [bt.as_extraction(bx.gold(graph, [m])) for m in picked]
     truth[0]["people"].append({"name": "Orsolya Brandt", "role": "", "org": "", "place": ""})
     scores = bx.score(bx.fold(truth), held)
     people = scores["by_kind"]["people"]
@@ -152,7 +152,7 @@ def test_a_project_the_messages_assert_under_others_is_neither_found_nor_invente
     held = bx.gold(graph, picked)
     assert held["others"], "a company's chatter is about its projects"
     project = next(iter(held["others"].values()))["label"]
-    truth = [bx.as_extraction(bx.gold(graph, [m])) for m in picked]
+    truth = [bt.as_extraction(bx.gold(graph, [m])) for m in picked]
     truth[0]["orgs"].append({"name": project, "kind": "project"})
     scores = bx.score(bx.fold(truth), held)
     assert scores["by_kind"]["orgs"]["invented"] == 0
@@ -281,7 +281,7 @@ def test_measure_scores_the_sender_only_reader_at_full_people_precision(tmp_path
 
 
 def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     graph, messages = talked()
     picked = bx.sample_messages(messages, 5, seed=0)
     rows, scores = bx.measure(Reader(), picked, graph)
@@ -306,7 +306,7 @@ def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
 
 
 def test_the_estimate_comes_from_earlier_runs_of_the_same_model_else_a_guess(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     graph, messages = talked()
     rows, scores = bx.measure(Reader(), bx.sample_messages(messages, 4, seed=0), graph)
     for r in rows:
@@ -336,7 +336,7 @@ def test_a_world_without_messages_is_simulated_and_said_so(tmp_path):
 
 
 def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack import bench
 
@@ -359,7 +359,7 @@ def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, mon
 
 
 def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack import bench
 
@@ -381,7 +381,7 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
 
 
 def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_path, monkeypatch, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     import ml_stack.client
     from ml_stack import bench
 
@@ -401,7 +401,7 @@ def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_pat
 
 
 def test_show_prints_extraction_runs_under_the_answering_table_or_alone(tmp_path, capsys):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack import bench
 
     graph, messages = talked()

@@ -1,40 +1,15 @@
 """Everything measured so far, as one document: how each model was asked, what a draft
 head was worth, how much memory it wants, and what to serve.
 
-`show` prints evidence -- one line per run, every column that could matter. This prints the
-*conclusion a person asked for*: "a nice table with all the stats you have so far" was
-composed by hand once, out of `show`, the `drafts` summaries in a log and
-`ml-stack-serve fit`, and composing it by hand is exactly the step that becomes a command.
-
-Nothing here measures anything or serves anything. It reads the kept runs and the fit
-records and arranges them:
-
-1. **Answering, per model** -- one table per model file, a row per way it was asked;
-2. **Across models** -- the best row of each, which is what `show --rank` writes;
-3. **Extraction** -- one row per `extract` run, newest first, with the topology and the
-   conformance under it; printed only when the window holds one;
-4. **Ingest** -- one row per source in a ``--sources`` store: how much of it is read, what
-   is in the store as of the last fold, what it cost, and the run(s) that read it; printed
-   only when such a store is given and finds something;
-5. **Draft heads** -- the `drafts` summary and its recommendation, per model;
-6. **Memory** -- the fit records, at this machine's room and at each ``--room``;
-7. **What to serve** -- one line per model composing 1, 5 and 6.
-
-Extraction is here because the day it was left out is the day the document could not hold
-the cause-then-fix record it exists for: a model read topics at 19% precision and relations
-at 0% F1 with 26% invented ids, the extraction instructions were given the topic and the
-relation vocabulary, and the same model read 67% / 62% / 7% after. That is a measurement, a
-cause we controlled and a re-measurement, and it lived only in a terminal because the report
-filtered the runs out before it read them.
-
-A part that was never measured says "not measured". Nothing here guesses: a report that
-filled a gap with a plausible number would be read as a measurement, and the whole point of
-the store is that a number in it was paid for.
+`Doc` builds a document once and renders it as Markdown or as plain text; `report` fills
+it -- answering per model, across models, extraction, ingest, draft heads, memory, and
+what to serve -- and `main` is ``ml-stack-bench report``. Nothing here measures or serves
+anything: it reads the kept runs and the fit records and arranges them, and a part that
+was never measured says "not measured".
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -42,443 +17,33 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.runs`, `bench.home_dir()`
 # -- so anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
-from ml_stack.bench.keep import SHORT
-from ml_stack.bench.record import of
-from ml_stack.bench.score import (
-    NOISE,
-    derived,
-    held_up,
-    host_of,
-    hosts_of,
-    per_question,
+from ml_stack.bench.gathered import (
+    MIN_MESSAGES,
+    _pct,
+    _scores,
+    across,
+    answering,
+    asking_of,
+    best_extractor,
+    by_model,
+    cache_of,
+    extract_model_of,
+    extractions,
+    fit_for,
+    model_of,
+    read_messages,
+    recommended_head,
+    thinking_of,
 )
-from ml_stack.bench.show import _gb, drafted, kv_short
+from ml_stack.bench.keep import SHORT
+from ml_stack.bench.profiles import write_profiles
+from ml_stack.bench.record import of
+from ml_stack.bench.score import NOISE, derived, host_of, hosts_of, per_question
+from ml_stack.bench.show import _gb, drafted
 from ml_stack.log import say, warn
-from ml_stack.serve.profile import ASK
 from ml_stack.units import human_bytes
 
-__all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "FLAGS", "across", "answering", "asking_of",
-           "best_extractor", "by_model", "cache_of", "extract_model_of",
-           "extractions", "fit_for", "fits_named", "measured_best", "model_of",
-           "profile_of", "read_messages", "recommended_head", "report", "thinking_of",
-           "flags_of", "workload_of", "write_profiles"]
-
-
-# The words a sweep puts in a label for how it asked (`bench.halves`, `bench._askings`).
-# ``shortlist`` is here beside ``plain`` although it is a half rather than a way: without
-# it `shortlist-terse` and `plain-terse` read as the same row, which is two measurements
-# printed as one -- the mistake every column in `show`'s table exists to prevent.
-ASKINGS = ("plain", "shortlist", "terse", "card", "greedy", "rich", "tight", "reach")
-
-_WORD = re.compile(r"[-_:@.]+")
-
-# `drafted`'s recommendation, whose label may itself contain a colon
-_RECOMMENDED = re.compile(r"^serve (.+?): fastest whose F1 held")
-
-
-def model_of(one: Mapping[str, Any]) -> str:
-    """The model file a run was served from -- what groups runs into tables. "?" when the
-    run was kept before the server record named one."""
-    return str((one.get("server") or {}).get("model") or "?")
-
-
-def asking_of(label: Any) -> str:
-    """The way a run was asked, read out of its label: ``plain+terse``, ``shortlist``.
-
-    The label is where this lives and the only place it lives -- `served` composes it from
-    the half and the ``--also`` and keeps no separate record -- so it is read back the same
-    way, by whole word, never by substring: a model called ``tightfit`` is not a ``tight``
-    asking.
-    """
-    words = [w for w in _WORD.split(str(label or "").lower()) if w in ASKINGS]
-    return "+".join(dict.fromkeys(words)) or "-"
-
-
-def thinking_of(server: Mapping[str, Any]) -> str:
-    """``on`` when nothing bound the model's thinking, ``off`` at a budget of zero, else
-    the budget itself. A run served with a reasoning budget is another configuration, and
-    a budget of 0 is not the same measurement as no budget at all."""
-    budget = (server or {}).get("reasoning_budget")
-    if budget is None:
-        return "on"
-    return "off" if int(budget) == 0 else str(int(budget))
-
-
-def cache_of(server: Mapping[str, Any]) -> str:
-    """The KV cache type when it was quantised, "-" at f16. A quantised cache against an
-    f16 one is two configurations, not two models."""
-    kind = str((server or {}).get("cache_type") or "")
-    return kv_short(kind) if kind and kind != "f16" else "-"
-
-
-def _pct(value: float | None) -> str:
-    return f"{value * 100:.0f}%" if value is not None else "-"
-
-
-def by_model(kept: Sequence[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
-    """The scored runs grouped by the model file they were served from, newest last.
-
-    A run with no scored question is not an answering run and is left out: it has no F1,
-    and a row of dashes said nothing about why.
-    """
-    out: dict[str, list[Mapping[str, Any]]] = {}
-    for one in kept:
-        if not derived(one):
-            continue
-        out.setdefault(model_of(one), []).append(one)
-    return out
-
-
-def answering(kept: Sequence[Mapping[str, Any]], *, min_n: int = 6
-              ) -> dict[str, tuple[list[Mapping[str, Any]], int]]:
-    """Per model: the runs long enough to read, best F1 first, and how many were too short.
-
-    A run of two questions is a smoke run proving the path works; its score is a coin toss
-    by construction, and put in the table beside a full run it is read as a measurement.
-    So it is counted in a footnote instead of printed.
-    """
-    out: dict[str, tuple[list[Mapping[str, Any]], int]] = {}
-    for model, mine in by_model(kept).items():
-        long_enough = [o for o in mine if derived(o)["questions"] >= min_n]
-        long_enough.sort(key=lambda o: (-derived(o)["right"], str(o.get("at") or "")))
-        out[model] = (long_enough, len(mine) - len(long_enough))
-    return out
-
-
-def across(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0
-           ) -> list[tuple[str, Mapping[str, Any]]]:
-    """The best run of each model, most accurate first -- the ranking, as data.
-
-    "Best" is the best F1 among the model's *longest* runs, because a score is only
-    comparable with another over the same questions: twenty scored questions make each one
-    worth five points of F1 and fifty make it two, so the short run and the full one are
-    two measurements that must not be sorted against each other. ``full_n`` fixes the floor
-    across every model; unset, each model is read at the largest run it has.
-    """
-    out = []
-    for model, mine in by_model(kept).items():
-        floor = full_n or max(derived(o)["questions"] for o in mine)
-        pool = [o for o in mine if derived(o)["questions"] >= floor]
-        if not pool:
-            continue
-        out.append((model, max(pool, key=lambda o: (derived(o)["right"],
-                                                    str(o.get("at") or "")))))
-    return sorted(out, key=lambda pair: -derived(pair[1])["right"])
-
-
-# ---------------------------------------------------------------- the extraction runs
-
-# How many messages an extraction run reads before its scores are read as a measurement,
-# and `min_n`'s opposite number for the other half of the bench. `extract.SMOKE_MESSAGES`
-# is three, and three messages fix every coverage to a third: a run that missed one thing
-# reads 67%, which is not a rate but an arithmetic accident of how few it was asked.
-MIN_MESSAGES = 10
-
-
-def extract_model_of(one: Mapping[str, Any]) -> str:
-    """The model an extraction run read with, "?" for a run that names none.
-
-    Its own top-level ``model`` first, because that is where `extract.save` writes it --
-    already the file's basename with the ``.gguf`` off -- and the server record only after.
-    An answering run keeps the same fact under ``server.model`` and `model_of` reads it
-    there; the two are separate functions rather than one that guesses, since a run that
-    named neither would otherwise be grouped under whatever the other kind happened to say.
-    """
-    return str(one.get("model") or (one.get("server") or {}).get("model") or "?")
-
-
-def read_messages(one: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """The rows of an extraction run whose gold is exact -- the messages its scores were
-    measured over.
-
-    `extract.measure` scores the template-written messages and puts the model-written ones
-    in ``lower_bound``, and `extract.table` counts the run's messages the same way. So does
-    this: a run's `s/msg` counted over rows its coverage was not measured over is two
-    numbers over two different sets printed as one row.
-    """
-    return [r for r in (one.get("rows") or ()) if r.get("exact", True)]
-
-
-def _scores(one: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    return (one.get("scores") or {}).get(key) or {}
-
-
-def extractions(kept: Sequence[Mapping[str, Any]], *, min_msgs: int = MIN_MESSAGES
-                ) -> tuple[list[Mapping[str, Any]], int]:
-    """The extraction runs among ``kept``, newest first, and how many were too short.
-
-    Newest first rather than best first, unlike `answering`: an extraction run is read as a
-    record of what changed -- an instruction rewritten, a vocabulary defined -- and the
-    order that shows a change is the order it happened in, latest at the top. Which model
-    read best is a separate sentence, `best_extractor`, so the ordering never has to carry
-    two jobs at once.
-
-    A run of three messages is a smoke run proving the path works, for `answering`'s reason
-    exactly: it is counted here and footnoted rather than tabled beside a full one.
-
-    The key breaks a tie, not the order the store gave them back: `bench.runs` returns runs
-    sorted by key, and a key begins with the label, so two runs kept inside the same second
-    would be ordered by whatever they were called. The key's own tail is the run's stamp
-    and the suffix `save` adds when one second held two, which is the only record of which
-    came second.
-    """
-    from ml_stack.bench.extract import only
-
-    mine = only(kept)
-    long_enough = [one for one in mine if len(read_messages(one)) >= min_msgs]
-    long_enough.sort(key=lambda one: (str(one.get("at") or ""), str(one.get("key") or "")),
-                     reverse=True)
-    return long_enough, len(mine) - len(long_enough)
-
-
-def best_extractor(rows: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
-    """The run that read a graph out of messages best: the highest relation F1 among those
-    that read the most messages. None for nothing to read.
-
-    By relations rather than by nodes because naming the right people and joining none of
-    them is the failure this half of the bench exists to catch -- a model can list every
-    name in a message and state no relation at all, and its node F1 will not say so.
-
-    Among the longest runs only, for `across`'s reason: a coverage over ten messages and one
-    over forty are not the same measurement, and sorting them against each other rewards
-    whichever was asked less. Ties go to the later run, which is the one measured against
-    whatever changed last.
-    """
-    if not rows:
-        return None
-    floor = max(len(read_messages(one)) for one in rows)
-    pool = [one for one in rows if len(read_messages(one)) >= floor]
-    return max(pool, key=lambda one: (float(_scores(one, "relations").get("f1") or 0.0),
-                                      str(one.get("at") or "")))
-
-
-def recommended_head(mine: Sequence[Mapping[str, Any]],
-                     among: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
-    """The drafted run `drafted` recommends serving, or None for "serve no head".
-
-    Read out of `drafted`'s own last line rather than re-derived here: the rule -- the
-    fastest head whose F1 held within the noise of its baseline, and only if it beat no
-    head at all -- belongs in one place, and a second copy of it would be a second thing to
-    keep in step. A summary that stops saying "serve LABEL" makes this return None, which
-    reads as "not measured" rather than as a wrong recommendation.
-    """
-    if not any(of(o).head for o in mine):
-        return None
-    said = _RECOMMENDED.match(drafted(mine, among=among).splitlines()[-1])
-    if not said:
-        return None
-    # matched to the end of the label rather than to its first colon: a drafts label is
-    # `draft:mtp-alder@n4`, and splitting on the colon recommended a run called "draft"
-    return next((o for o in mine if str(o.get("label") or "") == said.group(1)), None)
-
-
-def fit_for(model: str, fits: Sequence[Any]) -> Any | None:
-    """The fit record measured for this model file, or None.
-
-    By file name first and by substring after, because the two sides name a model from
-    different ends: a run records what ``/props`` called the file it served, and a fit
-    record is keyed on the basename it was measured under.
-    """
-    name = str(model).lower()
-    for one in fits:
-        if str(getattr(one, "model", "")).lower() == name:
-            return one
-    for one in fits:
-        held = str(getattr(one, "model", "")).lower()
-        if held and (held in name or name in held):
-            return one
-    return None
-
-
-# ---------------------------------------------------------------- the record it all sets
-
-# Every word a label can carry about the asking, and what it means to `converse`. Wider
-# than `ASKINGS`, which is only what the tables print: `batch`, `kinds` and `summary` ride
-# on an asking rather than naming one, and a profile has to carry them or a model measured with
-# all three would be served with none.
-FLAGS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
-        "constrain_ids", "reach", "rounds")
-
-
-def flags_of(one: Mapping[str, Any]) -> dict[str, Any]:
-    """The asking a run records, as the fields of a profile.
-
-    A run kept since `asked_with` carries ``asking`` -- the keywords `converse` was actually
-    handed -- and that is taken as it is: it is the record, and reading a label instead
-    would be inferring what is already written down.
-
-    Older runs have only the label, so it is read by whole word, never by substring -- a
-    model called ``tightfit`` is not a ``tight`` asking. ``loose`` is the one word that
-    means the *absence* of a way: it is the control the ranking runs were measured with,
-    and it is how ``tight=False`` is said.
-    """
-    said = one.get("asking")
-    if isinstance(said, Mapping) and said:
-        out: dict[str, Any] = {"tight": bool(said.get("tight", True))}
-        for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few",
-                    "constrain_ids"):
-            out[way] = bool(said.get(way, False))
-        if said.get("reach"):
-            out["reach"] = int(said["reach"])
-        if said.get("rounds"):
-            out["rounds"] = int(said["rounds"])
-        return out
-    words = {w for w in _WORD.split(str(one.get("label") or "").lower()) if w}
-    out = {"tight": "loose" not in words}
-    for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few"):
-        out[way] = way in words
-    out["constrain_ids"] = False
-    if "reach" in words:
-        from ml_stack.bench.askings import REACH
-
-        # the label says a run reached; it does not say how far, and `--also reach` is the
-        # only thing that puts the word there, so its own figure is what was measured
-        out["reach"] = int(REACH)
-    return out
-
-
-def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
-                  ) -> Mapping[str, Any] | None:
-    """The run one model's record should be written from: the fastest whose F1 held.
-
-    `across` ranks by F1 alone, which is the right question for "which model answers best"
-    and the wrong one for "how should this model be asked". Two askings the questions
-    cannot tell apart are not two accuracies -- their 95% bands overlap, which is all
-    twenty questions can say -- and between them the record takes the cheaper one, because
-    the seconds are a difference the questions *can* see. Held is `score.held_up`: it did
-    not fall at all, or the fall is inside what the questions can account for (`bands` and
-    `separated`, with the fixed `NOISE` where a run carries no interval).
-
-    Compared only among a model's longest runs, for `across`'s reason: a score means
-    nothing beside a score over a different number of questions. Ties -- two rows at the
-    same seconds -- go to the higher F1, then to the later run.
-
-    Never from fewer than `SHORT` questions: the ranking refuses to rank a smoke, and a
-    record set from one would send every later serve of that model the settings a coin toss
-    chose (a two-question row once wrote a 27B's profile). Such a model gets no record,
-    and `main` says so.
-    """
-    pool = [one for one in mine if derived(one)]
-    if not pool:
-        return None
-    floor = full_n or max(derived(one)["questions"] for one in pool)
-    if floor < SHORT:
-        return None
-    pool = [one for one in pool if derived(one)["questions"] >= floor]
-    if not pool:
-        return None
-    best = max(pool, key=lambda o: (derived(o)["right"], str(o.get("at") or "")))
-    held = [one for one in pool if held_up(one, best)] or [best]
-    return min(held, key=lambda o: (per_question(o), -derived(o)["right"],
-                                    str(o.get("at") or "")))
-
-
-def workload_of(one: Mapping[str, Any]) -> str:
-    """The workload a run measured. A run kept before workloads measured the graph asking,
-    which is what every answering run in a store is."""
-    return str(of(one).workload or ASK)
-
-
-def profile_of(model: str, one: Mapping[str, Any]) -> Any:
-    """The settings a run records, as a `ml_stack.serve.profile.Profile`.
-
-    One row sets one record, and the record says which row: settings composed from the
-    accuracy of one run and the speed of another is a configuration nobody ever served.
-    Nothing is guessed -- a field the run does not carry is left at its default, and `add`
-    keeps whatever the older record knew about the two fields a kept run cannot see (the
-    extra llama-server flags and the vision projector).
-    """
-    from ml_stack.hub import spec_for
-    from ml_stack.serve.profile import record
-
-    server = one.get("server") or {}
-    got = derived(one)
-    kept = of(one)
-    head = kept.head
-    slots = int(server.get("slots") or 0) or 1
-    context = int(server.get("context") or 0)
-    asked = one.get("asking") if isinstance(one.get("asking"), Mapping) else {}
-    sampling = asked.get("sampling") or server.get("sampling")
-    return record(
-        model,
-        workload=workload_of(one),
-        build=kept.build,
-        draft=head,
-        spec_type=spec_for(head) if head else "",
-        spec_draft_max=(int(server["spec_draft_max"])
-                        if server.get("spec_draft_max") is not None else None),
-        cache_type=str(server.get("cache_type") or ""),
-        draft_cache_type=str(server.get("draft_cache_type") or ""),
-        reasoning_budget=(int(server["reasoning_budget"])
-                          if server.get("reasoning_budget") is not None else None),
-        slot_context=(context // slots) if context else 32768,
-        parallel=slots,
-        sampling=dict(sampling) if isinstance(sampling, Mapping) else {},
-        measured_at=str(one.get("at") or "")[:10],
-        label=str(one.get("label") or ""),
-        questions=int(got.get("questions") or 0),
-        right=float(got.get("right") or 0.0),
-        recall=float(got.get("recall") or 0.0),
-        precision=float(got.get("precision") or 0.0),
-        seconds_per_question=float(per_question(one)),
-        host=host_of(one),
-        note=(f"set from the fastest row whose F1 held: `{one.get('label') or '?'}`, "
-              f"{int(got.get('questions') or 0)} question(s) at "
-              f"{float(got.get('right') or 0.0) * 100:.0f}% F1, "
-              f"{float(per_question(one)):.1f} s/question"),
-        **flags_of(one))
-
-
-def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
-                   path: Path | None = None) -> list[tuple[Any, Path]]:
-    """Write one record per model and workload, from the row `across` ranks it by. Returns
-    what it wrote.
-
-    The ranking fixes the *order* and `measured_best` fixes the *row*. They are not the
-    same question: the ranking asks which model answers best, and a record asks how this
-    model should be asked, where two askings the questions cannot tell apart should be
-    settled by the seconds rather than by a hundredth of an F1. Both read only a model's
-    longest runs, so a profile is never settings chosen by a coin toss over two questions.
-    """
-    grouped = by_model(kept)
-    out = []
-    for model, _ranked in across(kept, full_n=full_n):
-        mine = grouped.get(model) or []
-        for workload in sorted({workload_of(r) for r in mine}):
-            one = measured_best([r for r in mine if workload_of(r) == workload],
-                                full_n=full_n)
-            if one is None:
-                continue
-            out.append(_written(model, workload, one, path))
-    return out
-
-
-def _written(model: str, workload: str, one: Mapping[str, Any],
-             path: Path | None) -> tuple[Any, Path]:
-    """One record, written from ``one`` into the ``model`` and ``workload`` slot."""
-    from dataclasses import replace
-
-    from ml_stack.serve.profile import FLAGS, add, profile_for, records_in, writable_file
-
-    made_one = profile_of(model, one)
-    if not asked_recorded(one):
-        # a run whose label is all `flags_of` could read keeps the asking the record holds
-        older = profile_for(model, workload=workload,
-                            records=records_in(path or writable_file()))
-        if older is not None and older.workload == workload:
-            asked = {flag: getattr(older, flag) for flag in FLAGS}
-            asked.update(reach=older.reach, rounds=older.rounds)
-            made_one = replace(made_one, **asked,
-                               note=(made_one.note + " -- asked as the record already "
-                                     "said: this run predates asking records"))
-    return made_one, add(made_one, path=path)
-
-
-def asked_recorded(one: Mapping[str, Any]) -> bool:
-    """Whether a run carries the asking record `asked_with` keeps -- the keywords
-    `converse` was handed -- rather than only a label to read words from."""
-    said = one.get("asking")
-    return isinstance(said, Mapping) and bool(said)
+__all__ = ["Doc", "fits_named", "report"]
 
 
 # ---------------------------------------------------------------- rendering both ways
@@ -572,20 +137,15 @@ def report(kept: Sequence[Mapping[str, Any]], *, fits: Sequence[Any] = (),
            extracted: Sequence[Mapping[str, Any]] = (),
            min_msgs: int = MIN_MESSAGES,
            ingested: Sequence[str] = ()) -> str:
-    """Every measurement there is, as one document. See the module docstring for the parts.
+    """Every measurement there is, as one document.
 
-    ``fits` are the memory records for this machine, ``elsewhere`` the same records asked
-    about another room -- ``[(name, fits), ...]``, one per ``--room``. ``at`` is the
+    ``fits`` are the memory records for this machine, ``elsewhere`` the same records asked
+    about another room -- ``[(name, fits), ...]``, one per ``--room`` -- and ``at`` the
     per-user context the "how many fit" column answers at.
 
     ``kept`` is the answering runs and ``extracted`` the extraction runs, narrowed by the
-    same window: they are kept in one store and are two different measurements, and mixing
-    them cost an "Extraction" section that never printed. An empty ``extracted`` prints no
-    such section -- a heading over nothing reads as a model that scored nothing.
-
-    ``ingested`` names the stores a ``--sources`` pointed at -- an ``ml_stack.ingest`` run,
-    not a bench run, so it is read straight off that store's own files rather than out of
-    ``kept``. A store that names no source prints no section, for the same reason.
+    same window; ``ingested`` names the stores a ``--sources`` pointed at, read off those
+    stores' own files. Each of the three prints no section when it is empty.
     """
     doc = Doc(md)
     doc.head(1, "What has been measured")

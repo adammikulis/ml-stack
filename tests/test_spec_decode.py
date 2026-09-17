@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import pytest
 
-mx = pytest.importorskip("mlx.core")
+mx = pytest.importorskip("mlx.core", reason="ml-stack[spec]")
 
 from mlx_lm.generate import generate_step  # noqa: E402
 from mlx_lm.models import qwen3_5  # noqa: E402

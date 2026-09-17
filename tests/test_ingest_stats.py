@@ -132,7 +132,7 @@ def test_status_says_nothing_was_measured_when_no_call_reached_the_server(tmp_pa
 
 
 def test_the_head_and_the_depth_come_from_the_run_the_store_kept(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     where = a_run(tmp_path, calls=[a_call()])
     ingest.write_run(where, {"id": "run:20260906T101500", "model": "/w/thornwick-8b.gguf",
                              "n_max": 6, "sampling": {"temperature": 0.1},

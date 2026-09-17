@@ -646,7 +646,7 @@ class TestTorchStepTiedWeights:
 
     @staticmethod
     def tied_module():
-        torch = pytest.importorskip("torch")
+        torch = pytest.importorskip("torch", reason="ml-stack[torch]")
         nn = torch.nn
 
         class Tied(nn.Module):
@@ -675,6 +675,7 @@ class TestTorchStepTiedWeights:
         return TorchStep(model, torch.optim.SGD(model.parameters(), lr=0.1), loss)
 
     def test_a_tied_weight_is_named_once_and_safetensors_writes_it(self, tmp_path):
+        pytest.importorskip("torch", reason="ml-stack[torch]")
         pytest.importorskip("safetensors", reason="ml-stack[train]")
         from safetensors.torch import load_file, save_file
 

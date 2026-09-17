@@ -17,7 +17,7 @@ from test_sources_pdf import a_textbook
 from ml_stack import ingest
 from ml_stack.ingest.vocabulary import DOC, MOST, Vocabulary
 
-pytest.importorskip("pymupdf")
+pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
 
 
 def a_reading(*verbs, kind="structure"):
@@ -52,7 +52,7 @@ def test_the_prompt_takes_the_most_used_coined_verbs_and_no_more():
 
 
 def test_the_vocabulary_goes_into_the_store_and_comes_back(tmp_path):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     from ml_stack.graph.store import GraphStore
 
     unit = a_unit()
@@ -86,7 +86,7 @@ def test_a_store_with_no_vocabulary_document_is_counted_from_its_reads(tmp_path)
 
 
 def test_the_next_section_is_told_what_the_last_one_coined(tmp_path, server):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     seen: list[str] = []
 
     def script(prompt):
@@ -112,7 +112,7 @@ def test_the_next_section_is_told_what_the_last_one_coined(tmp_path, server):
 
 
 def test_core_only_tells_the_next_section_nothing_that_was_coined(tmp_path, server):
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
     instance, asked = a_model(server, lambda prompt: a_reading("part_of"))
     book = a_textbook(tmp_path / "lattice.pdf")
     assert run([book, "--out", str(tmp_path / "shelf.ladybug"), "--core-only",
@@ -125,7 +125,7 @@ def test_a_grown_vocabulary_does_not_make_a_read_run_again(tmp_path, server):
     """The vocabulary is in the prompt and never in the schema, so the cache key and the
     run record's schema_sha do not move as it grows -- a read answered under an earlier
     vocabulary stays answered."""
-    pytest.importorskip("ladybug")
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
 
     instance, asked = a_model(server, lambda prompt: a_reading("sits_inside"))
     book = a_textbook(tmp_path / "lattice.pdf")

@@ -176,7 +176,7 @@ def _one(kept: Sequence[Mapping[str, Any]], *, name: str, model: str = "",
 def _questions(args: Any) -> int:
     """How many questions each way is asked: the sample, plus the smoke a real run makes
     first."""
-    from ml_stack.bench.measure import _how_many, read_questions, sample
+    from ml_stack.bench.questions import _how_many, read_questions, sample
     from ml_stack.bench.run import wants_smoke
     from ml_stack.graph.community import QUESTIONS
 

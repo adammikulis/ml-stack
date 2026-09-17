@@ -3,7 +3,7 @@ claim about the difference the questions measured -- and never a smoke."""
 
 from ml_stack.bench import invented_digest, runs, save
 from ml_stack.bench.keep import SHORT
-from ml_stack.bench.report import measured_best
+from ml_stack.bench.profiles import measured_best
 from ml_stack.bench.score import held_up, separated
 from tests.test_graph_bench import scored_rows
 
@@ -55,7 +55,7 @@ def test_a_profile_is_never_set_from_a_smoke(tmp_path):
 def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says(tmp_path):
     """The hundred-question row asked with batch, kinds and summary carried no asking
     record (it predates them), and a rewrite from it set all three to false."""
-    from ml_stack.bench.report import write_profiles
+    from ml_stack.bench.profiles import write_profiles
     from ml_stack.serve.profile import add, profile_for, record, records_in
 
     where = tmp_path / "profiles.json"
@@ -81,7 +81,7 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
 
 def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
     """One model measured two askings writes two records, and neither overwrites the other."""
-    from ml_stack.bench.report import write_profiles
+    from ml_stack.bench.profiles import write_profiles
     from ml_stack.serve.profile import profile_for, records_in
 
     where = tmp_path / "profiles.json"
@@ -104,7 +104,7 @@ def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
 
 
 def test_a_store_of_runs_that_name_no_workload_writes_the_graph_asking_record(tmp_path):
-    from ml_stack.bench.report import write_profiles
+    from ml_stack.bench.profiles import write_profiles
     from ml_stack.serve.profile import records_in
 
     where = tmp_path / "profiles.json"

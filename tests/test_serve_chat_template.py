@@ -28,7 +28,7 @@ def test_forgiving_it_removes_the_refusal():
 
 
 def test_the_late_system_message_is_rendered_rather_than_dropped():
-    jinja = pytest.importorskip("jinja2")
+    jinja = pytest.importorskip("jinja2", reason="pip install jinja2")
     env = jinja.Environment(loader=jinja.BaseLoader())
     env.globals["raise_exception"] = lambda m: (_ for _ in ()).throw(RuntimeError(m))
     body = ("{%- for message in messages %}{%- set content = message.content %}"
