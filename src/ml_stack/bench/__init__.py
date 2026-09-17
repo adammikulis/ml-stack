@@ -254,7 +254,6 @@ from ml_stack.bench.underway import (  # noqa: F401
     measuring,
     measuring_file,
 )
-from ml_stack.graph.vectors import MARGIN, stands_out  # noqa: F401 - imported from here too
 from ml_stack.paths import repo_root  # noqa: F401
 
 __all__ = [

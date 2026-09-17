@@ -19,7 +19,7 @@ from ml_stack import bench
 from ml_stack.bench.counting import PER_QUESTION, Counting, wants_trace
 from ml_stack.bench.holding import _Peak, watching
 from ml_stack.bench.score import Row, prefix_kept, unread_named
-from ml_stack.graph.vectors import MARGIN, stands_out
+from ml_stack.client.embed import MARGIN, stands_out
 
 
 def found(store: str | Path | None, embed_url: str = "",
@@ -263,7 +263,7 @@ def asking(graph: Mapping[str, Any], *, how: Any = None, shortlist: int = 0,
         if not embed_url or finder_name != "meaning":
             return None
         from ml_stack.client.embed import embed
-        from ml_stack.graph.vectors import QUERY
+        from ml_stack.client.embed import QUERY
 
         try:
             return embed([QUERY + text], base_url=embed_url, model=embed_model)[0]

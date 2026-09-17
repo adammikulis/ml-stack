@@ -263,8 +263,6 @@ def _ints(text: str, default: Sequence[int]) -> list[int]:
 def add_arguments(sub: Any) -> argparse.ArgumentParser:
     """The ``speed`` subcommand's own flags; the common measuring flags are added by the
     parser beside every other measuring command's."""
-    from ml_stack.graph.vectors import MARGIN  # noqa: F401 - the sweep's defaults are here
-
     one = sub.add_parser("speed", allow_abbrev=False,
                          help="how fast a served model reads and writes: prefill and decode "
                               "tokens per second and the time to the first token, by "

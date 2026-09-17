@@ -183,16 +183,6 @@ def test_table_on_nothing(capsys):
     assert "nothing kept yet" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("scores,stands", [([0.9, 0.5], True), ([0.9, 0.89], False)])
-def test_the_bench_gate_is_the_shared_one(scores, stands):
-    """`ml-stack-bench` must not grow a second copy of the margin test."""
-    from ml_stack.bench import MARGIN, stands_out
-    from ml_stack.graph.vectors import MARGIN as SOURCE, stands_out as origin
-
-    assert MARGIN is SOURCE and stands_out is origin
-    assert stands_out(scores) is stands
-
-
 def test_two_runs_in_one_second_do_not_replace_each_other(tmp_path):
     """A run took minutes when the key was a timestamp. Cached, it takes no time at all."""
     store = tmp_path / "runs.ladybug"

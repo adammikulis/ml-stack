@@ -10,53 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-# embeddinggemma is trained to be told what the embedding is for, and without it short
-# business prose all lands above 0.9 against everything else — measured over 63 topic
-# labels, where "hiring" and "retail" scored 0.922 and no threshold existed at all.
-#
-# Searching is asymmetric: a three-word question and a paragraph about somebody are not the
-# same kind of text, and saying so is what stops the longest, most generic entry winning
-# every query. Measured on a real graph of 290 nodes, ranking six entries against three
-# questions: told they were all one kind, a generic "help" opportunity came first for two of
-# the three and the robotics technician did not place at all for "who fixes machines". Told
-# which was the question and which the document, "help" left the results entirely and the
-# technician came second. The scores are lower that way (0.37-0.60 against 0.62-0.80) and it
-# does not matter — nothing compares them across queries, only within one.
-DOCUMENT = "title: none | text: "
-QUERY = "task: search result | query: "
-
-# Grouping things by how alike they are is a different task, and asks to be named as one.
-TASK = "task: clustering | query: "
-
-# One request per node is a round trip per node. Big enough to be worth batching, small
-# enough that a failure loses a little work rather than all of it.
-BATCH = 32
-
-# How far the best match must stand above the rest before a search is worth acting on.
-# Measured over the invented community: the score alone cannot tell a greeting from a
-# question, because a greeting scores as high as one — "hi" 0.754 against "someone who can
-# sell things" 0.740. What separates them is the gap between the best match and the mean of
-# the rest: greetings 0.015-0.038, questions 0.029-0.196. So the shape of the results is the
-# test, not their height.
-MARGIN = 0.04
-
-
-def stands_out(scores: Sequence[float], *, margin: float = MARGIN) -> bool:
-    """Whether these similarities point somewhere, or are flat enough to mean nothing.
-
-    A greeting embeds as well as a question does, so asking whether the best score is high
-    fails: "hi" outscores "someone who can sell things" against the same graph. What differs
-    is whether one entry stands apart from the field. When nothing does, there is nothing
-    worth handing to a model, and it should go looking for itself.
-
-    A ``margin`` of 0 or less turns the test off and everything stands out.
-    """
-    if margin <= 0:
-        return True
-    kept = [float(s) for s in scores]
-    if not kept:
-        return False
-    return kept[0] - (sum(kept) / len(kept)) >= margin
+from ml_stack.client.embed import BATCH, DOCUMENT
 
 
 def remember(store: Any, texts: Mapping[str, str], *, base_url: str, model: str,

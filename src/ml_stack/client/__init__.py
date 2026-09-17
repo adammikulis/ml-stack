@@ -9,7 +9,14 @@ from ml_stack.client.chat import (
     Reply,
     strip_thinking,
 )
-from ml_stack.client.embed import EmbeddingError, cosine, embed, rank_pairs, top_k
+from ml_stack.client.embed import (
+    EmbeddingError,
+    VectorMismatch,
+    cosine,
+    embed,
+    rank_pairs,
+    top_k,
+)
 from ml_stack.client.families import Family
 from ml_stack.client.families import by_name as family_by_name
 from ml_stack.client.families import for_model_id as family_for_model_id
@@ -22,13 +29,13 @@ from ml_stack.client.health import (
     serving_params,
     wait_for_health,
 )
-from ml_stack.http import ServerError, ServerUnreachable, request_json, request_stream
 from ml_stack.client.tokens import (
     CHARS_PER_TOKEN,
     estimate_tokens,
     heuristic_tokens,
     set_token_counter,
 )
+from ml_stack.http import ServerError, ServerUnreachable, request_json, request_stream
 
 __all__ = [
     "CHARS_PER_TOKEN",
@@ -42,6 +49,7 @@ __all__ = [
     "ServerError",
     "ServerUnreachable",
     "ServingParams",
+    "VectorMismatch",
     "cosine",
     "embed",
     "estimate_tokens",

@@ -2246,16 +2246,16 @@ def test_a_broad_question_routes_to_the_summary_only_where_it_is_offered():
     from ml_stack.graph.prompts import SUMMARY_PROMPTS, TOOL_PROMPTS, prompts_for, routing_prompts
     from ml_stack.graph.route import rank
 
-    def words(text):
-        return {w.strip(".,?!") for w in text.casefold().split()}
+    from ml_stack.testing.embedding import bag_of_words_embedder
 
-    def fake_embedder(texts, **kw):
-        vocab = sorted({w for t in texts for w in words(t)})
-        return [[1.0 if w in words(t) else 0.0 for w in vocab] for t in texts]
+    embedder = bag_of_words_embedder(
+        *routing_prompts(summary=True).values(),
+        ["what is this community about", "what does this group actually do",
+         "who fixes machines"])
 
     def routed(question, **kw):
         return rank(question, base_url="http://nowhere.invalid", model="pretend",
-                    embedder=fake_embedder, prompts=routing_prompts(**kw))
+                    embedder=embedder, prompts=routing_prompts(**kw))
 
     assert routed("what is this community about?", summary=True).order[0] == "summarise"
     assert routed("what does this group actually do?", summary=True).order[0] == "summarise"
