@@ -44,7 +44,7 @@ index 4e9448b..4f72828 100644
  };
  
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index d0b411b..4bcc4d5 100644
+index d0b411b..8d55d24 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
 @@ -13,6 +13,7 @@
@@ -131,7 +131,7 @@ index d0b411b..4bcc4d5 100644
              common_batch_clear(batch);
  
              for (int k = 0; k < n_tokens; ++k) {
-@@ -1587,14 +1624,146 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1587,14 +1624,148 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
                  std::memcpy(verify_h[seq_id].data() + (size_t) i * n_embd, h, row_bytes);
              }
  
@@ -253,7 +253,9 @@ index d0b411b..4bcc4d5 100644
 +                }
 +            }
 +
-+            llama_tree_commit(ctx_dft, seq_id, nullptr, 0);
++            if (!llama_tree_commit(ctx_dft, seq_id, nullptr, 0)) {
++                GGML_ABORT("the draft context cannot drop a tree; a tree drafter needs a context whose memory keeps one");
++            }
 +
 +            auto & result = *dp.result;
 +            result.assign(tok.begin() + 1, tok.end());
@@ -280,7 +282,7 @@ index d0b411b..4bcc4d5 100644
          auto & ctx_dft = params.ctx_dft;
  
          common_batch_clear(batch);
-@@ -1760,6 +1929,34 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1760,6 +1931,34 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
          const size_t row_bytes = (size_t) n_embd * sizeof(float);
          std::memcpy(pending_h[seq_id].data(), verify_h[seq_id].data() + (size_t) i_h * n_embd, row_bytes);
      }
@@ -315,7 +317,7 @@ index d0b411b..4bcc4d5 100644
  };
  
  // state of self-speculation (simple implementation, not ngram-map)
-@@ -1769,12 +1966,15 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
+@@ -1769,12 +1968,15 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
      // shared across all sequences
      common_ngram_simple_config config;
  
@@ -331,7 +333,7 @@ index d0b411b..4bcc4d5 100644
      {
          SPC_TRC("%s", "adding speculative implementation 'ngram-simple'\n");
          SPC_TRC("- size_n=%d, size_m=%d, min_hits=%d\n",
-@@ -1799,7 +1999,76 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
+@@ -1799,7 +2001,76 @@ struct common_speculative_impl_ngram_simple : public common_speculative_impl {
                  continue;
              }
  
@@ -409,7 +411,7 @@ index d0b411b..4bcc4d5 100644
          }
      }
  
-@@ -2485,6 +2754,12 @@ common_params common_base_params_to_speculative(const common_params & params) {
+@@ -2485,6 +2756,12 @@ common_params common_base_params_to_speculative(const common_params & params) {
      result.n_outputs_max = params.n_parallel;
      result.n_outputs_max_per_seq = 1;
  
@@ -422,7 +424,7 @@ index d0b411b..4bcc4d5 100644
      // dflash/dspark decode the whole noise block in a single pass and sample every block position on the backend
      // TODO: refactor such properties to be announced by the speculative types
      //       something like `struct common_speculative_type_props common_speculative_type_get_props(...);`
-@@ -2802,6 +3077,10 @@ void common_speculative_draft(common_speculative * spec) {
+@@ -2802,6 +3079,10 @@ void common_speculative_draft(common_speculative * spec) {
          for (auto & dp : dparams) {
              GGML_ASSERT(!dp.drafting || dp.result->empty());
  
@@ -433,7 +435,7 @@ index d0b411b..4bcc4d5 100644
              if (dp.drafting) {
                  n_drafting++;
              }
-@@ -2838,6 +3117,9 @@ void common_speculative_draft(common_speculative * spec) {
+@@ -2838,6 +3119,9 @@ void common_speculative_draft(common_speculative * spec) {
                      if (!result.empty() && (int) result.size() > dp.n_max) {
                          SPC_DBG("truncating draft to %d tokens\n", dp.n_max);
                          result.resize(dp.n_max);
@@ -443,7 +445,7 @@ index d0b411b..4bcc4d5 100644
                      }
                  }
  
-@@ -2910,6 +3192,45 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
+@@ -2910,6 +3194,45 @@ void common_speculative_accept(common_speculative * spec, llama_seq_id seq_id, u
      }
  }
  

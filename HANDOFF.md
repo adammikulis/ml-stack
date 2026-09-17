@@ -497,6 +497,28 @@ digest.
   which is a much larger change than this one. `Client` refuses those names rather than
   sending something the server would drop.
 
+### Draft trees for llama.cpp
+
+`patches/llama.cpp/0003-speculative-tree.patch` verifies a tree of drafted nodes in one pass
+-- ancestor-masked attention, per-path DeltaNet state, a commit that keeps the accepted path
+-- and `ml-stack-serve up --spec-tree W` asks for it. `docs/llama-cpp-tree-speculative.md`
+says what it does and what it refuses.
+
+- [ ] **The bench cannot ask for a tree.** `ServerSpec.spec_tree` and `up --spec-tree` carry
+  it, but `ml-stack-bench speed/sweep/drafts` build their serving from `bench/serve.py` and
+  `bench/profiles.py`, which have no field for it, so a tree arm has to be served by hand
+  with `up` and measured with `--on`. Give `Serving` a tree width the way it carries
+  `draft_n_max`, and the drafts table a tree arm.
+- [ ] **Trees serve one slot.** The server refuses `--spec-tree` beside `--parallel > 1`: a
+  tree batch is one sequence, and the KV cache keeps one tree per sequence. Several slots
+  need the drafted trees of each slot in one batch, which is a batch-level tree rather than a
+  context-level one.
+- [ ] **Width and node budget have not been swept.** 3 branches and 12 nodes was the first
+  shape tried. What the curve looks like against depth, and against the chain at the same
+  verification cost, is a `ml-stack-draft`-shaped question once the bench can ask for a tree.
+- [ ] **The ngram tree drafter has not been measured.** It builds a trie of the continuations
+  that followed the last n-gram; only the MTP tree drafter has been driven end to end.
+
 ### What a draft head costs, and where the draft stops paying
 
 `patches/llama.cpp/0002-speculative-timings.patch` splits generation into `draft_ms` and
