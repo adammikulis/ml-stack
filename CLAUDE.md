@@ -208,9 +208,8 @@ and its tests, running the suite, merging its own branch -- goes to a subagent, 
 branch, in its own worktree.
 
 **Pick the model the task needs.** Not a rank to stay under and not a default: read what
-the work actually asks for and choose. Haiku for a mechanical sweep with the judgement
-already in the brief -- a rename across known sites, a parser moved to the shared one,
-a fixture swapped. Sonnet for ordinary code with tests. Opus where the agent has to decide
+the work actually asks for and choose. Haiku only to explore -- a search, a read, a lookup across files -- never to
+edit: a change it writes is a change someone has to redo. Sonnet for ordinary code with tests. Opus where the agent has to decide
 *what* the right change is, not just make it -- a module boundary, a failure that needs
 diagnosing, a measurement whose meaning is in question. Fable sparingly: only for work whose
 difficulty is the thinking rather than the typing and that Opus has fallen short on. It is
@@ -435,6 +434,10 @@ No name, handle, email or phone number of a real person may appear anywhere in t
 not in source, not in a test, not in a fixture, not in a docstring, not in a commit message.
 Test data is invented. If a real value revealed a bug, reproduce its *shape* — the casing, the
 punctuation, a dot in a handle, a missing surname — never its content.
+
+The one exception is attribution a license requires: a copyright line in `NOTICE`, `LICENSE`
+or a vendored file's own license header names its holder, because the license makes keeping
+it a condition of using the code. The hook does not read those files.
 
 `scripts/hooks/` enforces it — `no-real-names` on staged files, `commit-msg` on the
 message — and is worth installing:
