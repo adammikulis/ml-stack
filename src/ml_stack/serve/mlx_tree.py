@@ -28,7 +28,8 @@ from ml_stack.serve.backend import (
 from ml_stack.serve.preflight import Check, Report
 from ml_stack.spec import LAYOUTS
 
-__all__ = ["PREFIX", "MlxTreeBackend", "drafter_of", "is_mlx", "located", "report_for"]
+__all__ = ["PREFIX", "MlxTreeBackend", "drafter_of", "is_mlx", "located", "report_for",
+           "resident_bytes"]
 
 PREFIX = "mlx:"
 #: the node cap when a spec names none
@@ -81,7 +82,7 @@ def drafter_of(draft: str | Path | None) -> str:
 MAPPED = ".ple.ple_embedding.ngram_embedding."
 
 
-def _bytes_under(where: Path | None) -> int:
+def resident_bytes(where: Path | None) -> int:
     """Bytes of the safetensors under ``where`` a load holds in memory."""
     if where is None:
         return 0
@@ -114,8 +115,8 @@ def report_for(spec: ServerSpec, *, limit_bytes: int = 0) -> Report:
     except ServerFailed as why:
         report.checks.append(Check("drafter", False, str(why)))
         kind = "none"
-    report.weights_bytes = _bytes_under(weights)
-    drafted = _bytes_under(located(spec.draft)) if kind in ("dflash", "mtp") else 0
+    report.weights_bytes = resident_bytes(weights)
+    drafted = resident_bytes(located(spec.draft)) if kind in ("dflash", "mtp") else 0
     if limit_bytes and report.weights_bytes:
         wanted = report.weights_bytes + drafted
         report.checks.append(Check("fit", wanted <= limit_bytes,

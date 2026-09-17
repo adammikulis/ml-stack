@@ -35,6 +35,7 @@ from ml_stack.files import write_json
 from ml_stack.lock import only_one
 from ml_stack.log import say, warn
 from ml_stack.serve import broker_wire
+from ml_stack.serve.mlx_tree import resident_bytes
 from ml_stack.spec.cost import load_curve
 from ml_stack.spec.decode import Asked, Session, decode
 from ml_stack.spec.drafters import Budget
@@ -59,6 +60,10 @@ LONG_TOKENS = 2200
 MAX_NOISE = 1.0
 
 
+class Cramped(RuntimeError):
+    """The weights do not fit beside what this machine is already holding."""
+
+
 def long_prompt(tokenizer: Any) -> str:
     """Numbered report lines to past `LONG_TOKENS` tokens, then a request to summarise them."""
     size = LONG_TOKENS
@@ -69,12 +74,27 @@ def long_prompt(tokenizer: Any) -> str:
         size += 200
 
 
+def room_for(path: Path, *, headroom: float = 1.2) -> str:
+    """Why the weights under ``path`` do not fit beside what this machine is already holding."""
+    held = metal_smi.system_gpu_stats()["in_use_system_memory"]
+    wanted = resident_bytes(path) * headroom
+    limit = mx.device_info()["max_recommended_working_set_size"]
+    if held + wanted <= limit:
+        return ""
+    return (f"{wanted / 2**30:.0f}G of weights and working set do not fit beside the "
+            f"{held / 2**30:.0f}G this machine is already holding, under a "
+            f"{limit / 2**30:.0f}G limit")
+
+
 class Target:
     """One loaded MLX model: its layout, its tokenizer, and plain greedy decoding."""
 
     def __init__(self, model: str) -> None:
         mx.set_wired_limit(mx.device_info()["max_recommended_working_set_size"])
         self.path = weights(model)
+        cramped = room_for(self.path)
+        if cramped:
+            raise Cramped(cramped)
         self.model, self.tokenizer = load_target(self.path)
         self.layout = layout_for(self.model)
         self.text = getattr(self.model, "language_model", self.model)
@@ -332,8 +352,12 @@ def _keep(args: argparse.Namespace, kind: str, body: dict[str, Any]) -> Path:
 
 
 def run(args: argparse.Namespace) -> int:
-    """``ml-stack-bench tree lossless|speed``, under the measuring lock."""
+    """``ml-stack-bench tree lossless|speed``, under the measuring lock; 3 when it does not fit."""
     if not args.drafter:
         raise SystemExit("error: name at least one --drafter")
     with only_one(bench.home_dir() / "measuring.lock", announce=warn):
-        return lossless(args) if args.action == "lossless" else speed(args)
+        try:
+            return lossless(args) if args.action == "lossless" else speed(args)
+        except Cramped as why:
+            warn(f"refused: {why}. Wait for the memory, or take those models down.")
+            return 3
