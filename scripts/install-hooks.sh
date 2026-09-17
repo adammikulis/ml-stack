@@ -5,10 +5,12 @@
 # wrapper in .git/hooks/ that exports NAMES_GRAPH / NAMES_SCRAPE and execs the script
 # here; this installer leaves any hook it did not put there alone.
 #
-# pre-push refuses an agent's push of any ref but the development branch.
+# pre-push refuses an agent's push of any ref but the development branch, and runs pushed:
+# pushed Python parses, pushed files pass no-data-files, and no merged worktree is left.
 #
-# pre-commit runs no-real-names, then budgets, then budgets-only-fall. budgets refuses a
-# staged file that adds a site to any metric in budgets.json (SKIP_BUDGETS=1 to override);
+# pre-commit runs no-data-files, then no-real-names, then budgets, then budgets-only-fall.
+# no-data-files refuses graph, data and weight files, large files and data directories.
+# budgets refuses a staged file that adds a site to any metric in budgets.json (SKIP_BUDGETS=1 to override);
 # budgets-only-fall refuses a staged budgets.json whose numbers rose, and refuses it
 # outright when CLAUDECODE is set (ML_STACK_BUDGET_RISE=yes for a person's own terminal).
 #

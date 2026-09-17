@@ -287,7 +287,7 @@ Temperature, clocks, power draw, utilisation and throttle state.
 |---|---|
 | NVIDIA | `nvidia-smi` |
 | AMD | `rocm-smi` |
-| Apple silicon | `darwin-perf`, no `sudo` |
+| Apple silicon | `metal-smi`, no `sudo` |
 
 The vendor tools are read by the daemon itself, so a machine with a card and no
 framework installed still reports it. They also see memory held by other processes,

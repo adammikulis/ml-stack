@@ -21,8 +21,6 @@ Register it in Claude Code's config as a stdio server::
 or in ``.mcp.json``: ``{"mcpServers": {"ml-stack": {"command": "ml-stack-mcp"}}}``.
 """
 
-from __future__ import annotations
-
 import argparse
 import contextlib
 import dataclasses

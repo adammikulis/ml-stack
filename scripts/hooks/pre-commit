@@ -1,6 +1,6 @@
 #!/bin/sh
-# Every pre-commit check, in order: no person's name, no growth in any budget, and no
-# raised number in budgets.json.
+# Every pre-commit check, in order: no data file, no person's name, no growth in any budget,
+# and no raised number in budgets.json.
 set -e
 
 self=$0
@@ -13,6 +13,7 @@ while [ -L "$self" ]; do
 done
 here=$(cd "$(dirname "$self")" && pwd)
 
+"$here/no-data-files"
 "$here/no-real-names" "$@"
 "$here/budgets" "$@"
 "$here/budgets-only-fall" "$@"
