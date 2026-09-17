@@ -24,8 +24,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["FAMILY", "ORG", "PARTS", "PictureUnreadable", "Shape", "TAXONOMY", "cycles",
-           "read", "roots", "schema_for", "to_graph", "transcribe"]
+__all__ = [
+    "FAMILY",
+    "ORG",
+    "PARTS",
+    "TAXONOMY",
+    "PictureUnreadable",
+    "Shape",
+    "cycles",
+    "read",
+    "roots",
+    "schema_for",
+    "to_graph",
+    "transcribe",
+]
 
 
 class PictureUnreadable(RuntimeError):

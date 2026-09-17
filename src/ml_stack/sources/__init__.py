@@ -18,7 +18,7 @@ from typing import Any
 
 from ml_stack.messages import Message, directory, slack_user_id, teams_user_id
 
-__all__ = ["People", "Message", "read", "sniff"]
+__all__ = ["Message", "People", "read", "sniff"]
 
 
 class People:

@@ -26,7 +26,7 @@ from typing import Any, Callable
 from ml_stack import bench
 from ml_stack.log import say, warn
 
-__all__ = ["SETS", "Set", "HarnessShape", "plan", "summarise", "standard", "main"]
+__all__ = ["SETS", "HarnessShape", "Set", "main", "plan", "standard", "summarise"]
 
 #: The one model type the harness has for a chat endpoint that takes strings, not tokens.
 MODEL_TYPE = "local-chat-completions"

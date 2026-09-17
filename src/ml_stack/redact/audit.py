@@ -27,7 +27,7 @@ from ml_stack import home
 from ml_stack.redact import hook
 from ml_stack.redact.hook import DEFAULT_FIXTURES, FLOOR, from_database, permitted, recogniser
 
-__all__ = ["Finding", "NOISY", "SIGNAL", "audit", "main", "tracked"]
+__all__ = ["NOISY", "SIGNAL", "Finding", "audit", "main", "tracked"]
 
 # email addresses and phone numbers are the hook's own patterns, not the recogniser's
 SIGNAL = frozenset({"PERSON", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "US_PASSPORT", "CRYPTO",
