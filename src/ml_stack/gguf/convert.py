@@ -74,8 +74,14 @@ def convert(
     converter: Path | str | None = None,
     python: str | None = None,
     write_sidecar: bool = True,
+    sentence_transformers_dense_modules: bool = False,
 ) -> ConversionResult:
-    """Run ``convert_hf_to_gguf.py`` over a HF-layout directory."""
+    """Run ``convert_hf_to_gguf.py`` over a HF-layout directory.
+
+    ``sentence_transformers_dense_modules`` writes a sentence-transformers model's pooling
+    and dense projection heads into the file; an embedding model converted without them
+    serves vectors of the right shape from the wrong space.
+    """
     model_dir, outfile = Path(model_dir), Path(outfile)
     if not model_dir.is_dir():
         raise ConversionError(f"no model directory at {model_dir}")
@@ -83,11 +89,11 @@ def convert(
     script = require_converter(converter)
     outfile.parent.mkdir(parents=True, exist_ok=True)
 
-    _run(
-        [python or sys.executable, str(script), str(model_dir),
-         "--outfile", str(outfile), "--outtype", outtype],
-        what="convert_hf_to_gguf",
-    )
+    argv = [python or sys.executable, str(script), str(model_dir),
+            "--outfile", str(outfile), "--outtype", outtype]
+    if sentence_transformers_dense_modules:
+        argv.append("--sentence-transformers-dense-modules")
+    _run(argv, what="convert_hf_to_gguf")
 
     if not outfile.is_file():
         raise ConversionError(f"{script.name} reported success but wrote no {outfile}")
