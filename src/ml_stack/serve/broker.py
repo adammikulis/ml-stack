@@ -24,6 +24,7 @@ from ml_stack.hub import free_memory
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.manager import (
     BESIDE_HEADROOM,
+    Measuring,
     ServerManager,
     model_matches,
     recorded_servers,
@@ -158,18 +159,27 @@ class Broker:
     def lease(self, ask: Ask, *, timeout: float) -> Grant:
         """A lease for ``ask``, waiting up to ``timeout`` seconds for its turn. Servers
         started outside the broker since it last looked are taken in first, so an ask never
-        loads a second copy of one of them."""
+        loads a second copy of one of them. A card somebody else is measuring is waited on
+        like any other holder, so a measurement is never spoiled and never refuses a lease
+        that could have had its turn."""
         self.adopt()
-        waiting = Waiting(lease=uuid.uuid4().hex, ask=ask, since=time.monotonic())
-        with self._cond:
-            self.queue.append(waiting)
-            turn = self._wait_for_turn(waiting, time.monotonic() + timeout)
-        if isinstance(turn, Grant):
-            return turn
-        placeholder, evicted = turn
-        for held in evicted:
-            self._stop(held)
-        return self._start(waiting, placeholder)
+        deadline = time.monotonic() + timeout
+        while True:
+            waiting = Waiting(lease=uuid.uuid4().hex, ask=ask, since=time.monotonic())
+            with self._cond:
+                self.queue.append(waiting)
+                turn = self._wait_for_turn(waiting, deadline)
+            if isinstance(turn, Grant):
+                return turn
+            placeholder, evicted = turn
+            for held in evicted:
+                self._stop(held)
+            try:
+                return self._start(waiting, placeholder)
+            except Measuring as why:
+                if time.monotonic() >= deadline:
+                    raise BrokerError(f"waited for {ask.purpose} ({ask.models[0]}): {why}") from why
+                time.sleep(POLL_S)
 
     def release(self, lease: str) -> bool:
         """Let go of ``lease``. False when nothing held it."""
@@ -272,6 +282,11 @@ class Broker:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
             info = self.manager.lease(spec, roam=False)
+        except Measuring:
+            with self._cond:
+                self.servers.pop(placeholder.port, None)
+                self._cond.notify_all()
+            raise
         except (ServerFailed, OSError, TypeError, ValueError) as exc:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
