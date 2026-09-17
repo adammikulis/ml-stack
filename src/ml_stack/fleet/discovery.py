@@ -311,10 +311,12 @@ class Beacon:
 
 
 def _prefer(existing: Beacon, candidate: Beacon) -> Beacon:
-    """Pick which address to keep for a daemon that answered more than once."""
-    if candidate.host.startswith("127.") and not existing.host.startswith("127."):
+    """Merge a repeat answer from one daemon: the later state, the better address."""
+    if not (candidate.host.startswith("127.") or existing.host.startswith("127.")):
         return candidate
-    return existing
+    candidate.host = (candidate.host if candidate.host.startswith("127.")
+                      else existing.host)
+    return candidate
 
 
 def primary_ip() -> str:
@@ -415,10 +417,12 @@ class Advertiser:
         self._sock: socket.socket | None = None
         self._ready = threading.Event()
         self._error: BaseException | None = None
+        self._asked = threading.Event()
+        self._state: dict[str, Any] = {}
 
     # -- lifecycle --
     def start(self, *, wait_s: float = 2.0) -> "Advertiser":
-        for target in (self._serve, self._announce_loop):
+        for target in (self._serve, self._announce_loop, self._sample_loop):
             t = threading.Thread(target=target, daemon=True,
                                  name=f"advertiser-{target.__name__.strip('_')}")
             t.start()
@@ -436,6 +440,7 @@ class Advertiser:
 
     def stop(self) -> None:
         self._stop.set()
+        self._asked.set()
         if self._sock is not None:
             try:
                 self._sock.close()
@@ -451,16 +456,29 @@ class Advertiser:
         self.stop()
 
     # -- internals --
-    def _payload(self, kind: str, nonce: str = "") -> bytes:
+    def _body(self) -> dict[str, Any]:
+        b = self.beacon.public()
+        b["hostname"] = b["hostname"] or socket.gethostname()
+        return b
+
+    def _sample(self) -> None:
+        """Run ``refresh`` and keep what it produced as the beacon to send."""
         if self.refresh is not None:
             try:
                 self.refresh(self.beacon)
             except Exception:                         # noqa: BLE001
                 pass
-        b = self.beacon.public()
-        b["hostname"] = b["hostname"] or socket.gethostname()
+        self._state = self._body()
+
+    def _sample_loop(self) -> None:
+        while not self._stop.is_set():
+            self._sample()
+            self._asked.wait(self.interval_s)
+            self._asked.clear()
+
+    def _payload(self, kind: str, nonce: str = "") -> bytes:
         return _sign(self.key, {"v": PROTOCOL, "kind": kind, "t": time.time(),
-                                "nonce": nonce, "beacon": b})
+                                "nonce": nonce, "beacon": self._state or self._body()})
 
     def _serve(self) -> None:
         try:
@@ -486,6 +504,7 @@ class Advertiser:
                 sock.sendto(self._payload("beacon", str(msg.get("nonce", ""))), addr)
             except OSError:
                 continue
+            self._asked.set()
 
     def _announce_loop(self) -> None:
         while not self._stop.wait(self.interval_s):

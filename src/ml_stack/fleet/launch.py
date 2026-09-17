@@ -17,7 +17,12 @@ __all__ = ["already_running", "main", "wait_for_health"]
 HTTP_PORT = 8770
 
 
-def _health(port: int, timeout: float = 1.0) -> dict[str, Any] | None:
+#: /health carries the device report, and a first telemetry sample on a loaded machine
+#: takes over a second. A port with nothing on it is refused at once either way.
+HEALTH_TIMEOUT_S = 5.0
+
+
+def _health(port: int, timeout: float = HEALTH_TIMEOUT_S) -> dict[str, Any] | None:
     """What the ml-stack daemon on ``port`` says about itself, or None."""
     try:
         said = request_json(f"http://127.0.0.1:{port}/health", timeout=timeout)
@@ -36,7 +41,7 @@ def wait_for_health(port: int = HTTP_PORT, *, seconds: float = 20.0
     """Block until the daemon answers, or give up. Returns its health."""
     deadline = time.time() + seconds
     while time.time() < deadline:
-        found = _health(port, timeout=0.5)
+        found = _health(port)
         if found is not None:
             return found
         time.sleep(0.15)

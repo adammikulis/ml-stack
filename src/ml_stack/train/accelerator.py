@@ -2,11 +2,31 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from ml_stack.fleet.telemetry import gpu_telemetry
 
-__all__ = ["apple_telemetry", "report", "torch_report", "vendor_of"]
+__all__ = ["apple_telemetry", "gpu_power", "report", "torch_report", "vendor_of"]
+
+#: ``metal_smi.gpu_power`` integrates over a sampling window and blocks for about a
+#: second and a quarter, so a reading is kept this long rather than taken per caller.
+POWER_SAMPLE_S = 5.0
+
+_last_power: dict[str, Any] = {"at": 0.0, "reading": {}}
+
+
+def gpu_power(max_age_s: float = POWER_SAMPLE_S) -> dict[str, Any]:
+    """The Apple GPU power reading, resampled when the kept one is older than this."""
+    import metal_smi
+
+    now = time.monotonic()
+    kept = _last_power["reading"]
+    if kept and now - float(_last_power["at"]) < max_age_s:
+        return dict(kept)
+    reading = dict(metal_smi.gpu_power())
+    _last_power.update(at=now, reading=reading)
+    return dict(reading)
 
 
 def vendor_of(torch: Any) -> str:
@@ -59,7 +79,7 @@ def apple_telemetry() -> dict[str, Any]:
     except Exception:                                 # noqa: BLE001
         pass
     try:
-        gpu = metal_smi.gpu_power()
+        gpu = gpu_power()
         for key, name in (("power_w", "gpu_power_w"), ("clock_mhz", "gpu_freq_mhz"),
                           ("power_limit_pct", "power_limit_pct")):
             value = gpu.get(name)

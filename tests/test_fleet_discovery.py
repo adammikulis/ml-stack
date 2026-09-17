@@ -34,7 +34,7 @@ from ml_stack.fleet.discovery import (
     discover,
     load_cluster_key,
 )
-from ml_stack.fleet.remote import Peer
+from ml_stack.fleet.remote import Peer, PeerError
 
 #: Real UDP on a real interface and a real daemon subprocess, per the docstring
 #: above -- so every test here waits out a network timeout at least once.
@@ -155,6 +155,34 @@ def test_loopback_wins_when_the_daemon_is_on_this_machine():
     assert _prefer(local, lan).host == "127.0.0.1", "order must not decide it"
 
 
+def test_the_later_of_two_answers_is_the_state_kept():
+    """A daemon answers each query in a round, and the last thing it said about its own
+    free slots is the one a placement must read."""
+    same = "0123456789abcdef"
+    first = Beacon(name="rtx", port=8770, host="127.0.0.1", instance=same, free=1)
+    second = Beacon(name="rtx", port=8770, host="127.0.0.1", instance=same, free=0,
+                    busy=True)
+    kept = _prefer(first, second)
+    assert kept.free == 0 and kept.busy
+    lan = Beacon(name="rtx", port=8770, host="192.168.2.9", instance=same, free=0)
+    merged = _prefer(first, lan)
+    assert merged.host == "127.0.0.1" and merged.free == 0
+
+
+def test_a_slow_device_probe_does_not_delay_the_answer(key, port):
+    """The failure this reproduces: the beacon was built on the receiving thread, so a
+    daemon whose refresh reads GPU power -- over a second on Apple silicon -- answered
+    after the asker had given up."""
+    def slow(b: Beacon) -> None:
+        time.sleep(3.0)
+        b.free = 0
+
+    with Advertiser(Beacon(name="rtx", port=8770), key, port=port, interval_s=0.2,
+                    refresh=slow):
+        found = discover(key, timeout_s=1.0, port=port)
+    assert "rtx" in [b.name for b in found], "the reply waited on the probe"
+
+
 def test_a_beacon_without_an_instance_still_has_an_identity():
     """Tolerate a peer that predates instance ids rather than merging them all."""
     a = Beacon(name="rtx", port=8770, hostname="boxa")
@@ -228,18 +256,21 @@ def _booted(tmp_path, *extra: str):
          "--port", str(http_port), "--name", "testbox",
          "--cluster-key", str(keyfile), *extra],
         env=env, stdout=fh, stderr=subprocess.STDOUT)
+    # /health, not a bare connect: the daemon's socket is bound and its backlog accepts
+    # from the moment the server object is built, seconds before it serves or advertises.
+    driver = _driver(keyfile, http_port)
     deadline = time.time() + 20
     while time.time() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", http_port), timeout=0.5):
+            if driver.health().get("ok"):
                 break
-        except OSError:
+        except PeerError:
             if proc.poll() is not None:
                 pytest.fail(f"traind died:\n{log.read_text(errors='replace')}")
             time.sleep(0.1)
     else:
         proc.kill()
-        pytest.fail("traind never listened")
+        pytest.fail(f"traind never answered /health:\n{log.read_text(errors='replace')}")
     try:
         yield keyfile, disco_port, http_port, log
     finally:

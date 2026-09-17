@@ -612,6 +612,44 @@ def test_a_probe_that_raises_costs_detail_not_the_daemon():
     assert out["cpus"] >= 1
 
 
+def _fake_metal_smi(monkeypatch, gpu_power):
+    import sys
+    import types
+
+    from ml_stack.train import accelerator
+
+    fake = types.ModuleType("metal_smi")
+    fake.gpu_power = gpu_power
+    monkeypatch.setitem(sys.modules, "metal_smi", fake)
+    monkeypatch.setattr(accelerator, "_last_power", {"at": 0.0, "reading": {}})
+    return accelerator
+
+
+def test_the_gpu_power_sample_is_kept_rather_than_taken_per_caller(monkeypatch):
+    """`metal_smi.gpu_power` blocks for over a second, and a beacon reply, /health and
+    /props all ask for it."""
+    taken: list[int] = []
+
+    def sample() -> dict:
+        taken.append(1)
+        return {"gpu_power_w": len(taken)}
+
+    accelerator = _fake_metal_smi(monkeypatch, sample)
+
+    assert accelerator.gpu_power()["gpu_power_w"] == 1
+    assert accelerator.gpu_power()["gpu_power_w"] == 1
+    assert len(taken) == 1
+    assert accelerator.gpu_power(max_age_s=0.0)["gpu_power_w"] == 2
+
+
+def test_a_kept_power_sample_cannot_be_edited_by_its_caller(monkeypatch):
+    accelerator = _fake_metal_smi(monkeypatch, lambda: {"gpu_power_w": 12.0})
+
+    accelerator.gpu_power()["gpu_power_w"] = 999.0
+
+    assert accelerator.gpu_power()["gpu_power_w"] == 12.0
+
+
 def test_a_report_spec_resolves_to_its_callable():
     fn = resolve_report("ml_stack.fleet.device:stdlib_device_report")
     assert fn is stdlib_device_report
