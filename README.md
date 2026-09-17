@@ -24,6 +24,9 @@ Everything runs on your own hardware. Nothing leaves the network.
 - **Chat from any machine.** The one with the card runs the model; the laptop talks to
   it. A machine that installs nothing extra still gets to use it, and conversations are
   kept.
+- **Documents into a knowledge graph.** A model reads a shelf of PDFs section by section
+  into concepts and the relations between them, and every claim keeps the page and the
+  model behind it.
 - **Nothing to configure.** A passphrase is the whole setup. Two households on one
   network stay separate without either of them being told to.
 - **Work lands where it fits.** Placement is by what a machine reports and how fast it
@@ -93,23 +96,54 @@ ml-stack-serve status
 `ml-stack` on its own starts the daemon and opens the interface in your browser;
 `ml-stack --list` prints every command with the first line of its help.
 
-## Work that runs while you do something else
+## Documents into a knowledge graph
 
-A job here is a command you start and walk away from, not a chat window you sit in front
-of. Point it at what you have:
+Point it at a shelf of PDFs and get back a graph you can ask questions of.
 
 ```
 ml-stack-ingest ~/texts/*.pdf --out ./sources.ladybug --images --resume --detach
-ml-stack-ingest status --out ./sources.ladybug
-ml-stack-ingest ask --out ./sources.ladybug "how is heart rate controlled"
+ml-stack-ingest status  --out ./sources.ladybug
+ml-stack-ingest ask     --out ./sources.ladybug "how is heart rate controlled"
 ```
 
-Chapters, sections and figures come out of each PDF, a model reads each section into one
-graph, and every claim keeps the page and the model behind it. A run is hours, so
-`--detach` gives the shell straight back and puts the run in its own session with a log;
-`status` says how far it has got, how fast the model is reading and how long is left;
-`--resume` starts where a killed run stopped. `ml-stack-jobs wait ingest` blocks until it
-has ended, so the next step is `wait && next` rather than a loop you wrote by hand.
+Each book is cut where it cuts itself -- chapters, sections, figures -- because a section is
+the unit that still means something read on its own. A model reads each section into
+concepts with a kind and a one-line definition in the book's own words, the relations
+between them, what each figure shows, and the terms the book sets in bold. The extractions
+fold into one graph per source, so `has_part` and `haspart` are one relation and a plural
+folds into the spelling the source uses.
+
+**Every claim keeps the page and the model behind it.** A concept points at the passages it
+was read from; a passage knows its source, chapter, section and pages, and points in turn at
+the run that read it -- which model, which build, which settings, and when. Asking where
+something came from walks back to a page, not to a string copied onto every node.
+
+**The vocabulary grows as it reads.** A core set of relations and kinds is what every source
+shares. Where none of them says what the page says, the model names one itself and it is
+marked as that source's own, so a source's own vocabulary can be read back afterwards. The
+words earlier sections used are offered to the next one, so the reading takes a word already
+in use rather than coining a third spelling of it.
+
+**A model is handed tools, not the graph.** It finds entries by name or by the words
+attached to them, reads what one holds, reads a whole neighbourhood in a single call, traces
+how two entries connect, and lists everything of one kind -- so a question is answered by
+looking things up, and the answer names the entries it rests on. `ml-stack-ingest ask` does
+that over a store, `converse` and `hybrid` do it from Python over any graph, and
+`ml-stack-graph serve` puts the graph on a page with the same asking behind it, on loopback:
+whoever has the file has the graph, so a private one is served rather than sent.
+
+An extraction somebody else produced comes in as a source of its own, and a graph that has
+been read into can be drawn, searched, walked and given a point on a map for every entry
+that names a place.
+
+## Work that runs while you do something else
+
+A job here is a command you start and walk away from, not a chat window you sit in front of.
+Reading a shelf of books is hours, so `--detach` gives the shell straight back and puts the
+run in its own session with a log; `status` says how far it has got, how fast the model is
+reading and how long is left; `--resume` starts where a killed run stopped.
+`ml-stack-jobs wait ingest` blocks until it has ended, so the next step is `wait && next`
+rather than a loop you wrote by hand.
 
 `ml-stack-do "..."` takes the task in words instead: a model on your own hardware, holding
 every command here as a tool, asks what the task leaves open, prints a plan, waits for the
