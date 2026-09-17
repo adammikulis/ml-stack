@@ -28,26 +28,29 @@ dependencies = []
 # Nothing here is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
 [project.optional-dependencies]
-privacy = ["presidio-analyzer>=2.2", "spacy>=3.7"]
-test = ["pytest>=8", "pytest-xdist>=3.5"]
+privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
+# presidio over a transformers NER model rather than spaCy's own
+privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
+test = ["pytest>=9.1.1", "pytest-xdist>=3.8.0"]
 
 claude = ["claude-agent-sdk>=0.1"]
 arrays = ["numpy>=1.24"]
-torch = ["torch>=2.2"]
-mlx = ["mlx>=0.20"]
+torch = ["torch>=2.14"]
+transformers = ["transformers>=5.17"]
+mlx = ["mlx>=0.32.2"]
 # `ml_stack.spec`: tree speculative decoding over mlx-lm's hybrid models, which it drives
 # through their own layer classes
-spec = ["mlx>=0.32.2", "mlx-lm>=0.31.3", "mlx-vlm>=0.7.1", "numpy>=1.24", "huggingface_hub>=0.20"]
+spec = ["mlx>=0.32.2", "mlx-lm>=0.31.3", "mlx-vlm>=0.7.1", "numpy>=1.24", "huggingface_hub>=1.32"]
 train = ["numpy>=1.24", "safetensors>=0.4"]
 # a LoRA rather than a full fine-tune: two small matrices on each projection, the
 # base frozen. What makes an 8B tool caller trainable on one machine, where a full
 # fine-tune of it would need ~128G of optimizer state.
-train-lora = ["ml-stack[train,torch]", "peft>=0.11", "transformers>=4.40"]
-serve = ["psutil>=5.9"]
+train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
+serve = ["psutil>=7.2.2"]
 # `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
 # each engine still wants
-speech = ["faster-whisper>=1.0", "piper-tts>=1.2"]
+speech = ["faster-whisper>=1.2.1", "piper-tts>=1.8.0"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
 # an embedded property graph: one file on disk, native Cypher, no server.
@@ -58,7 +61,7 @@ scrape = ["playwright>=1.40"]
 # searching the web beside the graph: ddgs is keyless and rate-limited, SearXNG is not
 web = ["ddgs>=9", "trafilatura>=2"]
 # ml-stack-models fetch and hub.located read and fill the Hub cache through this
-hub = ["huggingface_hub>=0.20"]
+hub = ["huggingface_hub>=1.32"]
 vision = ["numpy>=1.24", "pillow>=10.0"]
 # a book is a source like any other: `ml_stack.sources.pdf` reads one into sections,
 # and renders its figures, through MuPDF -- no other reader gives both text with the
@@ -69,9 +72,9 @@ pdf = ["pymupdf>=1.24"]
 viz = ["manim>=0.19"]
 # `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
 # own --plot writes hand-built SVG with no library, so it opens on a machine with no packages
-plot = ["matplotlib>=3.7"]
-testing = ["numpy>=1.24", "pytest>=7"]
-telemetry = ["darwin-perf>=0.1; sys_platform == 'darwin'"]
+plot = ["matplotlib>=3.11.2"]
+testing = ["numpy>=1.24", "pytest>=9.1.1"]
+telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
 mcp = ["mcp>=1.0"]
 # `ml-stack-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;

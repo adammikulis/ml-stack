@@ -347,6 +347,9 @@ class ServerSpec:
     yarn_beta_fast: float | None = None
     yarn_beta_slow: float | None = None
     extra_args: tuple[str, ...] = ()
+    # "" serves with llama-server (or tree decoding for MLX weights); "vllm" or "sglang"
+    # serves Hugging Face weights with that engine.
+    engine: str = ""
 
     @property
     def is_hf_ref(self) -> bool:

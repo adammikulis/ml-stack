@@ -156,7 +156,10 @@ class Broker:
 
     # ------------------------------------------------------------------ leases
     def lease(self, ask: Ask, *, timeout: float) -> Grant:
-        """A lease for ``ask``, waiting up to ``timeout`` seconds for its turn."""
+        """A lease for ``ask``, waiting up to ``timeout`` seconds for its turn. Servers
+        started outside the broker since it last looked are taken in first, so an ask never
+        loads a second copy of one of them."""
+        self.adopt()
         waiting = Waiting(lease=uuid.uuid4().hex, ask=ask, since=time.monotonic())
         with self._cond:
             self.queue.append(waiting)

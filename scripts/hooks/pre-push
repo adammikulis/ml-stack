@@ -1,8 +1,20 @@
 #!/bin/sh
-# Refuse an agent's push of anything but the development branch. Claude Code sets CLAUDECODE
-# for every command it runs, and a person's shell does not. The development branch is the one
-# the primary checkout is on, and `main` is never it.
+# Refuse an agent's push of anything but the development branch, then check what it pushes
+# with scripts/hooks/pushed. Claude Code sets CLAUDECODE for every command it runs, and a
+# person's shell does not. The development branch is the one the primary checkout is on, and
+# `main` is never it.
 [ -z "$CLAUDECODE" ] && exit 0
+
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+here=$(cd "$(dirname "$self")" && pwd)
+input=$(cat)
 
 primary=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 dev=$(git -C "$primary" branch --show-current)
@@ -15,9 +27,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             || [ "$local_sha" = "$zero" ]; then
         refused="$refused $remote_ref"
     fi
-done
+done <<EOF
+$input
+EOF
 
-[ -z "$refused" ] && exit 0
+if [ -z "$refused" ]; then
+    printf '%s\n' "$input" | python3 "$here/pushed" "$dev"
+    exit $?
+fi
 cat >&2 <<WHY
 pre-push: refused:$refused
 
