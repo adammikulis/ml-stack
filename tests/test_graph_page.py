@@ -185,17 +185,21 @@ def settle(page):
 
 
 def box_at_rest(page, js, arg, tries=60, ms=250):
-    """The box ``js`` reads, once two reads running give the same one.
+    """The box ``js`` reads, once two reads running put it on the same pixel.
 
     A layout that keeps reheating never reaches `data-layout="rest"`, and a box read before
-    a click at a point is stale the moment the node moves again.
+    a click at a point is stale the moment the node moves again. The force layout's alpha
+    decays without reaching zero, so the box is compared rounded: a click lands on a pixel.
     """
+    def where(box):
+        return None if box is None else {k: round(v) for k, v in box.items()}
+
     was = None
     for _ in range(tries):
         box = page.evaluate(js, arg)
-        if box is not None and box == was:
+        if box is not None and where(box) == was:
             return box
-        was = box
+        was = where(box)
         page.wait_for_timeout(ms)
     raise AssertionError("the node never stopped moving")
 
