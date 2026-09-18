@@ -1,41 +1,15 @@
-"""A conversation as part of the graph, rather than beside it.
+"""A conversation kept as part of the graph.
 
-A chat about a graph is usually kept somewhere else: a list in the browser's memory, or a
-line appended to a log. Both lose the thing worth keeping — that a turn *drew on* particular
-entries, and which ones. The answer knows: it read some, traced a path through others, and
-said its answer was about a few. That is an edge, and edges belong in the graph.
+A turn is a node, turns are chained newest-after-oldest, and each is joined to the entries
+it drew on with how it drew on them.
 
-So a turn is a node, turns are chained newest-after-oldest, and each is joined to the
-entries it drew on with *how* it drew on them. What that buys:
+What goes back to the model with a question is three things, in this order: the latest
+summary, one paragraph ``summarise`` writes every ``EVERY`` turns; what ``recall`` finds,
+the earlier turns outside the window whose words or meaning match the question; and the
+last ``WINDOW`` ordinary turns, chosen by recency alone.
 
-* history survives the tab, and can be reopened on another machine;
-* "what have we said about this person?" is a query rather than a grep;
-* an answer can be shown with its own working, or without it, because the working is
-  attached rather than baked into the prose;
-* a stale answer is findable when the entries under it change.
-
-Nothing here decides what a reader sees. It records what happened; showing or hiding the
-working is the caller's choice, and both are one query away.
-
-A conversation of any length
-----------------------------
-
-What goes back to the model with a question is three things, in this order, and only the
-last is chosen by recency:
-
-* the latest *summary* -- one paragraph the small model writes every ``EVERY`` turns
-  (``summarise``): what is established, what the asker wants, what is open, the entry ids it
-  rests on. It is a ``Turn`` of role ``"summary"``, joined to those ids, kept out of the
-  ordinary window, and it changes rarely, so it sits inside the model's cached prefix;
-* what ``recall`` finds -- the two or three earlier turns, outside the window, whose words or
-  meaning match the question, each with what it drew on;
-* the last ``WINDOW`` ordinary turns, always, chosen by recency alone. A follow-up ("and
-  where is she based?") resolves from these with nothing else; ``recall`` and the summary
-  are additions ahead of them and never displace one.
-
-A fact stated in conversation reaches the *graph* through the change-request path, not
-through any of this: the summary and the recall keep it in the model's view; only an entry
-makes the tools find it.
+A fact stated in conversation reaches the graph through the change-request path, not
+through any of this.
 """
 
 from __future__ import annotations
@@ -46,6 +20,8 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
+
+from ml_stack.graph.search import rrf_scored
 
 __all__ = [
     "DREW",
@@ -123,7 +99,7 @@ def _tables(store: Any) -> None:
     for statement in (TURN_TABLE, AFTER_TABLE, DREW_TABLE):
         try:
             store.query(statement)
-        except Exception:  # noqa: BLE001 - a read-only store already has them, or has none
+        except RuntimeError:  # a read-only store already has them, or has none
             return
     store.index_words("Turn", "turn_index", ["text"])
 
@@ -185,17 +161,12 @@ def remember_turn(store: Any, *, thread: str, role: str, text: str,
     """Write one turn, chained after the last in its thread, joined to what it drew on.
 
     ``after`` names the turn this follows; left empty it follows whatever is last in the
-    thread, which is what a linear conversation wants. Passing it explicitly is how a
-    conversation branches -- two answers to the same question, kept side by side.
+    thread, so passing it is how a conversation branches. An id the graph does not hold is
+    not joined.
 
-    An id the graph does not hold is not joined. A conversation must not be able to invent
-    entries, which is the same rule the tool loop follows.
-
-    ``embedder`` -- ``texts -> vectors`` -- makes the turn findable by meaning as well as by
-    its words: the vector is kept under the thread's own name, so ``recall`` with the same
-    embedder finds it and nothing else's. It is called before anything is written, so an
-    embedder that fails writes nothing rather than half a turn. A summary is not embedded:
-    it is sent every time, and has nothing to be recalled for.
+    ``embedder`` -- ``texts -> vectors`` -- keeps the turn's vector under the thread's own
+    name, so ``recall`` with the same embedder finds it and nothing else's. It is called
+    before anything is written. A summary is not embedded.
     """
     _tables(store)
     vector: Sequence[float] | None = None
@@ -397,8 +368,6 @@ def recall(store: Any, thread: str, question: str, *,
     # what is wanted: the index ranks every turn in the store, not this thread's
     k = len(said) + 4 * max(limit, window) + 16
 
-    from ml_stack.graph.search import rrf_scored
-
     rankings: list[list[str]] = []
     words = _by_words(store, want, k)
     if words:
@@ -446,17 +415,12 @@ def summarise(store: Any, thread: str, writer: Callable[[Sequence[Turn]], str], 
               every: int = EVERY) -> Turn | None:
     """Roll the summary forward when ``every`` ordinary turns have been said since the last.
 
-    ``writer(turns) -> str`` is the small model, or anything scripted to stand in for it:
-    it is handed the previous summary (first, when there is one) and every ordinary turn
-    since, each with what it drew on, and returns one paragraph -- what is established,
-    what the asker wants, what is open, the entry ids it rests on. That paragraph is kept as
-    a ``Turn`` of role ``"summary"``, joined to every id it names that a summarised turn or
-    the previous summary drew on: an id the writer drops is an id the summary no longer
-    rests on, and one it invents is not in that set to begin with.
+    ``writer(turns) -> str`` is handed the previous summary, when there is one, and every
+    ordinary turn since, each with what it drew on, and returns one paragraph. That
+    paragraph is kept as a ``Turn`` of role ``"summary"``, joined to every id it names that
+    a summarised turn or the previous summary drew on.
 
     Returns the new summary, or None when it is not yet time or the writer said nothing.
-    Costs one model call every ``every`` turns, over roughly ``every`` turns of text plus
-    the previous paragraph; the answer it is written after has already gone out.
     """
     last = latest_summary(store, thread)
     since = int(last.seq) if last is not None else 0
