@@ -57,6 +57,20 @@ branch for a caller nobody has, a module boundary drawn around a hash, a number 
 document because re-measuring is inconvenient, "we can't change that, it would invalidate
 the benchmarks".
 
+**There are no users.** Not one, on any platform. So a requirement that exists to serve
+somebody hypothetical is not a requirement, and work spent on one is work spent on nobody:
+a fallback to an older interpreter, per-platform advice in an error path, a `--force` escape
+hatch, a migration for state nobody holds, a softened refusal. When a decision narrows what
+is supported, write the code as though the narrow thing is simply what this runs on, and
+delete whatever existed only to straddle.
+
+This one is a **stop, not a judgement call**. If you find yourself about to write something
+worse in order to serve someone who is not there, ask first -- do not decide it yourself and
+report it afterwards. (Adam, 2026-09-18, pinning the project to one Python: "we have
+literally no linux users or users at all"; "never base requirements on non-existent users.
+if you decided to do something that is dumb to just satisfy people who don't exist, you must
+ask permission first".)
+
 What is refused is the *accidental* version. `tests/test_asking_is_the_same_asking.py` and
 `graph/cache.py:fingerprint` exist to catch bytes moving when nobody meant them to: they are
 detectors, not vetoes. A red you can explain is a change. A red you cannot explain is a bug.
