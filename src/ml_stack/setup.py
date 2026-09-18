@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ml_stack import home
+from ml_stack.installed import standard
 from ml_stack.log import say
 from ml_stack.serve.build_platform import server_name
 from ml_stack.units import human_bytes
@@ -202,8 +203,6 @@ def look() -> list[Finding]:
                            if mine else "nothing found; ml-stack-models find <words>"))
     except Exception:  # noqa: BLE001
         pass
-
-    from ml_stack.installed import standard
 
     out.extend(Finding(name=one.name, good=here,
                        said=f"{one.module} is here" if here else "not installed",

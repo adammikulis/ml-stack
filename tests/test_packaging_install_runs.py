@@ -21,6 +21,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+
 from ml_stack.installed import STANDARD
 
 REPO = Path(__file__).resolve().parent.parent

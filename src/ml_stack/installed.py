@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from ml_stack.log import say
 
-__all__ = ["Capability", "STANDARD", "extras", "main", "missing", "standard"]
+__all__ = ["STANDARD", "Capability", "extras", "missing", "report", "standard"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +61,7 @@ def missing() -> list[Capability]:
     return [c for c, here in standard() if not here]
 
 
-def main() -> int:
+def report() -> int:
     """Print what this install cannot do, and the line that fixes each. 0 when it can do
     everything."""
     gone = missing()
@@ -74,4 +74,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(report())
