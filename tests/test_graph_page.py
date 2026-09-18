@@ -184,6 +184,22 @@ def settle(page):
     page.wait_for_selector(".graph-wrap:not(.settling)")
 
 
+def box_at_rest(page, js, arg, tries=60, ms=250):
+    """The box ``js`` reads, once two reads running give the same one.
+
+    A layout that keeps reheating never reaches `data-layout="rest"`, and a box read before
+    a click at a point is stale the moment the node moves again.
+    """
+    was = None
+    for _ in range(tries):
+        box = page.evaluate(js, arg)
+        if box is not None and box == was:
+            return box
+        was = box
+        page.wait_for_timeout(ms)
+    raise AssertionError("the node never stopped moving")
+
+
 def at_rest(page):
     """Waits until the force layout has stopped moving the nodes."""
     # `settling` comes off on a 1500ms timer while the simulation is still running, so it
@@ -1350,7 +1366,7 @@ def test_the_name_of_what_you_clicked_is_never_left_off(open_page):
         for (const n of M.nodes) { const near = (M.neighbors.get(n.id) || new Set()).size;
           if (near > most) { most = near; best = n.id; } }
         return best; }""")
-    box = page.evaluate("""(id) => [...document.querySelectorAll('#graph g.node')]
+    box = box_at_rest(page, """(id) => [...document.querySelectorAll('#graph g.node')]
         .find(g => g.__data__.id === id).querySelector('path.mark').getBoundingClientRect()""", hub)
     page.mouse.click((box["left"] + box["right"]) / 2, (box["top"] + box["bottom"]) / 2)
     page.wait_for_function("(id) => window.graphModel.selected === id", arg=hub)
