@@ -81,8 +81,8 @@ def test_a_run_asked_for_a_temperature_says_that_one(tmp_path, monkeypatch, caps
 
 def test_a_record_whose_process_has_gone_is_not_measuring(tmp_path, monkeypatch):
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    from ml_stack.bench.underway import measuring, measuring_file, remember
     from ml_stack.bench.progress import status
+    from ml_stack.bench.underway import measuring, measuring_file, remember
 
     remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
     assert measuring() is not None
@@ -115,8 +115,8 @@ def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsy
 
 
 def test_the_record_says_the_serving_a_sweep_will_use():
-    from ml_stack.bench.underway import asking_said
     from ml_stack.bench.progress import _how_said
+    from ml_stack.bench.underway import asking_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
                        "--n-max", "4", "--serve-kv", "f16", "--reasoning-budget", "2048",
@@ -132,8 +132,8 @@ def test_the_record_says_the_serving_a_sweep_will_use():
 def test_the_record_says_every_arm_a_drafts_run_will_serve():
     """`drafts` names its heads under --draft and a depth per arm, and the baseline arm is
     the empty head."""
-    from ml_stack.bench.underway import asking_said
     from ml_stack.bench.progress import _how_said
+    from ml_stack.bench.underway import asking_said
 
     how = asking_said(["drafts", "flash.gguf", "--draft", "", "--draft", "heads/mtp-a.gguf",
                        "--n-max", "2", "--n-max", "8", "--reasoning-budget", "0"])
@@ -143,8 +143,8 @@ def test_the_record_says_every_arm_a_drafts_run_will_serve():
 
 
 def test_a_sweep_told_to_drop_the_head_says_it_has_none():
-    from ml_stack.bench.underway import asking_said
     from ml_stack.bench.progress import _how_said
+    from ml_stack.bench.underway import asking_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
                        "--no-draft"])
@@ -163,3 +163,19 @@ def test_a_detached_run_keeps_the_log_its_parent_opened_for_it(tmp_path, monkeyp
     again = remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
     assert again["log"] == str(tmp_path / "sweep.log")
     assert again["started"] == "2026-09-05T10:00:00"
+
+
+def test_a_record_that_kept_no_sampling_says_the_asking_was_unrecorded():
+    """An older record, or one written before the sampler was read, has no `sampling`."""
+    from ml_stack.bench.progress import _how_said, _sampling_said
+
+    assert _sampling_said({}) == "unrecorded"
+    assert _how_said({"sampling": {}, "cache_type": "q8_0"})[0] == "  asking: unrecorded"
+
+
+def test_the_sampling_reads_temperature_first_and_names_a_zero_greedy():
+    from ml_stack.bench.progress import _sampling_said
+
+    said = _sampling_said({"top_p": 0.9, "temperature": 0.0, "seed": 7})
+    assert said == "temperature 0.0 (greedy), top_p 0.9, seed 7"
+    assert _sampling_said({"temperature": 0.7}) == "temperature 0.7"

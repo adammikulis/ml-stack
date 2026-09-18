@@ -8,13 +8,13 @@ making real requests from real addresses rather than by asserting on a function'
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import sys
 import threading
 import time
 import urllib.error
-import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -77,21 +77,20 @@ class Serving:
 
     def call(self, path, *, method="GET", body=None, host="127.0.0.1",
              headers=None, ui_header=True, cookie=""):
-        url = f"http://{host}:{self.port}{path}"
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(url, data=data, method=method)
-        req.add_header("Content-Type", "application/json")
+        sent = {"Content-Type": "application/json"}
         if ui_header:
-            req.add_header("X-ML-Stack-UI", "1")
+            sent["X-ML-Stack-UI"] = "1"
         if cookie:
-            req.add_header("Cookie", cookie)
-        for k, v in (headers or {}).items():
-            req.add_header(k, v)
+            sent["Cookie"] = cookie
+        sent.update(headers or {})
+        conn = http.client.HTTPConnection(host, self.port, timeout=10)
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status, _maybe_json(r.read()), dict(r.headers)
-        except urllib.error.HTTPError as e:
-            return e.code, _maybe_json(e.read()), dict(e.headers)
+            conn.request(method, path, body=data, headers=sent)
+            r = conn.getresponse()
+            return r.status, _maybe_json(r.read()), dict(r.getheaders())
+        finally:
+            conn.close()
 
     def close(self):
         self.runner.shutdown()
@@ -309,8 +308,8 @@ class TestOnItsOwn:
         assert "hostname" in body["error"]
 
     def test_finishing_is_refused_from_another_machine(self, serving):
-        status, body, _ = serving.call("/ui/setup/done", method="POST",
-                                       host=primary_ip())
+        status, _body, _ = serving.call("/ui/setup/done", method="POST",
+                                        host=primary_ip())
         assert status == 403
         assert serving.call("/ui/setup")[1]["needs_setup"] is True
 
@@ -716,7 +715,6 @@ class TestTheInterfaceAndTheDaemonAgree:
 
     def test_the_page_calls_nothing_the_daemon_does_not_answer(self, signed_in,
                                                               monkeypatch):
-        import urllib.error
 
         serving, cookie = signed_in
         from ml_stack.fleet import catalogue as catalogue_mod
@@ -1021,3 +1019,46 @@ class TestUpdatingItself:
             time.sleep(0.05)
         assert started, "it never started the new copy"
         assert str(target) in " ".join(str(x) for x in started[0])
+
+
+class TestTheBenchOnThePage:
+    """`UI.bench_state` is the bench half of `/ui/fleet`: what `ml-stack-bench status` says."""
+
+    def _ui(self, tmp_path):
+        return UI(name="studio", cluster_key_path=tmp_path / "cluster.key")
+
+    def test_an_idle_machine_reports_the_bench_with_nothing_measuring(self, tmp_path,
+                                                                     monkeypatch):
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        state = self._ui(tmp_path).bench_state()
+
+        assert sorted(state) == ["available", "measuring", "text"]
+        assert state["available"] is True
+        assert state["measuring"] is None
+        assert "nothing is measuring" in state["text"]
+
+    def test_a_measurement_under_way_reaches_the_page_with_its_pid_and_argv(self, tmp_path,
+                                                                           monkeypatch):
+        import os
+
+        from ml_stack.bench.underway import remember
+
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid(),
+                 started="2026-09-05T10:00:00")
+        state = self._ui(tmp_path).bench_state()
+
+        assert state["available"] is True
+        assert state["measuring"]["pid"] == os.getpid()
+        assert state["measuring"]["argv"] == ["sweep", "--serve", "models/beacon.gguf"]
+        assert "ml-stack-bench sweep --serve models/beacon.gguf" in state["text"]
+        assert str(os.getpid()) in state["text"]
+
+    def test_the_fleet_view_carries_the_same_bench_state(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
+        ui = self._ui(tmp_path)
+        monkeypatch.setattr(ui, "peers", lambda *a, **k: [])
+
+        view = ui.fleet()
+        assert view["bench"] == ui.bench_state()
+        assert view["bench"]["available"] is True

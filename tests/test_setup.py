@@ -374,3 +374,34 @@ def test_the_speech_findings_are_printed_with_the_rest(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "voice activity: energy (energy)" in out
     assert "speech recognition: nothing on this machine" in out
+
+
+def test_the_firewall_finding_names_both_inbound_rules_and_how_to_add_them():
+    """Windows hears no beacon and answers no peer until TCP 8770 and UDP 8771 are let in.
+    `_firewall_rule_present` asks ``netsh``; where there is none, every rule reads absent."""
+    from ml_stack.fleet.discovery import windows_firewall_line, windows_firewall_rules
+    from ml_stack.setup import _firewall_finding
+
+    finding = _firewall_finding()
+    named = [name for name, _ in windows_firewall_rules()]
+
+    assert isinstance(finding, Finding)
+    assert finding.name == "firewall"
+    assert finding.root is True
+    assert isinstance(finding.good, bool)
+    assert all(name in finding.said for name in named)
+    assert bool(finding.fix) is not finding.good
+    if not finding.good:
+        assert finding.said.startswith("no inbound rule for ")
+        assert finding.fix == windows_firewall_line()
+        assert "protocol=TCP" in finding.fix and "protocol=UDP" in finding.fix
+        assert "Windows blocks inbound TCP 8770" in finding.note
+    else:
+        assert finding.said.startswith("inbound rules present: ")
+        assert finding.note == ""
+
+
+def test_a_rule_netsh_cannot_confirm_reads_as_absent():
+    from ml_stack.setup import _firewall_rule_present
+
+    assert _firewall_rule_present("ml-stack: a rule no machine has") is False

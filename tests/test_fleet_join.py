@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack.checks import Finding
 from ml_stack.fleet import join as joining
 from ml_stack.fleet.discovery import (
     Advertiser,
@@ -40,7 +41,6 @@ from ml_stack.fleet.join import (
     sweep_argv,
     table,
 )
-from ml_stack.checks import Finding
 
 WORDS = "quince larch marlow"
 DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
@@ -934,3 +934,44 @@ class TestTheStartedRecord:
         assert joining._started_pid(tmp_path) is None
         joining.started_file(tmp_path).write_text("{not json")
         assert joining._started_pid(tmp_path) is None
+
+
+class TestWhoAPauseIsSentTo:
+    """`pausing.peer_clients` builds the clients `pause_fleet` posts to."""
+
+    def test_a_row_gets_a_client_holding_the_token_its_cluster_derives(self, tmp_path):
+        from ml_stack.fleet.discovery import derive_token
+        from ml_stack.fleet.discovery import join as join_cluster
+        from ml_stack.fleet.pausing import peer_clients
+
+        key = tmp_path / "clusters.json"
+        join_cluster("nine blue kettles", group="studio", path=key)
+        join_cluster("four grey lanterns", group="annex", path=key)
+        held = {m.group: m.key for m in memberships(key)}
+
+        clients = peer_clients(
+            [{"name": "workshop", "base_url": "http://10.0.0.4:8770", "clusters": ["studio"]},
+             {"name": "attic", "base_url": "http://10.0.0.5:8770", "clusters": ["annex"]}],
+            cluster_key_path=key, timeout=12.5)
+
+        assert sorted(clients) == ["attic", "workshop"]
+        assert clients["workshop"].base_url == "http://10.0.0.4:8770"
+        assert clients["workshop"].token == derive_token(held["studio"])
+        assert clients["attic"].token == derive_token(held["annex"])
+        assert clients["workshop"].token != clients["attic"].token
+        assert clients["workshop"].timeout == 12.5
+
+    def test_a_row_no_key_of_this_machine_reaches_gets_no_client(self, tmp_path):
+        from ml_stack.fleet.discovery import join as join_cluster
+        from ml_stack.fleet.pausing import peer_clients
+
+        key = tmp_path / "clusters.json"
+        join_cluster("nine blue kettles", group="studio", path=key)
+
+        clients = peer_clients(
+            [{"name": "workshop", "base_url": "http://10.0.0.4:8770", "clusters": ["studio"]},
+             {"name": "stranger", "base_url": "http://10.0.0.6:8770", "clusters": ["elsewhere"]},
+             {"name": "unlisted", "base_url": "http://10.0.0.7:8770"}],
+            cluster_key_path=key)
+
+        assert list(clients) == ["workshop"]
