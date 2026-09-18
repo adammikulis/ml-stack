@@ -26,7 +26,9 @@ jobs:
             python: "3.11"
           - os: ubuntu-latest
             python: "3.13"
-          - os: macos-14
+          # ladybug's macOS wheels are tagged macosx_15_0; on an older runner pip
+          # falls back to the sdist and compiles the graph database from source.
+          - os: macos-15
             python: "3.12"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
