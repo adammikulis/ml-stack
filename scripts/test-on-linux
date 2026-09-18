@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Run the suite in a Linux container against this worktree.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE="${ML_STACK_LINUX_IMAGE:-python:3.13-slim}"
+PLATFORM="${ML_STACK_LINUX_PLATFORM:-}"
+VOLUME="${ML_STACK_LINUX_VOLUME:-ml-stack-linux-suite}"
+
+usage() {
+  cat <<'HELP'
+scripts/test-on-linux [--single] [--rebuild] [--platform P] [pytest args...]
+
+Runs this worktree's tests inside a Linux container, with the extras ci.yml installs,
+and prints what pytest prints. Arguments after the script's own flags go to pytest:
+
+    scripts/test-on-linux tests/test_serve.py -q
+    scripts/test-on-linux --single tests/test_graph_thread.py
+    scripts/test-on-linux -q --slow
+
+  --single        run in one process (-n 0), so an order-dependent test is not hidden
+                  by xdist scattering the file across workers
+  --rebuild       discard the cached container venv and install it again
+  --platform P    docker platform, e.g. linux/amd64 to match the CI runners under
+                  emulation. The default is this machine's own architecture; both
+                  Linuxes catch a macOS-only pass, and emulation costs about 4x.
+
+The worktree is copied into the container, never mounted for writing, so nothing the
+run installs or leaves behind lands in your tree. The venv lives in a docker volume
+and is rebuilt when pyproject.toml or the installed set changes.
+
+Docker credentials: on macOS the desktop credential helper can hang an image pull
+(`error getting credentials - err: signal: terminated`). This script passes every
+docker command a --config directory holding no credsStore, so the helper is never
+consulted; the image is public and needs no login.
+HELP
+}
+
+SINGLE=""
+REBUILD=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --single) SINGLE=1; shift ;;
+    --rebuild) REBUILD=1; shift ;;
+    --platform) PLATFORM="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+DCFG="$(mktemp -d)"
+trap 'rm -rf "$DCFG"' EXIT
+printf '{"auths":{}}' > "$DCFG/config.json"
+docker() { command docker --config "$DCFG" "$@"; }
+
+if ! docker info >/dev/null 2>&1; then
+  echo "scripts/test-on-linux: \`docker info\` failed, so there is no Linux to run in." >&2
+  echo "Start Docker Desktop, or install docker, and run it again." >&2
+  exit 2
+fi
+
+PYTEST_ARGS=("$@")
+[ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
+[ -n "$SINGLE" ] && PYTEST_ARGS+=(-n 0)
+
+[ -n "$REBUILD" ] && docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
+
+exec docker run --rm -i \
+  ${PLATFORM:+--platform "$PLATFORM"} \
+  -v "$REPO":/src:ro \
+  -v "$VOLUME":/venv \
+  -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+  -e PIP_CACHE_DIR=/venv/pipcache \
+  -w /work \
+  "$IMAGE" \
+  bash -s -- "${PYTEST_ARGS[@]}" <<'INNER'
+set -euo pipefail
+
+# Same set as ci.yml's "install test dependencies", and the same reasons.
+DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
+EXTRAS='.[store,hub,web,plot]'
+
+mkdir -p /work
+tar -C /src -cf - --exclude .git --exclude __pycache__ . | tar -C /work -xf -
+
+want="$( { echo "$DEPS $EXTRAS"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
+if [ "$(cat /venv/stamp 2>/dev/null || true)" != "$want" ]; then
+  echo "test-on-linux: building the container venv (a few minutes; cached after this)" >&2
+  rm -rf /venv/env /venv/stamp
+  python -m venv /venv/env
+  /venv/env/bin/pip install -q --upgrade pip build
+  /venv/env/bin/pip install -q $DEPS
+  /venv/env/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+  /venv/env/bin/pip install -q -e "/work/$EXTRAS"
+  echo "$want" > /venv/stamp
+fi
+# /work is rebuilt from the worktree every run, so the editable install is redone; seconds.
+/venv/env/bin/pip install -q --no-deps -e "/work/$EXTRAS"
+
+exec /venv/env/bin/python -m pytest "$@"
+INNER
