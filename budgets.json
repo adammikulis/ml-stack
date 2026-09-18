@@ -1,10 +1,10 @@
 {
   "ad-hoc-fakes": 79,
-  "argument-parsers": 28,
+  "argument-parsers": 26,
   "atomic-writes": 0,
   "broad-excepts": 204,
   "duplicate-bodies": 0,
-  "entry-points": 30,
+  "entry-points": 24,
   "file-locks": 0,
   "home-paths": 0,
   "http-servers": 2,

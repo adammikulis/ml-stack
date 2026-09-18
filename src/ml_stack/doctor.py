@@ -22,8 +22,8 @@ from ml_stack.serve.binary import child_env, managed_current, managed_named
 from ml_stack.serve.build_platform import server_name
 from ml_stack.serve.build_report import manifest_of
 
-__all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of", "doctor_main",
-           "hooks_of", "install_of", "look_checkouts", "repositories", "status_of",
+__all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of",
+           "hooks_of", "install_of", "look_checkouts", "main", "repositories", "status_of",
            "worktrees_of"]
 
 STALE_BUILD_DAYS = 14
@@ -381,7 +381,7 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
     return out
 
 
-def doctor_main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """``ml-stack-doctor`` -- the repositories and the working state, at the start of a
     session. Exit 0 when every finding is good, 1 otherwise."""
     ap = argparse.ArgumentParser(
@@ -407,4 +407,4 @@ def doctor_main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(doctor_main())
+    raise SystemExit(main())

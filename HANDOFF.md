@@ -381,12 +381,6 @@ across `src/`.
   takes no budget line, so this lands as one branch per file, not as a recorded number.
   Held until 0.2.0 was cut (Adam, 2026-09-18) on sequencing alone -- a 4,828-line file is
   not a one-branch job -- and nothing else.
-- [ ] **The `entry-points` budget is shaping a name.** It counts functions called `main`
-  in `src/ml_stack`, the budget is 30 and the tree holds 30, so `ml_stack/doctor.py` had
-  to keep `doctor_main` -- redundant in a module already called `doctor` -- because a
-  second `main` would have been a rise, and an agent may not record one. Drive
-  `entry-points` under 30 (it means `ml_stack.cli`'s dispatch and eight `bench/*` modules)
-  and the rename is free.
 - [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
   that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
   `graph/replies.py`, `graph/answers.py` and `graph/conversation.py`, and every test still
