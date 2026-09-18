@@ -26,6 +26,27 @@ SCRIPTS = ("ml-stack", "ml-stack-serve", "ml-stack-models", "ml-stack-setup",
 
 pytestmark = pytest.mark.slow
 
+# Parses install.ps1 and reads its syntax tree: every switch the header documents is in the
+# param block, and something assigns each of the four modes.
+READS_THE_PS1 = r"""
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $env:ML_STACK_PS1, [ref]$null, [ref]$errors)
+if ($errors) { $errors | ForEach-Object { $_.Message }; exit 1 }
+$switches = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+foreach ($want in 'Headless', 'Dev', 'System', 'Uninstall') {
+    if ($switches -notcontains $want) { "no -$want switch"; exit 1 }
+}
+$modes = @($ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left.Extent.Text -eq '$mode'
+}, $true) | ForEach-Object { $_.Right.Extent.Text.Trim('"') })
+foreach ($want in 'app', 'headless', 'dev', 'system') {
+    if ($modes -notcontains $want) { "nothing sets the $want mode"; exit 1 }
+}
+"""
+
 
 def wheel() -> Path:
     """The wheel in dist/, built first when it is missing or older than src/."""
@@ -102,10 +123,8 @@ def test_uninstall_takes_the_venv_away(tmp_path):
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not on this machine")
 def test_the_windows_installer_parses_and_offers_every_mode():
-    done = subprocess.run(
-        ["pwsh", "-NoProfile", "-Command",
-         f"$null = [System.Management.Automation.Language.Parser]::ParseFile("
-         f"'{REPO / 'packaging' / 'install.ps1'}', [ref]$null, [ref]$e); "
-         f"if ($e) {{ $e | ForEach-Object {{ $_.Message }}; exit 1 }}"],
-        capture_output=True, text=True, timeout=120)
+    done = subprocess.run(["pwsh", "-NoProfile", "-Command", READS_THE_PS1],
+                          capture_output=True, text=True, timeout=120,
+                          env={**os.environ,
+                               "ML_STACK_PS1": str(REPO / "packaging" / "install.ps1")})
     assert done.returncode == 0, done.stdout + done.stderr
