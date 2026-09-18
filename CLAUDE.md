@@ -57,7 +57,7 @@ branch for a caller nobody has, a module boundary drawn around a hash, a number 
 document because re-measuring is inconvenient, "we can't change that, it would invalidate
 the benchmarks".
 
-**There are no users.** Not one, on any platform. So a requirement that exists to serve
+**There are no users but Adam.** Not one, on any platform, unless he says otherwise. So a requirement that exists to serve
 somebody hypothetical is not a requirement, and work spent on one is work spent on nobody:
 a fallback to an older interpreter, per-platform advice in an error path, a `--force` escape
 hatch, a migration for state nobody holds, a softened refusal. When a decision narrows what
@@ -479,6 +479,14 @@ Fix it. Then say what you fixed.
 A problem you found and did not fix is only worth raising if you are **actually blocked**:
 you need a decision only the owner can make, you need hardware or an account you do not
 have, or fixing it would go outside what was asked. Say which of those it is, in one line.
+
+**If it is a decision, ask it.** In the same message, as one question with the two or three
+options and what each costs -- not a paragraph describing that a decision exists. "That's
+your call", "I'd want your view" and "let me know how you want to proceed" are deferring
+dressed as deference. The test: if you cannot write it as one question with options, it is
+not a decision, it is a judgement that is yours -- make it and say what you chose. (Adam,
+2026-09-18, of a status item headed "a decision I need from you" that asked nothing: "sick
+of that".)
 
 **Existing code is not a blocker.** Neither is code you did not write, a function that
 returns the wrong thing on one platform, a missing branch, or a test that was never
