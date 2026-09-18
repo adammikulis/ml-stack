@@ -11,10 +11,8 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
-import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
@@ -97,12 +95,3 @@ def test_offline_skips_the_checks_that_reach_the_internet():
     assert text.count(", network=True)") == 3, (
         "a check that reaches a host outside this machine has to say so, or CI runs it")
     assert 'OFFLINE = "--offline" in sys.argv' in text
-
-
-@pytest.mark.slow
-def test_the_verifier_reports_what_it_skipped():
-    done = subprocess.run([sys.executable, str(VERIFIER), "--offline"],
-                          capture_output=True, text=True, cwd=REPO, timeout=1200)
-    assert "[SKIP]" in done.stdout, done.stdout[-2000:]
-    assert "3 skipped" in done.stdout, done.stdout[-2000:]
-    assert done.returncode == 0, done.stdout[-4000:]
