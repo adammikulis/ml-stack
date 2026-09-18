@@ -359,8 +359,8 @@ them for two weeks.
 `scripts/test-on-linux` copies the worktree into a container, installs what `ci.yml`
 installs, and hands pytest whatever arguments follow, so
 `scripts/test-on-linux tests/test_serve.py -q` is the targeted form and `--single` adds
-`-n 0`. The first run builds a venv in a docker volume; after that it starts in about
-seven seconds. `--help` covers the docker credential helper. Run the macOS suite as well;
+`-n 0`. The first run builds a venv in a docker volume; after that the container adds a
+couple of seconds to pytest's own time. `--help` covers the docker credential helper. Run the macOS suite as well;
 the app ships for both, and CI has one macOS entry for the same reason.
 
 While you are working, run the tests that touch what you changed:

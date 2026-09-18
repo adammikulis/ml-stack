@@ -3,7 +3,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE="${ML_STACK_LINUX_IMAGE:-python:3.13-slim}"
+# python:3.13 rather than -slim: a hundred tests shell out to git, which -slim has not.
+IMAGE="${ML_STACK_LINUX_IMAGE:-python:3.13}"
 PLATFORM="${ML_STACK_LINUX_PLATFORM:-}"
 VOLUME="${ML_STACK_LINUX_VOLUME:-ml-stack-linux-suite}"
 
@@ -23,11 +24,13 @@ and prints what pytest prints. Arguments after the script's own flags go to pyte
   --rebuild       discard the cached container venv and install it again
   --platform P    docker platform, e.g. linux/amd64 to match the CI runners under
                   emulation. The default is this machine's own architecture; both
-                  Linuxes catch a macOS-only pass, and emulation costs about 4x.
+                  Linuxes catch a pass that is only macOS's, and an emulated run is
+                  several times slower.
 
-The worktree is copied into the container, never mounted for writing, so nothing the
-run installs or leaves behind lands in your tree. The venv lives in a docker volume
-and is rebuilt when pyproject.toml or the installed set changes.
+The container gets a clone of this worktree with the working tree copied over it, so
+the tests that read a real repository have one and nothing the run writes lands in
+yours. The venv lives in a docker volume and is rebuilt when pyproject.toml, the
+installed set or the image changes.
 
 Docker credentials: on macOS the desktop credential helper can hang an image pull
 (`error getting credentials - err: signal: terminated`). This script passes every
@@ -49,7 +52,8 @@ while [ $# -gt 0 ]; do
 done
 
 DCFG="$(mktemp -d)"
-trap 'rm -rf "$DCFG"' EXIT
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$DCFG" "$STAGE"' EXIT
 printf '{"auths":{}}' > "$DCFG/config.json"
 docker() { command docker --config "$DCFG" "$@"; }
 
@@ -59,6 +63,9 @@ if ! docker info >/dev/null 2>&1; then
   exit 2
 fi
 
+git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
+(cd "$REPO" && tar -cf - --exclude .git .) | (cd "$STAGE/repo" && tar -xf -)
+
 PYTEST_ARGS=("$@")
 [ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
 [ -n "$SINGLE" ] && PYTEST_ARGS+=(-n 0)
@@ -67,10 +74,11 @@ PYTEST_ARGS=("$@")
 
 exec docker run --rm -i \
   ${PLATFORM:+--platform "$PLATFORM"} \
-  -v "$REPO":/src:ro \
+  -v "$STAGE/repo":/src:ro \
   -v "$VOLUME":/venv \
   -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
   -e PIP_CACHE_DIR=/venv/pipcache \
+  -e IMAGE="$IMAGE" \
   -w /work \
   "$IMAGE" \
   bash -s -- "${PYTEST_ARGS[@]}" <<'INNER'
@@ -81,9 +89,10 @@ DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
 EXTRAS='.[store,hub,web,plot]'
 
 mkdir -p /work
-tar -C /src -cf - --exclude .git --exclude __pycache__ . | tar -C /work -xf -
+tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -
+git config --global --add safe.directory /work
 
-want="$( { echo "$DEPS $EXTRAS"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
+want="$( { echo "$DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
 if [ "$(cat /venv/stamp 2>/dev/null || true)" != "$want" ]; then
   echo "test-on-linux: building the container venv (a few minutes; cached after this)" >&2
   rm -rf /venv/env /venv/stamp
