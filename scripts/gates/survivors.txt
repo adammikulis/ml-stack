@@ -6,13 +6,3 @@
 # scripts/budgets --update. scripts/mutate --verify re-runs every row and says which the
 # tests now catch.
 # equivalent: a mutation nothing can observe; the note says why, and it is not counted.
-#
-# Found 2026-09-18 by: scripts/mutate --functions 10 --mutations 2 --tests 2, seed
-# f771d8f, confirmed against every test file that names the module with --tests 4.
-survivor	src/ml_stack/bench/progress.py::_sampling_said	skip-branch:2	tests/test_bench_measuring.py tests/test_bench_beside.py tests/test_graph_bench.py tests/test_graph_bench_queue.py
-survivor	src/ml_stack/fleet/pausing.py::peer_clients	skip-branch:3	tests/test_fleet_join.py
-survivor	src/ml_stack/fleet/pausing.py::peer_clients	constant-return:1	tests/test_fleet_join.py
-survivor	src/ml_stack/fleet/ui.py::UI.bench_state	empty-body:0	tests/test_fleet_ui.py tests/test_fleet_page.py tests/test_fleet_ui_fit.py tests/test_packages_install_anywhere.py
-survivor	src/ml_stack/fleet/ui.py::UI.bench_state	constant-return:1	tests/test_fleet_ui.py tests/test_fleet_page.py tests/test_fleet_ui_fit.py tests/test_packages_install_anywhere.py
-survivor	src/ml_stack/setup.py::_firewall_finding	empty-body:0	tests/test_serve_preflight.py tests/test_setup.py tests/test_serve_cli.py tests/test_bench_selfcheck.py
-survivor	src/ml_stack/setup.py::_firewall_finding	constant-return:1	tests/test_serve_preflight.py tests/test_setup.py tests/test_serve_cli.py tests/test_bench_selfcheck.py

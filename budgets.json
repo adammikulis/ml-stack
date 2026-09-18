@@ -12,20 +12,20 @@
   "long-docstrings": 97,
   "long-functions": 12,
   "module-skips": 31,
-  "mutation-survivors": 7,
+  "mutation-survivors": 0,
   "print-calls": 0,
   "process-scans": 5,
   "pyright-errors": 1,
   "ruff-blind-except": 23,
   "ruff-bugbear": 59,
-  "ruff-other": 762,
-  "ruff-security": 129,
+  "ruff-other": 756,
+  "ruff-security": 127,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
   "wide-signatures": 42,
   "floors-only-rise": {
-    "tests-collected": 5346
+    "tests-collected": 5372
   },
   "ratchet": {
     "date": "2026-09-18",
