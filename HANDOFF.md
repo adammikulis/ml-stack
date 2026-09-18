@@ -307,10 +307,14 @@ across `src/`.
   the loopback page needs three things or it is refused by the ACL: the capability's
   `remote.urls`, `build.rs` declaring the command names, and the name in the capability's
   permissions.
-  - **Windows and Linux have never been built.** The release workflow installs Rust, node
-    and (on Linux) webkit2gtk and runs the same build; the NSIS setup and the AppImage the
-    bundler makes there are what `install.ps1` and `install.sh` now expect, and neither has
-    run. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
+  - **Nobody has opened the Windows or Linux window.** The bundles themselves build:
+    `gh run view 32881712199` (v0.1.7, 2026-08-25) shows `bundle (ubuntu-latest,
+    ml-stack-linux-x86_64)` and `bundle (windows-latest, ml-stack-windows-x86_64)` both
+    succeeded, against a matrix identical to today's, and the release workflow's own
+    `it starts and serves the interface` and `the screens answer` steps ran there. What
+    has not happened is a person installing the NSIS setup or the AppImage on a real
+    machine of that kind and using it -- which is what `install.ps1` and `install.sh`
+    expect to exist. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
   - **The frozen daemon bundles numpy because `ml_stack.serve` reaches the graph.**
     `packaging/ml-stack.spec` names `ml_stack.serve` as a hidden import, for the reclaim
     watcher and the hosting routes; `ml_stack/serve/__init__.py` imports `serve/serving.py`,
