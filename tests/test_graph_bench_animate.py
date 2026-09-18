@@ -11,7 +11,13 @@ import pathlib
 
 import pytest
 
+from ml_stack import bench
 from ml_stack.bench import animate as a
+
+
+def animate_cmd(argv):
+    """``ml-stack-bench animate ARGS``, parsed and dispatched as the command is."""
+    return bench._main(["animate", *argv])
 
 
 def a_document() -> dict:
@@ -272,7 +278,7 @@ def test_only_keeps_the_scenes_named_and_gives_them_the_whole_cut():
 
 def test_dry_run_prints_the_plan_and_writes_nothing(tmp_path, capsys):
     out = tmp_path / "out" / "comparison.mp4"
-    code = a.main([str(written(tmp_path)), "--out", str(out), "--png", str(tmp_path / "x.png"),
+    code = animate_cmd([str(written(tmp_path)), "--out", str(out), "--png", str(tmp_path / "x.png"),
                    "--seconds", "40", "--dry-run"])
     assert code == 0
     text = capsys.readouterr().out
@@ -287,7 +293,7 @@ def test_dry_run_prints_the_plan_and_writes_nothing(tmp_path, capsys):
 
 def test_a_document_without_configs_is_refused(tmp_path, capsys):
     where = written(tmp_path, {"title": "nothing", "configs": []})
-    assert a.main([str(where), "--out", str(tmp_path / "o.mp4"), "--dry-run"]) == 2
+    assert animate_cmd([str(where), "--out", str(tmp_path / "o.mp4"), "--dry-run"]) == 2
     assert "no configs" in capsys.readouterr().err
 
 

@@ -49,11 +49,11 @@ def test_n_max_lengthens_the_profiles_draft(monkeypatch, tmp_path):
     seen: dict = {}
     _serving_seam(monkeypatch, seen, draft="mtp.gguf")
     with contextlib.suppress(SystemExit):
-        ex.main(_args(tmp_path))
+        ex.run(_args(tmp_path))
     assert seen["lease"]["spec_draft_max"] == 4, "the profile's own length when not told"
     seen.clear()
     with contextlib.suppress(SystemExit):
-        ex.main(_args(tmp_path, n_max=8))
+        ex.run(_args(tmp_path, n_max=8))
     assert seen["lease"]["spec_draft_max"] == 8 and seen["lease"]["draft"] == "mtp.gguf"
 
 
@@ -62,7 +62,7 @@ def test_n_max_without_a_head_is_refused_rather_than_ignored(monkeypatch, tmp_pa
 
     seen: dict = {}
     _serving_seam(monkeypatch, seen, draft="")
-    assert ex.main(_args(tmp_path, n_max=8)) == 2
+    assert ex.run(_args(tmp_path, n_max=8)) == 2
     assert "no draft head" in capsys.readouterr().err
     assert "lease" not in seen, "nothing was served"
 

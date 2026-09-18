@@ -490,7 +490,7 @@ def test_extract_serves_the_model_with_the_best_settings_unless_told_bare(monkey
                           "no_smoke": False, "yes": True, "ceiling": 0, "no_selfcheck": True,
                           "detach": False, "no_queue": True, "no_prefetch": True})()
     with contextlib.suppress(SystemExit):        # `fake_serve` stops the run at the seam
-        ex.main(args)
+        ex.run(args)
     assert "lease" in seen, "the run never reached the serving seam, so no shape was asked for"
     lease = seen["lease"]
     assert lease["cache_type_k"] == "q8_0" and lease["extra_args"] == ("-ub", "2048")
@@ -500,7 +500,7 @@ def test_extract_serves_the_model_with_the_best_settings_unless_told_bare(monkey
     seen.clear()
     args.profile = False
     with contextlib.suppress(SystemExit):
-        ex.main(args)
+        ex.run(args)
     assert "lease" in seen
     bare = seen["lease"]
     assert not bare.get("cache_type_k") and not bare.get("extra_args")
