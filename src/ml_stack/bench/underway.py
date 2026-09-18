@@ -33,27 +33,27 @@ __all__ = ["MEASURING", "_last_line", "_locked_by", "_named_in", "asking_said", 
 MEASURING = ("run", "sweep", "drafts", "concurrent", "extract", "speed")
 
 
-def measuring_file() -> Path:
+def measuring_file(home: Path | None = None) -> Path:
     """Where the run holding the measuring lock writes its pid, argv, log, start time and
     how it is asking."""
-    return bench.home_dir() / "measuring.json"
+    return (home or bench.home_dir()) / "measuring.json"
 
 
-def measuring_lock_file() -> Path:
+def measuring_lock_file(home: Path | None = None) -> Path:
     """Where the run holding the measuring lock is named, whatever else it wrote."""
-    return bench.home_dir() / "measuring.lock"
+    return (home or bench.home_dir()) / "measuring.lock"
 
 
-def _locked_by() -> int | None:
+def _locked_by(home: Path | None = None) -> int | None:
     """The pid written into the measuring lock, or None."""
     try:
-        said = measuring_lock_file().read_text(encoding="utf-8").split()
+        said = measuring_lock_file(home).read_text(encoding="utf-8").split()
     except OSError:
         return None
     return int(said[-1]) if said and said[-1].isdigit() else None
 
 
-def measuring() -> dict[str, Any] | None:
+def measuring(home: Path | None = None) -> dict[str, Any] | None:
     """The measurement still running, or None. Read from `measuring_file`; a record marked
     ended, or one whose pid has gone, is a measurement that finished.
 
@@ -61,12 +61,12 @@ def measuring() -> dict[str, Any] | None:
     the lock knows: a machine whose GPU is busy must never read as idle.
     """
     try:
-        record = json.loads(measuring_file().read_text(encoding="utf-8"))
+        record = json.loads(measuring_file(home).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         record = None
     if isinstance(record, dict) and not record.get("ended") and pid_exists(record.get("pid")):
         return record
-    pid = _locked_by()
+    pid = _locked_by(home)
     if pid is None or not pid_exists(pid) \
             or (isinstance(record, dict) and record.get("pid") == pid):
         return None
@@ -122,7 +122,11 @@ def remember(argv: Sequence[str], *, pid: int, log: str = "", started: str = "",
 
 
 def ended() -> None:
-    """Mark this process's record finished, so nothing reads it as a live measurement."""
+    """Mark this process's record finished, so nothing reads it as a live measurement.
+
+    The record stays: `ml-stack-bench status` names the last run from it and `tail` finds
+    that run's log through it.
+    """
     try:
         record = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):

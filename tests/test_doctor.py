@@ -290,13 +290,17 @@ def test_empty_runs_are_counted_and_named_with_forget_as_the_fix(tmp_path):
     assert found.fix == f"ml-stack-bench forget --empty --kept {home / 'runs.ladybug'}"
 
 
-def test_a_lock_whose_pid_is_dead_is_stale_and_its_removal_is_the_fix(tmp_path):
+def test_a_record_whose_pid_is_gone_is_the_last_run_and_not_a_fault(tmp_path):
+    """`ml-stack-bench status` names the last run from this record and `tail` finds its log
+    through it, so a finished measurement is reported and never offered for deletion."""
     pid = dead_pid()
     home = make_bench(tmp_path / "bench", lock_pid=pid)
     found = by_name(bench_of(home), "bench: measuring")
-    assert not found.good
-    assert found.said == f"stale lock: {home / 'measuring.json'} names pid {pid}, which is not running"
-    assert found.fix == f"rm -f {home / 'measuring.json'}"
+    assert found.good
+    assert found.said == "nothing is measuring"
+    assert f"pid {pid} is gone" in found.note
+    assert found.fix == ""
+    assert (home / "measuring.json").exists(), "the record is what says what ran last"
 
 
 def test_a_lock_whose_pid_is_alive_is_a_measurement_in_progress(tmp_path):
@@ -426,18 +430,18 @@ def test_look_names_everything_and_main_exits_one_until_it_is_fixed(everything, 
         "quenlow: hooks", "quenlow: working tree", "quenlow: branch",
         "quenlow: editable install", "bench: measuring", "llama.cpp: current"]
     assert [f.name for f in found if not f.good] == [
-        "quenlow: hooks", "bench: measuring", "llama.cpp: current"]
+        "quenlow: hooks", "llama.cpp: current"]
     assert main(["--repo", str(repo), "--bench-home", str(home)]) == 1
     out = capsys.readouterr().out
     assert out.startswith("ml-stack: the repositories and the working state\n")
     assert "  ! quenlow: hooks: not installed: pre-commit, commit-msg, pre-push" in out
-    assert f"      fix: rm -f {home / 'measuring.json'}" in out
+    assert "ok  bench: measuring: nothing is measuring" in out
     assert "ok  quenlow: working tree: clean" in out
 
 
 def test_yes_runs_the_fixes_it_can_and_does_not_touch_the_build(everything, capsys, monkeypatch):
-    """Installing the hooks and removing the dead lock are safe; ``ml-stack-serve build``
-    is a compile, and the test replaces it with a record of having been asked."""
+    """Installing the hooks is safe; ``ml-stack-serve build`` is a compile, and the test
+    replaces it with a record of having been asked."""
     repo, home = everything
     asked: list[str] = []
     real = subprocess.run
@@ -451,7 +455,7 @@ def test_yes_runs_the_fixes_it_can_and_does_not_touch_the_build(everything, caps
     monkeypatch.setattr(subprocess, "run", run)
     assert main(["--repo", str(repo), "--bench-home", str(home), "--yes"]) == 1
     assert asked == ["ml-stack-serve build"]
-    assert not (home / "measuring.json").exists()
+    assert (home / "measuring.json").exists(), "nothing deletes what says what ran last"
     assert hooks_of(repo).good
     found = look([repo], bench_home=home)
     assert [f.name for f in found if not f.good] == ["llama.cpp: current"]

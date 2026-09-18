@@ -15,12 +15,12 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ml_stack.bench.underway import measuring, measuring_file
 from ml_stack.checks import CHECKOUT, Finding, ask
 from ml_stack.log import say
 from ml_stack.serve.binary import child_env, managed_current, managed_named
 from ml_stack.serve.build_platform import server_name
 from ml_stack.serve.build_report import manifest_of
-from ml_stack.serve.process import pid_exists
 
 __all__ = ["HOOKS", "STALE_BUILD_DAYS", "ahead_of", "bench_of", "builds_of", "doctor_main",
            "hooks_of", "install_of", "look_checkouts", "repositories", "status_of",
@@ -190,28 +190,30 @@ def install_of(repo: Path, *, checkout: Path | None = None,
              "what runs here")
 
 
-def _dead_lock(home: Path) -> Finding | None:
-    """A ``measuring.json`` whose pid has gone: the last measurement finished or died,
-    and nothing removed its record."""
-    where = home / "measuring.json"
-    if not where.exists():
-        return None
-    try:
-        held = json.loads(where.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        held = {}
-    pid = held.get("pid") if isinstance(held, dict) else None
-    if pid_exists(pid):
+def _measuring(home: Path) -> Finding | None:
+    """What is measuring on this machine, or what ran last, or None when neither.
+
+    A record whose run has ended is what `ml-stack-bench status` names the last run from
+    and what `tail` finds its log through, so it is reported, never offered for deletion.
+    """
+    held = measuring(home)
+    if held is not None:
         return Finding(name="bench: measuring", good=True,
-                       said=f"pid {pid} since {held.get('started', '?')}: "
-                            f"ml-stack-bench {' '.join(held.get('argv') or ())}")
+                       said=f"pid {held.get('pid')} since {held.get('started') or '?'}: "
+                            f"ml-stack-bench {' '.join(held.get('argv') or ())}".rstrip())
+    try:
+        last = json.loads(measuring_file(home).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(last, dict):
+        return None
     return Finding(
-        name="bench: measuring", good=False,
-        said=f"stale lock: {where} names pid {pid}, which is not running",
-        fix=f"rm -f {where}",
-        note=f"the measurement that started {held.get('started', '?')} has ended; "
-             "ml-stack-bench status reads this file and says so, but it is the record of "
-             "something that is over")
+        name="bench: measuring", good=True,
+        said="nothing is measuring",
+        note=f"the last was ml-stack-bench {' '.join(last.get('argv') or ())}, started "
+             f"{last.get('started') or '?'}"
+             + (f" and ended {last['ended']}" if last.get("ended") else
+                f", and pid {last.get('pid')} is gone"))
 
 
 def _newest_run_at(store: Path) -> tuple[float, int]:
@@ -261,15 +263,11 @@ def bench_of(home: Path) -> list[Finding]:
             note="each was a measurement that saved a row of dashes; the table skips them "
                  "and says nothing about why"))
 
-    lock = _dead_lock(home)
-    if lock is not None:
-        out.append(lock)
-    live_log = ""
-    if lock is not None and lock.good:
-        try:
-            live_log = str(json.loads((home / "measuring.json").read_text()).get("log", ""))
-        except (OSError, ValueError, AttributeError):
-            live_log = ""
+    held = measuring(home)
+    running = _measuring(home)
+    if running is not None:
+        out.append(running)
+    live_log = str((held or {}).get("log") or "")
 
     logs = sorted((home / "logs").glob("*.log"), key=_started) if (home / "logs").is_dir() else []
     newest, count = _newest_run_at(store)
