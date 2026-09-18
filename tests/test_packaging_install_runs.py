@@ -244,12 +244,42 @@ def stand_in_wheel(into: Path, name: str, version: str, module: str) -> Path:
     return path
 
 
+def wheel_of_installed(into: Path, name: str) -> Path:
+    """A wheel built out of the copy of ``name`` this interpreter already holds."""
+    import importlib.util
+    from importlib.metadata import version as installed_version
+
+    where = Path(importlib.util.find_spec(name).origin).parent
+    version = installed_version(name)
+    info = f"{name}-{version}.dist-info"
+    into.mkdir(parents=True, exist_ok=True)
+    path = into / f"{name}-{version}-py3-none-any.whl"
+    written = []
+    with zipfile.ZipFile(path, "w") as whl:
+        for one in sorted(where.rglob("*.py")):
+            at = f"{name}/{one.relative_to(where).as_posix()}"
+            whl.writestr(at, one.read_text(encoding="utf-8"))
+            written.append(at)
+        for at, body in (
+                (f"{info}/METADATA",
+                 f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"),
+                (f"{info}/WHEEL", "Wheel-Version: 1.0\nGenerator: tests\n"
+                                  "Root-Is-Purelib: true\nTag: py3-none-any\n")):
+            whl.writestr(at, body)
+            written.append(at)
+        whl.writestr(f"{info}/RECORD",
+                     "".join(f"{at},,\n" for at in [*written, f"{info}/RECORD"]))
+    return path
+
+
 def wheelhouse(into: Path) -> Path:
-    """A directory holding one stand-in wheel for every extra a full install has."""
+    """A directory holding a wheel for every extra a full install has, and for the
+    packaging the library itself asks for."""
     versions = {"ladybug": "0.20.4", "huggingface_hub": "1.32.0", "ddgs": "9.0.0",
                 "matplotlib": "3.11.2", "numpy": "1.26.0", "trafilatura": "2.0.0"}
     for module, version in versions.items():
         stand_in_wheel(into, module.replace("_", "-"), version, module)
+    wheel_of_installed(into, "packaging")
     return into
 
 
