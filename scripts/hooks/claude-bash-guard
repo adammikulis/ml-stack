@@ -30,9 +30,20 @@ import os
 import re
 import sys
 
+# The start of a command, past any NAME=value the caller put in front of it.
+RUN = r"(^|[;&|(]\s*|\bthen\s+|\bdo\s+|\bexec\s+)(\w+=\S*\s+)*"
+
+PUSH_MAIN = RUN + r"git\s+push\b[^;&|\n]*\bmain\b"
+
+# Read off the command rather than the environment: the guard is told what to allow by the
+# command it is asked about.
+PUSH_MAIN_OPENED = r"\bML_STACK_PUSH_MAIN=yes\b"
+
+
 # (what it matches, what to do instead). Ordered: the first match wins.
 REFUSE = [
-    (r"(^|[;&|(]\s*)git\s+add\s+(-A\b|--all\b|\.(\s|$)|-u\b|--update\b)|(^|[;&|(]\s*)git\s+commit\s+(-a\b|-am\b|--all\b)",
+    (RUN + r"git\s+add\s+(-A\b|--all\b|\.(\s|$)|-u\b|--update\b)|"
+     + RUN + r"git\s+commit\s+(-a\b|-am\b|--all\b)",
      "Do not stage everything. `git add -A` (and `add .`, `add -u`, `commit -a`) sweeps in "
      "whatever another agent is halfway through writing -- it committed a failing test once, "
      "under somebody else's commit message. Name the files you mean: `git add path/one.py "
@@ -42,11 +53,11 @@ REFUSE = [
      "so the loop never exits -- two of them spun for an afternoon and the work queued "
      "behind them never ran. `ml-stack-bench run|sweep|drafts` now takes a lock and waits "
      "for whoever is measuring (`ml_stack.lock.only_one`); just start it."),
-    (r"(^|[;&|]\s*|\bthen\s+|\bdo\s+|\bexec\s+)nohup\b",
+    (RUN + r"nohup\b",
      "Do not `nohup ... &`. Use the Bash tool's run_in_background, which reports the exit "
      "code and keeps the output, or `ml-stack-bench sweep --serve`, which puts one model up "
      "at a time on purpose. Backgrounded jobs have died silently here before."),
-    (r"(^|[;&|]\s*)(/\S*/)?llama-server\s",
+    (RUN + r"(/\S*/)?llama-server\s",
      "Do not start llama-server by hand. `ml-stack-serve up <model> --port N` leases one "
      "shape per port, refuses a mismatched lease, and downloads `hf:owner/repo/file` on "
      "first use. Two shapes on one port made the second caller adopt a server with the "
@@ -66,12 +77,18 @@ REFUSE = [
     (r"\bpkill\b[^|;]*llama|\bkillall\b[^|;]*llama",
      "Do not pkill llama-server. `ml-stack-serve down --port N` releases the lease too; "
      "killing the process leaves the lease behind and the next `up` refuses."),
-    (r"(^|[;&|(]\s*)git\s+push\b[^;&|\n]*(\bmain\b|--all\b|--mirror\b|--tags\b|--delete\b"
+    (RUN + r"git\s+push\b[^;&|\n]*(--all\b|--mirror\b|--tags\b|--delete\b"
      r"|--force|\s-f\b|\s-d\b)",
+     "An agent pushes one branch by name: `git push origin <branch>`. Every branch at "
+     "once, a tag, a deletion and a forced push stay the owner's, and no opener opens "
+     "them."),
+    (PUSH_MAIN,
      "An agent pushes the development branch by name and nothing else: `git push origin "
-     "<development branch>` after a merge lands on it. A push to `main` is Adam's: "
-     "release-please reads the subjects there, so it moves the release PR and publishes "
-     "every commit on the branch at once. The pre-push hook refuses any other ref."),
+     "<development branch>` after a merge lands on it. A push to `main` publishes: "
+     "release-please reads the subjects there, so it moves the release pull request and "
+     "releases every commit on the branch at once.\n\n"
+     "When the owner has asked for that push, the ask is written on the command itself:  "
+     "ML_STACK_PUSH_MAIN=yes git push origin main"),
     (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
      "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
      "between a real community and a public repository. If it flagged an invented name, add "
@@ -124,6 +141,8 @@ def main() -> int:
     command = without_search_patterns(command)
     for pattern, instead in REFUSE:
         if re.search(pattern, command, re.M):
+            if pattern is PUSH_MAIN and re.search(PUSH_MAIN_OPENED, command):
+                continue
             print(f"blocked: {instead}\n\n"
                   f"(ml-stack scripts/hooks/claude-bash-guard. If this is genuinely the right "
                   f"command, say so and a person can run it, or set MLSTACK_GUARD=off.)",

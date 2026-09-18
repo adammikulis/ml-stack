@@ -2,7 +2,8 @@
 # Refuse an agent's push of anything but the development branch, then check what it pushes
 # with scripts/hooks/pushed. Claude Code sets CLAUDECODE for every command it runs, and a
 # person's shell does not. The development branch is the one the primary checkout is on, and
-# `main` is never it.
+# `main` is never it. ML_STACK_PUSH_MAIN=yes on the command lets `main` through, for the
+# push the owner has asked for.
 [ -z "$CLAUDECODE" ] && exit 0
 
 self=$0
@@ -23,8 +24,11 @@ zero=0000000000000000000000000000000000000000
 refused=""
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "$remote_ref" ] && continue
-    if [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ] \
-            || [ "$local_sha" = "$zero" ]; then
+    if [ "$local_sha" = "$zero" ]; then
+        refused="$refused $remote_ref"
+    elif [ "$remote_ref" = refs/heads/main ] && [ "$ML_STACK_PUSH_MAIN" = yes ]; then
+        continue
+    elif [ -z "$dev" ] || [ "$dev" = main ] || [ "$remote_ref" != "refs/heads/$dev" ]; then
         refused="$refused $remote_ref"
     fi
 done <<EOF
@@ -40,9 +44,12 @@ pre-push: refused:$refused
 
 An agent pushes the development branch and nothing else. release-please reads the commit
 subjects on \`main\`, so a push there moves the release pull request and publishes every
-commit on it at once; that push is the repository owner's.
+commit on it at once.
 
 Land your branch into the development branch the primary checkout is on, then push it by
 name: git push origin ${dev:-<development branch>}
+
+When the owner has asked for the push to \`main\`, the ask is written on the command:
+ML_STACK_PUSH_MAIN=yes git push origin main
 WHY
 exit 1

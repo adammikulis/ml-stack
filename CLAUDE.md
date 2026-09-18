@@ -143,8 +143,11 @@ your own push through: Claude Code sets `CLAUDECODE` for every command it runs a
 sets nothing, so the hook can tell them apart. The development branch is the one the primary
 checkout is on, and `main` is never it. release-please reads the subjects on `main`, so a
 push there moves the release pull request and publishes every commit on it at once; that push
-is Adam's. The Bash guard refuses a push naming `main`, a force, a deletion, `--all` or
-`--tags`, so an agent is told before it runs.
+is Adam's, and an agent makes it only when he has asked for it, on a command that says so:
+`ML_STACK_PUSH_MAIN=yes git push origin main`. Both hooks read that opener and it opens
+`main` and nothing else -- never a force, a deletion, `--all` or `--tags`, and never another
+branch. The Bash guard refuses all of those before the command runs, past any `NAME=value`
+written in front of it.
 
 `scripts/hooks/claude-edit-guard` refuses a function whose body already exists elsewhere, a
 raw HTTP call, a docstring over twelve lines, a signature over eight parameters, and a write

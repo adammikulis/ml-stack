@@ -61,6 +61,26 @@ def test_main_rides_along_with_the_development_branch_and_is_still_refused(check
     assert "refs/heads/main" in done.stderr and "refs/heads/0.9dev" not in done.stderr
 
 
+def test_main_goes_through_when_the_owner_has_opened_it(checkout):
+    done = push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="yes")
+    assert done.returncode == 0, done.stderr
+
+
+def test_the_opener_opens_main_and_nothing_else(checkout):
+    assert push(checkout, "split-something", CLAUDECODE="1",
+                ML_STACK_PUSH_MAIN="yes").returncode != 0
+
+
+def test_the_opener_does_not_open_a_deletion(checkout):
+    done = push(checkout, "main", sha=ZERO, CLAUDECODE="1", ML_STACK_PUSH_MAIN="yes")
+    assert done.returncode != 0
+    assert "refs/heads/main" in done.stderr
+
+
+def test_any_other_value_of_the_opener_is_not_one(checkout):
+    assert push(checkout, "main", CLAUDECODE="1", ML_STACK_PUSH_MAIN="1").returncode != 0
+
+
 def test_an_agents_push_of_a_work_branch_is_refused(checkout):
     assert push(checkout, "split-something", CLAUDECODE="1").returncode != 0
 
