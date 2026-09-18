@@ -104,7 +104,14 @@ def report(outcomes: list[_mutation.Outcome], known: set[str], pool: int) -> int
 
 def verify(root: Path, tree: Tree, args: argparse.Namespace) -> int:
     """Re-run every recorded survivor and name the ones the tests now catch."""
-    rows = [e for e in mutation_survivors.entries(root) if e.state == "survivor"]
+    held = mutation_survivors.entries(root)
+    rows = [e for e in held if e.state == "survivor"]
+    if not rows:
+        same = len(held) - len(rows)
+        print(f"{mutation_survivors.LEDGER} records no survivor to re-run "
+              f"({same} equivalent, {len(mutation_survivors.campaigns(root))} campaign(s)). "
+              f"That is the ledger, not the tree: scripts/mutate samples it.")
+        return 0
     pool = _mutation.candidates(root)
     fixed = []
     for entry in rows:

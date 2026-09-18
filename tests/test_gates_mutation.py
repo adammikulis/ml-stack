@@ -216,6 +216,16 @@ def test_this_repository_records_the_campaigns_behind_its_count() -> None:
         "scripts/gates/survivors.txt records no campaign; the count covers nothing"
 
 
+def test_a_verify_with_nothing_to_re_run_says_so_rather_than_printing_nothing() -> None:
+    """Silence reads as a pass. The ledger being empty is a fact about the ledger."""
+    done = subprocess.run([sys.executable, str(REPO / "scripts" / "mutate"), "--verify"],
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    if not [e for e in mutation_survivors.entries(REPO) if e.state == "survivor"]:
+        assert "records no survivor to re-run" in done.stdout
+        assert "That is the ledger, not the tree" in done.stdout
+
+
 def _mini(root: Path, test_body: str) -> None:
     (root / "src" / "ml_stack" / "toy").mkdir(parents=True)
     (root / "src" / "ml_stack" / "toy" / "count.py").write_text(
