@@ -43,6 +43,16 @@ def skipped(checker: ModuleType) -> str:
     return reason() if reason is not None else ""
 
 
+def notes(root: Path) -> list[str]:
+    """Every checker's lines about what its count does not cover."""
+    out: list[str] = []
+    for checker in checkers():
+        said = getattr(checker, "notes", None)
+        if said is not None and not skipped(checker):
+            out.extend(said(root))
+    return out
+
+
 def unrunnable() -> dict[str, str]:
     """Metric name -> why it cannot be counted here."""
     return {c.NAME: r for c in checkers() if (r := skipped(c))}

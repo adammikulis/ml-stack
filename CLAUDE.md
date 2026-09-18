@@ -161,6 +161,13 @@ and `scripts/mutate --verify` re-runs every row and says which the tests now cat
 mutation that cannot change what anyone observes is recorded as `equivalent` with the
 reason.
 
+`mutation-survivors: 0` means no recorded survivor is left, not that the tests catch
+everything. A campaign reads a sample, so `scripts/mutate` writes a `campaign` row after
+every sampled run -- date, commit, what it sampled, what it found -- and says, when
+nothing survives, how many functions it did not mutate; `scripts/budgets` prints the same
+caveat under the table. A run at a deeper `--mutations` finds more mutations of a function
+already sampled, so a function with a row is not a function that is done.
+
 `pyproject.toml` selects ruff's rules and pyright's checks, and `scripts/gates/` budgets
 both: `ruff-blind-except`, `ruff-bugbear`, `ruff-security`, `ruff-other`, `pyright-errors`.
 Neither tool is a dependency, so a checker that cannot find its tool prints why and its

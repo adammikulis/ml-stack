@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,10 +48,40 @@ def ledger_lines(outcomes: list[_mutation.Outcome]) -> list[str]:
             for o in outcomes if o.survived]
 
 
-def report(root: Path, outcomes: list[_mutation.Outcome], known: set[str]) -> int:
+def reach(outcomes: list[_mutation.Outcome], pool: int) -> list[str]:
+    """What a clean result covers, so it is not read as a clean tree."""
+    looked = len({o.mutant.target.name() for o in outcomes})
+    return [f"Nothing survived of these {len(outcomes)} mutants of {looked} function(s).",
+            f"That is not a clean tree: {pool - looked} of this tree's {pool} mutable "
+            f"functions were not mutated at all, and a deeper run finds more mutations "
+            f"of the ones that were."]
+
+
+def short(root: Path) -> str:
+    """The commit a campaign ran at, short."""
+    said = _mutation.head(root)
+    return said[:7] if len(said) == 40 else said
+
+
+def recorded(root: Path, args: argparse.Namespace, outcomes: list[_mutation.Outcome],
+             pool: int) -> None:
+    """Write what this campaign sampled into the ledger."""
+    looked = len({o.mutant.target.name() for o in outcomes})
+    survived = sum(1 for o in outcomes if o.survived)
+    mutation_survivors.record(root, mutation_survivors.Campaign(
+        date.today().isoformat(), short(root),
+        f"{looked} of {pool} functions, up to {args.mutations} mutations each, "
+        f"{args.tests} test files",
+        f"{len(outcomes)} mutants, {survived} survived"))
+
+
+def report(outcomes: list[_mutation.Outcome], known: set[str], pool: int) -> int:
     """Print every survivor and return 1 when one of them is new."""
     survivors = [o for o in outcomes if o.survived]
     print(f"\n{len(outcomes)} mutants run, {len(survivors)} survived")
+    if not survivors and outcomes:
+        for line in reach(outcomes, pool):
+            print(line)
     fresh = []
     for outcome in survivors:
         mutant = outcome.mutant
@@ -145,8 +176,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if code or args.verify:
         return code
+    pool = len(_mutation.candidates(root))
+    if outcomes and not args.target:
+        recorded(root, args, outcomes, pool)
     known = {f"{e.site}\t{e.mutation}" for e in mutation_survivors.entries(root)}
-    return report(root, outcomes, known)
+    return report(outcomes, known, pool)
 
 
 if __name__ == "__main__":

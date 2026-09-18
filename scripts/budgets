@@ -147,6 +147,8 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
     lines, fell = floor_rows(floors())
     for line in lines:
         print(line)
+    for line in gates.notes(ROOT):
+        print(line if line.startswith(" ") else f"\n{line}")
 
     over = [r for r in rows if r[0] > 0]
     if not over:
@@ -181,6 +183,8 @@ def show(found: dict[str, list[gates.Finding]], metric: str) -> int:
     owner = owners()[metric]
     if owner:
         print(f"owner: {owner}")
+    for line in gates.notes(ROOT):
+        print(line)
     print()
     for finding in found[metric]:
         print(f"{finding.path}:{finding.line}  {finding.detail}")

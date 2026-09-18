@@ -1,8 +1,14 @@
-# Mutations of live code that every test naming the module kept green, one per line:
+# Mutations of live code that every test naming the module kept green, and the campaigns
+# that looked. One row per line:
 #
 #   state<TAB>path::qualname<TAB>kind:index<TAB>the tests that ran and stayed green
+#   campaign<TAB>date<TAB>commit<TAB>what it sampled<TAB>what it found
 #
 # survivor: a debt. Write a test that fails on the mutation, take the row out, and run
 # scripts/budgets --update. scripts/mutate --verify re-runs every row and says which the
 # tests now catch.
 # equivalent: a mutation nothing can observe; the note says why, and it is not counted.
+# campaign: written by scripts/mutate after a sampled run. No row here means nobody has
+# mutated that function, not that its tests read what it answers.
+equivalent	src/ml_stack/sources/rows.py::_rows	skip-branch:9	the guard it drops is a fast path: json.loads("") raises ValueError, which the next statement catches and continues on, so both continue the loop for every input
+campaign	2026-09-18	f771d8f	10 functions, 2 mutations each, 2 test files	7 survived, all since caught

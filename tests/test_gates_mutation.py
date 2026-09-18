@@ -132,6 +132,59 @@ def test_the_ledger_this_repository_holds_names_live_code() -> None:
         assert entry.mutation.split(":")[0] in _mutation.KINDS, entry.mutation
 
 
+def test_a_campaign_row_is_read_back_whole(tmp_path) -> None:
+    root = _ledger(tmp_path, "")
+    mutation_survivors.record(root, mutation_survivors.Campaign(
+        "2026-09-18", "abc1234", "10 of 3708 functions, up to 2 mutations each, 2 test files",
+        "19 mutants, 1 survived"))
+    (one,) = mutation_survivors.campaigns(root)
+    assert one.when == "2026-09-18" and one.commit == "abc1234"
+    assert one.sampled.startswith("10 of 3708 functions")
+    assert one.found == "19 mutants, 1 survived"
+
+
+def test_a_campaign_row_is_not_a_survivor(tmp_path) -> None:
+    """The two states share a file; a campaign may never be counted as a debt."""
+    root = _ledger(tmp_path, "campaign\t2026-09-18\tabc1234\t1 function\t2 mutants, 0 survived\n")
+    assert mutation_survivors.entries(root) == []
+    assert mutation_survivors.find(root) == []
+
+
+def test_recording_a_campaign_keeps_the_rows_already_there(tmp_path) -> None:
+    root = _ledger(tmp_path, "survivor\tsrc/ml_stack/sample.py::alive\tempty-body:0\tt.py\n")
+    mutation_survivors.record(root, mutation_survivors.Campaign("2026-09-18", "abc1234",
+                                                                "1 function", "2 mutants"))
+    assert len(mutation_survivors.find(root)) == 1
+    assert len(mutation_survivors.campaigns(root)) == 1
+
+
+def test_the_count_says_out_loud_that_it_only_covers_what_was_sampled(tmp_path) -> None:
+    """A zero here reads as "the tests catch everything" unless the tool says otherwise."""
+    root = _ledger(tmp_path, "")
+    said = "\n".join(mutation_survivors.notes(root))
+    assert "counts recorded survivors, not every mutation the tests would miss" in said
+    assert "No campaign is recorded, so the count covers nothing" in said
+    assert mutation_survivors.LEDGER in said
+
+    mutation_survivors.record(root, mutation_survivors.Campaign(
+        "2026-09-18", "abc1234", "10 of 3708 functions", "19 mutants, 1 survived"))
+    said = "\n".join(mutation_survivors.notes(root))
+    assert "The last ran on 2026-09-18 at abc1234: 10 of 3708 functions." in said
+
+
+def test_the_scoreboard_prints_the_caveat_under_the_table() -> None:
+    done = subprocess.run([sys.executable, str(REPO / "scripts" / "budgets")],
+                          capture_output=True, text=True, check=False)
+    assert "counts recorded survivors, not every mutation the tests would miss" in done.stdout
+    assert "were not mutated" not in done.stdout.split("mutation-survivors counts")[0]
+
+
+def test_this_repository_records_the_campaigns_behind_its_count() -> None:
+    """A zero with no campaign behind it is a number nobody has earned."""
+    assert mutation_survivors.campaigns(REPO), \
+        "scripts/gates/survivors.txt records no campaign; the count covers nothing"
+
+
 def _mini(root: Path, test_body: str) -> None:
     (root / "src" / "ml_stack" / "toy").mkdir(parents=True)
     (root / "src" / "ml_stack" / "toy" / "count.py").write_text(
@@ -154,6 +207,8 @@ def test_a_test_that_asserts_nothing_lets_the_mutation_through(tmp_path) -> None
     ran, survived = re.search(r"(\d+) mutants run, (\d+) survived", done.stdout).groups()
     assert ran == survived and int(ran) > 3, done.stdout
     assert "count.py" in done.stdout
+    assert "That is not a clean tree" not in done.stdout
+    assert mutation_survivors.campaigns(tmp_path)[0].found.endswith(f"{survived} survived")
 
 
 @pytest.mark.slow
@@ -165,6 +220,11 @@ def test_a_test_that_reads_the_answer_catches_them_all(tmp_path) -> None:
                           capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "0 survived" in done.stdout
+    assert "That is not a clean tree" in done.stdout, \
+        "a clean run that does not say what it left out is read as a clean tree"
+    assert "were not mutated at all" in done.stdout
+    (ran,) = mutation_survivors.campaigns(tmp_path)
+    assert ran.found.endswith("0 survived") and "1 of " in ran.sampled
 
 
 @pytest.mark.slow
