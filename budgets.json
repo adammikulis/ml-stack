@@ -25,5 +25,9 @@
   "wide-signatures": 42,
   "floors-only-rise": {
     "tests-collected": 5312
+  },
+  "ratchet": {
+    "date": "2026-09-18",
+    "total": 2039
   }
 }

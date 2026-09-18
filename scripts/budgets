@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,7 +18,15 @@ from gates import _floors, _pins
 ROOT = Path(__file__).resolve().parent.parent
 BUDGETS = ROOT / "budgets.json"
 
+RATCHET = 0.05
+"""The share of the debt recorded at the anchor to retire each month, so 1/RATCHET
+months to zero. Reporting only: nothing is refused for being over the target."""
+
+MONTH = 30
+"""Days to the month, so the schedule lands on a date arithmetic can name."""
+
 FLOORS = "floors-only-rise"
+ANCHOR = "ratchet"
 
 
 def held() -> dict:
@@ -36,6 +45,31 @@ def floors() -> dict[str, int]:
     return dict(held().get(FLOORS, {}))
 
 
+def anchor(total: int, today: date) -> dict:
+    """Where the ratchet counts the debt down from, started here if it has no start."""
+    have = held().get(ANCHOR) or {}
+    if not {"date", "total"} <= set(have):
+        return {"date": today.isoformat(), "total": total}
+    return dict(have)
+
+
+def due(start: dict, when: date) -> int:
+    """The debt the ratchet asks for on that date."""
+    months = max(0.0, (when - date.fromisoformat(start["date"])).days / MONTH)
+    return max(0, int(start["total"] * (1 - RATCHET * months)))
+
+
+def ratchet_lines(total: int, start: dict, today: date) -> list[str]:
+    """The debt now, what is due next, when it reaches zero, and whether it is on track."""
+    zero = date.fromisoformat(start["date"]) + timedelta(days=int(MONTH / RATCHET))
+    step = today + timedelta(days=MONTH)
+    behind = total - due(start, today)
+    state = "on track" if behind <= 0 else f"{behind} over today's {due(start, today)}"
+    return [f"ratchet  {int(RATCHET * 100)}% of {start['total']} a month from "
+            f"{start['date']}, zero by {zero}",
+            f"         {total} now, {due(start, step)} due by {step} -- {state}"]
+
+
 def owners() -> dict[str, str]:
     """The module that owns each metric's job."""
     return {c.NAME: c.OWNER for c in gates.checkers()}
@@ -46,11 +80,12 @@ def descriptions() -> dict[str, str]:
     return {c.NAME: c.describe() for c in gates.checkers()}
 
 
-def write_budgets(counts: dict[str, int], least: dict[str, int]) -> None:
+def write_budgets(counts: dict[str, int], least: dict[str, int], start: dict) -> None:
     """Replace budgets.json with these counts, leaving out the hard gates."""
     skip = gates.hard()
     ordered: dict = {name: counts[name] for name in sorted(counts) if name not in skip}
     ordered[FLOORS] = {name: least[name] for name in sorted(least)}
+    ordered[ANCHOR] = start
     BUDGETS.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
 
 
@@ -106,6 +141,9 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
           f"{'+' if moved > 0 else ''}{moved}")
     print(f"\nruff and pyright metrics measured with {_pins.measured_with()}")
 
+    debt = counted + sum(allowed.get(name, 0) for name in absent)
+    for line in ratchet_lines(debt, anchor(debt, date.today()), date.today()):
+        print(line)
     lines, fell = floor_rows(floors())
     for line in lines:
         print(line)
@@ -217,7 +255,8 @@ def main(argv: list[str] | None = None) -> int:
                       f"{was - counted} tests that were collected are not any more.")
             elif was != counted:
                 print(f"{_floors.NAME}: {was if was is not None else '-'} -> {counted}")
-        write_budgets(counts, least)
+        debt = sum(counts.values())
+        write_budgets(counts, least, anchor(debt, date.today()))
         changed = [n for n in counts if allowed.get(n) != counts[n]]
         for name in sorted(changed):
             print(f"{name}: {allowed.get(name, '-')} -> {counts[name]}")
@@ -226,9 +265,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.json:
+        debt = sum(allowed.values())
         payload = {
             "version": 1,
             "floors": floors(),
+            "ratchet": {**anchor(debt, date.today()), "rate": RATCHET, "debt": debt,
+                        "due": due(anchor(debt, date.today()), date.today())},
             "metrics": {
                 name: {
                     "budget": allowed.get(name),
