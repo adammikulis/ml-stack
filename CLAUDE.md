@@ -345,7 +345,23 @@ A new worktree has no `dist/`, and one test builds a real environment out of it.
 ## Running the tests
 
 The suite is ~3,800 tests and about six minutes on a quiet machine, and longer when
-several agents are running it at once. Run it **once, immediately before merging**.
+several agents are running it at once. Run it **once, immediately before merging**, and
+run it on Linux:
+
+    scripts/test-on-linux tests/ -q --slow
+
+A green macOS run does not clear a branch. This is the only Mac here and CI is Linux, and
+twice on 2026-09-18 the difference was the whole failure: a graph read with no `ORDER BY`
+came back in insertion order here and in another order there, and a killed process is
+reapable a couple of milliseconds later there. Both were green here and red in CI, one of
+them for two weeks.
+
+`scripts/test-on-linux` copies the worktree into a container, installs what `ci.yml`
+installs, and hands pytest whatever arguments follow, so
+`scripts/test-on-linux tests/test_serve.py -q` is the targeted form and `--single` adds
+`-n 0`. The first run builds a venv in a docker volume; after that it starts in about
+seven seconds. `--help` covers the docker credential helper. Run the macOS suite as well;
+the app ships for both, and CI has one macOS entry for the same reason.
 
 While you are working, run the tests that touch what you changed:
 
@@ -357,7 +373,9 @@ The tests marked `slow` — a browser, a subprocess, a wheel build, a network ti
 left out unless you ask for them with `--slow`. CI runs with `--slow`, so a change that
 only they catch still fails there; run `--slow` yourself before merging anything that
 touches packaging, the page or the fleet. `-n 0` runs them in one process when a failure
-needs a clean order.
+needs a clean order; one Linux CI entry runs the whole suite that way, so a test that only
+passes beside its neighbours is caught there rather than by whoever next runs its file
+alone.
 
 Re-running the whole suite after every intermediate commit buys nothing: the branch has
 not landed, and it will be rebased onto a moved development branch before it does, which

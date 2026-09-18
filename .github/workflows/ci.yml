@@ -31,16 +31,25 @@ jobs:
         include:
           - os: ubuntu-latest
             python: "3.12"
+            pytest: --slow
           - os: ubuntu-latest
             python: "3.11"
+            pytest: --slow
           - os: ubuntu-latest
             python: "3.13"
+            pytest: --slow
           # ladybug's macOS wheels are tagged macosx_15_0; on an older runner pip
           # falls back to the sdist and compiles the graph database from source.
           - os: macos-15
             python: "3.12"
+            pytest: --slow
+          # -n scatters a file across workers, so a test that only passes beside its
+          # neighbours passes there and fails alone. This is the run that sees that.
+          - os: ubuntu-latest
+            python: "3.12"
+            pytest: -n 0
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +80,13 @@ jobs:
         run: python packaging/build.py
 
       - name: tests
-        run: python -m pytest tests/ -q --slow
+        run: python -m pytest tests/ -q ${{ matrix.pytest }}
+
+      # docs/FEATURES.md points at this as the proof each feature holds, and nothing else
+      # runs it. --offline leaves out the three checks that reach Hugging Face or PyPI.
+      - name: every claim in FEATURES.md
+        if: matrix.pytest == '--slow' && matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: python docs/verify_release.py --offline
 
   gates:
     runs-on: ubuntu-latest

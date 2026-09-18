@@ -1,6 +1,7 @@
 """Run every claim in FEATURES.md and report whether it holds.
 
     python docs/verify_release.py
+    python docs/verify_release.py --offline   # leave out the checks that reach the internet
 """
 
 from __future__ import annotations
@@ -20,11 +21,21 @@ from pathlib import Path
 # claims must hold for this tree, not whatever an older install left on the path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-RESULTS: list[tuple[str, str, bool, str]] = []
+RESULTS: list[tuple[str, str, bool | None, str]] = []
+
+OFFLINE = "--offline" in sys.argv
 
 
-def check(area: str, claim: str):
+def check(area: str, claim: str, *, network: bool = False):
+    """Run ``fn`` at import and record what it returned or raised.
+
+    ``network=True`` marks a check that reaches a host outside this machine; ``--offline``
+    records those as skipped instead of running them.
+    """
     def wrap(fn):
+        if network and OFFLINE:
+            RESULTS.append((area, claim, None, "needs the internet"))
+            return fn
         try:
             detail = fn() or ""
             RESULTS.append((area, claim, True, str(detail)))
@@ -464,7 +475,7 @@ def _():
 
 
 # -- packaging -----------------------------------------------------------
-@check("Packaging", "the interface ships inside the wheel")
+@check("Packaging", "the interface ships inside the wheel", network=True)
 def _():
     import zipfile
     out = TMP / "wheels"
@@ -656,7 +667,7 @@ def _():
     return f"{len(payload) // 1024 // 1024} MB, counted as it arrived"
 
 
-@check("Models", "the model list is what Hugging Face says is popular now")
+@check("Models", "the model list is what Hugging Face says is popular now", network=True)
 def _():
     """A list written into the code is out of date the day it ships."""
     from ml_stack.fleet.catalogue import SUGGESTED, popular
@@ -676,7 +687,7 @@ def _():
     return f"{len(got)} models across {len(families)}: {', '.join(families)}"
 
 
-@check("Models", "the list it falls back to when offline still downloads")
+@check("Models", "the list it falls back to when offline still downloads", network=True)
 def _():
     """A reference that stopped resolving is a button that does nothing."""
     import urllib.error
@@ -1206,10 +1217,13 @@ def main() -> int:
         if a != area:
             print(f"\n{a}")
             area = a
-        mark = "PASS" if ok else "FAIL"
+        mark = "SKIP" if ok is None else "PASS" if ok else "FAIL"
         print(f"  [{mark}] {claim:<{width}} {detail}")
-    failed = [r for r in RESULTS if not r[2]]
-    print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} verified")
+    failed = [r for r in RESULTS if r[2] is False]
+    skipped = [r for r in RESULTS if r[2] is None]
+    tail = f", {len(skipped)} skipped" if skipped else ""
+    print(f"\n{len(RESULTS) - len(failed) - len(skipped)}/{len(RESULTS) - len(skipped)}"
+          f" verified{tail}")
     return 1 if failed else 0
 
 
