@@ -53,7 +53,7 @@ def _git(repo: Path, *args: str, strip: bool = True) -> str:
 def repositories(given: list[str] | None = None) -> list[Path]:
     """The checkouts to look at: those named, or the current directory and the two that
     are always here when they exist. Each once, whatever path it was reached by."""
-    wanted = [Path(p).expanduser() for p in given] if given else [
+    wanted = [Path(p).expanduser().absolute() for p in given] if given else [
         Path.cwd(), Path("~/ai_ceo").expanduser(), CHECKOUT]
     out: list[Path] = []
     for one in wanted:

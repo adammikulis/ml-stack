@@ -394,6 +394,13 @@ def test_repositories_are_those_given_or_the_known_ones_that_exist(tmp_path, mon
     assert repositories([str(tmp_path / "a"), str(tmp_path / "a")]) == [tmp_path / "a"]
 
 
+def test_a_relative_repository_is_named_by_its_directory(tmp_path, monkeypatch):
+    """Every finding is labelled `repo.name`, and `Path(".").name` is ''."""
+    (tmp_path / "quenlow").mkdir()
+    monkeypatch.chdir(tmp_path / "quenlow")
+    assert [p.name for p in repositories(["."])] == ["quenlow"]
+
+
 @pytest.fixture
 def everything(tmp_path, monkeypatch):
     """A whole working state, all of it wrong: hooks missing, a dead lock, a stale build."""
