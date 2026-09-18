@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.installed import STANDARD
+from ml_stack.installed import STANDARD, extras
 
 REPO = Path(__file__).resolve().parent.parent
 SH = REPO / "packaging" / "install.sh"
@@ -124,6 +124,86 @@ def test_uninstall_takes_the_venv_away(tmp_path):
     gone = run_installer(tmp_path, "--headless", "--uninstall")
     assert gone.returncode == 0, gone.stdout
     assert not venv.exists(), f"the venv survived --uninstall\n{gone.stdout}"
+
+
+# Pulls the offline install out of install.ps1 by name and runs it against a real pip: the
+# wheelhouse it picks, the file:// URL it builds, and the extras that land in the venv.
+DRIVES_THE_PS1 = r"""
+$ErrorActionPreference = "Stop"
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $env:ML_STACK_PS1, [ref]$null, [ref]$null)
+$all = $ast.FindAll({ param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+foreach ($want in 'Find-Wheelhouse', 'Local-Uri', 'Install-Offline') {
+    $fn = @($all | Where-Object { $_.Name -eq $want })
+    if (-not $fn) { "install.ps1 has no $want"; exit 1 }
+    Invoke-Expression $fn[0].Extent.Text
+}
+$extras = $env:ML_STACK_EXTRAS
+$offZip = $env:ML_STACK_OFFLINE_ZIP
+$offWhl = $env:ML_STACK_OFFLINE_WHEELS
+"windows uri: " + (Local-Uri "C:\dir\pkg.whl")
+"wheelhouse: " + (Find-Wheelhouse $offZip)
+Install-Offline $env:ML_STACK_PIP
+"""
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not on this machine")
+def test_the_windows_installer_takes_its_extras_from_the_wheels_on_the_disk(tmp_path):
+    """The Windows offline path installed ml-stack alone, where the online one installs
+    every extra. pwsh runs the functions that changed that; the venv and pip are this
+    machine's, and the paths are checked in the Windows shape the machine cannot run."""
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, timeout=300)
+    pip = venv / ("Scripts/pip.exe" if sys.platform == "win32" else "bin/pip")
+    done = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", DRIVES_THE_PS1],
+        capture_output=True, text=True, timeout=900,
+        env={**os.environ,
+             "ML_STACK_PS1": str(REPO / "packaging" / "install.ps1"),
+             "ML_STACK_PIP": str(pip),
+             "ML_STACK_EXTRAS": extras(),
+             "ML_STACK_OFFLINE_ZIP": str(wheel()),
+             "ML_STACK_OFFLINE_WHEELS": str(wheelhouse(tmp_path / "wheels"))})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "windows uri: file:///C:/dir/pkg.whl" in done.stdout, done.stdout
+    assert "extras from the wheels in" in done.stdout, done.stdout
+    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    for one in STANDARD:
+        got = subprocess.run([str(python), "-c", f"import {one.module}"],
+                             capture_output=True, text=True, timeout=120)
+        assert got.returncode == 0, f"{one.extra} did not install: {got.stderr}"
+    said = subprocess.run([str(python), "-m", "ml_stack.installed"],
+                          capture_output=True, text=True, timeout=120)
+    assert said.returncode == 0, said.stdout + said.stderr
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not on this machine")
+def test_the_windows_installer_falls_back_to_ml_stack_alone_without_the_wheels(tmp_path):
+    """A wheelhouse missing one distribution used to be the whole install failing. It
+    installs ml-stack and says which parts it did not get."""
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True, timeout=300)
+    pip = venv / ("Scripts/pip.exe" if sys.platform == "win32" else "bin/pip")
+    half = tmp_path / "wheels"
+    stand_in_wheel(half, "numpy", "1.26.0", "numpy")
+    done = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", DRIVES_THE_PS1],
+        capture_output=True, text=True, timeout=900,
+        env={**os.environ,
+             "ML_STACK_PS1": str(REPO / "packaging" / "install.ps1"),
+             "ML_STACK_PIP": str(pip),
+             "ML_STACK_EXTRAS": extras(),
+             "ML_STACK_OFFLINE_ZIP": str(wheel()),
+             "ML_STACK_OFFLINE_WHEELS": str(half)})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "does not hold every wheel" in done.stdout, done.stdout
+    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    said = subprocess.run([str(python), "-m", "ml_stack.installed"],
+                          capture_output=True, text=True, timeout=120)
+    assert said.returncode == 1, "a fallback install reports nothing missing"
+    for one in STANDARD:
+        assert f"{one.name}: not installed" in said.stdout, said.stdout
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not on this machine")

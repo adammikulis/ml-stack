@@ -23,6 +23,10 @@
 # Unattended: ML_STACK_MODE, ML_STACK_NAME, ML_STACK_PASSPHRASE, ML_STACK_CLUSTER,
 # ML_STACK_MODELS, ML_STACK_ADOPT_CACHE, ML_STACK_REF, ML_STACK_OFFLINE_ZIP,
 # ML_STACK_OFFLINE_MODELS. Nothing is prompted for when no console is attached.
+#
+# ML_STACK_OFFLINE_WHEELS=C:\dir names the wheels the extras are installed from offline; a
+# `wheels` directory beside the zip is used without being named, and
+# `python packaging\build.py --wheelhouse` fills one.
 param(
     [switch]$Headless,
     [switch]$Dev,
@@ -42,6 +46,7 @@ $arch    = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x86_
 $key     = "ml-stack-windows-$arch"
 $offZip  = $env:ML_STACK_OFFLINE_ZIP
 $offMod  = $env:ML_STACK_OFFLINE_MODELS
+$offWhl  = $env:ML_STACK_OFFLINE_WHEELS
 if (-not $Models) { $Models = $env:ML_STACK_MODELS }
 if (-not $Ref)    { $Ref    = $env:ML_STACK_REF }
 
@@ -173,13 +178,45 @@ function New-Venv($venv) {
     & (Join-Path $script:bin "python.exe") -m pip install --quiet --upgrade pip
 }
 
+function Find-Wheelhouse($zip) {
+    if ($offWhl) { return $offWhl }
+    $beside = Join-Path (Split-Path -Parent $zip) "wheels"
+    if (Test-Path $beside) { return $beside }
+    return ""
+}
+
+# pip takes a direct reference as a URL, and file:// wants forward slashes and three of
+# them: file:///C:/dir/pkg.whl.
+function Local-Uri($path) {
+    $slashed = $path -replace "\\", "/"
+    if (-not $slashed.StartsWith("/")) { $slashed = "/$slashed" }
+    return "file://$slashed"
+}
+
+# The extras come from wheels on the disk. Without them, ml-stack and nothing else.
+function Install-Offline($pip) {
+    $abs = (Resolve-Path $offZip).Path
+    $house = Find-Wheelhouse $abs
+    if ($house) {
+        Write-Host "extras from the wheels in $house"
+        try {
+            & $pip install --quiet --no-index --find-links $house `
+                "ml-stack[$extras] @ $(Local-Uri $abs)"
+            if ($LASTEXITCODE -eq 0) { return }
+        } catch { }
+        Write-Host "  $house does not hold every wheel ml-stack[$extras] needs"
+    }
+    & $pip install --quiet $abs
+    if ($LASTEXITCODE -ne 0) { throw "could not install $offZip" }
+}
+
 function Install-Headless {
     Step "headless"
     New-Venv (Venv-Root)
     $pip = Join-Path $script:bin "pip.exe"
     if ($offZip) {
         Write-Host "installing from $offZip; no network step will run"
-        & $pip install --quiet $offZip
+        Install-Offline $pip
     }
     else {
         $want = $Ref
@@ -301,6 +338,17 @@ function Join-Fleet {
     & $fleet @argv
 }
 
+function Show-WhatCameWithIt {
+    Step "what came with it"
+    $py = Join-Path $script:bin "python.exe"
+    if (-not (Test-Path $py)) { Write-Host "skipped"; return }
+    & $py -m ml_stack.installed
+    if ($LASTEXITCODE -ne 0 -and $offZip) {
+        Write-Host "    on a machine with no network these come from wheels on its disk:"
+        Write-Host "    put them in one directory and name it with ML_STACK_OFFLINE_WHEELS=C:\dir"
+    }
+}
+
 function Check-Over {
     Step "checking it over"
     $doctor = Join-Path $script:bin "ml-stack-doctor.exe"
@@ -362,6 +410,7 @@ if ($mode -ne "app") {
     Build-Llama
     Fetch-Models
     Join-Fleet
+    Show-WhatCameWithIt
     Check-Over
     Last-Screen
 }

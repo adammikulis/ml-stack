@@ -77,7 +77,8 @@ def test_the_installers_call_the_commands_rather_than_redoing_them(command):
 
 
 @pytest.mark.parametrize("name", ["ML_STACK_PASSPHRASE", "ML_STACK_NAME", "ML_STACK_MODELS",
-                                  "ML_STACK_OFFLINE_ZIP", "ML_STACK_MODE"])
+                                  "ML_STACK_OFFLINE_ZIP", "ML_STACK_OFFLINE_WHEELS",
+                                  "ML_STACK_MODE"])
 def test_every_prompt_can_be_answered_from_the_environment(name):
     """A machine being set up by a script has no terminal to type at, and prompting one
     that cannot answer hangs the install rather than failing it."""
@@ -99,19 +100,26 @@ def test_the_app_mode_downloads_no_model_behind_anybodys_back():
     assert re.search(r'fetch_models\n', body.split('if [ "$MODE" != app ]')[1])
 
 
-def test_the_extras_the_installer_asks_for_are_the_ones_a_full_install_reports():
+NAMES_THE_EXTRAS = {"install.sh": r'^EXTRAS="([^"]+)"',
+                    "install.ps1": r'^\$extras\s*=\s*"([^"]+)"'}
+
+
+@pytest.mark.parametrize("script", [SH, PS1], ids=["sh", "ps1"])
+def test_the_extras_the_installer_asks_for_are_the_ones_a_full_install_reports(script):
     """`ml-stack-setup` lists one line per extra a full install has. A set that drifts from
     the installer's own would call an install complete that is missing half of itself."""
     from ml_stack.installed import extras
 
-    named = re.search(r'^EXTRAS="([^"]+)"', SH.read_text(encoding="utf-8"), re.M)
-    assert named, "install.sh no longer names the extras it installs"
+    named = re.search(NAMES_THE_EXTRAS[script.name], script.read_text(encoding="utf-8"), re.M)
+    assert named, f"{script.name} no longer names the extras it installs"
     assert set(named.group(1).split(",")) == set(extras().split(","))
 
 
-def test_an_offline_install_can_be_pointed_at_the_wheels_for_its_extras():
+@pytest.mark.parametrize("script", [SH, PS1], ids=["sh", "ps1"])
+def test_an_offline_install_takes_its_extras_from_wheels_on_the_disk(script):
     """Without them an offline machine is an ml-stack with no store, no downloads and no
-    graph, which is not the machine the online path produces."""
-    body = SH.read_text(encoding="utf-8")
-    assert "ML_STACK_OFFLINE_WHEELS" in body
+    graph, which is not the machine the online path produces, and it says which parts it
+    did not get."""
+    body = script.read_text(encoding="utf-8")
     assert "--no-index" in body and "--find-links" in body
+    assert "ml_stack.installed" in body
