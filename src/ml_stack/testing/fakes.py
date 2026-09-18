@@ -771,8 +771,12 @@ _LAUNCHER = """#!{python}
 import os, sys
 sys.path.insert(0, {root!r})
 # argv[0] is what a process scan matches a llama-server on, so this wears the name.
+# CPython reads its prefix from argv[0], and a name that is not an interpreter leaves it
+# with no stdlib, so the child is told where its stdlib and its packages are.
 if not os.environ.get("MLSTACK_FAKE_LLAMA"):
     os.environ["MLSTACK_FAKE_LLAMA"] = "1"
+    os.environ["PYTHONHOME"] = sys.base_prefix
+    os.environ["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
     os.execv(sys.executable, ["llama-server", __file__, *sys.argv[1:]])
 from pathlib import Path
 

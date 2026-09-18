@@ -72,7 +72,9 @@ PYTEST_ARGS=("$@")
 
 [ -n "$REBUILD" ] && docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
 
-exec docker run --rm -i \
+# --init: without a real pid 1 the suite's own parent is pid 0, and a server owned by a
+# process that does not exist is an orphan to stop.
+exec docker run --rm -i --init \
   ${PLATFORM:+--platform "$PLATFORM"} \
   -v "$STAGE/repo":/src:ro \
   -v "$VOLUME":/venv \
@@ -86,6 +88,9 @@ set -euo pipefail
 
 # Same set as ci.yml's "install test dependencies", and the same reasons.
 DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
+# The runners have cmake; the image has not, and tests/test_serve_build.py configures a
+# checkout with it. PyPI's wheel carries the binary, so it caches with the venv.
+DEPS="$DEPS cmake"
 EXTRAS='.[store,hub,web,plot]'
 
 mkdir -p /work
@@ -106,5 +111,13 @@ fi
 # /work is rebuilt from the worktree every run, so the editable install is redone; seconds.
 /venv/env/bin/pip install -q --no-deps -e "/work/$EXTRAS"
 
-exec /venv/env/bin/python -m pytest "$@"
+# As a person runs it, and as CI runs it. Root ignores a 0o500 directory, so the tests
+# that check a refusal on an unwritable path see no refusal.
+mkdir -p /home/tester
+chown -R 1000:1000 /work /home/tester
+export HOME=/home/tester
+# A fake server the tests write into a temp directory runs `python3` off PATH, and the
+# one in the image has no pytest.
+export PATH=/venv/env/bin:$PATH
+exec setpriv --reuid=1000 --regid=1000 --clear-groups /venv/env/bin/python -m pytest "$@"
 INNER
