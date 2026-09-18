@@ -97,3 +97,21 @@ def test_the_app_mode_downloads_no_model_behind_anybodys_back():
     body = SH.read_text(encoding="utf-8")
     assert 'if [ "$MODE" != app ]' in body
     assert re.search(r'fetch_models\n', body.split('if [ "$MODE" != app ]')[1])
+
+
+def test_the_extras_the_installer_asks_for_are_the_ones_a_full_install_reports():
+    """`ml-stack-setup` lists one line per extra a full install has. A set that drifts from
+    the installer's own would call an install complete that is missing half of itself."""
+    from ml_stack.installed import extras
+
+    named = re.search(r'^EXTRAS="([^"]+)"', SH.read_text(encoding="utf-8"), re.M)
+    assert named, "install.sh no longer names the extras it installs"
+    assert set(named.group(1).split(",")) == set(extras().split(","))
+
+
+def test_an_offline_install_can_be_pointed_at_the_wheels_for_its_extras():
+    """Without them an offline machine is an ml-stack with no store, no downloads and no
+    graph, which is not the machine the online path produces."""
+    body = SH.read_text(encoding="utf-8")
+    assert "ML_STACK_OFFLINE_WHEELS" in body
+    assert "--no-index" in body and "--find-links" in body

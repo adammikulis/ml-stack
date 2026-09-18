@@ -203,6 +203,12 @@ def look() -> list[Finding]:
     except Exception:  # noqa: BLE001
         pass
 
+    from ml_stack.installed import standard
+
+    out.extend(Finding(name=one.name, good=here,
+                       said=f"{one.module} is here" if here else "not installed",
+                       fix="" if here else one.fix, note="" if here else one.does)
+               for one, here in standard())
     out.extend(_speech_findings())
     out.append(_commands_finding())
 

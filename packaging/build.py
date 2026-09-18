@@ -3,6 +3,7 @@
     python packaging/build.py             wheels only
     python packaging/build.py --bundle    wheels, the daemon, and the window around it
     python packaging/build.py --bundle --no-window    the daemon on its own
+    python packaging/build.py --wheelhouse            wheels, and the extras beside them
 """
 
 from __future__ import annotations
@@ -34,6 +35,19 @@ def wheels() -> list[Path]:
     run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST), str(ROOT)],
         stdout=subprocess.DEVNULL)
     return sorted(DIST.glob("*.whl"))
+
+
+def wheelhouse(out: Path) -> list[Path]:
+    """Download every extra a full install has into ``out``, as wheels."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from ml_stack.installed import extras
+
+    out.mkdir(parents=True, exist_ok=True)
+    run([sys.executable, "-m", "pip", "wheel", "--wheel-dir", str(out),
+         f"ml-stack[{extras()}] @ file://{ROOT}"], stdout=subprocess.DEVNULL)
+    for mine in out.glob("ml_stack-*.whl"):
+        mine.unlink()
+    return sorted(out.glob("*.whl"))
 
 
 def daemon() -> Path:
@@ -124,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="also build a standalone app for this platform")
     ap.add_argument("--no-window", action="store_true",
                     help="freeze the daemon, and stop before the window around it")
+    ap.add_argument("--wheelhouse", action="store_true",
+                    help="also download the extras, for a machine with no network")
     ap.add_argument("--clean", action="store_true")
     a = ap.parse_args(argv)
 
@@ -136,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{len(built)} wheels in {DIST}")
     for w in built:
         print(f"  {w.name}  {w.stat().st_size / 1024:.0f} KB")
+    if a.wheelhouse:
+        house = wheelhouse(DIST / "wheels")
+        print(f"{len(house)} extra wheels in {DIST / 'wheels'}")
     if a.bundle:
         frozen = daemon()
         if not a.no_window:

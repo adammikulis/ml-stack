@@ -63,7 +63,10 @@ Unattended, for a machine you are setting up from a script: `ML_STACK_NAME`,
 `ML_STACK_PASSPHRASE`, `ML_STACK_CLUSTER`, `ML_STACK_MODE`, `ML_STACK_MODELS`,
 `ML_STACK_ADOPT_CACHE`, `ML_STACK_REF` answer every prompt, and a machine with no terminal
 is never prompted at all. `ML_STACK_OFFLINE_ZIP` and `ML_STACK_OFFLINE_MODELS` install from
-local files and skip every network step. `--uninstall` takes it off and leaves the model
+local files and skip every network step; `ML_STACK_OFFLINE_WHEELS` names the directory the
+extras are installed from -- `python packaging/build.py --wheelhouse` fills one, and a
+`wheels` directory beside the zip is taken without being named. Without it the machine
+gets ml-stack and none of its extras, and the install says which parts those are. `--uninstall` takes it off and leaves the model
 cache where it is.
 
 Past the install, every step is an ml-stack command rather than shell -- `ml-stack-setup`

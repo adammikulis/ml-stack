@@ -6,7 +6,9 @@ user takes is one this suite has actually walked: a virtualenv appears, the cons
 scripts are linked, and every step after the install exits without a traceback.
 
 `ML_STACK_OFFLINE_ZIP` keeps it off the network. `ML_STACK_MODELS=none` keeps it off
-the disk. No terminal means `join_fleet` asks for nothing.
+the disk. No terminal means `join_fleet` asks for nothing. `ML_STACK_OFFLINE_WHEELS`
+points the extras at wheels on the disk; the ones built here stand in for the real
+distributions, which are tens of megabytes and on the network.
 """
 
 from __future__ import annotations
@@ -15,9 +17,11 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
+from ml_stack.installed import STANDARD
 
 REPO = Path(__file__).resolve().parent.parent
 SH = REPO / "packaging" / "install.sh"
@@ -128,3 +132,61 @@ def test_the_windows_installer_parses_and_offers_every_mode():
                           env={**os.environ,
                                "ML_STACK_PS1": str(REPO / "packaging" / "install.ps1")})
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+def stand_in_wheel(into: Path, name: str, version: str, module: str) -> Path:
+    """A wheel holding one empty module, named so pip reads it as ``name==version``."""
+    dist = name.replace("-", "_")
+    info = f"{dist}-{version}.dist-info"
+    files = {
+        f"{module}.py": f"__version__ = {version!r}\n",
+        f"{info}/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+        f"{info}/WHEEL": ("Wheel-Version: 1.0\nGenerator: tests\n"
+                          "Root-Is-Purelib: true\nTag: py3-none-any\n"),
+    }
+    into.mkdir(parents=True, exist_ok=True)
+    path = into / f"{dist}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w") as whl:
+        for at, body in files.items():
+            whl.writestr(at, body)
+        whl.writestr(f"{info}/RECORD",
+                     "".join(f"{at},,\n" for at in [*files, f"{info}/RECORD"]))
+    return path
+
+
+def wheelhouse(into: Path) -> Path:
+    """A directory holding one stand-in wheel for every extra a full install has."""
+    versions = {"ladybug": "0.20.4", "huggingface_hub": "1.32.0", "ddgs": "9.0.0",
+                "matplotlib": "3.11.2", "numpy": "1.26.0", "trafilatura": "2.0.0"}
+    for module, version in versions.items():
+        stand_in_wheel(into, module.replace("_", "-"), version, module)
+    return into
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="install.ps1 is the Windows installer")
+def test_an_offline_install_says_which_parts_it_did_not_get(tmp_path):
+    """No wheels on the disk means no store, no downloads and no graph maths. A machine
+    that is quietly missing half of what the online one has is worse than one that says
+    so, because nothing it does later names the reason."""
+    done = run_installer(tmp_path, "--headless")
+    assert done.returncode == 0, done.stdout
+    assert "== what came with it" in done.stdout, done.stdout
+    for one in STANDARD:
+        assert f"{one.name}: not installed" in done.stdout, done.stdout
+        assert one.fix in done.stdout, done.stdout
+    assert "ML_STACK_OFFLINE_WHEELS" in done.stdout, done.stdout
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="install.ps1 is the Windows installer")
+def test_an_offline_install_takes_its_extras_from_the_wheels_beside_it(tmp_path):
+    """With them it is the machine the online path produces: every extra installed, from
+    the disk, with no index consulted."""
+    done = run_installer(tmp_path, "--headless",
+                         ML_STACK_OFFLINE_WHEELS=str(wheelhouse(tmp_path / "wheels")))
+    assert done.returncode == 0, done.stdout
+    assert "every part of a full install is here" in done.stdout, done.stdout
+    python = tmp_path / "prefix" / "venv" / "bin" / "python"
+    for one in STANDARD:
+        got = subprocess.run([str(python), "-c", f"import {one.module}"],
+                             capture_output=True, text=True, timeout=120)
+        assert got.returncode == 0, f"{one.extra} did not install: {got.stderr}"

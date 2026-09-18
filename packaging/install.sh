@@ -23,6 +23,8 @@
 #   ML_STACK_MODELS=auto|default|none|<word>   ML_STACK_ADOPT_CACHE=yes|no
 #   ML_STACK_REF=main|v1.2.3   ML_STACK_BUILD=release|source
 #   ML_STACK_OFFLINE_ZIP=/path/to.zip   ML_STACK_OFFLINE_MODELS=/dir   (no network at all)
+#   ML_STACK_OFFLINE_WHEELS=/dir   the wheels the extras are installed from offline;
+#                                  a `wheels` directory beside the zip is used by default
 set -eu
 
 REPO="${ML_STACK_REPO:-adammikulis/ml-stack}"
@@ -35,6 +37,7 @@ REF="${ML_STACK_REF:-}"
 ADOPT="${ML_STACK_ADOPT_CACHE:-}"
 OFFLINE_ZIP="${ML_STACK_OFFLINE_ZIP:-}"
 OFFLINE_MODELS="${ML_STACK_OFFLINE_MODELS:-}"
+OFFLINE_WHEELS="${ML_STACK_OFFLINE_WHEELS:-}"
 UNINSTALL=no
 PY=""
 BIN=""
@@ -173,12 +176,34 @@ make_venv() {
   BIN="$VENV/bin"
 }
 
+wheelhouse() {
+  if [ -n "$OFFLINE_WHEELS" ]; then printf '%s' "$OFFLINE_WHEELS"; return 0; fi
+  BESIDE="$(dirname "$OFFLINE_ZIP")/wheels"
+  if [ -d "$BESIDE" ]; then printf '%s' "$BESIDE"; fi
+  return 0
+}
+
+# The extras come from wheels on the disk. Without them, ml-stack and nothing else.
+install_offline() {
+  HOUSE=$(wheelhouse)
+  ABS=$(cd "$(dirname "$OFFLINE_ZIP")" && pwd)/$(basename "$OFFLINE_ZIP")
+  if [ -n "$HOUSE" ]; then
+    say "extras from the wheels in $HOUSE"
+    if "$BIN/pip" install --quiet --no-index --find-links "$HOUSE" \
+         "ml-stack[$EXTRAS] @ file://$ABS"; then
+      return 0
+    fi
+    say "  $HOUSE does not hold every wheel ml-stack[$EXTRAS] needs"
+  fi
+  "$BIN/pip" install --quiet "$ABS" || die "could not install $OFFLINE_ZIP"
+}
+
 install_headless() {
   step "headless"
   make_venv "$(venv_root)"
   if [ -n "$OFFLINE_ZIP" ]; then
     say "installing from $OFFLINE_ZIP; no network step will run"
-    "$BIN/pip" install --quiet "$OFFLINE_ZIP" || die "could not install $OFFLINE_ZIP"
+    install_offline
   else
     WANT="$REF"
     if [ -z "$WANT" ]; then
@@ -335,6 +360,15 @@ join_fleet() {
   "$BIN/ml-stack-fleet" "$@" || say "  join did not finish; 'ml-stack-fleet join' retries"
 }
 
+what_came_with_it() {
+  step "what came with it"
+  [ -x "$BIN/python" ] || { say "skipped"; return 0; }
+  if ! "$BIN/python" -m ml_stack.installed && [ -n "$OFFLINE_ZIP" ]; then
+    say "    on a machine with no network these come from wheels on its disk:"
+    say "    put them in one directory and name it with ML_STACK_OFFLINE_WHEELS=/dir"
+  fi
+}
+
 check_over() {
   step "checking it over"
   if [ -x "$BIN/ml-stack-doctor" ]; then "$BIN/ml-stack-doctor" || true; else say "skipped"; fi
@@ -406,6 +440,7 @@ if [ "$MODE" != app ]; then
   llama_build
   fetch_models
   join_fleet
+  what_came_with_it
   check_over
   last_screen
 fi
