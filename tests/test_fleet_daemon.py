@@ -824,7 +824,7 @@ class TestWhatAMachineIsDoing:
         assert second == 0.0, "after priming it should be psutil's own number"
 
     def test_it_still_answers_without_psutil(self, monkeypatch):
-        """ml-stack-fleet declares no dependencies; psutil is a bonus."""
+        """ml-stack-fleet does not ask for psutil; it is a bonus."""
         import builtins
 
         import ml_stack.fleet.device as mod

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from packaging.version import Version
+
 from ml_stack import installed
 from ml_stack.installed import STANDARD, Capability, extras, missing
 
@@ -81,6 +83,38 @@ def test_a_package_at_its_floor_is_not_a_finding():
 def test_a_package_under_its_floor_is_a_finding():
     assert [(e, n) for e, n, _, _ in installed.unmet({"test": ["pytest>=999.0"]})] == [
         ("test", "pytest")]
+
+
+def test_a_ceiling_the_installed_version_is_over_is_a_finding():
+    """`store` pins `ladybug>=0.20.4,<0.21`: a pin is two-sided, not a floor."""
+    have = version("pytest")
+    assert [(e, n) for e, n, _, _ in installed.unmet({"test": [f"pytest>=0,<{have}"]})] == [
+        ("test", "pytest")]
+
+
+def test_a_version_the_pin_excludes_by_name_is_a_finding():
+    have = version("pytest")
+    assert [(e, n) for e, n, _, _ in installed.unmet({"test": [f"pytest>=0,!={have}"]})] == [
+        ("test", "pytest")]
+
+
+def test_a_compatible_release_clause_is_read_as_both_of_its_bounds():
+    here = Version(version("pytest"))
+    assert installed.unmet({"test": [f"pytest~={here.major}.0"]}) == []
+    older = f"pytest~={here.major - 1}.0"
+    assert [(e, n) for e, n, _, _ in installed.unmet({"test": [older]})] == [
+        ("test", "pytest")]
+
+
+def test_a_release_candidate_counts_towards_a_stable_floor(monkeypatch):
+    monkeypatch.setattr(installed, "installed_version", lambda name: "3.0.0rc1")
+    assert installed.unmet({"test": ["pytest>=2.0"]}) == []
+    assert [(e, n) for e, n, _, _ in installed.unmet({"test": ["pytest>=3.0.1"]})] == [
+        ("test", "pytest")]
+
+
+def test_a_requirement_nothing_can_parse_is_skipped():
+    assert installed.unmet({"test": ["not a requirement at all"]}) == []
 
 
 def test_a_requirement_naming_another_extra_is_not_looked_up():

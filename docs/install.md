@@ -136,7 +136,8 @@ pip install "ml-stack[train] @ git+https://github.com/adammikulis/ml-stack"
 pip install "ml-stack[all] @ git+https://github.com/adammikulis/ml-stack"
 ```
 
-The first is all of it and nothing else -- no dependencies. `[train]` adds numpy and
+The first is all of it and nothing else -- pure Python, and one small library for reading
+version pins. `[train]` adds numpy and
 safetensors; `[all]` adds everything the rest of it can use. Every
 [release](https://github.com/adammikulis/ml-stack/releases/latest) carries the same wheel,
 for a machine with no git: `pip install ./ml_stack-<version>-py3-none-any.whl`.

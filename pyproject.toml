@@ -21,9 +21,10 @@ classifiers = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = []
+# ml_stack.installed reads the pins with Requirement, SpecifierSet and Version.
+dependencies = ["packaging>=22"]
 
-# Nothing here is needed to find the other machines and pass work between them.
+# Nothing below is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
 [project.optional-dependencies]
 privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]

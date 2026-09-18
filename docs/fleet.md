@@ -2,8 +2,8 @@
 
 ## Driving it from Python
 
-`ml-stack` has no dependencies, so the machine you drive from needs no CUDA, no MLX
-and no training stack.
+`ml-stack` is pure Python and brings in one small library for reading version pins, so
+the machine you drive from needs no CUDA, no MLX and no training stack.
 
 ```python
 from ml_stack.fleet import Peer, Requires, Unit, run

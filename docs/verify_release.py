@@ -493,16 +493,17 @@ def _():
     return f"shell.html, style.css and {len(COMPONENTS)} components"
 
 
-@check("Packaging", "installing it brings in nothing")
+@check("Packaging", "installing it brings in one pure-Python library")
 def _():
     import tomllib
 
     root = Path(__file__).resolve().parent.parent
     meta = tomllib.load((root / "pyproject.toml").open("rb"))["project"]
-    assert meta["dependencies"] == [], meta["dependencies"]
+    names = [d.split(">")[0] for d in meta["dependencies"]]
+    assert names == ["packaging"], meta["dependencies"]
     extras = sorted(meta["optional-dependencies"])
     assert {"train", "serve", "all"} <= set(extras)
-    return "no dependencies; " + ", ".join(extras)
+    return "packaging; " + ", ".join(extras)
 
 
 # -- models --------------------------------------------------------------

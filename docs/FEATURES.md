@@ -298,7 +298,7 @@ memory — and says nothing about accelerators rather than guessing.
 
 ## Installing
 
-One package, `ml-stack`, with no dependencies at all: finding the other
+One package, `ml-stack`, and one small pure-Python library beside it: finding the other
 machines, passing work between them and moving files needs nothing beyond the standard
 library, so the daemon installs on a small board as fast as on a workstation. The extras
 add what a part needs to do its own job — `train`, `serve`, `store`, `graph`, `scrape`,

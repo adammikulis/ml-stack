@@ -33,11 +33,12 @@ def test_it_imports_with_nothing_installed(name):
 
 def test_installing_ml_stack_brings_in_nothing():
     """Installing `ml-stack` has to be enough on a machine that only joins the
-    cluster and passes work about. Everything heavier is an extra."""
+    cluster and passes work about. `packaging` is pure Python; everything heavier is an
+    extra."""
     import tomllib
 
     meta = tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]
-    assert meta["dependencies"] == []
+    assert [d.split(">")[0] for d in meta["dependencies"]] == ["packaging"]
     assert set(meta["optional-dependencies"]) >= {"train", "serve", "all"}
 
 
