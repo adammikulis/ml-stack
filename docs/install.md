@@ -131,10 +131,15 @@ Windows calls themselves run for the first time when that list does.
 **If you write Python**:
 
 ```
-pip install ml-stack            # all of it, and nothing else. No dependencies.
-pip install ml-stack[train]     # and numpy and safetensors, to train
-pip install ml-stack[all]       # and everything the rest of it can use
+pip install git+https://github.com/adammikulis/ml-stack
+pip install "ml-stack[train] @ git+https://github.com/adammikulis/ml-stack"
+pip install "ml-stack[all] @ git+https://github.com/adammikulis/ml-stack"
 ```
+
+The first is all of it and nothing else -- no dependencies. `[train]` adds numpy and
+safetensors; `[all]` adds everything the rest of it can use. Every
+[release](https://github.com/adammikulis/ml-stack/releases/latest) carries the same wheel,
+for a machine with no git: `pip install ./ml_stack-<version>-py3-none-any.whl`.
 
 Building from source needs `pip install build`, then:
 

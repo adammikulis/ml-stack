@@ -32,7 +32,7 @@ def test_it_imports_with_nothing_installed(name):
 
 
 def test_installing_ml_stack_brings_in_nothing():
-    """`pip install ml-stack` has to be enough on a machine that only joins the
+    """Installing `ml-stack` has to be enough on a machine that only joins the
     cluster and passes work about. Everything heavier is an extra."""
     import tomllib
 

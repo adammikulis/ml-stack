@@ -26,6 +26,8 @@ def read(name: str) -> dict[str, Any]:
 
 CI = read("ci.yml")
 PLEASE = read("release-please.yml")
+RELEASE_FILE = "release.yml"
+RELEASE = read(RELEASE_FILE)
 
 
 def checkouts() -> list[dict[str, Any]]:
@@ -80,3 +82,65 @@ def test_the_build_still_only_runs_for_a_release():
 def test_the_test_extra_carries_what_these_tests_read():
     text = (WORKFLOWS.parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     assert "pyyaml" in text, "this file parses YAML; the extra has to say so"
+
+
+def upload_step() -> dict[str, Any]:
+    steps = RELEASE["jobs"]["pypi"]["steps"]
+    found = [s for s in steps
+             if str(s.get("uses", "")).startswith("pypa/gh-action-pypi-publish@")]
+    assert len(found) == 1, "one upload step, or the job is not what this file describes"
+    return found[0]
+
+
+def test_the_release_publishes_to_pypi():
+    assert "pypi" in RELEASE["jobs"], "nothing uploads the wheels anywhere"
+
+
+def test_the_workflow_filename_is_the_one_the_publisher_names():
+    """PyPI matches a trusted publisher on owner, repository and workflow filename."""
+    assert (WORKFLOWS / RELEASE_FILE).is_file()
+
+
+def test_the_upload_mints_an_oidc_token():
+    assert RELEASE["jobs"]["pypi"]["permissions"]["id-token"] == "write"
+
+
+def test_the_upload_passes_no_password():
+    """A password is used instead of the OIDC token, so trusted publishing never runs."""
+    with_ = upload_step().get("with") or {}
+    assert "password" not in with_
+    assert "user" not in with_
+    assert not [k for k in with_ if "token" in k or "secret" in k]
+
+
+def test_no_secret_reaches_the_upload_job():
+    assert "secrets." not in yaml.safe_dump(RELEASE["jobs"]["pypi"])
+
+
+def test_the_upload_declares_no_environment():
+    """The registered publisher names no environment; one here would stop it matching."""
+    assert "environment" not in RELEASE["jobs"]["pypi"]
+
+
+def test_a_rerun_does_not_fail_on_a_version_already_there():
+    assert (upload_step().get("with") or {})["skip-existing"] is True
+
+
+def test_the_upload_waits_for_wheels_that_built():
+    job = RELEASE["jobs"]["pypi"]
+    assert job["needs"] == "wheels" or "wheels" in job["needs"]
+    assert "needs.wheels.result == 'success'" in job["if"], "always() uploads nothing"
+    assert "always()" not in job["if"]
+
+
+def test_the_github_release_says_pip_only_when_the_upload_succeeded():
+    publish = RELEASE["jobs"]["publish"]
+    assert "pypi" in publish["needs"]
+    step = next(s for s in publish["steps"] if s.get("id") == "downloads")
+    assert step["env"]["PYPI"] == "${{ needs.pypi.result }}"
+    assert '[ "$PYPI" = "success" ]' in step["run"]
+
+
+def test_a_failed_upload_still_releases_on_github():
+    """A PyPI outage must not cost the bundles their release page."""
+    assert "needs.pypi.result == 'success'" not in RELEASE["jobs"]["publish"]["if"]

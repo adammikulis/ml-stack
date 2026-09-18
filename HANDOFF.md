@@ -39,11 +39,14 @@ capability; every line is something that already exists not being what it says.
   `ci.yml` now triggers on `main` and `*dev` branches, and `release.yml`'s `publish` job
   now refuses when `needs.bundle.result == 'failure'`, so what is left is getting the
   release pull request's own checks to run and be approved before it merges.
-- [ ] **`pip install ml-stack` is in the README, `docs/install.md` and every release page,
-  and it 404s.** `https://pypi.org/pypi/ml-stack/json` returns 404; no workflow publishes
-  to PyPI -- `release.yml` attaches wheels to a GitHub release and stops. Register the name
-  and add a trusted-publishing job, or take the line out of all three places. A first
-  reader following the README hits this in the first minute.
+- [ ] **The distribution has no name on PyPI.** `ml-stack` cannot be registered: PyPI's
+  similarity check ignores `-`, `_` and `.`, so it collides with `mlstack` (1.0b3, uploaded
+  2018-09-14), and adding a pending publisher for it is refused. `ml-stack-ai`,
+  `ml-stack-py`, `ml_stack` and `ml-stacks` are free; `mlstacks` is taken. Until a name is
+  picked and a pending publisher registered for owner `adammikulis`, repository `ml-stack`,
+  workflow `release.yml`, no environment, `release.yml`'s `pypi` job uploads nothing and the
+  docs install from git. Changing `[project] name` in `pyproject.toml` is part of whichever
+  name is chosen.
 - [ ] **Neither `ml-stack-setup` nor `ml-stack-doctor` checks the things that would say
   whether an installed machine actually works.** `ml-stack-setup` (`look()` in `setup.py`)
   is now the machine check -- memory, the llama-server binary, models on disk, speech

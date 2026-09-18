@@ -125,11 +125,33 @@ jobs:
           path: dist/${{ matrix.asset }}-*.zip
           retention-days: 7
 
+  # Trusted publishing: the action mints an OIDC token from `id-token: write` and PyPI
+  # matches it against the publisher registered for this workflow filename. A `password:`
+  # here would be used instead of the token and the match would never be attempted.
+  pypi:
+    needs: wheels
+    if: >-
+      needs.wheels.result == 'success'
+      && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
   publish:
-    needs: [wheels, bundle]
+    needs: [wheels, bundle, pypi]
     # A platform whose runner was unavailable should not hold back the ones that are
     # ready, so a skipped or cancelled bundle still publishes. A bundle that ran and
-    # failed does not: that is a broken zip on the release page.
+    # failed does not: that is a broken zip on the release page. A pypi job that failed
+    # does not hold it back either; the notes then leave the pip line out.
     if: >-
       !cancelled()
       && needs.wheels.result == 'success'
@@ -155,6 +177,7 @@ jobs:
         shell: bash
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
+          PYPI: ${{ needs.pypi.result }}
         run: |
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           here() { find artifacts -name "$1" -type f -print -quit | grep -q .; }
@@ -165,7 +188,10 @@ jobs:
             name=$(basename "$path")
             printf '\n%s\n- [%s](%s/%s)\n' "$1" "$name" "$base" "$name"
           }
-          wheel=$(find artifacts -name 'ml_stack-*.whl' -type f -print -quit)
+          wheel=$(find artifacts -name '*.whl' -type f -print -quit)
+          # PEP 427: the wheel filename is <distribution>-<version>-..., and the
+          # distribution is escaped, so `_` there is `-` on PyPI.
+          dist=$(basename "${wheel:-}" | cut -d- -f1 | tr '_' '-')
           {
             echo "body<<DOWNLOADS_EOF"
             echo "## Download"
@@ -181,9 +207,9 @@ jobs:
               echo "- macOS and Linux: \`curl -fsSL $base/install.sh | sh\`"
               echo "- Windows: \`irm $base/install.ps1 | iex\`"
             fi
-            if [ -n "$wheel" ]; then
+            if [ -n "$wheel" ] && [ "$PYPI" = "success" ]; then
               echo
-              echo "**If you write Python**: \`pip install ml-stack\`, and \`ml-stack[train]\`, \`[serve]\` or \`[all]\` for what needs more than the standard library."
+              echo "**If you write Python**: \`pip install $dist\`, and \`$dist[train]\`, \`[serve]\` or \`[all]\` for what needs more than the standard library."
             fi
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"

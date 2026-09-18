@@ -69,8 +69,11 @@ each other on their own.
 drive from needs no CUDA, no MLX and no training stack:
 
 ```
-pip install ml-stack
+pip install git+https://github.com/adammikulis/ml-stack
 ```
+
+Every [release](https://github.com/adammikulis/ml-stack/releases/latest) carries the same
+thing as a wheel, for a machine with no git.
 
 There are three other modes -- a machine with no screen, a machine that starts at boot
 before anyone logs in, and a git checkout that follows `main` -- and one model cache per

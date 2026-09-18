@@ -66,7 +66,7 @@ training job starts beside it. The dispatcher counts as a peer through `here()`.
 Three lines on a new machine:
 
 ```
-pip install ml-stack
+pip install git+https://github.com/adammikulis/ml-stack
 ml-stack-fleet join --persist
 ml-stack-fleet status
 ```

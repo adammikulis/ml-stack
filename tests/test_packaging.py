@@ -148,7 +148,7 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     done = subprocess.run(
         ["bash", "-e", "-c", downloads_step()], cwd=tmp_path, capture_output=True,
         text=True,
-        env={**os.environ, "TAG": "v9.9.9",
+        env={**os.environ, "TAG": "v9.9.9", "PYPI": "success",
              "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
     assert done.returncode == 0, done.stderr
 
@@ -157,6 +157,46 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     assert "ml-stack-windows-x86_64" not in body, "linked a bundle that did not build"
     assert "ml-stack-linux-x86_64" not in body, "linked a bundle that did not build"
     assert "pip install ml-stack" in body
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
+@pytest.mark.parametrize("result", ["failure", "skipped", ""])
+def test_the_notes_offer_pip_only_when_the_upload_succeeded(tmp_path, result):
+    """A release page telling a reader to `pip install` a version that never reached
+    PyPI sends them to a 404."""
+    import os
+
+    (tmp_path / "artifacts" / "wheels").mkdir(parents=True)
+    (tmp_path / "artifacts" / "wheels" / "ml_stack-0-py3-none-any.whl").write_text("x")
+    out = tmp_path / "out"
+    out.touch()
+
+    done = subprocess.run(
+        ["bash", "-e", "-c", downloads_step()], cwd=tmp_path, capture_output=True,
+        text=True,
+        env={**os.environ, "TAG": "v9.9.9", "PYPI": result,
+             "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
+    assert done.returncode == 0, done.stderr
+    assert "pip install" not in out.read_text()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
+def test_the_notes_name_the_distribution_the_wheel_carries(tmp_path):
+    """The name on PyPI is whatever was uploaded, not a string typed into the notes."""
+    import os
+
+    (tmp_path / "artifacts" / "wheels").mkdir(parents=True)
+    (tmp_path / "artifacts" / "wheels" / "other_name-1.2-py3-none-any.whl").write_text("x")
+    out = tmp_path / "out"
+    out.touch()
+
+    done = subprocess.run(
+        ["bash", "-e", "-c", downloads_step()], cwd=tmp_path, capture_output=True,
+        text=True,
+        env={**os.environ, "TAG": "v9.9.9", "PYPI": "success",
+             "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
+    assert done.returncode == 0, done.stderr
+    assert "pip install other-name" in out.read_text()
 
 
 def git(*args, cwd):
@@ -323,11 +363,4 @@ def test_a_called_workflow_declares_the_secrets_it_reads():
 def test_the_release_is_built_by_the_workflow_that_cuts_it():
     caller = workflows()["release-please.yml"]
     assert "uses: ./.github/workflows/release.yml" in caller
-    assert "id-token" not in caller, "nothing here asks PyPI for anything any more"
-
-
-def test_nothing_uploads_to_pypi():
-    """The release builds the wheel and attaches it. Publishing it is a decision, not
-    something a tag does on its own."""
-    for name, text in workflows().items():
-        assert "pypi" not in text.lower(), f"{name} still reaches for PyPI"
+    assert "id-token" not in caller, "the OIDC token is minted in the job that uploads"
