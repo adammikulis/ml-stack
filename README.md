@@ -65,8 +65,8 @@ irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/instal
 Do the same on every machine you want to work with, typing the same passphrase. They find
 each other on their own.
 
-**If you write Python**, the library on its own has no dependencies, so the machine you
-drive from needs no CUDA, no MLX and no training stack:
+**If you write Python**, it runs on 3.13, and the library on its own has no dependencies,
+so the machine you drive from needs no CUDA, no MLX and no training stack:
 
 ```
 pip install git+https://github.com/adammikulis/ml-stack

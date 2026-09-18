@@ -20,9 +20,14 @@ RUNNER = REPO / "scripts" / "test-on-linux"
 VERIFIER = REPO / "docs" / "verify_release.py"
 
 
-def ci() -> dict:
+def workflows() -> dict:
     loaded = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
-    return loaded["jobs"]["test"]
+    loaded["on"] = loaded.pop(True, loaded.get("on"))
+    return loaded
+
+
+def ci() -> dict:
+    return workflows()["jobs"]["test"]
 
 
 def entries() -> list[dict]:

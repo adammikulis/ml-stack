@@ -19,8 +19,7 @@ from ml_stack.http import ServerError, open_stream, request_json
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
-MIN_PYTHON = (3, 11)
-WANT_PYTHON = "3.12"
+PYTHON = "3.13"
 STANDALONE = ("https://api.github.com/repos/astral-sh/"
               "python-build-standalone/releases/latest")
 
@@ -107,29 +106,11 @@ class Environment:
 
     # -- finding an interpreter -----------------------------------------
     def host_python(self) -> Path | None:
-        """A Python on this machine new enough to build the environment with."""
+        """A Python on this machine to build the environment with."""
         if not getattr(sys, "frozen", False):
-            if sys.version_info[:2] >= MIN_PYTHON:
-                return Path(sys.executable)
-        for name in ("python3.13", "python3.12", "python3.11", "python3", "python"):
-            found = shutil.which(name)
-            if not found:
-                continue
-            try:
-                out = subprocess.run([found, "-c",
-                                      "import sys;print('%d.%d' % sys.version_info[:2])"],
-                                     capture_output=True, text=True, timeout=10)
-            except (OSError, subprocess.SubprocessError):
-                continue
-            if out.returncode != 0:
-                continue
-            try:
-                major, minor = (int(x) for x in out.stdout.strip().split("."))
-            except ValueError:
-                continue
-            if (major, minor) >= MIN_PYTHON:
-                return Path(found)
-        return None
+            return Path(sys.executable)
+        found = shutil.which(f"python{PYTHON}")
+        return Path(found) if found else None
 
     # -- fetching one --------------------------------------------------
     def standalone_python(self) -> Path | None:
@@ -146,11 +127,7 @@ class Environment:
         return f"-{arch}-{target}-install_only_stripped"
 
     def fetch_python(self, *, on_progress: Any = None) -> Path:
-        """Download a Python to build the environment with.
-
-        The system Python on a stock machine is often older than 3.11 -- macOS ships
-        3.9 -- and a bundled app has no interpreter of its own to lend.
-        """
+        """Download a Python to build the environment with."""
         found = self.standalone_python()
         if found:
             return found
@@ -164,10 +141,10 @@ class Environment:
         want = self._asset_name()
         assets = [a for a in release.get("assets", ())
                   if want in a["name"] and a["name"].endswith(".tar.gz")
-                  and f"cpython-{WANT_PYTHON}." in a["name"]]
+                  and f"cpython-{PYTHON}." in a["name"]]
         if not assets:
             raise EnvironmentError(
-                f"no Python {WANT_PYTHON} build for this machine ({want.strip('-')})")
+                f"no Python {PYTHON} build for this machine ({want.strip('-')})")
 
         base = Path(self.root).expanduser() / "python"
         base.parent.mkdir(parents=True, exist_ok=True)

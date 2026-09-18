@@ -4,28 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
 
 from ml_stack.speech.protocols import NoProviderAvailable, ProviderHealth
 
-P = TypeVar("P")
-
-Factory = Callable[[], P]
+type Factory[P] = Callable[[], P]
 
 
 @dataclass
-class Registry(Generic[P]):
+class Registry[P]:
     """Named provider factories, an order to try them in, and one cached instance."""
 
     kind: str
     """``"asr"`` / ``"tts"`` / ``"vad"``. Only used in messages."""
 
-    factories: dict[str, Factory] = field(default_factory=dict)
+    factories: dict[str, Factory[P]] = field(default_factory=dict)
     order: list[str] = field(default_factory=list)
     _cached: P | None = field(default=None, repr=False)
     _cached_name: str | None = field(default=None, repr=False)
 
-    def register(self, name: str, factory: Factory, *, prefer: bool = False) -> None:
+    def register(self, name: str, factory: Factory[P], *, prefer: bool = False) -> None:
         """Add a candidate. ``prefer=True`` puts it at the front of the auto order."""
         self.factories[name] = factory
         if name in self.order:

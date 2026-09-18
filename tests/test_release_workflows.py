@@ -144,3 +144,4 @@ def test_the_github_release_says_pip_only_when_the_upload_succeeded():
 def test_a_failed_upload_still_releases_on_github():
     """A PyPI outage must not cost the bundles their release page."""
     assert "needs.pypi.result == 'success'" not in RELEASE["jobs"]["publish"]["if"]
+

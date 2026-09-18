@@ -30,6 +30,7 @@ set -eu
 REPO="${ML_STACK_REPO:-adammikulis/ml-stack}"
 API="https://api.github.com/repos/$REPO/releases/latest"
 GIT_URL="https://github.com/$REPO"
+PYTHON="3.13"
 EXTRAS="store,hub,web,plot,graph"
 MODE="${ML_STACK_MODE:-app}"
 MODELS="${ML_STACK_MODELS:-}"
@@ -82,20 +83,11 @@ KEY="ml-stack-$OS-$ARCH"
 # -- python -------------------------------------------------------------------
 # Say how to get one; never install a system Python behind somebody's back.
 find_python() {
-  for candidate in python3.13 python3.12 python3.11 python3; do
-    if have "$candidate" && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
-      PY="$(command -v "$candidate")"
-      return 0
-    fi
-  done
-  if [ "$OS" = macos ]; then
-    die "ml-stack needs Python 3.11 or newer. Install it with:  brew install python@3.13
-     (or from https://www.python.org/downloads/macos/), then run this again."
+  if have "python$PYTHON"; then
+    PY="$(command -v "python$PYTHON")"
+    return 0
   fi
-  die "ml-stack needs Python 3.11 or newer. Install it with:
-       sudo apt install python3 python3-venv   (Debian, Ubuntu)
-       sudo dnf install python3                (Fedora, RHEL)
-     then run this again."
+  die "ml-stack runs on Python $PYTHON. Install it from https://www.python.org/downloads/, then run this again."
 }
 
 # -- the app (default) --------------------------------------------------------

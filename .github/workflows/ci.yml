@@ -23,30 +23,24 @@ concurrency:
 
 jobs:
   test:
-    # The classifiers claim 3.11 through 3.13, and the app ships for macOS as well as
-    # Linux. `packaging/install.sh` is executed on both by tests/test_packaging_install_runs.py.
+    # The app ships for macOS as well as Linux, and `packaging/install.sh` is executed on
+    # both by tests/test_packaging_install_runs.py.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            python: "3.12"
-            pytest: --slow
-          - os: ubuntu-latest
-            python: "3.11"
-            pytest: --slow
           - os: ubuntu-latest
             python: "3.13"
             pytest: --slow
           # ladybug's macOS wheels are tagged macosx_15_0; on an older runner pip
           # falls back to the sdist and compiles the graph database from source.
           - os: macos-15
-            python: "3.12"
+            python: "3.13"
             pytest: --slow
           # -n scatters a file across workers, so a test that only passes beside its
           # neighbours passes there and fails alone. This is the run that sees that.
           - os: ubuntu-latest
-            python: "3.12"
+            python: "3.13"
             pytest: -n 0
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -85,7 +79,7 @@ jobs:
       # docs/FEATURES.md points at this as the proof each feature holds, and nothing else
       # runs it. --offline leaves out the three checks that reach a host off this machine.
       - name: every claim in FEATURES.md
-        if: matrix.pytest == '--slow' && matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        if: matrix.pytest == '--slow' && matrix.os == 'ubuntu-latest'
         run: python docs/verify_release.py --offline
 
   gates:
@@ -98,7 +92,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       # The checkers are stdlib only apart from the two they shell out to, and those two
       # come from scripts/gates/pinned.txt: each ruff and pyright release finds sites the

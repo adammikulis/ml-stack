@@ -41,6 +41,7 @@ $ErrorActionPreference = "Stop"
 $repo    = if ($env:ML_STACK_REPO) { $env:ML_STACK_REPO } else { "adammikulis/ml-stack" }
 $api     = "https://api.github.com/repos/$repo/releases/latest"
 $gitUrl  = "https://github.com/$repo"
+$python  = "3.13"
 $extras  = "store,hub,web,plot,graph"
 $arch    = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x86_64" }
 $key     = "ml-stack-windows-$arch"
@@ -65,18 +66,20 @@ function Interactive { return [Environment]::UserInteractive -and -not [Console]
 # -- python -------------------------------------------------------------------
 # Say how to get one; never install a Python behind somebody's back.
 function Find-Python {
-    foreach ($name in @("python3.13", "python3.12", "python3.11", "python", "py")) {
-        $found = Get-Command $name -ErrorAction SilentlyContinue
-        if (-not $found) { continue }
+    # The launcher is how a version is named on Windows; -c prints the interpreter behind it.
+    $launcher = Get-Command "py" -ErrorAction SilentlyContinue
+    if ($launcher) {
         try {
-            & $found.Source -c "import sys; raise SystemExit(sys.version_info < (3, 11))" 2>$null
-            if ($LASTEXITCODE -eq 0) { return $found.Source }
+            $exe = & $launcher.Source "-$python" -c "import sys; print(sys.executable)" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $exe) { return $exe.Trim() }
         } catch { }
     }
+    $direct = Get-Command "python$python" -ErrorAction SilentlyContinue
+    if ($direct) { return $direct.Source }
     throw @"
-ml-stack needs Python 3.11 or newer. Install it with:
+ml-stack runs on Python $python. Install it with:
     winget install --id Python.Python.3.13 -e
-  (or from https://www.python.org/downloads/windows/), open a new terminal, and run this again.
+  then open a new terminal and run this again.
 "@
 }
 

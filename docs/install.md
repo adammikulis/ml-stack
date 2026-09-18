@@ -128,7 +128,7 @@ new Windows machine, in this order, each of which should say what follows it:
 Windows-specific here was written against a faked `platform.system()` on a Mac -- the
 Windows calls themselves run for the first time when that list does.
 
-**If you write Python**:
+**If you write Python**, on 3.13:
 
 ```
 pip install git+https://github.com/adammikulis/ml-stack

@@ -3,8 +3,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# python:3.13 rather than -slim: a hundred tests shell out to git, which -slim has not.
-IMAGE="${ML_STACK_LINUX_IMAGE:-python:3.13}"
+PYTHON="3.13"
+# python:$PYTHON rather than -slim: a hundred tests shell out to git, which -slim has not.
+IMAGE="${ML_STACK_LINUX_IMAGE:-python:$PYTHON}"
 PLATFORM="${ML_STACK_LINUX_PLATFORM:-}"
 VOLUME="${ML_STACK_LINUX_VOLUME:-ml-stack-linux-suite}"
 

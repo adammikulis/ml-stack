@@ -60,8 +60,8 @@ capability; every line is something that already exists not being what it says.
   fleet, that a GGUF is on disk, that a store opens, that 8770 and 8771 are free.
 - [ ] **`install.ps1` has never been executed, and CI has no Windows job.**
   `tests/test_packaging_install_runs.py` now runs `install.sh --headless` end to end
-  against a scratch prefix with a locally built wheel, and `ci.yml`'s matrix now covers
-  `ubuntu-latest` on 3.11, 3.12 and 3.13 plus `macos-14` on 3.12 -- but there is still no
+  against a scratch prefix with a locally built wheel, and `ci.yml` runs on `ubuntu-latest`
+  every push and on `macos-15` nightly -- but there is still no
   Windows job, and `install.ps1` is still only parsed (`tests/test_packaging_install.py`:
   a pwsh syntax check and some greps), never run; `docs/install.md` still says its
   Windows-specific behaviour was written against a faked `platform.system()` on a Mac.
