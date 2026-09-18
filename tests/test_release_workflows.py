@@ -145,3 +145,16 @@ def test_a_failed_upload_still_releases_on_github():
     """A PyPI outage must not cost the bundles their release page."""
     assert "needs.pypi.result == 'success'" not in RELEASE["jobs"]["publish"]["if"]
 
+
+def setups() -> list[dict[str, Any]]:
+    return [step for job in CI["jobs"].values() for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/setup-python@")]
+
+
+@pytest.mark.parametrize("step", setups(), ids=lambda s: str(s.get("with", {}).get(
+    "python-version", "?")))
+def test_every_job_caches_the_packages_it_installs(step):
+    """Every job installs the same set; without a cache each one downloads torch again."""
+    with_ = step.get("with") or {}
+    assert with_.get("cache") == "pip"
+    assert with_.get("cache-dependency-path") == "pyproject.toml"

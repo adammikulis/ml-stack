@@ -86,7 +86,28 @@ def test_one_matrix_entry_runs_the_suite_in_a_single_process():
 def test_the_other_entries_still_run_the_slow_tests():
     slow = [e for e in entries() if e.get("pytest") == "--slow"]
     assert len(slow) == len(entries()) - 1
-    assert {e["os"] for e in slow} == {"ubuntu-latest", "macos-15"}
+    assert {e["os"] for e in slow} == {"ubuntu-latest"}
+
+
+def test_no_push_waits_on_macos():
+    """A macOS run outlasts the gap between two pushes, so one on the push path is
+    cancelled by the next push and never reports."""
+    assert {e["os"] for e in entries()} == {"ubuntu-latest"}
+    when = workflows()["jobs"]["macos"]["if"]
+    assert "github.event_name == 'schedule'" in when
+    assert "github.event_name == 'workflow_dispatch'" in when
+    assert "inputs.ref != ''" in when, "the release branch ships the macOS app"
+
+
+def test_macos_has_a_nightly_to_run_on():
+    schedule = workflows()["on"]["schedule"]
+    assert [entry["cron"] for entry in schedule] == ["30 4 * * *"]
+
+
+def test_macos_runs_the_slow_tests_on_the_wheels_it_built():
+    steps = workflows()["jobs"]["macos"]["steps"]
+    assert any("packaging/build.py" in str(s.get("run", "")) for s in steps)
+    assert any("--slow" in str(s.get("run", "")) for s in steps)
 
 
 def test_ci_runs_the_release_verifier():

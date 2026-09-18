@@ -6,6 +6,9 @@ on:
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+  # 04:30 UTC: the macOS job, which nothing else starts.
+  schedule:
+    - cron: "30 4 * * *"
   # release-please opens its pull request with the action's own token, so a run on that
   # pull request waits for approval. release-please.yml calls this instead.
   workflow_call:
@@ -23,18 +26,11 @@ concurrency:
 
 jobs:
   test:
-    # The app ships for macOS as well as Linux, and `packaging/install.sh` is executed on
-    # both by tests/test_packaging_install_runs.py.
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            python: "3.13"
-            pytest: --slow
-          # ladybug's macOS wheels are tagged macosx_15_0; on an older runner pip
-          # falls back to the sdist and compiles the graph database from source.
-          - os: macos-15
             python: "3.13"
             pytest: --slow
           # -n scatters a file across workers, so a test that only passes beside its
@@ -51,6 +47,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: install test dependencies
         run: |
@@ -60,13 +58,8 @@ jobs:
           # and a title read without trafilatura is a different title
           python -m pip install -e ".[store,hub,web,plot]"
           # CPU torch: 28 tests across backend, graph and recipes need a framework,
-          # and without one they fail rather than skip. The CPU index carries no macOS
-          # arm64 wheel; there torch comes from the default index, CPU-only anyway.
-          if [ "${{ runner.os }}" = Linux ]; then
-            python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          else
-            python -m pip install torch
-          fi
+          # and without one they fail rather than skip.
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       # ml-stack's own packages are on no index. Without them the environment test
       # can build a venv, install torch, and still not import ml_stack.
@@ -79,8 +72,40 @@ jobs:
       # docs/FEATURES.md points at this as the proof each feature holds, and nothing else
       # runs it. --offline leaves out the three checks that reach a host off this machine.
       - name: every claim in FEATURES.md
-        if: matrix.pytest == '--slow' && matrix.os == 'ubuntu-latest'
+        if: matrix.pytest == '--slow'
         run: python docs/verify_release.py --offline
+
+  # Nightly, on demand, and on the release branch that ships the macOS app. A run takes
+  # about three quarters of an hour, longer than the gap between two pushes.
+  macos:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || inputs.ref != ''
+    # ladybug's macOS wheels are tagged macosx_15_0; on an older runner pip falls back to
+    # the sdist and compiles the graph database from source.
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: install test dependencies
+        run: |
+          python -m pip install --upgrade pip build
+          python -m pip install pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors
+          python -m pip install -e ".[store,hub,web,plot]"
+          # The CPU index carries no macOS arm64 wheel; the default one is CPU-only here.
+          python -m pip install torch
+
+      - name: build the wheels the environment test installs
+        run: python packaging/build.py
+
+      - name: tests
+        run: python -m pytest tests/ -q --slow
 
   gates:
     runs-on: ubuntu-latest
@@ -93,6 +118,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       # The checkers are stdlib only apart from the two they shell out to, and those two
       # come from scripts/gates/pinned.txt: each ruff and pyright release finds sites the
