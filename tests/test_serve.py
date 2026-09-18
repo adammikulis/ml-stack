@@ -46,6 +46,18 @@ from ml_stack.testing.fakes import (
 from tests.conftest import leased
 
 
+def wait_until_exited(pid: int, *, timeout: float = 10.0) -> None:
+    """Block until ``pid`` has exited and is waiting to be reaped, without reaping it.
+
+    ``psutil`` calls a Linux thread group's leader a zombie while the rest of its threads
+    are still exiting, which is before ``waitpid`` will report the group at all.
+    """
+    deadline = time.monotonic() + timeout
+    while os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is None:
+        assert time.monotonic() < deadline, f"pid {pid} never exited"
+        time.sleep(0.005)
+
+
 @pytest.fixture
 def serving():
     """llama-servers on real sockets, closed at the end of the test."""
@@ -206,12 +218,14 @@ class TestProcess:
     def test_a_zombie_does_not_count_as_alive(self):
         """A zombie keeps its pid until someone reaps it, so 'the pid is in the table' is
         a proxy; 'the process is running' is the fact."""
+        if os.name != "posix":
+            pytest.skip("zombies are POSIX")
         proc = subprocess.Popen([sys.executable, "-c", "pass"])
-        deadline = time.monotonic() + 5
-        while proc.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert not pid_exists(proc.pid)
-        proc.wait()
+        try:
+            wait_until_exited(proc.pid)
+            assert not pid_exists(proc.pid)
+        finally:
+            proc.wait()
 
     def test_nonsense_pids_are_not_alive(self):
         assert not pid_exists(0)
@@ -982,20 +996,15 @@ class TestTheStartedProcess:
             manager.release(info)
 
     def test_a_server_that_exits_on_its_own_is_reaped(self, running):
-        """The child is waited on until it is a zombie -- exited and unreaped -- so
-        ``_save`` is the only thing that can have reaped it below."""
+        """The child is waited on until it has exited and is unreaped, so ``_save`` is the
+        only thing that can have reaped it below."""
         import signal
-
-        import psutil
 
         if os.name != "posix":
             pytest.skip("SIGKILL and zombies are POSIX")
         manager, info = running
         os.kill(info.pid, signal.SIGKILL)
-        deadline = time.monotonic() + 10
-        while psutil.Process(info.pid).status() != psutil.STATUS_ZOMBIE:
-            assert time.monotonic() < deadline, "the killed server never exited"
-            time.sleep(0.05)
+        wait_until_exited(info.pid)
         assert not pid_exists(info.pid)
         manager._save()
         with pytest.raises(ChildProcessError):
