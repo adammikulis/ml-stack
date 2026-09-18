@@ -184,6 +184,13 @@ def settle(page):
     page.wait_for_selector(".graph-wrap:not(.settling)")
 
 
+def at_rest(page):
+    """Waits until the force layout has stopped moving the nodes."""
+    # `settling` comes off on a 1500ms timer while the simulation is still running, so it
+    # says the labels may show, not that a node holds still under a click
+    page.wait_for_selector('.graph-wrap[data-layout="rest"]', timeout=60_000)
+
+
 class PacedStream:
     """A real local ``/ask/stream`` that lets one event out per ``release()``.
 
@@ -373,6 +380,9 @@ def test_a_second_ask_carries_only_what_was_gathered(open_page):
     # the answer lit two nodes, and neither was gathered by hand
     assert "highlighted" not in json.loads(second.value.post_data)
     # gathering one deliberately does travel
+    at_rest(page)
+    assert page.evaluate("[...graphModel.picked]") == []
+    assert page.evaluate("graphModel.selected") is None
     page.locator("#graph g.node", has_text="Ada Lovelace").first.click(modifiers=["Shift"])
     page.fill("#q", "what about them?")
     with page.expect_request("**/ask") as third:

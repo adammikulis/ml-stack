@@ -53,6 +53,7 @@
     const root = svg.append('g');
     const wrap = document.querySelector('.graph-wrap');
     wrap.classList.add('settling');
+    wrap.dataset.layout = 'moving';
     let W = wrap.clientWidth, H = wrap.clientHeight;
     const SIZE = { person: [9, 2.6], org: [5, 1.9], place: [5, 1.9], opportunity: [5, 1.9], topic: [3.5, 1.6] };
     const radius = n => { const [base, per] = SIZE[n.kind] || SIZE.org; return base + Math.sqrt(n.mentions || 1) * per; };
@@ -137,6 +138,7 @@
     };
 
     sim.on('tick', () => {
+      wrap.dataset.layout = 'moving';
       const k = d3.zoomTransform(svg.node()).k;
       link.each(function (l) {
         const [x1, y1, x2, y2] = ends(l, k);
@@ -182,7 +184,10 @@
       svg.transition().duration(dur).call(zoom.transform, t).on('end interrupt', done);
     }
     function fit() { frame(fitted ? 400 : 0); }
-    sim.on('end', () => { if (following || needsFit) { needsFit = false; fit(); } });
+    sim.on('end', () => {
+      wrap.dataset.layout = 'rest';
+      if (following || needsFit) { needsFit = false; fit(); }
+    });
     setTimeout(() => { if (!fitted) fit(); }, 1500);
     svg.on('click', e => { if (e.target === svg.node()) select(null); });
     // Escape puts the selection down, as a click on empty space does; a search box that
