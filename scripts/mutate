@@ -134,6 +134,17 @@ def verify(root: Path, tree: Tree, args: argparse.Namespace) -> int:
     return 0
 
 
+def unreached(root: Path) -> int:
+    """Print every module a campaign cannot run a test file for."""
+    blind = mutation_survivors.unmeasured(root)
+    for path in blind:
+        print(path)
+    print(f"\n{len(blind)} module(s) no test file names. A campaign runs the test files "
+          f"that name the module, so none of these is measured at all. Each is a test "
+          f"file to write.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the campaign."""
     parser = argparse.ArgumentParser(prog="scripts/mutate", description=__doc__)
@@ -147,9 +158,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--test", action="append",
                         help="run these tests instead of the ones that name the function")
     parser.add_argument("--verify", action="store_true", help="re-run the ledger instead")
+    parser.add_argument("--unmeasured", action="store_true",
+                        help="list the modules no test file names, which no campaign reaches")
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
+    if args.unmeasured:
+        return unreached(root)
     before = dirt(root)
     tree = Tree(root)
     outcomes: list[_mutation.Outcome] = []

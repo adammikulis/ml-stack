@@ -170,6 +170,37 @@ def test_the_count_says_out_loud_that_it_only_covers_what_was_sampled(tmp_path) 
         "2026-09-18", "abc1234", "10 of 3708 functions", "19 mutants, 1 survived"))
     said = "\n".join(mutation_survivors.notes(root))
     assert "The last ran on 2026-09-18 at abc1234: 10 of 3708 functions." in said
+    assert "named by no test file, so no campaign reaches them" in said
+
+
+def _measurable(tmp_path: Path, test_body: str) -> Path:
+    """A tree with two modules and one test file, for the module-naming question."""
+    where = tmp_path / "src" / "ml_stack" / "toy"
+    where.mkdir(parents=True)
+    for name in ("seen.py", "unseen.py"):
+        (where / name).write_text(SAMPLE, encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_toy.py").write_text(test_body, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_module_no_test_file_names_is_reported_as_unmeasured(tmp_path) -> None:
+    root = _measurable(tmp_path, "from ml_stack.toy.seen import alive\n")
+    assert mutation_survivors.unmeasured(root) == ["src/ml_stack/toy/unseen.py"]
+
+
+def test_a_module_imported_only_off_its_package_is_unmeasured_too(tmp_path) -> None:
+    """The trap: `from ml_stack.toy import seen` never writes the dotted module, so a
+    campaign runs nothing for it however well it is tested."""
+    root = _measurable(tmp_path, "from ml_stack.toy import seen, unseen\n")
+    assert mutation_survivors.unmeasured(root) == ["src/ml_stack/toy/seen.py",
+                                                   "src/ml_stack/toy/unseen.py"]
+
+
+def test_the_modules_this_repository_cannot_measure_are_countable() -> None:
+    blind = mutation_survivors.unmeasured(REPO)
+    assert "src/ml_stack/sources/rows.py" not in blind
+    assert all((REPO / path).is_file() for path in blind)
 
 
 def test_the_scoreboard_prints_the_caveat_under_the_table() -> None:

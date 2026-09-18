@@ -168,6 +168,11 @@ nothing survives, how many functions it did not mutate; `scripts/budgets` prints
 caveat under the table. A run at a deeper `--mutations` finds more mutations of a function
 already sampled, so a function with a row is not a function that is done.
 
+A campaign runs the test files that name the module, so a module none of them names is
+measured by nothing. `scripts/mutate --unmeasured` lists them -- 110 of 344 on 2026-09-18
+-- and each is a test file to write. `from ml_stack.sources import rows` does not name
+`ml_stack.sources.rows`, so a well-tested module can sit in that list.
+
 `pyproject.toml` selects ruff's rules and pyright's checks, and `scripts/gates/` budgets
 both: `ruff-blind-except`, `ruff-bugbear`, `ruff-security`, `ruff-other`, `pyright-errors`.
 Neither tool is a dependency, so a checker that cannot find its tool prints why and its

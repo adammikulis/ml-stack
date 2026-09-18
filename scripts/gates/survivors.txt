@@ -12,3 +12,4 @@
 # mutated that function, not that its tests read what it answers.
 equivalent	src/ml_stack/sources/rows.py::_rows	skip-branch:9	the guard it drops is a fast path: json.loads("") raises ValueError, which the next statement catches and continues on, so both continue the loop for every input
 campaign	2026-09-18	f771d8f	10 functions, 2 mutations each, 2 test files	7 survived, all since caught
+campaign	2026-09-18	5f7153c	2 of 3708 functions, up to 2 mutations each, 2 test files	4 mutants, 0 survived

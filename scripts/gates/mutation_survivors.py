@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import Finding
-from ._mutation import candidates, functions
+from ._mutation import NEVER_RUN, TEST_ROOT, candidates, dotted, functions
 
 NAME = "mutation-survivors"
 OWNER = "scripts/mutate"
@@ -75,17 +75,40 @@ def record(root: Path, campaign: Campaign) -> None:
                       + campaign.row() + "\n", encoding="utf-8")
 
 
+def unmeasured(root: Path, where: list[str] | None = None) -> list[str]:
+    """Every module with a mutable function that no test file names.
+
+    `covering_tests` runs the test files that name the module, so a module none of them
+    names is one no campaign can mutate. It may still be exercised through a package
+    import; what it has is no file a campaign can run.
+    """
+    blob = ""
+    for path in sorted((root / TEST_ROOT).glob("test_*.py")):
+        if path.relative_to(root).as_posix() in NEVER_RUN:
+            continue
+        try:
+            blob += path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+    paths = where if where is not None else sorted({t.path for t in candidates(root)})
+    return [path for path in paths if dotted(path) not in blob]
+
+
 def notes(root: Path) -> list[str]:
     """What the count does and does not cover, for anyone reading a zero."""
     ran = campaigns(root)
     last = (f"    The last ran on {ran[-1].when} at {ran[-1].commit}: {ran[-1].sampled}."
             if ran else "    No campaign is recorded, so the count covers nothing.")
+    pool = candidates(root)
+    where = sorted({t.path for t in pool})
+    blind = unmeasured(root, where)
     return [f"{NAME} counts recorded survivors, not every mutation the tests would miss.",
-            f"    A campaign reads a sample; {len(candidates(root))} functions here are "
-            f"mutable.",
+            f"    A campaign reads a sample; {len(pool)} functions here are mutable.",
             last,
             "    Another commit samples others, and a deeper run finds more mutations of "
             "the same function.",
+            f"    {len(blind)} of {len(where)} modules are named by no test file, so no "
+            f"campaign reaches them: scripts/mutate --unmeasured.",
             f"    {LEDGER} lists every campaign and what it found."]
 
 
