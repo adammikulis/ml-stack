@@ -12,16 +12,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gates
-from gates import _pins
+from gates import _floors, _pins
 
 ROOT = Path(__file__).resolve().parent.parent
 BUDGETS = ROOT / "budgets.json"
 
+FLOORS = "floors-only-rise"
+
+
+def held() -> dict:
+    """budgets.json as it is written."""
+    return json.loads(BUDGETS.read_text(encoding="utf-8")) if BUDGETS.exists() else {}
+
 
 def budgets() -> dict[str, int]:
     """The allowed count for each metric; a hard gate allows none."""
-    held = json.loads(BUDGETS.read_text(encoding="utf-8")) if BUDGETS.exists() else {}
-    return {**held, **dict.fromkeys(gates.hard(), 0)}
+    numbers = {k: v for k, v in held().items() if isinstance(v, int)}
+    return {**numbers, **dict.fromkeys(gates.hard(), 0)}
+
+
+def floors() -> dict[str, int]:
+    """The least each floor metric may count."""
+    return dict(held().get(FLOORS, {}))
 
 
 def owners() -> dict[str, str]:
@@ -34,11 +46,32 @@ def descriptions() -> dict[str, str]:
     return {c.NAME: c.describe() for c in gates.checkers()}
 
 
-def write_budgets(counts: dict[str, int]) -> None:
+def write_budgets(counts: dict[str, int], least: dict[str, int]) -> None:
     """Replace budgets.json with these counts, leaving out the hard gates."""
     skip = gates.hard()
-    ordered = {name: counts[name] for name in sorted(counts) if name not in skip}
+    ordered: dict = {name: counts[name] for name in sorted(counts) if name not in skip}
+    ordered[FLOORS] = {name: least[name] for name in sorted(least)}
     BUDGETS.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
+
+
+def floor_rows(least: dict[str, int]) -> tuple[list[str], int]:
+    """The floor block for the table, and 1 when a floor has fallen or a module broke."""
+    reason = _floors.skip(ROOT)
+    recorded = least.get(_floors.NAME)
+    head = [f"\n{FLOORS}: these may not fall, where every number above may not rise"]
+    if reason:
+        return [*head, f"{_floors.NAME}  {recorded}  not counted here: {reason}"], 0
+    counted, broke = _floors.collect(ROOT)
+    delta = counted - (recorded if recorded is not None else counted)
+    lines = [*head, f"{_floors.NAME}  least {recorded}  collected {counted}  "
+                    f"{'+' if delta > 0 else ''}{delta}"]
+    if delta > 0:
+        lines.append(f"    {delta} more than recorded -- scripts/budgets --update")
+    if delta < 0:
+        lines.append(f"    {_floors.describe()}")
+    if broke:
+        lines.append(f"    {broke} modules failed to collect; their tests ran nowhere")
+    return lines, 1 if (delta < 0 or broke) else 0
 
 
 def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int:
@@ -62,7 +95,8 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
         print(f"{name.ljust(width)}  {shown:>6}  {actual:>6}  {mark}{delta}")
 
     for name in sorted(absent):
-        print(f"{name.ljust(width)}  {str(allowed.get(name, '-')):>6}  {'?':>6}  {absent[name]}")
+        print(f"{name.ljust(width)}  {allowed.get(name, '-')!s:>6}  {'?':>6}  "
+              f"{absent[name]}")
 
     counted = sum(r[3] for r in rows)
     against = sum(r[2] or 0 for r in rows)
@@ -72,9 +106,13 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
           f"{'+' if moved > 0 else ''}{moved}")
     print(f"\nruff and pyright metrics measured with {_pins.measured_with()}")
 
+    lines, fell = floor_rows(floors())
+    for line in lines:
+        print(line)
+
     over = [r for r in rows if r[0] > 0]
     if not over:
-        return 0
+        return fell
     print()
     for delta, name, budget, actual in over:
         where = owner.get(name) or "no owner"
@@ -88,6 +126,11 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
 
 def show(found: dict[str, list[gates.Finding]], metric: str) -> int:
     """Print every site for one metric."""
+    if metric == _floors.NAME:
+        print(_floors.describe())
+        for line in floor_rows(floors())[0]:
+            print(line)
+        return 0
     absent = gates.unrunnable()
     if metric in absent:
         print(f"{metric}: {absent[metric]}", file=sys.stderr)
@@ -160,7 +203,21 @@ def main(argv: list[str] | None = None) -> int:
                  if n in allowed and counts[n] > allowed[n]}
         if risen and (agent() or not args.allow_increase):
             return refuse_the_rise(risen, found)
-        write_budgets(counts)
+        least = floors()
+        if not _floors.skip(ROOT):
+            counted, broke = _floors.collect(ROOT)
+            if broke:
+                print(f"{_floors.NAME}: {broke} modules failed to collect. Fix them "
+                      f"first; a count taken now records their tests as gone.")
+                return 1
+            was = least.get(_floors.NAME)
+            least[_floors.NAME] = counted
+            if was is not None and counted < was:
+                print(f"{_floors.NAME}: {was} -> {counted}, a floor down by {was - counted}. "
+                      f"{was - counted} tests that were collected are not any more.")
+            elif was != counted:
+                print(f"{_floors.NAME}: {was if was is not None else '-'} -> {counted}")
+        write_budgets(counts, least)
         changed = [n for n in counts if allowed.get(n) != counts[n]]
         for name in sorted(changed):
             print(f"{name}: {allowed.get(name, '-')} -> {counts[name]}")
@@ -171,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         payload = {
             "version": 1,
+            "floors": floors(),
             "metrics": {
                 name: {
                     "budget": allowed.get(name),

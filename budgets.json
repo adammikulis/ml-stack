@@ -11,15 +11,19 @@
   "local-imports": 529,
   "long-docstrings": 97,
   "long-functions": 12,
+  "module-skips": 31,
   "print-calls": 0,
   "process-scans": 5,
   "pyright-errors": 1,
   "ruff-blind-except": 23,
   "ruff-bugbear": 59,
-  "ruff-other": 763,
+  "ruff-other": 762,
   "ruff-security": 129,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
-  "wide-signatures": 42
+  "wide-signatures": 42,
+  "floors-only-rise": {
+    "tests-collected": 5312
+  }
 }

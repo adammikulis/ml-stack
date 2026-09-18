@@ -18,7 +18,8 @@ from gates import _pins  # noqa: E402
 
 BUDGETS = REPO / "budgets.json"
 FOUND = gates.run(REPO)
-RECORDED: dict[str, int] = json.loads(BUDGETS.read_text(encoding="utf-8"))
+HELD: dict = json.loads(BUDGETS.read_text(encoding="utf-8"))
+RECORDED: dict[str, int] = {k: v for k, v in HELD.items() if isinstance(v, int)}
 ALLOWED: dict[str, int] = {**RECORDED, **dict.fromkeys(gates.hard(), 0)}
 
 
