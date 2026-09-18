@@ -361,7 +361,7 @@ def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict
 def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
-    from ml_stack.setup import look_checkouts, repositories
+    from ml_stack.doctor import look_checkouts, repositories
 
     return [_plain(f) for f in look_checkouts(repositories(list(repos)) if repos else None)]
 

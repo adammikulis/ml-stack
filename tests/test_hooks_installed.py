@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.setup import HOOKS, hooks_of
+from ml_stack.doctor import HOOKS, hooks_of
 
 REPO = Path(__file__).resolve().parent.parent
 

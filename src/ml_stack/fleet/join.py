@@ -140,7 +140,7 @@ class Joined:
 
 # -- the checks ------------------------------------------------------------------------
 def _machine_findings() -> list[Any]:
-    """`ml_stack.setup.look`, behind a name a test can replace: it reads sysctl and libllama."""
+    """`ml_stack.setup.look`, behind a name a test can replace: it reads the binary and libllama."""
     from ml_stack.setup import look
 
     return look()

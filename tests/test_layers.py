@@ -17,15 +17,15 @@ REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("core", ("asking", "backend", "command", "contracts", "data", "entities", "files",
-              "geo",
+    ("core", ("asking", "backend", "checks", "command", "contracts", "data", "entities",
+              "files", "geo",
               "home", "http", "installed", "jobs", "jsonl", "limits", "lock", "log",
               "markup",
               "media", "messages", "paths", "platform", "redact", "scrape", "records",
               "telemetry", "ui", "units")),
     ("model", ("client", "gguf", "hub", "spec", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
-    ("machine", ("fleet", "serve", "setup")),
+    ("machine", ("doctor", "fleet", "serve", "setup")),
     ("tools", ("bench", "claude", "cli", "do", "draft", "harness", "mcp", "surface",
                "testing", "train", "walk", "web")),
 )
@@ -34,6 +34,7 @@ RANK = {package: height for height, (_, packages) in enumerate(LAYERS)
         for package in packages}
 
 KNOWN = {
+    ("doctor", "bench"),
     ("fleet", "bench"),
     ("fleet", "serve"),
     ("fleet", "setup"),
@@ -45,7 +46,6 @@ KNOWN = {
     ("serve", "bench"),
     ("serve", "fleet"),
     ("serve", "setup"),
-    ("setup", "bench"),
     ("setup", "fleet"),
     ("setup", "serve"),
 }

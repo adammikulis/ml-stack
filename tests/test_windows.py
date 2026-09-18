@@ -577,7 +577,6 @@ class TestDiscoveryAndTheFirewall:
     def test_setup_prints_the_netsh_line_until_both_rules_exist(self, windows, monkeypatch):
         from ml_stack import setup
 
-        monkeypatch.setattr(setup, "_sysctl", lambda key: "")
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         monkeypatch.setattr(setup.subprocess, "run",
                             lambda argv, **k: _ok(1, stdout="\nNo rules match the specified criteria.\n"))
@@ -595,7 +594,6 @@ class TestDiscoveryAndTheFirewall:
     def test_setup_is_satisfied_once_netsh_finds_them(self, windows, monkeypatch):
         from ml_stack import setup
 
-        monkeypatch.setattr(setup, "_sysctl", lambda key: "")
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         monkeypatch.setattr(setup.subprocess, "run",
                             lambda argv, **k: _ok(0, stdout="Rule Name: ml-stack traind\n"))
@@ -606,7 +604,6 @@ class TestDiscoveryAndTheFirewall:
     def test_no_firewall_finding_anywhere_else(self, monkeypatch):
         from ml_stack import setup
 
-        monkeypatch.setattr(setup, "_sysctl", lambda key: "")
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         assert not [f for f in setup.look() if f.name == "firewall"]
 

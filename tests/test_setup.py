@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 
-from ml_stack.setup import BEHAVIOURS, Finding, ask, explain, look, main
+from ml_stack.checks import Finding, ask
+from ml_stack.setup import BEHAVIOURS, explain, look, main
 
 
 def test_it_reports_rather_than_changes(capsys):
@@ -24,7 +25,6 @@ def test_a_machine_that_will_not_answer_says_so_rather_than_guessing(monkeypatch
     """A wrong "supported" sends someone to debug a model that was never going to load."""
     import ml_stack.setup as setup
 
-    monkeypatch.setattr(setup, "_sysctl", lambda key: "")
     monkeypatch.setattr(setup, "_arches", lambda binary: set())
     named = {f.name for f in setup.look()}
     assert not any(n.startswith("architecture") for n in named), \
@@ -235,7 +235,7 @@ def test_every_command_the_package_installs_is_looked_for_on_path(monkeypatch, t
 
     import ml_stack.setup as setup
 
-    monkeypatch.setattr(setup, "_checkout", lambda: tmp_path)
+    monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     monkeypatch.setattr(shutil, "which",
                         lambda name, *a, **k: None if name == "ml-stack-ingest"
                         else f"/opt/bin/{name}")
@@ -261,7 +261,7 @@ def test_the_commands_are_read_from_the_install_and_the_checkouts_pyproject(monk
         '[project]\nname = "ml-stack"\n[project.scripts]\n'
         'ml-stack-serve = "ml_stack.serve.cli:main"\n'
         'ml-stack-newthing = "ml_stack.newthing:main"\n')
-    monkeypatch.setattr(setup, "_checkout", lambda: tmp_path)
+    monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     names = setup._scripts()
     assert {"ml-stack-serve", "ml-stack-setup", "ml-stack-ingest"} <= set(names)
     assert "ml-stack-newthing" in names, "named in the checkout, not yet installed"
@@ -274,7 +274,7 @@ def test_the_printed_report_names_the_missing_command_and_the_line(monkeypatch, 
 
     import ml_stack.setup as setup
 
-    monkeypatch.setattr(setup, "_checkout", lambda: tmp_path)
+    monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
     monkeypatch.setattr(shutil, "which",
                         lambda name, *a, **k: None if name == "ml-stack-jobs"
                         else f"/opt/bin/{name}")

@@ -40,7 +40,7 @@ from ml_stack.fleet.join import (
     sweep_argv,
     table,
 )
-from ml_stack.setup import Finding
+from ml_stack.checks import Finding
 
 WORDS = "quince larch marlow"
 DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,

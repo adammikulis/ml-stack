@@ -19,10 +19,19 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import setup as doctor
-from ml_stack.setup import (ahead_of, bench_of, builds_of, doctor_main as main, hooks_of,
-                            install_of, look_checkouts as look, repositories, status_of,
-                            worktrees_of)
+from ml_stack import doctor
+from ml_stack.doctor import (
+    ahead_of,
+    bench_of,
+    builds_of,
+    hooks_of,
+    install_of,
+    repositories,
+    status_of,
+    worktrees_of,
+)
+from ml_stack.doctor import doctor_main as main
+from ml_stack.doctor import look_checkouts as look
 
 REPO = Path(__file__).resolve().parent.parent
 AUTHOR = ("Ada Lovelace", "ada@invented.example")
@@ -92,7 +101,8 @@ def test_the_offered_fix_installs_them_and_the_next_look_is_good(tmp_path):
     found = hooks_of(repo)
     assert found.good
     assert found.said == "installed, from scripts/hooks"
-    assert os.readlink(repo / ".git" / "hooks" / "pre-commit") == "../../scripts/hooks/pre-commit"
+    assert str((repo / ".git" / "hooks" / "pre-commit").readlink()) == \
+        "../../scripts/hooks/pre-commit"
 
 
 def test_an_untracked_wrapper_that_execs_the_shipped_script_counts_as_installed(tmp_path):
@@ -122,7 +132,7 @@ def test_a_hook_pointing_somewhere_else_is_not_installed(tmp_path):
     repo = make_repo(tmp_path / "quenlow")
     hooks = repo / ".git" / "hooks"
     hooks.mkdir(exist_ok=True)
-    os.symlink("/somewhere/else/pre-commit", hooks / "pre-commit")
+    (hooks / "pre-commit").symlink_to("/somewhere/else/pre-commit")
     _script(hooks / "commit-msg", "exit 0\n")
     assert hooks_of(repo).said == "not installed: pre-commit, commit-msg, pre-push"
 
@@ -367,7 +377,7 @@ def test_named_builds_are_listed_beside_current(tmp_path):
     named = tmp_path / "named"
     named.mkdir()
     fork = make_build(tmp_path / "builds" / "fork111", commit="fork111", days_old=1)
-    os.symlink(fork, named / "fork")
+    (named / "fork").symlink_to(fork)
     (named / "gone").mkdir()                     # no server in it: not a build
     found = builds_of(current, named)
     assert found[1].name == "llama.cpp: named builds"
