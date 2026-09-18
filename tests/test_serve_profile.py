@@ -450,7 +450,7 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a
 
 
 def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
-    from ml_stack.bench.report import main as reporting
+    from ml_stack.bench.report import run as reporting
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-kv-q8_0-rb0", right=0.4, cache_type="q8_0")
@@ -622,7 +622,7 @@ def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):
 
 
 def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_path, capsys):
-    from ml_stack.bench.report import main as reporting
+    from ml_stack.bench.report import run as reporting
 
     assert reporting(SimpleNamespace(kept=str(tmp_path / "nothing.ladybug"), profile=True,
                                      profiles=str(tmp_path / "none.json"),

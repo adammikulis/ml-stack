@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import ml_stack.bench as bench
 import ml_stack.bench.history as bh
 
 # A day in the invented company's life: four measurements, in the order they were started.
@@ -24,6 +25,11 @@ KILLED = f"{DAY}T12:00:00"          # a run stopped ten minutes in
 CRASHED = f"{DAY}T13:00:00"         # a drafts run that raised two minutes in
 RUNNING = f"{DAY}T14:00:00"         # a sweep still going
 NOW = f"{DAY}T14:30:00"             # when the test looks
+
+
+def history_cmd(argv):
+    """``ml-stack-bench history ARGS``, parsed and dispatched as the command is."""
+    return bench.main(["history", *argv])
 
 
 def _epoch(iso: str) -> float:
@@ -140,7 +146,7 @@ def test_no_logs_directory_is_an_empty_history(tmp_path: Path):
 
 def test_table_has_the_header_a_row_per_log_and_the_totals(day: Path, monkeypatch, capsys):
     monkeypatch.setattr(bh, "_now", lambda: _epoch(NOW))
-    assert bh.main(["--home", str(day)]) == 0
+    assert history_cmd(["--home", str(day)]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].split() == ["started", "sub", "model/label", "est", "actual", "exit", "kept"]
     assert len(lines) == 1 + 4 + 1
@@ -161,27 +167,27 @@ def test_table_has_the_header_a_row_per_log_and_the_totals(day: Path, monkeypatc
 def test_since_narrows_to_today_a_span_or_a_date(day: Path, monkeypatch, capsys):
     monkeypatch.setattr(bh, "_now", lambda: _epoch(NOW))
 
-    assert bh.main(["--home", str(day), "--since", "today"]) == 0
+    assert history_cmd(["--home", str(day), "--since", "today"]) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("4 runs")
 
-    assert bh.main(["--home", str(day), "--since", "3h"]) == 0
+    assert history_cmd(["--home", str(day), "--since", "3h"]) == 0
     said = capsys.readouterr().out.splitlines()
     assert [row.split()[1] for row in said[1:-1]] == ["run", "drafts", "sweep"]
     assert said[-1].startswith("3 runs, 0.7 GPU hours, 0.2 hours produced no kept run")
 
-    assert bh.main(["--home", str(day), "--since", f"{DAY}T13:00"]) == 0
+    assert history_cmd(["--home", str(day), "--since", f"{DAY}T13:00"]) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("2 runs")
 
-    assert bh.main(["--home", str(day), "--since", "2026-09-02"]) == 0
+    assert history_cmd(["--home", str(day), "--since", "2026-09-02"]) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("0 runs, 0.0 GPU hours")
 
-    assert bh.main(["--home", str(day), "--since", "yesterday-ish"]) == 2
+    assert history_cmd(["--home", str(day), "--since", "yesterday-ish"]) == 2
     assert "--since takes today, 24h, 7d or a date" in capsys.readouterr().err
 
 
 def test_json_dumps_the_entries(day: Path, monkeypatch, capsys):
     monkeypatch.setattr(bh, "_now", lambda: _epoch(NOW))
-    assert bh.main(["--home", str(day), "--json", "--since", "24h"]) == 0
+    assert history_cmd(["--home", str(day), "--json", "--since", "24h"]) == 0
     got = json.loads(capsys.readouterr().out)
     assert [e["exit"][:7] for e in got] == ["done", "killed", "crashed", "running"]
     assert got[0]["kept"] == ["quill-terse"] and got[0]["estimate_s"] == 8100.0
@@ -190,14 +196,13 @@ def test_json_dumps_the_entries(day: Path, monkeypatch, capsys):
 
 
 def test_the_default_home_is_the_benchs_and_is_faked_here(tmp_path: Path, monkeypatch, capsys):
-
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))             # never ~/.ml-stack
-    assert bh.main([]) == 0
+    assert bench.main(["history"]) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("0 runs")
 
 
 def test_runs_as_a_module(day: Path):
-    done = subprocess.run([sys.executable, "-m", "ml_stack.bench.history",
+    done = subprocess.run([sys.executable, "-m", "ml_stack.bench", "history",
                            "--home", str(day), "--json"],
                           capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
@@ -216,8 +221,6 @@ def test_an_estimate_line_is_read_in_any_of_the_shapes_it_is_printed_in(text, se
 def test_ml_stack_bench_history_is_the_same_command(day: Path, monkeypatch, capsys):
     """Registered on the bench's parser: `ml-stack-bench history` dispatches to `run`, and
     its flags are this module's own (`add_arguments`), so the two cannot drift."""
-    import ml_stack.bench as bench
-
     monkeypatch.setattr(bh, "_now", lambda: _epoch(NOW))
     assert bench.main(["history", "--home", str(day), "--json", "--since", "24h"]) == 0
     got = json.loads(capsys.readouterr().out)

@@ -1,7 +1,7 @@
 """Standard benchmark sets -- GSM8K, MMLU-Pro, IFEval, HumanEval -- through
 lm-evaluation-harness against any OpenAI-compatible chat endpoint, one JSON per configuration.
 
-``python -m ml_stack.bench.standard --url URL --model NAME [--tasks ...]`` runs each set
+``ml-stack-bench standard --url URL --model NAME [--tasks ...]`` runs each set
 as its own `lm_eval.simple_evaluate` call under the bench's measuring lock, times it by wall
 clock, and writes::
 
@@ -16,7 +16,6 @@ import argparse
 import json
 import os
 import re
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,7 +25,7 @@ from typing import Any, Callable
 from ml_stack import bench
 from ml_stack.log import say, warn
 
-__all__ = ["SETS", "HarnessShape", "Set", "main", "plan", "standard", "summarise"]
+__all__ = ["SETS", "HarnessShape", "Set", "plan", "run", "standard", "summarise"]
 
 #: The one model type the harness has for a chat endpoint that takes strings, not tokens.
 MODEL_TYPE = "local-chat-completions"
@@ -229,11 +228,10 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(args: argparse.Namespace) -> int:
     """Run the sets under the measuring lock and write one JSON; 3 when refused the lock."""
     from ml_stack.lock import Busy, only_one
 
-    args = _parser().parse_args(argv)
     sets = [s.strip() for s in args.tasks.split(",") if s.strip()]
     unknown = [s for s in sets if s not in SETS]
     if unknown:
@@ -260,7 +258,3 @@ def main(argv: list[str] | None = None) -> int:
     out.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     say(f"wrote {out}")
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

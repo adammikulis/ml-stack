@@ -444,7 +444,7 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
     return keys
 
 
-def main(args: Any) -> int:
+def run(args: Any) -> int:
     """The ``speed`` subcommand after the parse."""
     from ml_stack.bench.backends import parse_on
     from ml_stack.bench.run import wants_smoke

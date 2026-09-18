@@ -548,7 +548,7 @@ def fits_named(fits: Iterable[Any], wanted: Sequence[str]) -> list[Any]:
     return [f for f in fits if any(w in str(f.model).lower() for w in low)]
 
 
-def main(args: Any) -> int:
+def run(args: Any) -> int:
     """``ml-stack-bench report``. Reads the store and the fit records; serves nothing."""
     from ml_stack.bench import extract as bench_extract
     from ml_stack.bench.ops import newest

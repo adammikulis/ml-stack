@@ -1,4 +1,4 @@
-"""``ml-stack-bench standard`` and ``animate`` hand their words to their own modules; the
+"""``ml-stack-bench standard`` and ``animate`` reach their own modules' `run`; the
 ``compare`` and ``speed`` lines take the shapes ``ml-stack-do`` writes.
 
 Every fixture here is invented. Nothing reads a real store, a real graph, or a real server.
@@ -13,29 +13,29 @@ import pytest
 from ml_stack.bench import _parser
 
 
-def test_standard_and_animate_hand_their_words_to_their_own_mains(monkeypatch):
+def test_standard_and_animate_reach_their_own_run(monkeypatch):
     import ml_stack.bench as bench
     from ml_stack.bench import animate, standard
 
     seen = {}
-    monkeypatch.setattr(standard, "main", lambda argv: seen.setdefault("standard", list(argv)) and 0)
-    monkeypatch.setattr(animate, "main", lambda argv: seen.setdefault("animate", list(argv)) and 0)
+    monkeypatch.setattr(standard, "run", lambda args: seen.setdefault("standard", args) and 0)
+    monkeypatch.setattr(animate, "run", lambda args: seen.setdefault("animate", args) and 0)
     assert bench._main(["standard", "--url", "http://127.0.0.1:1/v1/chat/completions",
                         "--model", "quince-2b", "--limit", "10", "--dry-run"]) == 0
-    assert seen["standard"] == ["--url", "http://127.0.0.1:1/v1/chat/completions",
-                                "--model", "quince-2b", "--limit", "10", "--dry-run"]
+    assert (seen["standard"].url, seen["standard"].model) == (
+        "http://127.0.0.1:1/v1/chat/completions", "quince-2b")
+    assert seen["standard"].limit == 10 and seen["standard"].dry_run
     assert bench._main(["animate", "compare.json", "--out", "compare.mp4", "--dry-run"]) == 0
-    assert seen["animate"] == ["compare.json", "--out", "compare.mp4", "--dry-run"]
+    assert seen["animate"].comparison == "compare.json"
+    assert seen["animate"].out == "compare.mp4" and seen["animate"].dry_run
 
 
 def test_standard_and_animate_are_not_measuring_commands_here():
     """`standard` takes the measuring lock itself and `animate` needs none; neither is sent
     through this parser's lock, its self-check or its estimate."""
     from ml_stack.bench import MEASURING
-    from ml_stack.bench.run import HANDED_OVER
 
-    assert set(HANDED_OVER) == {"standard", "animate"}
-    assert not set(HANDED_OVER) & set(MEASURING)
+    assert not {"standard", "animate"} & set(MEASURING)
 
 
 def test_the_bench_parser_knows_the_flags_standard_and_animate_take():

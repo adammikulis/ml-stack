@@ -261,7 +261,7 @@ def newest_labels(kept: Sequence[Mapping[str, Any]], n: int) -> list[str]:
     return sorted(seen, key=lambda label: seen[label], reverse=True)[:max(0, n)]
 
 
-def main(args: Any) -> int:
+def run(args: Any) -> int:
     kept = bench._kept(args.kept)
     labels = [*(getattr(args, "labels_given", None) or []),
               *[w.strip() for w in str(args.labels or "").split(",") if w.strip()]]

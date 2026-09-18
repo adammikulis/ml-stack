@@ -44,7 +44,7 @@ from ml_stack.command import Group
 from ml_stack.log import say, warn
 from ml_stack.serve.profile import ASK
 
-__all__ = ["COMMANDS", "HANDED_OVER", "main"]
+__all__ = ["COMMANDS", "main"]
 
 # allow_abbrev=False on every parser here: a flag that is documented but not defined must
 # be refused by name, not bound by prefix to whichever neighbour shares its first letters
@@ -52,11 +52,6 @@ __all__ = ["COMMANDS", "HANDED_OVER", "main"]
 COMMANDS = Group("ml-stack-bench",
                  "Time a set of questions through a graph, and compare two runs.",
                  allow_abbrev=False)
-
-# The subcommands whose module has a `main(argv)` of its own: `ml-stack-bench NAME ARGS`
-# hands ARGS to it as they were typed. `standard` takes the measuring lock itself, so
-# neither is a MEASURING command here, and neither goes through this parser's lock.
-HANDED_OVER = ("standard", "animate")
 
 
 class _NotIdle(Exception):
@@ -72,12 +67,6 @@ def _parser() -> argparse.ArgumentParser:
     """The command line of ``ml-stack-bench``, built once per call and shared with `detach`,
     which needs a label out of an argv before handing it to the child."""
     return COMMANDS.parser()
-
-
-def _after(argv: Sequence[str], cmd: str) -> list[str]:
-    """The words after ``cmd`` on ``argv``: what a handed-over module's main is given."""
-    words = list(argv)
-    return words[words.index(cmd) + 1:] if cmd in words else []
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -453,10 +442,10 @@ def cmd_sweep(args: Any) -> int:
 
 
 COMMANDS.borrow(lambda sub: _module("speed").add_arguments(sub),
-                lambda args: _module("speed").main(args),
+                lambda args: _module("speed").run(args),
                 options=lambda: (*options.measuring_options(), *options.checking()))
 COMMANDS.borrow(lambda sub: _module("extract").add_arguments(sub),
-                lambda args: _module("extract").main(args),
+                lambda args: _module("extract").run(args),
                 options=options.checking)
 
 
@@ -529,7 +518,7 @@ def cmd_show(args: Any) -> int:
                        "memory it wants, and what to serve",
                   options=options.report_options, allow_abbrev=False)
 def cmd_report(args: Any) -> int:
-    from ml_stack.bench.report import main as reporting
+    from ml_stack.bench.report import run as reporting
 
     return reporting(args)
 
@@ -618,16 +607,10 @@ def cmd_queue(args: Any) -> int:
 
 
 COMMANDS.borrow(lambda sub: _module("comparison").add_arguments(sub),
-                lambda args: _module("comparison").main(args))
+                lambda args: _module("comparison").run(args))
 
 
-def _handed_over(args: Any) -> int:
-    """A subcommand whose module has a ``main(argv)`` of its own, given the words after it."""
-    return int(_module(args.cmd).main(
-        _after(list(getattr(args, "_argv", None) or []), args.cmd)))
-
-
-COMMANDS.add("standard", _handed_over,
+COMMANDS.add("standard", lambda args: int(_module("standard").run(args)),
              help="the standard sets -- GSM8K, MMLU-Pro, IFEval, HumanEval -- through "
                   "lm-evaluation-harness against a chat endpoint, one JSON per "
                   "configuration; takes the measuring lock itself",
@@ -638,7 +621,7 @@ COMMANDS.add("tree", lambda args: int(_module("tree").run(args)),
                   "greedy decoding, and speed by drafter beside llama.cpp; takes the "
                   "measuring lock itself",
              options=options.tree_options, allow_abbrev=False)
-COMMANDS.add("animate", _handed_over,
+COMMANDS.add("animate", lambda args: int(_module("animate").run(args)),
              help="a comparison document as an animated graphic, with manim",
              options=options.animate_options, allow_abbrev=False)
 
@@ -689,8 +672,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # every subcommand there is, so a *value* that happens to read like one -- `report
     # --model run` -- is not mistaken for the command and sent through the lock
-    known = {*MEASURING, *HANDED_OVER, "show", "report", "prepare", "forget", "status",
-             "tail", "stop", "wait", "history", "compare"}
+    # `standard` takes the measuring lock itself, so it is not in MEASURING here.
+    known = {*MEASURING, "standard", "animate", "show", "report", "prepare", "forget",
+             "status", "tail", "stop", "wait", "history", "compare"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)

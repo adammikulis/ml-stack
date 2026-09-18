@@ -11,11 +11,9 @@ Nothing here imports manim until ``render`` is called; the tables are plain dict
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import re
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -313,23 +311,8 @@ def describe(doc: Mapping[str, Any], scenes: Sequence[Mapping[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def run(args: Any) -> int:
     """``ml-stack-bench animate COMPARISON.json --out FILE.mp4``."""
-    parser = argparse.ArgumentParser(
-        prog="ml-stack-bench animate",
-        description="Render a comparison document as an animated graphic with manim.")
-    parser.add_argument("comparison", help="the comparison document (JSON)")
-    parser.add_argument("--out", required=True, help="the .mp4 to write")
-    parser.add_argument("--png", help="also write the last frame as a still")
-    parser.add_argument("--quality", choices=sorted(QUALITY), default="h",
-                        help="l 480p15, m 720p30, h 1080p60 (default h)")
-    parser.add_argument("--seconds", type=float, default=50,
-                        help="the length of the whole cut (default 50)")
-    parser.add_argument("--only", help="comma-separated scene keys to render alone")
-    parser.add_argument("--work", help="where manim keeps its partial renders")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print the scene plan and write nothing")
-    args = parser.parse_args(argv)
     try:
         doc = load(args.comparison)
     except (OSError, ValueError, json.JSONDecodeError) as e:
@@ -349,7 +332,3 @@ def main(argv: Sequence[str] | None = None) -> int:
                    seconds=args.seconds, only=only, work=args.work)
     say(f"wrote {where}" + (f" and {args.png}" if args.png else ""))
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

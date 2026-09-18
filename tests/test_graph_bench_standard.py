@@ -17,6 +17,11 @@ from ml_stack.bench import standard
 URL = "http://127.0.0.1:1/v1/chat/completions"
 
 
+def standard_cmd(argv):
+    """``ml-stack-bench standard ARGS``, parsed and dispatched as the command is."""
+    return bench._main(["standard", *argv])
+
+
 def recorded(task: str, n: int, original: int, **metrics) -> dict:
     """One task's results in the harness's own shape (``results[task]["metric,filter"]``)."""
     return {
@@ -68,7 +73,7 @@ def test_dry_run_prints_the_harness_kwargs_and_writes_nothing(tmp_path, monkeypa
 
     monkeypatch.setattr(standard, "_evaluate", never)
     out = tmp_path / "quill.json"
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "gsm8k,ifeval",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "gsm8k,ifeval",
                           "--limit", "5", "--out", str(out), "--dry-run"]) == 0
     assert not out.exists()
     said = capsys.readouterr().out
@@ -109,7 +114,7 @@ def test_a_run_writes_one_json_in_the_comparison_shape(tmp_path, faked, monkeypa
     monkeypatch.setattr(standard, "_clock", lambda: next(ticks))
     out = tmp_path / "quill.json"
 
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "gsm8k,ifeval",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "gsm8k,ifeval",
                           "--limit", "5", "--out", str(out), "--label", "quill tight",
                           "--no-think"]) == 0
 
@@ -135,7 +140,7 @@ def test_no_limit_scores_the_whole_set_and_records_what_was_scored(tmp_path, fak
     script["ifeval"] = recorded("ifeval", 541, 541,
                                 **{"prompt_level_strict_acc,none": 0.84})
     out = tmp_path / "all.json"
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                           "--out", str(out)]) == 0
     doc = json.loads(out.read_text(encoding="utf-8"))
     assert doc["limit"] is None
@@ -163,7 +168,7 @@ def test_mmlu_pro_is_a_group_whose_n_is_the_sum_of_its_subjects(tmp_path, faked)
                       "mmlu_pro_math": {"original": 1351, "effective": 3}},
     }
     out = tmp_path / "m.json"
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "mmlu_pro",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "mmlu_pro",
                           "--limit", "3", "--out", str(out)]) == 0
     got = json.loads(out.read_text(encoding="utf-8"))["sets"]["mmlu_pro"]
     assert got["score"] == 0.5 and got["n"] == 6 and got["filter"] == "custom-extract"
@@ -178,19 +183,19 @@ def test_the_think_switch_rides_in_gen_kwargs_and_its_absence_is_the_server_defa
     base = ["--url", URL, "--model", "quill-2b", "--tasks", "ifeval", "--limit", "1"]
 
     out = tmp_path / "a.json"
-    assert standard.main([*base, "--out", str(out), "--no-think"]) == 0
+    assert standard_cmd([*base, "--out", str(out), "--no-think"]) == 0
     assert calls[-1]["gen_kwargs"]["chat_template_kwargs"] == {"enable_thinking": False}
     assert "think_end_token" not in calls[-1]["model_args"]
     assert json.loads(out.read_text())["think"] is False
 
     out = tmp_path / "b.json"
-    assert standard.main([*base, "--out", str(out), "--think"]) == 0
+    assert standard_cmd([*base, "--out", str(out), "--think"]) == 0
     assert calls[-1]["gen_kwargs"]["chat_template_kwargs"] == {"enable_thinking": True}
     assert calls[-1]["model_args"]["think_end_token"] == "</think>"
     assert json.loads(out.read_text())["think"] is True
 
     out = tmp_path / "c.json"
-    assert standard.main([*base, "--out", str(out)]) == 0
+    assert standard_cmd([*base, "--out", str(out)]) == 0
     assert "chat_template_kwargs" not in calls[-1]["gen_kwargs"]
     assert json.loads(out.read_text())["think"] == "server default"
 
@@ -209,7 +214,7 @@ def test_humaneval_confirms_unsafe_code_and_lets_code_eval_run(tmp_path, faked, 
 
     monkeypatch.setattr(standard, "_evaluate", evaluate)
     out = tmp_path / "h.json"
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "humaneval",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "humaneval",
                           "--out", str(out)]) == 0
     assert calls[0]["confirm_run_unsafe_code"] is True
     assert seen == ["1"]
@@ -228,12 +233,12 @@ def test_no_queue_is_refused_with_3_while_another_measurement_holds_the_lock(
     script["ifeval"] = recorded("ifeval", 1, 541, **{"prompt_level_strict_acc,none": 1.0})
     out = tmp_path / "held.json"
     with only_one(bench.home_dir() / "measuring.lock", wait=False):
-        assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
+        assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                               "--limit", "1", "--out", str(out), "--no-queue"]) == 3
     assert calls == [] and not out.exists()
     assert "measuring.lock" in capsys.readouterr().err
 
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                           "--limit", "1", "--out", str(out), "--no-queue"]) == 0
     assert out.exists() and len(calls) == 1
 
@@ -250,7 +255,7 @@ def test_the_lock_is_let_go_after_a_run_and_after_a_harness_failure(tmp_path, fa
     monkeypatch.setattr(standard, "_evaluate", failing)
     out = tmp_path / "f.json"
     with pytest.raises(RuntimeError):
-        standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
+        standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                        "--out", str(out)])
     assert not out.exists()
     with only_one(bench.home_dir() / "measuring.lock", wait=False):
@@ -261,7 +266,7 @@ def test_the_lock_is_let_go_after_a_run_and_after_a_harness_failure(tmp_path, fa
 
 def test_a_set_the_module_does_not_know_is_refused_by_name(tmp_path, faked, capsys):
     calls, _ = faked
-    code = standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "gsm8k,arc_easy",
+    code = standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "gsm8k,arc_easy",
                           "--out", str(tmp_path / "x.json")])
     assert code == 2 and calls == []
     err = capsys.readouterr().err
@@ -272,14 +277,14 @@ def test_a_metric_the_harness_did_not_report_is_a_failure_not_a_zero(tmp_path, f
     calls, script = faked
     script["ifeval"] = recorded("ifeval", 1, 541, **{"inst_level_loose_acc,none": 1.0})
     with pytest.raises(standard.HarnessShape, match="prompt_level_strict_acc,none"):
-        standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
+        standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                        "--limit", "1", "--out", str(tmp_path / "x.json")])
 
 
 def test_the_default_out_lives_under_the_bench_home(tmp_path, faked, capsys):
     calls, script = faked
     script["ifeval"] = recorded("ifeval", 1, 541, **{"prompt_level_strict_acc,none": 1.0})
-    assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
+    assert standard_cmd(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                           "--limit", "1", "--label", "Quill/tight"]) == 0
     written = list((bench.home_dir() / "standard").glob("*.json"))
     assert len(written) == 1 and written[0].name.startswith("quill-tight-")

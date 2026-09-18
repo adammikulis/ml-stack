@@ -17,7 +17,7 @@ kept are the ones in the store whose ``at`` falls between its start and its end.
     ml-stack-bench history [--home PATH] [--kept PATH] [--since WHEN] [--json]
 
 `add_arguments` is what the bench's parser hosts the subcommand with, and `run` is what it
-dispatches to; `main` is the same two for ``python -m ml_stack.bench.history``.
+dispatches to.
 """
 from __future__ import annotations
 
@@ -260,8 +260,7 @@ def table(entries: Sequence[Entry]) -> str:
 
 
 def add_arguments(ap: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """The subcommand's flags, on ``ap``: shared by `ml-stack-bench history` and this
-    module's own `main`, so the two cannot drift."""
+    """The subcommand's flags, on ``ap``."""
     ap.add_argument("--home", default=None,
                     help="the bench's home (default: ~/.ml-stack/bench); its logs/ and "
                          "measuring.json are read")
@@ -273,19 +272,8 @@ def add_arguments(ap: argparse.ArgumentParser) -> argparse.ArgumentParser:
     return ap
 
 
-def _parser() -> argparse.ArgumentParser:
-    return add_arguments(argparse.ArgumentParser(
-        prog="ml-stack-bench history", allow_abbrev=False,
-        description="Every measurement the bench's logs remember: when, how long, how it "
-                    "ended, the estimate beside the actual, and the runs it kept."))
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    return run(_parser().parse_args(list(argv) if argv is not None else None))
-
-
 def run(args: argparse.Namespace) -> int:
-    """`main` after the parse: what `ml-stack-bench history` dispatches to."""
+    """What `ml-stack-bench history` dispatches to."""
     if args.home is None:
         from ml_stack.bench import home_dir
         home = home_dir()
@@ -304,7 +292,3 @@ def run(args: argparse.Namespace) -> int:
     else:
         say(table(entries))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

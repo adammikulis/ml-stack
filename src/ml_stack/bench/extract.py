@@ -50,10 +50,10 @@ __all__ = [
     "detail",
     "estimate",
     "extract_one",
-    "main",
     "measure",
     "only",
     "read_back",
+    "run",
     "save",
     "table",
 ]
@@ -468,7 +468,7 @@ def twice(client: Any, picked: Sequence[Mapping[str, Any]], graph: Mapping[str, 
                                                                  if k != "folded"}}
 
 
-def main(args: Any) -> int:
+def run(args: Any) -> int:
     """``ml-stack-bench extract``: sample, read, fold, score, keep, and print the table."""
     if len(args.serve) > 1:
         warn("error: --serve takes one model; a comparison is one run per model")
