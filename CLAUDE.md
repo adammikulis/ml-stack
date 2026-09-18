@@ -108,6 +108,22 @@ without being recorded, so a branch that lowers one runs `scripts/budgets --upda
 commits the file. `--update` refuses to raise a number. `scripts/budgets --show METRIC`
 lists the sites. `SKIP_BUDGETS=1` skips the pre-commit check.
 
+`budgets.json` also carries two things that are not ceilings, each named for its own
+direction. `floors-only-rise` holds `tests-collected`, the number of tests the suite
+collects: it may not *fall*, because ten spec tests once stopped being collected for a
+fortnight and the suite still said passed. `scripts/budgets` returns 1 when the count is
+under the floor or when any module failed to collect, and `--update` refuses to record a
+count taken while one did -- recording then bakes the loss in. The count is only comparable
+where every extra is installed, so on a machine missing one it says so rather than reporting
+a low number. `module-skips` counts the other way in: a skip *outside* a test function takes
+a whole file out of collection, which the floor cannot see coming.
+
+`ratchet` is the date and total the debt is measured from, and `RATCHET` at the top of
+`scripts/budgets` is the share it should fall by each month. The scoreboard prints what is
+due and whether the tree is on track. **It refuses nothing** -- a repo-wide debt must never
+block an unrelated branch, which is the pressure that gets gates gamed, and `entry-points`
+sitting at its ceiling is why a function was called `doctor_main` until somebody fixed it.
+
 `scripts/hooks/budgets-only-fall` closes the other door: a staged `budgets.json` whose
 numbers rose is refused whatever wrote it, and a metric dropped from the file counts as a
 rise, because the next `--update` puts it back at whatever the tree holds. An agent is
