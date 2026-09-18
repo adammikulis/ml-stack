@@ -31,7 +31,7 @@ dependencies = []
 privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
 # presidio over a transformers NER model rather than spaCy's own
 privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
-test = ["pytest>=9.1.1", "pytest-xdist>=3.8.0"]
+test = ["pytest>=9.1.1", "pytest-xdist>=3.8.0", "pyyaml>=6.0"]
 
 claude = ["claude-agent-sdk>=0.1"]
 arrays = ["numpy>=1.24"]

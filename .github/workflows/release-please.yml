@@ -15,12 +15,31 @@ jobs:
     outputs:
       released: ${{ steps.rp.outputs.release_created }}
       tag: ${{ steps.rp.outputs.tag_name }}
+      pr_branch: ${{ steps.pr.outputs.branch }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: rp
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - id: pr
+        env:
+          PR: ${{ steps.rp.outputs.pr }}
+        run: |
+          if [ -n "$PR" ]; then
+            printf 'branch=%s\n' "$(printf '%s' "$PR" | jq -r .headBranchName)" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The version bump is the one change on the release pull request that a test covers
+  # (tests/test_packaging.py reads version.txt against pyproject.toml), and a run on that
+  # pull request waits for approval, so the branch is tested from here.
+  release-pr:
+    needs: propose
+    if: needs.propose.outputs.pr_branch != ''
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.propose.outputs.pr_branch }}
 
   # A tag pushed by the action's own token starts no workflow, so the build is
   # called from here rather than waiting for refs/tags to fire release.yml.

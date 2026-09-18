@@ -413,6 +413,25 @@ returns the wrong thing on one platform, a missing branch, or a test that was ne
 written. Those are the work. Reporting them as findings, with the fix left undone, is
 handing back a list instead of a result.
 
+**Neither is something this repository does not have yet.** A dependency nobody has taken,
+a tool that is not installed, a setting nothing wires, a helper nobody wrote: add it and
+write the straightforward code. Downloading costs nothing. A test-only dependency is not
+bound by `dependencies = []`, which is a promise about what a *user* installs; put it in
+the `test` extra and in the line CI installs, and both are then true. Never write worse
+code to avoid adding something -- string-matching a file a parser would read, a hand-rolled
+version compare, a shape copied because importing the real one would mean a new name in
+`pyproject.toml`.
+
+Upgrade on the same terms. A package below its pin is the environment being wrong, not a
+version to code around: upgrade it, run the suite, and say what moved. `ml-stack-doctor`
+reports what is below its pin and `ml_stack.installed` holds the check.
+
+(Adam, 2026-09-18, after a test string-matched YAML rather than take pyyaml: "NEVER ACT
+LIKE EXISTING CODE IS A BLOCKER"; "upgrade whatever you need to, that is always the
+answer"; "never, ever deliberately not fix something ... unless there is a real reason".
+The parsed version of that test found a duplicate `with:` key in `ci.yml` on its first run,
+which the string-matching version passed.)
+
 Watch for the passive voice that turns a bug into weather: "the field is simply absent",
 "psutil isn't available there", "that platform doesn't expose it". Every one of those is
 a sentence about something you could have changed. If it is genuinely impossible, say why
