@@ -175,6 +175,13 @@ class Models:
         and a full path is needless disclosure."""
         return [m.public() for m in self.all()[:limit]]
 
+    def beacon(self, limit: int = 24) -> dict[str, Any]:
+        """The models for the beacon, and how many this machine holds. A peer reads the
+        ones past ``limit`` from ``/models``."""
+        held = self.all()
+        return {"models": [m.public() for m in held[:limit]],
+                "models_total": len(held)}
+
     # -- getting one ----------------------------------------------------
     def where(self, name: str, key: bytes, *, timeout_s: float = 2.0
               ) -> list[tuple[str, str, int]]:

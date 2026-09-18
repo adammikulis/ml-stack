@@ -225,7 +225,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         if not available["available"]:
             b.free = 0
         b.device = {**report(), "availability": available,
-                    "serving": serving.public(), "models": models.public()}
+                    "serving": serving.public(), **models.beacon()}
 
     def start_announcing() -> None:
         """Advertise on every cluster this machine is in, and stop on any it left."""

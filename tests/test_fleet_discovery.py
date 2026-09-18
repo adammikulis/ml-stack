@@ -32,6 +32,7 @@ from ml_stack.fleet.discovery import (
     create_cluster_key,
     derive_token,
     discover,
+    fit_beacon,
     load_cluster_key,
 )
 from ml_stack.fleet.remote import Peer, PeerError
@@ -447,6 +448,49 @@ def test_a_busy_daemon_stops_advertising_itself_as_idle(key, port):
 
     assert busy.free == 0, "the beacon still claims a free slot after the job started"
     assert busy.busy
+
+
+def test_a_machine_holding_hundreds_of_models_is_still_found(key, port):
+    """The models go on the beacon, and a beacon is one datagram. Past 65,507 bytes
+    `sendto` refuses it and the daemon is in no `ml-stack-peers ls` at all."""
+    held = [{"name": f"a-model-with-a-long-enough-name-{n:04d}.gguf", "size": n}
+            for n in range(900)]
+    beacon = Beacon(name="hoarder", port=8770,
+                    device={"models": held, "models_total": len(held)})
+    with Advertiser(beacon, key, port=port, interval_s=0.2):
+        found = discover(key, timeout_s=2.0, port=port)
+
+    peer = next((b for b in found if b.name == "hoarder"), None)
+    assert peer is not None, f"a machine with {len(held)} models vanished; saw {found}"
+    sent = peer.device["models"]
+    assert 0 < len(sent) < len(held), f"{len(sent)} of {len(held)} models sent"
+    assert peer.device["models_total"] == len(held), \
+        "the beacon does not say how many models it left off"
+
+
+def test_a_beacon_too_big_to_leave_the_machine_is_said_out_loud(key, port):
+    """Vanishing from the fleet with nothing written anywhere is the failure nobody can
+    diagnose: every other machine simply stops listing this one."""
+    from ml_stack import log
+    from ml_stack.fleet.discovery import MAX_DATAGRAM
+
+    lines: list[str] = []
+    beacon = Beacon(name="x" * (MAX_DATAGRAM + 1000), port=8770)
+    with log.to(lambda stream, text: lines.append(text)), \
+            Advertiser(beacon, key, port=port, interval_s=0.2) as adv:
+        discover(key, timeout_s=1.0, port=port)
+
+    assert adv.undelivered, "a beacon that was never sent was counted as sent"
+    assert adv.last_error, "nothing recorded why the beacon did not go out"
+    said = "".join(lines)
+    assert "not in the fleet" in said, said
+    assert "did not reach" in said, said
+
+
+def test_a_beacon_that_fits_is_left_exactly_as_it_is():
+    body = {"name": "small", "device": {"models": [{"name": "one.gguf", "size": 1}]}}
+    assert fit_beacon(body) == body
+    assert "models_total" not in body["device"]
 
 
 def test_a_refresh_that_raises_does_not_silence_the_beacon(key, port):

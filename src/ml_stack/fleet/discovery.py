@@ -21,6 +21,7 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.files import write_json
+from ml_stack.log import warn
 from ml_stack.platform import private_file
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
@@ -48,6 +49,11 @@ def default_port() -> int:
 
 PROTOCOL = 1
 MAX_SKEW_S = 60.0
+#: The most one UDP datagram carries.
+MAX_DATAGRAM = 65507
+#: What a beacon body may take. macOS refuses a datagram over ``net.inet.udp.maxdgram``
+#: -- 9216 by default -- with EMSGSIZE, well below what IP allows.
+BEACON_BUDGET = 8000
 _TOKEN_INFO = b"ml-stack-traind-api-token-v1"
 
 
@@ -248,6 +254,29 @@ def _canonical(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
+def fit_beacon(body: dict[str, Any], budget: int = BEACON_BUDGET) -> dict[str, Any]:
+    """The beacon body shortened until one datagram carries it.
+
+    ``device["models_total"]`` is how many models the machine holds whenever the list on
+    the beacon is shorter; a peer reads the rest from the daemon's ``/models``.
+    """
+    def over(device: dict[str, Any]) -> bool:
+        return len(_canonical({**body, "device": device})) > budget
+
+    device = dict(body.get("device") or {})
+    if not over(device):
+        return body
+    models = list(device.get("models") or [])
+    device["models_total"] = int(device.get("models_total") or len(models))
+    keep = len(models)
+    while keep and over({**device, "models": models[:keep]}):
+        keep //= 2
+    device["models"] = models[:keep]
+    if over(device):
+        device = {k: v for k, v in device.items() if not isinstance(v, (list, dict))}
+    return {**body, "device": device}
+
+
 def _sign(key: bytes, payload: dict[str, Any]) -> bytes:
     body = {k: v for k, v in payload.items() if k != "mac"}
     mac = hmac.new(key, _canonical(body), sha256).hexdigest()
@@ -419,6 +448,9 @@ class Advertiser:
         self._error: BaseException | None = None
         self._asked = threading.Event()
         self._state: dict[str, Any] = {}
+        self.undelivered = 0
+        self.last_error = ""
+        self._said: set[str] = set()
 
     # -- lifecycle --
     def start(self, *, wait_s: float = 2.0) -> "Advertiser":
@@ -459,7 +491,19 @@ class Advertiser:
     def _body(self) -> dict[str, Any]:
         b = self.beacon.public()
         b["hostname"] = b["hostname"] or socket.gethostname()
-        return b
+        return fit_beacon(b)
+
+    def _undelivered(self, addr: tuple[str, int], exc: OSError, size: int) -> None:
+        """Record a beacon that did not go out, and say so once per reason."""
+        reason = f"{type(exc).__name__}: {exc}"
+        self.undelivered += 1
+        self.last_error = reason
+        if reason in self._said:
+            return
+        self._said.add(reason)
+        warn(f"a {size}-byte beacon did not reach {addr[0]}:{addr[1]} ({reason}). "
+             f"Until one does, {self.beacon.name} is not in the fleet: the other "
+             "machines do not list it.")
 
     def _sample(self) -> None:
         """Run ``refresh`` and keep what it produced as the beacon to send."""
@@ -500,9 +544,11 @@ class Advertiser:
             msg = _verify(self.key, raw, kind="who")
             if msg is None:
                 continue
+            reply = self._payload("beacon", str(msg.get("nonce", "")))
             try:
-                sock.sendto(self._payload("beacon", str(msg.get("nonce", ""))), addr)
-            except OSError:
+                sock.sendto(reply, addr)
+            except OSError as exc:
+                self._undelivered(addr, exc, len(reply))
                 continue
             self._asked.set()
 
@@ -513,12 +559,16 @@ class Advertiser:
     def announce(self) -> None:
         """Push an unsolicited beacon. Safe to call at any time."""
         data = self._payload("beacon")
+        refused: list[tuple[tuple[str, int], OSError]] = []
+        destinations = _destinations(self.group, self.port)
         with _socket(broadcast=True) as s:
-            for dest in _destinations(self.group, self.port):
+            for dest in destinations:
                 try:
                     s.sendto(data, dest)
-                except OSError:
-                    continue
+                except OSError as exc:
+                    refused.append((dest, exc))
+        if len(refused) == len(destinations):
+            self._undelivered(*refused[0], len(data))
 
 
 def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
