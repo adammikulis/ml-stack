@@ -83,7 +83,7 @@ jobs:
         run: python -m pytest tests/ -q ${{ matrix.pytest }}
 
       # docs/FEATURES.md points at this as the proof each feature holds, and nothing else
-      # runs it. --offline leaves out the three checks that reach Hugging Face or PyPI.
+      # runs it. --offline leaves out the three checks that reach a host off this machine.
       - name: every claim in FEATURES.md
         if: matrix.pytest == '--slow' && matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: python docs/verify_release.py --offline
