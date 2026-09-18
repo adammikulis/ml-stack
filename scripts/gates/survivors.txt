@@ -1,0 +1,4 @@
+# state	site	mutation	note
+#
+# survivor: a mutation every test naming the function kept green.
+# equivalent: a mutation nothing can observe; the note says why.

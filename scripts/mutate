@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Mutate a sample of functions and report the ones no test noticed.
+
+A survivor is a mutation of live code that every test naming it kept green. The ledger at
+scripts/gates/survivors.txt holds the ones already known; a survivor that is not in it
+fails this command.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from gates import _mutation, mutation_survivors
+from gates._mutation import Target, Tree
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def dirt(root: Path) -> str:
+    """What git says about src, so a run that changed it can be told from one that did not."""
+    done = subprocess.run(["git", "status", "--porcelain", "--", "src"], cwd=root,
+                          capture_output=True, text=True, check=False)
+    return done.stdout
+
+
+def targets(root: Path, args: argparse.Namespace) -> list[Target]:
+    """The functions this run mutates."""
+    pool = _mutation.candidates(root)
+    if args.target:
+        named = {t.name(): t for t in pool}
+        missing = [name for name in args.target if name not in named]
+        if missing:
+            raise SystemExit(f"no such function: {', '.join(missing)}")
+        return [named[name] for name in args.target]
+    seed = args.seed or _mutation.head(root)
+    return _mutation.sample(pool, args.functions, seed)
+
+
+def ledger_lines(outcomes: list[_mutation.Outcome]) -> list[str]:
+    """One ledger row per survivor."""
+    return [f"survivor\t{o.mutant.target.name()}\t{o.mutant.name()}\t{' '.join(o.tests)}"
+            for o in outcomes if o.survived]
+
+
+def report(root: Path, outcomes: list[_mutation.Outcome], known: set[str]) -> int:
+    """Print every survivor and return 1 when one of them is new."""
+    survivors = [o for o in outcomes if o.survived]
+    print(f"\n{len(outcomes)} mutants run, {len(survivors)} survived")
+    fresh = []
+    for outcome in survivors:
+        mutant = outcome.mutant
+        mark = "" if f"{mutant.target.name()}\t{mutant.name()}" in known else "  NEW"
+        print(f"\n{mutant.target.path}:{mutant.lineno}  {mutant.target.qualname}{mark}")
+        print(f"    mutation: {mutant.name()}")
+        print(f"    green:    {' '.join(outcome.tests)}")
+        if not mark:
+            continue
+        fresh.append(outcome)
+    if not fresh:
+        return 0
+    print(f"\n{len(fresh)} survivor(s) not in {mutation_survivors.LEDGER}. Write a test that "
+          f"fails on the mutation. If the mutation cannot change what anyone observes, record "
+          f"it as equivalent with the reason:")
+    for line in ledger_lines(fresh):
+        print(f"    {line}")
+    return 1
+
+
+def verify(root: Path, tree: Tree, args: argparse.Namespace) -> int:
+    """Re-run every recorded survivor and name the ones the tests now catch."""
+    rows = [e for e in mutation_survivors.entries(root) if e.state == "survivor"]
+    pool = _mutation.candidates(root)
+    fixed = []
+    for entry in rows:
+        target = next((t for t in pool if t.name() == entry.site), None)
+        if target is None:
+            print(f"  {entry.site}: gone from the tree")
+            continue
+        kind, _, index = entry.mutation.partition(":")
+        source = (root / entry.path).read_text(encoding="utf-8")
+        wanted = [m for m in _mutation.mutants(source, target)
+                  if m.kind == kind and str(m.index) == index]
+        if not wanted:
+            print(f"  {entry.site}: {entry.mutation} no longer applies")
+            continue
+        tests = tuple(_mutation.covering_tests(root, target, args.tests))
+        tree.write(entry.path, wanted[0].source)
+        try:
+            survived, _ = tree.pytest(tests, args.timeout)
+        finally:
+            tree.restore(entry.path)
+        print(f"  {entry.site} {entry.mutation}: {'still survives' if survived else 'caught'}")
+        if not survived:
+            fixed.append(entry)
+    if fixed:
+        print(f"\n{len(fixed)} ledger row(s) the tests now catch. Take them out of "
+              f"{mutation_survivors.LEDGER} and run scripts/budgets --update.")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the campaign."""
+    parser = argparse.ArgumentParser(prog="scripts/mutate", description=__doc__)
+    parser.add_argument("--root", type=Path, default=ROOT, help="the tree to mutate")
+    parser.add_argument("--functions", type=int, default=8, help="how many to sample")
+    parser.add_argument("--mutations", type=int, default=2, help="mutations per function")
+    parser.add_argument("--tests", type=int, default=2, help="test files per mutation")
+    parser.add_argument("--timeout", type=float, default=300.0, help="seconds per test run")
+    parser.add_argument("--seed", default="", help="override the commit as the sample seed")
+    parser.add_argument("--target", action="append", help="path::qualname, repeatable")
+    parser.add_argument("--test", action="append",
+                        help="run these tests instead of the ones that name the function")
+    parser.add_argument("--verify", action="store_true", help="re-run the ledger instead")
+    args = parser.parse_args(argv)
+
+    root = args.root.resolve()
+    before = dirt(root)
+    tree = Tree(root)
+    outcomes: list[_mutation.Outcome] = []
+    code = 0
+    try:
+        if not tree.imports_the_copy():
+            print("the copy's ml_stack is not what a test run imports", file=sys.stderr)
+            code = 2
+        elif args.verify:
+            code = verify(root, tree, args)
+        else:
+            chosen = targets(root, args)
+            print(f"{len(chosen)} function(s), seed {args.seed or _mutation.head(root)}")
+            shape = {"say": print, "timeout": args.timeout, "tests": args.tests,
+                     "mutations": args.mutations, "only": tuple(args.test or ())}
+            outcomes = _mutation.campaign(tree, root, chosen, shape)
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr)
+        code = 130
+    finally:
+        tree.close()
+    if dirt(root) != before:
+        print("the tree under mutation changed; git status differs", file=sys.stderr)
+        return 2
+    if code or args.verify:
+        return code
+    known = {f"{e.site}\t{e.mutation}" for e in mutation_survivors.entries(root)}
+    return report(root, outcomes, known)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
