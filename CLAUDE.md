@@ -480,8 +480,12 @@ A problem you found and did not fix is only worth raising if you are **actually 
 you need a decision only the owner can make, you need hardware or an account you do not
 have, or fixing it would go outside what was asked. Say which of those it is, in one line.
 
-**If it is a decision, ask it.** In the same message, as one question with the two or three
-options and what each costs -- not a paragraph describing that a decision exists. "That's
+**Say it short.** A few lines, the result or the question first, findings as a list. Prose
+that has to be mined for its content is work handed back. (Adam, 2026-09-18: "no more
+parsing through endless prose".)
+
+**If it is a decision, ask it.** Through the ask/answer tool, in the same message, as one question with
+the two or three options and what each costs -- not a paragraph describing that a decision exists. "That's
 your call", "I'd want your view" and "let me know how you want to proceed" are deferring
 dressed as deference. The test: if you cannot write it as one question with options, it is
 not a decision, it is a judgement that is yours -- make it and say what you chose. (Adam,
