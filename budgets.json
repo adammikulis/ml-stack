@@ -12,6 +12,7 @@
   "long-docstrings": 97,
   "long-functions": 12,
   "module-skips": 31,
+  "mutation-survivors": 7,
   "print-calls": 0,
   "process-scans": 5,
   "pyright-errors": 1,

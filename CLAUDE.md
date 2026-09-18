@@ -149,6 +149,18 @@ written.
 `tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
 that quietly tightens is caught.
 
+`scripts/mutate` samples functions out of `src/ml_stack`, changes one thing each -- a
+flipped comparison, a swapped `and`, a negated or dropped branch, a constant return, an
+emptied body -- and runs the test files that name the module. A mutation the tests keep
+green is a survivor: those tests do not read what the function answers. It works in a copy
+of the tree made from `git ls-files`, so nothing is written where it read. About eight
+minutes for ten functions and two mutations each, seeded by the commit, so a given commit
+samples the same functions every time. `scripts/gates/survivors.txt` holds the survivors
+already found, `mutation-survivors` counts the rows whose function is still in the tree,
+and `scripts/mutate --verify` re-runs every row and says which the tests now catch. A
+mutation that cannot change what anyone observes is recorded as `equivalent` with the
+reason.
+
 `pyproject.toml` selects ruff's rules and pyright's checks, and `scripts/gates/` budgets
 both: `ruff-blind-except`, `ruff-bugbear`, `ruff-security`, `ruff-other`, `pyright-errors`.
 Neither tool is a dependency, so a checker that cannot find its tool prints why and its
