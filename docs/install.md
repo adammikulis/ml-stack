@@ -85,6 +85,11 @@ Past the install, every step is an ml-stack command rather than shell -- `ml-sta
 Each download holds the app and `ml-stack-headless`, for a machine with no screen — the
 same daemon, serving the interface to a browser on your network.
 
+On macOS the graph store needs **macOS 15 or newer**: its engine publishes wheels from that
+release on, so an older Mac has none to install and tries to compile it instead.
+`python -m ml_stack.installed` names it, and so does the installer's own `what came with it`
+step. Everything else runs on macOS 13 and 14.
+
 ![Setting up a machine](images/setup.jpg)
 
 Do the same on every machine you want to train with, typing the same passphrase. They
