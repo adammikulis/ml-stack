@@ -1054,6 +1054,21 @@ class TestTheBenchOnThePage:
         assert "ml-stack-bench sweep --serve models/beacon.gguf" in state["text"]
         assert str(os.getpid()) in state["text"]
 
+    def test_an_install_without_the_bench_says_so_rather_than_breaking_the_page(
+            self, tmp_path, monkeypatch):
+        """A device-tier install has no `ml_stack.bench`. The page still wants the three
+        keys, so the import failure is reported in the same shape as an answer."""
+        import sys
+
+        for name in ("ml_stack.bench.underway", "ml_stack.bench.progress"):
+            monkeypatch.setitem(sys.modules, name, None)
+        state = self._ui(tmp_path).bench_state()
+
+        assert sorted(state) == ["available", "measuring", "text"]
+        assert state["available"] is False
+        assert state["measuring"] is None
+        assert state["text"].startswith("the bench is not installed here: ")
+
     def test_the_fleet_view_carries_the_same_bench_state(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
         ui = self._ui(tmp_path)
