@@ -44,13 +44,6 @@ capability; every line is something that already exists not being what it says.
   to PyPI -- `release.yml` attaches wheels to a GitHub release and stops. Register the name
   and add a trusted-publishing job, or take the line out of all three places. A first
   reader following the README hits this in the first minute.
-- [ ] **A zero-extras install dies on `import numpy`, which contradicts the no-dependencies
-  claim.** `pyproject.toml` says `dependencies = []`, but numpy is a module-level import in
-  `graph/topology.py` and `vision/geometry.py`, and `graph/answers.py` reaches the second. On a
-  bare interpreter `ml-stack-setup`, `ml-stack-doctor`, `ml-stack-serve`, `ml-stack-ingest`
-  and `fleet join` all end in `ModuleNotFoundError: numpy`. `install.sh` only survives it
-  because its `EXTRAS` pull numpy in through matplotlib. Either numpy is a dependency or
-  the two imports are deferred behind a message naming the extra.
 - [ ] **Neither `ml-stack-setup` nor `ml-stack-doctor` checks the things that would say
   whether an installed machine actually works.** `ml-stack-setup` (`look()` in `setup.py`)
   is now the machine check -- memory, the llama-server binary, models on disk, speech
@@ -69,22 +62,6 @@ capability; every line is something that already exists not being what it says.
   Windows-specific behaviour was written against a faked `platform.system()` on a Mac.
   `install.sh` also still gates the unsloth fork build on `CHOSEN_BUILD`, which nothing
   assigns, and still hardcodes `~/.ml-stack/traind` where `ML_STACK_HOME` should decide.
-- [ ] **The offline headless install ships no extras.** The online path in
-  `packaging/install.sh` runs `pip install "ml-stack[$EXTRAS]"` with
-  `EXTRAS="store,hub,web,plot,graph"`; the offline path (`ML_STACK_OFFLINE_ZIP`) does
-  `pip install "$OFFLINE_ZIP"` with no extras at all, so a machine installed offline is
-  missing everything those extras pull in. What keeps it from crashing today is only that
-  `ml-stack-doctor` happens not to import `ml_stack.graph` -- a stale wheel that did reach
-  it died on `ModuleNotFoundError: numpy`. A local wheelhouse (`pip install
-  "$OFFLINE_ZIP[$EXTRAS]" --find-links <dir>`, or extras vendored into the offline zip)
-  would close it.
-- [ ] **Nothing checks that an installed environment's packages match what the extras
-  pin.** `tests/test_spec_decode.py` and `tests/test_spec_serve.py` both
-  `importorskip("mlx_lm.models.qwen3_5")`, added after both files failed at collection on
-  a machine whose `mlx-lm` predated that module -- ten tests that had silently stopped
-  running until a test happened to name the gap. Nothing else notices a stale dependency;
-  a check that the installed version of each extra's packages meets its pin (run by
-  `ml-stack-doctor` or in CI) would surface it before a test file has to.
 
 ### Not losing what it read
 - [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
@@ -98,20 +75,6 @@ capability; every line is something that already exists not being what it says.
   dies at node 3,000 of 9,700 prints `embedded 3000 node(s)` and every question over the
   rest of the store is answered by words alone, silently. Pass the log through, and have
   `ml-stack-store check` report vector coverage.
-
-### The beacon
-
-- [ ] **The device report carries the full `models` list inside a UDP datagram, and a
-  reply too big to send is silently dropped.** `Beacon._serve` in
-  `src/ml_stack/fleet/discovery.py` answers a `who` query with `sock.sendto(self._payload
-  ("beacon", ...), addr)` wrapped in `except OSError: continue`; the payload is
-  `self.beacon.public()`, which includes every model on the machine
-  (`fleet/autostart.py`: `"models": [{"name": n, "bytes": b} for n, b in self.models]`) --
-  25 entries and about 4 KB on this machine. UDP's datagram limit is 65,507 bytes, so a
-  machine holding a few hundred model files pushes the reply past it, `sendto` raises
-  `OSError`, and that daemon goes invisible on the network with nothing said. Either cap
-  or page what the beacon reports, or catch the specific failure and say it instead of
-  swallowing it.
 
 ### Text it was never licensed to keep
 - [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,
@@ -403,6 +366,23 @@ across `src/`.
 
 ### The code itself
 
+- [ ] **The hard 900-line file gate does not look at `tests/` at all.**
+  `scripts/gates/deep_files.py` sets `ROOTS = ("src/ml_stack",)`, so thirteen test files
+  are over the limit and invisible to the gate that refuses a source file at 901 lines:
+  `test_graph_bench.py` 4,828, `test_graph_ask.py` 2,383, `test_serve_fit.py` 1,574,
+  `test_ingest.py` 1,549, `test_graph_page.py` 1,403, `test_client.py` 1,340,
+  `test_serve.py` 1,102, `test_serve_cli.py` 1,077, `test_fleet_ui.py` 1,023,
+  `test_fleet_daemon.py` 1,002, `test_fleet_models.py` 969, `test_hub.py` 963,
+  `test_fleet_join.py` 936. Widen `ROOTS` to `tests/` and split all thirteen; the gate
+  takes no budget line, so this lands as one branch per file, not as a recorded number.
+  Held until 0.2.0 was cut (Adam, 2026-09-18) on sequencing alone -- a 4,828-line file is
+  not a one-branch job -- and nothing else.
+- [ ] **The `entry-points` budget is shaping a name.** It counts functions called `main`
+  in `src/ml_stack`, the budget is 30 and the tree holds 30, so `ml_stack/doctor.py` had
+  to keep `doctor_main` -- redundant in a module already called `doctor` -- because a
+  second `main` would have been a rise, and an agent may not record one. Drive
+  `entry-points` under 30 (it means `ml_stack.cli`'s dispatch and eight `bench/*` modules)
+  and the rename is free.
 - [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
   that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
   `graph/replies.py`, `graph/answers.py` and `graph/conversation.py`, and every test still
