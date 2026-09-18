@@ -32,21 +32,13 @@ capability; every line is something that already exists not being what it says.
 
 ### Getting it onto a machine that is not this one
 
-- [ ] **CI has been red on `main` since 2026-09-04, through four pushes.** `gh run list
-  --branch main` shows `ci` failing on 09-04, 09-05, 09-06 (twice) and 09-09; the one
-  failure is
-  `tests/test_serve.py::TestTheStartedProcess::test_a_server_that_exits_on_its_own_is_reaped
-  -- DID NOT RAISE ChildProcessError`, with 4,257 passing beside it. Head of `main` is an
-  attempted fix with no run against it. Either the reaper misses a process that exits
-  between the poll and the wait, or the test races it; find out which, because the reaper
-  is what stops a dead server holding a port.
-- [ ] **CI never runs on the development branch, and the release publishes whatever
-  built.** `.github/workflows/ci.yml` triggers on `main` only, so `0.2dev` -- 55 commits
-  ahead -- has never been tested by anything but a person's own machine, and the
-  release-please pull request's checks sit `action_required`. `release.yml`'s `publish`
-  job is `if: always()`, so a failed bundle still publishes. The workflow should trigger on the
-  development branch, the release pull request's checks should be approved, and `publish`
-  should need `bundle`.
+- [ ] **The release-please pull request's checks sit `action_required`, unapproved.**
+  `gh run list --branch release-please--branches--main--components--ml-stack` shows every
+  `ci` run queued against it stuck `action_required` from 09-03 through 09-09, so nothing
+  has ever actually validated the version-bump commit release-please queues to publish.
+  `ci.yml` now triggers on `main` and `*dev` branches, and `release.yml`'s `publish` job
+  now refuses when `needs.bundle.result == 'failure'`, so what is left is getting the
+  release pull request's own checks to run and be approved before it merges.
 - [ ] **`pip install ml-stack` is in the README, `docs/install.md` and every release page,
   and it 404s.** `https://pypi.org/pypi/ml-stack/json` returns 404; no workflow publishes
   to PyPI -- `release.yml` attaches wheels to a GitHub release and stops. Register the name
@@ -59,21 +51,40 @@ capability; every line is something that already exists not being what it says.
   and `fleet join` all end in `ModuleNotFoundError: numpy`. `install.sh` only survives it
   because its `EXTRAS` pull numpy in through matplotlib. Either numpy is a dependency or
   the two imports are deferred behind a message naming the extra.
-- [ ] **`ml-stack-doctor` checks a developer's checkout, and both installers run it as the
-  last screen a new machine sees.** `setup.py` hardcodes `~/Documents/repos/ml-stack` and
-  `~/ai_ceo`; on a fresh machine every finding is bad and the remedy offered is
-  `pip install -e` a directory that does not exist. It never checks the things that would
-  actually be wrong there: that the daemon answers, that the machine joined, that a GGUF is
-  on disk, that a store opens, that 8770 and 8771 are free. Make doctor about the installed
-  machine and put the checkout, hook and worktree checks behind `--checkouts`.
-- [ ] **Neither installer has ever been executed, and CI runs one OS and one Python.**
-  `tests/test_packaging_install.py` parses `install.sh` with `sh -n`, parses `install.ps1`
-  with pwsh, and greps both; nothing runs either. `ci.yml` is `ubuntu-latest` on 3.12 while
-  the classifiers claim 3.11, 3.12 and 3.13, and `docs/install.md` says outright that
-  everything Windows-specific was written against a faked `platform.system()` on a Mac.
-  `install.sh` also gates the unsloth fork build on `CHOSEN_BUILD`, which nothing assigns,
-  and hardcodes `~/.ml-stack/traind` where `ML_STACK_HOME` should decide. A macOS job, a
-  Windows job and a 3.11/3.13 matrix; then delete or wire `CHOSEN_BUILD`.
+- [ ] **Neither `ml-stack-setup` nor `ml-stack-doctor` checks the things that would say
+  whether an installed machine actually works.** `ml-stack-setup` (`look()` in `setup.py`)
+  is now the machine check -- memory, the llama-server binary, models on disk, speech
+  providers, commands -- and `ml-stack-doctor` (`look_checkouts()`) is now the
+  developer-checkout check on its own, run as the last screen both installers show; it no
+  longer reports a bad finding for `~/Documents/repos/ml-stack` or `~/ai_ceo` when they
+  do not exist (`repositories()` now only looks at directories that are actually there).
+  What neither command checks: that the daemon answers, that the machine joined the
+  fleet, that a GGUF is on disk, that a store opens, that 8770 and 8771 are free.
+- [ ] **`install.ps1` has never been executed, and CI has no Windows job.**
+  `tests/test_packaging_install_runs.py` now runs `install.sh --headless` end to end
+  against a scratch prefix with a locally built wheel, and `ci.yml`'s matrix now covers
+  `ubuntu-latest` on 3.11, 3.12 and 3.13 plus `macos-14` on 3.12 -- but there is still no
+  Windows job, and `install.ps1` is still only parsed (`tests/test_packaging_install.py`:
+  a pwsh syntax check and some greps), never run; `docs/install.md` still says its
+  Windows-specific behaviour was written against a faked `platform.system()` on a Mac.
+  `install.sh` also still gates the unsloth fork build on `CHOSEN_BUILD`, which nothing
+  assigns, and still hardcodes `~/.ml-stack/traind` where `ML_STACK_HOME` should decide.
+- [ ] **The offline headless install ships no extras.** The online path in
+  `packaging/install.sh` runs `pip install "ml-stack[$EXTRAS]"` with
+  `EXTRAS="store,hub,web,plot,graph"`; the offline path (`ML_STACK_OFFLINE_ZIP`) does
+  `pip install "$OFFLINE_ZIP"` with no extras at all, so a machine installed offline is
+  missing everything those extras pull in. What keeps it from crashing today is only that
+  `ml-stack-doctor` happens not to import `ml_stack.graph` -- a stale wheel that did reach
+  it died on `ModuleNotFoundError: numpy`. A local wheelhouse (`pip install
+  "$OFFLINE_ZIP[$EXTRAS]" --find-links <dir>`, or extras vendored into the offline zip)
+  would close it.
+- [ ] **Nothing checks that an installed environment's packages match what the extras
+  pin.** `tests/test_spec_decode.py` and `tests/test_spec_serve.py` both
+  `importorskip("mlx_lm.models.qwen3_5")`, added after both files failed at collection on
+  a machine whose `mlx-lm` predated that module -- ten tests that had silently stopped
+  running until a test happened to name the gap. Nothing else notices a stale dependency;
+  a check that the installed version of each extra's packages meets its pin (run by
+  `ml-stack-doctor` or in CI) would surface it before a test file has to.
 
 ### Not losing what it read
 - [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
@@ -87,6 +98,20 @@ capability; every line is something that already exists not being what it says.
   dies at node 3,000 of 9,700 prints `embedded 3000 node(s)` and every question over the
   rest of the store is answered by words alone, silently. Pass the log through, and have
   `ml-stack-store check` report vector coverage.
+
+### The beacon
+
+- [ ] **The device report carries the full `models` list inside a UDP datagram, and a
+  reply too big to send is silently dropped.** `Beacon._serve` in
+  `src/ml_stack/fleet/discovery.py` answers a `who` query with `sock.sendto(self._payload
+  ("beacon", ...), addr)` wrapped in `except OSError: continue`; the payload is
+  `self.beacon.public()`, which includes every model on the machine
+  (`fleet/autostart.py`: `"models": [{"name": n, "bytes": b} for n, b in self.models]`) --
+  25 entries and about 4 KB on this machine. UDP's datagram limit is 65,507 bytes, so a
+  machine holding a few hundred model files pushes the reply past it, `sendto` raises
+  `OSError`, and that daemon goes invisible on the network with nothing said. Either cap
+  or page what the beacon reports, or catch the specific failure and say it instead of
+  swallowing it.
 
 ### Text it was never licensed to keep
 - [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,
@@ -145,11 +170,6 @@ capability; every line is something that already exists not being what it says.
   old ones. The three-configuration comparison above is the first place it matters.
 
 
-- [ ] **No benchmark result belongs in a README.** Adam, 2026-09-10: "we shouldn't have
-  benchmark results in a readme". This repository's README is already clean; the rule is
-  written into `CLAUDE.md` under what a user reads, and what it means for the rest is
-  below: a measurement lives in a document that names its date, its command, its store and
-  its model, and prose points at that document rather than restating the figure.
 - [ ] **`docs/report-2026-09-02.md` was never regenerated after the pairing bug was fixed,
   and two shipped serving defaults were derived from it.** The report holds 136 speedup
   figures and was last written on 09-02; the fix to how a drafted run is paired with its
@@ -157,11 +177,6 @@ capability; every line is something that already exists not being what it says.
   of asking. `data/profiles.json` sets `spec_draft_max 2` for gemma-4 E2B and E4B from two
   of these rows. Re-run `ml-stack-bench report` over `runs.ladybug`, commit the regenerated
   file, and re-derive the profiles with `report --profile`.
-- [ ] **`bench/report.py` prints acceptance for runs that carried no draft head, and then
-  recommends serving them.** `docs/report-2026-09-02.md` has a `draft:none` row with 80%
-  acceptance and a 2.74x speedup, followed by a line telling the reader to serve it; a run
-  with no head cannot have an acceptance. The column is falling back to the label rather
-  than reading the recorded head. Read the head, and drop the rows that have none.
 - [ ] **Two documentation claims are not true as written.** `README.md` and
   `docs/FEATURES.md` say every feature has a check in `docs/verify_release.py`: there are
   83 bullets across 23 sections against 57 checks across 19 areas, and 16 sections have no
