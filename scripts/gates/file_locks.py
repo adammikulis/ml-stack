@@ -33,9 +33,9 @@ def find(root: Path) -> list[Finding]:
                 for alias in node.names:
                     if alias.name.split(".")[0] in MODULES:
                         out.append(Finding(where, node.lineno, f"import {alias.name}"))
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and node.module.split(".")[0] in MODULES:
-                    out.append(Finding(where, node.lineno, f"from {node.module}"))
+            elif (isinstance(node, ast.ImportFrom) and node.module
+                  and node.module.split(".")[0] in MODULES):
+                out.append(Finding(where, node.lineno, f"from {node.module}"))
         for node, name in calls(tree):
             if name.endswith("flock") or dotted(node.func).endswith("flock"):
                 out.append(Finding(where, node.lineno, "flock"))

@@ -63,9 +63,7 @@ def _bound_names(fn: ast.AST) -> set[str]:
             names.add(node.arg)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             names.add(node.id)
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            names.add(node.name)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        elif (isinstance(node, ast.ExceptHandler) and node.name) or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             names.update(node.names)
@@ -133,7 +131,7 @@ class _Normalise:
 
     def generic(self, node: ast.AST) -> None:
         for field, value in ast.iter_fields(node):
-            if field in SKIP_FIELDS or field == "name" and isinstance(value, str):
+            if field in SKIP_FIELDS or (field == "name" and isinstance(value, str)):
                 continue
             if isinstance(value, list):
                 self.out.append(f"[{len(value)}]")

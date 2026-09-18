@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 SKIP_DIRS = {
@@ -20,7 +20,7 @@ SKIP_DIRS = {
 }
 
 
-@lru_cache(maxsize=None)
+@cache
 def python_files(root: Path, roots: tuple[str, ...]) -> tuple[Path, ...]:
     """Every .py file under the given repo-relative directories."""
     out: list[Path] = []
@@ -46,7 +46,7 @@ def rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-@lru_cache(maxsize=None)
+@cache
 def read(path: Path) -> str:
     """The file's text, empty if it cannot be decoded."""
     try:
@@ -55,7 +55,7 @@ def read(path: Path) -> str:
         return ""
 
 
-@lru_cache(maxsize=None)
+@cache
 def parse(path: Path) -> ast.Module | None:
     """The file's syntax tree, or None if it does not parse."""
     source = read(path)
@@ -112,7 +112,7 @@ def qualify(name: str, bound: dict[str, str]) -> str:
     return f"{target}.{rest}" if rest else target
 
 
-@lru_cache(maxsize=None)
+@cache
 def calls(tree: ast.Module) -> tuple[tuple[ast.Call, str], ...]:
     """Every call in the tree with its qualified dotted name."""
     bound = import_map(tree)
