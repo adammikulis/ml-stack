@@ -32,7 +32,8 @@ SCRIPTS = ("ml-stack", "ml-stack-serve", "ml-stack-models", "ml-stack-setup",
 pytestmark = pytest.mark.slow
 
 # Parses install.ps1 and reads its syntax tree: every switch the header documents is in the
-# param block, and something assigns each of the four modes.
+# param block, something assigns each of the four modes, and every step after the install is
+# called rather than only defined.
 READS_THE_PS1 = r"""
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -49,6 +50,14 @@ $modes = @($ast.FindAll({
 }, $true) | ForEach-Object { $_.Right.Extent.Text.Trim('"') })
 foreach ($want in 'app', 'headless', 'dev', 'system') {
     if ($modes -notcontains $want) { "nothing sets the $want mode"; exit 1 }
+}
+$calls = @($ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.CommandAst]
+}, $true) | ForEach-Object { $_.GetCommandName() })
+foreach ($want in 'Show-Sizing', 'Build-Llama', 'Fetch-Models', 'Join-Fleet',
+                  'Show-WhatCameWithIt', 'Check-Over', 'Last-Screen', 'Install-Offline') {
+    if ($calls -notcontains $want) { "nothing calls $want"; exit 1 }
 }
 """
 
@@ -207,7 +216,7 @@ def test_the_windows_installer_falls_back_to_ml_stack_alone_without_the_wheels(t
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not on this machine")
-def test_the_windows_installer_parses_and_offers_every_mode():
+def test_the_windows_installer_parses_and_offers_every_mode_and_step():
     done = subprocess.run(["pwsh", "-NoProfile", "-Command", READS_THE_PS1],
                           capture_output=True, text=True, timeout=120,
                           env={**os.environ,
