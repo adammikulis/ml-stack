@@ -226,7 +226,7 @@ def remember_turn(store: Any, *, thread: str, role: str, text: str,
                 "RETURN 1 AS ok", {"t": turn.id, "n": str(node_id), "how": str(how)})
             if done:
                 kept.setdefault(how, []).append(str(node_id))
-    turn.drew = kept
+    turn.drew = {how: sorted(ids) for how, ids in sorted(kept.items())}
     if vector is not None:
         store.set_embedding(turn.id, vector, model=_tag(turn.thread))
     return turn
@@ -277,12 +277,16 @@ def follow(store: Any, thread: str, *, limit: int = 0, working: bool = True,
 
 
 def _drew_for(store: Any, ids: Sequence[str]) -> dict[str, dict[str, list[str]]]:
-    """What each of those turns drew on, in one query rather than one per turn."""
+    """What each of those turns drew on, in one query rather than one per turn.
+
+    Relations and ids come back sorted.
+    """
     if not ids:
         return {}
     rows = _rows(
         store, "MATCH (t:Turn)-[d:Drew]->(n:Node) WHERE list_contains($ids, t.id) "
-        "RETURN t.id AS turn, d.how AS how, n.id AS node", {"ids": [str(i) for i in ids]})
+        "RETURN t.id AS turn, d.how AS how, n.id AS node ORDER BY turn, how, node",
+        {"ids": [str(i) for i in ids]})
     out: dict[str, dict[str, list[str]]] = {}
     for row in rows:
         out.setdefault(str(row["turn"]), {}).setdefault(str(row["how"]), []).append(
@@ -315,7 +319,7 @@ def of_node(store: Any, node_id: str, *, how: Iterable[str] = ()) -> list[Turn]:
         store, "MATCH (t:Turn)-[d:Drew]->(n:Node {id:$n}) "
         "WHERE size($how) = 0 OR list_contains($how, d.how) "
         "RETURN DISTINCT t.id AS id, t.thread AS thread, t.seq AS seq, t.at AS at, "
-        "t.role AS role, t.text AS text, t.meta AS meta ORDER BY at DESC, seq DESC",
+        "t.role AS role, t.text AS text, t.meta AS meta ORDER BY at DESC, seq DESC, id",
         {"n": str(node_id), "how": wanted})
     return [_read(r) for r in rows]
 
@@ -324,7 +328,7 @@ def threads(store: Any) -> list[dict[str, Any]]:
     """Every conversation held, newest first: its name, how long, and when it was last said to."""
     rows = _rows(
         store, "MATCH (t:Turn) RETURN t.thread AS thread, count(t) AS turns, max(t.at) AS last "
-        "ORDER BY last DESC")
+        "ORDER BY last DESC, thread")
     return [{"thread": str(r["thread"]), "turns": int(r["turns"]), "last": str(r["last"])}
             for r in rows]
 

@@ -257,7 +257,7 @@ def test_a_thread_is_remembered_and_read_back_with_each_answers_steps(served):
     # without `working` the turns come back as plain words; with it, what each drew on
     assert answer["drew"] == {}
     _, _, working = call(url + "/thread/c1?working=1")
-    assert working["turns"][1]["drew"] == {"found": ["topic:surveying", "person:iris"],
+    assert working["turns"][1]["drew"] == {"found": ["person:iris", "topic:surveying"],
                                            "read": ["person:iris"], "shown": ["person:iris"]}
     with GraphStore(handler.store_path, read_only=True) as store:
         assert [t.role for t in follow(store, "c1")] == ["user", "assistant"]
@@ -420,8 +420,8 @@ def test_history_carries_the_summary_and_the_recalled_turns_ahead_of_the_window(
         assert last["turns"] == [{"role": "user", "content": "what else?"},
                                  {"role": "assistant", "content": "Iris surveys land."}]
         assert last["summary"].role == SUMMARY
-        assert last["summary"].text == "So far: Iris surveys land. Rests on: topic:surveying, person:iris."
-        assert last["summary"].drew == {"shown": ["topic:surveying", "person:iris"]}
+        assert last["summary"].text == "So far: Iris surveys land. Rests on: person:iris, topic:surveying."
+        assert last["summary"].drew == {"shown": ["person:iris", "topic:surveying"]}
         # recalled from outside the window, never from inside it
         assert [t.text for t in last["recalled"]] == ["who surveys land?", "Iris surveys land."]
         assert [t.seq for t in last["recalled"]] == [1, 2]

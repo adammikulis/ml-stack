@@ -51,6 +51,18 @@ def test_drew_on_keeps_the_ways_apart_rather_than_merging_them():
     assert drew_on({"shown": ["person:otto"], "read": []}) == {"shown": ["person:otto"]}
 
 
+def test_what_a_turn_drew_on_comes_back_in_one_order(store):
+    """Sorted by id, whatever order the caller gave and whatever order the store scans in."""
+    written = remember_turn(
+        store, thread="t1", role="assistant", text="Otto and Iris both do.",
+        drew={"shown": ["person:otto", "person:iris"], "read": ["topic:surveying"]})
+    sorted_ids = {"read": ["topic:surveying"], "shown": ["person:iris", "person:otto"]}
+    assert written.drew == sorted_ids
+    assert list(written.drew) == ["read", "shown"]
+    assert follow(store, "t1")[0].drew == sorted_ids
+    assert turn_of(store, written.id).drew == sorted_ids
+
+
 def test_turns_chain_in_the_order_they_were_said(store):
     remember_turn(store, thread="t1", role="user", text="who surveys land?")
     remember_turn(store, thread="t1", role="assistant", text="Iris does.",
