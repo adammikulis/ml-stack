@@ -190,6 +190,21 @@ def test_a_person_raises_it_on_purpose_and_an_agent_still_cannot(checkout):
     assert "No agent raises a budget" in refused.stderr
 
 
+SECTIONS = {"floors-only-rise": {"tests-collected": 5000},
+            "ratchet": {"date": "2026-09-18", "total": 6}}
+
+
+def test_the_sections_ride_along_and_the_numbers_beside_them_are_still_read(checkout):
+    """budgets.json holds floors and a ratchet anchor as well as the budgets."""
+    kept = commit_with(checkout, {"broad-excepts": 1, "print-calls": 0, "walls": 4,
+                                  **SECTIONS}, CLAUDECODE="1")
+    assert (kept.returncode, kept.stderr) == (0, "")
+    done = commit_with(checkout, {"broad-excepts": 40, "print-calls": 0, "walls": 4,
+                                  **SECTIONS}, CLAUDECODE="1")
+    assert done.returncode == 1
+    assert "broad-excepts: 2 -> 40, up 38" in done.stderr
+
+
 def test_a_budgets_json_nobody_staged_is_not_this_hook_s_business(checkout):
     (checkout / "notes.txt").write_text("nothing to do with budgets\n", encoding="utf-8")
     git(checkout, "add", "notes.txt")
