@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP = ROOT / "app"
-EXTERNAL = ("pyinstaller", "psutil", "numpy")
+EXTERNAL = ("pyinstaller", "packaging", "psutil", "numpy")
 SIDECAR = "ml-stack-headless"
 
 
