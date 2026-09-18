@@ -659,7 +659,7 @@ def _():
 @check("Models", "the model list is what Hugging Face says is popular now")
 def _():
     """A list written into the code is out of date the day it ships."""
-    from ml_stack.fleet.models import SUGGESTED, popular
+    from ml_stack.fleet.catalogue import SUGGESTED, popular
 
     got = popular(free_gb=1024.0, ram_gb=1024.0, limit=12)
     assert len(got) >= 5, f"only {len(got)} came back"
@@ -682,11 +682,12 @@ def _():
     import urllib.error
     import urllib.request
 
-    from ml_stack.fleet.models import SUGGESTED, _resolve
+    from ml_stack.fleet.catalogue import SUGGESTED
+    from ml_stack.fleet.weights import resolve
 
     checked = []
     for pick in SUGGESTED:
-        req = urllib.request.Request(_resolve(pick.ref), method="HEAD",
+        req = urllib.request.Request(resolve(pick.ref), method="HEAD",
                                      headers={"User-Agent": "ml-stack"})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
