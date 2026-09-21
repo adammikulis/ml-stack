@@ -72,6 +72,14 @@ def test_the_whole_serving_becomes_the_arguments_serve_takes():
     }
 
 
+def test_a_draft_p_min_reaches_the_lease_only_beside_a_draft():
+    assert Serving(model="m", draft="h.gguf", draft_p_min=0.5).lease()["spec_p_min"] == 0.5
+    assert Serving(model="m", spec_type="draft-mtp", draft_p_min=0.4).lease()["spec_p_min"] == 0.4
+    assert "spec_p_min" not in Serving(model="m", draft_p_min=0.5).lease(), \
+        "a confidence floor with nothing to guess ahead with is nothing to serve"
+    assert "spec_p_min" not in Serving(model="m", draft="h.gguf").lease()
+
+
 def test_a_head_is_served_as_the_method_it_implements():
     """An EAGLE3 head served as draft-simple is not slower, it is wrong."""
     assert Serving(model="m", draft="eagle3-head.gguf").lease()["spec_type"] == "draft-eagle3"
