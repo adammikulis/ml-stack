@@ -844,11 +844,11 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
 
     with ingest._serving(args, say=lambda line: None) as client:
         assert client.base_url == "http://127.0.0.1:8099"
-        assert client.n_predict == 999 and client.timeout == 120.0
-        assert client.slot == 0, "one slot, and it is the one used"
-        assert client.asked_temperature == 0.1, "extraction's own default, not the " \
+        assert client.request.n_predict == 999 and client.transport.timeout == 120.0
+        assert client.request.slot == 0, "one slot, and it is the one used"
+        assert client.request.temperature == 0.1, "extraction's own default, not the " \
             "profile's answering temperature"
-        assert client.asked_top_k == 20, "and the command line laid its own over"
+        assert client.request.top_k == 20, "and the command line laid its own over"
 
     assert seen["model"] == "kestrel-8B-UD-Q4_K_XL.gguf"
     lease = seen["lease"]

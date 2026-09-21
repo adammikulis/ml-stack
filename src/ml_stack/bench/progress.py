@@ -29,7 +29,7 @@ from ml_stack.bench.underway import _last_line, measuring, measuring_file
 from ml_stack.log import say, warn
 from ml_stack.serve.ops import processes
 from ml_stack.serve.process import pid_exists
-from ml_stack.serve.serving import SAMPLERS
+from ml_stack.client.settings import SAMPLERS
 from ml_stack.units import human_bytes
 
 __all__ = ["beside_on_the_card", "note_beside_the_run", "results_since", "serving_lines",

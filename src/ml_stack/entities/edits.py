@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Collection, Iterable, Mapping
 
+from ml_stack.extraction import Checking, Prompting
+
 OPERATIONS = ("rename", "remove", "merge", "set_attr", "add_relation", "remove_relation")
 
 # op -> what target must be, what name must be, what value must be
@@ -98,9 +100,10 @@ def plan_edits(request: str, *, nodes: Any, edges: Any = (), client: Any,
     ])
     raw = client.extract(
         text, EDITS_SCHEMA,
-        instructions=instructions or EDIT_INSTRUCTIONS,
-        think=False, schema_name="graph_edits", n_predict=n_predict, tries=tries,
-        check=lambda obj: objections(obj, node_ids=node_ids, edge_ids=edge_ids),
+        prompting=Prompting(instructions=instructions or EDIT_INSTRUCTIONS,
+                            schema_name="graph_edits", n_predict=n_predict),
+        checking=Checking(tries=tries, check=lambda obj: objections(
+            obj, node_ids=node_ids, edge_ids=edge_ids)),
     )
     return validate_edits(raw, node_ids=node_ids, edge_ids=edge_ids)
 

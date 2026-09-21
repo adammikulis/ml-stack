@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack.extraction import Prompting
 __all__ = [
     "FAMILY",
     "ORG",
@@ -173,9 +174,9 @@ def read(client: Any, shape: Shape = ORG, *, text: str = "",
 
     messages = [_picture(text or asking, images)] if images else None
 
-    out = client.extract(text, schema_for(shape), instructions=asking,
-                         messages=messages, n_predict=n_predict,
-                         schema_name=shape.name.replace(" ", "_"))
+    out = client.extract(text, schema_for(shape), prompting=Prompting(
+        instructions=asking, messages=messages, n_predict=n_predict,
+        schema_name=shape.name.replace(" ", "_")))
     rows = out.get("entries")
     return [r for r in rows if isinstance(r, Mapping) and str(r.get("name") or "").strip()] \
         if isinstance(rows, list) else []

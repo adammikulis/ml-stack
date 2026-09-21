@@ -225,7 +225,7 @@ class Profile:
         from ml_stack.serve.serving import Talking
 
         return Talking(n_predict=n_predict, timeout=timeout, sampling=dict(self.sampling),
-                       spec_draft_max=self.spec_draft_max, spec_p_min=self.spec_p_min)
+                       spec_draft_max=self.spec_draft_max)
 
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
               n_predict: int = 16384, timeout: float = 300.0) -> Any:

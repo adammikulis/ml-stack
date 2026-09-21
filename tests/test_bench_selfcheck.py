@@ -20,13 +20,15 @@ from ml_stack.bench.selfcheck import (
     _scratch_world,
     selfcheck,
 )
+from ml_stack.client import Request, Transport
 
 # -- the fakes are strict -------------------------------------------------------------------------
 
 def test_the_scripted_model_takes_exactly_what_the_client_takes():
     """A fake with **kwargs is what let `tight` reach an 87G load. This one is bound
     against the real `Client.__init__`, so it refuses what the client refuses, by name."""
-    ScriptedModel("http://127.0.0.1:1", timeout=3.0, n_predict=16, temperature=0.0, top_k=4)
+    ScriptedModel("http://127.0.0.1:1", request=Request(n_predict=16, temperature=0.0, top_k=4),
+                  transport=Transport(timeout=3.0))
     with pytest.raises(TypeError, match="tight"):
         ScriptedModel("http://127.0.0.1:1", tight=True)
     with pytest.raises(TypeError, match="rich"):

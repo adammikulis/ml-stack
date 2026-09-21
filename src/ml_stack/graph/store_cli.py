@@ -103,9 +103,10 @@ def _gold(gold: str, base_url: str, fail_under: float) -> int:
     if not base_url:
         warn("--gold needs --base-url: a model already serving to answer the pairs")
         return 2
-    from ml_stack.client import Client
+    from ml_stack.client import Client, Request
 
-    scored = judge_gold(Client(base_url, n_predict=1024), load_gold(gold or None), log=print)
+    scored = judge_gold(Client(base_url, request=Request(n_predict=1024)), load_gold(gold or None),
+                        log=print)
     if fail_under and scored.accuracy < fail_under:
         warn(f"below the bar: {scored.accuracy:.0%} of {scored.total} against "
              f"{fail_under:.0%}")
@@ -180,9 +181,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "tidy":
             judge = None
             if args.base_url:
-                from ml_stack.client import Client
+                from ml_stack.client import Client, Request
 
-                judge = ModelJudge(Client(args.base_url, n_predict=1024))
+                judge = ModelJudge(Client(args.base_url, request=Request(n_predict=1024)))
             report = tidy(path, dry_run=not args.apply, written=written_from(args.written),
                           judge=judge, log=print, rejudge=args.rejudge)
             return 0 if report.sound else 1

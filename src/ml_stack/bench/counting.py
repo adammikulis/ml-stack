@@ -225,9 +225,9 @@ class Counting:
             # expires -- urllib closes the socket on the exception it raises, and llama.cpp's
             # server polls `is_connection_closed` while a non-streamed result is pending and
             # cancels the slot's tasks when it is, so the slot stops generating rather than
-            # finishing a reply nobody is waiting for. A client without a `timeout` of its
+            # finishing a reply nobody is waiting for. A client without a `transport` of its
             # own is only held to the deadline between calls.
-            if hasattr(self.client, "timeout"):
+            if hasattr(self.client, "transport"):
                 kw.setdefault("timeout", max(0.1, left))
         try:
             reply = self.client.chat(messages, **kw)

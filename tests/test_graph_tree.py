@@ -108,8 +108,9 @@ class Chat:
     def __init__(self, entries):
         self.entries, self.seen = entries, {}
 
-    def extract(self, text, schema, **kw):
-        self.seen = {"text": text, **kw}
+    def extract(self, text, schema, *, prompting=None, checking=None, cache=None):
+        self.seen = {"text": text, "instructions": prompting.instructions,
+                     "messages": prompting.messages}
         return {"entries": self.entries}
 
 

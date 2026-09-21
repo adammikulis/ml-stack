@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.client.chat import Client
+from ml_stack.client.settings import Request, Transport
 from ml_stack.http import ServerError, request_json
 from ml_stack.serve.backend import ServerFailed, ServerSpec
 from ml_stack.serve.events import Event, emit
@@ -140,17 +141,22 @@ def save_live(run: Escalating, live: list[tuple[int, int]]) -> dict[int, str]:
     return saved
 
 
+def _on_slot(run: Escalating, sid: int) -> Client:
+    """A client pinned to slot ``sid`` of ``run``'s server."""
+    return Client(run.base_url, request=Request(slot=sid), transport=Transport(timeout=run.wait))
+
+
 def _one_summary(run: Escalating, sid: int, prior: str) -> str:
     """The model's own summary of what slot ``sid`` holds."""
     if prior:
         # A raw continuation of the slot's own cached prompt: the shared prefix is a
         # cache hit, so this costs the generation and nothing about the reprocessing
         # the coordinator's cheap-summary case rests on.
-        return Client(run.base_url, slot=sid, timeout=run.wait).complete(
+        return _on_slot(run, sid).complete(
             prior + SUMMARY_SUFFIX, n_predict=512)
     # No prompt text to read (LLAMA_SERVER_SLOTS_DEBUG was not on for this server) --
     # the model is asked cold and told nothing.
-    reply = Client(run.base_url, slot=sid, timeout=run.wait).chat(
+    reply = _on_slot(run, sid).chat(
         [{"role": "user", "content": SUMMARY_PROMPT}], n_predict=512)
     return (getattr(reply, "content", "") or "").strip()
 
@@ -193,7 +199,7 @@ def restore(run: Escalating, live: list[tuple[int, int]], *, summaries: dict[int
         if sid in summaries:
             emit(run.on_event, "restoring", port=run.port, slot=sid, mode="summary")
             try:
-                Client(run.base_url, slot=sid, timeout=run.wait).complete(
+                _on_slot(run, sid).complete(
                     summaries[sid], n_predict=1)
             except Exception as exc:
                 raise ServerFailed(

@@ -9,13 +9,13 @@ overrides off the parsed line, and `with_card` puts a model's own card over a cl
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench._askings` -- so
 # anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
 from ml_stack.asking import Asking
-from ml_stack.bench.backends import _accepts
 from ml_stack.log import warn
 
 __all__ = ["REACH", "_asked", "_askings", "asking_from", "halves", "sampling_from",
@@ -198,8 +198,5 @@ def with_card(client: Any, args: Any) -> Any:
     if not asked:
         warn(f"note: {client.base_url} serves a model whose card names no sampler settings")
         return client
-    # the program and the model the client was built for ride along, when it was built
-    # for one: a card is a sampling, not a new server
-    kept = {name: getattr(client, name) for name in ("api", "model", "context")
-            if getattr(client, name, None) is not None and _accepts(type(client), name)}
-    return type(client)(client.base_url, **kept, **asked)
+    return type(client)(client.base_url, model=client.model, family=client.pinned_family,
+                        request=replace(client.request, **asked), transport=client.transport)

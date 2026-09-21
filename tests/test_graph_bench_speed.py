@@ -204,7 +204,7 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
     import ml_stack.bench as bench
     from ml_stack.bench import backends
 
-    client = _Ollama()
+    ollama = _Ollama()
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint",
@@ -212,9 +212,9 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
                                                   "served_by": client.served_by()})
     seen = {}
 
-    def fake_client_for(url, **kw):
-        seen.update(url=url, **kw)
-        return client
+    def fake_client_for(url, *, client=None, model=None, request=None, transport=None):
+        seen.update(url=url, request=request, transport=transport)
+        return ollama
 
     monkeypatch.setattr("ml_stack.bench.speed.client_for", fake_client_for)
     kept = tmp_path / "runs.ladybug"
@@ -223,7 +223,8 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
                         "--kept", str(kept), "--no-smoke", "--context", "8192"])
     assert code == 0
     assert seen["url"] == "ollama://127.0.0.1:11434/thornfell:125b-mlx"
-    assert seen["n_predict"] == 8 and seen["temperature"] == 0.0 and seen["context"] == 8192
+    asked = seen["request"]
+    assert asked.n_predict == 8 and asked.temperature == 0.0 and asked.context == 8192
     kept_runs = runs(kept)
     assert len(kept_runs) == 1 and kept_runs[0]["kind"] == KIND
     assert kept_runs[0]["label"] == "flash-ollama-speed"
@@ -301,9 +302,10 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
                          load_s=3.0, warmup_s=None)
 
     class Built(_Llama):
-        def __init__(self, base_url, **settings):
+        def __init__(self, base_url, *, model=None, family=None, request=None,
+                     transport=None):
             super().__init__()
-            self.settings = dict(settings)
+            self.request = request
             seen["clients"].append(self)
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
@@ -324,8 +326,8 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
     assert [r["label"] for r in got] == ["flash-nodraft-speed"]
     assert got[0]["server"]["load_s"] == 3.0 and got[0]["server"]["binary"]
     assert "draft_model" not in got[0]["server"]
-    assert seen["clients"][-1].settings.get("n_predict") == 8
-    assert seen["clients"][-1].settings.get("temperature") == 0.0
+    assert seen["clients"][-1].request.n_predict == 8
+    assert seen["clients"][-1].request.temperature == 0.0
     # and with the head, the label says nothing extra
     assert bench._main(["speed", "--serve", "tiny.gguf", "--serve-label", "flash",
                         "--prompts", "64", "--streams", "1", "--generate", "8",

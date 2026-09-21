@@ -11,7 +11,8 @@ import inspect
 import json
 
 import pytest
-from ml_stack.client import Client, Reply
+from ml_stack.client import Client, Reply, Request
+from ml_stack.extraction import Checking
 from ml_stack.serve import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.preflight import Report
 from ml_stack.testing import (
@@ -23,6 +24,7 @@ from ml_stack.testing import (
     FakeServe,
     ScriptedModel,
     Served,
+    Yielding,
     drift,
     fake_llama_binary,
     fake_llama_server,
@@ -43,7 +45,7 @@ def test_every_fake_mirrors_the_real_signature(label, fake, real):
 #: Fakes with nothing to diff. `FakeReport` is a `Report`, checked by ``isinstance``;
 #: `Served` is a value object; the rest stand in for a program rather than a callable, and
 #: are checked by driving the real clients at them below.
-NO_SIGNATURE = {"FakeReport", "Served", "FakeLlamaServer", "fake_binary",
+NO_SIGNATURE = {"FakeReport", "Served", "Yielding", "FakeLlamaServer", "fake_binary",
                 "fake_llama_binary", "fake_llama_server"}
 
 
@@ -133,7 +135,7 @@ def test_the_fake_client_refuses_what_the_real_one_refuses():
 
 
 def test_the_fake_client_samples_and_cards_as_the_real_one_shapes_them():
-    c = FakeClient("http://127.0.0.1:1/", top_k=40)
+    c = FakeClient("http://127.0.0.1:1/", request=Request(top_k=40))
     assert c.base_url == "http://127.0.0.1:1"
     assert c.sampling == {"temperature": 0.0, "top_k": 40}
     assert c.temperature == 0.0
@@ -170,7 +172,7 @@ def test_a_callable_script_is_asked_each_time_with_what_was_offered():
 def test_every_built_client_is_recorded_on_the_scripted_class_alone():
     One = FakeClient.scripted("one")
     Two = FakeClient.scripted("two")
-    a, b = One("http://127.0.0.1:1"), One("http://127.0.0.1:2", temperature=0.5)
+    a, b = One("http://127.0.0.1:1"), One("http://127.0.0.1:2", request=Request(temperature=0.5))
     assert One.built == [a, b]
     assert Two.built == []
     assert [x.base_url for x in One.built] == ["http://127.0.0.1:1", "http://127.0.0.1:2"]
@@ -181,12 +183,12 @@ def test_extract_answers_from_the_script_and_reports_objections():
     c = FakeClient.scripted([{"name": "Ada"}, {"name": ""}])()
     schema = {"type": "object", "properties": {"name": {"type": "string"}}}
     assert c.extract("Ada wrote it", schema) == {"name": "Ada"}
-    checked = c.extract("nobody wrote it", schema,
-                        check=lambda a: ["name is empty"] if not a["name"] else [])
+    checked = c.extract("nobody wrote it", schema, checking=Checking(
+        check=lambda a: ["name is empty"] if not a["name"] else []))
     assert checked == {"name": "", "_objections": ["name is empty"]}
     assert [call["method"] for call in c.calls] == ["extract", "extract"]
     with pytest.raises(ValueError, match="tries"):
-        c.extract("", schema, tries=0)
+        c.extract("", schema, checking=Checking(tries=0))
 
 
 def test_on_delta_receives_the_thinking_and_the_answer_as_whole_pieces():
@@ -246,7 +248,7 @@ def test_fake_serve_refuses_a_spec_keyword_the_real_one_would():
 
 
 def test_a_recording_fake_serve_keeps_every_lease_and_release():
-    serving = FakeServe(load_s=12.5, warmup_s=1.2, pid=7)
+    serving = FakeServe(yields=Yielding(load_s=12.5, warmup_s=1.2, pid=7))
     with serving("tiny.gguf", port=9, draft="head.gguf", timeout=30.0) as info:
         assert (info.load_s, info.warmup_s, info.pid) == (12.5, 1.2, 7)
         assert serving.released == []

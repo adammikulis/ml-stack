@@ -51,6 +51,7 @@ from unittest import mock
 # put over `preflight.Preflight` for the run it then makes
 from ml_stack.client.chat import Client as _RealClient
 from ml_stack.client.families import GENERIC
+from ml_stack.client.settings import Request, Transport
 from ml_stack.serve.preflight import Preflight as _RealPreflight
 from ml_stack.world import about
 
@@ -64,6 +65,15 @@ class SelfCheckFailed(RuntimeError):
 def _bind(base_url: str, settings: Mapping[str, Any]) -> None:
     """Raise the `TypeError` the real `Client` would for a keyword it does not take."""
     inspect.signature(_RealClient.__init__).bind(None, base_url, **settings)
+
+
+def _settled(fake: Any, settings: Mapping[str, Any]) -> None:
+    """Give ``fake`` the model, request, transport and sampling the real client would hold."""
+    fake.model = settings.get("model")
+    fake.pinned_family = settings.get("family")
+    fake.request = settings.get("request") or Request()
+    fake.transport = settings.get("transport") or Transport()
+    fake.sampling = fake.request.sampling()
 
 
 @dataclass
@@ -89,12 +99,7 @@ class ScriptedModel:
     def __init__(self, base_url: str = "http://127.0.0.1:8080", **settings: Any) -> None:
         _bind(base_url, settings)
         self.base_url = base_url
-        self.timeout = settings.get("timeout", 180.0)
-        # the speculative settings are the server's, not the sampler's; the real client
-        # keeps them out of `sampling` and so out of a run's identity
-        self.asked_spec_draft_max = settings.get("spec_draft_max")
-        self.sampling: dict[str, Any] = {k: v for k, v in settings.items()
-                                         if k not in ("spec_draft_max", "spec_p_min")}
+        _settled(self, settings)
         self.card: dict[str, Any] = {"temperature": 1.0, "top_k": 64}
         self.text = "compilers"
         self.seen: list[list[dict[str, Any]]] = []
@@ -127,11 +132,7 @@ class ScriptedReader:
     def __init__(self, base_url: str = "http://127.0.0.1:8080", **settings: Any) -> None:
         _bind(base_url, settings)
         self.base_url = base_url
-        self.timeout = settings.get("timeout", 180.0)
-        # the speculative settings are the server's, not the sampler's; the real client
-        # keeps them out of `sampling` and so out of a run's identity
-        self.sampling: dict[str, Any] = {k: v for k, v in settings.items()
-                                         if k not in ("spec_draft_max", "spec_p_min")}
+        _settled(self, settings)
         self.seen: list[list[dict[str, Any]]] = []
 
     def chat(self, messages: Sequence[Mapping[str, Any]], **_: Any) -> Any:

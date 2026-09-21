@@ -28,6 +28,7 @@ from typing import Any
 from ml_stack import bench, hub
 from ml_stack.bench.backends import client_for, describe, http_of, timings_of
 from ml_stack.bench.keep import read_back, save
+from ml_stack.client.settings import Request, Transport
 from ml_stack.client.tokens import CHARS_PER_TOKEN
 from ml_stack.log import say, warn
 
@@ -322,8 +323,6 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
     return one
 
 
-def _client_settings(args: Any, *, timeout: float) -> dict[str, Any]:
-    return {"timeout": float(timeout), "n_predict": int(args.generate), "temperature": 0.0}
 
 
 def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
@@ -339,9 +338,9 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
         label = f"{name}{getattr(args, 'label_suffix', '') or ''}-speed"
         if not _idle(http_of(url), args):
             return keys
-        settings = {**_client_settings(args, timeout=float(args.per_question)),
-                    **{k: v for k, v in sampling_from(args).items() if k != "n_predict"}}
-        client = client_for(url, context=context, **settings)
+        sampling = {"temperature": 0.0, **sampling_from(args), "n_predict": int(args.generate)}
+        client = client_for(url, request=Request(context=context, **sampling),
+                            transport=Transport(timeout=float(args.per_question)))
         say(f"\n{label} on {url}")
         if smoking_first:
             say("  smoke: one cell first")
@@ -412,8 +411,8 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
         run = swept(args, model, measured_run(args, model, head, heads, n),
                     context=per_slot * slots, port=args.serve_port,
                     head=head if n < len(heads) else None)
-        run = run.over(**{k: v for k, v in _client_settings(
-            args, timeout=float(args.per_question)).items()})
+        run = run.over(timeout=float(args.per_question), n_predict=int(args.generate),
+                       temperature=0.0)
         try:
             with up(run, binary=args.binary or "", name=label) as (server, held_up):
                 held_up.pop("baseline", None)

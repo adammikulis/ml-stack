@@ -28,6 +28,7 @@ import re
 import sys
 from typing import Any
 
+from ml_stack.client.settings import Request
 from ml_stack.http import request_json
 
 PLATFORM = sys.platform
@@ -37,19 +38,20 @@ _QUANT = re.compile(r"^(?:I?Q\d[A-Z0-9_]*|BF16|F16|F32|FP16|FP32)$")
 _NS_PER_MS = 1_000_000
 
 
-def build_body(model: str | None, messages: list[dict[str, Any]], *,
-               sampling: dict[str, Any], n_predict: int, context: int | None,
-               keep_alive: str | int | None, tools: list[dict[str, Any]] | None,
-               think: bool | None, response_format: str | dict[str, Any] | None,
-               extra: dict[str, Any]) -> dict[str, Any]:
+def build_body(model: str | None, messages: list[dict[str, Any]], request: Request, *,
+               tools: list[dict[str, Any]] | None, extra: dict[str, Any]) -> dict[str, Any]:
     """The ``/api/chat`` body for one call. ``extra`` keys that are sampler options go
-    under ``options``; anything else is sent as it is."""
+    under ``options``, ``think`` and ``response_format`` become Ollama's own fields, and
+    anything else is sent as it is."""
     if not model:
         raise ValueError("an Ollama client needs a model tag: Client('ollama://host:port/tag') "
-                         "or Client(url, api='ollama', model='tag')")
-    options: dict[str, Any] = {**sampling, "num_predict": n_predict}
-    if context is not None:
-        options["num_ctx"] = int(context)
+                         "or Client(url, model='tag', transport=Transport(api='ollama'))")
+    extra = dict(extra)
+    think = extra.pop("think", None)
+    response_format = extra.pop("response_format", None)
+    options: dict[str, Any] = {**request.sampling(), "num_predict": request.n_predict}
+    if request.context is not None:
+        options["num_ctx"] = int(request.context)
     rest: dict[str, Any] = {}
     for key, value in extra.items():
         if key in ("id_slot", "cache_prompt", "grammar", "chat_template_kwargs", "tool_choice"):
@@ -66,8 +68,8 @@ def build_body(model: str | None, messages: list[dict[str, Any]], *,
         body["tools"] = tools
     if think is not None:
         body["think"] = bool(think)
-    if keep_alive is not None:
-        body["keep_alive"] = keep_alive
+    if request.keep_alive is not None:
+        body["keep_alive"] = request.keep_alive
     if response_format is not None:
         body["format"] = _format(response_format)
     body.update(rest)

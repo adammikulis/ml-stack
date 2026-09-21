@@ -21,9 +21,9 @@ from typing import Any
 from ml_stack import bench, jobs
 from ml_stack.bench.askings import sampling_from
 from ml_stack.bench.keep import _commit
-from ml_stack.client.chat import Client
+from ml_stack.client.settings import SAMPLERS, Request
 from ml_stack.serve.process import pid_exists
-from ml_stack.serve.serving import DEFAULT_CACHE, SAMPLERS
+from ml_stack.serve.serving import DEFAULT_CACHE
 
 __all__ = ["MEASURING", "_last_line", "_locked_by", "_named_in", "asking_said", "detach",
            "ended", "measuring", "measuring_file", "measuring_lock_file", "remember"]
@@ -82,7 +82,7 @@ def asking_said(argv: Sequence[str]) -> dict[str, Any]:
     except SystemExit:
         return {}
     asked = sampling_from(args)
-    sampling = dict(Client(**{k: v for k, v in asked.items() if k in SAMPLERS}).sampling)
+    sampling = Request(**{k: v for k, v in asked.items() if k in SAMPLERS}).sampling()
     if asked.get("n_predict") is not None:
         sampling["n_predict"] = asked["n_predict"]
     named = [*(getattr(args, "serve_draft", []) or []), *(getattr(args, "draft", []) or [])]

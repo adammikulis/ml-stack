@@ -351,7 +351,7 @@ def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[s
                             "finder": getattr(ask, "finder", ""), **held_up}
                     if host:
                         record["host"] = host
-                    asked_depth = getattr(client, "asked_spec_draft_max", None)
+                    asked_depth = client.request.spec_draft_max
                     if asked_depth is not None:
                         record["spec_draft_max_asked"] = int(asked_depth)
                     if kept:

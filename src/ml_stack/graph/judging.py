@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.extraction import Checking, Prompting
 from ml_stack.graph.hygiene import union
 
 __all__ = [
@@ -161,12 +162,14 @@ class ModelJudge:
         self.read = 0
         self.failed = 0
 
-    def _ask(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    def _ask(self, text: str, schema: dict[str, Any], instructions: str) -> dict[str, Any]:
         """One model call, never fatal to the pass: a server that answers 500 for one
         pair (a compute error mid-run, 2026-09-03) makes that pair `unsure` and marks
         it ``failed`` so it is not written down as decided, and the pass goes on."""
         try:
-            answer = self.client.extract(*args, **kwargs)
+            answer = self.client.extract(
+                text, schema, prompting=Prompting(instructions=instructions, n_predict=1024),
+                checking=Checking(tries=1))
         except Exception as exc:  # noqa: BLE001 - one pair's failure is that pair's
             self.failed += 1
             return {"verdict": "unsure", "keep": "", "why": f"the model failed: "
@@ -177,8 +180,7 @@ class ModelJudge:
         """``{verdict, why, read: [unit ids the second look used]}``."""
         self.asked += 1
         text = self._question(one, other)
-        answer = self._ask(text, JUDGE_SCHEMA, instructions=JUDGE_INSTRUCTIONS,
-                                     tries=1, n_predict=1024)
+        answer = self._ask(text, JUDGE_SCHEMA, JUDGE_INSTRUCTIONS)
         verdict = str((answer or {}).get("verdict") or "unsure")
         why = str((answer or {}).get("why") or "")
         used: list[str] = []
@@ -190,9 +192,8 @@ class ModelJudge:
                 self.read += 1
                 used = [unit for unit, _ in passages]
                 shown = "\n\n".join(f"[{unit}] {piece}" for unit, piece in passages)
-                answer = self._ask(
-                    text + "\n\n" + JUDGE_READ + "\n\n" + shown, JUDGE_SCHEMA,
-                    instructions=JUDGE_INSTRUCTIONS, tries=1, n_predict=1024)
+                answer = self._ask(text + "\n\n" + JUDGE_READ + "\n\n" + shown,
+                                   JUDGE_SCHEMA, JUDGE_INSTRUCTIONS)
                 verdict = str((answer or {}).get("verdict") or "unsure")
                 why = str((answer or {}).get("why") or why)
         if verdict not in VERDICTS:
@@ -216,8 +217,7 @@ class ModelJudge:
             used = list(dict.fromkeys(unit for unit, _ in passages))
             text += "\n\n" + CONFLICT_READ + "\n\n" + "\n\n".join(
                 f"[{unit}] {piece}" for unit, piece in passages)
-        answer = self._ask(text, conflict_schema(verbs),
-                                     instructions=CONFLICT_INSTRUCTIONS, tries=1, n_predict=1024)
+        answer = self._ask(text, conflict_schema(verbs), CONFLICT_INSTRUCTIONS)
         verdict = str((answer or {}).get("verdict") or "unsure")
         if verdict not in {*CONFLICT_VERDICTS, *(f"keep {verb}" for verb in verbs)}:
             verdict = "unsure"
@@ -229,8 +229,7 @@ class ModelJudge:
         self.asked += 1
         text = (f"The thing: {one.get('label')!r} ({one.get('kind')}), being merged with "
                 f"{other.get('label')!r}.\n\na. {a_said}\n\nb. {b_said}")
-        answer = self._ask(text, DEFINITION_SCHEMA,
-                                     instructions=DEFINITION_INSTRUCTIONS, tries=1, n_predict=1024)
+        answer = self._ask(text, DEFINITION_SCHEMA, DEFINITION_INSTRUCTIONS)
         keep = str((answer or {}).get("keep") or "both")
         if keep not in ("a", "b", "both"):
             keep = "both"
@@ -247,8 +246,7 @@ class ModelJudge:
             used = list(dict.fromkeys(unit for unit, _ in passages))
             text += "\n\nPassages it was read from:\n\n" + "\n\n".join(
                 f"[{unit}] {piece}" for unit, piece in passages)
-        answer = self._ask(text, SUSPECT_SCHEMA, instructions=SUSPECT_INSTRUCTIONS,
-                                     tries=1, n_predict=1024)
+        answer = self._ask(text, SUSPECT_SCHEMA, SUSPECT_INSTRUCTIONS)
         verdict = str((answer or {}).get("verdict") or "keep")
         if verdict not in SUSPECT_VERDICTS:
             verdict = "keep"

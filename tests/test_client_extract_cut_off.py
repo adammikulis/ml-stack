@@ -4,6 +4,7 @@ import pytest
 
 from ml_stack.client import Client
 from ml_stack.client.chat import Reply, ServerError
+from ml_stack.extraction import Checking
 
 
 def test_a_length_stop_names_the_knob(monkeypatch):
@@ -15,7 +16,7 @@ def test_a_length_stop_names_the_knob(monkeypatch):
 
     monkeypatch.setattr(client, "chat", cut)
     with pytest.raises(ServerError) as err:
-        client.extract("some text", {"type": "object"}, tries=1)
+        client.extract("some text", {"type": "object"}, checking=Checking(tries=1))
     said = str(err.value)
     assert "cut off" in said and "finish_reason=length" in said and "context" in said
     assert err.value.body == half, "the whole reply rides on the error"
@@ -29,4 +30,4 @@ def test_a_reply_that_stopped_on_its_own_is_still_not_json(monkeypatch):
 
     monkeypatch.setattr(client, "chat", wrong)
     with pytest.raises(ServerError, match="not JSON"):
-        client.extract("some text", {"type": "object"}, tries=1)
+        client.extract("some text", {"type": "object"}, checking=Checking(tries=1))

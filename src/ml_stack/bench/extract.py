@@ -37,6 +37,7 @@ from ml_stack.bench import (
 )
 from ml_stack.bench.folding import consistency, fold, score
 from ml_stack.bench.truth import BUCKETS, gold, load_world, sample_messages, schema
+from ml_stack.extraction import Checking, Prompting
 from ml_stack.log import say, warn
 
 __all__ = [
@@ -157,7 +158,8 @@ def extract_one(client: Any, message: Mapping[str, Any], sender: str, shape: Map
     counting = _Extracting(client, deadline=began + per_message if per_message else None)
     try:
         got = counting.extract(str(message.get("text") or ""), dict(shape),
-                               messages=prompt_for(message, sender), think=False, tries=1)
+                               prompting=Prompting(messages=prompt_for(message, sender)),
+                               checking=Checking(tries=1))
         row.extracted = got if isinstance(got, dict) else {}
     except Exception as exc:  # noqa: BLE001 - a failure is a result, not the end of the run
         row.error = f"{type(exc).__name__}: {exc}"[:200]
@@ -509,7 +511,7 @@ def run(args: Any) -> int:
         + ", ".join(f"{v} {k}" for k, v in sample["gold"].items())
         + f"; about {per:.0f} s/msg ({source}), so about {len(picked) * per / 60:.0f} min")
 
-    from ml_stack.client import Client
+    from ml_stack.client import Client, Request, Transport
 
     sampling = sampling_from(args)
 
@@ -559,7 +561,8 @@ def run(args: Any) -> int:
             say(f"    draft length {args.n_max} over the profile's")
         with serve(found, manager=manager, **lease) as server:
             say(f"    up in {time.time() - began:.0f}s")
-            client = Client(server.base_url, timeout=args.per_message, **sampling)
+            client = Client(server.base_url, request=Request(**sampling),
+                            transport=Transport(timeout=args.per_message))
             server = {**footprint(server.base_url), "sampling": dict(client.sampling),
                     "load_s": getattr(server, "load_s", None)}
             if lease.get("spec_draft_max") is not None:
@@ -578,7 +581,8 @@ def run(args: Any) -> int:
             smoke_first(args)
         if not _idle(args.base_url, args):
             return 3
-        client = Client(args.base_url, timeout=args.per_message, **sampling)
+        client = Client(args.base_url, request=Request(**sampling),
+                        transport=Transport(timeout=args.per_message))
         read_and_keep(client, picked, server={**footprint(args.base_url),
                                             "sampling": dict(client.sampling)},
                       twice_over=args.twice, n=len(picked))

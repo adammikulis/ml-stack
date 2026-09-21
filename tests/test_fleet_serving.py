@@ -211,11 +211,12 @@ class TestEndpoint:
         """If this needs a change in Client, the design is wrong."""
         import inspect
 
-        from ml_stack.client import Client
+        from ml_stack.client import Client, Transport
 
         kwargs = Endpoint(peer="gpubox", base_url="http://box:8770",
                           token="abc").client_kwargs()
-        assert kwargs == {"base_url": "http://box:8770/infer", "api_key": "abc"}
+        assert kwargs == {"base_url": "http://box:8770/infer",
+                          "transport": Transport(api_key="abc")}
         accepted = inspect.signature(Client.__init__).parameters
         assert set(kwargs) <= set(accepted)
 

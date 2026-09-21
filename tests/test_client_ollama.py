@@ -14,8 +14,8 @@ import types
 
 import pytest
 from conftest import json_reply
-from ml_stack.client import Client
-from ml_stack.client import ollama
+
+from ml_stack.client import Client, Request, Transport, ollama
 from ml_stack.client.spent import Spent
 from ml_stack.telemetry import Call
 
@@ -84,25 +84,29 @@ class TestWhichApi:
         assert c.api == "ollama" and c.model is None
 
     def test_the_api_can_be_chosen_explicitly(self):
-        assert Client("http://127.0.0.1:11434", api="ollama", model=MODEL).api == "ollama"
-        assert Client("http://127.0.0.1:8080", api="openai", model="m").api == "openai"
+        assert Client("http://127.0.0.1:11434", model=MODEL,
+                      transport=Transport(api="ollama")).api == "ollama"
+        assert Client("http://127.0.0.1:8080", model="m",
+                      transport=Transport(api="openai")).api == "openai"
 
     def test_an_unknown_api_is_refused(self):
         with pytest.raises(ValueError, match="api"):
-            Client("http://x", api="banana")
+            Client("http://x", transport=Transport(api="banana"))
 
 
 # -- the body for a hosted OpenAI server ----------------------------------------------------
 class TestOpenAIBody:
     def test_the_model_is_named_and_the_ceiling_is_max_tokens(self):
         body = Client("https://api.openai.com/v1", model="gpt-x",
-                      n_predict=512).build_body([{"role": "user", "content": "hi"}])
+                      request=Request(n_predict=512)).build_body([{"role": "user",
+                                                                   "content": "hi"}])
         assert body["model"] == "gpt-x" and body["max_tokens"] == 512
         assert "n_predict" not in body
 
     def test_llamacpp_only_keys_never_go_out(self):
-        body = Client("https://api.openai.com/v1", model="gpt-x", slot=2, top_k=40,
-                      min_p=0.05).build_body([], grammar="root ::= x",
+        body = Client("https://api.openai.com/v1", model="gpt-x",
+                      request=Request(slot=2, top_k=40,
+                                      min_p=0.05)).build_body([], grammar="root ::= x",
                                              chat_template_kwargs={"enable_thinking": False})
         for key in ("top_k", "min_p", "cache_prompt", "id_slot", "grammar",
                     "chat_template_kwargs"):
@@ -118,7 +122,8 @@ class TestOpenAIBody:
         assert "think" not in qwen
 
     def test_a_llamacpp_body_is_untouched(self):
-        body = Client("http://127.0.0.1:8080", slot=2, n_predict=512).build_body([], top_k=40)
+        body = Client("http://127.0.0.1:8080",
+                      request=Request(slot=2, n_predict=512)).build_body([], top_k=40)
         assert body["n_predict"] == 512 and body["top_k"] == 40 and body["id_slot"] == 2
         assert "model" not in body
 
@@ -127,8 +132,10 @@ class TestOpenAIBody:
 class TestOllamaBody:
     def test_it_is_the_native_chat_shape(self):
         tool = {"type": "function", "function": {"name": "ping", "parameters": {}}}
-        c = Client(f"ollama://127.0.0.1:11434/{MODEL}", n_predict=4096, top_k=20, min_p=0.05,
-                   temperature=0.0, context=32768, keep_alive="10m")
+        c = Client(f"ollama://127.0.0.1:11434/{MODEL}", request=Request(n_predict=4096, top_k=20,
+                                                                        min_p=0.05, temperature=0.0,
+                                                                        context=32768,
+                                                                        keep_alive="10m"))
         body = c.build_body([{"role": "user", "content": "hi"}], tools=[tool], think=False,
                             seed=7)
         assert body["model"] == MODEL and body["messages"] == [{"role": "user", "content": "hi"}]
@@ -188,7 +195,7 @@ class TestOllamaChat:
     def test_tool_calls_come_back_in_the_openai_shape(self, server):
         fake = an_ollama(server, ollama_chat_reply(content="", tool_calls=[
             {"function": {"name": "look_up", "arguments": {"word": "surveying"}}}]))
-        c = Client(fake.base_url, api="ollama", model=MODEL)
+        c = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama"))
         reply = c.chat([{"role": "user", "content": "hi"}])
         assert reply.tool_calls is not None
         call = reply.tool_calls[0]
@@ -198,7 +205,7 @@ class TestOllamaChat:
 
     def test_the_usage_and_timings_are_in_the_llamacpp_shape(self, server):
         fake = an_ollama(server, ollama_chat_reply())
-        reply = Client(fake.base_url, api="ollama", model=MODEL).chat([])
+        reply = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).chat([])
         assert reply.raw["usage"] == {"prompt_tokens": 300, "completion_tokens": 40,
                                       "total_tokens": 340}
         timings = reply.raw["timings"]
@@ -210,25 +217,27 @@ class TestOllamaChat:
 
     def test_a_reply_cut_by_the_ceiling_is_length(self, server):
         fake = an_ollama(server, ollama_chat_reply(done_reason="length"))
-        assert Client(fake.base_url, api="ollama", model=MODEL).chat([]).truncated
+        assert Client(fake.base_url, model=MODEL,
+                      transport=Transport(api="ollama")).chat([]).truncated
 
     def test_streaming_is_refused_with_a_reason(self, server):
         fake = an_ollama(server)
         with pytest.raises(NotImplementedError, match="stream"):
-            Client(fake.base_url, api="ollama", model=MODEL).chat(
+            Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).chat(
                 [], on_delta=lambda channel, text: None)
 
     def test_a_raw_completion_is_refused(self, server):
         fake = an_ollama(server)
         with pytest.raises(NotImplementedError, match="completion"):
-            Client(fake.base_url, api="ollama", model=MODEL).complete("x", grammar="root ::= x")
+            Client(fake.base_url, model=MODEL,
+                   transport=Transport(api="ollama")).complete("x", grammar="root ::= x")
 
 
 # -- the record, off an Ollama reply -------------------------------------------------------
 class TestCallFromAnOllamaReply:
     def test_the_durations_become_milliseconds_and_the_counts_are_read(self, server):
         fake = an_ollama(server, ollama_chat_reply())
-        reply = Client(fake.base_url, api="ollama", model=MODEL).chat([])
+        reply = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).chat([])
         one = Call.from_reply(reply, 0.8)
         assert (one.prompt_ms, one.predicted_ms, one.load_ms) == (100.0, 400.0, 2000.0)
         assert (one.prompt_n, one.predicted_n) == (300, 40)
@@ -237,7 +246,8 @@ class TestCallFromAnOllamaReply:
 
     def test_what_ollama_cannot_report_is_none_and_not_zero(self, server):
         fake = an_ollama(server, ollama_chat_reply())
-        one = Call.from_reply(Client(fake.base_url, api="ollama", model=MODEL).chat([]), 0.8)
+        one = Call.from_reply(Client(fake.base_url, model=MODEL,
+                                     transport=Transport(api="ollama")).chat([]), 0.8)
         assert one.cache_n is None and one.draft_n is None and one.draft_n_accepted is None
         assert one.held is None
         assert json.dumps(one.public())
@@ -253,8 +263,8 @@ class TestCallFromAnOllamaReply:
     def test_spent_says_not_measured_rather_than_zero(self, server):
         fake = an_ollama(server, ollama_chat_reply())
         s = Spent()
-        s.note(Client(fake.base_url, api="ollama", model=MODEL).chat([]), 0.8)
-        s.note(Client(fake.base_url, api="ollama", model=MODEL).chat([]), 0.4)
+        s.note(Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).chat([]), 0.8)
+        s.note(Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).chat([]), 0.4)
         assert s.read_tokens == 600 and s.completion_tokens == 80
         assert s.cached_tokens is None and s.draft_tokens is None and s.draft_taken is None
         assert s.acceptance is None and s.drafted is False
@@ -273,7 +283,7 @@ class TestServedBy:
     def test_ollama_says_program_format_quant_runtime_and_size(self, server, monkeypatch):
         monkeypatch.setattr(ollama, "PLATFORM", "darwin")
         fake = an_ollama(server)
-        got = Client(fake.base_url, api="ollama", model=MODEL).served_by()
+        got = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).served_by()
         assert got == {"program": "ollama", "version": "0.33.3", "format": "safetensors",
                        "runtime": "mlx", "quant": "nvfp4", "model": MODEL,
                        "weights_bytes": 70_000_000_000}
@@ -284,7 +294,7 @@ class TestServedBy:
         fake = an_ollama(server, show={"details": {"format": "gguf",
                                                    "quantization_level": "Q4_K_M"}},
                          tags={"models": []})
-        got = Client(fake.base_url, api="ollama", model=MODEL).served_by()
+        got = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama")).served_by()
         assert got["format"] == "gguf" and got["runtime"] == "llama.cpp"
         assert got["quant"] == "Q4_K_M" and got["weights_bytes"] is None
 
@@ -365,7 +375,8 @@ class TestProcesses:
         app = _proc(29, ["/Applications/Ollama.app/Contents/MacOS/Ollama"], children=(serve,))
         monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [app, serve, runner, helper])
         monkeypatch.setattr(psutil, "CONN_LISTEN", "LISTEN")
-        assert Client("http://127.0.0.1:11434", api="ollama", model=MODEL).processes() == [31, 32]
+        assert Client("http://127.0.0.1:11434", model=MODEL,
+                      transport=Transport(api="ollama")).processes() == [31, 32]
 
     def test_a_listener_with_nothing_loaded_is_the_only_candidate(self, monkeypatch):
         import psutil
@@ -373,14 +384,15 @@ class TestProcesses:
         serve = _proc(30, ["/x/ollama", "serve"], listening=(11434,))
         monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [serve])
         monkeypatch.setattr(psutil, "CONN_LISTEN", "LISTEN")
-        assert Client("http://127.0.0.1:11434", api="ollama", model=MODEL).processes() == [30]
+        assert Client("http://127.0.0.1:11434", model=MODEL,
+                      transport=Transport(api="ollama")).processes() == [30]
 
 
 # -- the family, on a server with no /props -----------------------------------------------
 class TestFamilyOnOllama:
     def test_the_tag_names_the_family_without_a_probe(self, server):
         fake = an_ollama(server)
-        c = Client(fake.base_url, api="ollama", model=MODEL)
+        c = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama"))
         assert c.family.name == "qwen"
         assert fake.requests == []
 
@@ -389,12 +401,12 @@ class TestFamilyOnOllama:
         from ml_stack.client.chat import forget_families
 
         forget_families()
-        c = Client(fake.base_url, api="ollama")
+        c = Client(fake.base_url, transport=Transport(api="ollama"))
         assert c.family.name == "qwen"
         assert [path for _, path, _ in fake.requests] == ["/v1/models"]
 
     def test_the_card_does_not_ask_for_props(self, server):
         fake = an_ollama(server)
-        c = Client(fake.base_url, api="ollama", model=MODEL)
+        c = Client(fake.base_url, model=MODEL, transport=Transport(api="ollama"))
         assert isinstance(c.card, dict)
         assert "/props" not in [path for _, path, _ in fake.requests]

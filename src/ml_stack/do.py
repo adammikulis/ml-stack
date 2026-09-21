@@ -637,12 +637,13 @@ def client_for(args: argparse.Namespace) -> Any:
     """A client on the served model: ``--url`` for one already up, ``--model`` leased on
     one slot in the settings it scored best with."""
     if args.url:
-        from ml_stack.client import Client
+        from ml_stack.client import Client, Request, Transport
 
-        return Client(args.url, n_predict=args.n_predict, timeout=args.timeout)
+        return Client(args.url, request=Request(n_predict=args.n_predict),
+                      transport=Transport(timeout=args.timeout))
     from pathlib import Path
 
-    from ml_stack.client import Client
+    from ml_stack.client import Client, Request, Transport
     from ml_stack.serve.leases import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.recent import note
@@ -655,7 +656,8 @@ def client_for(args: argparse.Namespace) -> Any:
         # the weights are up already, whatever the settings: use them rather than reload them
         say(f"using the server already up on {args.port}: {Path(found).name}, "
             f"{up.get('slots') or '?'} slot(s)")
-        return Client(str(up["base_url"]), n_predict=args.n_predict, timeout=args.timeout)
+        return Client(str(up["base_url"]), request=Request(n_predict=args.n_predict),
+                      transport=Transport(timeout=args.timeout))
     measured = profile_for(found)
     if measured is not None:
         config = measured.alone(port=args.port, model=found, n_predict=args.n_predict,

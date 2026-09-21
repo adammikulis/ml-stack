@@ -10,6 +10,7 @@ from pathlib import Path
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ml_stack.client.settings import Transport
 from ml_stack.files import write_json
 from ml_stack.units import human_bytes
 
@@ -254,9 +255,10 @@ class Endpoint:
     slots: int = 1
     free: int = 1
 
-    def client_kwargs(self) -> dict[str, str]:
+    def client_kwargs(self) -> dict[str, Any]:
         """Straight into ``ml_stack.client.Client(**endpoint.client_kwargs())``."""
-        return {"base_url": f"{self.base_url}/infer", "api_key": self.token}
+        return {"base_url": f"{self.base_url}/infer",
+                "transport": Transport(api_key=self.token)}
 
 
 def discover_serving(key: bytes, *, model: str = "", timeout_s: float = 2.0,

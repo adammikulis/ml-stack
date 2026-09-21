@@ -154,8 +154,8 @@ class FakeClient:
         self.reply = reply
         self.calls = []
 
-    def extract(self, text, schema, **kwargs):
-        self.calls.append((text, schema, kwargs))
+    def extract(self, text, schema, *, prompting=None, checking=None, cache=None):
+        self.calls.append((text, schema, prompting, checking))
         return self.reply
 
 
@@ -168,11 +168,11 @@ def test_plan_edits_keeps_only_what_checks_out():
     out = plan_edits("call node one Ada", nodes={"n:1": {"label": "one"}}, edges=[], client=client)
 
     assert out == [Edit(op="rename", target="n:1", value="Ada", reason="call it Ada")]
-    text, schema, kwargs = client.calls[0]
+    text, schema, prompting, checking = client.calls[0]
     assert "n:1: one" in text and "call node one Ada" in text
     assert schema is EDITS_SCHEMA
-    assert kwargs["think"] is False
-    assert kwargs["check"]({"edits": [{"op": "rename", "target": "n:9", "value": "x"}]})
+    assert prompting.think is False
+    assert checking.check({"edits": [{"op": "rename", "target": "n:9", "value": "x"}]})
 
 
 def test_plan_edits_asks_nothing_when_there_is_no_request_or_no_graph():

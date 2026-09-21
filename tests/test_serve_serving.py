@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import ml_stack.serve
+from ml_stack.client import Request, Transport
 from ml_stack.serve import serving as serving_mod
 from ml_stack.serve.serving import Serving, draft_for, projector_for, release_all, servers, slot
 
@@ -107,14 +108,16 @@ def test_two_models_on_two_ports_are_two_servers_and_neither_is_leased_twice(lea
 
 def test_every_slot_is_its_own_slot_and_a_busy_port_cycles_through_them(leases):
     small = Serving(model="/models/small.gguf", port=8082, slots=4)
-    assert [slot(small, index=i, n_predict=100).slot for i in range(6)] == [0, 1, 2, 3, 0, 1]
+    assert [slot(small, index=i,
+                 n_predict=100).request.slot for i in range(6)] == [0, 1, 2, 3, 0, 1]
     # a serving with no slots named still asks for a slot that exists
-    assert slot(Serving(model="/m.gguf", port=8083, slots=0), index=3, n_predict=100).slot == 0
+    assert slot(Serving(model="/m.gguf", port=8083, slots=0), index=3,
+                n_predict=100).request.slot == 0
 
 
 def test_the_client_gets_the_ceiling_and_the_timeout_it_was_asked_for(leases):
     client = slot(Serving(model="/m.gguf", port=8080), index=0, n_predict=16384, timeout=42.0)
-    assert (client.n_predict, client.timeout) == (16384, 42.0)
+    assert (client.request.n_predict, client.transport.timeout) == (16384, 42.0)
 
 
 def test_letting_go_releases_every_held_server(leases):
@@ -239,10 +242,10 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     assert laid.asking == Asking(few=True, reach=8000)
     assert laid.talking.n_predict == 4096
     assert laid.talking.sampling == {"temperature": 0.7, "top_k": 20}
-    # what the client is built with, and `think` is not among it: the client takes that per
-    # call, and handing it to `Client.__init__` raises
-    assert laid.over(think=False).talking.client() == {
-        "n_predict": 4096, "timeout": 300.0, "temperature": 0.7, "top_k": 20}
+    # what the client is built with; `think` is taken per call and is in neither
+    thinking = laid.over(think=False).talking
+    assert thinking.request() == Request(n_predict=4096, temperature=0.7, top_k=20)
+    assert thinking.transport() == Transport(timeout=300.0)
     with pytest.raises(TypeError, match="tightt"):
         config.over(tightt=True)
 
@@ -308,7 +311,7 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
     for _model, lease in asked:
         assert lease["cache_type_k"] == "f16" and lease["cache_type_v"] == "f16"
         assert lease["context"] == 16384, "8192 a slot, two slots"
-    assert (client.n_predict, taken.n_predict) == (4096, 4096)
+    assert (client.request.n_predict, taken.request.n_predict) == (4096, 4096)
     assert changed.asking.said() == {"tight": True, "terse": False, "kinds": True,
                                      "few": True, "summary": True}, \
         "batch off, few on, in one place"

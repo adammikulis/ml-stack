@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Collection
 
+from ml_stack.extraction import Checking, Prompting
+
 from .edits import _listing, ids_of
 
 PICK_INSTRUCTIONS = """You answer a question about a graph by naming the items it is about.
@@ -59,8 +61,8 @@ def pick(question: str, *, records: Any, client: Any, instructions: str | None =
     text = "\n\n".join(["Items:\n" + _listing(records), "Question:\n" + question.strip()])
     raw = client.extract(
         text, PICK_SCHEMA,
-        instructions=instructions or PICK_INSTRUCTIONS,
-        think=False, schema_name="graph_pick", n_predict=n_predict, tries=tries,
-        check=lambda obj: objections(obj, ids=known),
+        prompting=Prompting(instructions=instructions or PICK_INSTRUCTIONS,
+                            schema_name="graph_pick", n_predict=n_predict),
+        checking=Checking(check=lambda obj: objections(obj, ids=known), tries=tries),
     )
     return validate_pick(raw, ids=known, limit=limit)

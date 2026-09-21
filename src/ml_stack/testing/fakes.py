@@ -13,7 +13,8 @@ What is here:
 
 - `FakeClient`: `Client` that reaches no server. Scripted replies, every call recorded.
 - `ScriptedModel`: the graph tests' model -- a script of tool calls, then words.
-- `FakeServe` / `fake_serve`: `serve()` that starts nothing and yields a real `ServerInfo`.
+- `FakeServe` / `fake_serve`: `serve()` that starts nothing and yields a real `ServerInfo`;
+  `Yielding` is what that info holds.
 - `FakeReport` / `FakePreflight`: a preflight that read nothing and passed, or refused.
 - `FakeBackend`: a `ServerBackend` that binds no socket and records every spec.
 - `Served` / `FakeLlamaServer` / `fake_llama_server`: a llama-server on a real socket.
@@ -34,12 +35,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, ClassVar
 
 from ml_stack.client import families
-from ml_stack.client.chat import Client, Reply, sampling_asked
+from ml_stack.client.chat import Client, Reply
 from ml_stack.client.counters import Speculative
 from ml_stack.client.families import Family
+from ml_stack.client.settings import Request, Transport
+from ml_stack.extraction import Checking, Kept, Prompting
 from ml_stack.http import json_body
 from ml_stack.serve.backend import (
     LlamaServerBackend,
@@ -63,6 +66,7 @@ __all__ = [
     "FakeServe",
     "ScriptedModel",
     "Served",
+    "Yielding",
     "drift",
     "fake_binary",
     "fake_llama_binary",
@@ -147,48 +151,25 @@ class FakeClient:
     it. ``sampling`` is computed as the real one computes it; ``card`` is ``card_says``.
     """
 
-    replies: Any = ()
-    card_says: dict[str, Any] = {}
-    built: list[FakeClient] = []
+    replies: ClassVar[Any] = ()
+    card_says: ClassVar[dict[str, Any]] = {}
+    built: ClassVar[list[FakeClient]] = []
 
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:8080",
         *,
-        slot: int | None = None,
-        temperature: float | None = None,
-        top_p: float | None = None,
-        top_k: int | None = None,
-        min_p: float | None = None,
-        n_predict: int = 16384,
-        spec_draft_max: int | None = None,
-        spec_p_min: float | None = None,
-        timeout: float = 180.0,
-        tries: int = 1,
-        api_key: str | None = None,
-        family: Family | str | None = None,
-        api: str | None = None,
         model: str | None = None,
-        context: int | None = None,
-        keep_alive: str | int | None = None,
+        family: Family | str | None = None,
+        request: Request | None = None,
+        transport: Transport | None = None,
     ) -> None:
         from ml_stack.client.chat import parse_url
 
-        self.base_url, self.api, found = parse_url(base_url, api)
+        self.request = request or Request()
+        self.transport = transport or Transport()
+        self.base_url, self.api, found = parse_url(base_url, self.transport.api)
         self.model = model or found
-        self.context = context
-        self.keep_alive = keep_alive
-        self.slot = slot
-        self.asked_temperature = temperature
-        self.asked_top_p = top_p
-        self.asked_top_k = top_k
-        self.asked_min_p = min_p
-        self.n_predict = n_predict
-        self.asked_spec_draft_max = spec_draft_max
-        self.asked_spec_p_min = spec_p_min
-        self.timeout = timeout
-        self.tries = tries
-        self.api_key = api_key
         self.pinned_family = families.resolve(family)
         self.seen: list[list[dict[str, Any]]] = []
         self.calls: list[dict[str, Any]] = []
@@ -217,8 +198,7 @@ class FakeClient:
 
     @property
     def sampling(self) -> dict[str, Any]:
-        return sampling_asked(self.asked_temperature, self.asked_top_p,
-                              self.asked_top_k, self.asked_min_p)
+        return self.request.sampling()
 
     @property
     def card(self) -> dict[str, Any]:
@@ -250,20 +230,15 @@ class FakeClient:
                 on_delta("content", reply.content)
         return reply
 
-    def extract(self, text: str, schema: dict[str, Any], *, instructions: str = "",
-                n_predict: int | None = None,
-                check: Callable[[dict[str, Any]], list[str]] | None = None,
-                tries: int = 2, prompt: str | None = None,
-                messages: list[dict[str, Any]] | None = None,
-                think: bool = False,
-                schema_name: str = "extraction") -> dict[str, Any]:
-        if tries < 1:
-            raise ValueError(f"tries must be at least 1, got {tries}")
+    def extract(self, text: str, schema: dict[str, Any], *,
+                prompting: Prompting | None = None, checking: Checking | None = None,
+                cache: Kept | None = None) -> dict[str, Any]:
+        prompting = prompting or Prompting()
+        checking = checking or Checking()
         self.calls.append({"method": "extract", "text": text, "schema": schema,
-                           "instructions": instructions, "n_predict": n_predict,
-                           "check": check, "tries": tries, "prompt": prompt,
-                           "messages": messages, "think": think,
-                           "schema_name": schema_name})
+                           "prompting": prompting, "checking": checking, "cache": cache})
+        messages, check = prompting.messages, checking.check
+        instructions = prompting.instructions
         convo = list(messages) if messages is not None else [
             {"role": "system", "content": instructions}, {"role": "user", "content": text}]
         answer = json.loads(self._next(convo, None).content or "null")
@@ -328,6 +303,17 @@ class ScriptedModel:
 
 # ---------------------------------------------------------------- serving
 
+@dataclass(frozen=True)
+class Yielding:
+    """What a `FakeServe` lease yields besides its port; a None ``base_url`` is the port's."""
+
+    base_url: str | None = None
+    pid: int | None = None
+    backend: str = "fake"
+    load_s: float | None = None
+    warmup_s: float | None = None
+
+
 class FakeServe:
     """`serve()` that starts nothing and yields a real `ServerInfo`.
 
@@ -337,15 +323,9 @@ class FakeServe:
     of ``refuse`` raises ``raising`` instead of yielding -- the backend refusing a load.
     """
 
-    def __init__(self, *, base_url: str | None = None, pid: int | None = None,
-                 backend: str = "fake", load_s: float | None = None,
-                 warmup_s: float | None = None, refuse: tuple[str, ...] = (),
+    def __init__(self, *, yields: Yielding | None = None, refuse: tuple[str, ...] = (),
                  raising: type[Exception] = ServerFailed) -> None:
-        self.base_url = base_url
-        self.pid = pid
-        self.backend = backend
-        self.load_s = load_s
-        self.warmup_s = warmup_s
+        self.yields = yields or Yielding()
         self.refuse = tuple(refuse)
         self.raising = raising
         self.leased: list[ServerSpec] = []
@@ -369,9 +349,10 @@ class FakeServe:
         self.timeouts.append(timeout)
         if any(word in str(model) for word in self.refuse):
             raise self.raising(f"FAIL  shards: not on this machine yet: {model}")
-        info = ServerInfo(base_url=self.base_url or f"http://127.0.0.1:{spec.port}",
-                          port=spec.port, pid=self.pid, backend=self.backend,
-                          load_s=self.load_s, warmup_s=self.warmup_s)
+        y = self.yields
+        info = ServerInfo(base_url=y.base_url or f"http://127.0.0.1:{spec.port}",
+                          port=spec.port, pid=y.pid, backend=y.backend,
+                          load_s=y.load_s, warmup_s=y.warmup_s)
         try:
             yield info
         finally:
@@ -781,7 +762,6 @@ if not os.environ.get("MLSTACK_FAKE_LLAMA"):
 from pathlib import Path
 
 from ml_stack.testing.fakes import serve_from_argv
-from ml_stack.client.chat import sampling_asked
 
 raise SystemExit(serve_from_argv(sys.argv[1:], where=Path(__file__).parent))
 """

@@ -14,6 +14,7 @@ from typing import ClassVar
 import pytest
 
 from ml_stack.bench import Row, runs, save, table
+from ml_stack.client import Request, Transport
 
 from conftest import a_row
 
@@ -55,39 +56,24 @@ def test_a_spec_without_name_or_url_is_refused():
         parse_on("=http://127.0.0.1:8083")
 
 
-def test_the_client_is_built_with_the_program_and_context_when_it_takes_them():
-    """The contract with the client: ``Client(url, api=, model=, context=)``. A client that
-    takes those keywords is given them; one that does not is given only what it takes,
-    and an Ollama URL handed to it is refused by name rather than sent as http."""
+def test_the_client_is_told_the_program_and_the_model_a_url_names():
+    """``ollama://host:port/tag`` reaches the client as the plain address, the api in its
+    transport and the tag as its model; the request and the rest of the transport ride
+    along untouched."""
     from ml_stack.bench.backends import client_for
 
-    seen = {}
-
-    class Newer:
-        def __init__(self, base_url, *, api="llama", model=None, context=None, timeout=180.0,
-                     temperature=None):
-            seen.update(base_url=base_url, api=api, model=model, context=context,
-                        timeout=timeout, temperature=temperature)
-
-    client_for("ollama://127.0.0.1:11434/thornfell:125b-mlx", client=Newer, context=32768,
-               timeout=300.0, temperature=0.0)
-    assert seen == {"base_url": "http://127.0.0.1:11434",
-                    "api": "ollama", "model": "thornfell:125b-mlx", "context": 32768,
-                    "timeout": 300.0, "temperature": 0.0}, \
-        "the plain address, with the program and the model said outright"
-    client_for("openai://10.0.0.7:8000/pellard-9b", client=Newer)
-    assert seen["base_url"] == "http://10.0.0.7:8000" and seen["api"] == "openai"
-    assert seen["model"] == "pellard-9b"
-
-    class Older:
-        def __init__(self, base_url, *, timeout=180.0, temperature=None):
-            seen.clear()
-            seen.update(base_url=base_url, timeout=timeout)
-
-    client_for("http://127.0.0.1:8083", client=Older, context=32768, timeout=300.0)
-    assert seen == {"base_url": "http://127.0.0.1:8083", "timeout": 300.0}
-    with pytest.raises(ValueError, match="ollama"):
-        client_for("ollama://127.0.0.1:11434/thornfell:125b-mlx", client=Older)
+    built = client_for("ollama://127.0.0.1:11434/thornfell:125b-mlx",
+                       request=Request(context=32768, temperature=0.0),
+                       transport=Transport(timeout=300.0))
+    assert (built.base_url, built.api, built.model) == (
+        "http://127.0.0.1:11434", "ollama", "thornfell:125b-mlx")
+    assert built.request == Request(context=32768, temperature=0.0)
+    assert built.transport == Transport(api="ollama", timeout=300.0)
+    hosted = client_for("openai://10.0.0.7:8000/pellard-9b")
+    assert (hosted.base_url, hosted.api, hosted.model) == (
+        "http://10.0.0.7:8000", "openai", "pellard-9b")
+    plain = client_for("http://127.0.0.1:8083", model="quince")
+    assert (plain.base_url, plain.api, plain.model) == ("http://127.0.0.1:8083", "llama", "quince")
 
 
 # -- what served the run ----------------------------------------------------------------
@@ -599,12 +585,13 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
     built = {}
 
     class Ollama:
-        def __init__(self, base_url, *, api="llama", model=None, context=None, timeout=180.0,
-                     temperature=None, n_predict=16384, **rest):
-            built.update(base_url=base_url, api=api, model=model, context=context,
-                         timeout=timeout, temperature=temperature)
-            self.base_url, self.api, self.model, self.context = base_url, api, model, context
-            self.sampling = {"temperature": temperature if temperature is not None else 0.0}
+        def __init__(self, base_url="http://127.0.0.1:8080", *, model=None, family=None,
+                     request=None, transport=None):
+            self.request, self.transport = request or Request(), transport or Transport()
+            built.update(base_url=base_url, api=self.transport.api, model=model,
+                         context=self.request.context)
+            self.base_url, self.api, self.model = base_url, self.transport.api, model
+            self.sampling = self.request.sampling()
             self.card = {}
 
         def served_by(self):
@@ -661,10 +648,10 @@ class _DraftingClient:
     honours = True
     asked_of_each: ClassVar[list[int | None]] = []
 
-    def __init__(self, base_url="http://x", **settings):
-        self.base_url, self.api, self.model = base_url, "llama", None
-        self.timeout, self.api_key, self.pinned_family = 30.0, None, None
-        self.asked = settings.get("spec_draft_max")
+    def __init__(self, base_url="http://x", *, model=None, family=None, request=None,
+                 transport=None):
+        self.base_url, self.api, self.model = base_url, "llama", model
+        self.asked = (request or Request()).spec_draft_max
         type(self).asked_of_each.append(self.asked)
 
     def chat(self, messages):

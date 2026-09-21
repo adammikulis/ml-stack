@@ -231,12 +231,12 @@ returned, so a wrong one is something a test can point at. `dead_keys` is the ot
 the entries of a hand-written map that nothing produces any more, which fail silently
 otherwise.
 
-**An extraction already done is not done again.** `Client.extract(..., cache_dir=...)` keeps
-each answer as a file there and reads it back instead of asking the model. The key is
-`cache_version` + the schema + the text + `cache_extra` (the rest of the prompt that varies
+**An extraction already done is not done again.** `Client.extract(..., cache=Kept(root))` keeps
+each answer as a file under `root` and reads it back instead of asking the model. The key is
+`Kept.version` + the schema + the text + `Kept.extra` (the rest of the prompt that varies
 per record -- the thread a message replies to, the vocabulary offered) and deliberately *not*
 the instructions: wording those is iterative, and a pipeline that re-reads its whole corpus
-because a sentence was rephrased is one where nobody rephrases anything. `cache_version` is
+because a sentence was rephrased is one where nobody rephrases anything. `Kept.version` is
 the knob for a change nobody should be allowed to skip. Only an answer that passed `check` is
 kept, so a run that gave up is asked again rather than remembered as settled.
 

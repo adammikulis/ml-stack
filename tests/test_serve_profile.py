@@ -742,8 +742,7 @@ def test_the_request_half_travels_with_each_call():
     talking = one.talking()
 
     assert talking.spec_draft_max == 3
-    assert talking.client()["spec_draft_max"] == 3
-    assert talking.client()["spec_p_min"] == 0.4
+    assert talking.request().spec_draft_max == 3
 
 
 def test_the_startup_half_still_names_the_draft_depth_it_was_served_with():

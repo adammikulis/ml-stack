@@ -17,6 +17,8 @@ from typing import Any
 from ml_stack.client import families
 from ml_stack.client.families import Family
 from ml_stack.client.health import reported_models
+from ml_stack.client.settings import Request, Transport
+from ml_stack.extraction import Checking, Kept, Prompting
 from ml_stack.http import ServerError, request_json, request_stream
 
 logger = logging.getLogger(__name__)
@@ -82,18 +84,6 @@ def forget_families() -> None:
     _FAMILY_BY_URL.clear()
 
 
-def sampling_asked(temperature: float | None, top_p: float | None, top_k: int | None,
-                   min_p: float | None) -> dict[str, Any]:
-    """The sampler fields a request carries: those that were chosen, greedy when none was."""
-    out: dict[str, Any] = {}
-    for name, value in (("temperature", temperature), ("top_p", top_p),
-                        ("top_k", top_k), ("min_p", min_p)):
-        if value is not None:
-            out[name] = value
-    out.setdefault("temperature", 0.0)
-    return out
-
-
 class GrammarBudgetError(ServerError):
     """A grammar-constrained generation ran out of tokens mid-structure."""
 
@@ -127,57 +117,16 @@ class Client:
         self,
         base_url: str = "http://127.0.0.1:8080",
         *,
-        slot: int | None = None,
-        temperature: float | None = None,
-        top_p: float | None = None,
-        top_k: int | None = None,
-        min_p: float | None = None,
-        n_predict: int = 16384,
-        spec_draft_max: int | None = None,
-        spec_p_min: float | None = None,
-        timeout: float = 180.0,
-        tries: int = 1,
-        api_key: str | None = None,
-        family: Family | str | None = None,
-        api: str | None = None,
         model: str | None = None,
-        context: int | None = None,
-        keep_alive: str | int | None = None,
+        family: Family | str | None = None,
+        request: Request | None = None,
+        transport: Transport | None = None,
     ) -> None:
-        self.base_url, self.api, found = parse_url(base_url, api)
+        self.request = request or Request()
+        self.transport = transport or Transport()
+        self.base_url, self.api, found = parse_url(base_url, self.transport.api)
         # The model tag, where the server wants one named per request (openai, ollama).
         self.model = model or found
-        # Ollama's num_ctx. Unset means the server's own default for the model, which for
-        # the Flash-Next tag is 262144 -- a cache nobody asked for.
-        self.context = context
-        self.keep_alive = keep_alive
-        self.slot = slot
-        # None means "whatever this model's card asks for", resolved once the family is
-        # known; a number given here is the caller overriding its publisher, which is
-        # sometimes right — a benchmark wants 0.0 so a run can be repeated — and is never
-        # guessed at on their behalf.
-        self.asked_temperature = temperature
-        self.asked_top_p = top_p
-        self.asked_top_k = top_k
-        self.asked_min_p = min_p
-        # A ceiling, not a budget: nothing is spent that is not generated, so a high one
-        # costs nothing and a low one truncates. 512 was set when a reply was a sentence;
-        # a thinking model spends most of a turn reasoning before it writes anything, and
-        # measured here gemma-4 filled 220 tokens with thought and returned empty content.
-        # What a low ceiling cuts is always the answer, never the thinking.
-        self.n_predict = n_predict
-        # The speculative settings llama-server takes per request, so one served model can
-        # guess ahead by a different number of tokens for each workload asking it. None
-        # leaves the server the depth it was started with.
-        if spec_p_min is not None:
-            raise ValueError(
-                "spec_p_min is not a per-request setting: the draft implementations read "
-                "it once, when the server starts. Serve with --spec-draft-p-min instead")
-        self.asked_spec_draft_max = spec_draft_max
-        self.asked_spec_p_min = None
-        self.timeout = timeout
-        self.tries = tries
-        self.api_key = api_key
         self.pinned_family = families.resolve(family)
         self._probed: Family | None = None
         self._carded: dict[str, Any] | None = None
@@ -199,7 +148,7 @@ class Client:
             known = _FAMILY_BY_URL.get(self.base_url)
             if known is None:
                 known = families.for_model_ids(
-                    reported_models(self.base_url, timeout=min(self.timeout, 5.0)))
+                    reported_models(self.base_url, timeout=min(self.transport.timeout, 5.0)))
                 _FAMILY_BY_URL[self.base_url] = known
             self._probed = known
         return self._probed
@@ -217,8 +166,7 @@ class Client:
 
         Greedy by default, because a caller who has not chosen wants the repeatable answer.
         """
-        return sampling_asked(self.asked_temperature, self.asked_top_p,
-                              self.asked_top_k, self.asked_min_p)
+        return self.request.sampling()
 
     @property
     def speculative(self) -> dict[str, Any]:
@@ -229,11 +177,11 @@ class Client:
         started with stands, so a caller who must know asks
         `ml_stack.bench.backends.draft_depth_support`.
         """
-        if self.api != "llama" or self.asked_spec_draft_max is None \
-                or self.base_url in _NO_SPECULATIVE:
+        depth = self.request.spec_draft_max
+        if self.api != "llama" or depth is None or self.base_url in _NO_SPECULATIVE:
             return {}
         # the server registers a flat field name, not a nested object
-        return {"speculative.n_max": int(self.asked_spec_draft_max)}
+        return {"speculative.n_max": int(depth)}
 
     def _served_depth(self, body: dict[str, Any], exc: ServerError) -> dict[str, Any] | None:
         """``body`` without the speculative field when ``exc`` is the server refusing it,
@@ -289,7 +237,8 @@ class Client:
         return self.api == "openai"
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        key = self.transport.api_key
+        return {"Authorization": f"Bearer {key}"} if key else {}
 
     def build_body(
         self,
@@ -306,22 +255,19 @@ class Client:
         if self.api == "ollama":
             from ml_stack.client import ollama
 
-            return ollama.build_body(self.model, messages, sampling=self.sampling,
-                                     n_predict=self.n_predict, context=self.context,
-                                     keep_alive=self.keep_alive, tools=tools,
-                                     think=extra.pop("think", None),
-                                     response_format=response_format, extra=extra)
+            return ollama.build_body(self.model, messages, self.request, tools=tools,
+                                     extra={**extra, "response_format": response_format})
         body: dict[str, Any] = {
             "messages": messages,
             **self.sampling,
-            "n_predict": self.n_predict,
+            "n_predict": self.request.n_predict,
             "stream": stream,
         }
         body.update(self.speculative)
         if self.model:
             body["model"] = self.model
-        if self.slot is not None:
-            body["id_slot"] = self.slot
+        if self.request.slot is not None:
+            body["id_slot"] = self.request.slot
             body["cache_prompt"] = True
         if tools:
             body["tools"] = tools
@@ -388,8 +334,8 @@ class Client:
             payload = request_json(
                 f"{self.base_url}/api/chat",
                 payload=body,
-                timeout=timeout or self.timeout,
-                tries=self.tries,
+                timeout=timeout or self.transport.timeout,
+                tries=self.transport.tries,
                 headers=self._headers(),
             )
             if not isinstance(payload, dict):
@@ -401,7 +347,7 @@ class Client:
 
         def streamed(sending: dict[str, Any]) -> Any:
             return gather_stream(
-                request_stream(where, payload=sending, timeout=timeout or self.timeout,
+                request_stream(where, payload=sending, timeout=timeout or self.transport.timeout,
                                headers=self._headers()),
                 on_delta, self.pinned_family)
 
@@ -429,7 +375,7 @@ class Client:
             raise NotImplementedError(
                 "a raw completion under a grammar is llama.cpp's /completion; the Ollama api "
                 "has no grammar -- use chat() with a json_schema response_format")
-        budget = n_predict if n_predict is not None else self.n_predict
+        budget = n_predict if n_predict is not None else self.request.n_predict
         body: dict[str, Any] = {
             "prompt": prompt,
             **self.sampling,
@@ -439,8 +385,8 @@ class Client:
         body.update(self.speculative)
         if grammar:
             body["grammar"] = grammar
-        if self.slot is not None:
-            body["id_slot"] = self.slot
+        if self.request.slot is not None:
+            body["id_slot"] = self.request.slot
             body["cache_prompt"] = True
         body.update(extra)
 
@@ -459,42 +405,32 @@ class Client:
                 )
         return text
 
-    def extract(self, text: str, schema: dict[str, Any], *, instructions: str = "",
-                n_predict: int | None = None,
-                check: Callable[[dict[str, Any]], list[str]] | None = None,
-                tries: int = 2, prompt: str | None = None,
-                messages: list[dict[str, Any]] | None = None,
-                think: bool = False,
-                schema_name: str = "extraction",
-                cache_dir: str | Path | None = None, cache_version: str = "",
-                cache_extra: str = "") -> dict[str, Any]:
-        """``text`` as a JSON document matching ``schema``, re-prompted while ``check``
-        objects. Objections left after ``tries`` calls land under ``"_objections"``.
+    def extract(self, text: str, schema: dict[str, Any], *,
+                prompting: Prompting | None = None, checking: Checking | None = None,
+                cache: Kept | None = None) -> dict[str, Any]:
+        """``text`` as a JSON document matching ``schema``, re-prompted while the check
+        objects. Objections left after the last try land under ``"_objections"``.
 
-        With ``cache_dir``, an extraction already done is not done again: the answer is kept
-        as a file per key under it and read back instead of asking the model. The key is
-        ``cache_version`` + the schema + ``text`` + ``cache_extra``, and deliberately *not*
-        the instructions -- :mod:`ml_stack.client.cache` says why, and what belongs in
-        ``cache_extra``. Only a clean answer is kept: one the model never got past ``check``
-        is asked again next run rather than cached as settled.
+        With ``cache``, an answer that passed the check is kept as a file per key and read
+        back instead of asking again; :mod:`ml_stack.client.cache` says what the key holds.
         """
-        if tries < 1:
-            raise ValueError(f"tries must be at least 1, got {tries}")
+        prompting = prompting or Prompting()
+        checking = checking or Checking()
+        check, tries = checking.check, checking.tries
 
         key: str | None = None
-        if cache_dir is not None:
+        if cache is not None:
             from ml_stack.client.cache import extraction_key, read_cached
 
-            key = extraction_key(text, schema, version=cache_version, extra=cache_extra)
-            done = read_cached(cache_dir, key)
+            key = extraction_key(text, schema, version=cache.version, extra=cache.extra)
+            done = read_cached(cache.root, key)
             if done is not None:
                 return done
 
-        if prompt is not None:
-            ask, reject = self._raw_extractor(prompt, schema, n_predict)
+        if prompting.prompt is not None:
+            ask, reject = self._raw_extractor(prompting.prompt, schema, prompting.n_predict)
         else:
-            ask, reject = self._chat_extractor(
-                text, schema, instructions, messages, think, schema_name, n_predict)
+            ask, reject = self._chat_extractor(text, schema, prompting)
 
         seed: int | None = None
         raw = ""
@@ -511,10 +447,10 @@ class Client:
                 parsed = answer
                 objections = list(check(answer)) if check else []
                 if not objections:
-                    if key is not None:
+                    if cache is not None and key is not None:
                         from ml_stack.client.cache import write_cached
 
-                        write_cached(cache_dir, key, answer)  # type: ignore[arg-type]
+                        write_cached(cache.root, key, answer)
                     return answer
 
             if attempt + 1 < tries:
@@ -555,27 +491,26 @@ class Client:
 
         return ask, reject
 
-    def _chat_extractor(self, text: str, schema: dict[str, Any], instructions: str,
-                        messages: list[dict[str, Any]] | None, think: bool,
-                        schema_name: str, n_predict: int | None) -> _Extractor:
+    def _chat_extractor(self, text: str, schema: dict[str, Any],
+                        prompting: Prompting) -> _Extractor:
         """``(ask, reject)`` driving ``/v1/chat/completions`` under a JSON schema."""
-        convo = list(messages) if messages is not None else [
-            {"role": "system", "content": instructions or EXTRACT_INSTRUCTIONS},
+        convo = list(prompting.messages) if prompting.messages is not None else [
+            {"role": "system", "content": prompting.instructions or EXTRACT_INSTRUCTIONS},
             {"role": "user", "content": text},
         ]
         response_format = {
             "type": "json_schema",
-            "json_schema": {"name": schema_name, "schema": strict_schema(schema)},
+            "json_schema": {"name": prompting.schema_name, "schema": strict_schema(schema)},
         }
 
         def ask(seed: int | None) -> str:
             extra: dict[str, Any] = {} if seed is None else {"seed": seed}
-            if n_predict is not None:
-                extra["n_predict"] = n_predict
+            if prompting.n_predict is not None:
+                extra["n_predict"] = prompting.n_predict
             reply = self.chat(
                 convo,
                 response_format=response_format,
-                chat_template_kwargs=self.family.think_kwargs(think),
+                chat_template_kwargs=self.family.think_kwargs(prompting.think),
                 **extra,
             )
             self._last_finish = reply.finish_reason
@@ -595,14 +530,14 @@ class Client:
         """One request, sent again without its speculative field if the server refuses
         that field."""
         try:
-            return request_json(where, payload=body, timeout=timeout or self.timeout,
-                                tries=self.tries, headers=self._headers())
+            return request_json(where, payload=body, timeout=timeout or self.transport.timeout,
+                                tries=self.transport.tries, headers=self._headers())
         except ServerError as exc:
             served = self._served_depth(body, exc)
             if served is None:
                 raise
-            return request_json(where, payload=served, timeout=timeout or self.timeout,
-                                tries=self.tries, headers=self._headers())
+            return request_json(where, payload=served, timeout=timeout or self.transport.timeout,
+                                tries=self.transport.tries, headers=self._headers())
 
     def assert_grammar_support(self) -> None:
         """Fail now if constrained decoding is broken on this server."""
@@ -624,8 +559,8 @@ class Client:
         payload = request_json(
             f"{self.base_url}/tokenize",
             payload={"content": text, "with_pieces": with_pieces},
-            timeout=self.timeout,
-            tries=self.tries,
+            timeout=self.transport.timeout,
+            tries=self.transport.tries,
             headers=self._headers(),
         )
         tokens = payload.get("tokens") if isinstance(payload, dict) else None
@@ -636,8 +571,8 @@ class Client:
         payload = request_json(
             f"{self.base_url}/detokenize",
             payload={"tokens": list(tokens)},
-            timeout=self.timeout,
-            tries=self.tries,
+            timeout=self.transport.timeout,
+            tries=self.transport.tries,
             headers=self._headers(),
         )
         content = payload.get("content") if isinstance(payload, dict) else None
@@ -653,8 +588,9 @@ class Client:
         from ml_stack.client import ollama
 
         if self.api == "ollama":
-            return ollama.served_by(self.base_url, self.model, timeout=min(self.timeout, 10.0))
-        props = request_json(f"{self.base_url}/props", timeout=min(self.timeout, 10.0),
+            return ollama.served_by(self.base_url, self.model,
+                                    timeout=min(self.transport.timeout, 10.0))
+        props = request_json(f"{self.base_url}/props", timeout=min(self.transport.timeout, 10.0),
                              method="GET", headers=self._headers()) or {}
         where = str(props.get("model_path") or "")
         name = where.rsplit("/", 1)[-1] or self.model
@@ -711,24 +647,23 @@ class Client:
         adapter = families.resolve(family) or families.for_model_id(served)
         tool_calls = adapter.tool_calls(message)
         content, thinking = families.split(adapter, message)
-        _warn_if_nothing_read(choice, message, adapter, served, content, thinking, tool_calls)
-
-        return Reply(
+        reply = Reply(
             content=content,
             tool_calls=tool_calls,
             finish_reason=choice.get("finish_reason"),
             thinking=thinking,
             raw=payload,
         )
+        _warn_if_nothing_read(reply, choice, message, adapter)
+        return reply
 
 
-def _warn_if_nothing_read(choice: dict[str, Any], message: dict[str, Any],
-                          adapter: Family, served: Any, content: str | None,
-                          thinking: str | None,
-                          tool_calls: list[dict[str, Any]] | None) -> None:
+def _warn_if_nothing_read(reply: Reply, choice: dict[str, Any], message: dict[str, Any],
+                          adapter: Family) -> None:
     """Say so when a reply carried text and nothing came back. Names fields, never text."""
-    if (content or "").strip() or (thinking or "").strip() or tool_calls:
+    if (reply.content or "").strip() or (reply.thinking or "").strip() or reply.tool_calls:
         return
+    served = reply.raw.get("model")
     stray = families.unread_text_fields(choice, message, adapter)
     if stray:
         logger.warning(
@@ -736,6 +671,35 @@ def _warn_if_nothing_read(choice: dict[str, Any], message: dict[str, Any],
             "not read; the server reports model %r",
             ", ".join(stray), adapter.name, served,
         )
+
+
+@dataclass
+class _Gathered:
+    """What a stream has said so far."""
+
+    content: list[str] = field(default_factory=list)
+    thinking: list[str] = field(default_factory=list)
+    calls: dict[int, dict[str, Any]] = field(default_factory=dict)
+    unread: dict[str, list[str]] = field(default_factory=dict)
+    tail: dict[str, Any] = field(default_factory=dict)
+    finish: str | None = None
+    model: str | None = None
+
+    def payload(self, adapter: Family) -> dict[str, Any]:
+        """The completion payload the pieces add up to."""
+        message: dict[str, Any] = {"role": "assistant",
+                                   adapter.content_field: "".join(self.content)}
+        if self.thinking:
+            message[adapter.thinking_fields[0]] = "".join(self.thinking)
+        if self.calls:
+            message["tool_calls"] = [self.calls[i] for i in sorted(self.calls)]
+        for key, pieces in self.unread.items():
+            message[key] = "".join(pieces)
+        out: dict[str, Any] = {"choices": [{"message": message, "finish_reason": self.finish}]}
+        if self.model:
+            out["model"] = self.model
+        out.update(self.tail)
+        return out
 
 
 def gather_stream(chunks: Any, on_delta: Callable[[str, str], None],
@@ -748,72 +712,54 @@ def gather_stream(chunks: Any, on_delta: Callable[[str, str], None],
     adapter comes from the ``model`` id the chunks carry.
     """
     pinned = families.resolve(family)
-    content: list[str] = []
-    thinking: list[str] = []
-    calls: dict[int, dict[str, Any]] = {}
-    finish: str | None = None
-    model: str | None = None
+    got = _Gathered()
     adapter: Family | None = pinned
     inline = families.inline_splitter()
-    unread: dict[str, list[str]] = {}
-    tail: dict[str, Any] = {}
 
     for chunk in chunks:
         if not isinstance(chunk, dict):
             continue
-        if isinstance(chunk.get("model"), str) and not model:
-            model = chunk["model"]
+        if isinstance(chunk.get("model"), str) and not got.model:
+            got.model = chunk["model"]
         for key in ("timings", "usage"):
             if isinstance(chunk.get(key), dict):
-                tail[key] = chunk[key]
+                got.tail[key] = chunk[key]
         if adapter is None:
-            adapter = families.for_model_id(model) if model else families.GENERIC
+            adapter = families.for_model_id(got.model) if got.model else families.GENERIC
 
         choices = chunk.get("choices") or []
         if not choices:
             continue
         choice = choices[0] or {}
-        finish = choice.get("finish_reason") or finish
+        got.finish = choice.get("finish_reason") or got.finish
         delta = choice.get("delta") or {}
 
         for key in adapter.thinking_fields:
             piece = delta.get(key)
             if piece:
-                thinking.append(str(piece))
+                got.thinking.append(str(piece))
                 on_delta("thinking", str(piece))
                 break
 
         piece = delta.get(adapter.content_field)
         if piece:
-            content.append(str(piece))
+            got.content.append(str(piece))
             if adapter.inline_think:
                 for channel, text in inline(str(piece)):
                     on_delta(channel, text)
             else:
                 on_delta("content", str(piece))
 
-        adapter.tool_delta(calls, delta)
+        adapter.tool_delta(got.calls, delta)
 
         for key in families.unread_text_fields({}, delta, adapter):
-            unread.setdefault(key, []).append(str(delta[key]))
+            got.unread.setdefault(key, []).append(str(delta[key]))
 
     adapter = adapter or pinned or families.GENERIC
     if adapter.inline_think:
         for channel, text in inline("", final=True):
             on_delta(channel, text)
-
-    message: dict[str, Any] = {"role": "assistant", adapter.content_field: "".join(content)}
-    if thinking:
-        message[adapter.thinking_fields[0]] = "".join(thinking)
-    if calls:
-        message["tool_calls"] = [calls[i] for i in sorted(calls)]
-    for key, pieces in unread.items():
-        message[key] = "".join(pieces)
-    assembled: dict[str, Any] = {"choices": [{"message": message, "finish_reason": finish}]}
-    if model:
-        assembled["model"] = model
-    assembled.update(tail)
-    return assembled
+    return got.payload(adapter)
 
 
 def _port_of(base_url: str) -> int:

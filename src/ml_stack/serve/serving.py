@@ -50,15 +50,12 @@ from typing import Any
 
 from ml_stack.asking import Asking
 from ml_stack.client.health import serving_params
+from ml_stack.client.settings import SAMPLERS, Request, Transport
 from ml_stack.log import say
 
 __all__ = ["Config", "Serving", "Talking", "draft_for", "drafted", "projector_for",
            "release_all", "said_cache", "served", "servers", "serving_said", "slot",
            "split_cache_type"]
-
-# The sampler settings a `Talking` carries. They are the client's, never the server's.
-SAMPLERS = ("temperature", "top_p", "top_k", "min_p")
-
 
 #: how the KV cache is stored unless a serving says otherwise
 DEFAULT_CACHE = "q8_0"
@@ -186,12 +183,8 @@ class Talking:
     """One model, talked to one way: what a :class:`~ml_stack.client.Client` is built from.
 
     ``timeout`` is the cap on one call, which is the bench's per-question cap said once.
-    ``think`` is absent from :meth:`client`: the client takes it per call --
-    ``chat(..., think=)`` -- and handing it to ``Client.__init__`` raises.
-
-    ``spec_draft_max`` and ``spec_p_min`` are the speculative settings that ride on a
-    request rather than on the server, so one served model can guess ahead by a different
-    number of tokens for each workload asking it.
+    ``think`` is taken per call -- ``chat(..., think=)`` -- and so is in neither
+    :meth:`request` nor :meth:`transport`. ``spec_draft_max`` rides on each request.
     """
 
     n_predict: int = 16384               # a ceiling, not a budget
@@ -199,17 +192,17 @@ class Talking:
     sampling: Mapping[str, Any] = field(default_factory=dict)
     think: bool | None = None
     spec_draft_max: int | None = None    # tokens guessed ahead
-    spec_p_min: float | None = None      # the draft's confidence floor
 
-    def client(self) -> dict[str, Any]:
-        """The keyword arguments :class:`~ml_stack.client.Client` takes."""
-        out: dict[str, Any] = {"n_predict": int(self.n_predict), "timeout": float(self.timeout)}
-        out.update({k: v for k, v in dict(self.sampling).items() if v is not None})
-        if self.spec_draft_max is not None:
-            out["spec_draft_max"] = int(self.spec_draft_max)
-        if self.spec_p_min is not None:
-            out["spec_p_min"] = float(self.spec_p_min)
-        return out
+    def request(self, *, slot: int | None = None) -> Request:
+        """The :class:`~ml_stack.client.Request` a client on ``slot`` sends."""
+        sampling = {k: v for k, v in dict(self.sampling).items() if v is not None}
+        depth = None if self.spec_draft_max is None else int(self.spec_draft_max)
+        return Request(n_predict=int(self.n_predict), spec_draft_max=depth, slot=slot,
+                       **sampling)
+
+    def transport(self) -> Transport:
+        """The :class:`~ml_stack.client.Transport` a client reaches its server with."""
+        return Transport(timeout=float(self.timeout))
 
 
 @dataclass(frozen=True)
@@ -240,19 +233,17 @@ class Config:
         """The keyword arguments :func:`ml_stack.serve.serve` takes, model aside."""
         return self.serving.lease()
 
-    def client(self, base_url: str, *, index: int | None = None, **over: Any) -> Any:
+    def client(self, base_url: str, *, index: int | None = None) -> Any:
         """A :class:`~ml_stack.client.Client` on this config's server.
 
         ``index`` pins it to a slot -- whose slot it is, taken modulo the slots -- and
-        None leaves the server to choose, which is what a config measuring one conversation
-        at a time wants.
+        None leaves the server to choose.
         """
         from ml_stack.client import Client
 
-        asked = {**self.talking.client(), **over}
-        if index is not None:
-            asked["slot"] = index % max(1, self.serving.slots)
-        return Client(base_url, **asked)
+        slot = None if index is None else index % max(1, self.serving.slots)
+        return Client(base_url, request=self.talking.request(slot=slot),
+                      transport=self.talking.transport())
 
     def over(self, **fields: Any) -> Config:
         """This config with ``fields`` laid over it, each routed to the section that owns it.
@@ -297,7 +288,7 @@ _URLS: dict[int, str] = {}
 
 
 def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
-         timeout: float | None = None, **client_kwargs: Any) -> Any:
+         timeout: float | None = None) -> Any:
     """A client on one slot of ``serving``'s server, started on first ask and held after.
 
     ``serving`` is a :class:`Serving` or the whole :class:`Config`; given a config, the ceiling,
@@ -310,10 +301,8 @@ def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
     argument rather than a livelier sentence.
     """
     config = serving if isinstance(serving, Config) else Config(serving=serving)
-    if n_predict is not None:
-        client_kwargs["n_predict"] = n_predict
-    if timeout is not None:
-        client_kwargs["timeout"] = timeout
+    over = {k: v for k, v in (("n_predict", n_predict), ("timeout", timeout)) if v is not None}
+    config = config.over(**over) if over else config
     with _LOCK:
         if config.port not in _URLS:
             from ml_stack.serve import serve
@@ -323,7 +312,7 @@ def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
                 serve(config.model, manager=config.serving.manager(), **config.lease()))
             _STACKS[config.port], _URLS[config.port] = stack, server.base_url
         where = _URLS[config.port]
-    return config.client(where, index=index, **client_kwargs)
+    return config.client(where, index=index)
 
 
 def servers() -> dict[int, str]:

@@ -29,6 +29,7 @@ from ml_stack.client.health import (
     serving_params,
     wait_for_health,
 )
+from ml_stack.client.settings import Request, Transport
 from ml_stack.client.tokens import (
     CHARS_PER_TOKEN,
     estimate_tokens,
@@ -46,9 +47,11 @@ __all__ = [
     "GrammarBudgetError",
     "GrammarUnsupportedError",
     "Reply",
+    "Request",
     "ServerError",
     "ServerUnreachable",
     "ServingParams",
+    "Transport",
     "VectorMismatch",
     "cosine",
     "embed",

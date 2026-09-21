@@ -791,11 +791,12 @@ class LlamaServerBackend(ServerBackend):
         measured question. A warm-up that fails is logged and otherwise ignored: a server
         that answered health is a server, and what it does with a real prompt is somebody
         else's check to make."""
-        from ml_stack.client import Client
+        from ml_stack.client import Client, Request, Transport
 
         started = time.monotonic()
         try:
-            Client(base_url, n_predict=8, timeout=min(timeout, 60.0)).complete(
+            Client(base_url, request=Request(n_predict=8),
+                   transport=Transport(timeout=min(timeout, 60.0))).complete(
                 "hello", n_predict=8)
         except Exception as exc:  # noqa: BLE001
             logger.debug("warm-up request to %s did not complete: %s", base_url, exc)

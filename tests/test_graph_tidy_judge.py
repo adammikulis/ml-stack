@@ -33,7 +33,7 @@ class Scripted:
     def _key(script, text):
         return next((k for k in script if all(word in text for word in k)), None)
 
-    def extract(self, text, schema, **kw):
+    def extract(self, text, schema, *, prompting=None, checking=None, cache=None):
         self.calls.append(text)
         properties = (schema or {}).get("properties") or {}
         if "keep" in properties:
@@ -459,10 +459,10 @@ def test_a_failed_model_call_leaves_the_pair_unsure_and_undecided_and_the_pass_g
     from ml_stack.http import ServerError
 
     class Flaky(Scripted):
-        def extract(self, text, schema, **kw):
+        def extract(self, text, schema, *, prompting=None, checking=None, cache=None):
             if "vaulf" in text:
                 raise ServerError("HTTP 500: compute error")
-            return super().extract(text, schema, **kw)
+            return super().extract(text, schema, prompting=prompting, checking=checking)
 
     path = _store(tmp_path, [
         _node("concept:glimmer-node", "glimmer node", mentions=4),

@@ -14,6 +14,7 @@ import pytest
 from ml_stack import hub
 from ml_stack.bench import Row, _hit, missed, runs, save, table
 from ml_stack.bench.selfcheck import ScriptedModel
+from ml_stack.client import Request, Transport
 from ml_stack.asking import Asking
 
 from conftest import a_row, json_reply, scored_rows
@@ -2413,7 +2414,7 @@ class _Stalling:
 
     def __init__(self, stall: float) -> None:
         self.stall = stall
-        self.timeout = 180.0            # the real client has one, so the cap is handed down
+        self.transport = Transport()    # the real client has one, so the cap is handed down
         self.given: list[float | None] = []
         self.calls = 0
         self.sampling: dict = {}
@@ -2506,13 +2507,23 @@ def test_the_table_counts_timeouts_and_the_detail_names_them(tmp_path, capsys):
 
 def test_per_question_reaches_the_client_and_the_measuring(tmp_path, monkeypatch, capsys):
     import ml_stack.bench as bench
+    import ml_stack.client
 
     seen = _serving(monkeypatch, tmp_path)
+    built = []
+
+    class Recording(_ServedModel):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(ml_stack.client, "Client", Recording)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--per-question", "42",
                         *seen["common"]]) == 0
     capsys.readouterr()
     back = runs(seen["kept"])[0]
-    assert back["server"]["sampling"]["timeout"] == 42.0, "the served client was built with it"
+    assert built and all(c.transport.timeout == 42.0 for c in built), \
+        "the served client was built with it"
     assert all(r["timed_out"] is False for r in back["rows"])
     assert "binary" in back["server"], "which llama-server served it is on the record"
 
@@ -2850,7 +2861,8 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
 
     with pytest.raises(TypeError, match="nonsense"):
         Strict("http://127.0.0.1:1", nonsense=True)
-    Strict("http://127.0.0.1:1", timeout=1.0, n_predict=4, temperature=0.0)
+    Strict("http://127.0.0.1:1", request=Request(n_predict=4, temperature=0.0),
+           transport=Transport(timeout=1.0))
     built.clear()
 
     class Server:

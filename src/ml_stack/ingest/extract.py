@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.extraction import Checking, Kept, Prompting
 from ml_stack.ingest.reads import Read
 
 __all__ = ["CORE_KINDS", "IMAGES_PER_SECTION", "INSTRUCTIONS", "PER_SECTION",
@@ -316,9 +317,11 @@ def extract_unit(client: Any, unit: Any, shape: Mapping[str, Any], *, images: bo
     recording = _Recording(client)
     began = time.time()
     try:
-        got = recording.extract(unit.text, dict(shape), messages=turns, think=False, tries=1,
-                                cache_dir=cache_dir,
-                                cache_extra=f"document/{unit.id}/{int(images)}")
+        got = recording.extract(
+            unit.text, dict(shape), prompting=Prompting(messages=turns),
+            checking=Checking(tries=1),
+            cache=None if cache_dir is None else Kept(
+                cache_dir, extra=f"document/{unit.id}/{int(images)}"))
         row.extracted = got if isinstance(got, dict) else {}
     except Exception as exc:  # noqa: BLE001 - one bad section does not end a run
         row.error = f"{type(exc).__name__}: {exc}"[:200]

@@ -39,6 +39,7 @@ from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.score import _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, table
+from ml_stack.client.settings import Request, Transport
 from ml_stack.bench.underway import MEASURING, detach, ended, remember
 from ml_stack.command import Group
 from ml_stack.log import say, warn
@@ -137,7 +138,7 @@ def cmd_run(args: Any) -> int:
 
         if not _idle(args.base_url, args):
             return 3
-        client = with_card(Client(args.base_url, **sampling_from(args)), args)
+        client = with_card(Client(args.base_url, request=Request(**sampling_from(args))), args)
     ask = bench.ask_from(args.ask) if args.ask else bench.asking(
         graph, how=asking_from(args), shortlist=args.shortlist, store=args.store or None,
         embed_url=args.embed_url, embed_model=args.embed_model, margin=args.margin)
@@ -207,8 +208,8 @@ def cmd_concurrent(args: Any) -> int:
 
         if not _idle(args.base_url, args):
             return 3
-        client = with_card(Client(args.base_url, timeout=args.per_question,
-                                  **sampling_from(args)), args)
+        client = with_card(Client(args.base_url, request=Request(**sampling_from(args)),
+                                  transport=Transport(timeout=args.per_question)), args)
     # a smoke run proves the path -- two conversations really overlapping, one turn
     # each -- and its numbers mean nothing, as with every other --smoke
     many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
@@ -380,9 +381,9 @@ def _measured_on(args: Any, named: Sequence[tuple[str, str]], questions: Any, gr
                 raise _NotIdle
             # the client for whatever program the URL names -- a llama-server, Ollama,
             # an OpenAI-style server -- at the sweep's context
-            asking_with = with_card(client_for(url, timeout=args.per_question,
-                                               context=total_context,
-                                               **sampling_from(args)), args)
+            asking_with = with_card(client_for(
+                url, request=Request(context=total_context, **sampling_from(args)),
+                transport=Transport(timeout=args.per_question)), args)
             # what it will actually send, card and overrides together: a run measured at
             # one temperature against a run at another is two measurements, and the only
             # way to know later is to write it down now

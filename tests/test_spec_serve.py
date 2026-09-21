@@ -23,7 +23,10 @@ from mlx_lm import load  # noqa: E402
 from test_spec_decode import plain_greedy, tiny_hybrid  # noqa: E402
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers  # noqa: E402
 
-from ml_stack.client import Client  # noqa: E402
+from ml_stack.client import (
+    Client,  # noqa: E402
+    Request,
+)
 from ml_stack.graph.serve import Handler  # noqa: E402
 from ml_stack.http import ServerError  # noqa: E402
 from ml_stack.serve.backend import ServerSpec  # noqa: E402
@@ -80,8 +83,8 @@ def test_a_served_tree_engine_answers_what_plain_greedy_decoding_writes(weights:
                                  Handler.configured(name="TreeTest", completer=completer))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        client = Client(f"http://127.0.0.1:{server.server_address[1]}", temperature=0.0,
-                        n_predict=16)
+        client = Client(f"http://127.0.0.1:{server.server_address[1]}",
+                        request=Request(temperature=0.0, n_predict=16))
         whole = client.chat(ASKED, think=False)
         pieces: list[str] = []
         streamed = client.chat(ASKED, think=False, on_delta=lambda kind, text: pieces.append(text))
@@ -105,8 +108,8 @@ def test_a_streamed_failure_reaches_the_client_as_an_error(weights: Path,
                                  Handler.configured(name="TreeTest", completer=completer))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        client = Client(f"http://127.0.0.1:{server.server_address[1]}", temperature=0.0,
-                        n_predict=4)
+        client = Client(f"http://127.0.0.1:{server.server_address[1]}",
+                        request=Request(temperature=0.0, n_predict=4))
         with pytest.raises(ServerError, match="no-such-rule"):
             client.chat(ASKED, think=False, on_delta=lambda kind, text: None)
     finally:
@@ -123,7 +126,8 @@ def test_a_lease_on_mlx_weights_starts_the_tree_server_and_it_answers(weights: P
     info = manager.lease(spec, timeout=180.0, roam=False, anyway=True)
     try:
         assert info.backend == "mlx-tree"
-        reply = Client(info.base_url, temperature=0.0, n_predict=16).chat(ASKED, think=False)
+        reply = Client(info.base_url,
+                       request=Request(temperature=0.0, n_predict=16)).chat(ASKED, think=False)
         assert reply.content.strip() == expected_text(weights, 16)
         assert reply.raw["timings"]["verify_n"] >= 1
     finally:

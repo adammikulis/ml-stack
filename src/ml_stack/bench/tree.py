@@ -29,7 +29,7 @@ import mlx.core as mx
 from ml_stack import bench
 from ml_stack.bench.quiet import look
 from ml_stack.bench.speed import prompt_text
-from ml_stack.client import Client
+from ml_stack.client import Client, Request
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.lock import only_one
@@ -312,7 +312,7 @@ def llama_arms(args: argparse.Namespace) -> tuple[list[Sample], list[dict[str, A
             served.append({"arm": arm, "spec": spec, "pid": pid, "base_url": grant.base_url,
                            "params": asdict(params) if params is not None else None})
             for count in args.tokens_list:
-                client = Client(grant.base_url, temperature=0.0, n_predict=count)
+                client = Client(grant.base_url, request=Request(temperature=0.0, n_predict=count))
                 client.chat([{"role": "user", "content": "Say hello."}], think=False)
                 for name, question in PROMPTS.items():
                     for thinking in (False, True):

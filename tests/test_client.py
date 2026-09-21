@@ -13,12 +13,15 @@ import time
 
 import pytest
 from conftest import json_reply
+
 from ml_stack.client import (
     Client,
     EmbeddingError,
     GrammarUnsupportedError,
+    Request,
     ServerError,
     ServerUnreachable,
+    Transport,
     embed,
     estimate_tokens,
     family_by_name,
@@ -31,6 +34,7 @@ from ml_stack.client import (
     strip_thinking,
     wait_for_health,
 )
+from ml_stack.extraction import Checking, Prompting
 
 
 def _chat_reply(content: str, **message: object):
@@ -44,7 +48,8 @@ class TestBuildBody:
     """Split out from ``chat`` precisely so it is testable with no server running."""
 
     def test_pins_the_kv_slot_when_one_is_given(self):
-        body = Client("http://x", slot=3).build_body([{"role": "user", "content": "hi"}])
+        body = Client("http://x",
+                      request=Request(slot=3)).build_body([{"role": "user", "content": "hi"}])
         assert body["id_slot"] == 3
         assert body["cache_prompt"] is True, "pinning a slot without reusing its cache "\
                                              "is the cost with none of the benefit"
@@ -64,14 +69,15 @@ class TestBuildBody:
 
     def test_strips_llamacpp_only_keys_for_hosted_openai(self):
         """api.openai.com rejects top_k outright rather than ignoring it."""
-        body = Client("https://api.openai.com/v1", slot=1,
-                      n_predict=512).build_body([], top_k=40)
+        body = Client("https://api.openai.com/v1",
+                      request=Request(slot=1, n_predict=512)).build_body([], top_k=40)
         assert "top_k" not in body
         assert "n_predict" not in body and body["max_tokens"] == 512
         assert "id_slot" not in body
 
     def test_keeps_them_for_a_local_server(self):
-        body = Client("http://127.0.0.1:8080", n_predict=512).build_body([], top_k=40)
+        body = Client("http://127.0.0.1:8080",
+                      request=Request(n_predict=512)).build_body([], top_k=40)
         assert body["top_k"] == 40 and body["n_predict"] == 512
 
     def test_the_token_ceiling_defaults_high(self):
@@ -92,20 +98,17 @@ class TestBuildBody:
 
     def test_a_draft_depth_is_sent_under_the_servers_own_name(self):
         """The server registers a flat field; a nested object is dropped in silence."""
-        body = Client("http://x", spec_draft_max=4).build_body([])
+        body = Client("http://x", request=Request(spec_draft_max=4)).build_body([])
         assert body["speculative.n_max"] == 4
         assert "speculative" not in body
 
-    def test_a_setting_the_server_reads_once_at_startup_is_refused(self):
-        """The draft implementations copy p_min in when they are built at server start.
-        Sending it changes nothing, and a caller who thinks it did measures the wrong
-        thing."""
-        with pytest.raises(ValueError, match="not a per-request setting"):
-            Client("http://x", spec_p_min=0.5)
+    def test_a_setting_the_server_reads_once_at_startup_is_not_a_request_field(self):
+        """llama-server reads the draft's p_min once, at start."""
+        with pytest.raises(TypeError, match="spec_p_min"):
+            Request(spec_p_min=0.5)
 
     def test_speculative_fields_are_stripped_for_hosted_openai(self):
-        body = Client("https://api.openai.com/v1",
-                      spec_draft_max=4).build_body([])
+        body = Client("https://api.openai.com/v1", request=Request(spec_draft_max=4)).build_body([])
         assert not [key for key in body if key.startswith("speculative.")]
 
 
@@ -683,7 +686,7 @@ class TestChat:
 
     def test_the_request_actually_carries_the_slot(self, server):
         instance = server(lambda m, p, b: _chat_reply("ok"))
-        Client(instance.base_url, slot=7).chat([{"role": "user", "content": "x"}])
+        Client(instance.base_url, request=Request(slot=7)).chat([{"role": "user", "content": "x"}])
         _, path, body = instance.requests[-1]
         assert path == "/v1/chat/completions"
         assert json.loads(body)["id_slot"] == 7
@@ -743,7 +746,7 @@ class TestGrammarTripwire:
 
     def test_fails_when_the_server_is_absent(self):
         with pytest.raises(GrammarUnsupportedError, match="could not run"):
-            Client("http://127.0.0.1:1", timeout=0.5).assert_grammar_support()
+            Client("http://127.0.0.1:1", transport=Transport(timeout=0.5)).assert_grammar_support()
 
     def test_budget_exhaustion_retries_once_at_double_with_a_fresh_seed(self, server):
         """The fresh seed matters: the same seed re-walks the same path into the same
@@ -951,9 +954,9 @@ class TestExtract:
             return self.chat_reply('{"people": []}')
 
         instance = server(handler)
-        out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
-                                                instructions="Pull out the people.",
-                                                n_predict=256)
+        out = Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA,
+            prompting=Prompting(instructions="Pull out the people.", n_predict=256))
 
         assert out == {"people": []}
         assert seen["path"] == "/v1/chat/completions"
@@ -991,7 +994,8 @@ class TestExtract:
             return self.chat_reply("{}")
 
         instance = server(handler)
-        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA, think=True)
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                          prompting=Prompting(think=True))
 
         assert seen["body"]["chat_template_kwargs"]["enable_thinking"] is True
 
@@ -1004,7 +1008,7 @@ class TestExtract:
 
         instance = server(handler)
         Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
-                                          schema_name="people")
+                                          prompting=Prompting(schema_name="people"))
 
         assert seen["body"]["response_format"]["json_schema"]["name"] == "people"
 
@@ -1020,7 +1024,8 @@ class TestExtract:
 
         instance = server(handler)
         Client(instance.base_url).extract("ignored", self.SCHEMA,
-                                          instructions="ignored", messages=convo)
+                                          prompting=Prompting(instructions="ignored",
+                                                              messages=convo))
 
         assert seen[0]["messages"] == convo
 
@@ -1063,7 +1068,7 @@ class TestExtract:
 
         instance = server(handler)
         out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
-                                                check=lambda obj: [])
+                                                checking=Checking(check=lambda obj: []))
 
         assert out == found
         assert "_objections" not in out
@@ -1081,7 +1086,7 @@ class TestExtract:
         instance = server(handler)
         out = Client(instance.base_url).extract(
             "Ada is an engineer.", self.SCHEMA,
-            check=lambda obj: [] if obj["people"] else ["no people were found"])
+            checking=Checking(check=lambda obj: [] if obj["people"] else ["no people were found"]))
 
         assert out == {"people": [{"name": "Ada"}]}
         assert "_objections" not in out
@@ -1104,8 +1109,9 @@ class TestExtract:
 
         instance = server(handler)
         out = Client(instance.base_url).extract(
-            "Ada is an engineer.", self.SCHEMA, tries=3,
-            check=lambda obj: ["no people were found", "role is missing"])
+            "Ada is an engineer.", self.SCHEMA,
+            checking=Checking(tries=3,
+                              check=lambda obj: ["no people were found", "role is missing"]))
 
         assert len(seen) == 3
         assert out["people"] == []
@@ -1120,8 +1126,8 @@ class TestExtract:
 
         instance = server(handler)
         out = Client(instance.base_url).extract(
-            "Ada is an engineer.", self.SCHEMA, tries=1,
-            check=lambda obj: ["no people were found"])
+            "Ada is an engineer.", self.SCHEMA,
+            checking=Checking(tries=1, check=lambda obj: ["no people were found"]))
 
         assert len(seen) == 1
         assert out["_objections"] == ["no people were found"]
@@ -1136,9 +1142,10 @@ class TestExtract:
             return json_reply({"content": "{}"})
 
         instance = server(handler)
-        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
-                                          instructions="ignored", n_predict=256,
-                                          prompt="<|user|>find the people<|assistant|>")
+        Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA,
+            prompting=Prompting(instructions="ignored", n_predict=256,
+                                prompt="<|user|>find the people<|assistant|>"))
 
         assert seen[0][0] == "/completion"
         assert seen[0][1]["prompt"] == "<|user|>find the people<|assistant|>"
@@ -1154,9 +1161,10 @@ class TestExtract:
 
         instance = server(handler)
         base = "<|im_start|>user\nfind the people<|im_end|>\n<|im_start|>assistant\n"
-        Client(instance.base_url).extract(
-            "Ada is an engineer.", self.SCHEMA, prompt=base,
-            check=lambda obj: ["no people were found"])
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                          prompting=Prompting(prompt=base),
+                                          checking=Checking(
+                                              check=lambda obj: ["no people were found"]))
 
         retried = seen[1]["prompt"]
         assert len(seen) == 2
@@ -1174,9 +1182,10 @@ class TestExtract:
             return json_reply({"content": '{"people": []}'})
 
         instance = server(handler)
-        Client(instance.base_url).extract(
-            "Ada is an engineer.", self.SCHEMA, prompt="find the people\nJSON:\n",
-            check=lambda obj: ["no people were found"])
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                          prompting=Prompting(prompt="find the people\nJSON:\n"),
+                                          checking=Checking(
+                                              check=lambda obj: ["no people were found"]))
 
         assert seen[1]["prompt"].startswith(seen[0]["prompt"])
         assert "no people were found" in seen[1]["prompt"]
@@ -1192,9 +1201,10 @@ class TestExtract:
 
         instance = server(handler)
         with pytest.raises(ContractError):
-            Client(instance.base_url).extract(
-                "x", {"type": "object", "properties": {"a": {"type": "date"}}},
-                prompt="find it\nJSON:\n")
+            Client(instance.base_url).extract("x",
+                                              {"type": "object",
+                                               "properties": {"a": {"type": "date"}}},
+                                              prompting=Prompting(prompt="find it\nJSON:\n"))
         assert calls["n"] == 0
 
 
@@ -1236,7 +1246,8 @@ def test_a_model_card_informs_but_is_never_sent_on_its_own():
     assert "top_p" not in gemma.build_body([{"role": "user", "content": "x"}])
 
     # a caller who chooses gets what they chose, and only that
-    chosen = Client("http://nowhere.invalid", family=GEMMA, temperature=0.7, top_k=40)
+    chosen = Client("http://nowhere.invalid", family=GEMMA,
+                    request=Request(temperature=0.7, top_k=40))
     assert chosen.sampling == {"temperature": 0.7, "top_k": 40}
 
     # and a card that says nothing leaves an empty record rather than an invented one
@@ -1299,7 +1310,7 @@ def test_think_becomes_the_familys_template_flag_and_never_a_body_key():
 def test_a_measured_draft_depth_goes_out_with_the_request():
     from ml_stack.client.chat import Client
 
-    body = Client("http://127.0.0.1:1", spec_draft_max=2).build_body(
+    body = Client("http://127.0.0.1:1", request=Request(spec_draft_max=2)).build_body(
         [{"role": "user", "content": "hi"}])
     assert body["speculative.n_max"] == 2
     assert "speculative" not in body, "the server registers a flat field, not an object"
@@ -1308,7 +1319,8 @@ def test_a_measured_draft_depth_goes_out_with_the_request():
 def test_a_hosted_endpoint_is_never_asked_to_guess_ahead():
     from ml_stack.client.chat import Client
 
-    client = Client("https://api.openai.com/v1", spec_draft_max=2, api="openai")
+    client = Client("https://api.openai.com/v1", request=Request(spec_draft_max=2),
+                    transport=Transport(api="openai"))
     assert client.speculative == {}
     body = client.build_body([{"role": "user", "content": "hi"}])
     assert not [key for key in body if key.startswith("speculative")]
@@ -1328,13 +1340,13 @@ def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(chat_mod, "request_json", answering)
-    client = chat_mod.Client("http://127.0.0.1:1", spec_draft_max=2)
+    client = chat_mod.Client("http://127.0.0.1:1", request=Request(spec_draft_max=2))
     assert client.chat([{"role": "user", "content": "hi"}]).content == "ok"
     assert len(sent) == 2
     assert not [key for key in sent[1] if key.startswith("speculative.")]
 
     sent.clear()
     chat_mod.Client("http://127.0.0.1:1",
-                    spec_draft_max=2).chat([{"role": "user", "content": "hi"}])
+                    request=Request(spec_draft_max=2)).chat([{"role": "user", "content": "hi"}])
     assert len(sent) == 1, "the server is asked once, not once per client"
     chat_mod.forget_speculative()

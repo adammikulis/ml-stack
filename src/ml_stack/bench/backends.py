@@ -12,12 +12,13 @@ figure that program does not report.
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from ml_stack.client.settings import Request, Transport
 from ml_stack.http import request_json
 
 # The programs a URL can name ahead of its host, and the api each is spoken to with.
@@ -64,35 +65,21 @@ def http_of(url: str) -> str:
     return str(url).rstrip("/")
 
 
-def _accepts(client: Any, name: str) -> bool:
-    try:
-        params = inspect.signature(client.__init__).parameters
-    except (TypeError, ValueError):
-        return True
-    return name in params or any(p.kind is p.VAR_KEYWORD for p in params.values())
-
-
-def client_for(url: str, *, client: Any = None, context: int | None = None,
-               **settings: Any) -> Any:
-    """A client on ``url``: ``Client(url, api=, model=, context=, **settings)`` when the
-    client takes those, ``Client(url, **settings)`` when it does not -- and a URL naming
-    a program the client cannot speak to is refused by name."""
+def client_for(url: str, *, client: Any = None, model: str | None = None,
+               request: Request | None = None, transport: Transport | None = None) -> Any:
+    """A client on ``url``, told the program and the model a program's URL names, at
+    the plain http address it points at."""
     if client is None:
         from ml_stack.client import Client
 
         client = Client
     how = how_of(url)
-    asked = dict(settings)
+    transport = transport or Transport()
     if how:
-        if not _accepts(client, "api"):
-            raise ValueError(f"{url}: this client speaks to a llama-server only and cannot "
-                             f"take an {how['api']} URL")
-        asked.update(how)
-    if context is not None and _accepts(client, "context"):
-        asked["context"] = int(context)
-    # the plain http address with the program and the model said outright, so a client
-    # that reads only one scheme off a URL is still told what the others mean
-    return client(http_of(url) if how else url, **asked)
+        transport = replace(transport, api=how["api"])
+        model = how.get("model") or model
+    return client(http_of(url) if how else url, model=model, request=request,
+                  transport=transport)
 
 
 def speaks_llama(client: Any) -> bool:
@@ -292,9 +279,9 @@ def draft_depth_support(client: Any, *, n_predict: int = 24) -> str:
     nothing either way and there is no depth to ask for.
     """
     def drafted(depth: int | None) -> int | None:
-        probe = client_for(str(client.base_url), client=type(client), n_predict=n_predict,
+        probe = client_for(str(client.base_url), client=type(client),
                            model=getattr(client, "model", None) or None,
-                           spec_draft_max=depth)
+                           request=Request(n_predict=n_predict, spec_draft_max=depth))
         return timings_of(probe.chat(list(_PROBE))).get("draft_n")
 
     free = drafted(None)

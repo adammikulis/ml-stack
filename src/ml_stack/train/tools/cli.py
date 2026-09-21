@@ -42,7 +42,7 @@ def load_tools(spec: str) -> Any:
 def _asker(url: str) -> Callable[[str], str]:
     from ml_stack.client import Client
 
-    client = Client(base_url=url)
+    client = Client(url)
 
     def ask(prompt: str) -> str:
         reply = client.chat([{"role": "user", "content": prompt}])

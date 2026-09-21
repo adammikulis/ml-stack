@@ -15,8 +15,8 @@ class Stub:
         self.reply = reply
         self.seen = []
 
-    def extract(self, text, schema, **kw):
-        self.seen.append((text, kw))
+    def extract(self, text, schema, *, prompting=None, checking=None, cache=None):
+        self.seen.append((text, prompting))
         return self.reply
 
 
@@ -53,9 +53,9 @@ def test_pick_asks_with_the_listing_and_keeps_only_what_checks_out():
     client = Stub({"ids": ["n:2", "nope"], "why": "he answered"})
     got, why = pick("who replied?", records=RECORDS, client=client)
     assert got == ["n:2"] and why == "he answered"
-    text, kw = client.seen[0]
+    text, prompting = client.seen[0]
     assert "n:2" in text and "who replied?" in text
-    assert kw["think"] is False and kw["schema_name"] == "graph_pick"
+    assert prompting.think is False and prompting.schema_name == "graph_pick"
 
 
 def test_pick_needs_neither_a_model_for_an_empty_question_nor_for_an_empty_graph():
