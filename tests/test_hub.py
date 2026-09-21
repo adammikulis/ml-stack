@@ -429,6 +429,20 @@ class TestFetch:
         assert downloaded == ["thing-Q4_K_M.gguf"]
         assert got.name == "thing-Q4_K_M.gguf"
 
+    def test_a_file_the_repo_does_not_hold_names_what_it_does(self, monkeypatch):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        monkeypatch.setattr(hub, "files", lambda repo, **kw: [
+            ("thing-UD-Q4_K_XL.gguf", 4), ("mmproj-F16.gguf", 1),
+            ("MTP/mtp-thing-Q8_0.gguf", 1)])
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download",
+                            lambda *a, **kw: pytest.fail("downloaded a file the repo lacks"))
+        with pytest.raises(ValueError) as caught:
+            hub.fetch("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
+        assert str(caught.value) == ("maker/thing-GGUF has no thing-Q4_K_M.gguf; "
+                                     "it holds thing-UD-Q4_K_XL.gguf")
+
     def test_a_reference_with_no_file_is_rejected(self):
         import ml_stack.hub as hub
 

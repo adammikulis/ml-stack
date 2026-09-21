@@ -178,9 +178,14 @@ def fetch(reference: str) -> Path:
     repo, name = parts
 
     stem = name.split("/")[0] if "/" in name else _SHARD.sub("", name.rsplit("/", 1)[-1])
-    members = [n for n, _size in hub.files(repo)
-              if (n.split("/")[0] if "/" in n
-                  else _SHARD.sub("", n.rsplit("/", 1)[-1])) == stem] or [name]
+    listing = [n for n, _size in hub.files(repo)]
+    members = [n for n in listing
+               if (n.split("/")[0] if "/" in n
+                   else _SHARD.sub("", n.rsplit("/", 1)[-1])) == stem]
+    if name not in members:
+        held = [n for n in listing if not hub.aside(n)]
+        raise ValueError(f"{repo} has no {name}; it holds "
+                         + (", ".join(held) if held else "no model file"))
 
     wanted: Path | None = None
     last: Path | None = None
