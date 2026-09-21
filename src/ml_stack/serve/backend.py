@@ -508,7 +508,20 @@ class LlamaServerBackend(ServerBackend):
     def command(self, spec: ServerSpec) -> list[str]:
         """Build the argv."""
         argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
+        argv += self._model_source_argv(spec)
+        argv += self._companion_argv(spec)
+        argv += self._speculative_argv(spec)
+        argv += self._placement_argv(spec)
+        argv += self._cache_argv(spec)
+        argv += self._runtime_argv(spec)
+        argv += self._rope_argv(spec)
+        argv += list(spec.extra_args)
+        return argv
 
+    @staticmethod
+    def _model_source_argv(spec: ServerSpec) -> list[str]:
+        """The model itself: where it comes from, its context, layers and slots."""
+        argv: list[str] = []
         if spec.is_hf_ref:
             repo, name = spec.hf_parts(spec.model)
             argv += ["--hf-repo", repo]
@@ -527,6 +540,12 @@ class LlamaServerBackend(ServerBackend):
         argv += ["-np", str(max(1, spec.parallel))]
         if spec.embedding:
             argv += ["--embeddings", "--pooling", "mean"]
+        return argv
+
+    @staticmethod
+    def _companion_argv(spec: ServerSpec) -> list[str]:
+        """A projector and a draft model, each served beside the main one."""
+        argv: list[str] = []
         if spec.mmproj:
             # `--mmproj` takes a file on disk, so an `hf:` reference has to become the URL
             # it stands for; `--mmproj-url` fetches it. Passing the reference itself is a
@@ -555,6 +574,12 @@ class LlamaServerBackend(ServerBackend):
                 raise ServerFailed(
                     f"a draft named by file ({spec.draft}) must be fetched before serving; "
                     f"LlamaServerBackend.start does that, or `ml-stack-models fetch`")
+        return argv
+
+    @staticmethod
+    def _speculative_argv(spec: ServerSpec) -> list[str]:
+        """How the drafted tokens are guessed and checked."""
+        argv: list[str] = []
         if spec.spec_type:
             argv += ["--spec-type", str(spec.spec_type)]
         for flag, value in (("--spec-draft-type-k", spec.spec_draft_type_k or None),
@@ -567,12 +592,24 @@ class LlamaServerBackend(ServerBackend):
                             ("--spec-draft-ngl", spec.spec_draft_ngl)):
             if value is not None:
                 argv += [flag, str(value)]
+        return argv
+
+    @staticmethod
+    def _placement_argv(spec: ServerSpec) -> list[str]:
+        """Which tensors and experts sit on the CPU rather than the GPU."""
+        argv: list[str] = []
         for pattern in spec.override_tensor:
             argv += ["--override-tensor", str(pattern)]
         if spec.cpu_moe:
             argv += ["--cpu-moe"]
         if spec.n_cpu_moe is not None:
             argv += ["--n-cpu-moe", str(spec.n_cpu_moe)]
+        return argv
+
+    @staticmethod
+    def _cache_argv(spec: ServerSpec) -> list[str]:
+        """The KV cache, slots, and what carries a conversation across them."""
+        argv: list[str] = []
         if spec.cache_reuse is not None:
             argv += ["--cache-reuse", str(spec.cache_reuse)]
         if not spec.warmup:
@@ -595,6 +632,12 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--lookup-cache-static", str(spec.lookup_static)]
         if spec.lookup_dynamic:
             argv += ["--lookup-cache-dynamic", str(spec.lookup_dynamic)]
+        return argv
+
+    @staticmethod
+    def _runtime_argv(spec: ServerSpec) -> list[str]:
+        """Attention, quantisation, memory residency and reasoning."""
+        argv: list[str] = []
         if spec.flash_attn:
             argv += ["-fa", "on"]
         if spec.jinja and not spec.embedding:
@@ -609,6 +652,12 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--mlock"]
         if spec.reasoning_budget is not None:
             argv += ["--reasoning-budget", str(spec.reasoning_budget)]
+        return argv
+
+    @staticmethod
+    def _rope_argv(spec: ServerSpec) -> list[str]:
+        """RoPE/YaRN: how a context beyond the model's training length is read."""
+        argv: list[str] = []
         if spec.rope_scaling:
             argv += ["--rope-scaling", str(spec.rope_scaling)]
         if spec.rope_scale is not None:
@@ -621,8 +670,6 @@ class LlamaServerBackend(ServerBackend):
                             ("--yarn-beta-slow", spec.yarn_beta_slow)):
             if value is not None:
                 argv += [flag, str(value)]
-
-        argv += list(spec.extra_args)
         return argv
 
     @staticmethod
@@ -672,22 +719,11 @@ class LlamaServerBackend(ServerBackend):
                        yarn_orig_ctx=trained), said
 
     def start(self, spec: ServerSpec, *, lease: Lease, timeout: float = 300.0,
-              check_flags: bool = True, preflight: bool = True,
-              warmup_request: bool = True) -> ServerInfo:
+              **starting: bool) -> ServerInfo:
         """Launch and wait until healthy. Raises ``ServerFailed`` with the log tail.
 
-        A flag this build does not have raises ``UnknownFlag`` before anything is started;
-        ``check_flags=False`` skips that, for a stand-in binary that prints no help.
-
-        ``preflight=True`` (the default) runs every other check worth asking before a load
-        -- shards present, architecture read by this build, an estimate against what this
-        machine may use -- and raises ``PreflightFailed`` with the report's own lines when
-        one comes back wrong. It runs after the port is confirmed free and before anything
-        is spawned, so a refusal here still costs nothing: no process, no load, no GPU.
-
-        ``warmup_request=True`` sends one short completion once the health check passes,
-        so shader compilation and the first KV allocation are paid for here rather than by
-        whatever the first real question turns out to be.
+        ``starting`` takes ``check_flags``, ``preflight`` and ``warmup_request``, each
+        ``True`` unless passed otherwise.
         """
         spec = self.resolved_draft(self.resolved_model(spec))
         spec, yarn_said = self.resolved_context(spec)
@@ -699,12 +735,12 @@ class LlamaServerBackend(ServerBackend):
                 raise ServerFailed(f"no model file at {model}")
 
         argv = self.command(spec)
-        if check_flags:
+        if starting.get("check_flags", True):
             argv = self.checked(argv)
 
         claim_port(spec, lease)
 
-        if preflight:
+        if starting.get("preflight", True):
             from ml_stack.hub import room
             from ml_stack.serve.preflight import Preflight, PreflightFailed
 
@@ -734,7 +770,7 @@ class LlamaServerBackend(ServerBackend):
             env=child_env(self.binary, extra_env or None))
 
         warmup_s = None
-        if warmup_request:
+        if starting.get("warmup_request", True):
             warmup_s = self._warm_up(base_url, timeout=timeout)
 
         return ServerInfo(

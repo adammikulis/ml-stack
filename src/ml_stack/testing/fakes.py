@@ -819,8 +819,7 @@ class FakeBackend(ServerBackend):
         return ["fake", "--port", str(spec.port), "--model", str(spec.model)]
 
     def start(self, spec: ServerSpec, *, lease: Any, timeout: float = 300.0,
-              check_flags: bool = True, preflight: bool = True,
-              warmup_request: bool = True) -> ServerInfo:
+              **starting: bool) -> ServerInfo:
         self.started.append(spec)
         return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                           pid=self.pid + len(self.started), backend=self.name,
