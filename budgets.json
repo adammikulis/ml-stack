@@ -2,7 +2,7 @@
   "ad-hoc-fakes": 79,
   "argument-parsers": 26,
   "atomic-writes": 0,
-  "broad-excepts": 204,
+  "broad-excepts": 203,
   "duplicate-bodies": 0,
   "entry-points": 24,
   "file-locks": 0,
@@ -18,14 +18,14 @@
   "pyright-errors": 1,
   "ruff-blind-except": 23,
   "ruff-bugbear": 59,
-  "ruff-other": 756,
+  "ruff-other": 742,
   "ruff-security": 127,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
   "wide-signatures": 42,
   "floors-only-rise": {
-    "tests-collected": 5392
+    "tests-collected": 5395
   },
   "ratchet": {
     "date": "2026-09-18",
