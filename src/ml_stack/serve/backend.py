@@ -147,7 +147,7 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
     """
     full = ServerSpec(
         model="model.gguf", parallel=2, mmproj="mmproj-model.gguf", draft="draft.gguf",
-        spec_type="draft-simple", spec_draft_max=3, spec_draft_min=1, spec_ngram_min=48,
+        spec_type="draft-simple", spec_draft_max=3, spec_p_min=0.5, spec_draft_min=1, spec_ngram_min=48,
         spec_ngram_max=64, spec_draft_ngl=99, spec_draft_type_k="q8_0",
         spec_draft_type_v="q8_0", lookup_static="static.bin", lookup_dynamic="dynamic.bin",
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
@@ -239,6 +239,7 @@ class ServerSpec:
     # costs both. `ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-mod`, `ngram-cache`.
     spec_type: str = ""
     spec_draft_max: int | None = None       # tokens guessed ahead (server default 3)
+    spec_p_min: float | None = None         # draft's minimum probability (server default 0.00)
     # Guess ahead in a tree rather than a chain: the branches the drafter expands per depth,
     # each proposing that many children, up to `spec_draft_max` nodes. The target verifies the
     # whole tree in one pass, every node seeing only the prefix and its own ancestors, and keeps
@@ -585,6 +586,7 @@ class LlamaServerBackend(ServerBackend):
         for flag, value in (("--spec-draft-type-k", spec.spec_draft_type_k or None),
                             ("--spec-draft-type-v", spec.spec_draft_type_v or None),
                             ("--spec-draft-n-max", spec.spec_draft_max),
+                            ("--spec-draft-p-min", spec.spec_p_min),
                             ("--spec-tree", spec.spec_tree),
                             ("--spec-draft-n-min", spec.spec_draft_min),
                             ("--spec-ngram-mod-n-min", spec.spec_ngram_min),

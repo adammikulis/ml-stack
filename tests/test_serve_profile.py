@@ -337,6 +337,13 @@ def test_up_with_a_profile_fills_every_flag_that_was_not_given(leases, tmp_path)
     assert spec.extra_args == ("-ub", "2048", "--spec-draft-p-min", "0.5")
 
 
+def test_up_with_a_profile_serves_the_draft_p_min(leases, tmp_path):
+    add(measured(mmproj="", spec_p_min=0.4))
+    assert serve_cli.main(upped("--profile", root=tmp_path)) == 0
+
+    assert leases[0].spec_p_min == 0.4
+
+
 def test_a_flag_that_was_given_wins_over_the_record(leases, tmp_path):
     add(measured(mmproj=""))
     assert serve_cli.main(upped("--profile", "--kv", "f16", "--parallel", "4",
@@ -731,14 +738,15 @@ def test_a_record_writes_its_workload_and_reads_it_back(tmp_path):
 
     row = json.loads(where.read_text(encoding="utf-8"))[0]
     assert row["workload"] == "ingest"
-    assert row["request"] == {"spec_draft_max": 2, "spec_p_min": 0.5,
-                              "sampling": {"temperature": 0.0}}
+    assert row["request"] == {"spec_draft_max": 2, "sampling": {"temperature": 0.0}}
+    assert row["serve"]["spec_p_min"] == 0.5, "the confidence floor rides on the launch"
     assert "spec_draft_max" not in row["serve"], "the draft depth rides on a request"
+    assert "spec_p_min" not in row["request"], "the confidence floor is not a per-request field"
     assert prof.records_in(where)[0] == one
 
 
 def test_the_request_half_travels_with_each_call():
-    one = measured(spec_draft_max=3, spec_p_min=0.4)
+    one = measured(spec_draft_max=3)
     talking = one.talking()
 
     assert talking.spec_draft_max == 3
@@ -749,6 +757,12 @@ def test_the_startup_half_still_names_the_draft_depth_it_was_served_with():
     one = measured(spec_draft_max=3)
     assert one.serving(resolve=False).draft_n_max == 3, \
         "a build with no per-request override serves the depth it was started with"
+
+
+def test_the_startup_half_names_the_draft_p_min_it_was_served_with():
+    one = measured(spec_p_min=0.4)
+    assert one.serving(resolve=False).draft_p_min == 0.4, \
+        "the confidence floor is a launch setting, not a per-request one"
 
 
 # -- saying which workload a server is for ------------------------------------------------
@@ -863,6 +877,15 @@ def test_a_record_keeps_the_drafts_own_cache_type():
     assert Profile.from_dict(one.as_dict()).draft_cache_type == "q4_0"
     assert one.serving(resolve=False).draft_cache_type == "q4_0"
     assert "--draft-kv q4_0" in _flags(one)
+
+
+def test_a_record_carries_the_draft_p_min_to_the_flags_line():
+    from ml_stack.serve.profile import Profile, _flags
+
+    one = Profile(model="m.gguf", spec_p_min=0.5)
+    assert Profile.from_dict(one.as_dict()).spec_p_min == 0.5
+    assert one.serving(resolve=False).draft_p_min == 0.5
+    assert "--spec-draft-p-min 0.5" in _flags(one)
 
 
 def test_a_rewrite_that_cannot_see_the_drafts_cache_keeps_it():

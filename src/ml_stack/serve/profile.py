@@ -11,8 +11,8 @@ the three this repository drives a model with, and both ends read it: the serve 
 takes :meth:`Profile.talking`.
 
 A record has a startup half and a request half. `--context`, the draft head file, the cache
-type, the slot count and the build are what a server is told once; the draft depth, the
-draft p-min and the sampling ride on each call, so two workloads can share one served model
+type, the draft's p-min, the slot count and the build are what a server is told once; the
+draft depth and the sampling ride on each call, so two workloads can share one served model
 and still each get what they measured. The startup half is written under ``serve`` and the
 request half under ``request``.
 
@@ -123,13 +123,13 @@ class Profile:
     draft_cache_type: str = ""           # the draft's own cache; "" leaves the build's f16
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
-    extra_args: tuple[str, ...] = ()     # -ub 2048, --spec-draft-p-min 0.5
+    extra_args: tuple[str, ...] = ()     # -ub 2048
+    spec_p_min: float | None = None      # the draft's confidence floor
     slot_context: int = 32768            # what one conversation gets
     parallel: int = 1                    # how many conversations at once
 
     # -- serving, per request -----------------------------------------------------------
     spec_draft_max: int | None = None    # tokens guessed ahead
-    spec_p_min: float | None = None      # the draft's confidence floor
 
     # -- asking -------------------------------------------------------------------------
     tight: bool = True
@@ -178,19 +178,11 @@ class Profile:
                 model: str = "", resolve: bool = True) -> Any:
         """The :class:`~ml_stack.serve.Serving` this model scored best in.
 
-        One slot alone (no ``slots``, or ``slots=1``) gets the model's own trained context
-        length when this machine's room holds it, the longest context that room does hold
-        when it does not, and the record's whole cache -- ``slot_context *
-        parallel``, the record's own -- only when neither can be computed.
-        :attr:`~ml_stack.serve.Serving.note` says which. ``slots`` above one each get what
-        one measured slot got, from the record's own ``parallel``. ``model`` overrides the
-        reference served, which otherwise is what :func:`profile_for` was asked about, and
-        the record's own file name failing that.
-
-        ``resolve`` answers 'auto' and a bare head file name the way `ml-stack-serve up`
-        does -- a record names the head it measured, and where that file is is this
-        machine's question. Off, the strings are handed on as they are, which is what a
-        test wants and what a caller resolving them itself wants.
+        One slot alone gets the model's trained context when this machine's room holds
+        it, the longest that does when it does not, else the record's own cache. ``slots``
+        above one each get one measured slot's own. ``model`` overrides the reference
+        served. ``resolve`` answers 'auto' and a bare head name the way `ml-stack-serve
+        up` does; off, the strings are handed on as given.
         """
         from ml_stack.serve.serving import Serving
 
@@ -204,6 +196,7 @@ class Profile:
         return Serving(model=served, port=port, slots=taken,
                      slot_context=each, cache_type=self.cache_type,
                      draft=draft, draft_n_max=self.spec_draft_max,
+                     draft_p_min=self.spec_p_min,
                      draft_cache_type=self.draft_cache_type,
                      spec_type=self.spec_type, mmproj=seeing,
                      reasoning_budget=self.reasoning_budget, build=self.build,
@@ -262,10 +255,10 @@ class Profile:
                                  "reasoning_budget": self.reasoning_budget,
                                  "mmproj": self.mmproj,
                                  "extra_args": list(self.extra_args),
+                                 "spec_p_min": self.spec_p_min,
                                  "slot_context": self.slot_context,
                                  "parallel": self.parallel}
         request: dict[str, Any] = {"spec_draft_max": self.spec_draft_max,
-                                   "spec_p_min": self.spec_p_min,
                                    "sampling": dict(self.sampling)}
         ask: dict[str, Any] = {**{flag: bool(getattr(self, flag)) for flag in FLAGS},
                                "reach": self.reach, "rounds": self.rounds}
@@ -590,6 +583,8 @@ def _flags(profile: Profile) -> str:
         parts.append(f"--spec {profile.spec_type}")
     if profile.spec_draft_max is not None:
         parts.append(f"--spec-n-max {profile.spec_draft_max}")
+    if profile.spec_p_min is not None:
+        parts.append(f"--spec-draft-p-min {profile.spec_p_min}")
     if profile.cache_type:
         parts.append(f"--kv {profile.cache_type}")
     if profile.draft_cache_type:
@@ -640,8 +635,6 @@ def _per_request(profile: Profile) -> str:
     parts = []
     if profile.spec_draft_max is not None:
         parts.append(f"draft {profile.spec_draft_max} ahead")
-    if profile.spec_p_min is not None:
-        parts.append(f"draft p-min {profile.spec_p_min}")
     sampled = _sampled(profile.sampling)
     if sampled:
         parts.append(sampled if sampled == "greedy" else sampled.removeprefix("at "))

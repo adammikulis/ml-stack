@@ -103,6 +103,21 @@ def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
     assert profile_for("flash.gguf", workload="ingest", records=held).label == "flash--reading"
 
 
+def test_a_recorded_draft_p_min_is_written_into_the_profile(tmp_path):
+    """A run served with a measured confidence floor keeps it in the record `up` reads."""
+    from ml_stack.bench.profiles import write_profiles
+    from ml_stack.serve.profile import profile_for, records_in
+
+    where = tmp_path / "profiles.json"
+    store = tmp_path / "runs.ladybug"
+    save(store, scored_rows("flash--pmin", questions=100, hits=80, seconds=2700.0),
+         server={"graph": invented_digest(), "model": "flash.gguf", "spec_p_min": 0.5})
+
+    write_profiles(runs(store), path=where)
+
+    assert profile_for("flash.gguf", records=records_in(where)).spec_p_min == 0.5
+
+
 def test_a_store_of_runs_that_name_no_workload_writes_the_graph_asking_record(tmp_path):
     from ml_stack.bench.profiles import write_profiles
     from ml_stack.serve.profile import records_in

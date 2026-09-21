@@ -224,7 +224,8 @@ class TestEmittedFlags:
     def test_every_flag_the_argv_builder_knows_appears(self, tmp_path):
         flags = emitted_flags(LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)))
         for flag in ("-m", "--hf-repo", "--hf-file", "--mmproj", "--mmproj-url", "-md",
-                     "-hfd", "--spec-type", "--spec-draft-n-max", "--spec-draft-ngl",
+                     "-hfd", "--spec-type", "--spec-draft-n-max", "--spec-draft-p-min",
+                     "--spec-draft-ngl",
                      "--override-tensor", "--cpu-moe", "--n-cpu-moe", "--cache-reuse",
                      "--no-warmup", "--kv-unified-per-slot", "--lookup-cache-static",
                      "--lookup-cache-dynamic", "-fa", "--jinja", "--embeddings",
@@ -238,6 +239,20 @@ class TestEmittedFlags:
             assert flag in flags, flag
         assert len(flags) == len(set(flags))
         assert not any(token.endswith(".gguf") for token in flags)
+
+
+class TestSpeculativePMin:
+    """The draft's confidence floor, a launch setting like the depth it guesses ahead."""
+
+    def test_a_value_is_passed_to_the_server(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
+            ServerSpec(model="m.gguf", spec_p_min=0.5))
+        assert argv[argv.index("--spec-draft-p-min") + 1] == "0.5"
+
+    def test_none_passes_no_flag(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
+            ServerSpec(model="m.gguf"))
+        assert "--spec-draft-p-min" not in argv
 
 
 class TestDraftTree:

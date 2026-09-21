@@ -95,6 +95,7 @@ class Serving:
     # needs is read from what it is called, so a head is never served as the wrong method.
     draft: str = ""
     draft_n_max: int | None = None      # tokens guessed ahead; None leaves the default
+    draft_p_min: float | None = None    # the draft's confidence floor; None leaves the default
     # How the draft's own KV cache is stored. It is a second cache, not the target's, and
     # llama.cpp stores it as f16 whatever `cache_type` says. One value sets both halves;
     # `K/V` sets them apart; "" leaves the build's own.
@@ -111,10 +112,10 @@ class Serving:
     # A named build from `ml-stack-serve build --name`, or "" for the managed master: an
     # architecture or a head newer than any release loads only on the build that has it.
     build: str = ""
-    # Anything else llama-server takes that no field here names -- `-ub 2048`,
-    # `--spec-draft-p-min 0.5`. Measured flags, not remembered ones: they are here because a
-    # profile carries what a measurement found, and a run that found `-ub 2048` worth 4.7x
-    # has nowhere else to put it.
+    # Anything else llama-server takes that no field here names -- `-ub 2048`. Measured
+    # flags, not remembered ones: they are here because a profile carries what a
+    # measurement found, and a run that found `-ub 2048` worth 4.7x has nowhere else to
+    # put it.
     extra_args: tuple[str, ...] = ()
     # What decided `slot_context` for a lone slot -- the model's trained context, the
     # longest this machine's room holds, or what scored best -- said outright rather
@@ -150,6 +151,8 @@ class Serving:
             out["spec_type"] = self.spec_type
             if self.draft_n_max is not None:
                 out["spec_draft_max"] = self.draft_n_max
+        if (self.draft or self.spec_type) and self.draft_p_min is not None:
+            out["spec_p_min"] = self.draft_p_min
         if (self.draft or self.spec_type) and self.draft_cache_type:
             out["spec_draft_type_k"], out["spec_draft_type_v"] = \
                 split_cache_type(self.draft_cache_type)

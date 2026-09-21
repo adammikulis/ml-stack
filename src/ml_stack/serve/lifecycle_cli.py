@@ -56,14 +56,15 @@ def from_profile(args: argparse.Namespace, model: str,
         "draft": head,
         "spec": found.spec_type,
         "spec_n_max": found.spec_draft_max,
+        "spec_p_min": found.spec_p_min,
         "kv": found.cache_type,
         "draft_kv": found.draft_cache_type,
         "mmproj": found.mmproj,
         "reasoning_budget": found.reasoning_budget,
     }
     defaults = {"context": DEFAULT_CONTEXT, "parallel": DEFAULT_PARALLEL, "build": "",
-                "draft": "", "spec": "", "spec_n_max": None, "kv": "", "draft_kv": "",
-                "mmproj": "", "reasoning_budget": None}
+                "draft": "", "spec": "", "spec_n_max": None, "spec_p_min": None, "kv": "",
+                "draft_kv": "", "mmproj": "", "reasoning_budget": None}
     took: list[str] = []
     for dest, value in wanted.items():
         if value in (None, "", ()) or getattr(args, dest, None) != defaults[dest]:
@@ -115,6 +116,7 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
         kv_unified=getattr(args, "kv_unified", None),
         embedding=bool(getattr(args, "embedding", False)),
         spec_draft_max=getattr(args, "spec_n_max", None),
+        spec_p_min=getattr(args, "spec_p_min", None),
         spec_tree=getattr(args, "spec_tree", None),
         spec_draft_ngl=getattr(args, "draft_ngl", None),
         lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
@@ -177,6 +179,8 @@ OPTIONS_UP = [
               "with --draft. Left unset, the server decides"),
     flag("--spec-n-max", type=int, default=None, metavar="N",
          help="tokens guessed ahead each step (server default 3)"),
+    flag("--spec-p-min", type=float, default=None, metavar="P",
+         help="the draft's minimum probability to be accepted (server default 0.00)"),
     flag("--spec-tree", type=int, default=None, metavar="W",
          help="guess ahead in a tree: expand W branches per depth, each proposing W "
               "children, up to --spec-n-max nodes, all verified in one pass. Needs "

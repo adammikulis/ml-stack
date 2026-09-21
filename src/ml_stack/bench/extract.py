@@ -567,6 +567,8 @@ def run(args: Any) -> int:
                     "load_s": getattr(server, "load_s", None)}
             if lease.get("spec_draft_max") is not None:
                 server["spec_draft_max"] = int(lease["spec_draft_max"])
+            if lease.get("spec_p_min") is not None:
+                server["spec_p_min"] = float(lease["spec_p_min"])
             if wants_smoke(args):
                 # first, on this load: a few messages through the whole path, kept and
                 # read back, before the sample that costs the GPU
