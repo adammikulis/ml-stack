@@ -550,6 +550,59 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     assert "-hfd" in be.LlamaServerBackend(binary=binary).command(quant)
 
 
+def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_path):
+    """Mutation: drop resolved_model() from start, or return the spec unchanged."""
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
+    from ml_stack.serve import backend as be
+
+    weights = tmp_path / "thing-Q4_K_M.gguf"
+    weights.write_bytes(b"GGUF")
+    asked = []
+    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: asked.append(ref) or weights)
+    spec = be.ServerSpec(model="hf:owner/thing-GGUF/thing-Q4_K_M.gguf")
+    resolved = be.LlamaServerBackend.resolved_model(spec)
+    assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
+    argv = be.LlamaServerBackend(binary=binary).command(resolved)
+    assert argv[argv.index("-m") + 1] == str(weights)
+    assert "--hf-repo" not in argv
+    repo_only = be.ServerSpec(model="hf:owner/thing-GGUF")
+    assert be.LlamaServerBackend.resolved_model(repo_only) is repo_only
+    assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
+
+
+def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):
+    """Preflight reads the fetched file, not the reference. Mutation: drop resolved_model()
+    from start."""
+    from ml_stack.serve import backend as be
+    from ml_stack.serve import preflight as pf
+
+    weights = tmp_path / "thing-Q4_K_M.gguf"
+    weights.write_bytes(b"GGUF")
+    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: weights)
+    monkeypatch.setattr(be, "claim_port", lambda spec, lease: None)
+    seen = []
+
+    class Refusing:
+        def __init__(self, spec, **_):
+            seen.append(spec.model)
+            self.ok = False
+
+        def said(self):
+            return "refused"
+
+    monkeypatch.setattr(pf, "Preflight", Refusing)
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
+    backend = be.LlamaServerBackend(binary=binary)
+    with pytest.raises(pf.PreflightFailed):
+        backend.start(be.ServerSpec(model="hf:owner/thing-GGUF/thing-Q4_K_M.gguf"),
+                      lease=None, check_flags=False)
+    assert seen == [weights]
+
+
 class TestValuesOf:
     """What a flag will take, read out of the same help the flag names come from."""
 

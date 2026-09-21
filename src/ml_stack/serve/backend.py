@@ -626,6 +626,20 @@ class LlamaServerBackend(ServerBackend):
         return argv
 
     @staticmethod
+    def resolved_model(spec: ServerSpec) -> ServerSpec:
+        """The spec with a model named by `hf:` file fetched into the Hub cache and served
+        by path; a reference naming no file is left for the server."""
+        parts = spec.hf_parts(spec.model)
+        if not parts or not parts[1]:
+            return spec
+        from ml_stack.hub import fetch
+
+        try:
+            return replace(spec, model=fetch(str(spec.model)))
+        except Exception as exc:
+            raise ServerFailed(f"could not fetch the model {spec.model}: {exc}") from exc
+
+    @staticmethod
     def resolved_draft(spec: ServerSpec) -> ServerSpec:
         """The spec with a draft named by `hf:` file turned into the cached file's path.
 
@@ -691,7 +705,7 @@ class LlamaServerBackend(ServerBackend):
         so shader compilation and the first KV allocation are paid for here rather than by
         whatever the first real question turns out to be.
         """
-        spec = self.resolved_draft(spec)
+        spec = self.resolved_draft(self.resolved_model(spec))
         spec, yarn_said = self.resolved_context(spec)
         if yarn_said:
             logger.warning(yarn_said)
