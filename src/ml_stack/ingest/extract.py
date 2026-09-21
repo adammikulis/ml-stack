@@ -285,7 +285,7 @@ def prompt_for(unit: Any, *, images: bool = False, core_only: bool = False,
         return turns, 0
     from ml_stack.vision.payloads import build_message
 
-    seen, report = build_message("The figures of this section, in order:", list(pictures))
+    seen, _report = build_message("The figures of this section, in order:", list(pictures))
     kept = sum(1 for part in seen["content"] if part.get("type") == "image_url")
     if not kept:
         # a picture that cannot be prepared is not sent and not claimed: a model told to

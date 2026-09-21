@@ -8,8 +8,19 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.graph.tree import (FAMILY, ORG, PARTS, PictureUnreadable, Shape, cycles, read,
-                                 roots, schema_for, to_graph, transcribe)
+from ml_stack.graph.tree import (
+    FAMILY,
+    ORG,
+    PARTS,
+    PictureUnreadable,
+    Shape,
+    cycles,
+    read,
+    roots,
+    schema_for,
+    to_graph,
+    transcribe,
+)
 
 # A real 1x1 PNG, written out here rather than fetched or faked. A test that hands in
 # `b"pretend-png"` fails three layers down with `any(...) is False`, because an unreadable
@@ -69,7 +80,7 @@ def test_a_name_written_two_ways_is_one_entry():
                   {"name": "jo ash", "title": "Lead", "above": []},
                   {"name": "Pell Grantham", "above": ["JO ASH"]}], ORG)
     assert len([n for n in g["nodes"] if n["id"] == "person:joash"]) == 1
-    assert [n for n in g["nodes"] if n["id"] == "person:joash"][0]["attrs"]["title"] == "Lead"
+    assert next(n for n in g["nodes"] if n["id"] == "person:joash")["attrs"]["title"] == "Lead"
     assert g["edges"][0]["target"] == "person:joash"
 
 

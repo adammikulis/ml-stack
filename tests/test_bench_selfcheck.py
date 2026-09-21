@@ -295,7 +295,7 @@ def test_yesterdays_bug_put_back_fails_the_self_check_naming_the_reference(monke
         return Check("flags", True, "built on the raw spec")
 
     monkeypatch.setattr(preflight, "_flags_check", raw)
-    with pytest.raises(SelfCheckFailed, match="MTP/mtp-tiny-Q8_0.gguf") as why:
+    with pytest.raises(SelfCheckFailed, match=r"MTP/mtp-tiny-Q8_0\.gguf") as why:
         selfcheck(["drafts", "tiny.gguf", "--draft", HEAD, "--n-max", "2"])
     assert "the preflight raised" in str(why.value) and "ServerFailed" in str(why.value)
     assert "must be fetched" in str(why.value)

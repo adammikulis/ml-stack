@@ -23,10 +23,7 @@ from mlx_lm import load  # noqa: E402
 from test_spec_decode import plain_greedy, tiny_hybrid  # noqa: E402
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers  # noqa: E402
 
-from ml_stack.client import (
-    Client,  # noqa: E402
-    Request,
-)
+from ml_stack.client import Client, Request  # noqa: E402
 from ml_stack.graph.serve import Handler  # noqa: E402
 from ml_stack.http import ServerError  # noqa: E402
 from ml_stack.serve.backend import ServerSpec  # noqa: E402

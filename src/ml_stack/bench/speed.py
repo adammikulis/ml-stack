@@ -20,6 +20,7 @@ the prompt cache reads nothing for the second.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -66,12 +67,10 @@ def count_tokens(client: Any, text: str) -> tuple[int | None, str]:
     ``/tokenize``, else ``reply`` from a one-token request's prompt count; ``(None,
     "unknown")`` when it will say neither."""
     if hasattr(client, "tokenize"):
-        try:
+        with contextlib.suppress(Exception):  # no /tokenize on this program; ask by reply
             got = client.tokenize(text)
             if got:
                 return len(got), "tokenize"
-        except Exception:  # noqa: BLE001 - no /tokenize on this program; ask by reply
-            pass
     try:
         reply = client.chat([{"role": "user", "content": text}], think=False, n_predict=1)
     except Exception:  # noqa: BLE001 - a server that will not answer counts nothing
@@ -195,7 +194,7 @@ def cell(client: Any, *, tokens: int, streams: int, generate: int, seed: int = 0
     ttft_from = "stream" if "stream" in clocks else ("prompt_ms" if clocks else None)
     out: dict[str, Any] = {
         "prompt_tokens": int(tokens),
-        "prompt_measured": _mean([m for m in measured]),
+        "prompt_measured": _mean(list(measured)),
         "built": built,
         "streams": int(streams),
         "generate": int(generate),
@@ -328,8 +327,8 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
 def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
                smoking_first: bool) -> list[str]:
     """Every ``--on`` server: the grid, kept as one run of kind ``speed`` per label."""
-    from ml_stack.bench.holding import _idle
     from ml_stack.bench.askings import sampling_from
+    from ml_stack.bench.holding import _idle
 
     keys = []
     prompts, streams = _ints(args.prompts, PROMPTS), _ints(args.streams, STREAMS)

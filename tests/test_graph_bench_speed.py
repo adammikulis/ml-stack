@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -104,7 +105,7 @@ class _Silent:
     """A program that reports no timings and no usage at all."""
 
     base_url = "http://127.0.0.1:1"
-    sampling = {}
+    sampling: ClassVar[dict] = {}
 
     def chat(self, messages, **kw):
         return _Reply({})
@@ -202,7 +203,6 @@ def test_a_smoke_grid_is_one_cell_and_a_full_grid_is_every_pair():
 def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_path, monkeypatch,
                                                                         capsys):
     import ml_stack.bench as bench
-    from ml_stack.bench import backends
 
     ollama = _Ollama()
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
@@ -258,7 +258,7 @@ def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monk
 
     class Down:
         base_url = "http://127.0.0.1:1"
-        sampling = {}
+        sampling: ClassVar[dict] = {}
 
         def chat(self, messages, **kw):
             raise ConnectionError("nothing there")
@@ -280,13 +280,13 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
     from contextlib import contextmanager
     from dataclasses import replace
 
+    from test_graph_bench import _preflight_ok
+
+    import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.bench as bench
     from ml_stack.serve import ServerInfo
     from ml_stack.serve.profile import record
-
-    from test_graph_bench import _preflight_ok
 
     measured = record("tiny.gguf", slot_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4)

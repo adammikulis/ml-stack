@@ -300,7 +300,7 @@ def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
         labels = {n["id"]: n["label"] for n in store.nodes()}
         assert labels["source:lattice"] == "Lattice Studies"
         assert labels["concept:glimmer-node"] == "glimmer node"
-        read_from = [e for e in store.edges("read_from")]
+        read_from = list(store.edges("read_from"))
         assert {e["target"] for e in read_from} == {"source:lattice"}
         assert store.get_doc("ingest:unit:lattice:1:1.1")["extracted"] == LATTICE
 
@@ -1298,6 +1298,7 @@ def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
     import threading
 
     from conftest import REPO
+
     from ml_stack.testing.fakes import Served, fake_llama_server
 
     store = tmp_path / "sources.ladybug"

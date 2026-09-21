@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import ClassVar
 
 import pytest
 from conftest import json_reply
@@ -919,7 +920,7 @@ class TestExtract:
     """A schema in, a dict out, over a real socket. The default path goes through the
     server's chat template; ``prompt=`` keeps the raw endpoint under a grammar."""
 
-    SCHEMA = {
+    SCHEMA: ClassVar[dict] = {
         "type": "object",
         "properties": {
             "people": {
@@ -1048,7 +1049,7 @@ class TestExtract:
     def test_two_malformed_replies_raise_with_what_came_back(self, server):
         instance = server(lambda m, p, b: self.chat_reply("I cannot do that."))
 
-        with pytest.raises(ServerError, match="I cannot do that."):
+        with pytest.raises(ServerError, match=r"I cannot do that\."):
             Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
 
     def test_the_raw_text_in_the_error_is_truncated(self, server):

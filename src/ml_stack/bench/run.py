@@ -39,8 +39,8 @@ from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.score import _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, table
-from ml_stack.client.settings import Request, Transport
 from ml_stack.bench.underway import MEASURING, detach, ended, remember
+from ml_stack.client.settings import Request, Transport
 from ml_stack.command import Group
 from ml_stack.log import say, warn
 from ml_stack.serve.profile import ASK

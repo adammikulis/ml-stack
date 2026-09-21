@@ -12,11 +12,10 @@ import types
 from typing import ClassVar
 
 import pytest
-
-from ml_stack.bench import Row, runs, save, table
-from ml_stack.client import Request, Transport
-
 from conftest import a_row
+
+from ml_stack.bench import runs, save, table
+from ml_stack.client import Request, Transport
 
 G = 2**30
 
@@ -35,7 +34,7 @@ def test_an_ollama_url_names_the_program_and_the_model():
 def test_an_openai_url_names_the_program_and_the_model():
     from ml_stack.bench.backends import parse_on
 
-    name, url, how = parse_on("hosted=openai://10.0.0.7:8000/pellard-9b")
+    name, _url, how = parse_on("hosted=openai://10.0.0.7:8000/pellard-9b")
     assert name == "hosted"
     assert how == {"api": "openai", "model": "pellard-9b"}
 
@@ -551,10 +550,10 @@ def test_a_sweep_serves_without_the_head_and_labels_the_runs_so(tmp_path, monkey
     the stem, so the three configurations are three labels a reader tells apart."""
     from dataclasses import replace
 
+    from test_graph_bench import _serving
+
     import ml_stack.bench as bench
     from ml_stack.serve.profile import record
-
-    from test_graph_bench import _serving
 
     measured = record("tiny.gguf", slot_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4)

@@ -5,20 +5,20 @@ Every fixture here is invented. Nothing reads a real store, a real graph, or a r
 
 from __future__ import annotations
 
+import contextlib
 import json
 import pathlib
 from dataclasses import replace
+from typing import ClassVar
 
 import pytest
+from conftest import a_row, json_reply, scored_rows
 
 from ml_stack import hub
+from ml_stack.asking import Asking
 from ml_stack.bench import Row, _hit, missed, runs, save, table
 from ml_stack.bench.selfcheck import ScriptedModel
 from ml_stack.client import Request, Transport
-from ml_stack.asking import Asking
-
-from conftest import a_row, json_reply, scored_rows
-
 
 
 def test_hit_is_how_well_what_was_shown_matched_what_was_wanted():
@@ -458,9 +458,9 @@ def test_drafts_counts_the_client_it_is_measuring():
 
     class Reply:
         content = "an answer"
-        raw = {"usage": {"prompt_tokens": 100, "completion_tokens": 20},
-               "timings": {"prompt_n": 90, "cache_n": 10, "draft_n": 8,
-                           "draft_n_accepted": 5}}
+        raw: ClassVar[dict] = {"usage": {"prompt_tokens": 100, "completion_tokens": 20},
+                               "timings": {"prompt_n": 90, "cache_n": 10, "draft_n": 8,
+                                           "draft_n_accepted": 5}}
         tool_calls = None
 
     class Model:
@@ -517,7 +517,7 @@ def test_the_footprint_does_not_invent_a_negative_cost(monkeypatch):
     monkeypatch.setattr(bench, "request_json", props, raising=False)
 
     # mmapped: less resident than the weights on disk
-    out = dict(resident_bytes=70 * 2**30, weights_bytes=87 * 2**30)
+    out = {"resident_bytes": 70 * 2**30, "weights_bytes": 87 * 2**30}
     beyond = out["resident_bytes"] - out["weights_bytes"]
     assert beyond < 0
 
@@ -774,8 +774,8 @@ def test_a_run_asks_the_way_the_flags_said_and_writes_it_down(tmp_path, monkeypa
     `converse` there and stand beside the row that was measured under them."""
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
     import ml_stack.bench as bench
-    from ml_stack.bench.askings import asking_from
     from ml_stack.bench import _parser
+    from ml_stack.bench.askings import asking_from
 
     assert asking_from(_parser().parse_args(
         ["run", "x", "--reach", "8000", "--rounds", "20"])) == Asking(reach=8000, rounds=20)
@@ -1192,7 +1192,7 @@ def test_the_run_reads_the_slots_and_keeps_the_most_the_server_held(monkeypatch,
     monkeypatch.setattr(bench, "footprint", lambda url: dict(next(seen)))
     url = slots([{"is_processing": False}, {"is_processing": False}])
     assert bench.slot_count(url) == 2
-    rows, held = bench.concurrent(bench.asking(TINY), [{"q": "q?"}], conversations=1,
+    _rows, held = bench.concurrent(bench.asking(TINY), [{"q": "q?"}], conversations=1,
                                   turns=1, label="t", client=_Overlapping(0.0),
                                   base_url=url)
     assert held["concurrency"]["slots"] == 2
@@ -1307,9 +1307,9 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
     everything. A smoke run caught it; this is the test that should have."""
     from contextlib import contextmanager
 
+    import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.bench as bench
 
     @contextmanager
     def fake_serve(model, **kw):
@@ -1409,9 +1409,9 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
     summary the smoke prints is read from the store, not from memory."""
     from contextlib import contextmanager
 
+    import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.bench as bench
 
     @contextmanager
     def fake_serve(model, **kw):
@@ -1678,9 +1678,9 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
     import signal
     from contextlib import contextmanager
 
+    import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.bench as bench
 
     came_down = []
 
@@ -1727,9 +1727,9 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
     import time
     from contextlib import contextmanager
 
+    import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.bench as bench
 
     served_models = []
 
@@ -1813,9 +1813,9 @@ def _serving(monkeypatch, tmp_path, *, load_s=12.5, warmup_s=1.2, fail_for=()):
     """
     from contextlib import contextmanager
 
+    import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.bench as bench
     from ml_stack.serve import ServerInfo
     from ml_stack.serve.preflight import PreflightFailed
 
@@ -1853,8 +1853,8 @@ def test_every_hf_reference_is_fetched_before_the_lock_and_no_prefetch_skips_it(
                                                                                 capsys):
     """A download inside the timed window is a timing of the network. The fetch is also
     before the *lock*: minutes of Hub and no GPU are not a reason to make the next run wait."""
-    import ml_stack.hub
     import ml_stack.bench as bench
+    import ml_stack.hub
     from ml_stack.lock import only_one
 
     seen = _serving(monkeypatch, tmp_path)
@@ -1902,8 +1902,8 @@ def test_references_are_read_from_every_measuring_subcommand():
 
 
 def test_a_fetch_that_fails_is_said_and_the_rest_still_come_down(capsys):
-    import ml_stack.hub
     import ml_stack.bench as bench
+    import ml_stack.hub
 
     def flaky(reference):
         if "gone" in reference:
@@ -2474,10 +2474,8 @@ def test_an_ask_that_swallows_the_timeout_is_still_scored_wrong():
     client = _Stalling(stall=0.3)
 
     def ask(question, counting):
-        try:
+        with contextlib.suppress(Exception):
             counting.chat([])
-        except Exception:
-            pass
         return {"content": "Iris Tamsin, probably", "show": ["person:iris"]}
 
     row, = measure(ask, [{"q": "who?", "expect": ["person:iris"]}], label="t", client=client,
@@ -2813,8 +2811,8 @@ def test_tight_reaches_converse_on_the_asking(monkeypatch):
     both askings, which is the whole of `--also loose` -- and hand the terse set in already
     told, since that set is built here rather than chosen inside."""
     import ml_stack.graph.conversation as conversation
-    from ml_stack.graph.prompts import TERSE, TIGHT_SHOW_TERSE
     from ml_stack.bench import asking
+    from ml_stack.graph.prompts import TERSE, TIGHT_SHOW_TERSE
 
     reached = {}
 
@@ -3037,8 +3035,8 @@ def test_a_smoke_that_fails_ends_the_run_with_exit_1_and_nothing_else_starts(tmp
     """The self-check passes -- its model is scripted -- and then the real server answers
     nothing: every smoke question fails, the run stops there with the reason, and the
     questions that cost the GPU are never asked."""
-    import ml_stack.client
     import ml_stack.bench as bench
+    import ml_stack.client
 
     seen = _serving(monkeypatch, tmp_path)
     built = _watching(monkeypatch)
@@ -3120,8 +3118,8 @@ def test_serve_draft_auto_asks_the_one_resolver_and_says_why(tmp_path, monkeypat
     """`hub.choose_head` is the resolver every caller shares -- told which binary will
     serve, so a head that borrows is withheld from mainline. The bench had its own, which
     chose a BF16 MTP head for mainline twice (2026-09-01), 87G each time."""
-    import ml_stack.hub
     import ml_stack.bench as bench
+    import ml_stack.hub
 
     asked = []
 
@@ -4044,7 +4042,7 @@ def test_a_traced_question_keeps_every_call_with_its_arguments_and_timings():
     """What the row could not say: which calls the calls were. Each is kept with the tool,
     the arguments, what came back and what the server spent -- the fields `Spent.note`
     reads, so the per-call record and the per-answer totals are one measurement, twice."""
-    row, model = _one_traced_row()
+    row, _model = _one_traced_row()
 
     assert row.trace and row.shown == ["topic:compiler"]
     kinds = [e["role"] for e in row.trace]
@@ -4101,7 +4099,7 @@ def test_a_tool_result_is_cut_at_two_thousand_characters_and_says_how_long_it_wa
     huge = json.dumps([{"id": f"person:n{i}", "label": "Ada Quill"} for i in range(400)])
     counting.chat([{"role": "user", "content": "who?"},
                    {"role": "tool", "name": "look_up", "content": huge}])
-    kept = [e for e in counting.trace if e["role"] == "tool"][0]
+    kept = next(e for e in counting.trace if e["role"] == "tool")
     assert len(kept["content"]) == TRACE_CAP and kept["cut"] is True
     assert kept["chars"] == len(huge) > TRACE_CAP
     assert kept["ids"] == 400, "counted before the cut, not after it"
@@ -4804,8 +4802,8 @@ def test_a_held_measuring_lock_with_no_record_still_reads_as_measuring(tmp_path,
     import os
 
     from ml_stack import bench
-    from ml_stack.bench.underway import measuring
     from ml_stack.bench.progress import _status_line
+    from ml_stack.bench.underway import measuring
 
     monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
     assert measuring() is None, "no lock, nothing measuring"

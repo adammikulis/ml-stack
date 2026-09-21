@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import socket
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from collections.abc import Callable, Sequence
 from typing import Any
 
 from ml_stack.client.settings import Transport
@@ -120,8 +120,7 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
     ``parallel`` asks for, rather than refusing -- see
     :meth:`~ml_stack.serve.ServerManager.escalate`.
     """
-    from ml_stack.serve import (
-        LlamaServerBackend, ServerManager, ServerSpec, free_port)
+    from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
 
     if manager is None:
         from .llama import ensure_server
@@ -174,6 +173,7 @@ class Hosting:
         """"" when the model with ``parallel`` slots fits in ``room`` bytes by its memory
         record, or a line saying what it needs. A model with no record passes."""
         from ml_stack.serve.fit import records
+
         from .plan import fit_for
 
         if room <= 0:

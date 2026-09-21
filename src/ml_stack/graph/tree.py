@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.extraction import Prompting
+
 __all__ = [
     "FAMILY",
     "ORG",
@@ -252,7 +253,7 @@ def cycles(graph: Mapping[str, Any], shape: Shape = ORG) -> list[list[str]]:
 
     def walk(node: str, trail: list[str]) -> None:
         if node in trail:
-            loop = trail[trail.index(node):] + [node]
+            loop = [*trail[trail.index(node):], node]
             if sorted(loop) not in [sorted(f) for f in found]:
                 found.append(loop)
             return

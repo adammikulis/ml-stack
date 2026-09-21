@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Collection, Iterable, Mapping
+from typing import Any
 
 from ml_stack.extraction import Checking, Prompting
 

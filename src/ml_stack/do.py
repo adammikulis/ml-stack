@@ -12,6 +12,7 @@ measured as making a small model call tools right.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import inspect
 import json
 import os
@@ -384,12 +385,10 @@ def ollama_models(words: str = "",
             continue
         details = dict(row.get("details") or {})
         info: dict[str, Any] = {}
-        try:
+        with contextlib.suppress(Exception):  # the tag line already says most of it
             shown = ask("/api/show", {"model": name})
             details = {**details, **dict(shown.get("details") or {})}
             info = dict(shown.get("model_info") or {})
-        except Exception:  # noqa: BLE001 - the tag line already says most of it
-            pass
         out.append({"name": name, "backend": "ollama", "bytes": int(row.get("size") or 0),
                     "format": str(details.get("format") or ""),
                     "quantization": str(details.get("quantization_level") or ""),

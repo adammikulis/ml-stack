@@ -42,7 +42,7 @@ import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest import mock
 
 # the real client's signature, read before anything is patched over it, is what the fakes
@@ -127,7 +127,7 @@ class ScriptedReader:
     exercised -- with the strict signature `ScriptedModel` has."""
 
     family = GENERIC
-    card: dict[str, Any] = {}
+    card: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, base_url: str = "http://127.0.0.1:8080", **settings: Any) -> None:
         _bind(base_url, settings)

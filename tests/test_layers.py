@@ -93,9 +93,7 @@ def _violations(edges: dict[tuple[str, str], set[str]]) -> set[tuple[str, str]]:
     """Edges that point up a layer, or across one layer in both directions."""
     out: set[tuple[str, str]] = set()
     for source, target in edges:
-        if RANK[source] < RANK[target]:
-            out.add((source, target))
-        elif RANK[source] == RANK[target] and (target, source) in edges:
+        if RANK[source] < RANK[target] or (RANK[source] == RANK[target] and (target, source) in edges):
             out.add((source, target))
     return out
 
@@ -114,7 +112,7 @@ def test_no_import_reaches_above_its_layer() -> None:
 
 def test_known_holds_nothing_already_fixed() -> None:
     stale = sorted(KNOWN - _violations(_imports()))
-    assert not stale, f"no longer violations, delete from KNOWN: {stale}"
+    assert not stale, f"no longer violations, remove them from KNOWN: {stale}"
 
 
 def _loaded(module: str, then: str = "pass") -> set[str]:

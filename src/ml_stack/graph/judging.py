@@ -6,6 +6,7 @@ say. `judge_gold` scores one against the gold set that ships.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -261,9 +262,8 @@ class ModelJudge:
         snapshot = list(nodes)
         out: list[tuple[str, str]] = []
         for unit in units:
-            try:
-                text = self.sources(str(unit))
-            except Exception:  # noqa: BLE001 - a source that cannot be re-read is skipped
+            text = self._read(unit)
+            if text is None:
                 continue
             for node in snapshot:
                 for piece in excerpts(text, str(node.get("label") or ""),
@@ -285,14 +285,20 @@ class ModelJudge:
     def _question(one: Mapping[str, Any], other: Mapping[str, Any]) -> str:
         return "A.\n" + described(one) + "\n\nB.\n" + described(other)
 
+    def _read(self, unit: Any) -> str | None:
+        """The text of ``unit``, or None when there are no sources or it cannot be re-read."""
+        if self.sources is None:
+            return None
+        with contextlib.suppress(Exception):
+            return self.sources(str(unit))
+        return None
+
     def _passages(self, node: Mapping[str, Any]) -> list[tuple[str, str]]:
-        assert self.sources is not None
         label = str(node.get("label") or "")
         out: list[tuple[str, str]] = []
         for unit in list(self.pointers(node))[: self.most_units]:
-            try:
-                text = self.sources(str(unit))
-            except Exception:  # noqa: BLE001 - a source that cannot be re-read is skipped
+            text = self._read(unit)
+            if text is None:
                 continue
             for piece in excerpts(text, label, chars=self.excerpt_chars, most=2):
                 out.append((str(unit), piece))

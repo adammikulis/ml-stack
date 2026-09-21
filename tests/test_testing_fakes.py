@@ -11,6 +11,7 @@ import inspect
 import json
 
 import pytest
+
 from ml_stack.client import Client, Reply, Request
 from ml_stack.extraction import Checking
 from ml_stack.serve import ServerFailed, ServerInfo, ServerSpec
@@ -31,7 +32,6 @@ from ml_stack.testing import (
     fake_serve,
     mirrors,
 )
-
 
 # ---------------------------------------------------------------- the diff
 
@@ -242,9 +242,8 @@ def test_fake_serve_yields_a_real_server_info_on_the_port_asked():
 
 
 def test_fake_serve_refuses_a_spec_keyword_the_real_one_would():
-    with pytest.raises(TypeError, match="tight"):
-        with fake_serve("tiny.gguf", tight=True):
-            pass
+    with pytest.raises(TypeError, match="tight"), fake_serve("tiny.gguf", tight=True):
+        pass
 
 
 def test_a_recording_fake_serve_keeps_every_lease_and_release():
@@ -263,13 +262,11 @@ def test_a_fake_serve_can_refuse_a_model_by_name():
         pass
 
     serving = FakeServe(refuse=("huge",), raising=Refused)
-    with pytest.raises(Refused, match="huge-Q8"):
-        with serving("huge-Q8.gguf"):
-            pass
+    with pytest.raises(Refused, match="huge-Q8"), serving("huge-Q8.gguf"):
+        pass
     assert len(serving.leased) == 1, "the lease was asked for before it was refused"
-    with pytest.raises(ServerFailed):
-        with FakeServe(refuse=("huge",))("huge.gguf"):
-            pass
+    with pytest.raises(ServerFailed), FakeServe(refuse=("huge",))("huge.gguf"):
+        pass
 
 
 # ---------------------------------------------------------------- preflight

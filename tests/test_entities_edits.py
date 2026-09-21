@@ -6,10 +6,18 @@ import json
 
 import pytest
 from conftest import json_reply
+
 from ml_stack.client import Client
 from ml_stack.contracts import ContractError, grammar_for
-from ml_stack.entities import (EDITS_SCHEMA, OPERATIONS, Edit, ids_of, objections, plan_edits,
-                               validate_edits)
+from ml_stack.entities import (
+    EDITS_SCHEMA,
+    OPERATIONS,
+    Edit,
+    ids_of,
+    objections,
+    plan_edits,
+    validate_edits,
+)
 
 NODES = ["n:1", "n:2", "n:3"]
 EDGES = ["e:1"]

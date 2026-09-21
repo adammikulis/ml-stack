@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Collection
+from collections.abc import Collection
+from typing import Any
 
 from ml_stack.extraction import Checking, Prompting
 
