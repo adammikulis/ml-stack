@@ -629,15 +629,7 @@ class LlamaServerBackend(ServerBackend):
     def resolved_model(spec: ServerSpec) -> ServerSpec:
         """The spec with a model named by `hf:` file fetched into the Hub cache and served
         by path; a reference naming no file is left for the server."""
-        parts = spec.hf_parts(spec.model)
-        if not parts or not parts[1]:
-            return spec
-        from ml_stack.hub import fetch
-
-        try:
-            return replace(spec, model=fetch(str(spec.model)))
-        except Exception as exc:
-            raise ServerFailed(f"could not fetch the model {spec.model}: {exc}") from exc
+        return replace(spec, model=fetched(spec.model, "model"))
 
     @staticmethod
     def resolved_draft(spec: ServerSpec) -> ServerSpec:
@@ -647,15 +639,7 @@ class LlamaServerBackend(ServerBackend):
         so the file is fetched (or found in the cache) with `ml_stack.hub.fetch` and served
         by path. A quant-style reference (`hf:owner/repo`) is left for the server.
         """
-        parts = spec.hf_parts(spec.draft) if spec.draft else None
-        if not parts or not parts[1]:
-            return spec
-        from ml_stack.hub import fetch
-
-        try:
-            return replace(spec, draft=str(fetch(str(spec.draft))))
-        except Exception as exc:
-            raise ServerFailed(f"could not fetch the draft {spec.draft}: {exc}") from exc
+        return replace(spec, draft=fetched(spec.draft, "draft")) if spec.draft else spec
 
     @staticmethod
     def resolved_context(spec: ServerSpec) -> tuple[ServerSpec, str]:
@@ -781,6 +765,19 @@ class LlamaServerBackend(ServerBackend):
             logger.debug("warm-up request to %s did not complete: %s", base_url, exc)
             return None
         return time.monotonic() - started
+
+
+def fetched(ref: str | Path, what: str) -> str | Path:
+    """``ref`` downloaded into the Hub cache when it is an `hf:` file, else ``ref``."""
+    parts = ServerSpec.hf_parts(ref)
+    if not parts or not parts[1]:
+        return ref
+    from ml_stack.hub import fetch
+
+    try:
+        return str(fetch(str(ref)))
+    except (ValueError, OSError) as exc:
+        raise ServerFailed(f"could not fetch the {what} {ref}: {exc}") from exc
 
 
 def fresh_log(path: Path) -> BinaryIO:

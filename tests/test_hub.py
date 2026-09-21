@@ -1,4 +1,6 @@
 """What a model card asks for, read out of prose -- and out of the file itself."""
+from typing import ClassVar
+
 import pytest
 
 from ml_stack.hub import advice
@@ -11,6 +13,7 @@ def _no_network_for_draft_note(monkeypatch):
     in every test that finds one. A test that cares about ``draft_note`` itself overrides
     this locally with its own fake."""
     import huggingface_hub
+
     import ml_stack.hub as hub
 
     def refuse(*a, **k):
@@ -158,9 +161,9 @@ def test_a_subdirectory_does_not_make_something_a_companion():
 def test_room_is_what_can_be_served_not_what_is_installed(monkeypatch):
     """On unified memory this is the wired limit, not the whole of RAM: a model and its KV
     cache have to fit under what Metal will wire, and `free` does not report that."""
-    import ml_stack.hub as hub
-
     import subprocess
+
+    import ml_stack.hub as hub
 
     class Done:
         def __init__(self, out): self.returncode, self.stdout = 0, out
@@ -330,7 +333,7 @@ class TestDraftForBorrows:
     unsloth/Qwen3.8-Flash-Next-GGUF/MTP/ fails on mainline llama.cpp master with
     `check_tensor_dims: tensor 'output_hc_norm.weight' not found`."""
 
-    SHELVES = {
+    SHELVES: ClassVar[dict] = {
         "maker/thing-GGUF": [
             ("thing-Q4.gguf", 4_000_000_000),
             ("MTP/mtp-thing-shared-BF16.gguf", 5_000_000_000),
@@ -341,6 +344,7 @@ class TestDraftForBorrows:
 
     def _repo(self, monkeypatch, tmp_path, *, note: str = ""):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
@@ -386,6 +390,7 @@ class TestFetch:
 
     def test_every_shard_of_the_named_build_is_downloaded(self, tmp_path, monkeypatch):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         shelves = [
@@ -411,6 +416,7 @@ class TestFetch:
 
     def test_an_unsharded_reference_downloads_just_the_one_file(self, tmp_path, monkeypatch):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         monkeypatch.setattr(hub, "files",
@@ -431,6 +437,7 @@ class TestFetch:
 
     def test_a_file_the_repo_does_not_hold_names_what_it_does(self, monkeypatch):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         monkeypatch.setattr(hub, "files", lambda repo, **kw: [
@@ -446,7 +453,7 @@ class TestFetch:
     def test_a_reference_with_no_file_is_rejected(self):
         import ml_stack.hub as hub
 
-        with pytest.raises(ValueError, match="hf:owner/repo/file.gguf"):
+        with pytest.raises(ValueError, match=r"hf:owner/repo/file\.gguf"):
             hub.fetch("hf:maker/thing-GGUF")
 
 
@@ -540,6 +547,7 @@ class TestDraftNote:
 
     def test_reads_the_sentence_naming_mainline(self, monkeypatch, tmp_path):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
@@ -569,6 +577,7 @@ class TestDraftNote:
     def test_falls_back_to_the_plain_readme_when_there_is_no_mtp_one(
             self, monkeypatch, tmp_path):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
@@ -587,6 +596,7 @@ class TestDraftNote:
     def test_a_card_with_nothing_to_say_about_either_returns_empty(
             self, monkeypatch, tmp_path):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
@@ -612,7 +622,7 @@ class TestChooseHead:
 
     FORK_ONLY = "These do not work on mainline ggml-org/llama.cpp yet."
 
-    SHELVES = {
+    SHELVES: ClassVar[dict] = {
         # a sharded model with three heads under MTP/, one of which borrows the target's
         # embeddings and is the publisher's own recommendation -- the Flash-Next shape
         "maker/flash-GGUF": [
@@ -632,6 +642,7 @@ class TestChooseHead:
 
     def _hub(self, monkeypatch, tmp_path, *, notes: dict[str, str] | None = None):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
@@ -770,6 +781,7 @@ class TestChooseHead:
             self, monkeypatch, tmp_path):
         """Offline, the head already downloaded beside the weights is still the head."""
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()

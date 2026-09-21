@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -108,7 +109,7 @@ class TestFlagsOf:
         # A rebuild at the same path, with a newer mtime, is read again.
         fake_binary(tmp_path,
                     help_text=HELP.replace("--spec-draft-n-max", "--spec-draft-max"))
-        newer = os.stat(binary).st_mtime + 10
+        newer = Path(binary).stat().st_mtime + 10
         os.utime(binary, (newer, newer))
         second = flags_of(binary)
         assert "--spec-draft-max" in second and "--spec-draft-n-max" not in second
@@ -568,7 +569,7 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     assert argv[argv.index("-m") + 1] == str(weights)
     assert "--hf-repo" not in argv
     repo_only = be.ServerSpec(model="hf:owner/thing-GGUF")
-    assert be.LlamaServerBackend.resolved_model(repo_only) is repo_only
+    assert be.LlamaServerBackend.resolved_model(repo_only) == repo_only
     assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
 
 
@@ -600,7 +601,7 @@ def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):
     with pytest.raises(pf.PreflightFailed):
         backend.start(be.ServerSpec(model="hf:owner/thing-GGUF/thing-Q4_K_M.gguf"),
                       lease=None, check_flags=False)
-    assert seen == [weights]
+    assert seen == [str(weights)]
 
 
 class TestValuesOf:
