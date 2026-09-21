@@ -4,6 +4,8 @@ that repeats what it just read."""
 import contextlib
 from pathlib import Path
 
+import pytest
+
 from ml_stack import hub
 from tests.test_bench_extract import _world_dir
 
@@ -72,3 +74,32 @@ def test_the_subcommand_parses_n_max():
 
     args = _parser().parse_args(["extract", "x", "--world", "w", "--n-max", "6"])
     assert args.n_max == 6
+
+
+def test_the_kept_record_carries_the_draft_settings_as_served(monkeypatch, tmp_path):
+    """`extract --serve`'s kept run's ``server`` carries ``spec_draft_max`` and
+    ``spec_p_min`` as the profile served them."""
+    pytest.importorskip("ladybug", reason="ml-stack[store]")
+    from ml_stack.bench import extract as ex
+    from ml_stack.serve import Serving
+    from ml_stack.testing.fakes import FakeClient, FakeServe
+
+    class Found:
+        def serving(self, port, slots):
+            return Serving(model="x.gguf", port=port, slots=slots, slot_context=4096,
+                         cache_type="q8_0", draft="mtp.gguf", draft_n_max=4, draft_p_min=0.7)
+
+        def said(self):
+            return "measured"
+
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
+    monkeypatch.setattr("ml_stack.serve.serve", FakeServe())
+    monkeypatch.setattr("ml_stack.client.Client", FakeClient.scripted({}))
+
+    kept = tmp_path / "served.ladybug"
+    assert ex.run(_args(tmp_path, kept=str(kept))) == 0
+
+    record = ex.only(ex.runs(str(kept)))[-1]
+    assert record["server"]["spec_draft_max"] == 4
+    assert record["server"]["spec_p_min"] == 0.7
