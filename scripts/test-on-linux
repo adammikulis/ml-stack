@@ -22,7 +22,7 @@ and prints what pytest prints. Arguments after the script's own flags go to pyte
 
   --single        run in one process (-n 0), so an order-dependent test is not hidden
                   by xdist scattering the file across workers
-  --rebuild       discard the cached container venv and install it again
+  --rebuild       discard the cached venv for this stamp and install it again
   --platform P    docker platform, e.g. linux/amd64 to match the CI runners under
                   emulation. The default is this machine's own architecture; both
                   Linuxes catch a pass that is only macOS's, and an emulated run is
@@ -30,8 +30,10 @@ and prints what pytest prints. Arguments after the script's own flags go to pyte
 
 The container gets a clone of this worktree with the working tree copied over it, so
 the tests that read a real repository have one and nothing the run writes lands in
-yours. The venv lives in a docker volume and is rebuilt when pyproject.toml, the
-installed set or the image changes.
+yours. The dependencies live in a docker volume, keyed by a hash of pyproject.toml and
+the installed set, and are rebuilt only when that hash changes. Each run then makes its
+own throwaway venv inside the container for the editable install of this checkout, so
+two runs sharing the volume never see each other's install in progress.
 
 Docker credentials: on macOS the desktop credential helper can hang an image pull
 (`error getting credentials - err: signal: terminated`). This script passes every
@@ -71,8 +73,6 @@ PYTEST_ARGS=("$@")
 [ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
 [ -n "$SINGLE" ] && PYTEST_ARGS+=(-n 0)
 
-[ -n "$REBUILD" ] && docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
-
 # --init: without a real pid 1 the suite's own parent is pid 0, and a server owned by a
 # process that does not exist is an orphan to stop.
 exec docker run --rm -i --init \
@@ -82,6 +82,7 @@ exec docker run --rm -i --init \
   -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
   -e PIP_CACHE_DIR=/venv/pipcache \
   -e IMAGE="$IMAGE" \
+  -e REBUILD="$REBUILD" \
   -w /work \
   "$IMAGE" \
   bash -s -- "${PYTEST_ARGS[@]}" <<'INNER'
@@ -98,27 +99,67 @@ mkdir -p /work
 tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -
 git config --global --add safe.directory /work
 
-want="$( { echo "$DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
-if [ "$(cat /venv/stamp 2>/dev/null || true)" != "$want" ]; then
-  echo "test-on-linux: building the container venv (a few minutes; cached after this)" >&2
-  rm -rf /venv/env /venv/stamp
-  python -m venv /venv/env
-  /venv/env/bin/pip install -q --upgrade pip build
-  /venv/env/bin/pip install -q $DEPS
-  /venv/env/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
-  /venv/env/bin/pip install -q -e "/work/$EXTRAS"
-  echo "$want" > /venv/stamp
+# Keyed by the stamp, so a concurrent run needing a different one builds a sibling
+# instead of deleting the env this run may be using.
+HASH="$( { echo "$DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
+ENV_DIR="/venv/$HASH/env"
+STAMP="/venv/$HASH/stamp"
+mkdir -p /venv
+[ -n "${REBUILD:-}" ] && rm -f "$STAMP"
+
+# flock serialises two runs that both need this stamp; the stamp is written last so a
+# build another run started, and has not finished, is never read as done.
+exec 9>"/venv/$HASH.lock"
+flock 9
+if [ ! -f "$STAMP" ]; then
+  echo "test-on-linux: building the shared venv for this stamp (a few minutes; cached after this)" >&2
+  rm -rf "$ENV_DIR"
+  python -m venv "$ENV_DIR"
+  "$ENV_DIR/bin/pip" install -q --upgrade pip build
+  "$ENV_DIR/bin/pip" install -q $DEPS
+  "$ENV_DIR/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
+  "$ENV_DIR/bin/pip" install -q -e "/work/$EXTRAS"
+  # Only the dependencies belong in the shared env; this run's own editable install of
+  # ml-stack goes in its private venv below.
+  "$ENV_DIR/bin/pip" uninstall -y -q ml-stack
+  touch "$STAMP"
 fi
-# /work is rebuilt from the worktree every run, so the editable install is redone; seconds.
-/venv/env/bin/pip install -q --no-deps -e "/work/$EXTRAS"
+flock -u 9
+exec 9>&-
+
+# Sibling envs for a stamp nobody has used in days, taken non-blocking so a build another
+# run is doing right now is left alone.
+for dir in /venv/*/; do
+  dir="${dir%/}"
+  sibling="$(basename "$dir")"
+  [[ "$sibling" =~ ^[0-9a-f]{64}$ ]] || continue
+  [ "$sibling" = "$HASH" ] && continue
+  [ -f "$dir/stamp" ] || continue
+  [ -z "$(find "$dir/stamp" -mtime +4)" ] && continue
+  exec 8>"/venv/$sibling.lock"
+  flock -n 8 && rm -rf "$dir" "/venv/$sibling.lock"
+  exec 8>&-
+done
+
+# This run's own venv, outside the shared volume, seeing the shared env's dependencies
+# through a .pth file. Its editable install of ml-stack, and the entry points that
+# registers, belong to this run alone.
+PRIV=/priv-venv
+python -m venv "$PRIV"
+PURELIB='import sysconfig; print(sysconfig.get_path("purelib"))'
+SHARED_SITE="$("$ENV_DIR/bin/python" -c "$PURELIB")"
+PRIV_SITE="$("$PRIV/bin/python" -c "$PURELIB")"
+echo "$SHARED_SITE" > "$PRIV_SITE/shared-env.pth"
+"$PRIV/bin/pip" install -q --no-deps -e /work
 
 # As a person runs it, and as CI runs it. Root ignores a 0o500 directory, so the tests
 # that check a refusal on an unwritable path see no refusal.
 mkdir -p /home/tester
-chown -R 1000:1000 /work /home/tester
+chown -R 1000:1000 /work /home/tester "$PRIV"
 export HOME=/home/tester
-# A fake server the tests write into a temp directory runs `python3` off PATH, and the
-# one in the image has no pytest.
-export PATH=/venv/env/bin:$PATH
-exec setpriv --reuid=1000 --regid=1000 --clear-groups /venv/env/bin/python -m pytest "$@"
+# A fake server the tests write into a temp directory runs `python3` off PATH; the
+# private venv is the one with pytest and the rest of the deps, ahead of the shared env's
+# own bin, which still needs to be reachable for a dependency's console script (cmake).
+export PATH="$PRIV/bin:$ENV_DIR/bin:$PATH"
+exec setpriv --reuid=1000 --regid=1000 --clear-groups "$PRIV/bin/python" -m pytest "$@"
 INNER
