@@ -284,6 +284,35 @@ install_system() {
 }
 
 # -- after any install --------------------------------------------------------
+
+# The model this install will fetch, and the build its measured profile names -- decided
+# once, before the build and the fetch, so both agree. Sets PICK (the model and its draft
+# head, as `ml-stack-models fetch` and `ml-stack-serve build` take them), CHOSEN_BUILD (the
+# named build the profile wants, "" for the managed one), WANT and ROOM.
+choose_model() {
+  WANT="$MODELS"
+  if [ -z "$WANT" ]; then
+    case "$MODE" in
+      app) WANT=default ;;   # gemma-4-E2B: the smallest that still answers
+      *)   WANT=auto ;;      # headless and system are power users: the best that fits
+    esac
+  fi
+  PICK=""
+  CHOSEN_BUILD=""
+  [ "$WANT" = none ] && return 0
+  [ -n "$OFFLINE_MODELS" ] && return 0
+  ROOM=$("$BIN/python" -c \
+    'from ml_stack.hub import machine_room; print(machine_room())' 2>/dev/null || echo 0)
+  PICKED=$("$BIN/python" -m ml_stack.fleet.autostart choose --room "$ROOM" --want "$WANT" \
+    --json 2>/dev/null || true)
+  [ -n "$PICKED" ] || return 0
+  PICK=$("$BIN/python" -c 'import json, sys
+d = json.loads(sys.argv[1])
+print(" ".join(x for x in (d.get("model", ""), d.get("draft", "")) if x))' "$PICKED")
+  CHOSEN_BUILD=$("$BIN/python" -c \
+    'import json, sys; print(json.loads(sys.argv[1]).get("build", ""))' "$PICKED")
+}
+
 llama_build() {
   step "llama.cpp"
   [ -x "$BIN/ml-stack-serve" ] || { say "skipped: no ml-stack-serve"; return 0; }
@@ -295,7 +324,7 @@ llama_build() {
   "$BIN/ml-stack-serve" build --from "$FROM" \
     || say "  the build did not finish; 'ml-stack-serve build' retries"
   # A model whose measured profile names a fork needs that fork; mainline will not load it.
-  case "${CHOSEN_BUILD:-}" in
+  case "$CHOSEN_BUILD" in
     unsloth)
       "$BIN/ml-stack-serve" build --repo unslothai/llama.cpp --from release --name unsloth \
         || say "  the named fork did not build, and the chosen model needs it" ;;
@@ -309,21 +338,11 @@ sizing() {
 
 fetch_models() {
   step "models"
-  WANT="$MODELS"
-  if [ -z "$WANT" ]; then
-    case "$MODE" in
-      app) WANT=default ;;   # gemma-4-E2B: the smallest that still answers
-      *)   WANT=auto ;;      # headless and system are power users: the best that fits
-    esac
-  fi
   if [ "$WANT" = none ]; then say "none asked for"; return 0; fi
   if [ -n "$OFFLINE_MODELS" ]; then
     say "offline: using the models in $OFFLINE_MODELS; nothing is downloaded"
     return 0
   fi
-  ROOM=$("$BIN/python" -c \
-    'from ml_stack.hub import machine_room; print(machine_room())' 2>/dev/null || echo 0)
-  PICK=$("$BIN/python" -m ml_stack.fleet.autostart choose --room "$ROOM" --want "$WANT" 2>/dev/null || true)
   if [ -z "$PICK" ]; then
     say "no measured model fits this machine's $ROOM bytes; none fetched"
     return 0
@@ -396,11 +415,10 @@ do_uninstall() {
     # `uninstall.plan` ticks everything ml-stack made for itself and leaves unticked what
     # the person made -- their models and their datasets. Only the ticked ones go.
     "$VENV/bin/python" - <<'PYEOF' || say "  (the uninstall plan did not run)"
-from pathlib import Path
-
 from ml_stack.fleet import uninstall
+from ml_stack.home import state
 
-root = Path("~/.ml-stack/traind").expanduser()
+root = state("traind")
 items = uninstall.plan(root)
 went = uninstall.remove(root, [i.key for i in items if i.default])
 for name in went.get("removed", []):
@@ -429,6 +447,7 @@ esac
 
 if [ "$MODE" != app ]; then
   sizing
+  choose_model
   llama_build
   fetch_models
   join_fleet

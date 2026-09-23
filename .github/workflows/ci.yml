@@ -107,6 +107,58 @@ jobs:
       - name: tests
         run: python -m pytest tests/ -q --slow
 
+  # Runs install.ps1 -Headless end to end: a virtualenv under a scratch prefix, the console
+  # scripts on its own PATH, no network and no model, mirroring what
+  # tests/test_packaging_install_runs.py does for install.sh on Linux and macOS.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: build the wheel install.ps1 installs
+        run: |
+          python -m pip install --upgrade pip build
+          python packaging/build.py
+
+      - name: install.ps1 -Headless against a scratch prefix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $wheel = Get-ChildItem dist\ml_stack-*.whl | Select-Object -First 1
+          if (-not $wheel) { throw "packaging/build.py left no wheel in dist/" }
+          $env:ML_STACK_PREFIX = Join-Path $pwd "scratch"
+          $env:ML_STACK_MODELS = "none"
+          $env:ML_STACK_OFFLINE_ZIP = $wheel.FullName
+          & .\packaging\install.ps1 -Headless
+
+      - name: the venv it left behind runs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $py = Join-Path $pwd "scratch\venv\Scripts\python.exe"
+          if (-not (Test-Path $py)) { throw "no virtualenv where ML_STACK_PREFIX said: $py" }
+          & $py -c "from ml_stack.fleet import updates; print(updates.state()['version'])"
+          if ($LASTEXITCODE -ne 0) { throw "the installed machine could not import ml_stack" }
+
+      - name: install.ps1 -Headless -Uninstall takes the venv away
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:ML_STACK_PREFIX = Join-Path $pwd "scratch"
+          $env:ML_STACK_MODELS = "none"
+          $env:ML_STACK_OFFLINE_ZIP = (Get-ChildItem dist\ml_stack-*.whl | Select-Object -First 1).FullName
+          & .\packaging\install.ps1 -Headless -Uninstall
+          $venv = Join-Path $env:ML_STACK_PREFIX "venv"
+          if (Test-Path $venv) { throw "the venv survived -Uninstall: $venv" }
+
   gates:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -145,8 +197,8 @@ jobs:
 
       - name: gate tests
         run: |
-          files=""
+          files=()
           for f in tests/test_budgets.py tests/test_wiring.py tests/test_layers.py; do
-            [ -f "$f" ] && files="$files $f"
+            [ -f "$f" ] && files+=("$f")
           done
-          python -m pytest $files -q
+          python -m pytest "${files[@]}" -q

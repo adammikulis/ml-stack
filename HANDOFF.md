@@ -63,15 +63,12 @@ capability; every line is something that already exists not being what it says.
   do not exist (`repositories()` now only looks at directories that are actually there).
   What neither command checks: that the daemon answers, that the machine joined the
   fleet, that a GGUF is on disk, that a store opens, that 8770 and 8771 are free.
-- [ ] **`install.ps1` has never been executed, and CI has no Windows job.**
-  `tests/test_packaging_install_runs.py` now runs `install.sh --headless` end to end
-  against a scratch prefix with a locally built wheel, and `ci.yml` runs on `ubuntu-latest`
-  every push and on `macos-15` nightly -- but there is still no
-  Windows job, and `install.ps1` is still only parsed (`tests/test_packaging_install.py`:
-  a pwsh syntax check and some greps), never run; `docs/install.md` still says its
-  Windows-specific behaviour was written against a faked `platform.system()` on a Mac.
-  `install.sh` also still gates the unsloth fork build on `CHOSEN_BUILD`, which nothing
-  assigns, and still hardcodes `~/.ml-stack/traind` where `ML_STACK_HOME` should decide.
+- [ ] **The `windows` job in `ci.yml` has not run on GitHub yet.** It runs
+  `install.ps1 -Headless` end to end against a scratch prefix and a wheel built in the same
+  job, then `-Uninstall`, on `windows-latest` -- written and checked with `actionlint` and
+  the pwsh-driven tests in `tests/test_packaging_install_runs.py`, but never on an actual
+  Windows runner, because a work branch is not pushed until it lands. Watch its first run
+  after this merge reaches `0.2dev`.
 
 ### Not losing what it read
 - [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no

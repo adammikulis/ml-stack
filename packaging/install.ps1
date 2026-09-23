@@ -381,9 +381,9 @@ function Remove-MlStack {
         # uninstall.plan ticks everything ml-stack made for itself and leaves unticked what
         # the person made -- their models and their datasets. Only the ticked ones go.
         $code = @(
-            "from pathlib import Path",
             "from ml_stack.fleet import uninstall",
-            "root = Path('~/.ml-stack/traind').expanduser()",
+            "from ml_stack.home import state",
+            "root = state('traind')",
             "items = uninstall.plan(root)",
             "went = uninstall.remove(root, [i.key for i in items if i.default])",
             "[print('  removed', n) for n in went.get('removed', [])]",

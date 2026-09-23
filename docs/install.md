@@ -124,9 +124,10 @@ new Windows machine, in this order, each of which should say what follows it:
 `ml-stack-serve build --from release` ("current -> ...\builds\bNNNN" after "verifying");
 `ml-stack-traind --persist` ("installed to start at login", then a `traind.log` under
 `~\.ml-stack` that begins `ml-stack traind on http://0.0.0.0:8770`);
-`ml-stack-peers ls` from another machine (the Windows box listed with its GPU). Everything
-Windows-specific here was written against a faked `platform.system()` on a Mac -- the
-Windows calls themselves run for the first time when that list does.
+`ml-stack-peers ls` from another machine (the Windows box listed with its GPU). `ci.yml`'s
+`windows` job runs `install.ps1 -Headless` end to end on a Windows runner -- a venv under a
+scratch prefix, the console scripts on its own PATH, then `-Uninstall` taking the venv away
+again -- against a wheel built in the same job, with no model and no network.
 
 **If you write Python**, on 3.13:
 
