@@ -24,6 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import ml_stack.serve.binary as binary_module
 from ml_stack.serve import (
     build,
     build_persist,
@@ -307,7 +308,6 @@ class TestRollback:
 class TestFindBinaryPrefersTheManagedBuild:
     def test_it_wins_over_path_but_not_over_the_env_var_or_an_explicit_path(
             self, tmp_path, monkeypatch):
-        import ml_stack.serve.binary as binary_module
 
         monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
         managed = binary_module.managed_current()
@@ -340,7 +340,6 @@ class TestFindBinaryPrefersTheManagedBuild:
 
     def test_a_named_build_wins_over_current_but_not_over_explicit_or_the_env_var(
             self, tmp_path, monkeypatch):
-        import ml_stack.serve.binary as binary_module
 
         monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
         current = binary_module.managed_current()
@@ -796,6 +795,8 @@ class TestReleaseInstall:
         for name in ("LLAMA_CPP_SERVER", "LLAMA_CPP_DIR", "MLSTACK_LLAMA_BUILD"):
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("PATH", f"{on_path}{os.pathsep}/usr/bin{os.pathsep}/bin")
+        monkeypatch.setattr(binary_module, "_LOGIN_SHELL_DIRS", ())
+        assert binary_module.find_binary("llama-server") == on_path / "llama-server"
         _serve_a_release(monkeypatch, tmp_path, "b11147", {"gemma4", "qwen4exp"})
 
         assert build.cmd_build(_args(source_kind="release")) == 0
