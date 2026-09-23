@@ -432,8 +432,13 @@ def _history_pane(walker: Walker) -> None:
 
 
 def _review_pane(walker: Walker) -> None:
-    """The change requests waiting on the graph, when there are any."""
-    if walker.page.locator("#review-box").is_hidden():
+    """The change requests waiting on the graph, when there are any, with the change panel
+    they sit in opened."""
+    page = walker.page
+    walker.settle()
+    if page.locator("#review-box").is_hidden() and page.locator("#ask-summary").is_visible():
+        page.click("#ask-summary")
+    if page.locator("#review-box").is_hidden():
         walker.skip("review", "no change request is waiting on this graph")
         return
     walker.stop("review", "#review-count", "#review-list")

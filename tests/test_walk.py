@@ -230,3 +230,33 @@ def test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply(slow_model
         served.httpd.server_close()
     assert [s.screen for s in stops] == ["chat"] and stops[0].ok, stops
     assert "hello" in stops[0].text and "".join(SLOW) in stops[0].text, stops[0].text
+
+
+@pytest.mark.slow
+def test_the_review_pane_is_opened_and_read(tmp_path, monkeypatch, playwright):
+    from conftest import threaded_server
+
+    from ml_stack.files import write_json
+    from ml_stack.graph.page import render
+    from ml_stack.graph.review import Queue
+    from ml_stack.graph.serve import Handler
+
+    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    page = tmp_path / "page.html"
+    page.write_text(render(GRAPH_OF_TWO, title="Invented"), encoding="utf-8")
+    write_json(tmp_path / "review.json", {"2026-01-02T00:00:00Z|drop my topic": {
+        "at": "2026-01-02T00:00:00Z", "kind": "Fix my information", "claimed": "person:ada",
+        "claimedLabel": "Ada Lovelace", "attested": True, "concerns": [],
+        "text": "drop my topic", "targets": [], "edits": [], "status": "proposed"}})
+
+    class Quiet(Handler):
+        def log_message(self, *args):
+            pass
+
+    served = Quiet.configured(name="Reviewed", site=page, graph=GRAPH_OF_TWO,
+                              queue=Queue(tmp_path / "review.json"))
+    with threaded_server(served) as url:
+        stops = ops.graph(Walk(page="graph", base=url, out=tmp_path / "shots",
+                               screens=("review",)), playwright)
+    assert [s.screen for s in stops] == ["review"] and stops[0].ok, stops
+    assert "drop my topic" in stops[0].text
