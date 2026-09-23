@@ -33,7 +33,7 @@ from ml_stack.lock import held_by
 from ml_stack.paths import repo_root
 from ml_stack.units import human_bytes
 
-from .environment import CATALOG, Environment
+from .environment import Environment
 from .jobs import DaemonError, JobRunner
 from .jobs import Job as DaemonJob
 
@@ -267,17 +267,29 @@ def bench_python(environment: Environment | None) -> Path:
     if environment is None:
         raise RuntimeError(f"this app measures through its own environment and has none; "
                            f"{ON_THE_SCREEN}")
-    wanted = next(lib for lib in CATALOG if lib.name == MEASURING)
-    if not environment.has(wanted):
+    if not _measures(environment):
         try:
             done = environment.install([MEASURING]).get(MEASURING) or {}
         except (OSError, subprocess.SubprocessError) as exc:
             done = {"ok": False, "error": str(exc)}
-        if not done.get("ok") or not environment.has(wanted):
+        if not done.get("ok") or not _measures(environment):
             raise RuntimeError(f"could not install ml-stack's bench into {environment.path}: "
                                f"{done.get('error') or 'it is still not there'}; "
                                f"{ON_THE_SCREEN}")
     return environment.python
+
+
+def _measures(environment: Environment) -> bool:
+    """Whether ``environment``'s own interpreter imports the bench and its runs store."""
+    if not environment.exists:
+        return False
+    try:
+        done = subprocess.run([str(environment.python), "-c",
+                               "import ml_stack.bench.peer_runs, ladybug"],
+                              capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
 
 
 def detach_bench(line: Sequence[str], home: Path, python: Path) -> tuple[int, Path]:

@@ -431,8 +431,9 @@ def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkey
     assert "Measuring" in "\n".join(said)
 
 
-def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...]) -> Path:
-    """A wheel holding nothing but its metadata, named ``name`` at ``version``."""
+def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...],
+           modules: tuple[str, ...] = ()) -> Path:
+    """A wheel named ``name`` at ``version`` holding an empty file at each of ``modules``."""
     import base64
     import hashlib
     import zipfile
@@ -442,7 +443,8 @@ def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...]) -> Pat
     files = {f"{info}/METADATA": "Metadata-Version: 2.1\n" f"Name: {name}\nVersion: {version}\n"
              + "".join(f"Provides-Extra: {e}\n" for e in extras),
              f"{info}/WHEEL": "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\n"
-                              "Tag: py3-none-any\n"}
+                              "Tag: py3-none-any\n",
+             **dict.fromkeys(modules, "")}
     record = "".join(
         f"{path},sha256="
         f"{base64.urlsafe_b64encode(hashlib.sha256(text.encode()).digest()).rstrip(b'=').decode()}"
@@ -493,8 +495,10 @@ def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_pat
     roomy, _ = boxes
     environment = Environment(tmp_path / "managed")
     environment.create()
-    index, server = _slow_index(_wheel(tmp_path, "ml-stack", "0.0.1",
-                                       ("graph", "store", "serve", "hub")), delay_s=4.0)
+    # what `_measures` imports: the bench's store reader, and the store itself
+    stand_in = _wheel(tmp_path, "ml-stack", "0.0.1", ("graph", "store", "serve", "hub"),
+                      ("ml_stack/bench/__init__.py", "ml_stack/bench/peer_runs.py", "ladybug.py"))
+    index, server = _slow_index(stand_in, delay_s=4.0)
     monkeypatch.setenv("PIP_INDEX_URL", index)
     monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
     monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "1")
