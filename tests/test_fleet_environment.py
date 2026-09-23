@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 
 import pytest
+
 from ml_stack.fleet.environment import CATALOG, Environment, catalog_for
 
 

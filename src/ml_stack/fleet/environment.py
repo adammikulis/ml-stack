@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import platform
 import re
@@ -238,10 +239,8 @@ class Environment:
             return have
         if out.returncode != 0:
             return have
-        try:
+        with contextlib.suppress(ValueError, KeyError, TypeError):
             have.update({p["name"].lower(): p["version"] for p in json.loads(out.stdout)})
-        except (ValueError, KeyError, TypeError):
-            pass
         return have
 
     def has(self, library: Library) -> bool:
