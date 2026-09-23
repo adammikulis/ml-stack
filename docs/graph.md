@@ -173,7 +173,9 @@ there is one mixin per route: `graph.serve.AskRoutes` streams answers from
 `graph.routes`, `ReviewRoutes` lists and acts on a `graph.review.Queue`, `RequestRoutes`
 keeps a request on disk before saying so, `RefreshRoutes` streams the stages a subclass's
 `stages()` yields, and `DraftRoutes` hands ids to a `drafter`. A subclass says how a question is answered
-(`asker`), where conversations are kept (`threads`), what `look_up` calls (`finder`, which
+(`asker`), which corpus it answers over (`store`; conversations are kept beside it in
+`<store>.conversations` with the id, kind and label of each entry an answer drew on, or in
+it with `conversations_in_store`), what `look_up` calls (`finder`, which
 is where `search.hybrid` goes so meaning votes beside the words) and what each other route
 is given, and hangs its own journal off `answered`; each route is a 404 until it is given
 its thing,
@@ -318,8 +320,9 @@ would tell the next person their request was filed when it was not.
 
 A rebuilt graph misses on its own, but does not sweep on its own: pass
 `forget(store, keeping=digest(graph))` after a rebuild or the store keeps every answer it
-ever gave. Entries live under keys beginning `_`, which `GraphStore.docs` skips, so a cache
-in the same store as a graph never leaks into `read()`.
+ever gave. An entry holds the question and the answer word for word, so `store` is the
+conversation store (`thread.conversation_store(corpus)`), not the corpus; entries live under
+keys beginning `_`, which `GraphStore.docs` skips.
 
 ## A conversation of any length
 
@@ -365,6 +368,10 @@ until it changes. `tests/test_graph_thread.py` holds, with a scripted model, tha
 stated at turn one is in front of the model at turn two hundred twice, once in the summary
 and once recalled, and that the prefix is identical across turns 193–200. Measure the `cached` share per turn with `ml-stack-bench
 concurrent` after changing `EVERY`; a summary that changes too often shows up there.
+
+`store` above is the conversation store, `thread.conversation_store(corpus)`, which
+`AskRoutes` opens by default: turns, and a node with the id, kind and label of each entry a
+turn drew on so the joins hold, and nothing else of the corpus.
 
 A fact stated in conversation reaches the *graph* through the change-request path, not
 through any of this. The summary and the recall keep it in the model's view for this

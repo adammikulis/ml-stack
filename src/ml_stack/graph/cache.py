@@ -12,8 +12,9 @@ than serving an answer that was true of the old arrangement. Editing a tool's de
 invalidates every answer that description could have shaped, which is exactly what should
 happen — that edit changed the answers when it was measured.
 
-Entries are kept under keys beginning with an underscore, which `GraphStore.docs` skips, so
-a cache in the same store as a graph never leaks into `read()`.
+An entry holds the question and the answer as they were said, so the store it belongs in is
+the conversation store, `thread.conversation_store` of the corpus, not the corpus. Entries
+are kept under keys beginning with an underscore, which `GraphStore.docs` skips.
 """
 
 from __future__ import annotations

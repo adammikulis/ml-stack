@@ -12,8 +12,10 @@ routes beside the ask ones -- refresh, review, request, draft -- are
 
 ``AskRoutes`` is the server-side half, with no opinion about where the graph
 comes from or which model answers: a subclass says how a question is answered (``asker``)
-and where conversations are kept (``threads``), and hangs whatever it wants -- a journal, a
-review queue, a slot number -- off ``answered`` and ``failed``.
+and which corpus it answers over (``store``), and hangs whatever it wants -- a journal, a
+review queue, a slot number -- off ``answered`` and ``failed``. Conversations are kept in
+`thread.conversation_store` beside that corpus, never in it, unless
+``conversations_in_store`` is set.
 
 What goes back with a question is ``history``'s ``History``: the last ``WINDOW`` turns as
 messages, always, and on it the latest ``summary`` and the earlier turns ``recalled`` for
@@ -31,8 +33,7 @@ this question, for ``converse(..., summary=, recalled=)``. A subclass that retur
                                        on_event=emit)
             return converse(question, graph, client, turns=turns, highlighted=highlighted)
 
-        def threads(self, *, write=False):
-            return GraphStore(path, read_only=not write)
+        store = Path("graph.ladybug")
 
         def do_POST(self):
             body = self.read_body() or {}
@@ -116,10 +117,16 @@ class AskRoutes(MetricsRoutes):
         happen -- ``converse_stream``'s ``on_event`` -- or the asker may instead return an
         iterator that yields them and returns the answer. ``self.asking`` is the ``Ask``
         while a question is being answered, for anything else the body carried.
+    ``store``
+        The corpus's GraphStore path. Conversations go to `thread.conversation_store` of it,
+        which holds the turns and, for each entry an answer drew on, the entry's id, kind
+        and label. None means no history: questions still get answers, and ``/thread``
+        comes back empty.
+    ``conversations_in_store``
+        True keeps conversations in ``store`` itself.
     ``threads(*, write=False)``
         A context manager yielding the store conversations are kept in, opened for reading
-        or for writing. None means no history: questions still get answers, and
-        ``/thread`` comes back empty.
+        or for writing, or None. The default opens the one ``store`` names.
     ``ready()``
         A reason the server cannot answer yet, or None. Checked before anything is written,
         so it can still be a 409 rather than an error frame.
@@ -160,6 +167,8 @@ class AskRoutes(MetricsRoutes):
     summary_every: int = EVERY
     asking: Ask | None = None
     config: Any = None
+    store: Path | None = None
+    conversations_in_store: bool = False
 
     # ------------------------------------------------------------- what a subclass says
 
@@ -186,7 +195,34 @@ class AskRoutes(MetricsRoutes):
         return slot(self.config.over(**over) if over else self.config, index=index)
 
     def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
-        return None
+        if self.store is None:
+            return None
+        where = self.conversations()
+        if not write and not where.exists():
+            return None
+        return GraphStore(where, read_only=not write)
+
+    def conversations(self) -> Path:
+        """The path conversations are kept at: `conversation_store` of ``store``, or
+        ``store`` itself with ``conversations_in_store``."""
+        from ml_stack.graph.thread import conversation_store
+
+        corpus = Path(str(self.store))
+        return corpus if self.conversations_in_store else conversation_store(corpus)
+
+    def pointers(self, ids: Sequence[str]) -> list[dict[str, Any]]:
+        """The entries of ``store`` that ``ids`` name, as id, kind and label; empty when
+        conversations are kept in ``store`` or it does not exist."""
+        if not ids or self.store is None or self.conversations_in_store:
+            return []
+        corpus = Path(str(self.store))
+        if not corpus.exists():
+            return []
+        with GraphStore(corpus, read_only=True) as held:
+            rows = held.query("MATCH (n:Node) WHERE list_contains($ids, n.id) "
+                              "RETURN n.id AS id, n.kind AS kind, n.label AS label",
+                              {"ids": sorted(set(map(str, ids)))})
+        return [dict(row) for row in rows]
 
     def ready(self) -> str | None:
         return None
@@ -406,14 +442,18 @@ class AskRoutes(MetricsRoutes):
             from ml_stack.graph.thread import drew_on, remember_turn, summarise
 
             payload = answer_payload(out)
+            drew = drew_on(payload)
+            held = self.pointers([i for ids in drew.values() for i in ids])
             embed = self.embedder()
             with self._opened(write=True) as store:
                 if store is None:
                     return
+                for node in held:
+                    store.upsert_node(node)
                 remember_turn(store, thread=ask.thread, role="user", text=ask.question,
                               embedder=embed)
                 remember_turn(store, thread=ask.thread, role="assistant",
-                              text=str(payload.get("content") or ""), drew=drew_on(payload),
+                              text=str(payload.get("content") or ""), drew=drew,
                               meta={"why": payload.get("why", ""), "steps": payload.get("steps", []),
                                     "model": payload.get("model", ""),
                                     "spent": payload.get("spent")},
@@ -488,8 +528,8 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
 
     Configured on the class, since ``http.server`` makes an instance per request:
     ``site`` is the page file ``GET /`` serves, ``export`` the root ``GET /export/<path>``
-    reads under, ``graph`` what questions are answered over, ``store`` where conversations
-    are kept, and ``config`` the model (`AskRoutes.config`); ``queue``, ``requests``, ``stages``
+    reads under, ``graph`` what questions are answered over, ``store`` the corpus
+    conversations are kept beside (`AskRoutes.store`), and ``config`` the model (`AskRoutes.config`); ``queue``, ``requests``, ``stages``
     and ``drafter`` are the review, request, refresh and draft routes' (each a 404 until
     set). :meth:`configured` makes a subclass with those set, so two servers in one process
     do not share them.
@@ -498,7 +538,6 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
     site: Path | None = None
     export: Path | None = None
     graph: Mapping[str, Any] | None = None
-    store: Path | None = None
 
     @classmethod
     def configured(cls, *, site: Path | str | None = None, export: Path | str | None = None,
@@ -527,11 +566,6 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
         if stream:
             return converse_stream(question, self.graph, client, on_event=emit, **asked)
         return converse(question, self.graph, client, **asked)
-
-    def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
-        if self.store is None:
-            return None
-        return GraphStore(self.store, read_only=not write)
 
     # ------------------------------------------------------------------- the routes
 
@@ -650,7 +684,12 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--graph", type=Path,
                        help="the graph questions are answered over, as JSON")
     serve.add_argument("--store", type=Path,
-                       help="a GraphStore path conversations are kept in")
+                       help="the corpus GraphStore; every question and answer is kept in "
+                            "STORE.conversations beside it, with the id, kind and label of "
+                            "each entry an answer drew on, and nothing is written into STORE")
+    serve.add_argument("--conversations-in-store", action="store_true",
+                       help="keep questions and answers in --store itself, as nodes beside "
+                            "the corpus")
     placed = subs.add_parser(
         "geocode", help="give every entry that names a place a point, and optionally join "
                         "the nearest of them",
@@ -696,7 +735,8 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
     if args.graph:
         graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
     handler = Handler.configured(site=args.site, export=args.export, graph=graph,
-                                 store=args.store, config=config)
+                                 store=args.store, config=config,
+                                 conversations_in_store=bool(args.conversations_in_store))
     return ThreadingHTTPServer(("127.0.0.1", int(args.port)), handler)
 
 

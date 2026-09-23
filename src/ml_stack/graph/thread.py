@@ -9,7 +9,8 @@ the earlier turns outside the window whose words or meaning match the question; 
 last ``WINDOW`` ordinary turns, chosen by recency alone.
 
 A fact stated in conversation reaches the graph through the change-request path, not
-through any of this.
+through any of this. Turns are kept in a store of their own, `conversation_store` beside the
+corpus they were asked of, unless a caller hands the corpus itself.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from ml_stack.graph.search import rrf_scored
@@ -30,6 +32,7 @@ __all__ = [
     "SUMMARY",
     "WINDOW",
     "Turn",
+    "conversation_store",
     "drew_on",
     "follow",
     "forget_thread",
@@ -151,6 +154,11 @@ def drew_on(answer: Any) -> dict[str, list[str]]:
         if ids:
             out[how] = list(dict.fromkeys(ids))
     return out
+
+
+def conversation_store(corpus: str | Path) -> Path:
+    """The store a corpus's conversations are kept in: ``<corpus>.conversations``, beside it."""
+    return Path(str(Path(corpus).expanduser()) + ".conversations")
 
 
 def remember_turn(store: Any, *, thread: str, role: str, text: str,
