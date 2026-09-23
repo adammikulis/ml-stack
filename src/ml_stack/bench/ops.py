@@ -3,7 +3,7 @@
 The `Config` a ``--serve``'d model is measured in (`measured_run`, `swept`,
 `serving_fields`), the store a graph is prepared in (`prepare`), what a store holds for
 `show` to print (`kept_for`), and the jobs a ``sweep --fleet`` spreads over the peers
-(`fleet_jobs`, `fleet_planned`, `fleet_measure`). `ml_stack.bench.run` parses and prints;
+(`fleet_planned`, `fleet_measure`). `ml_stack.bench.run` parses and prints;
 `Refused` carries what a command says when it will not act.
 """
 
@@ -28,7 +28,7 @@ from ml_stack.fleet import join, measuring, pausing, sweeps
 from ml_stack.log import say
 from ml_stack.serve.serving import Config, Serving
 
-__all__ = ["Fleeted", "Kept", "Refused", "fleet_jobs", "fleet_measure", "fleet_planned",
+__all__ = ["Fleeted", "Kept", "Refused", "fleet_measure", "fleet_planned",
            "kept_for", "measured_run", "newest", "prepare", "serving_fields",
            "summarised", "swept"]
 
@@ -221,13 +221,14 @@ def serving_fields(args: Any) -> dict[str, Any]:
 # store, under its own detached process, so `--kept`, like `--detach` and `--no-queue`,
 # is never on a job's argv (`fleet.measuring.Job` refuses it).
 _NOT_FOR_A_PEER = ("--fleet", "--detach", "--no-queue")
-_NOT_FOR_A_PEER_VALUED = ("--peers", "--serve", "--serve-draft", "--kept")
+_NOT_FOR_A_PEER_VALUED = ("--peers", "--serve", "--serve-draft", "--kept",
+                          *measuring.SHIPPED)
 
 
 def _stripped(argv: Sequence[str]) -> tuple[list[str], list[str]]:
     """``argv`` minus what a peer never sees -- ``--fleet``, ``--detach``, ``--no-queue``,
-    every ``--peers``, ``--serve`` and ``--serve-draft`` -- and the ``--serve-draft``
-    values it carried, in the order they were given."""
+    every ``--peers``, ``--serve``, ``--serve-draft``, ``--kept`` and `measuring.SHIPPED`
+    flag -- and the ``--serve-draft`` values it carried, in the order they were given."""
     rest: list[str] = []
     skip = False
     for word in argv:
@@ -245,23 +246,19 @@ def _stripped(argv: Sequence[str]) -> tuple[list[str], list[str]]:
     return rest, list(_values_of(argv, "--serve-draft"))
 
 
-def fleet_jobs(argv: Sequence[str], models: Sequence[str], *, commit: str) -> list[dict[str, Any]]:
-    """One job per model: this same command line with that one ``--serve`` (and its
-    positional ``--serve-draft``, when one was given), on ``commit``.
-
-    Every other flag rides along unchanged -- the questions, the store, the sample, every
-    ``--also`` -- so a peer measures exactly what this machine would have. ``commit`` is
-    the short sha, and ``dirty`` says whether the tree had changes: a peer on another
-    commit is measuring other code, and both ends refuse it.
-    """
-    rest, heads = _stripped(argv)
-    sha, _, dirtiness = commit.partition(" ")
-    out = []
-    for n, model in enumerate(models):
-        line = [*rest, "--serve", model]
-        if n < len(heads):
-            line += ["--serve-draft", heads[n]]
-        out.append({"model": model, "argv": line, "commit": sha, "dirty": bool(dirtiness)})
+def _shipped(argv: Sequence[str]) -> dict[str, str]:
+    """The text of each file a `measuring.SHIPPED` flag names on ``argv``, by flag; a flag
+    given empty is left out. `Refused` for a file this machine cannot read."""
+    out: dict[str, str] = {}
+    for flag in measuring.SHIPPED:
+        named = [v for v in _values_of(argv, flag) if v]
+        if not named:
+            continue
+        where = Path(named[-1]).expanduser()
+        try:
+            out[flag] = where.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise Refused(f"error: {flag} {where}: {exc}") from None
     return out
 
 
@@ -339,7 +336,8 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
                       "is refused, and its daemon would refuse too", *lines)
     rest, heads = _stripped(argv)
     drafts = {model: heads[n] for n, model in enumerate(models) if n < len(heads)}
-    jobs = measuring.jobs_from(planned, rest, commit=mine, drafts=drafts)
+    base = measuring.Job(argv=tuple(rest), models=(), commit=mine, files=_shipped(argv))
+    jobs = measuring.jobs_from(planned, base, drafts=drafts)
     return Fleeted(jobs=jobs, lines=lines)
 
 

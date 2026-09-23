@@ -2259,14 +2259,13 @@ def test_halves_and_the_ways_they_cross():
 # run and its cost is the fastest run that held that accuracy -- a short drafted run, on a
 # fork, included -- rather than both from one run.
 
-def _kept_run(store, label, *, model, questions, hits, seconds, binary="", **server):
+def _kept_run(store, label, *, questions, hits, seconds, **server):
     """A run of ``questions`` over the invented community, ``hits`` of them answered in
-    full, taking ``seconds`` altogether, served by ``binary``."""
+    full, taking ``seconds`` altogether, with ``server`` as its server record."""
     from ml_stack.bench import invented_digest
 
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds)
-    return save(store, rows, server={"graph": invented_digest(), "model": model,
-                                   "binary": binary, **server})
+    return save(store, rows, server={"graph": invented_digest(), "binary": "", **server})
 
 
 def test_a_models_cost_comes_from_its_fastest_run_that_held_its_accuracy(tmp_path):
@@ -2594,18 +2593,18 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
 
 # -- what a draft head was worth, as a number ----------------------------------------------
 
-def _measured(label, *, model="flash.gguf", questions=20, hits=12, seconds=200.0,
-              build="current", draft="", at="2026-09-01T12:00:00",
-              guessed=0, taken=0, **over):
+def _measured(label, *, scored=(20, 12, 200.0), drafted=(0, 0), at="2026-09-01T12:00:00",
+              **server):
     """A kept run as `runs` hands it back, built by hand so ``at`` is chosen and not the
-    clock's: ``hits`` of ``questions`` answered in full over ``seconds`` altogether."""
+    clock's: ``scored`` is (questions, hits answered in full, seconds altogether) and
+    ``drafted`` (guessed, taken)."""
     from dataclasses import asdict
 
+    questions, hits, seconds = scored
     rows = [asdict(r) for r in scored_rows(label, questions=questions, hits=hits,
-                                           seconds=seconds, draft=(guessed, taken))]
-    server = {"model": model, "build": build, "context": 32768, "slots": 1, **over}
-    if draft:
-        server["draft_model"] = draft
+                                           seconds=seconds, draft=drafted)]
+    server = {"model": "flash.gguf", "build": "current", "context": 32768, "slots": 1,
+              **server}
     return {"key": f"bench:{label}:{at}", "at": at, "label": label, "server": server,
             "rows": rows}
 
@@ -2615,13 +2614,13 @@ def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_ove
     the *newest* undrafted run of the same model, build and size, and none other."""
     from ml_stack.bench import baseline, speedup
 
-    older = _measured("draft:none", seconds=300.0, at="2026-09-01T10:00:00")
-    newest = _measured("draft:none", seconds=200.0, at="2026-09-01T11:00:00")
-    fork = _measured("draft:none", seconds=100.0, build="brayfork")
-    larger = _measured("flash-plain", questions=34, hits=20, seconds=170.0)
-    other = _measured("draft:none", model="tiny.gguf", seconds=50.0)
-    drafted = _measured("draft:mtp-flash@n4", seconds=140.8, draft="mtp-flash.gguf",
-                        guessed=100, taken=76)
+    older = _measured("draft:none", scored=(20, 12, 300.0), at="2026-09-01T10:00:00")
+    newest = _measured("draft:none", at="2026-09-01T11:00:00")
+    fork = _measured("draft:none", scored=(20, 12, 100.0), build="brayfork")
+    larger = _measured("flash-plain", scored=(34, 20, 170.0))
+    other = _measured("draft:none", scored=(20, 12, 50.0), model="tiny.gguf")
+    drafted = _measured("draft:mtp-flash@n4", scored=(20, 12, 140.8), drafted=(100, 76),
+                        draft_model="mtp-flash.gguf")
     kept = [older, fork, larger, other, drafted, newest]
     assert baseline(drafted, kept) is newest
     assert speedup(drafted, kept) == pytest.approx(200.0 / 140.8)
@@ -2631,19 +2630,21 @@ def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_ove
     # a fork's baseline says nothing about mainline's head, nor a larger run about a smaller
     assert speedup(drafted, [fork, larger, other, drafted]) is None
     # the same model on no named build pairs with a baseline on no named build
-    bare = _measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf", build="")
+    bare = _measured("draft:mtp-flash@n4", scored=(20, 12, 100.0), build="",
+                     draft_model="mtp-flash.gguf")
     assert speedup(bare, [newest, bare]) is None
     assert speedup(bare, [_measured("draft:none", build=""), bare]) == pytest.approx(2.0)
     # ...and a run at another cache, budget or asking is another measurement, whatever the
     # label's suffixes said: a speedup read across one is the head's and the change's
-    quantised = _measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf",
-                          cache_type="q8_0")
+    quantised = _measured("draft:mtp-flash@n4", scored=(20, 12, 100.0), cache_type="q8_0",
+                          draft_model="mtp-flash.gguf")
     assert speedup(quantised, [newest, quantised]) is None
-    asked = {**_measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf"),
+    asked = {**_measured("draft:mtp-flash@n4", scored=(20, 12, 100.0),
+                         draft_model="mtp-flash.gguf"),
              "asking": {"tight": True, "batch": True}}
     assert speedup(asked, [newest, asked]) is None
     # a run that took no time has nothing to divide by
-    still = _measured("draft:mtp-flash@n4", seconds=0.0, draft="mtp-flash.gguf")
+    still = _measured("draft:mtp-flash@n4", scored=(20, 12, 0.0), draft_model="mtp-flash.gguf")
     assert speedup(still, [newest, still]) is None
 
 
@@ -2699,13 +2700,13 @@ def test_the_drafts_summary_is_sorted_by_speedup_and_recommends_the_fastest_that
     """
     from ml_stack.bench import drafted
 
-    base = _measured("draft:none", hits=12, seconds=200.0, at="2026-09-01T11:00:00")
-    slow = _measured("draft:mtp-a@n4", hits=12, seconds=140.0, draft="mtp-a.gguf",
-                     guessed=100, taken=70)
-    fell = _measured("draft:mtp-a@n8", hits=2, seconds=100.0, draft="mtp-a.gguf",
-                     guessed=100, taken=90)
-    held = _measured("draft:mtp-b@n4", hits=11, seconds=125.0, draft="mtp-b.gguf",
-                     guessed=100, taken=80)
+    base = _measured("draft:none", at="2026-09-01T11:00:00")
+    slow = _measured("draft:mtp-a@n4", scored=(20, 12, 140.0), drafted=(100, 70),
+                     draft_model="mtp-a.gguf")
+    fell = _measured("draft:mtp-a@n8", scored=(20, 2, 100.0), drafted=(100, 90),
+                     draft_model="mtp-a.gguf")
+    held = _measured("draft:mtp-b@n4", scored=(20, 11, 125.0), drafted=(100, 80),
+                     draft_model="mtp-b.gguf")
     said = drafted([base, slow, fell, held])
     lines = said.splitlines()
     assert lines[0].split() == ["draft", "accept", "s/q", "speed", "F1", "dF1", "against"]
@@ -3385,24 +3386,21 @@ def test_a_cost_run_from_another_host_is_never_taken_and_is_named(tmp_path, caps
 
 # -- sweep --fleet ----------------------------------------------------------------------------------
 
-def test_fleet_jobs_are_the_same_line_with_one_serve_each():
-    from ml_stack.bench.ops import fleet_jobs
+def test_a_fleet_job_line_is_the_sweep_without_what_stays_on_this_machine(tmp_path):
+    from ml_stack.bench.ops import Refused, _shipped, _stripped
 
+    graph = tmp_path / "g.json"
+    graph.write_text('{"nodes": [], "edges": []}')
     argv = ["sweep", "--fleet", "--peers", "quill,lantern", "--serve", "a.gguf", "--serve",
             "b.gguf", "--serve-draft", "ha.gguf", "--also", "terse", "--kept", "/k",
-            "--no-queue", "--sample", "5"]
-    jobs = fleet_jobs(argv, ["a.gguf", "b.gguf"], commit="0f1e2d3 (dirty)")
-    assert [j["argv"] for j in jobs] == [
-        ["sweep", "--also", "terse", "--sample", "5", "--serve", "a.gguf",
-         "--serve-draft", "ha.gguf"],
-        ["sweep", "--also", "terse", "--sample", "5", "--serve", "b.gguf"]], \
-        "--kept never rides to a peer: it keeps its own runs in its own store"
-    assert [(j["model"], j["commit"], j["dirty"]) for j in jobs] == \
-        [("a.gguf", "0f1e2d3", True), ("b.gguf", "0f1e2d3", True)]
-    assert fleet_jobs(["sweep", "--peers=quill", "--serve=x.gguf"], ["x.gguf"],
-                      commit="abc1234")[0] == {"model": "x.gguf", "argv": ["sweep", "--serve",
-                                                                            "x.gguf"],
-                                               "commit": "abc1234", "dirty": False}
+            "--no-queue", "--sample", "5", "--graph", str(graph), "--questions="]
+    assert _stripped(argv) == (["sweep", "--also", "terse", "--sample", "5"], ["ha.gguf"]), \
+        "--kept never rides to a peer, and --graph travels as the file's text"
+    assert _stripped(["sweep", "--peers=quill", "--serve=x.gguf"]) == (["sweep"], [])
+    assert _shipped(argv) == {"--graph": '{"nodes": [], "edges": []}'}, \
+        "an empty --questions is the default, and ships nothing"
+    with pytest.raises(Refused, match="--questions"):
+        _shipped(["sweep", "--questions", str(tmp_path / "absent.jsonl")])
 
 
 # The rest of `sweep --fleet` -- discovering real peers, planning and dispatching real jobs
@@ -3511,15 +3509,13 @@ def test_the_run_the_table_the_detail_and_the_export_carry_the_cache_per_turn(tm
 
 # -- the estimate, before anything is paid for -----------------------------------------------
 
-def _stamped_run(label, *, model, per_question, questions=20, context=32768, at, load_s=None):
-    """A kept run as `runs` hands it back, ``questions`` rows of ``per_question`` seconds."""
+def _stamped_run(label, *, model, per_question, at, **server):
+    """A kept run as `runs` hands it back, 20 rows of ``per_question`` seconds."""
     from dataclasses import asdict
 
-    rows = [asdict(r) for r in scored_rows(label, questions=questions, hits=questions,
-                                           seconds=per_question * questions)]
-    server = {"model": model, "context": context, "slots": 1}
-    if load_s is not None:
-        server["load_s"] = load_s
+    rows = [asdict(r) for r in scored_rows(label, questions=20, hits=20,
+                                           seconds=per_question * 20)]
+    server = {"model": model, "context": 32768, "slots": 1, **server}
     return {"key": f"bench:{label}:{at}", "at": at, "label": label, "server": server,
             "rows": rows}
 
@@ -3554,7 +3550,7 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
     one = got.models[0]
     assert (one.questions, one.askings, one.per_question, one.load_s) == (12, 4, 65.0, 41.6)
     assert not one.guessed
-    assert one.line() == ("estimate: 53 min (quill 12 q × 4 askings × 65 s/q + load 42 s; "
+    assert one.line() == ("estimate: 53 min (quill 12 q \u00d7 4 askings \u00d7 65 s/q + load 42 s; "
                           "from quill-plain kept 2026-09-01T12:00:00 at 32k)")
     assert got.seconds == pytest.approx(12 * 4 * 65 + 41.6)
     assert got.over and got.ceiling_min == 30
@@ -3593,7 +3589,7 @@ def test_a_model_with_no_run_kept_is_guessed_from_its_weights_and_the_line_says_
     assert by_size.guessed and by_size.per_question == pytest.approx(2.1)
     assert by_size.load_s == 30.0 and "a guess from 2.8G of weights" in by_size.line()
     assert unknown.guessed and unknown.per_question == 15.0
-    assert unknown.line() == ("estimate: 2 min (absent 4 q × 1 asking × 15 s/q + load 30 s; a "
+    assert unknown.line() == ("estimate: 2 min (absent 4 q \u00d7 1 asking \u00d7 15 s/q + load 30 s; a "
                               "guess, no run of it kept and no weights on disk to size it by)")
     assert unknown.seconds == 90.0, "and 90 s reads as 2 min, the shape history reads"
     assert got.lines()[-1] == "estimate: 2 min in all for 2 models, 2 guessed with no run kept"
@@ -3648,7 +3644,7 @@ def test_main_refuses_over_the_ceiling_with_exit_5_and_serves_nothing_unless_yes
             "--no-selfcheck", "--ceiling", "0.5"]
     assert bench.main(argv) == 5
     said = capsys.readouterr()
-    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q × 1 asking × 15 s/q "
+    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q \u00d7 1 asking \u00d7 15 s/q "
                                                "+ load 30 s; a guess")
     assert said.out.splitlines()[1] == ("estimate: 45 s in all for 1 model, 1 guessed with "
                                         "no run kept (over the ceiling)")
@@ -3697,7 +3693,7 @@ def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detache
     assert bench.main(argv) == 5
     said = capsys.readouterr()
     assert started == [] and not (tmp_path / "home" / "measuring.json").exists()
-    assert said.out.startswith("estimate: 4 min (tiny 12 q × 1 asking × 15 s/q + load 30 s;")
+    assert said.out.startswith("estimate: 4 min (tiny 12 q \u00d7 1 asking \u00d7 15 s/q + load 30 s;")
     assert "over the 1 min ceiling" in said.err
 
     assert bench.main([*argv, "--yes"]) == 0
@@ -3756,17 +3752,17 @@ def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():
     it (2026-09-02). Serving a head is only worth it when it is faster than no head."""
     from ml_stack.bench import drafted
 
-    base = _measured("draft:none", hits=12, seconds=120.0, at="2026-09-01T11:00:00")
-    slower = _measured("draft:eagle3@n2", hits=12, seconds=146.0, draft="eagle3.gguf",
-                       guessed=100, taken=65)
-    slowest = _measured("draft:eagle3@n4", hits=12, seconds=160.0, draft="eagle3.gguf",
-                        guessed=100, taken=46)
+    base = _measured("draft:none", scored=(20, 12, 120.0), at="2026-09-01T11:00:00")
+    slower = _measured("draft:eagle3@n2", scored=(20, 12, 146.0), drafted=(100, 65),
+                       draft_model="eagle3.gguf")
+    slowest = _measured("draft:eagle3@n4", scored=(20, 12, 160.0), drafted=(100, 46),
+                        draft_model="eagle3.gguf")
     last = drafted([base, slower, slowest]).splitlines()[-1]
     assert last.startswith("serve no head: the best that held its F1, draft:eagle3@n2, "
                            "is slower than none at 0.82x"), last
     # one that is faster is still recommended over the slower ones
-    quick = _measured("draft:eagle3@n1", hits=12, seconds=100.0, draft="eagle3.gguf",
-                      guessed=100, taken=80)
+    quick = _measured("draft:eagle3@n1", scored=(20, 12, 100.0), drafted=(100, 80),
+                      draft_model="eagle3.gguf")
     assert drafted([base, slower, quick]).splitlines()[-1].startswith("serve draft:eagle3@n1")
 
 
@@ -4311,10 +4307,12 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
 # said what was noise: ten questions moved 15% in wall clock and five points of F1 between
 # identical runs, and the ranking called that a regression.
 
-def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=None, **server):
-    """A run kept with a full server record and, given one, an asking record."""
+def _shaped_run(store, label, *, scored=(20, 14, 200.0), asking=None, **server):
+    """A run kept with a full server record and, given one, an asking record; ``scored``
+    is (questions, hits answered in full, seconds altogether)."""
     from ml_stack.bench import invented_digest
 
+    questions, hits, seconds = scored
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds,
                        miss=["person:wren"])
     return save(store, rows,
@@ -4407,9 +4405,8 @@ def test_runs_of_the_same_shape_are_one_line(tmp_path, capsys):
     store = tmp_path / "runs.ladybug"
     shape = {"cache_type": "q8_0", "reasoning_budget": 0}
     for hits in (14, 12):
-        _shaped_run(store, "flash-batch", hits=hits, seconds=200.0, asking={"batch": True},
-                    **shape)
-    _shaped_run(store, "flash-plain", hits=13, seconds=300.0, asking={"tight": True}, **shape)
+        _shaped_run(store, "flash-batch", scored=(20, hits, 200.0), asking={"batch": True}, **shape)
+    _shaped_run(store, "flash-plain", scored=(20, 13, 300.0), asking={"tight": True}, **shape)
     _shaped_run(store, "flash-before")         # no record at all: its own group
     by_serving(runs(store))
     lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("flash.gguf")]
@@ -4465,8 +4462,8 @@ def test_a_difference_inside_the_band_is_not_called(tmp_path):
     from ml_stack.bench import held_up, ranking, separated
 
     store = tmp_path / "runs.ladybug"
-    _shaped_run(store, "flash-plain", questions=20, hits=12, seconds=300.0)
-    _shaped_run(store, "flash-drafted", questions=20, hits=11, seconds=200.0)
+    _shaped_run(store, "flash-plain", scored=(20, 12, 300.0))
+    _shaped_run(store, "flash-drafted", scored=(20, 11, 200.0))
     by_label = {r["label"]: r for r in runs(store)}
     plain, drafted_ = by_label["flash-plain"], by_label["flash-drafted"]
     assert separated(drafted_, plain) is False, "twenty questions cannot tell 60 from 55"
@@ -4477,7 +4474,7 @@ def test_a_difference_inside_the_band_is_not_called(tmp_path):
     assert "not separated from that" in said, "and the document says what the rule is"
 
     # separated is a claim about the interval, not about the means being equal
-    _shaped_run(store, "flash-broken", questions=20, hits=2, seconds=100.0)
+    _shaped_run(store, "flash-broken", scored=(20, 2, 100.0))
     apart = next(r for r in runs(store) if r["label"] == "flash-broken")
     assert separated(apart, plain) is True and not held_up(apart, plain)
     assert "rejected" in ranking(runs(store))
@@ -4490,7 +4487,7 @@ def test_the_score_carries_its_interval_wherever_it_is_printed(tmp_path, capsys)
     from ml_stack.bench import export, missed, ranking
 
     store = tmp_path / "runs.ladybug"
-    _shaped_run(store, "flash-plain", questions=20, hits=14, seconds=200.0)
+    _shaped_run(store, "flash-plain")
     kept = runs(store)
     table(kept)
     assert "70% ±" in capsys.readouterr().out, "the table's F1 says how far it may move"

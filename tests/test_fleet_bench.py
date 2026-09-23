@@ -103,9 +103,9 @@ def _box(tmp_path: Path, name: str, *, room: int, launch=None, busy: bool = Fals
     home = root / "bench"
     token = load_or_create_token(root)
     runner = JobRunner(root, files)
-    host = BenchHost(runner, home=home, commit=COMMIT, room=lambda: room,
-                     launch=launch or scripted_launch(), name=name, poll_s=0.1)
-    host.machine = f"id-{name}"
+    host = BenchHost(runner, home=home, room=lambda: room,
+                     launch=launch or scripted_launch(), name=name)
+    host.commit, host.poll_s, host.machine = COMMIT, 0.1, f"id-{name}"
 
     def report():
         return {"cpus": 8, **host.report()}
@@ -234,18 +234,21 @@ def test_a_model_of_unknown_size_goes_to_the_roomiest_idle_peer(boxes):
 def test_jobs_from_gives_each_peer_only_its_serves(boxes):
     roomy, small = boxes
     planned = {roomy.peer: ["big.gguf"], small.peer: ["tiny.gguf"]}
-    jobs = jobs_from(planned, ["sweep", "--short", "--shortlist", "8"], commit=COMMIT,
-                     needs={"big.gguf": 60 * G, "tiny.gguf": 4 * G},
-                     drafts={"big.gguf": "auto"}, kept_label="tuesday")
+    base = Job(argv=("sweep", "--short", "--shortlist", "8"), models=(), commit=COMMIT,
+               kept_label="tuesday", needs={"big.gguf": 60 * G, "tiny.gguf": 4 * G},
+               files={"--graph": "{}"})
+    jobs = jobs_from(planned, base, drafts={"big.gguf": "auto"})
     assert jobs[roomy.peer].argv == ("sweep", "--short", "--shortlist", "8",
                                      "--serve", "big.gguf", "--serve-draft", "auto")
     assert jobs[small.peer].argv == ("sweep", "--short", "--shortlist", "8",
                                      "--serve", "tiny.gguf")
     assert jobs[small.peer].needs == {"tiny.gguf": 4 * G}
     assert jobs[small.peer].name == "bench:tuesday"
+    assert jobs[small.peer].files == jobs[roomy.peer].files == {"--graph": "{}"}
 
 
-@pytest.mark.parametrize("flag", ["--kept", "--detach", "--no-queue"])
+@pytest.mark.parametrize("flag", ["--kept", "--detach", "--no-queue", "--graph",
+                                  "--questions"])
 def test_a_job_may_not_carry_what_the_peer_owns(flag):
     with pytest.raises(ValueError, match=flag):
         Job(argv=("sweep", flag, "x"), models=("m",), commit=COMMIT)
@@ -354,6 +357,27 @@ def test_dispatch_and_wait_see_done_and_the_job_is_listed_like_any_other(boxes):
     assert "kept as bench:tried" in text, "the log tail is printed when a job ends"
     assert "kept as bench:tried" in roomy.peer.log(handles[0].id)
     assert roomy.host.launch.calls == [["sweep", "--short", "--serve", "big.gguf"]]
+
+
+def test_a_job_ships_its_graph_and_questions_and_the_peer_reads_its_own_copy(boxes):
+    roomy, _ = boxes
+    job = Job(argv=("sweep", "--short", "--serve", "big.gguf"), models=("big.gguf",),
+              commit=COMMIT, files={"--graph": '{"nodes": []}', "--questions": "q?\n"})
+    assert Job.from_request(json.loads(json.dumps(job.public()))) == job
+    with pytest.raises(ValueError, match="--store"):
+        Job(argv=("sweep",), models=(), commit=COMMIT, files={"--store": "x"})
+
+    (handle,) = dispatch({roomy.peer: job}, log=lambda _l: None)
+
+    (line,) = roomy.host.launch.calls
+    given = roomy.home / "given" / handle.id
+    assert line == ["sweep", "--short", "--serve", "big.gguf",
+                    "--graph", str(given / "graph.json"),
+                    "--questions", str(given / "questions.jsonl")]
+    assert (given / "graph.json").read_text() == '{"nodes": []}'
+    assert (given / "questions.jsonl").read_text() == "q?\n"
+    wait([handle], poll_s=0.1, timeout_s=20, log=lambda _l: None)
+    assert _await(lambda: not given.exists()), "removed once the job ends"
 
 
 def test_a_bench_that_says_error_is_failed(tmp_path):
@@ -777,6 +801,7 @@ def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
     from ml_stack.fleet.discovery import derive_token, load_cluster_key
 
     root = tmp_path / name
+    root.mkdir(parents=True, exist_ok=True)
     http_port = _free_port()
     log = tmp_path / f"{name}.out"
     fh = log.open("wb")
@@ -787,7 +812,7 @@ def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
         [sys.executable, "-m", "ml_stack.fleet.daemon", "--root", str(root / "traind"),
          "--bench-home", str(root / "bench"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", name, "--cluster-key", str(keyfile)],
-        env=env, stdout=fh, stderr=subprocess.STDOUT)
+        env=env, stdout=fh, stderr=subprocess.STDOUT, cwd=root)
     driver = Peer(f"http://127.0.0.1:{http_port}", derive_token(load_cluster_key(keyfile)))
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -802,11 +827,12 @@ def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
     pytest.fail(f"{name} traind never answered /health:\n{log.read_text(errors='replace')}")
 
 
-def _own_graph(tmp_path: Path) -> list[str]:
-    """``--graph`` and ``--questions`` over `_OWN_GRAPH`, written under ``tmp_path``."""
-    graph = tmp_path / "own.json"
+def _own_graph(where: Path) -> list[str]:
+    """``--graph`` and ``--questions`` over `_OWN_GRAPH`, written under ``where``."""
+    where.mkdir(parents=True, exist_ok=True)
+    graph = where / "own.json"
     graph.write_text(json.dumps(_OWN_GRAPH))
-    asked = tmp_path / "own.jsonl"
+    asked = where / "own.jsonl"
     asked.write_text("".join(json.dumps(q) + "\n" for q in _OWN_QUESTIONS))
     return ["--graph", str(graph), "--questions", str(asked)]
 
@@ -816,12 +842,17 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
     """Nothing here is mocked: a real ``ml-stack-fleet`` daemon booted as a subprocess, found
     by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench`` over a
     graph that is not the shipped community, on a llama-server-shaped process instead of a
-    GPU; the run it keeps comes home."""
+    GPU; the run it keeps comes home. The graph and questions are gone from the
+    dispatcher's disk before the job is sent, so the peer reads only what the job carried."""
+    import shutil
+
     from conftest import write_gguf
 
     import ml_stack.bench as bench
+    import ml_stack.fleet.sweeps as sweeps_module
     from ml_stack.bench import runs
     from ml_stack.fleet.discovery import create_cluster_key
+    from ml_stack.graph.cache import digest
     from ml_stack.testing.fakes import fake_llama_binary
 
     keyfile = tmp_path / "cluster.key"
@@ -837,8 +868,16 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
         gguf = write_gguf(tmp_path / "tiny.gguf", _FLEET_LLAMA_META)
         binary = fake_llama_binary(tmp_path)
         kept = tmp_path / "runs.ladybug"
+        dispatcher = tmp_path / "dispatcher"
+        real_dispatch = sweeps_module.dispatch
+
+        def dispatch_without_the_files(jobs, **kw):
+            shutil.rmtree(dispatcher)
+            return real_dispatch(jobs, **kw)
+
+        monkeypatch.setattr(sweeps_module, "dispatch", dispatch_without_the_files)
         argv = ["sweep", "--fleet", "--serve", str(gguf), "--binary", str(binary),
-                *_own_graph(tmp_path), "--store", "", "--plain-only", "--no-smoke",
+                *_own_graph(dispatcher), "--store", "", "--plain-only", "--no-smoke",
                 "--no-profile", "--kept", str(kept), "--serve-port", str(_free_port())]
         code = bench._main(argv)
         assert code == 0, "\n".join(p[1].read_text(errors="replace") for p in booted)
@@ -846,7 +885,13 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
         kept_runs = runs(kept)
         assert kept_runs, "the fleet measured nothing"
         assert kept_runs[0]["server"]["host"] in ("quill", "lantern")
-        assert kept_runs[0]["server"]["graph"] not in ("", bench.invented_digest())
+        assert kept_runs[0]["server"]["graph"] == digest(_OWN_GRAPH) != bench.invented_digest()
+        assert len(kept_runs[0]["rows"]) == len(_OWN_QUESTIONS), "the shipped questions"
+        assert not dispatcher.exists()
+        for name in ("quill", "lantern"):
+            given = tmp_path / name / "bench" / "given"
+            assert not given.exists() or not any(given.iterdir()), \
+                f"{name} removes what a job shipped once the job ends"
     finally:
         for proc, _log, fh in booted:
             proc.terminate()

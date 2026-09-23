@@ -6,18 +6,8 @@
     ml-stack-world emit --from ./talk --as slack-export --out ./export
     ml-stack-world check ./export ./mail.mbox --truth ./talk
 
-``make`` writes ``graph.json`` (the graph, in the community schema), ``personas.json`` (a
-voice, a system prompt and what each person knows), ``calendar.json`` (empty: the simulation
-schedules its own arcs into it) and ``world.json`` (kind, size, seed, people), and prints a
-summary -- as JSON with ``--json``. ``questions`` writes one question per line in the shape
-``ml-stack-bench run`` reads. ``simulate`` is `world.simulate.run`: the people talk for
-``--days``, templated unless ``--model-url`` and ``--mix`` hand a share to a model.
-``emit`` writes what was said the way a product exports it, so `ml_stack.sources` reads
-the invented corpus exactly as it reads a real one. ``check`` is `world.check`: the
-corpus read back against the graph the simulation wrote, and every generated name through
-the name detector; exit 1 on any miss or hit.
-
-Every subcommand parses and prints; the work is in `ml_stack.world.ops`.
+Every subcommand parses and prints; the work is in `ml_stack.world.ops`, `world.simulate`
+and `world.check`.
 """
 
 from __future__ import annotations

@@ -126,7 +126,6 @@ from ml_stack.bench.measure import (  # noqa: F401
 )
 from ml_stack.bench.ops import (  # noqa: F401
     Refused,
-    fleet_jobs,
     kept_for,
     measured_run,
     newest,

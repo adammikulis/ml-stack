@@ -1,20 +1,11 @@
 """``ml-stack-bench speed``: how fast a served model reads and writes, by prompt size and
 by how many ask at once.
 
-One cell per (prompt size, streams): ``streams`` identical-length requests sent together,
-greedy, thinking off, each writing ``--generate`` tokens. Per cell: ``prefill_tps`` (what
-the server read over the time it took, per stream and over all of them), ``decode_tps``
-(what it wrote, per stream and summed for throughput), ``ttft_s`` (the time to the first
-streamed token, or the server's own prompt clock where nothing streams, marked so), the
-wall, and the same memory
-and `served_by` record every run carries. Kept in the store as a run of kind ``speed``
-(`KIND`), one row per cell; `speed_table` prints them, one table per label.
-
-The prompt is built to a token count rather than guessed at: `prompt_text` writes numbered
-lines, `calibrated` measures them -- through ``/tokenize`` where the server has one, else
-by a one-token request read back for what the server counted -- and scales the text until
-it lands within `TOLERANCE`. Each stream gets its own lines, so no two share a prefix and
-the prompt cache reads nothing for the second.
+One cell per (prompt size, streams): that many requests of that length sent together,
+greedy, thinking off, each writing ``--generate`` tokens. A cell records ``prefill_tps``,
+``decode_tps``, ``ttft_s`` and the wall, per stream and over all of them. Kept as a run of
+kind `KIND`, one row per cell; `speed_table` prints them. `calibrated` builds each prompt
+to a token count within `TOLERANCE`, with its own lines so no two streams share a prefix.
 """
 
 from __future__ import annotations

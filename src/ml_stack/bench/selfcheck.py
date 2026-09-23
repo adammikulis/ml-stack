@@ -1,31 +1,10 @@
-"""The runner proves itself on no GPU before it spends one.
+"""A measuring command driven end to end on no GPU before it spends one.
 
-A measuring command is minutes of loading before the first question is asked, and the
-first question is where a new flag meets the client. On 2026-09-02 a new ``--also tight``
-way reached ``Client.__init__`` as a keyword argument and took an 87G load down with it: the
-smoke run had been left out of the plan, and the variant's test had faked a client that
-accepts anything. Neither the plan nor the test is where that belongs. `selfcheck` drives
-the exact subcommand and flags a person asked for -- every ``--also`` way, the store and
-the shortlist, the KV cache, the draft lengths, the per-question cap -- through the whole
-path with a scripted model that takes exactly what `Client` takes, a served model that
-never starts, the real preflight over facts that read nothing, the invented community and
-two of its questions, into a scratch store it reads back. Ten seconds, and `main` runs it
-before it takes the measuring lock, so the check no longer depends on a person remembering
-it.
-
-The preflight is the real one on purpose. Twice on 2026-09-02 the self-check said ok and
-the run then died inside the preflight -- `command()` refusing a draft head still named by
-`hf:` file -- because the self-check had replaced `Preflight` whole, so no preflight code
-ran. Now only its readers are replaced, through `Preflight`'s own seams (``shards_of``,
-``read_header``, ``arches``, ``flags``, ``ref_bytes``): the shards are present, the header
-is a dense model the build reads, the build accepts every flag `command` can emit. Every
-check's code runs over the exact spec the run builds, the argv included; and `fake_serve`
-walks what `start()` does before `Popen` -- the draft resolved, the argv built, its flags
-checked -- so the lease's refusal is met here too.
-
-`ScriptedModel` and `ScriptedReader` are the fakes the tests use too. One fake shared
-between the tests and the runner is the point: a fake with ``**kwargs`` in its signature
-is what let the flag through.
+`selfcheck` runs the exact subcommand and flags given through the whole path: a scripted
+model that takes exactly what `Client` takes, a served model that never starts, the real
+`Preflight` with only its readers replaced (``shards_of``, ``read_header``, ``arches``,
+``flags``, ``ref_bytes``), and the invented community's questions into a scratch store it
+reads back. `ScriptedModel` and `ScriptedReader` are the fakes the tests use too.
 """
 
 from __future__ import annotations
@@ -387,18 +366,12 @@ def _raw_flags(spec: Any) -> frozenset[str]:
 def selfcheck(argv: Sequence[str]) -> str:
     """Drive ``ml-stack-bench argv`` through the whole path with no server and no GPU.
 
-    The exact subcommand and flags given, with the model, the server and the machine
-    faked and everything else real: the askings are built, the spec is built, the real
-    preflight runs over it (its readers faked, its checks and its argv not), what
-    `start()` does before `Popen` is done to it, every client is constructed as the run
-    would construct it, two questions are asked of
-    the invented community and scored, the run is saved to a scratch store and read back
-    the way `show` reads it. `extract` reads a tiny invented world the same way. A run
-    that was not asked for as ``--smoke`` runs its own smoke first here too.
-
-    Returns one line saying what got through. Raises `SelfCheckFailed`, carrying the
-    traceback and everything the run printed, otherwise. ``--detach``, ``--no-queue`` and
-    ``--no-selfcheck`` are ignored; a command line that does not parse exits as it would.
+    The model, the server and the machine are faked; the askings, the spec, the preflight,
+    the clients, two questions over the invented community (a tiny world for `extract`),
+    the scoring and the saved run are real, and a run not asked as ``--smoke`` smokes
+    first. Returns one line saying what got through, or raises `SelfCheckFailed` with the
+    traceback and what the run printed. ``--detach``, ``--no-queue`` and
+    ``--no-selfcheck`` are ignored.
     """
     rest = [a for a in argv if a not in ("--detach", "--no-queue", "--no-selfcheck")]
     args = bench._parser().parse_args(rest)

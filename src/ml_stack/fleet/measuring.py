@@ -10,16 +10,19 @@ would, for a dispatcher with no daemon of its own.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import secrets
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -102,16 +105,15 @@ def installed_commit() -> str:
     """
     where = repo_root(Path(__file__).resolve().parent)
     if where is not None:
-        try:
-            def git(*words: str) -> str:
-                return subprocess.run(["git", "-C", str(where), *words], capture_output=True,
-                                      text=True, timeout=15, check=True).stdout.strip()
+        def git(*words: str) -> str:
+            return subprocess.run(["git", "-C", str(where), *words], capture_output=True,
+                                  text=True, timeout=15, check=True).stdout.strip()
 
+        # no git on the box: the version below still answers
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
             sha = git("rev-parse", "--short", "HEAD")
             if sha:
                 return f"{sha} (dirty)" if git("status", "--porcelain") else sha
-        except Exception:  # noqa: BLE001 - no git on the box: the version below still answers
-            pass
     try:
         from importlib.metadata import version
 
@@ -128,6 +130,10 @@ def same_commit(mine: str, theirs: str) -> bool:
 
 
 # -- a job ---------------------------------------------------------------------------
+SHIPPED = {"--graph": "graph.json", "--questions": "questions.jsonl"}
+"""The flags whose file a job carries, and the name the peer writes it under."""
+
+
 class Refused(RuntimeError):
     """A well-formed `Job` this peer will not run now. ``kind`` says which of the three
     reasons: ``commit`` (its code differs), ``lock`` (it is measuring) or ``room`` (a
@@ -142,15 +148,12 @@ class Refused(RuntimeError):
 class Job:
     """One ``ml-stack-bench`` invocation for one peer.
 
-    ``argv`` is the command line after ``ml-stack-bench``, with only the ``--serve`` flags
-    for the models this peer owns; ``models`` names them again so the peer can size them
-    without parsing the line, and ``needs`` is the dispatcher's estimate of each in bytes
-    (0 when unknown, which is not the same as enormous). ``commit`` is the dispatcher's
-    `installed_commit`, which the peer must match. ``kept_label`` names the sweep, so the
-    peer's job list says what is measuring.
-
-    The line may not carry ``--kept``: the peer keeps its runs in its own store and
-    `gather` brings them home. Nor ``--detach`` or ``--no-queue``: the peer adds both.
+    ``argv`` is the line after ``ml-stack-bench`` with this peer's ``--serve`` flags;
+    ``models`` names those models and ``needs`` estimates each in bytes (0 is unknown).
+    ``commit`` is the dispatcher's `installed_commit`, which the peer must match;
+    ``kept_label`` names the sweep in the peer's job list. ``files`` holds the text of each
+    `SHIPPED` flag's file; the peer writes it under its bench home and adds the flag.
+    ``argv`` may carry none of ``--kept``, ``--detach``, ``--no-queue`` or a `SHIPPED` flag.
     """
 
     argv: tuple[str, ...]
@@ -158,6 +161,7 @@ class Job:
     commit: str
     kept_label: str = ""
     needs: Mapping[str, int] = field(default_factory=dict)
+    files: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.argv:
@@ -166,6 +170,14 @@ class Job:
             if flag in self.argv:
                 raise ValueError(f"a bench job's argv may not carry {flag}: the peer keeps "
                                  f"its runs in its own store and detaches the run itself")
+        for flag in SHIPPED:
+            if any(word == flag or word.startswith(flag + "=") for word in self.argv):
+                raise ValueError(f"a bench job's argv may not carry {flag}: its file "
+                                 f"travels in the job's files")
+        unknown = sorted(set(self.files) - set(SHIPPED))
+        if unknown:
+            raise ValueError(f"a bench job ships files for {', '.join(SHIPPED)} only, "
+                             f"not {', '.join(unknown)}")
         if not self.commit:
             raise ValueError("a bench job needs the dispatcher's commit, so the peer can "
                              "refuse to measure with different code")
@@ -174,7 +186,8 @@ class Job:
         """The request body ``POST /bench`` takes."""
         return {"argv": list(self.argv), "models": list(self.models), "commit": self.commit,
                 "kept_label": self.kept_label,
-                "needs": {str(k): int(v) for k, v in self.needs.items()}}
+                "needs": {str(k): int(v) for k, v in self.needs.items()},
+                "files": dict(self.files)}
 
     @classmethod
     def from_request(cls, req: Mapping[str, Any]) -> Job:
@@ -194,10 +207,14 @@ class Job:
         needs = req.get("needs") or {}
         if not isinstance(needs, Mapping):
             raise ValueError("'needs' must map each model to its estimated bytes")
+        files = req.get("files") or {}
+        if not isinstance(files, Mapping) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in files.items()):
+            raise ValueError("'files' must map each shipped flag to its file's text")
         return cls(argv=tuple(argv_), models=tuple(models),
                    commit=str(req.get("commit") or ""),
                    kept_label=str(req.get("kept_label") or ""),
-                   needs={str(k): int(v) for k, v in needs.items()})
+                   needs={str(k): int(v) for k, v in needs.items()}, files=dict(files))
 
     @property
     def name(self) -> str:
@@ -205,28 +222,22 @@ class Job:
         return f"bench:{self.kept_label or ' '.join(self.models) or self.argv[0]}"
 
 
-def jobs_from(planned: Mapping[Any, Sequence[str]], base_argv: Sequence[str], *,
-              commit: str = "", needs: Mapping[str, int] | None = None,
-              drafts: Mapping[str, str] | None = None, kept_label: str = "",
-              ) -> dict[Any, Job]:
-    """One `Job` per peer in a `plan`: ``base_argv`` -- the sweep's line without any
-    ``--serve`` -- with ``--serve MODEL`` for each model the peer got, and ``--serve-draft``
-    beside it when ``drafts`` names one for that model. ``commit`` defaults to this
-    process's `installed_commit`."""
-    commit = commit or installed_commit()
-    needs = dict(needs or {})
+def jobs_from(planned: Mapping[Any, Sequence[str]], base: Job, *,
+              drafts: Mapping[str, str] | None = None) -> dict[Any, Job]:
+    """One `Job` per peer in a `plan`: ``base`` -- the sweep's line without any ``--serve``,
+    and the needs of every model -- with ``--serve MODEL`` for each model the peer got, and
+    ``--serve-draft`` beside it when ``drafts`` names one for that model."""
     out: dict[Any, Job] = {}
     for peer, models in planned.items():
         if not models:
             continue
-        line = list(base_argv)
+        line = list(base.argv)
         for model in models:
             line += ["--serve", model]
             if drafts and model in drafts:
                 line += ["--serve-draft", drafts[model]]
-        out[peer] = Job(argv=tuple(line), models=tuple(models), commit=commit,
-                        kept_label=kept_label,
-                        needs={m: int(needs.get(m, 0)) for m in models})
+        out[peer] = replace(base, argv=tuple(line), models=tuple(models),
+                            needs={m: int(base.needs.get(m, 0)) for m in models})
     return out
 
 
@@ -301,22 +312,24 @@ class BenchHost:
     stopped at ``/jobs/<id>/stop`` exactly as a training job is. ``home`` is where this
     machine's ``ml-stack-bench`` keeps its lock, store and logs -- always given, never
     defaulted, because the caller knows its root and this does not (`bench_home`);
-    ``commit`` is what this machine runs (`installed_commit` unless given); ``room`` and
+    ``commit`` is what this machine runs (`installed_commit`); ``room`` and
     ``launch`` are `hub.room` and `detach_bench` unless a test hands in fakes.
     """
 
+    poll_s = 1.0
+    """How often `_watch` asks whether the detached pid is still there, in seconds."""
+
     def __init__(self, runner: JobRunner, *, home: Path | str,
-                 commit: str | None = None, room: Callable[[], int] | None = None,
+                 room: Callable[[], int] | None = None,
                  launch: Callable[[Sequence[str], Path], tuple[int, Path]] = detach_bench,
-                 name: str = "", poll_s: float = 1.0) -> None:
+                 name: str = "") -> None:
         self.runner = runner
         self.home = Path(home).expanduser()
-        self.commit = installed_commit() if commit is None else commit
+        self.commit = installed_commit()
         self.room = machine_room if room is None else room
         self.launch = launch
         self.name = name or socket.gethostname()
         self.machine = machine_id()
-        self.poll_s = poll_s
         self._mine: dict[str, DaemonJob] = {}
         self._lock = threading.Lock()
 
@@ -375,14 +388,15 @@ class BenchHost:
                 if need > room:
                     raise Refused("room", f"{model} needs {human_bytes(need)} and {self.name} may "
                                           f"use {human_bytes(room)}")
+        job_id = f"{int(time.time())}-{secrets.token_hex(3)}"
+        line = [*job.argv, *self._placed(job_id, job.files)]
         try:
-            pid, log = self.launch(job.argv, self.home)
+            pid, log = self.launch(line, self.home)
         except Exception as exc:
+            shutil.rmtree(self._given(job_id), ignore_errors=True)
             raise Refused("launch", f"{self.name} could not start ml-stack-bench: {exc}") from exc
-        import secrets
-
-        mine = DaemonJob(id=f"{int(time.time())}-{secrets.token_hex(3)}", name=job.name,
-                         argv=["ml-stack-bench", *job.argv], cwd=str(self.home), pid=pid,
+        mine = DaemonJob(id=job_id, name=job.name,
+                         argv=["ml-stack-bench", *line], cwd=str(self.home), pid=pid,
                          submitted_at=time.time(), log=str(log))
         self.runner.adopt(mine)
         with self._lock:
@@ -391,11 +405,26 @@ class BenchHost:
                          name=f"bench-watch-{mine.id}").start()
         return mine
 
+    def _given(self, job_id: str) -> Path:
+        """Where the files job ``job_id`` shipped are written."""
+        return self.home / "given" / job_id
+
+    def _placed(self, job_id: str, files: Mapping[str, str]) -> list[str]:
+        """Each shipped file written under `_given`, as the flags that name it there."""
+        out: list[str] = []
+        for flag, text in files.items():
+            where = self._given(job_id) / SHIPPED[flag]
+            where.parent.mkdir(parents=True, exist_ok=True)
+            where.write_text(text, encoding="utf-8")
+            out += [flag, str(where)]
+        return out
+
     def _watch(self, job: DaemonJob) -> None:
-        """Wait for the detached pid to go, then settle the job from its log. A job
-        `stop` already marked ``stopped`` stays so."""
+        """Wait for the detached pid to go, then settle the job from its log and remove
+        what it shipped. A job `stop` already marked ``stopped`` stays so."""
         while _alive(int(job.pid or 0)):
             time.sleep(self.poll_s)
+        shutil.rmtree(self._given(job.id), ignore_errors=True)
         if job.state == "running":
             why = ended_badly(Path(job.log)) if job.log else "no log was written"
             job.state = "failed" if why else "done"
