@@ -12,6 +12,7 @@ import dataclasses
 import json
 import random
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -105,7 +106,7 @@ def test_a_message_without_asserts_is_refused_rather_than_guessed_at():
     graph, messages = talked()
     old = dict(messages[0], attrs={k: v for k, v in messages[0]["attrs"].items()
                                    if k != "asserts"})
-    with pytest.raises(ValueError, match="no attrs.asserts"):
+    with pytest.raises(ValueError, match=r"no attrs\.asserts"):
         bx.gold(graph, [old])
 
 
@@ -234,7 +235,7 @@ class Reader:
     through the real `Client.extract`, so the prompt, the schema and the JSON are exercised."""
 
     family = GENERIC
-    card: dict = {}
+    card: ClassVar[dict] = {}
 
     def __init__(self, base_url: str = "", timeout: float = 0.0, **sampling) -> None:
         self.base_url = base_url
@@ -286,8 +287,9 @@ def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
     picked = bx.sample_messages(messages, 5, seed=0)
     rows, scores = bx.measure(Reader(), picked, graph)
     kept = tmp_path / "runs.ladybug"
-    key = bx.save(kept, rows, label="reader", model="fake-reader", world={"kind": "company"},
-                  scores=scores, sample={"n": 5}, server={"resident_bytes": 3 * 2**30})
+    key = bx.save(kept, rows, label="reader", model="fake-reader",
+                  reading={"world": {"kind": "company"}, "scores": scores, "sample": {"n": 5},
+                           "server": {"resident_bytes": 3 * 2**30}})
     back = runs(kept)
     assert [r["key"] for r in back] == [key] and back[0]["kind"] == "extract"
     assert back[0]["scores"]["by_kind"] == scores["by_kind"]
@@ -313,7 +315,7 @@ def test_the_estimate_comes_from_earlier_runs_of_the_same_model_else_a_guess(tmp
         r.seconds = 2.0
     kept = tmp_path / "runs.ladybug"
     assert bx.estimate(kept, "fake-reader", 40) == (bx.GUESS_SECONDS, "a guess, no earlier run of this model")
-    bx.save(kept, rows, label="reader", model="fake-reader", world={}, scores=scores, sample={})
+    bx.save(kept, rows, label="reader", model="fake-reader", reading={"scores": scores})
     per, source = bx.estimate(kept, "fake-reader", 40)
     assert per == 2.0 and "4 earlier messages of fake-reader" in source
 
@@ -407,7 +409,7 @@ def test_show_prints_extraction_runs_under_the_answering_table_or_alone(tmp_path
     graph, messages = talked()
     rows, scores = bx.measure(Reader(), bx.sample_messages(messages, 3, seed=0), graph)
     kept = tmp_path / "runs.ladybug"
-    bx.save(kept, rows, label="reader", model="fake", world={}, scores=scores, sample={})
+    bx.save(kept, rows, label="reader", model="fake", reading={"scores": scores})
     assert bench._main(["show", "--kept", str(kept)]) == 0
     out = capsys.readouterr().out
     assert out.startswith("nothing kept yet")             # no answering run to show

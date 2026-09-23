@@ -65,10 +65,16 @@ def _messages(n: int, *, seconds: float = 2.5, tokens: int = 500,
             for i in range(n)]
 
 
-def _scored(*, node_f1: float, rel_cov: float, rel_prec: float, rel_f1: float,
-            top_prec: float, invented: float) -> dict:
+SCORED = {"node_f1": 0.84, "rel_cov": 0.70, "rel_prec": 0.83, "rel_f1": 0.76,
+          "top_prec": 0.86, "invented": 0.07}
+
+
+def _scored(**given: float) -> dict:
     """A score record of the shape `extract.score` writes, with the numbers this file
     asserts on named rather than measured -- the report composes, it does not score."""
+    n = {**SCORED, **given}
+    node_f1, rel_cov, rel_prec, rel_f1 = n["node_f1"], n["rel_cov"], n["rel_prec"], n["rel_f1"]
+    top_prec, invented = n["top_prec"], n["invented"]
     return {
         "by_kind": {
             "people": {"coverage": 0.90, "precision": 0.95, "f1": 0.92, "of": 20,
@@ -97,20 +103,22 @@ def _scored(*, node_f1: float, rel_cov: float, rel_prec: float, rel_f1: float,
     }
 
 
-def _extraction(store: str, label: str, *, model: str, messages: int, seconds: float = 2.5,
-                node_f1: float = 0.84, rel_cov: float = 0.70, rel_prec: float = 0.83,
-                rel_f1: float = 0.76, top_prec: float = 0.86, invented: float = 0.07,
-                resident: int = 6 * GIB) -> str:
+def _extraction(store: str, label: str, *, model: str, messages: int,
+                **given: float) -> str:
+    """An extraction run kept in ``store``; ``given`` names ``seconds``, ``resident`` and
+    any of `SCORED`."""
+    seconds, resident = given.pop("seconds", 2.5), given.pop("resident", 6 * GIB)
     return bx.save(store, _messages(messages, seconds=seconds), label=label, model=model,
-                   world={"kind": "foundry", "size": "small", "seed": 3},
-                   sample={"n": messages, "seed": 3},
-                   scores=_scored(node_f1=node_f1, rel_cov=rel_cov, rel_prec=rel_prec,
-                                  rel_f1=rel_f1, top_prec=top_prec, invented=invented),
-                   server={"model": model, "resident_bytes": resident})
+                   reading={"world": {"kind": "foundry", "size": "small", "seed": 3},
+                            "sample": {"n": messages, "seed": 3},
+                            "scores": _scored(**given),
+                            "server": {"model": model, "resident_bytes": resident}})
 
 
-def _answering(store: str, label: str, *, model: str = "kestrel.gguf", questions: int = 20,
-               hits: int = 15, seconds: float = 200.0) -> str:
+def _answering(store: str, label: str, *, model: str = "kestrel.gguf", hits: int = 15,
+               **run: float) -> str:
+    """An answering run kept in ``store``; ``run`` names ``questions`` and ``seconds``."""
+    questions, seconds = int(run.get("questions", 20)), float(run.get("seconds", 200.0))
     rows = [Row(label=label, question=f"who runs the kiln, question {n}?",
                 expected=["person:marisol-quen"],
                 shown=["person:marisol-quen"] if n < hits else [],

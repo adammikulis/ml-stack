@@ -207,6 +207,7 @@ known-first-party = ["ml_stack"]
     "S106",
     "S107",
     "S108",  # /tmp paths in fixtures
+    "S311",  # a seeded generator makes a fixture repeat
 ]
 "scripts/hooks/**" = [
     "BLE001",  # a guard that fails must let the command through, not block on its own error

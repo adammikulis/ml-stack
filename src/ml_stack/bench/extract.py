@@ -210,9 +210,11 @@ def measure(client: Any, messages: Sequence[Mapping[str, Any]], graph: Mapping[s
 # -- keeping and showing --------------------------------------------------------------------------
 
 def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: str,
-         world: Mapping[str, Any], scores: Mapping[str, Any], sample: Mapping[str, Any],
-         server: Mapping[str, Any] | None = None) -> str:
+         reading: Mapping[str, Any]) -> str:
     """Keep an extraction run beside the answering ones, and read it back before returning.
+
+    ``reading`` holds the record's ``world``, ``sample`` and ``scores``, and its ``server``
+    when one was measured.
 
     The same discipline as `bench.save`, for the same reason: the store once took twelve
     runs and gave back nothing, and the read-back is the only proof a run exists.
@@ -222,8 +224,11 @@ def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: st
     stem = f"bench:{label}:{time.strftime('%Y%m%dT%H%M%S')}"
     record = _plain({"at": time.strftime("%FT%T"), "label": label, "kind": KIND,
                      "workload": WORKLOAD, "model": model,
-                     "world": dict(world), "sample": dict(sample), "server": stamped(server),
-                     "scores": dict(scores), "rows": [asdict(r) for r in rows]})
+                     "world": dict(reading.get("world") or {}),
+                     "sample": dict(reading.get("sample") or {}),
+                     "server": stamped(reading.get("server")),
+                     "scores": dict(reading.get("scores") or {}),
+                     "rows": [asdict(r) for r in rows]})
     record = json.loads(json.dumps(record))
     with GraphStore(store) as writer:
         key, n = stem, 1
@@ -461,19 +466,46 @@ def twice(client: Any, picked: Sequence[Mapping[str, Any]], graph: Mapping[str, 
                                                                  if k != "folded"}}
 
 
-def run(args: Any) -> int:
-    """``ml-stack-bench extract``: sample, read, fold, score, keep, and print the table."""
-    if len(args.serve) > 1:
-        warn("error: --serve takes one model; a comparison is one run per model")
-        return 2
+@dataclass(frozen=True)
+class _Reading:
+    """One `run`: its arguments, the graph and messages it reads, and what its record says."""
+
+    args: Any
+    graph: Mapping[str, Any]
+    messages: Sequence[Mapping[str, Any]]
+    picked: Sequence[Mapping[str, Any]]
+    model: str
+    world: Mapping[str, Any]
+    sample: Mapping[str, Any]
+
+    def keep(self, client: Any, reading: Sequence[Mapping[str, Any]], *,
+             server: Mapping[str, Any], twice_over: bool) -> str:
+        """``reading`` through ``client``, folded, scored, kept and read back: the key."""
+        args = self.args
+        rows, scores = measure(client, reading, self.graph, per_message=args.per_message,
+                               log=print)
+        server = dict(server)
+        if twice_over:
+            scores["consistency"], server["twice"] = twice(client, reading, self.graph, scores,
+                                                         per_message=args.per_message)
+        key = save(args.kept, rows, label=args.label, model=self.model,
+                   reading={"world": self.world, "scores": scores, "server": server,
+                            "sample": {**self.sample, "n": len(reading)}})
+        say(f"kept as {key}")
+        table(read_back(args.kept, [key]))
+        return key
+
+
+def _reading(args: Any) -> _Reading | int:
+    """What `run` reads and how its record describes it, or the exit code refusing it."""
     graph, messages, note = load_world(args.world)
     if note:
         say(note)
     if not messages:
         warn(f"error: no messages in {args.world}")
         return 2
-    n = SMOKE_MESSAGES if args.smoke else args.sample
-    picked = sample_messages(messages, n, seed=args.seed)
+    picked = sample_messages(messages, SMOKE_MESSAGES if args.smoke else args.sample,
+                             seed=args.seed)
     arcs = sum(1 for m in picked if (m.get("attrs") or {}).get("arc"))
     loose = sum(1 for m in picked if not (m.get("attrs") or {}).get("asserts_exact", True))
     try:
@@ -489,94 +521,116 @@ def run(args: Any) -> int:
               "model_written": loose,
               "gold": {b: len(truth["nodes"][b]) for b in BUCKETS} | {
                   "others": len(truth["others"]), "relations": len(truth["relations"])}}
+    return _Reading(args=args, graph=graph, messages=messages, picked=picked,
+                    model=_model_of(args), world=world, sample=sample)
 
-    model = (str(hub.located(args.serve[0], loose=True) or args.serve[0])
-             .rsplit("/", 1)[-1].removesuffix(".gguf")
-             if args.serve else "")
-    if not args.serve:
-        model = str(footprint(args.base_url).get("model") or "").removesuffix(".gguf") or args.label
-    per, source = estimate(args.kept, model, len(picked))
-    say(f"{args.label}: {len(picked)} of {len(messages)} messages ({arcs} from arcs"
+
+def _model_of(args: Any) -> str:
+    """The model's name as a run records it: the file served, else what the server says."""
+    if args.serve:
+        return (str(hub.located(args.serve[0], loose=True) or args.serve[0])
+                .rsplit("/", 1)[-1].removesuffix(".gguf"))
+    return str(footprint(args.base_url).get("model") or "").removesuffix(".gguf") or args.label
+
+
+def _announce(read: _Reading) -> None:
+    """The line saying what is about to be read and about how long it will take."""
+    args, picked, sample = read.args, read.picked, read.sample
+    per, source = estimate(args.kept, read.model, len(picked))
+    loose = sample["model_written"]
+    say(f"{args.label}: {len(picked)} of {len(read.messages)} messages ({sample['arcs']} "
+        "from arcs"
         + (f", {loose} model-written, scored against a lower bound" if loose else "")
-        + f") over a {world['kind'] or 'small'} world; the gold holds "
+        + f") over a {read.world['kind'] or 'small'} world; the gold holds "
         + ", ".join(f"{v} {k}" for k, v in sample["gold"].items())
         + f"; about {per:.0f} s/msg ({source}), so about {len(picked) * per / 60:.0f} min")
 
+
+def _lease(args: Any, found: str) -> tuple[dict[str, Any], Any] | None:
+    """The lease and manager to serve ``found`` with, in the settings it scored best with
+    unless ``--no-profile``; None when ``--n-max`` asks for a draft nothing serves."""
+    lease: dict[str, Any] = {"port": args.serve_port, "context": args.context,
+                             "parallel": args.parallel, "timeout": 900.0,
+                             "cache_reuse": 256, "warmup": False}
+    manager = None
+    if getattr(args, "profile", True):
+        from ml_stack.serve.profile import profile_for
+
+        measured = profile_for(str(found), workload="ingest")
+        if measured is not None:
+            serving = measured.serving(port=args.serve_port, slots=args.parallel)
+            lease = {**lease, **{k: v for k, v in serving.lease().items()
+                                 if k not in ("port", "context", "parallel")}}
+            manager = serving.manager()
+            say(f"    serving in the settings it scored best with: {measured.said()}"
+                if hasattr(measured, "said") else "    serving in the settings it scored best with")
+    if getattr(args, "n_max", None) is not None:
+        if not lease.get("draft"):
+            warn("    --n-max: no draft head is being served, so there is no draft "
+                 "to lengthen")
+            return None
+        lease["spec_draft_max"] = int(args.n_max)
+        say(f"    draft length {args.n_max} over the profile's")
+    return lease, manager
+
+
+def _served(read: _Reading) -> int:
+    """`run` with ``--serve``: the model up, a smoke on the same load, then the sample."""
+    from ml_stack.client import Client, Request, Transport
+    from ml_stack.serve import serve
+
+    args = read.args
+    found = str(hub.located(args.serve[0], loose=True) or args.serve[0])
+    began = time.time()
+    leased = _lease(args, found)
+    if leased is None:
+        return 2
+    lease, manager = leased
+    with serve(found, manager=manager, **lease) as up:
+        say(f"    up in {time.time() - began:.0f}s")
+        client = Client(up.base_url, request=Request(**sampling_from(args)),
+                        transport=Transport(timeout=args.per_message))
+        server = {**footprint(up.base_url), "sampling": dict(client.sampling),
+                  "load_s": getattr(up, "load_s", None)}
+        if lease.get("spec_draft_max") is not None:
+            server["spec_draft_max"] = int(lease["spec_draft_max"])
+        if lease.get("spec_p_min") is not None:
+            server["spec_p_min"] = float(lease["spec_p_min"])
+        if wants_smoke(args):
+            few = sample_messages(read.messages, SMOKE_MESSAGES, seed=args.seed)
+            say(f"\n  smoke: {len(few)} message(s) through the whole path first")
+            key = read.keep(client, few, server=server, twice_over=False)
+            smoked(read_back(args.kept, [key]), f"{args.label} smoke")
+            say("  smoke: ok\n")
+        read.keep(client, read.picked, server=server, twice_over=args.twice)
+    return 0
+
+
+def _against(read: _Reading) -> int:
+    """`run` against the server at ``--base-url``: a smoke of the whole command, then the
+    sample."""
     from ml_stack.client import Client, Request, Transport
 
-    sampling = sampling_from(args)
-
-    def read_and_keep(client: Any, reading: Sequence[Mapping[str, Any]], *, server: Mapping[str, Any],
-                      twice_over: bool, n: int) -> str:
-        """``reading`` through ``client``, folded, scored, kept and read back: the key."""
-        rows, scores = measure(client, reading, graph, per_message=args.per_message, log=print)
-        server = dict(server)
-        if twice_over:
-            scores["consistency"], server["twice"] = twice(client, reading, graph, scores,
-                                                         per_message=args.per_message)
-        key = save(args.kept, rows, label=args.label, model=model, world=world, scores=scores,
-                   sample={**sample, "n": n}, server=server)
-        say(f"kept as {key}")
-        table(read_back(args.kept, [key]))
-        return key
-
-    if args.serve:
-        from ml_stack.serve import serve
-
-        found = str(hub.located(args.serve[0], loose=True) or args.serve[0])
-        began = time.time()
-        # the settings the model scored best with -- its build, head, cache type, thinking budget, raw
-        # flags -- unless told to serve it bare: an extraction measured on mainline without
-        # the head (2026-09-02) measured a different program from the one that answers
-        lease: dict[str, Any] = {"port": args.serve_port, "context": args.context,
-                                 "parallel": args.parallel, "timeout": 900.0,
-                                 "cache_reuse": 256, "warmup": False}
-        manager = None
-        if getattr(args, "profile", True):
-            from ml_stack.serve.profile import profile_for
-
-            measured = profile_for(str(found), workload="ingest")
-            if measured is not None:
-                serving = measured.serving(port=args.serve_port, slots=args.parallel)
-                lease = {**lease, **{k: v for k, v in serving.lease().items()
-                                     if k not in ("port", "context", "parallel")}}
-                manager = serving.manager()
-                say(f"    serving in the settings it scored best with: {measured.said()}"
-                    if hasattr(measured, "said") else "    serving in the settings it scored best with")
-        if getattr(args, "n_max", None) is not None:
-            if not lease.get("draft"):
-                warn("    --n-max: no draft head is being served, so there is no draft "
-                     "to lengthen")
-                return 2
-            lease["spec_draft_max"] = int(args.n_max)
-            say(f"    draft length {args.n_max} over the profile's")
-        with serve(found, manager=manager, **lease) as server:
-            say(f"    up in {time.time() - began:.0f}s")
-            client = Client(server.base_url, request=Request(**sampling),
-                            transport=Transport(timeout=args.per_message))
-            server = {**footprint(server.base_url), "sampling": dict(client.sampling),
-                    "load_s": getattr(server, "load_s", None)}
-            if lease.get("spec_draft_max") is not None:
-                server["spec_draft_max"] = int(lease["spec_draft_max"])
-            if lease.get("spec_p_min") is not None:
-                server["spec_p_min"] = float(lease["spec_p_min"])
-            if wants_smoke(args):
-                # first, on this load: a few messages through the whole path, kept and
-                # read back, before the sample that costs the GPU
-                few = sample_messages(messages, SMOKE_MESSAGES, seed=args.seed)
-                say(f"\n  smoke: {len(few)} message(s) through the whole path first")
-                key = read_and_keep(client, few, server=server, twice_over=False, n=len(few))
-                smoked(read_back(args.kept, [key]), f"{args.label} smoke")
-                say("  smoke: ok\n")
-            read_and_keep(client, picked, server=server, twice_over=args.twice, n=len(picked))
-    else:
-        if wants_smoke(args):
-            bench.smoke_first(args)
-        if not _idle(args.base_url, args):
-            return 3
-        client = Client(args.base_url, request=Request(**sampling),
-                        transport=Transport(timeout=args.per_message))
-        read_and_keep(client, picked, server={**footprint(args.base_url),
-                                            "sampling": dict(client.sampling)},
-                      twice_over=args.twice, n=len(picked))
+    args = read.args
+    if wants_smoke(args):
+        bench.smoke_first(args)
+    if not _idle(args.base_url, args):
+        return 3
+    client = Client(args.base_url, request=Request(**sampling_from(args)),
+                    transport=Transport(timeout=args.per_message))
+    read.keep(client, read.picked, server={**footprint(args.base_url),
+                                           "sampling": dict(client.sampling)},
+              twice_over=args.twice)
     return 0
+
+
+def run(args: Any) -> int:
+    """``ml-stack-bench extract``: sample, read, fold, score, keep, and print the table."""
+    if len(args.serve) > 1:
+        warn("error: --serve takes one model; a comparison is one run per model")
+        return 2
+    read = _reading(args)
+    if isinstance(read, int):
+        return read
+    _announce(read)
+    return _served(read) if args.serve else _against(read)
