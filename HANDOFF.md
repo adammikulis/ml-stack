@@ -93,18 +93,11 @@ capability; every line is something that already exists not being what it says.
   source, not the text a person feeds it. Prompts, answers and stored turns pass through
   unfiltered. A redaction pass in `ingest/fold.py` before the write and in
   `graph/serve.py`'s remember path, on by default, off by a flag.
-- [ ] **Every question and answer is written into whatever store is being served.**
-  `AskRoutes.answered` calls `remember()`, which opens the same `GraphStore` the corpus is
-  in and writes the raw question and the raw answer as nodes; `--store` is documented as
-  "a GraphStore path conversations are kept in", so pointing it at a corpus is the
-  documented use. The demo app did exactly that, which is why restarting its server did not
-  clear a conversation. Conversations belong in a store of their own, with a flag for
-  anyone who wants them in the corpus.
-- [ ] **`<store>.<slug>.reads.json` keeps every extraction in plaintext beside the store,
-  for good.** The record carries `extracted` -- every concept with its source-worded
-  definition -- and `raw`, the model's whole reply when it failed. `_keep_reads` only ever
-  merges more in; nothing rotates, expires or deletes. `ml-stack-ingest forget`, and the
-  licence and redaction gates above run before the write, not only before the store.
+- [ ] **The licence and redaction gates have to run before `_keep_reads`, not only before
+  the store.** `<store>.<slug>.reads.json` is written as each unit comes back, with
+  `extracted` (every concept with its source-worded definition) and `raw` (the model's whole
+  reply when it failed) in plaintext. A refusal in `fold` or `judge` alone leaves both on
+  disk until someone runs `ml-stack-ingest forget`.
 
 ### The vocabulary
 
