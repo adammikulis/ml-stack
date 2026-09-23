@@ -32,11 +32,18 @@ from ml_stack.serve.process import (  # noqa: F401 - the package's own re-export
 from ml_stack.serve.serving import DEFAULT_CACHE
 
 __all__ = ["MEASURING", "_last_line", "_locked_by", "_named_in", "asking_said", "detach",
-           "ended", "measuring", "measuring_file", "measuring_lock_file", "remember"]
+           "ended", "measuring", "measuring_file", "measuring_lock_file", "remember",
+           "wants_smoke"]
 
 
 # Which subcommands put load on the GPU, and so must never overlap with each other.
 MEASURING = ("run", "sweep", "drafts", "concurrent", "extract", "speed")
+
+
+def wants_smoke(args: Any) -> bool:
+    """Whether a run smokes first: a measuring command, not ``--smoke``, not ``--no-smoke``."""
+    return (getattr(args, "cmd", "") in MEASURING and not getattr(args, "smoke", False)
+            and not getattr(args, "no_smoke", False))
 
 
 def asking_said(argv: Sequence[str]) -> dict[str, Any]:

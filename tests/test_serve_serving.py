@@ -232,7 +232,7 @@ def _bench_lease(config, monkeypatch, leased):
     monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
     monkeypatch.setattr(bench, "asking", lambda graph, **k: leased.setdefault("asked", k))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
-    bench.served(config, [{"q": "who?", "expect": []}], {"nodes": [], "edges": []}, kept="")
+    bench.served(config, [{"q": "who?", "expect": []}], {"nodes": [], "edges": []})
 
 
 def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused():

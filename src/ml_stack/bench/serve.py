@@ -2,8 +2,7 @@
 
 `served` preflights the load, smokes every way first on the same server, asks the
 questions, keeps each run and reads it back; `drafts` does that once per draft head and
-says which head to serve. Before any of it, `hub.located` turns a name into a path
-and `prefetch` brings every `hf:` reference down outside the timed window.
+says which head to serve. `prefetch` brings every `hf:` reference down before any of it.
 """
 
 from __future__ import annotations
@@ -11,29 +10,76 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-# The package is the namespace the tests and `selfcheck` patch -- `bench.measure`,
-# `bench.footprint`, `bench.served` -- so anything patchable is looked up there at call
-# time, never bound here at import.
-from ml_stack import bench
+# `ml_stack.serve.serve`, `hub.fetch`, `hub.room`, `binary.find_binary` and
+# `checks.Preflight` are patched by the tests and `selfcheck`, so each is read off its module.
+import ml_stack.serve
+from ml_stack import bench, hub
 from ml_stack.bench.backends import DRAFT_OBEYED, draft_depth_support
 from ml_stack.bench.keep import read_back, save
 from ml_stack.bench.measure import found as finder_of
 from ml_stack.bench.score import Row, _which
 from ml_stack.bench.show import drafted
 from ml_stack.log import say, warn
+from ml_stack.serve import binary as binaries
 from ml_stack.serve import mlx_tree
+from ml_stack.serve import preflight as checks
+from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+from ml_stack.serve.binary import BinaryNotFound
+from ml_stack.serve.manager import ServerManager
+from ml_stack.serve.ops import alongside
 from ml_stack.serve.profile import ASK
+from ml_stack.serve.serving import DEFAULT_CACHE
+from ml_stack.serve.weights import weight_of
+
+
+@dataclass(frozen=True, slots=True)
+class Loading:
+    """What every load of a measuring command shares: the build, the timeout, where runs
+    are kept, the smoke asked first, and the store `look_up` reads."""
+
+    binary: str = ""
+    serve_timeout: float = 900.0
+    kept: str | Path = ""
+    host: str = ""
+    smoke: Sequence[Mapping[str, Any]] = ()
+    store: str | Path | None = None
+    embed_url: str = ""
+    embed_model: str = ""
+    trace: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Ways:
+    """The ways one load is asked: the label, each asking laid over the config with
+    `Config.over`, the default shortlist, and ``already(label)`` for a way kept before."""
+
+    label: str = ""
+    askings: Sequence[Mapping[str, Any]] = ()
+    shortlist: int = 0
+    already: Callable[[str], Mapping[str, Any] | None] | None = None
+    needs_draft_depth: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Heads:
+    """The draft heads `drafts` serves in turn ("" for none, `EMBEDDED` for the one in the
+    weights), the depths each drafts to, and whether the depths share a load (None: find out)."""
+
+    heads: Sequence[str] = ("",)
+    n_max: Sequence[int | None] = (None,)
+    per_request: bool | None = None
+
+
+BARE = Loading()
+ONE_WAY = Ways()
 
 
 def references_in(args: Any) -> list[str]:
-    """Every ``hf:`` reference a measuring command would otherwise download inside the
-    timed window: the models ``--serve`` names, the heads ``--serve-draft`` and ``--draft``
-    name, and the model `drafts` is given. Models first, then heads, each once: the
-    weights are what a preflight sizes."""
+    """Every ``hf:`` reference a measuring command names, models before heads, each once."""
     out: list[str] = []
     named = [getattr(args, "model", ""), *(getattr(args, "serve", None) or []),
              *(getattr(args, "serve_draft", None) or []), *(getattr(args, "draft", None) or [])]
@@ -44,22 +90,12 @@ def references_in(args: Any) -> list[str]:
 
 
 def prefetch(references: Sequence[str], log: Callable[[str], None] = say) -> list[tuple[str, int]]:
-    """Download every reference into the Hub cache before the lock is taken, one line each.
-
-    A download inside the timed window is a timing of the network: the first model of a
-    sweep once showed a load three times the second's, and the difference was the fetch.
-    `hub.fetch` brings down every shard of a build, so a preflight afterwards finds the
-    weights complete. A reference that cannot be fetched is said and left -- the preflight
-    on that model is what refuses it, with the shard named.
-    """
-    from ml_stack import hub
-    from ml_stack.serve.weights import weight_of
-
+    """Download every reference into the Hub cache: ``(reference, bytes)`` for each fetched."""
     out: list[tuple[str, int]] = []
     for ref in references:
         try:
             where = hub.fetch(ref)
-        except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
+        except (OSError, ValueError) as exc:
             warn(f"could not fetch {ref}: {exc}")
             continue
         size = weight_of(where)
@@ -69,14 +105,11 @@ def prefetch(references: Sequence[str], log: Callable[[str], None] = say) -> lis
 
 
 class SmokeFailed(RuntimeError):
-    """The two-question pass a real run makes first did not get through, so the run did
-    not start: nothing kept, nothing read back, or every question failed."""
+    """The smoke kept nothing, kept no rows, or every question in it failed."""
 
 
 def smoked(kept: Sequence[Mapping[str, Any]], what: str) -> None:
-    """Refuse a smoke that proved nothing: no run kept, a run with no rows, or every row
-    an error or a timeout. A model that fails two questions fails twenty, and the point of
-    asking two first is that finding out costs a minute."""
+    """Raise `SmokeFailed` for no run kept, a run with no rows, or every row failed."""
     if not kept:
         raise SmokeFailed(f"{what}: no run was kept")
     rows = [r for one in kept for r in (one.get("rows") or ())]
@@ -86,18 +119,12 @@ def smoked(kept: Sequence[Mapping[str, Any]], what: str) -> None:
         raise SmokeFailed(f"{what}: every question failed -- {rows[0].get('error') or 'timed out'}")
 
 
-# A head that lives inside the weights: `--draft embedded` serves the model with
-# --spec-type draft-mtp and no -md. Qwen3.8-27B ships its nextn layers in the main GGUF.
+# A head inside the weights: served with --spec-type draft-mtp and no -md.
 EMBEDDED = "embedded"
 
 
 def drafted_by(config: Any, head: str) -> Any:
-    """``config`` serving ``head``: a path or ``hf:`` reference, "" for no head at all, or
-    `EMBEDDED` for the head inside the weights -- the speculative type, no ``-md``.
-
-    The method is left to `Serving.lease`, which reads it off the head's own name, so an
-    EAGLE3 head is never served as draft-simple.
-    """
+    """``config`` serving ``head``: a path or ``hf:`` reference, "" for none, or `EMBEDDED`."""
     if head == EMBEDDED:
         return config.over(draft="", spec_type="draft-mtp")
     return config.over(draft=str(head or ""), spec_type="")
@@ -113,340 +140,260 @@ def refused(label: str, why: Exception) -> str:
             + "\n".join(f"      {line}" for line in str(why).splitlines()))
 
 
-@contextlib.contextmanager
-def up(config: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900.0) -> Any:
-    """One model put up in ``config``'s serving for the block: the load preflighted -- shards
-    present, architecture read by this build, weights plus an estimated KV cache under
-    what this machine may use, every flag one the build accepts -- then served, and taken
-    down on the way out. Yields ``(server, held)``: the lease's `ServerInfo` and the record
-    every run kept on this load carries -- the preflight, ``load_s``, ``warmup_s``, the
-    ``binary``, the head, the cache type and the thinking budget.
+def _with_projector(config: Any) -> Any:
+    """``config`` with an ``mmproj`` of "auto" resolved to the projector beside the model."""
+    if str(config.serving.mmproj or "").lower() != "auto":
+        return config
+    found = alongside(str(config.model), "auto", "mmproj-", best=True)
+    if not found:
+        say("no vision projector is shipped beside that model; serving without one")
+    return config.over(mmproj=str(found or ""))
 
-    Raises `NotLoaded` with the report when the preflight refuses; a caller prints it and
-    moves on to its next model. What the machine had wired before the load is on ``held``
-    as ``baseline`` for `measure` to hand `Watching`.
-    """
-    from ml_stack import hub
-    from ml_stack.serve import preflight as checks
-    from ml_stack.serve import serve
-    from ml_stack.serve.backend import ServerSpec
-    from ml_stack.serve.binary import find_binary
 
-    model = config.model
-    if str(config.serving.mmproj or "").lower() == "auto":
-        # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
-        # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
-        # file to load -- it picked the MTP head and died (2026-09-02)
-        from ml_stack.serve.ops import alongside
-
-        found = alongside(str(model), "auto", "mmproj-", best=True)
-        if not found:
-            say("no vision projector is shipped beside that model; serving without one")
-        config = config.over(mmproj=str(found or ""))
-    # Every question sends the same system prompt and the same tool schemas ahead of itself.
-    # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
-    # free accuracy-wise: the tokens are identical, so the cache is valid.
-    extra: dict[str, Any] = {**config.lease(), "cache_reuse": 256, "warmup": False}
-
-    # Asked of the spec `serve` is about to build, with the binary it will start -- or, with
-    # none named, the one `find_binary` would; a name no build answers to gives the flag and
-    # architecture checks no opinion rather than a wrong one. `room()` is what this machine
-    # may wire for a model, not what happens to be free.
-    spec = ServerSpec(model=model, **extra)
-    manager, build = None, str(binary or "")
+def _manager(config: Any, binary: str) -> tuple[Any, str]:
+    """The manager for ``binary`` or the profile's named build (None for the default), and
+    the build it runs."""
     if binary:
-        from ml_stack.serve.backend import LlamaServerBackend
-        from ml_stack.serve.manager import ServerManager
-
-        manager = ServerManager(LlamaServerBackend(binary=binary))
-    elif config.serving.build:
-        # a named build, because an architecture or a head newer than any release loads
-        # only on the build that has it; not found here, the default build serves and says so
+        return ServerManager(LlamaServerBackend(binary=binary)), binary
+    if config.serving.build:
         try:
             manager = config.serving.manager()
-            build = str(manager.backend.binary)
-        except Exception as exc:  # noqa: BLE001 - said, then the default build serves
-            manager = None
+            return manager, str(manager.backend.binary)
+        except BinaryNotFound as exc:
             say(f"    the profile names build {config.serving.build!r}, not found here: {exc}")
-    build = build or str(find_binary() or "llama-server")
-    report = (mlx_tree.report_for(spec, limit_bytes=hub.room()) if mlx_tree.is_mlx(model)
+    return None, str(binaries.find_binary() or "llama-server")
+
+
+def _preflighted(spec: Any, build: str) -> Any:
+    """The preflight report for ``spec`` on ``build``; raises `NotLoaded` when it refuses."""
+    report = (mlx_tree.report_for(spec, limit_bytes=hub.room()) if mlx_tree.is_mlx(spec.model)
               else checks.Preflight(spec, binary=build, limit_bytes=hub.room()))
     if not report.ok:
         raise NotLoaded(report.said())
-    checked = {"kv_estimate_bytes": int(report.kv_estimate_bytes),
-               "weights_bytes": int(report.weights_bytes), "ok": bool(report.ok)}
+    return report
+
+
+def _said_up(server: Any, loaded: float, report: Any) -> None:
+    load_s = getattr(server, "load_s", None)
+    warmup_s = getattr(server, "warmup_s", None)
+    timed = ""
+    if load_s is not None:
+        warm = f", warm-up {float(warmup_s):.1f}s" if warmup_s is not None else ""
+        timed = f" (load {float(load_s):.1f}s{warm})"
+    say(f"    up in {loaded:.0f}s{timed}")
+    say("\n".join(f"      {line}" for line in report.said().splitlines()))
+
+
+def _held(config: Any, server: Any, report: Any, build: str) -> dict[str, Any]:
+    """The record every run on this load carries: preflight, timings, build, head, cache."""
+    serving = config.serving
+    record: dict[str, Any] = {
+        "preflight": {"kv_estimate_bytes": int(report.kv_estimate_bytes),
+                      "weights_bytes": int(report.weights_bytes), "ok": bool(report.ok)},
+        "load_s": getattr(server, "load_s", None), "warmup_s": getattr(server, "warmup_s", None),
+        "binary": build, "build": str(serving.build or "")}
+    if serving.draft or serving.spec_type:
+        record["draft_model"] = str(serving.draft).rsplit("/", 1)[-1] if serving.draft else EMBEDDED
+        if serving.draft_n_max is not None:
+            record["spec_draft_max"] = int(serving.draft_n_max)
+    if serving.cache_type:
+        record["cache_type"] = serving.cache_type
+    if serving.reasoning_budget is not None:
+        record["reasoning_budget"] = int(serving.reasoning_budget)
+    return record
+
+
+@contextlib.contextmanager
+def up(config: Any, *, binary: str = "", serve_timeout: float = 900.0) -> Any:
+    """Preflight, serve and take down ``config``'s model; yields ``(server, held)``, the
+    lease's `ServerInfo` and the record its runs carry (with ``baseline`` and ``loaded``)."""
+    config = _with_projector(config)
+    # the system prompt and tool schemas prefix every question, so KV shifting reuses them
+    extra: dict[str, Any] = {**config.lease(), "cache_reuse": 256, "warmup": False}
+    manager, build = _manager(config, binary)
+    report = _preflighted(ServerSpec(model=config.model, **extra), build)
     if manager is not None:
         extra["manager"] = manager
     began = time.time()
-    # What the machine had wired before this model came up, so the server's own wired cost
-    # is a subtraction rather than a guess. Read here because here is the last moment it
-    # can be: `measure` carries it to `Watching`, which cannot go back before the load.
     before_load = bench.machine_memory()
-    with serve(model, timeout=serve_timeout, **extra) as server:
-        # `load_s` is the lease's own clock, process start to health; the stopwatch
-        # here also holds an adopted server's nothing and a warm-up's something.
+    with ml_stack.serve.serve(config.model, timeout=serve_timeout, **extra) as server:
         loaded = time.time() - began
-        load_s = getattr(server, "load_s", None)
-        warmup_s = getattr(server, "warmup_s", None)
-        say(f"    up in {loaded:.0f}s"
-            + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
-                                                   if warmup_s is not None else "") + ")"
-                 if load_s is not None else ""))
-        say("\n".join(f"      {line}" for line in report.said().splitlines()))
-        # `binary` is the llama-server this ran on, so a run on a fork is told from one on
-        # mainline when the ranking takes its cost; `build` is its name, for `served_by`
-        record: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
-                                "warmup_s": warmup_s, "binary": build,
-                                "build": str(config.serving.build or ""),
-                                "baseline": before_load, "loaded": loaded}
-        if config.serving.draft or config.serving.spec_type:
-            record["draft_model"] = (str(config.serving.draft).rsplit("/", 1)[-1] if config.serving.draft
-                                   else EMBEDDED)
-            if config.serving.draft_n_max is not None:
-                record["spec_draft_max"] = int(config.serving.draft_n_max)
-        if config.serving.cache_type:
-            record["cache_type"] = config.serving.cache_type
-        if config.serving.reasoning_budget is not None:
-            record["reasoning_budget"] = int(config.serving.reasoning_budget)
-        yield server, record
+        _said_up(server, loaded, report)
+        yield server, {**_held(config, server, report, build),
+                       "baseline": before_load, "loaded": loaded}
 
 
 class DraftDepthIgnored(RuntimeError):
     """A server that drops ``speculative.n_max`` instead of drafting to it."""
 
 
-def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
-           label: str = "", binary: str = "", kept: str | Path = "", shortlist: int = 0,
-           store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
-           askings: Sequence[Mapping[str, Any]] = (),
-           serve_timeout: float = 900.0,
-           already: Callable[[str], Mapping[str, Any] | None] | None = None,
-           trace: bool | None = None,
-           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
-           needs_draft_depth: bool = False) -> list[Row]:
-    """Put one model up, ask it the questions, take it down again.
+@dataclass(frozen=True, slots=True)
+class _Load:
+    """One served model and everything each way asked of it needs."""
 
-    ``config`` is everything -- a :class:`~ml_stack.serve.Config`: the serving the
-    server is leased in, the asking it is asked with, and the client. It used to
-    be twenty keyword arguments unpacked here into three destinations, and `tight` went to
-    the client once and took an 87G load down with it.
+    config: Any
+    graph: Mapping[str, Any]
+    loading: Loading
+    ways: Ways
+    server: Any
+    held: Mapping[str, Any]
+    baseline: Any
+    loaded: float
+    named: Callable[[Mapping[str, Any]], str]
 
-    ``host`` is what the kept runs say measured them, when this machine's name is not the
-    answer -- a peer running a fleet's job records the name the plan gave it. Empty, the
-    hostname is written.
 
-    ``smoke`` is the questions to ask first, of every asking, on the same load -- two of them
-    -- kept, read back, and refused with `SmokeFailed` when every one of them failed. A
-    real run does this before its questions unless told not to, and it is done here
-    rather than around the call so that the load is paid once: the smoke is the first
-    thing the served model is asked, and its own questions follow on the same server.
-
-    The piece that was missing. `sweep` measures servers somebody else started, so anything
-    comparing several models meant hand-rolling starts, stops and waits -- which is a shell
-    loop that dies with the terminal, and which was written twice before becoming this.
-
-    One model at a time is not a limitation, it is the point: two servers sharing a GPU
-    produce timings that belong to neither.
-
-    ``askings`` asks the *same* server several times, which is most of the saving available
-    here. Whether the tools are described briefly, what sampling is used, and whether a
-    shortlist is handed over first are questions about the asking and not about the
-    serving -- so measuring four of them costs one load and not four. Only a change the
-    server itself must be told about, a draft head or a context, needs putting it up
-    again. Each asking is ``{"label": ..., "shortlist": ...}`` plus any field of the config --
-    an asking flag, a sampler setting, a ceiling -- laid over it by `Config.over`, which is
-    what routes each name to the section that owns it.
-
-    ``already(label)`` is the run a way is already kept as, when it is -- `sweep --resume`
-    passes it -- and a way that has one is skipped before the model is loaded, so a sweep
-    killed on its third model costs the third model to re-run and not the first two.
-
-    The label carries what the table has to show: ``-kv-TYPE`` for a cache stored as
-    anything but the default q8_0, and ``-rbN`` for a thinking budget, because each is
-    another configuration. Each question is
-    capped at the config's own ``talking.timeout`` -- see `_ask_once`.
-
-    **The load is preflighted first** -- shards present, architecture read by this build,
-    weights plus an estimated KV cache under what this machine may use, every flag one the
-    build accepts -- and the report is printed under the `up in` line, the KV estimate
-    beside what `kv+run` then measures. A refused preflight is printed and the model is
-    skipped, nothing loaded: a sweep of five must not end on the one that does not fit.
-    Raises `NotLoaded` when either preflight refuses; the caller says `refused` and goes on.
-    """
-    from ml_stack.serve import preflight as checks
-
-    model = config.model
-    per_question = float(config.talking.timeout)
-    name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
-    from ml_stack.serve.serving import DEFAULT_CACHE
-
+def _suffix(config: Any) -> str:
+    """``-kv-TYPE`` for a cache other than the default, ``-rbN`` for a thinking budget."""
     kv = config.serving.cache_type
-    suffix = ((f"-kv-{kv}" if kv and kv != DEFAULT_CACHE else "")
-              + (f"-rb{config.serving.reasoning_budget}"
-                 if config.serving.reasoning_budget is not None else ""))
+    budget = config.serving.reasoning_budget
+    return ((f"-kv-{kv}" if kv and kv != DEFAULT_CACHE else "")
+            + (f"-rb{budget}" if budget is not None else ""))
 
+
+def _labeller(name: str, suffix: str) -> Callable[[Mapping[str, Any]], str]:
+    """A way's label: the name, its tag (joined directly when it begins with @), the suffix."""
     def labelled(way: Mapping[str, Any]) -> str:
         tag = str(way.get("label", "") or "")
         if not tag:
             return name + suffix
-        # a tag beginning with @ joins the name directly, everything else with a dash
         return f"{name}{'' if tag.startswith('@') else '-'}{tag}" + suffix
+    return labelled
 
-    every = list(askings) or [{}]
-    if already is not None:
-        todo = []
-        for way in every:
-            kept_as = already(labelled(way))
-            if kept_as:
-                say(f"skipping {labelled(way)}: kept at {kept_as.get('at', '?')}")
-            else:
-                todo.append(way)
-        if not todo:
-            return []
-        every = todo
 
+def _not_yet_kept(ways: Ways, labelled: Callable[[Mapping[str, Any]], str]
+                  ) -> list[Mapping[str, Any]]:
+    """The askings with no run kept yet under their label."""
+    every = list(ways.askings) or [{}]
+    if ways.already is None:
+        return every
+    todo = []
+    for way in every:
+        kept_as = ways.already(labelled(way))
+        if kept_as:
+            say(f"skipping {labelled(way)}: kept at {kept_as.get('at', '?')}")
+        else:
+            todo.append(way)
+    return todo
+
+
+def _ask_way(load: _Load, way: Mapping[str, Any],
+             questions: Sequence[Mapping[str, Any]]) -> tuple[list[Row], str]:
+    """``questions`` asked one way on ``load``: the rows, and the key they were kept under."""
+    asked = dict(way)
+    here = load.named(asked)
+    asked.pop("label", None)
+    first = int(asked.pop("shortlist", load.ways.shortlist) or 0)
+    wants_card = bool(asked.pop("_card", False))
+    this = load.config.over(**asked)
+    client = this.client(load.server.base_url)
+    if wants_card:
+        this = this.over(**client.card)
+        client = this.client(load.server.base_url)
+    loading = load.loading
+    ask = bench.asking(load.graph, how=this.asking, shortlist=first, store=loading.store,
+                       embed_url=loading.embed_url, embed_model=loading.embed_model)
+    got = bench.measure(ask, questions, label=here, client=client, trace=loading.trace,
+                        log=print, baseline=load.baseline, graph=load.graph,
+                        per_question=float(load.config.talking.timeout))
+    for row in got:
+        row.steps = f"{row.steps}; server up in {load.loaded:.0f}s".strip("; ")
+    record = {**bench.footprint(load.server.base_url), "graph": _which(load.graph),
+              "finder": getattr(ask, "finder", ""), **load.held}
+    if loading.host:
+        record["host"] = loading.host
+    if client.request.spec_draft_max is not None:
+        record["spec_draft_max_asked"] = int(client.request.spec_draft_max)
+    key = ""
+    if loading.kept:
+        key = save(loading.kept, got, server={**record, "sampling": dict(client.sampling)},
+                   asking=getattr(ask, "asking", None), workload=ASK)
+    return got, key
+
+
+def _ask_every(load: _Load, every: Sequence[Mapping[str, Any]],
+               questions: Sequence[Mapping[str, Any]], *, smoking: bool
+               ) -> tuple[list[Row], list[str]]:
+    """Every way asked ``questions``: the rows, and the keys of the runs kept."""
     rows: list[Row] = []
+    keys: list[str] = []
+    for way in every:
+        if len(every) > 1 or smoking:
+            say(f"\n  --- {load.named(way)}" + (" (smoke)" if smoking else ""))
+        got, key = _ask_way(load, way, questions)
+        rows += got
+        if key:
+            keys.append(key)
+    return rows, keys
+
+
+def _checked_depth(config: Any, server: Any) -> None:
+    """Raise `DraftDepthIgnored` unless the server drafts to a per-request depth."""
+    reading = draft_depth_support(config.client(server.base_url))
+    say(f"      per-request draft depth: {reading}")
+    if reading != DRAFT_OBEYED:
+        raise DraftDepthIgnored(reading)
+
+
+def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any],
+           loading: Loading = BARE, ways: Ways = ONE_WAY) -> list[Row]:
+    """Put ``config``'s model up, smoke then ask every way, take it down: the rows.
+
+    Raises `NotLoaded` when a preflight refuses, `SmokeFailed` when the smoke proves nothing."""
+    name = ways.label or str(config.model).rsplit("/", 1)[-1].removesuffix(".gguf")
+    suffix = _suffix(config)
+    named = _labeller(name, suffix)
+    every = _not_yet_kept(ways, named)
+    if not every:
+        return []
     try:
-        with up(config, binary=binary, name=f"{name}{suffix}",
-                serve_timeout=serve_timeout) as (server, held_up):
-            finder, why = finder_of(store, embed_url, embed_model)
+        with up(config, binary=loading.binary,
+                serve_timeout=loading.serve_timeout) as (server, held):
+            finder, why = finder_of(loading.store, loading.embed_url, loading.embed_model)
             say(f"      look_up by {finder}" + (f" ({why})" if why else ""))
-            loaded = float(held_up.pop("loaded", 0.0))
-            before_load = held_up.pop("baseline", None)
-
-            if needs_draft_depth:
-                reading = draft_depth_support(config.client(server.base_url))
-                say(f"      per-request draft depth: {reading}")
-                if reading != DRAFT_OBEYED:
-                    raise DraftDepthIgnored(reading)
-
-            def ask_every(asking_these: Sequence[Mapping[str, Any]],
-                          *, smoking: bool) -> tuple[list[Row], list[str]]:
-                """Every way, asked ``asking_these``, each kept: the rows and the keys."""
-                got_all: list[Row] = []
-                keys: list[str] = []
-                for way in every:
-                    asked = dict(way)
-                    here = labelled(asked)
-                    asked.pop("label", None)
-                    first = int(asked.pop("shortlist", shortlist) or 0)
-                    if len(every) > 1 or smoking:
-                        say(f"\n  --- {here}" + (" (smoke)" if smoking else ""))
-                    wants_card = bool(asked.pop("_card", False))
-                    # The asking, laid over the config: `Config.over` puts each name where it
-                    # belongs -- an asking to `asking`, a sampler or a ceiling to
-                    # `talking` -- so nothing about the asking can reach the client. It
-                    # did once: `tight` went to `Client.__init__` and took an 87G load
-                    # down with it (measured 2026-09-02).
-                    this = config.over(**asked)
-                    # the cap is the client's timeout too, so a call past it is cut off
-                    # there and the connection closed, rather than waited on
-                    client = this.client(server.base_url)
-                    if wants_card:
-                        # what the model itself recommends, read from the GGUF it is serving
-                        this = this.over(**client.card)
-                        client = this.client(server.base_url)
-                    ask = bench.asking(graph, how=this.asking, shortlist=first, store=store,
-                                       embed_url=embed_url, embed_model=embed_model)
-                    got = bench.measure(ask, asking_these, label=here, client=client,
-                                        trace=trace,
-                                        log=print, baseline=before_load,
-                                  graph=graph, per_question=per_question)
-                    for row in got:
-                        row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-                    record = {**bench.footprint(server.base_url), "graph": _which(graph),
-                            "finder": getattr(ask, "finder", ""), **held_up}
-                    if host:
-                        record["host"] = host
-                    asked_depth = client.request.spec_draft_max
-                    if asked_depth is not None:
-                        record["spec_draft_max_asked"] = int(asked_depth)
-                    if kept:
-                        keys.append(save(kept, got,
-                                         server={**record, "sampling": dict(client.sampling)},
-                                         # the way, beside what was serving: see `save`
-                                         asking=getattr(ask, "asking", None),
-                                         workload=ASK))
-                    got_all += got
-                return got_all, keys
-
-            if smoke:
-                # first, on this load: every way through the whole path on two questions,
-                # kept and read back, before the questions that cost the GPU
-                say(f"\n  smoke: {len(smoke)} question(s) through every way first")
-                proved, keys = ask_every(smoke, smoking=True)
-                smoked(read_back(kept, keys) if kept
+            loaded = float(held.pop("loaded", 0.0))
+            baseline = held.pop("baseline", None)
+            if ways.needs_draft_depth:
+                _checked_depth(config, server)
+            load = _Load(config=config, graph=graph, loading=loading, ways=ways, server=server,
+                         held=held, baseline=baseline, loaded=loaded, named=named)
+            if loading.smoke:
+                say(f"\n  smoke: {len(loading.smoke)} question(s) through every way first")
+                proved, keys = _ask_every(load, every, loading.smoke, smoking=True)
+                smoked(read_back(loading.kept, keys) if loading.kept
                        else [{"rows": [asdict(r) for r in proved]}], f"{name}{suffix} smoke")
                 say("  smoke: ok")
-            rows += ask_every(questions, smoking=False)[0]
+            return _ask_every(load, every, questions, smoking=False)[0]
     except checks.PreflightFailed as why:
-        # the backend's own preflight, which can refuse what this one passed -- a draft
-        # head resolved to a file this could not size, say
         raise NotLoaded(str(why)) from why
-    return rows
 
 
-def drafts(config: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
-           graph: Mapping[str, Any], *, binary: str = "", kept: str | Path = "",
-           store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
-           serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
-           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
-           per_request: bool | None = None) -> list[Row]:
-    """Serve one model with each draft head in turn and measure what each is worth.
+def _head_name(head: str) -> str:
+    if not head:
+        return "none"
+    if head == EMBEDDED:
+        return "embedded-mtp"
+    return str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
 
-    ``config`` is what every head is measured against; each head is that config
-    with its own ``draft`` laid over it, so nothing but the head and its length differs
-    between two rows.
 
-    ``smoke`` and ``host`` go to `served` as they are: the two questions each load is asked
-    first, and the name the kept runs carry.
-
-    A draft head only *proposes*; the large model verifies every token, so a quantised head
-    cannot make an answer wrong -- it can only be right less often, and each wrong guess
-    costs a verification pass. Whether the extra precision pays for its memory is therefore
-    an empirical question and not an arguable one: it depends on this model, this workload,
-    and how often the head happens to be right about it.
-
-    Pass "" as a head to measure the model with no draft at all, which is the baseline
-    every other row has to beat.
-
-    ``n_max`` is how many tokens a head guesses ahead per pass, and the run is labelled
-    ``draft:<head>@n8`` so the table shows acceptance and wall clock per (head, n-max).
-    ``None`` is the build's own default and adds nothing to the label. The baseline with
-    no head is measured once: there is nothing to guess ahead with.
-
-    ``per_request`` is whether the depths share one server. A build carrying the
-    per-request speculative fields takes a depth per request, so every depth for a head is
-    asked of one load; a build without them binds the depth at startup and needs a server
-    each. ``None`` measures which this is on the first load and falls back when the server
-    turns out to drop the field.
-
-    When the runs are ``kept``, it ends by printing `drafted`: one row per (head, n-max)
-    with its speedup over the baseline as a number, and which configuration to serve.
-    """
-    # The base model is loaded again for every head, because `-md` is bound when the server
-    # starts and llama.cpp has no runtime swap. It costs much less than the first load --
-    # the weights are mmapped and the pages are still cached -- but it is not free, so
-    # `served` times it and prints it rather than waving it away.
+def drafts(config: Any, heads: Heads, questions: Sequence[Mapping[str, Any]],
+           graph: Mapping[str, Any], loading: Loading = BARE) -> list[Row]:
+    """Serve ``config`` with each head at each depth and measure it: the rows; with runs kept,
+    ends by printing `drafted`, each (head, depth)'s speedup over the undrafted run."""
     out: list[Row] = []
-    lengths = list(n_max) or [None]
-    before = {r.get("key") for r in bench._kept(kept)} if kept else set()
-    shared = per_request
-    each = {"binary": binary, "kept": kept, "store": store, "embed_url": embed_url,
-            "embed_model": embed_model, "serve_timeout": serve_timeout, "smoke": smoke,
-            "host": host}
-    for head in heads:
-        name = "none" if not head else "embedded-mtp" if head == EMBEDDED else \
-            str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
+    lengths = list(heads.n_max) or [None]
+    before = {r.get("key") for r in bench._kept(loading.kept)} if loading.kept else set()
+    shared = heads.per_request
+    for head in heads.heads:
+        name = _head_name(head)
         depths = list(lengths) if head else [None]
         if head and shared is not False and len(depths) > 1 and None not in depths:
             say(f"\n--- draft: {name}, {len(depths)} depths on one load")
+            askings = [{"label": f"@n{d}", "spec_draft_max": d} for d in depths]
             try:
                 out += bench.served(
                     drafted_by(config, head).over(draft_n_max=max(depths)), questions, graph,
-                    label=f"draft:{name}", needs_draft_depth=shared is None,
-                    askings=[{"label": f"@n{d}", "spec_draft_max": d} for d in depths],
-                    **each)
+                    loading, Ways(label=f"draft:{name}", askings=askings,
+                                  needs_draft_depth=shared is None))
                 shared = True
                 continue
             except NotLoaded as why:
@@ -461,15 +408,12 @@ def drafts(config: Any, heads: Sequence[str], questions: Sequence[Mapping[str, A
             say(f"\n--- draft: {tagged}")
             try:
                 out += bench.served(drafted_by(config, head).over(draft_n_max=length),
-                                    questions, graph, label=f"draft:{tagged}", **each)
+                                    questions, graph, loading, Ways(label=f"draft:{tagged}"))
             except NotLoaded as why:
                 say(refused(f"draft:{tagged}", why))
-    if kept and out:
-        # the speedup as a number, against the baseline this call measured -- or, given
-        # only heads, the newest undrafted run of this model and size already kept. The
-        # smoke each load made first is kept too and is not one of these rows: two
-        # questions say nothing about a head
-        everything = bench._kept(kept)
+    if loading.kept and out:
+        # the smoke each load kept has fewer rows than the questions, so it is left out
+        everything = bench._kept(loading.kept)
         mine = [r for r in everything if r.get("key") not in before
                 and len(r.get("rows") or ()) == len(questions)]
         say("\n" + drafted(mine, among=everything))

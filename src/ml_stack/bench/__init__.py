@@ -1,22 +1,13 @@
-"""What a change to the asking costs and whether it was worth it.
+"""What a change to the asking costs and whether it was worth it: ``ml-stack-bench``.
 
-A graph answers questions through a large model, and every tool call it makes is a whole
-round trip. Any change to that -- a different prompt, a search run before the model instead
-of by it -- has to be shown to be an improvement rather than asserted, on wall clock, on
-tokens, and on whether the answers were right. Runs are kept, so two of them can be
-compared later.
+`keep` keeps runs and `score` says what one is worth; `questions`, `counting`, `measure`
+and `holding` ask questions and count what the server spent; `serve`, `run` and `options`
+put a model up and drive the subcommands; `show`, `detail`, `frontier`, `gathered`,
+`profiles` and `report` read runs back; `truth`, `folding` and `extract` read a graph out
+of messages.
 
-One package, one command (``ml-stack-bench``). `keep` is where runs are kept and `score`
-is what a run is worth; `questions`, `counting`, `measure` and `holding` ask a set of
-questions and count what the server spent on them; `serve`, `run` and `options` put a
-model up and drive the subcommands; `show`, `detail`, `frontier`, `gathered`, `profiles`
-and `report` read the runs back; and `truth`, `folding` and `extract` are the other half
-of the bench, reading a graph out of messages.
-
-This module is the namespace: everything is imported here, and every call between the
-modules to something a test or `selfcheck` patches -- `served`, `measure`, `footprint`,
-`runs`, `home_dir` -- goes through ``bench.<name>`` at call time, so patching it here
-patches it everywhere. ``python -m ml_stack.bench`` is what `detach` re-runs.
+Everything is imported here, and a call between modules to something a test or `selfcheck`
+patches (`served`, `measure`, `footprint`, `runs`, `home_dir`) goes through ``bench.<name>``.
 """
 
 from __future__ import annotations
@@ -171,7 +162,6 @@ from ml_stack.bench.run import (  # noqa: F401
     _stop_on_sigterm,
     main,
     smoke_first,
-    wants_smoke,
 )
 from ml_stack.bench.score import (  # noqa: F401
     BOOTSTRAP,
@@ -214,7 +204,10 @@ from ml_stack.bench.score import (  # noqa: F401
 )
 from ml_stack.bench.serve import (
     EMBEDDED,  # noqa: F401
+    Heads,
+    Loading,
     SmokeFailed,
+    Ways,
     drafted_by,
     drafts,
     prefetch,
@@ -251,6 +244,7 @@ from ml_stack.bench.underway import (  # noqa: F401
     detach,
     measuring,
     measuring_file,
+    wants_smoke,
 )
 from ml_stack.paths import repo_root  # noqa: F401
 
@@ -261,12 +255,15 @@ __all__ = [
     "SMOKE",
     "Counting",
     "Estimate",
+    "Heads",
+    "Loading",
     "Measured",
     "QuestionTimedOut",
     "Row",
     "SmokeFailed",
     "Spread",
     "Watching",
+    "Ways",
     "ask_from",
     "asked_as",
     "asking",

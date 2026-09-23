@@ -1,16 +1,10 @@
 """What a measuring run will cost before it is paid for, and the ceiling it is refused over.
 
-`estimate` reads the parsed command line and the runs already kept and says, per model
-the command will serve or measure, how long it should take: seconds per question from
-that model's newest kept run (the same context when one is kept at it), else a guess from
-the weights on disk, times the questions, times the askings one load is measured with, plus a load
-per model served. `main` prints it after the self-check and before the lock, and refuses
-with exit 5 when the total is over `--ceiling` and ``--yes`` was not given. A smoke run is
-never refused: two questions are the measurement of whether a run can start.
-
-The lines are what `history` reads back beside the actual (``estimate:``), the total last
-because it takes the last such line. Adam, 2026-09-02: "no more eight hour tests" -- the
-rule belongs in the tool, not in a person.
+`estimate` says, per model a command serves or measures, how long it should take: seconds
+per question from that model's newest kept run (at the same context when one is kept),
+else a guess from its weights, times the questions and the askings, plus a load per model
+served. Over `--ceiling` without ``--yes`` the run is refused; a smoke run never is. The
+``estimate:`` lines are what `history` reads back, the total last.
 """
 
 from __future__ import annotations
@@ -20,10 +14,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-# The package is the namespace the tests and `selfcheck` patch -- `bench.measure` -- so
-# anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import hub
+from ml_stack.bench.askings import _asked, halves
 from ml_stack.bench.keep import SMOKE
+from ml_stack.bench.questions import _how_many, read_questions, sample
+from ml_stack.bench.speed import PROMPTS, STREAMS, _ints
+from ml_stack.bench.underway import wants_smoke
+from ml_stack.graph.community import QUESTIONS
+from ml_stack.serve.weights import weight_of
 from ml_stack.units import span
 
 # A model nothing is known about: no run kept and no weights on disk to size it by.
@@ -63,8 +61,8 @@ class ModelEstimate:
         return self.questions * self.askings * self.per_question + self.load_s
 
     def line(self) -> str:
-        return (f"estimate: {span(self.seconds)} ({self.name} {self.questions} q × "
-                f"{self.askings} asking{'s' if self.askings != 1 else ''} × "
+        return (f"estimate: {span(self.seconds)} ({self.name} {self.questions} q x "
+                f"{self.askings} asking{'s' if self.askings != 1 else ''} x "
                 f"{self.per_question:.0f} s/q"
                 + (f" + load {self.load_s:.0f} s" if self.load_s else "")
                 + f"; {self.source})")
@@ -151,8 +149,6 @@ def measured(kept: Sequence[Mapping[str, Any]], *, model: str = "", labels: Sequ
 def guessed(model: str) -> tuple[float, str]:
     """``(seconds per question, why)`` for a model with no run kept: from its weights on
     disk when they are here, else `GUESS_S` -- and the line says which."""
-    from ml_stack.serve.weights import weight_of
-
     size = weight_of(model) if model else 0
     if size > 0:
         return (max(1.0, size / 1e9 * GUESS_PER_GB_S),
@@ -160,134 +156,146 @@ def guessed(model: str) -> tuple[float, str]:
     return GUESS_S, "a guess, no run of it kept and no weights on disk to size it by"
 
 
-def _one(kept: Sequence[Mapping[str, Any]], *, name: str, model: str = "",
-         labels: Sequence[str] = (), questions: int, askings: int, context: int = 0,
+@dataclass(frozen=True, slots=True)
+class _Who:
+    """A model an estimate is for: its name in the line, its weights, the labels its kept
+    runs go by, and the context it is served at."""
+
+    name: str
+    model: str = ""
+    labels: Sequence[str] = ()
+    context: int = 0
+
+
+def _one(kept: Sequence[Mapping[str, Any]], who: _Who, *, questions: int, askings: int,
          served: bool) -> ModelEstimate:
-    got = measured(kept, model=model, labels=labels, context=context)
+    got = measured(kept, model=who.model, labels=who.labels, context=who.context)
     if got is not None:
         per, load, source = got
         load_s = (GUESS_LOAD_S if load is None else load) if served else 0.0
-        return ModelEstimate(name, questions, askings, per, load_s, source)
-    per, source = guessed(model)
-    return ModelEstimate(name, questions, askings, per, GUESS_LOAD_S if served else 0.0,
+        return ModelEstimate(who.name, questions, askings, per, load_s, source)
+    per, source = guessed(who.model)
+    return ModelEstimate(who.name, questions, askings, per, GUESS_LOAD_S if served else 0.0,
                          source, guessed=True)
 
 
 def _questions(args: Any) -> int:
     """How many questions each way is asked: the sample, plus the smoke a real run makes
     first."""
-    from ml_stack.bench.questions import _how_many, read_questions, sample
-    from ml_stack.bench.run import wants_smoke
-    from ml_stack.graph.community import QUESTIONS
-
     named = getattr(args, "questions", "") or ""
     everything = read_questions(named) if named else QUESTIONS
     asked = len(sample(everything, _how_many(args)))
     return asked + (SMOKE if wants_smoke(args) else 0)
 
 
+def _located(wanted: str) -> tuple[str, str]:
+    """``(model path, the stem a label is made from)`` for a model a command names."""
+    model = str(hub.located(wanted, loose=True) or wanted)
+    return model, str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
+
+
+def _sweep(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
+    q = _questions(args)
+    context = int(getattr(args, "context", 0) or 0) or 32768 * max(
+        1, int(getattr(args, "parallel", 1) or 1))
+    out = []
+    for wanted in getattr(args, "serve", None) or []:
+        model, stem = _located(wanted)
+        askings = len(_asked(args, halves(args, f"{wanted} {model}")))
+        out.append(_one(kept, _Who(stem[:14], model, [stem[:14]], context), questions=q,
+                        askings=askings, served=True))
+    for one in getattr(args, "on", None) or []:
+        name, _, url = one.partition("=")
+        if name and url:
+            out.append(_one(kept, _Who(name, labels=[name]), questions=q,
+                            askings=len(halves(args, name)), served=False))
+    return out
+
+
+def _drafts(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
+    model, stem = _located(getattr(args, "model", ""))
+    asked = SMOKE if getattr(args, "smoke", False) else int(getattr(args, "sample", 0) or 0)
+    q = asked + (SMOKE if wants_smoke(args) else 0)
+    lengths = list(getattr(args, "n_max", None) or []) or [None]
+    context = int(getattr(args, "context", 0) or 0)
+    out = []
+    for head in getattr(args, "draft", None) or [""]:
+        name = "none" if not head else str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
+        for length in (lengths if head else [None]):
+            tagged = f"{name}@n{length}" if length is not None else name
+            out.append(_one(kept, _Who(f"{stem[:14]} draft:{tagged}", model,
+                                       [f"draft:{tagged}"], context),
+                            questions=q, askings=1, served=True))
+    return out
+
+
+def _speed(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
+    prompts = _ints(getattr(args, "prompts", ""), PROMPTS)
+    streams = _ints(getattr(args, "streams", ""), STREAMS)
+    if getattr(args, "smoke", False):
+        prompts, streams = [min(prompts)], [min(streams)]
+    cells = len(prompts) * len(streams) + (1 if wants_smoke(args) else 0)
+    generate = int(getattr(args, "generate", 256) or 256)
+    # each prompt is read twice (calibration, then the cell) and ``generate`` tokens written
+    per = sum(p / GUESS_PREFILL_TPS * 2 + generate / GUESS_DECODE_TPS for p in prompts) \
+        / max(1, len(prompts))
+    why = "a guess from the grid, no run of it timed"
+    out = [ModelEstimate(_located(wanted)[1][:14], cells, 1, per, GUESS_LOAD_S, why,
+                         guessed=True)
+           for wanted in getattr(args, "serve", None) or []]
+    out += [ModelEstimate(name, cells, 1, per, 0.0, why, guessed=True)
+            for name in (one.partition("=")[0] for one in getattr(args, "on", None) or [])
+            if name]
+    return out
+
+
+def _concurrent(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
+    many, long = ((2, 1) if getattr(args, "smoke", False)
+                  else (int(getattr(args, "conversations", 1) or 1),
+                        int(getattr(args, "turns", 1) or 1)))
+    q = many * long + (2 if wants_smoke(args) else 0)
+    label = str(getattr(args, "label", "") or "")
+    return [_one(kept, _Who(label or "the server", labels=[label]), questions=q, askings=1,
+                 served=False)]
+
+
+def _extract(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
+    from ml_stack.bench.extract import SMOKE_MESSAGES, only  # extract imports the bench package
+
+    serving = list(getattr(args, "serve", None) or [])
+    model, stem = _located(serving[0]) if serving else ("", "")
+    n = SMOKE_MESSAGES if getattr(args, "smoke", False) else int(getattr(args, "sample", 0) or 0)
+    askings = 2 if getattr(args, "twice", False) else 1
+    load = GUESS_LOAD_S if serving else 0.0
+    # an extraction run keeps `model` at its top and its rows are messages
+    seen = [float(r.get("seconds") or 0) for one in only(kept)
+            if stem and str(one.get("model") or "") == stem
+            for r in (one.get("rows") or ())]
+    name = stem or str(getattr(args, "label", "") or "the server")
+    if seen:
+        return [ModelEstimate(name, n, askings, sum(seen) / len(seen), load,
+                              f"from {len(seen)} earlier messages of {stem}")]
+    per, source = guessed(model)
+    return [ModelEstimate(name, n, askings, per, load, source, guessed=True)]
+
+
+def _run(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
+    label = str(getattr(args, "label", "") or "")
+    client = str(getattr(args, "client", "") or "")
+    return [_one(kept, _Who(label or client or "the server", labels=[label]),
+                 questions=_questions(args), askings=1, served=False)]
+
+
+_BY_COMMAND = {"sweep": _sweep, "drafts": _drafts, "speed": _speed,
+               "concurrent": _concurrent, "extract": _extract}
+
+
 def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
              ceiling_min: float | None = None) -> Estimate:
-    """What ``args`` will cost, model by model, from ``kept`` (the runs already in the
-    store) -- see the module. ``ceiling_min`` defaults to ``args.ceiling``, then the
-    environment's, then `CEILING_MIN`."""
-    from ml_stack.bench.askings import _asked, halves
-    from ml_stack.bench.run import wants_smoke
-
-    cmd = str(getattr(args, "cmd", "") or "")
-    smoke = bool(getattr(args, "smoke", False))
+    """What ``args`` will cost, model by model, from the runs in ``kept``; ``ceiling_min``
+    defaults to ``args.ceiling``, then the environment's, then `CEILING_MIN`."""
     if ceiling_min is None:
         held = getattr(args, "ceiling", None)
         ceiling_min = float(held) if held is not None else ceiling_default()
-    models: list[ModelEstimate] = []
-
-    if cmd == "sweep":
-        q = _questions(args)
-        context = int(getattr(args, "context", 0) or 0) or 32768 * max(
-            1, int(getattr(args, "parallel", 1) or 1))
-        for wanted in getattr(args, "serve", None) or []:
-            model = str(hub.located(wanted, loose=True) or wanted)
-            stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
-            askings = len(_asked(args, halves(args, f"{wanted} {model}")))
-            models.append(_one(kept, name=stem, model=model, labels=[stem], questions=q,
-                               askings=askings, context=context, served=True))
-        for one in getattr(args, "on", None) or []:
-            name, _, url = one.partition("=")
-            if not name or not url:
-                continue
-            models.append(_one(kept, name=name, labels=[name], questions=q,
-                               askings=len(halves(args, name)), served=False))
-    elif cmd == "drafts":
-        wanted = getattr(args, "model", "")
-        model = str(hub.located(wanted, loose=True) or wanted)
-        stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
-        asked = SMOKE if smoke else int(getattr(args, "sample", 0) or 0)
-        q = asked + (SMOKE if wants_smoke(args) else 0)
-        lengths = list(getattr(args, "n_max", None) or []) or [None]
-        for head in getattr(args, "draft", None) or [""]:
-            name = "none" if not head else str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
-            for length in (lengths if head else [None]):
-                tagged = f"{name}@n{length}" if length is not None else name
-                models.append(_one(kept, name=f"{stem} draft:{tagged}", model=model,
-                                   labels=[f"draft:{tagged}"], questions=q, askings=1,
-                                   context=int(getattr(args, "context", 0) or 0),
-                                   served=True))
-    elif cmd == "speed":
-        from ml_stack.bench.speed import PROMPTS, STREAMS, _ints
-
-        prompts = [min(_ints(getattr(args, "prompts", ""), PROMPTS))] if smoke \
-            else _ints(getattr(args, "prompts", ""), PROMPTS)
-        streams = [min(_ints(getattr(args, "streams", ""), STREAMS))] if smoke \
-            else _ints(getattr(args, "streams", ""), STREAMS)
-        cells = len(prompts) * len(streams) + (1 if wants_smoke(args) else 0)
-        generate = int(getattr(args, "generate", 256) or 256)
-        # a cell reads its prompt at a few hundred tokens a second and writes at a few
-        # tens; the calibration reads it once more
-        per = sum(p / GUESS_PREFILL_TPS * 2 + generate / GUESS_DECODE_TPS for p in prompts) \
-            / max(1, len(prompts))
-        for wanted in getattr(args, "serve", None) or []:
-            model = str(hub.located(wanted, loose=True) or wanted)
-            stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
-            models.append(ModelEstimate(stem, cells, 1, per, GUESS_LOAD_S,
-                                        "a guess from the grid, no run of it timed", guessed=True))
-        for one in getattr(args, "on", None) or []:
-            name = one.partition("=")[0]
-            if name:
-                models.append(ModelEstimate(name, cells, 1, per, 0.0,
-                                            "a guess from the grid, no run of it timed",
-                                            guessed=True))
-    elif cmd == "concurrent":
-        many, long = ((2, 1) if smoke else (int(getattr(args, "conversations", 1) or 1),
-                                            int(getattr(args, "turns", 1) or 1)))
-        q = many * long + (2 if wants_smoke(args) else 0)
-        label = str(getattr(args, "label", "") or "")
-        models.append(_one(kept, name=label or "the server", labels=[label], questions=q,
-                           askings=1, served=False))
-    elif cmd == "extract":
-        from ml_stack.bench.extract import SMOKE_MESSAGES, only
-
-        serving = list(getattr(args, "serve", None) or [])
-        model = str(hub.located(serving[0], loose=True) or serving[0]) if serving else ""
-        stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
-        n = SMOKE_MESSAGES if smoke else int(getattr(args, "sample", 0) or 0)
-        askings = 2 if getattr(args, "twice", False) else 1
-        # an extraction run keeps `model` at its top and its rows are messages
-        seen = [float(r.get("seconds") or 0) for one in only(kept)
-                if stem and str(one.get("model") or "") == stem
-                for r in (one.get("rows") or ())]
-        name = stem or str(getattr(args, "label", "") or "the server")
-        if seen:
-            models.append(ModelEstimate(name, n, askings, sum(seen) / len(seen),
-                                        GUESS_LOAD_S if serving else 0.0,
-                                        f"from {len(seen)} earlier messages of {stem}"))
-        else:
-            per, source = guessed(model)
-            models.append(ModelEstimate(name, n, askings, per, GUESS_LOAD_S if serving else 0.0,
-                                        source, guessed=True))
-    else:                                   # run
-        q = _questions(args)
-        label = str(getattr(args, "label", "") or "")
-        client = str(getattr(args, "client", "") or "")
-        models.append(_one(kept, name=label or client or "the server", labels=[label],
-                           questions=q, askings=1, served=False))
-    return Estimate(models, ceiling_min=ceiling_min, smoke=smoke)
+    models = _BY_COMMAND.get(str(getattr(args, "cmd", "") or ""), _run)(args, kept)
+    return Estimate(models, ceiling_min=ceiling_min, smoke=bool(getattr(args, "smoke", False)))

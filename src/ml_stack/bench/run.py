@@ -21,12 +21,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-# The package is the namespace the tests and `selfcheck` patch -- `bench.served`,
-# `bench.home_dir()` -- so anything patchable is looked up there at call
-# time, never bound here at import.
-from ml_stack import bench, hub, jobs
+# `bench.served`, `bench.home_dir`, `ml_stack.client.Client` and `lock.only_one` are patched by
+# the tests and `selfcheck`, so each is read off its module at call time.
+import ml_stack.client
+from ml_stack import bench, hub, jobs, lock
 from ml_stack.bench import ops, options
+from ml_stack.bench import speed as bench_speed
 from ml_stack.bench.askings import _asked, asking_from, halves, sampling_from, with_card
+from ml_stack.bench.backends import client_for, http_of, parse_on
 from ml_stack.bench.detail import missed, shape
 from ml_stack.bench.estimate import estimate
 from ml_stack.bench.frontier import plot, rates
@@ -35,14 +37,29 @@ from ml_stack.bench.keep import SMOKE, empties, forget, read_back, resumable, sa
 from ml_stack.bench.measure import concurrent
 from ml_stack.bench.ops import Refused
 from ml_stack.bench.progress import note_beside_the_run, status, stop, tail
-from ml_stack.bench.questions import _how_many, read_questions, sample
+from ml_stack.bench.questions import _how_many, mix, read_questions, sample
+from ml_stack.bench.queue import QueueError, run_queue
+from ml_stack.bench.report import run as reporting
 from ml_stack.bench.score import _which, export, ranking
-from ml_stack.bench.serve import NotLoaded, SmokeFailed, drafts, references_in, refused, smoked
+from ml_stack.bench.serve import (
+    Heads,
+    Loading,
+    NotLoaded,
+    SmokeFailed,
+    Ways,
+    drafts,
+    references_in,
+    refused,
+    smoked,
+)
 from ml_stack.bench.show import compare, table
-from ml_stack.bench.underway import MEASURING, detach, ended, remember
+from ml_stack.bench.underway import MEASURING, detach, ended, remember, wants_smoke
 from ml_stack.client.settings import Request, Transport
 from ml_stack.command import Group
+from ml_stack.graph.community import QUESTIONS
+from ml_stack.graph.community import graph as invented
 from ml_stack.log import say, warn
+from ml_stack.serve.backend import ServerFailed
 from ml_stack.serve.profile import ASK
 
 __all__ = ["COMMANDS", "main"]
@@ -84,13 +101,6 @@ def _run(args: Any) -> int:
     return int(args.run(args) or 0)
 
 
-def wants_smoke(args: Any) -> bool:
-    """Whether a run smokes first: it is a real run, not itself ``--smoke``, and not told
-    ``--no-smoke``."""
-    return (getattr(args, "cmd", "") in MEASURING and not getattr(args, "smoke", False)
-            and not getattr(args, "no_smoke", False))
-
-
 def smoke_first(args: Any) -> None:
     """The same command as a smoke, before the run proper: the real server, the real
     store, the runs read back, and `SmokeFailed` -- the run never starts -- when it kept
@@ -112,9 +122,6 @@ def smoke_first(args: Any) -> None:
 def _questions_and_graph(args: Any, *, everything: Any = None) -> tuple[Any, Any, Any]:
     """The questions a run asks, the sample of them it will ask, and the graph they are
     about: the invented community unless ``--questions`` and ``--graph`` name others."""
-    from ml_stack.graph.community import QUESTIONS
-    from ml_stack.graph.community import graph as invented
-
     asked = everything if everything is not None else (
         read_questions(args.questions) if args.questions else QUESTIONS)
     graph = (json.loads(Path(args.graph).expanduser().read_text())
@@ -134,11 +141,10 @@ def cmd_run(args: Any) -> int:
     if args.client:
         client = bench.ask_from(args.client)()
     else:
-        from ml_stack.client import Client
-
         if not _idle(args.base_url, args):
             return 3
-        client = with_card(Client(args.base_url, request=Request(**sampling_from(args))), args)
+        client = with_card(ml_stack.client.Client(args.base_url,
+                                                  request=Request(**sampling_from(args))), args)
     ask = bench.ask_from(args.ask) if args.ask else bench.asking(
         graph, how=asking_from(args), shortlist=args.shortlist, store=args.store or None,
         embed_url=args.embed_url, embed_model=args.embed_model, margin=args.margin)
@@ -165,22 +171,18 @@ def cmd_run(args: Any) -> int:
                                  "and measure what each is worth",
                   options=options.drafts_options, allow_abbrev=False)
 def cmd_drafts(args: Any) -> int:
-    from ml_stack.graph.community import QUESTIONS
-    from ml_stack.graph.community import graph as invented
-
     everything = read_questions(args.questions) if args.questions else QUESTIONS
     asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
     before = {r["key"] for r in bench._kept(args.kept)}
     model = str(hub.located(args.model, loose=True) or args.model)
-    rows = drafts(ops.swept(args, model, None, context=args.context, head=None)
-                  .over(port=int(args.port)),
-                  args.draft or [""], asked, invented(),
-                  binary=args.binary,
-                  kept=args.kept, store=args.store or None,
-                  embed_url=args.embed_url, embed_model=args.embed_model,
+    heads = Heads(heads=args.draft or [""],
                   n_max=list(getattr(args, "n_max", []) or []) or [None],
-                  per_request=False if getattr(args, "server_per_depth", False) else None,
-                  smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
+                  per_request=False if getattr(args, "server_per_depth", False) else None)
+    loading = Loading(binary=args.binary, kept=args.kept, store=args.store or None,
+                      embed_url=args.embed_url, embed_model=args.embed_model,
+                      smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
+    rows = drafts(ops.swept(args, model, None, context=args.context, head=None)
+                  .over(port=int(args.port)), heads, asked, invented(), loading)
     say()
     if getattr(args, "smoke", False):
         saved = [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
@@ -204,12 +206,11 @@ def cmd_concurrent(args: Any) -> int:
     if args.client:
         client = bench.ask_from(args.client)()
     else:
-        from ml_stack.client import Client
-
         if not _idle(args.base_url, args):
             return 3
-        client = with_card(Client(args.base_url, request=Request(**sampling_from(args)),
-                                  transport=Transport(timeout=args.per_question)), args)
+        client = with_card(ml_stack.client.Client(
+            args.base_url, request=Request(**sampling_from(args)),
+            transport=Transport(timeout=args.per_question)), args)
     # a smoke run proves the path -- two conversations really overlapping, one turn
     # each -- and its numbers mean nothing, as with every other --smoke
     many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
@@ -241,13 +242,8 @@ def cmd_concurrent(args: Any) -> int:
 @COMMANDS.command("prepare", help="put a graph in a store and index and embed it",
                   options=options.prepare_options, allow_abbrev=False)
 def cmd_prepare(args: Any) -> int:
-    from ml_stack.graph.community import graph as invented
-
     graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
     if getattr(args, "mix", False):
-        from ml_stack.bench.questions import mix
-        from ml_stack.graph.community import QUESTIONS
-
         everything = read_questions(args.questions) if args.questions else QUESTIONS
         counts = mix(everything, graph)
         scored = sum(1 for q in everything if q.get("expect"))
@@ -290,68 +286,41 @@ def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
     """Every ``--serve``'d model put up, asked both halves on one load, and taken down:
     the keys of the runs it kept, and ``"<label>: <why>"`` for each model refused or not
     loaded."""
-    from ml_stack.serve.backend import ServerFailed
-
     saved: list[str] = []
     unmeasured: list[str] = []
     total_context = args.context or 32768 * max(1, args.parallel)
-    # `wanted`, not `named`: the loop variable was `named` once, which rebound the
-    # (name, url) list built from --on to the last model's name, and the summary below
-    # then unpacked its characters. Every `sweep --serve` answered its questions and
-    # crashed while summarising, and the smoke run is what caught it.
     for n, wanted in enumerate(getattr(args, "serve", []) or []):
         model = str(hub.located(wanted, loose=True) or wanted)
         heads = getattr(args, "serve_draft", []) or []
         head = heads[n] if n < len(heads) else ""
         if head.lower() == "auto":
-            # the one resolver (`hub.choose_head`): told which binary will serve, so
-            # a head that borrows its target's embeddings is withheld from mainline
-            # rather than found out at the far end of an 87G load
             chosen = hub.choose_head(model, binary=args.binary or None)
             head = chosen.path
             say(f"    draft head: {head or 'none'} -- {chosen.why}"
                 + (f"\n      {chosen.note}" if chosen.note else ""))
-        # the label's stem: the model's file, or what --serve-label says it is; then
-        # -nodraft for a model served without its head, and the suffix asked for
         stem = ((str(getattr(args, "serve_label", "") or "")
                  or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14])
                 + ("-nodraft" if getattr(args, "no_draft", False) else "")
                 + str(getattr(args, "label_suffix", "") or ""))
-        # Both halves -- plain, and shortlisted where `--shortlist-for` allows it --
-        # and every `--also` of each, asked of one load. Loading twice per model was
-        # how this began, and the second load measured nothing about the asking.
+        # both halves and every `--also` of each, asked of one load
         parts = halves(args, f"{wanted} {model}")
         say(f"\n{stem}: " + ", ".join(suffix for suffix, _ in parts))
-        # A port nothing answers on is exactly what --serve expects, so the
-        # "would not say whether it is busy" note is noise here. Only a port
-        # somebody is actually using should stop us.
         if bench.busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
                 f"http://127.0.0.1:{args.serve_port}", args):
             raise _NotIdle
-        # `--context` is the total across slots, which is what `-c` takes and what
-        # ServerSpec means by it. Dividing by the slot count served a model at a
-        # quarter of the context every other run had, and the only thing that said
-        # so was the `ctx` column reading 8k where the rest read 32k.
         before = {r["key"] for r in bench._kept(args.kept)}
-        # The settings that scored best fill every flag this sweep did not set: the head
-        # at the length that measured best, the build that loads it, the cache type,
-        # the thinking budget, the raw flags, and the asking. Adam: "if a model
-        # has a drafting head that speeds it up at some config, always use it at that
-        # config (be sure to report it)". --no-profile serves it bare.
+        # the best-scoring settings fill every flag not set here; --no-profile serves bare
         chosen = ops.swept(args, model, ops.measured_run(args, model, head, heads, n),
                            context=total_context,
                            head=head if n < len(heads) else None).over(
                                port=int(args.serve_port))
         try:
-            bench.served(chosen, questions, graph, label=stem,
-                         askings=_asked(args, parts),
-                         binary=args.binary or "",
-                         kept=args.kept,
-                         store=args.store or None, embed_url=args.embed_url,
-                         embed_model=args.embed_model,
-                         already=already,
-                         trace=getattr(args, "trace", None),
-                         smoke=smoke)
+            bench.served(chosen, questions, graph,
+                         Loading(binary=args.binary or "", kept=args.kept,
+                                 store=args.store or None, embed_url=args.embed_url,
+                                 embed_model=args.embed_model,
+                                 trace=getattr(args, "trace", None), smoke=smoke),
+                         Ways(label=stem, askings=_asked(args, parts), already=already))
         except NotLoaded as why:
             say(refused(stem, why))
             unmeasured.append(f"{stem}: preflight refused: "
@@ -371,8 +340,6 @@ def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
 def _measured_on(args: Any, named: Sequence[tuple[str, str]], questions: Any, graph: Any,
                  already: Any) -> list[str]:
     """Every ``--on`` server measured both halves; the keys of the runs it kept."""
-    from ml_stack.bench.backends import client_for, http_of
-
     saved: list[str] = []
     total_context = args.context or 32768 * max(1, args.parallel)
     for name, url in named:
@@ -410,8 +377,6 @@ def _measured_on(args: Any, named: Sequence[tuple[str, str]], questions: Any, gr
 @COMMANDS.command("sweep", help="run every model, with and without a shortlist",
                   options=options.sweep_options, allow_abbrev=False)
 def cmd_sweep(args: Any) -> int:
-    from ml_stack.bench.backends import parse_on
-
     named = []
     for one in args.on:
         try:
@@ -466,8 +431,7 @@ COMMANDS.borrow(lambda sub: _module("extract").add_arguments(sub),
 def cmd_show(args: Any) -> int:
     # an extraction run is kept in the same store and is not an answering run: it has
     # no questions to score, and its table is its own
-    from ml_stack.bench import extract as bench_extract
-    from ml_stack.bench import speed as bench_speed
+    from ml_stack.bench import extract as bench_extract  # extract imports smoke_first from here
 
     kept = ops.kept_for(args.kept, last=int(getattr(args, "last", 0) or 0),
                         since=str(getattr(args, "since", "") or ""))
@@ -496,9 +460,6 @@ def cmd_show(args: Any) -> int:
                    anyway=getattr(args, "export_anyway", False)))
         return 0
     if args.shape:
-        from ml_stack.graph.community import QUESTIONS
-        from ml_stack.graph.community import graph as invented
-
         questions = read_questions(args.questions) if getattr(args, "questions", "") \
             else QUESTIONS
         shape(questions, invented())
@@ -530,8 +491,6 @@ def cmd_show(args: Any) -> int:
                        "memory it wants, and what to serve",
                   options=options.report_options, allow_abbrev=False)
 def cmd_report(args: Any) -> int:
-    from ml_stack.bench.report import run as reporting
-
     return reporting(args)
 
 
@@ -601,8 +560,6 @@ def cmd_queue(args: Any) -> int:
     # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
     # the measuring lock itself, so a step of a queue and a run started by hand still
     # wait for each other.
-    from ml_stack.bench.queue import QueueError, run_queue
-
     if args.detach:
         log = detach(getattr(args, "_argv", None) or sys.argv[1:])
         say(f"the queue is running in the background; log: {log}\n"
@@ -680,8 +637,6 @@ def main(argv: list[str] | None = None) -> int:
     sends it, and a server put up inside a `with serve(...)` comes down on the way out
     instead of staying up under nobody.
     """
-    from ml_stack.lock import Busy, only_one
-
     # every subcommand there is, so a *value* that happens to read like one -- `report
     # --model run` -- is not mistaken for the command and sent through the lock
     # `standard` takes the measuring lock itself, so it is not in MEASURING here.
@@ -738,7 +693,7 @@ def main(argv: list[str] | None = None) -> int:
     with contextlib.suppress(ValueError):    # not the main thread: nothing to hand a signal
         previous = signal.signal(signal.SIGTERM, _stop_on_sigterm)
     try:
-        with only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
+        with lock.only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
                       announce=lambda line: warn(line)):
             remember(rest, pid=os.getpid())
             note_beside_the_run()
@@ -746,7 +701,7 @@ def main(argv: list[str] | None = None) -> int:
                 return _main(rest)
             finally:
                 ended()
-    except Busy as why:
+    except lock.Busy as why:
         warn(f"error: {why}. Another measurement is running; wait for it, or pass "
              f"--no-queue to fail fast rather than queue.")
         return 3

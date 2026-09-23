@@ -2147,8 +2147,10 @@ def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_drafts(run, heads, questions, graph, **kw):
-        seen.update(kw, heads=list(heads), model=run.serving.model)
+    def fake_drafts(run, heads, questions, graph, loading):
+        seen.update(store=loading.store, embed_url=loading.embed_url,
+                    embed_model=loading.embed_model, heads=list(heads.heads),
+                    model=run.serving.model)
         return []
 
     monkeypatch.setattr(run_mod, "drafts", fake_drafts)
@@ -2837,7 +2839,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     askings = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
             {"label": "reach", "reach": 8000}]
     bench.served(Config(serving=Serving(model="tiny.gguf")), [{"q": "who?", "expect": []}],
-                 {"nodes": [], "edges": []}, askings=askings, kept="")
+                 {"nodes": [], "edges": []}, ways=bench.Ways(askings=askings))
     assert len(built) == 4, "one strict client per way, none refused"
 
 
@@ -3501,7 +3503,7 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
     one = got.models[0]
     assert (one.questions, one.askings, one.per_question, one.load_s) == (12, 4, 65.0, 41.6)
     assert not one.guessed
-    assert one.line() == ("estimate: 53 min (quill 12 q \u00d7 4 askings \u00d7 65 s/q + load 42 s; "
+    assert one.line() == ("estimate: 53 min (quill 12 q x 4 askings x 65 s/q + load 42 s; "
                           "from quill-plain kept 2026-09-01T12:00:00 at 32k)")
     assert got.seconds == pytest.approx(12 * 4 * 65 + 41.6)
     assert got.over and got.ceiling_min == 30
@@ -3540,7 +3542,7 @@ def test_a_model_with_no_run_kept_is_guessed_from_its_weights_and_the_line_says_
     assert by_size.guessed and by_size.per_question == pytest.approx(2.1)
     assert by_size.load_s == 30.0 and "a guess from 2.8G of weights" in by_size.line()
     assert unknown.guessed and unknown.per_question == 15.0
-    assert unknown.line() == ("estimate: 2 min (absent 4 q \u00d7 1 asking \u00d7 15 s/q + load 30 s; a "
+    assert unknown.line() == ("estimate: 2 min (absent 4 q x 1 asking x 15 s/q + load 30 s; a "
                               "guess, no run of it kept and no weights on disk to size it by)")
     assert unknown.seconds == 90.0, "and 90 s reads as 2 min, the shape history reads"
     assert got.lines()[-1] == "estimate: 2 min in all for 2 models, 2 guessed with no run kept"
@@ -3595,7 +3597,7 @@ def test_main_refuses_over_the_ceiling_with_exit_5_and_serves_nothing_unless_yes
             "--no-selfcheck", "--ceiling", "0.5"]
     assert bench.main(argv) == 5
     said = capsys.readouterr()
-    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q \u00d7 1 asking \u00d7 15 s/q "
+    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q x 1 asking x 15 s/q "
                                                "+ load 30 s; a guess")
     assert said.out.splitlines()[1] == ("estimate: 45 s in all for 1 model, 1 guessed with "
                                         "no run kept (over the ceiling)")
@@ -3644,7 +3646,7 @@ def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detache
     assert bench.main(argv) == 5
     said = capsys.readouterr()
     assert started == [] and not (tmp_path / "home" / "measuring.json").exists()
-    assert said.out.startswith("estimate: 4 min (tiny 12 q \u00d7 1 asking \u00d7 15 s/q + load 30 s;")
+    assert said.out.startswith("estimate: 4 min (tiny 12 q x 1 asking x 15 s/q + load 30 s;")
     assert "over the 1 min ceiling" in said.err
 
     assert bench.main([*argv, "--yes"]) == 0
@@ -3673,26 +3675,25 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     _preflight_ok(monkeypatch)
     bare = Config(serving=Serving(model="tiny.gguf"))
     bench.served(bench.drafted_by(bare, bench.EMBEDDED).over(draft_n_max=2),
-                 [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
-                 kept="", smoke=())
+                 [{"q": "who?", "expect": []}], {"nodes": [], "edges": []})
     spec = fake.leased[-1]
     assert spec.spec_type == "draft-mtp" and not spec.draft and spec.spec_draft_max == 2
 
     seen = []
     monkeypatch.setattr(bench, "served",
-                        lambda config, *a, **k: seen.append(
-                            (k.get("label"), config.serving.draft, config.serving.spec_type,
-                             config.serving.draft_n_max, k.get("askings"))) or [])
-    bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
-                 {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=True)
+                        lambda config, questions, graph, loading, ways: seen.append(
+                            (ways.label, config.serving.draft, config.serving.spec_type,
+                             config.serving.draft_n_max, ways.askings)) or [])
+    bench.drafts(bare, bench.Heads(["", bench.EMBEDDED], n_max=[2, 8], per_request=True),
+                 [{"q": "who?", "expect": []}], {"nodes": [], "edges": []})
     assert [row[:4] for row in seen] == [("draft:none", "", "", None),
                                          ("draft:embedded-mtp", "", "draft-mtp", 8)]
     assert seen[-1][4] == [{"label": "@n2", "spec_draft_max": 2},
                            {"label": "@n8", "spec_draft_max": 8}]
 
     seen.clear()
-    bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
-                 {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=False)
+    bench.drafts(bare, bench.Heads(["", bench.EMBEDDED], n_max=[2, 8], per_request=False),
+                 [{"q": "who?", "expect": []}], {"nodes": [], "edges": []})
     assert [row[:4] for row in seen] == [("draft:none", "", "", None),
                                          ("draft:embedded-mtp@n2", "", "draft-mtp", 2),
                                          ("draft:embedded-mtp@n8", "", "draft-mtp", 8)]

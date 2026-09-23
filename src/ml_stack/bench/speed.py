@@ -18,12 +18,19 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from ml_stack import bench, hub
-from ml_stack.bench.backends import client_for, describe, http_of, timings_of
+from ml_stack.bench.askings import sampling_from
+from ml_stack.bench.backends import client_for, describe, http_of, parse_on, timings_of
+from ml_stack.bench.holding import _idle, said_by
 from ml_stack.bench.keep import read_back, save
+from ml_stack.bench.ops import measured_run, swept
+from ml_stack.bench.serve import NotLoaded, SmokeFailed, refused, up
+from ml_stack.bench.underway import wants_smoke
 from ml_stack.client.settings import Request, Transport
 from ml_stack.client.tokens import CHARS_PER_TOKEN
 from ml_stack.http import ServerError
 from ml_stack.log import say, warn
+from ml_stack.serve.backend import ServerFailed
+from ml_stack.serve.preflight import PreflightFailed
 
 KIND = "speed"
 PROMPTS = (512, 4096, 16384)
@@ -327,9 +334,6 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
 def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
                smoking_first: bool) -> list[str]:
     """Every ``--on`` server: the grid, kept as one run of kind ``speed`` per label."""
-    from ml_stack.bench.askings import sampling_from
-    from ml_stack.bench.holding import _idle
-
     keys = []
     prompts, streams = _ints(args.prompts, PROMPTS), _ints(args.streams, STREAMS)
     context = int(getattr(args, "context", 0) or 0) or None
@@ -358,8 +362,6 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
 
 def _server_record(url: str, client: Any) -> dict[str, Any]:
     """The run's ``server`` record: what serves on ``url``, and what it holds."""
-    from ml_stack.bench.holding import said_by
-
     server = bench.footprint(url, client)
     server.setdefault("base_url", url)
     if "served_by" not in server:
@@ -370,8 +372,6 @@ def _server_record(url: str, client: Any) -> dict[str, Any]:
 
 
 def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
-    from ml_stack.bench.serve import SmokeFailed
-
     rows = [r for one in kept for r in (one.get("rows") or ())]
     if not rows:
         raise SmokeFailed(f"{what}: no cell was kept")
@@ -383,11 +383,6 @@ def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
 def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
     """Every ``--serve`` model: put up in the settings it scored best with (minus the head with
     ``--no-draft``), the grid through `up`, taken down."""
-    from ml_stack.bench.ops import measured_run, swept
-    from ml_stack.bench.serve import NotLoaded, refused, up
-    from ml_stack.serve.backend import ServerFailed
-    from ml_stack.serve.preflight import PreflightFailed
-
     keys: list[str] = []
     prompts, streams = _ints(args.prompts, PROMPTS), _ints(args.streams, STREAMS)
     slots = int(getattr(args, "parallel", 0) or 0) or max(streams)
@@ -413,7 +408,7 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
         run = run.over(port=int(args.serve_port), timeout=float(args.per_question),
                        n_predict=int(args.generate), temperature=0.0)
         try:
-            with up(run, binary=args.binary or "", name=label) as (server, held_up):
+            with up(run, binary=args.binary or "") as (server, held_up):
                 held_up.pop("baseline", None)
                 held_up.pop("loaded", None)
                 client = run.client(server.base_url)
@@ -443,9 +438,6 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
 
 def run(args: Any) -> int:
     """The ``speed`` subcommand after the parse."""
-    from ml_stack.bench.backends import parse_on
-    from ml_stack.bench.run import wants_smoke
-
     named = []
     for one in args.on:
         try:
