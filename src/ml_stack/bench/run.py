@@ -37,7 +37,7 @@ from ml_stack.bench.ops import Refused
 from ml_stack.bench.progress import note_beside_the_run, status, stop, tail
 from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.score import _which, export, ranking
-from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
+from ml_stack.bench.serve import NotLoaded, SmokeFailed, drafts, references_in, refused, smoked
 from ml_stack.bench.show import compare, table
 from ml_stack.bench.underway import MEASURING, detach, ended, remember
 from ml_stack.client.settings import Request, Transport
@@ -286,12 +286,14 @@ def _fleet_sweep(args: Any) -> int:
 
 
 def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
-                         smoke: Any) -> list[str]:
-    """Every ``--serve``'d model put up, asked both halves on one load, and taken down;
-    the keys of the runs it kept."""
+                         smoke: Any) -> tuple[list[str], list[str]]:
+    """Every ``--serve``'d model put up, asked both halves on one load, and taken down:
+    the keys of the runs it kept, and ``"<label>: <why>"`` for each model refused or not
+    loaded."""
     from ml_stack.serve.backend import ServerFailed
 
     saved: list[str] = []
+    unmeasured: list[str] = []
     total_context = args.context or 32768 * max(1, args.parallel)
     # `wanted`, not `named`: the loop variable was `named` once, which rebound the
     # (name, url) list built from --on to the last model's name, and the summary below
@@ -350,15 +352,20 @@ def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
                          already=already,
                          trace=getattr(args, "trace", None),
                          smoke=smoke)
+        except NotLoaded as why:
+            say(refused(stem, why))
+            unmeasured.append(f"{stem}: preflight refused: "
+                              + "; ".join(ln.strip() for ln in str(why).splitlines()
+                                          if ln.strip().startswith("FAIL")))
+            continue
         except ServerFailed as why:
-            # A model that will not load -- a head the build cannot read, a tensor it
-            # does not know -- ends that model, not the sweep. Measured 2026-09-01: one
-            # such load took gpt-oss-120b's measurement down with it, twice.
+            # a model that will not load ends that model, not the sweep
             say(f"    {stem} did not load; moving on:\n"
                 + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
+            unmeasured.append(f"{stem}: did not load: {str(why).splitlines()[0]}")
             continue
         saved += [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
-    return saved
+    return saved, unmeasured
 
 
 def _measured_on(args: Any, named: Sequence[tuple[str, str]], questions: Any, graph: Any,
@@ -433,13 +440,16 @@ def cmd_sweep(args: Any) -> int:
                          parallel=getattr(args, "parallel", 1), since=args.since)
                if args.resume else None)
     try:
-        saved = _served_by_the_sweep(args, questions, graph, already,
-                                     sample(everything, SMOKE) if smoking else ())
+        saved, unmeasured = _served_by_the_sweep(args, questions, graph, already,
+                                                 sample(everything, SMOKE) if smoking else ())
         saved += _measured_on(args, named, questions, graph, already)
     except _NotIdle:
         return 3
     say()
     table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
+    if unmeasured and not saved:
+        warn("error: nothing measured: " + " | ".join(unmeasured))
+        return 1
     return 0
 
 

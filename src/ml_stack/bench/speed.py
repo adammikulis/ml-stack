@@ -384,7 +384,7 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
     """Every ``--serve`` model: put up in the settings it scored best with (minus the head with
     ``--no-draft``), the grid through `up`, taken down."""
     from ml_stack.bench.ops import measured_run, swept
-    from ml_stack.bench.serve import NotLoaded, up
+    from ml_stack.bench.serve import NotLoaded, refused, up
     from ml_stack.serve.backend import ServerFailed
     from ml_stack.serve.preflight import PreflightFailed
 
@@ -434,8 +434,7 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                                          **held_up},
                                  kind=KIND, label=label))
         except (NotLoaded, PreflightFailed) as why:
-            say(f"    preflight refused {label}; not loaded:\n"
-                + "\n".join(f"      {line}" for line in str(why).splitlines()))
+            say(refused(label, why))
         except ServerFailed as why:
             say(f"    {label} did not load; moving on:\n"
                 + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))

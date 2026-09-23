@@ -1923,13 +1923,15 @@ def test_a_refused_preflight_skips_the_model_and_the_sweep_goes_on(tmp_path, mon
     assert [r["label"] for r in runs(seen["kept"])] == ["tiny-plain"]
 
 
-def test_a_sweep_refused_everywhere_still_prints_its_table(tmp_path, monkeypatch, capsys):
+def test_a_sweep_refused_everywhere_prints_its_table_and_fails(tmp_path, monkeypatch, capsys):
     import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     _preflight_ok(monkeypatch, refuse=("tiny",))
-    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
-    assert "nothing kept yet" in capsys.readouterr().out
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 1
+    said = capsys.readouterr()
+    assert "nothing kept yet" in said.out
+    assert "error: nothing measured: tiny: preflight refused: FAIL  shards" in said.err
     assert not seen["kept"].exists()
 
 
@@ -2530,16 +2532,18 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
     from ml_stack.serve.backend import ServerFailed
 
     calls = []
+    kept_runs = []
 
     def fake_served(run, *a, **k):
         model = run.model
         calls.append(model)
         if "bad" in model:
             raise ServerFailed("llama-server did not become healthy (exited 1)")
+        kept_runs.append({"key": f"bench:{model}", "label": model})
         return []
 
     monkeypatch.setattr(bench, "served", fake_served)
-    monkeypatch.setattr(bench, "_kept", lambda kept: [])
+    monkeypatch.setattr(bench, "_kept", lambda kept: list(kept_runs))
     monkeypatch.setattr(bench, "runs", lambda *a, **k: [])
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "prepared", lambda: "")
@@ -2547,7 +2551,7 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
     graph.write_text('{"nodes": [], "edges": []}')
     code = bench._main(["sweep", "--serve", "bad.gguf", "--serve", "good.gguf", "--plain-only",
                         "--graph", str(graph), "--kept", str(tmp_path / "runs.ladybug"),
-                        "--no-prefetch", "--smoke"])
+                        "--no-prefetch", "--no-smoke", "--no-selfcheck"])
     said = capsys.readouterr().out
     assert calls == ["bad.gguf", "good.gguf"], said
     assert "did not load; moving on" in said

@@ -107,6 +107,12 @@ class NotLoaded(RuntimeError):
     """The preflight refused the model, so nothing was loaded; the message is its report."""
 
 
+def refused(label: str, why: Exception) -> str:
+    """What a measuring command says of ``label`` when ``why`` kept it from loading."""
+    return (f"    preflight refused {label}; not loaded:\n"
+            + "\n".join(f"      {line}" for line in str(why).splitlines()))
+
+
 @contextlib.contextmanager
 def up(config: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900.0) -> Any:
     """One model put up in ``config``'s serving for the block: the load preflighted -- shards
@@ -265,6 +271,7 @@ def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[s
     build accepts -- and the report is printed under the `up in` line, the KV estimate
     beside what `kv+run` then measures. A refused preflight is printed and the model is
     skipped, nothing loaded: a sweep of five must not end on the one that does not fit.
+    Raises `NotLoaded` when either preflight refuses; the caller says `refused` and goes on.
     """
     from ml_stack.serve import preflight as checks
 
@@ -372,14 +379,10 @@ def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[s
                        else [{"rows": [asdict(r) for r in proved]}], f"{name}{suffix} smoke")
                 say("  smoke: ok")
             rows += ask_every(questions, smoking=False)[0]
-    except NotLoaded as why:
-        say(f"    preflight refused {name}{suffix}; not loaded:\n"
-            + "\n".join(f"      {line}" for line in str(why).splitlines()))
     except checks.PreflightFailed as why:
-        # The backend's own preflight, which can refuse what this one passed -- a draft
-        # head resolved to a file this could not size, say. Same answer: say it, move on.
-        say(f"    preflight refused {name}{suffix}; not loaded:\n"
-            + "\n".join(f"      {line}" for line in str(why).splitlines()))
+        # the backend's own preflight, which can refuse what this one passed -- a draft
+        # head resolved to a file this could not size, say
+        raise NotLoaded(str(why)) from why
     return rows
 
 
@@ -446,6 +449,9 @@ def drafts(config: Any, heads: Sequence[str], questions: Sequence[Mapping[str, A
                     **each)
                 shared = True
                 continue
+            except NotLoaded as why:
+                say(refused(f"draft:{name}", why))
+                continue
             except DraftDepthIgnored as reading:
                 shared = False
                 say(f"      this build {reading} the per-request depth; "
@@ -453,8 +459,11 @@ def drafts(config: Any, heads: Sequence[str], questions: Sequence[Mapping[str, A
         for length in depths:
             tagged = f"{name}@n{length}" if length is not None else name
             say(f"\n--- draft: {tagged}")
-            out += bench.served(drafted_by(config, head).over(draft_n_max=length),
-                                questions, graph, label=f"draft:{tagged}", **each)
+            try:
+                out += bench.served(drafted_by(config, head).over(draft_n_max=length),
+                                    questions, graph, label=f"draft:{tagged}", **each)
+            except NotLoaded as why:
+                say(refused(f"draft:{tagged}", why))
     if kept and out:
         # the speedup as a number, against the baseline this call measured -- or, given
         # only heads, the newest undrafted run of this model and size already kept. The

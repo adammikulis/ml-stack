@@ -446,6 +446,28 @@ def test_an_export_reads_the_store_through_peer_runs(tmp_path):
     assert json.loads(said) == flat
 
 
+@pytest.mark.slow
+def test_a_real_bench_that_refuses_its_only_model_is_failed_with_the_refusal(tmp_path):
+    from ml_stack.testing.fakes import fake_llama_binary
+
+    runner = JobRunner(tmp_path / "traind", tmp_path / "files")
+    host = BenchHost(runner, home=tmp_path / "bench", name="lone")
+    host.poll_s = 0.2
+    binary = fake_llama_binary(tmp_path)
+    job = Job(argv=("sweep", "--serve", str(tmp_path / "absent.gguf"), "--plain-only",
+                    "--no-smoke", "--store", "", "--binary", str(binary)),
+              models=("absent.gguf",), commit=host.commit)
+    try:
+        (handle,) = dispatch({Local(host): job}, log=lambda _l: None)
+        (done,) = wait([handle], poll_s=0.2, timeout_s=120, log=lambda _l: None)
+        record = runner.jobs[handle.id]
+        assert done.state == "failed", Path(record.log).read_text()
+        assert "error: nothing measured: absent: preflight refused: FAIL  shards" in \
+            Path(record.log).read_text()
+    finally:
+        runner.shutdown()
+
+
 def test_a_bench_that_says_error_is_failed(tmp_path):
     box = _box(tmp_path, "shaky", room=96 * G, launch=scripted_launch(fails=True))
     try:

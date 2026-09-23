@@ -17,7 +17,7 @@ from ml_stack.bench.keep import save
 from ml_stack.bench.questions import sample as sampled
 from ml_stack.bench.quiet import look
 from ml_stack.bench.score import Row
-from ml_stack.bench.serve import served, up
+from ml_stack.bench.serve import NotLoaded, refused, served, up
 from ml_stack.command import Group, flag, option
 from ml_stack.graph.community import QUESTIONS
 from ml_stack.graph.community import graph as invented
@@ -269,8 +269,12 @@ def _asking_work(questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any
                  binary: str, store: str) -> Any:
     """A callable that serves one arm's run and asks it the graph questions."""
     def work(config: Any, label: str, kept: str) -> list[Any]:
-        return served(config, questions, graph, label=label, binary=binary, kept=kept,
-                      store=store or None)
+        try:
+            return served(config, questions, graph, label=label, binary=binary, kept=kept,
+                          store=store or None)
+        except NotLoaded as why:
+            say(refused(label, why))
+            return []
 
     return work
 
