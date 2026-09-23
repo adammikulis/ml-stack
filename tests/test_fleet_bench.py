@@ -756,6 +756,23 @@ def test_fleet_planned_refuses_a_named_peer_discovery_did_not_find(boxes, monkey
                           peers=["lantern"])
 
 
+def test_fleet_planned_refuses_a_store_on_this_machine_and_passes_an_empty_one(boxes,
+                                                                                 monkeypatch):
+    from ml_stack.bench import ops
+    from ml_stack.bench.ops import Refused as OpsRefused
+
+    roomy, _ = boxes
+    monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
+    _discovery_stub(monkeypatch, {"roomy": roomy.peer})
+
+    with pytest.raises(OpsRefused, match=r"--store /here/graph\.ladybug is a graph store"):
+        ops.fleet_planned(["sweep", "--fleet", "--store", "/here/graph.ladybug",
+                           "--serve", "m.gguf"], ["m.gguf"])
+    planned = ops.fleet_planned(["sweep", "--fleet", "--store=", "--serve", "m.gguf"],
+                                ["m.gguf"])
+    assert planned.jobs[roomy.peer].argv == ("sweep", "--store=", "--serve", "m.gguf")
+
+
 def test_fleet_planned_refuses_when_discovery_finds_nobody(monkeypatch):
     from ml_stack.bench import ops
     from ml_stack.bench.ops import Refused as OpsRefused

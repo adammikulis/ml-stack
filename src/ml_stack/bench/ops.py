@@ -309,6 +309,11 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
     if not models:
         raise Refused("error: --fleet spreads --serve models over the fleet; pass --serve "
                       "MODEL for each")
+    stores = [v for v in _values_of(argv, "--store") if v]
+    if stores:
+        raise Refused(f"error: --store {stores[-1]} is a graph store on this machine, and a "
+                      f"peer cannot read it; each peer uses the store its own 'ml-stack-bench "
+                      f"prepare' built, or none with --store ''")
     mine = _commit()
     if not mine:
         raise Refused("error: --fleet needs to know this checkout's commit, and git would "
