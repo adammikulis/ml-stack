@@ -11,6 +11,7 @@ would, for a dispatcher with no daemon of its own.
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import os
 import re
@@ -448,7 +449,7 @@ class BenchHost:
         with self._lock:
             self._mine[mine.id] = mine
         # the job as accepted: `_start` may end it before the caller has answered
-        accepted = replace(mine)
+        accepted = copy.copy(mine)
         threading.Thread(target=self._start, args=(mine, job), daemon=True,
                          name=f"bench-start-{mine.id}").start()
         return accepted
