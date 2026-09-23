@@ -30,7 +30,7 @@ class Job:
     name: str
     argv: list[str]
     cwd: str
-    state: str = "queued"          # queued | running | done | failed | stopped
+    state: str = "queued"          # queued | preparing | running | done | failed | stopped
     pid: int | None = None
     returncode: int | None = None
     submitted_at: float = 0.0
@@ -53,8 +53,8 @@ class JobRunner:
     """Runs jobs, ``slots`` at a time, and owns their processes."""
 
     def __init__(self, root: Path, files_root: Path | None = None, *,
-                 slots: int = 1, gate: "Callable[[], tuple[bool, str]] | None" = None,
-                 environment: "Environment | None" = None) -> None:
+                 slots: int = 1, gate: Callable[[], tuple[bool, str]] | None = None,
+                 environment: Environment | None = None) -> None:
         if slots < 1:
             raise DaemonError(f"slots must be at least 1, got {slots}")
         self.root = root
@@ -115,6 +115,18 @@ class JobRunner:
             return Path(job.log)
         return self.job_dir(job_id) / "job.log"
 
+    def hold(self, job: Job) -> Job:
+        """List a job some other process will own once it starts, as ``preparing``, so it
+        is polled and stopped like any other until `adopt` takes it in."""
+        job.submitted_at = job.submitted_at or time.time()
+        job.state = "preparing"
+        self.job_dir(job.id).mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            self.jobs[job.id] = job
+            self._adopted.add(job.id)
+        self.record(job)
+        return job
+
     def adopt(self, job: Job) -> Job:
         """Take in a job some other process owns -- a bench started detached, whose pid
         and log are known -- so it is listed, polled and stopped like one of ours.
@@ -168,6 +180,10 @@ class JobRunner:
             proc = self._running.get(job_id)
             adopted = job_id in self._adopted
         if proc is None:
+            if adopted and job.state == "preparing":
+                job.state = "stopped"
+                job.finished_at = time.time()
+                self.record(job)
             if adopted and job.state == "running" and job.pid:
                 # By pid, never by name: the bench turns the signal into an exit that
                 # takes its served model down, and nobody else's server with it. There

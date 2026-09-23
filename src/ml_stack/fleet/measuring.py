@@ -72,6 +72,9 @@ gone, and the log is the record: `ml-stack-bench` prints ``error:`` on every fai
 TAIL = 5
 """Lines of a peer's log `wait` prints when a job ends."""
 
+UNDER_WAY = ("preparing", "running")
+"""The states of a bench job that has not ended: installing or launching, then measuring."""
+
 
 def bench_home(traind_root: Path | str | None = None) -> Path:
     """Where ``ml-stack-bench`` keeps everything on this machine: the lock, the store, the
@@ -376,7 +379,7 @@ class BenchHost:
         """Whether something is measuring here: a job this host started that has not
         ended, or the lock held by anyone -- a run started at the keyboard counts."""
         with self._lock:
-            if any(j.state == "running" for j in self._mine.values()):
+            if any(j.state in UNDER_WAY for j in self._mine.values()):
                 return True
         return bool(self.lock_held())
 
@@ -407,10 +410,10 @@ class BenchHost:
                                     f"code files two measurements under one name -- update "
                                     f"one of them")
         with self._lock:
-            running = [j for j in self._mine.values() if j.state == "running"]
+            running = [j for j in self._mine.values() if j.state in UNDER_WAY]
         if running:
             raise Refused("lock", f"{self.name} is measuring already: {running[0].name} "
-                                  f"(job {running[0].id}, pid {running[0].pid})")
+                                  f"(job {running[0].id}, {running[0].state})")
         holder = self.lock_held()
         if holder:
             raise Refused("lock", f"{self.name} is measuring already: {self.home / LOCK} is "
@@ -423,21 +426,39 @@ class BenchHost:
                     raise Refused("room", f"{model} needs {human_bytes(need)} and {self.name} may "
                                           f"use {human_bytes(room)}")
         job_id = f"{int(time.time())}-{secrets.token_hex(3)}"
-        line = [*job.argv, *self._placed(job_id, job.files)]
-        try:
-            pid, log = self.launch(line, self.home, bench_python(self.runner.environment))
-        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
-            shutil.rmtree(self._given(job_id), ignore_errors=True)
-            raise Refused("launch", f"{self.name} could not start ml-stack-bench: {exc}") from exc
-        mine = DaemonJob(id=job_id, name=job.name,
-                         argv=["ml-stack-bench", *line], cwd=str(self.home), pid=pid,
-                         submitted_at=time.time(), log=str(log))
-        self.runner.adopt(mine)
+        prepared = self.home / "logs" / f"prepare-{job_id}.log"
+        prepared.parent.mkdir(parents=True, exist_ok=True)
+        prepared.write_text("preparing: finding the interpreter to run ml-stack-bench with\n",
+                            encoding="utf-8")
+        mine = DaemonJob(id=job_id, name=job.name, argv=["ml-stack-bench", *job.argv],
+                         cwd=str(self.home), submitted_at=time.time(), log=str(prepared))
+        self.runner.hold(mine)
         with self._lock:
             self._mine[mine.id] = mine
-        threading.Thread(target=self._watch, args=(mine,), daemon=True,
-                         name=f"bench-watch-{mine.id}").start()
+        threading.Thread(target=self._start, args=(mine, job), daemon=True,
+                         name=f"bench-start-{mine.id}").start()
         return mine
+
+    def _start(self, mine: DaemonJob, job: Job) -> None:
+        """Find the interpreter, write what the job shipped, launch the bench and watch
+        it; a job that cannot start ends ``failed`` with the reason at the end of its log."""
+        try:
+            python = bench_python(self.runner.environment)
+            line = [*job.argv, *self._placed(mine.id, job.files)]
+            if mine.state != "preparing":
+                shutil.rmtree(self._given(mine.id), ignore_errors=True)
+                return
+            pid, log = self.launch(line, self.home, python)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            shutil.rmtree(self._given(mine.id), ignore_errors=True)
+            with Path(mine.log).open("a", encoding="utf-8") as said:
+                said.write(f"error: {self.name} could not start ml-stack-bench: {exc}\n")
+            mine.state, mine.returncode, mine.finished_at = "failed", 1, time.time()
+            self.runner.record(mine)
+            return
+        mine.argv, mine.pid, mine.log = ["ml-stack-bench", *line], pid, str(log)
+        self.runner.adopt(mine)
+        self._watch(mine)
 
     def _given(self, job_id: str) -> Path:
         """Where the files job ``job_id`` shipped are written."""

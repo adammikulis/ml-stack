@@ -293,7 +293,7 @@ def test_a_daemon_refuses_a_mismatched_commit(boxes):
 def test_a_dirty_tree_on_one_side_is_still_the_same_commit(boxes):
     roomy, _ = boxes
     got = submit_bench(roomy.peer, _job("m.gguf", commit=f"{COMMIT} (dirty)"))
-    assert got["state"] == "running"
+    assert got["state"] == "preparing"
 
 
 def test_a_daemon_refuses_while_its_measuring_lock_is_held(boxes):
@@ -341,8 +341,9 @@ def test_dispatch_and_wait_see_done_and_the_job_is_listed_like_any_other(boxes):
     said: list[str] = []
 
     handles = dispatch(jobs, log=said.append)
-    assert [h.state for h in handles] == ["running", "running"]
+    assert [h.state for h in handles] == ["preparing", "preparing"], "accepted at once"
     assert all(h.id and h.log for h in handles)
+    assert _await(lambda: roomy.peer.job(handles[0].id)["state"] == "running")
     assert roomy.peer.health()["measuring"] is True
     assert roomy.peer.health()["busy"] is True, "a measurement holds the GPU"
     listed = {j["id"]: j for j in roomy.peer.jobs()}
@@ -354,7 +355,7 @@ def test_dispatch_and_wait_see_done_and_the_job_is_listed_like_any_other(boxes):
     assert [h.state for h in done] == ["done", "done"]
     assert roomy.peer.health()["measuring"] is False
     text = "\n".join(said)
-    assert "roomy: bench:sweep running (job" in text
+    assert "roomy: bench:sweep preparing (job" in text and "roomy: bench:sweep running\n" in text
     assert "roomy: bench:sweep done" in text and "small: bench:sweep done" in text
     assert "kept as bench:tried" in text, "the log tail is printed when a job ends"
     assert "kept as bench:tried" in roomy.peer.log(handles[0].id)
@@ -371,6 +372,7 @@ def test_a_job_ships_its_graph_and_questions_and_the_peer_reads_its_own_copy(box
 
     (handle,) = dispatch({roomy.peer: job}, log=lambda _l: None)
 
+    assert _await(lambda: roomy.host.launch.calls)
     (line,) = roomy.host.launch.calls
     given = roomy.home / "given" / handle.id
     assert line == ["sweep", "--short", "--serve", "big.gguf",
@@ -394,7 +396,7 @@ def test_a_peer_nobody_answers_for_is_said_and_the_rest_go_on(boxes, tmp_path):
     handles = dispatch({gone: _job("tiny.gguf"), roomy.peer: _job("big.gguf")},
                        log=said.append)
     assert handles[0].state == "refused" and handles[0].why.startswith("unreachable: ")
-    assert handles[1].state == "running"
+    assert handles[1].state == "preparing"
     wait(handles, poll_s=0.1, timeout_s=20, log=said.append)
     handles[0].id = "never-there"
     got = gather(handles, into=tmp_path / "home.ladybug", log=said.append)
@@ -421,9 +423,99 @@ def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkey
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     with pytest.raises(RuntimeError, match="What this machine can train with"):
         bench_python(None)
-    (refused,) = dispatch({roomy.peer: _job("big.gguf")}, log=lambda _l: None)
-    assert refused.state == "refused" and "launch" in refused.why
-    assert "Measuring" in refused.why
+    said: list[str] = []
+    (failed,) = wait(dispatch({roomy.peer: _job("big.gguf")}, log=said.append),
+                     poll_s=0.1, timeout_s=20, log=said.append)
+    assert failed.state == "failed"
+    assert "error: roomy could not start ml-stack-bench" in "\n".join(said)
+    assert "Measuring" in "\n".join(said)
+
+
+def _wheel(where: Path, name: str, version: str, extras: tuple[str, ...]) -> Path:
+    """A wheel holding nothing but its metadata, named ``name`` at ``version``."""
+    import base64
+    import hashlib
+    import zipfile
+
+    stem = name.replace("-", "_")
+    info = f"{stem}-{version}.dist-info"
+    files = {f"{info}/METADATA": "Metadata-Version: 2.1\n" f"Name: {name}\nVersion: {version}\n"
+             + "".join(f"Provides-Extra: {e}\n" for e in extras),
+             f"{info}/WHEEL": "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\n"
+                              "Tag: py3-none-any\n"}
+    record = "".join(
+        f"{path},sha256="
+        f"{base64.urlsafe_b64encode(hashlib.sha256(text.encode()).digest()).rstrip(b'=').decode()}"
+        f",{len(text.encode())}\n" for path, text in files.items()) + f"{info}/RECORD,,\n"
+    made = where / f"{stem}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(made, "w") as out:
+        for path, text in {**files, f"{info}/RECORD": record}.items():
+            out.writestr(path, text)
+    return made
+
+
+def _slow_index(wheel: Path, *, delay_s: float):
+    """A package index on loopback that serves ``wheel`` after ``delay_s``: (url, server)."""
+    from http.server import BaseHTTPRequestHandler
+
+    class Index(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.rstrip("/").endswith("/simple/ml-stack"):
+                body = f'<a href="/files/{wheel.name}">{wheel.name}</a>'.encode()
+                kind = "text/html"
+            elif self.path == f"/files/{wheel.name}":
+                time.sleep(delay_s)
+                body, kind = wheel.read_bytes(), "application/octet-stream"
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}/simple", server
+
+
+@pytest.mark.slow
+def test_a_frozen_peer_installs_the_bench_after_accepting_the_job(boxes, tmp_path, monkeypatch):
+    """The install runs after ``POST /bench`` has answered, so an install slower than the
+    dispatcher's peer timeout is ``preparing``, not an unreachable peer."""
+    from ml_stack.fleet.environment import Environment
+
+    roomy, _ = boxes
+    environment = Environment(tmp_path / "managed")
+    environment.create()
+    index, server = _slow_index(_wheel(tmp_path, "ml-stack", "0.0.1",
+                                       ("graph", "store", "serve", "hub")), delay_s=4.0)
+    monkeypatch.setenv("PIP_INDEX_URL", index)
+    monkeypatch.setenv("PIP_NO_CACHE_DIR", "1")
+    monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
+    roomy.runner.environment = environment
+    impatient = Peer(roomy.peer.base_url, roomy.peer.token, timeout=2.0)
+    said: list[str] = []
+    try:
+        began = time.monotonic()
+        (handle,) = dispatch({impatient: _job("big.gguf")}, log=said.append)
+        assert handle.state == "preparing" and time.monotonic() - began < 2.0
+        (done,) = wait([handle], poll_s=0.2, timeout_s=120, log=said.append)
+    finally:
+        server.shutdown()
+    assert done.state == "done", "\n".join(said)
+    assert time.monotonic() - began > 4.0, "the install was slower than the peer timeout"
+    assert roomy.host.launch.pythons == [environment.python]
+    assert environment.installed().get("ml-stack") == "0.0.1"
+    assert "unreachable" not in "\n".join(said)
+    assert [ln.split()[-1] for ln in said if "bench:sweep" in ln][-2:] == ["running", "done"]
 
 
 def test_an_export_reads_the_store_through_peer_runs(tmp_path):
@@ -490,7 +582,7 @@ def test_a_refusal_is_a_handle_not_an_exception(boxes):
                         roomy.peer: _job("big.gguf", needs={"big.gguf": 60 * G})},
                        log=said.append)
     assert handles[0].state == "refused" and handles[0].why.startswith("room:")
-    assert handles[1].state == "running"
+    assert handles[1].state == "preparing"
     assert "small: refused (room)" in "\n".join(said)
     wait(handles, poll_s=0.1, timeout_s=20, log=said.append)
 
@@ -709,7 +801,7 @@ def test_a_local_peer_goes_through_the_same_path(tmp_path):
     me.host.poll_s = 0.1
     try:
         handles = dispatch({me: _job("m.gguf")}, log=lambda _l: None)
-        assert handles[0].state == "running"
+        assert handles[0].state == "preparing"
         assert me.health()["measuring"] is True and me.health()["busy"] is True
         done = wait(handles, poll_s=0.1, timeout_s=20, log=lambda _l: None)
         assert done[0].state == "done"
