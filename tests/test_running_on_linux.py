@@ -9,6 +9,7 @@ runs the suite in a container, one matrix entry runs it in a single process, and
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -57,7 +58,9 @@ def test_the_runner_installs_what_ci_installs():
     for package in ("pytest-xdist", "numpy", "psutil", "pillow", "networkx", "gguf",
                     "safetensors"):
         assert package in text, f"the container does not install {package}, and CI does"
-    assert ".[store,hub,web,plot]" in text and ".[store,hub,web,plot]" in install
+    extras = re.search(r'-e "(\.\[[^\]]*\])"', install).group(1)
+    assert f"EXTRAS='{extras}'" in text, f"the container does not install {extras}, and CI does"
+    assert "spacy download en_core_web_sm" in text and "spacy download en_core_web_sm" in install
 
 
 def test_the_runner_says_which_command_told_it_docker_is_missing(tmp_path):
