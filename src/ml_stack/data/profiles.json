@@ -1,17 +1,25 @@
 [
   {
-    "model": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+    "model": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+    "workload": "ask",
     "serve": {
       "build": "",
-      "draft": "mtp-gemma-4-E2B-it.gguf",
+      "draft": "mtp-gemma-4-26B-A4B-it.gguf",
       "spec_type": "draft-mtp",
-      "spec_draft_max": 2,
-      "cache_type": "q8_0",
-      "reasoning_budget": null,
-      "mmproj": "auto",
+      "cache_type": "",
+      "draft_cache_type": "",
+      "reasoning_budget": 4096,
+      "mmproj": "",
       "extra_args": [],
+      "spec_p_min": null,
       "slot_context": 16384,
       "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "ask": {
       "tight": true,
@@ -22,11 +30,56 @@
       "summary": false,
       "rich": false,
       "terse": false,
+      "constrain_ids": false,
       "reach": null,
-      "rounds": null,
+      "rounds": null
+    },
+    "measured": {
+      "measured_at": "2026-09-01",
+      "label": "gemma-4-26B-A4-plain-rb4096",
+      "questions": 34,
+      "right": 0.3705803733216575,
+      "recall": 0.8166666666666667,
+      "precision": 0.3102655557003383,
+      "seconds_per_question": 25.364117647058823,
+      "host": "",
+      "note": "set from the fastest row whose F1 held: `gemma-4-26B-A4-plain-rb4096`, 34 question(s) at 37% F1, 25.4 s/question"
+    }
+  },
+  {
+    "model": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+    "workload": "ask",
+    "serve": {
+      "build": "",
+      "draft": "mtp-gemma-4-E2B-it.gguf",
+      "spec_type": "draft-mtp",
+      "cache_type": "q8_0",
+      "draft_cache_type": "",
+      "reasoning_budget": null,
+      "mmproj": "auto",
+      "extra_args": [],
+      "spec_p_min": null,
+      "slot_context": 16384,
+      "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": 2,
       "sampling": {
         "temperature": 0.0
       }
+    },
+    "ask": {
+      "tight": true,
+      "batch": false,
+      "single": false,
+      "few": false,
+      "kinds": false,
+      "summary": false,
+      "rich": false,
+      "terse": false,
+      "constrain_ids": false,
+      "reach": null,
+      "rounds": null
     },
     "measured": {
       "measured_at": "2026-09-02",
@@ -42,17 +95,25 @@
   },
   {
     "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+    "workload": "ask",
     "serve": {
       "build": "",
       "draft": "mtp-gemma-4-E4B-it.gguf",
       "spec_type": "draft-mtp",
-      "spec_draft_max": 2,
       "cache_type": "q8_0",
+      "draft_cache_type": "",
       "reasoning_budget": null,
       "mmproj": "auto",
       "extra_args": [],
+      "spec_p_min": null,
       "slot_context": 16384,
       "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": 2,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "ask": {
       "tight": true,
@@ -63,11 +124,9 @@
       "summary": false,
       "rich": false,
       "terse": false,
+      "constrain_ids": false,
       "reach": null,
-      "rounds": null,
-      "sampling": {
-        "temperature": 0.0
-      }
+      "rounds": null
     },
     "measured": {
       "measured_at": "2026-09-02",
@@ -83,17 +142,25 @@
   },
   {
     "model": "gpt-oss-120b-mxfp4-00001-of-00003.gguf",
+    "workload": "ask",
     "serve": {
       "build": "",
       "draft": "",
       "spec_type": "",
-      "spec_draft_max": null,
       "cache_type": "q8_0",
+      "draft_cache_type": "",
       "reasoning_budget": null,
       "mmproj": "",
       "extra_args": [],
+      "spec_p_min": null,
       "slot_context": 16384,
       "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "ask": {
       "tight": true,
@@ -104,11 +171,9 @@
       "summary": false,
       "rich": false,
       "terse": false,
+      "constrain_ids": false,
       "reach": null,
-      "rounds": null,
-      "sampling": {
-        "temperature": 0.0
-      }
+      "rounds": null
     },
     "measured": {
       "measured_at": "2026-09-02",
@@ -124,17 +189,25 @@
   },
   {
     "model": "gpt-oss-20b-MXFP4.gguf",
+    "workload": "ask",
     "serve": {
       "build": "",
       "draft": "",
       "spec_type": "",
-      "spec_draft_max": null,
       "cache_type": "q8_0",
+      "draft_cache_type": "",
       "reasoning_budget": null,
       "mmproj": "",
       "extra_args": [],
+      "spec_p_min": null,
       "slot_context": 16384,
       "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "ask": {
       "tight": true,
@@ -145,11 +218,9 @@
       "summary": false,
       "rich": false,
       "terse": false,
+      "constrain_ids": false,
       "reach": null,
-      "rounds": null,
-      "sampling": {
-        "temperature": 0.0
-      }
+      "rounds": null
     },
     "measured": {
       "measured_at": "2026-09-02",
@@ -164,13 +235,61 @@
     }
   },
   {
+    "model": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
+    "workload": "ask",
+    "serve": {
+      "build": "",
+      "draft": "",
+      "spec_type": "",
+      "cache_type": "",
+      "draft_cache_type": "",
+      "reasoning_budget": null,
+      "mmproj": "",
+      "extra_args": [],
+      "spec_p_min": null,
+      "slot_context": 16384,
+      "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": null,
+      "sampling": {
+        "temperature": 0.0
+      }
+    },
+    "ask": {
+      "tight": true,
+      "batch": false,
+      "single": false,
+      "few": false,
+      "kinds": false,
+      "summary": false,
+      "rich": false,
+      "terse": false,
+      "constrain_ids": false,
+      "reach": null,
+      "rounds": null
+    },
+    "measured": {
+      "measured_at": "2026-09-01",
+      "label": "flashnext-plain",
+      "questions": 34,
+      "right": 0.5861917494270434,
+      "recall": 0.842156862745098,
+      "precision": 0.4969887955182073,
+      "seconds_per_question": 40.002941176470586,
+      "host": "",
+      "note": "set from the fastest row whose F1 held: `flashnext-plain`, 34 question(s) at 59% F1, 40.0 s/question"
+    }
+  },
+  {
     "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+    "workload": "ask",
     "serve": {
       "build": "unsloth",
       "draft": "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
       "spec_type": "draft-mtp",
-      "spec_draft_max": 4,
       "cache_type": "q8_0",
+      "draft_cache_type": "",
       "reasoning_budget": 0,
       "mmproj": "auto",
       "extra_args": [
@@ -179,8 +298,15 @@
         "--spec-draft-p-min",
         "0.5"
       ],
+      "spec_p_min": null,
       "slot_context": 16384,
       "parallel": 2
+    },
+    "request": {
+      "spec_draft_max": 4,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "ask": {
       "tight": true,
@@ -191,11 +317,9 @@
       "summary": true,
       "rich": false,
       "terse": false,
+      "constrain_ids": false,
       "reach": null,
-      "rounds": null,
-      "sampling": {
-        "temperature": 0.0
-      }
+      "rounds": null
     },
     "measured": {
       "measured_at": "2026-09-02",

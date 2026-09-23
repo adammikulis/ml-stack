@@ -29,4 +29,4 @@ sweep ${BEST} --plain-only --batch --kinds --summary --label-suffix=-all
 
 # The conclusions, written down where they are read from
 show --rank docs/model-ranking.md
-report --since 2026-09-02T09 --md docs/report-2026-09-02.md
+report --md report.md
