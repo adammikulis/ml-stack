@@ -3393,9 +3393,10 @@ def test_fleet_jobs_are_the_same_line_with_one_serve_each():
             "--no-queue", "--sample", "5"]
     jobs = fleet_jobs(argv, ["a.gguf", "b.gguf"], commit="0f1e2d3 (dirty)")
     assert [j["argv"] for j in jobs] == [
-        ["sweep", "--also", "terse", "--kept", "/k", "--sample", "5", "--serve", "a.gguf",
+        ["sweep", "--also", "terse", "--sample", "5", "--serve", "a.gguf",
          "--serve-draft", "ha.gguf"],
-        ["sweep", "--also", "terse", "--kept", "/k", "--sample", "5", "--serve", "b.gguf"]]
+        ["sweep", "--also", "terse", "--sample", "5", "--serve", "b.gguf"]], \
+        "--kept never rides to a peer: it keeps its own runs in its own store"
     assert [(j["model"], j["commit"], j["dirty"]) for j in jobs] == \
         [("a.gguf", "0f1e2d3", True), ("b.gguf", "0f1e2d3", True)]
     assert fleet_jobs(["sweep", "--peers=quill", "--serve=x.gguf"], ["x.gguf"],
@@ -3404,86 +3405,8 @@ def test_fleet_jobs_are_the_same_line_with_one_serve_each():
                                                "commit": "abc1234", "dirty": False}
 
 
-def _fake_fleet(monkeypatch, *, plan):
-    """`ml_stack.fleet.sweeps` with the four functions faked, recording every call; `gather`
-    keeps one invented run in the store it is told to."""
-    import sys
-    import types
-
-    calls = {}
-    fake = types.ModuleType("ml_stack.fleet.sweeps")
-
-    def planning(models, peers):
-        calls["plan"] = (list(models), peers)
-        return plan
-
-    def dispatching(jobs):
-        calls["dispatch"] = [dict(j) for j in jobs]
-        return [f"handle:{j['model']}" for j in jobs]
-
-    def waiting(handles):
-        calls["wait"] = list(handles)
-
-    def gathering(handles, *, into):
-        calls["gather"] = (list(handles), into)
-        _kept_run(into, "a-plain", model="a.gguf", questions=20, hits=10, seconds=100.0,
-                  host="quill")
-
-    fake.plan, fake.dispatch, fake.wait, fake.gather = planning, dispatching, waiting, gathering
-    monkeypatch.setitem(sys.modules, "ml_stack.fleet.sweeps", fake)
-    return calls
-
-
-def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeypatch, capsys):
-    import ml_stack.bench as bench
-    from ml_stack.bench import ops
-
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(ops, "_commit", lambda root=None: "0f1e2d3")
-    calls = _fake_fleet(monkeypatch, plan=[{"model": "a.gguf", "peer": "quill", "commit": "0f1e2d3"},
-                                           {"model": "b.gguf", "peer": "lantern"}])
-    kept = tmp_path / "runs.ladybug"
-    argv = ["sweep", "--fleet", "--peers", "quill,lantern", "--serve", "a.gguf", "--serve",
-            "b.gguf", "--plain-only", "--kept", str(kept), "--store", ""]
-    assert bench._main(argv) == 0
-    said = capsys.readouterr().out
-    assert calls["plan"] == (["a.gguf", "b.gguf"], ["quill", "lantern"])
-    assert [j["argv"] for j in calls["dispatch"]] == [
-        ["sweep", "--plain-only", "--kept", str(kept), "--store", "", "--serve", "a.gguf"],
-        ["sweep", "--plain-only", "--kept", str(kept), "--store", "", "--serve", "b.gguf"]]
-    assert [(j["peer"], j["commit"]) for j in calls["dispatch"]] == \
-        [("quill", "0f1e2d3"), ("lantern", "0f1e2d3")]
-    assert calls["wait"] == ["handle:a.gguf", "handle:b.gguf"]
-    assert calls["gather"] == (["handle:a.gguf", "handle:b.gguf"], str(kept))
-    assert "plan: 2 job(s) on commit 0f1e2d3 over quill, lantern" in said
-    assert "  a.gguf -> quill (0f1e2d3)" in said and "  b.gguf -> lantern" in said
-    assert said.index("plan:") < said.index("a-plain"), "the plan first, then the table"
-    assert [r["label"] for r in runs(kept)] == ["a-plain"], "gathered into --kept"
-
-
-def test_sweep_fleet_refuses_a_peer_on_another_commit_before_dispatching(tmp_path, monkeypatch,
-                                                                         capsys):
-    import ml_stack.bench as bench
-    from ml_stack.bench import ops
-
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(ops, "_commit", lambda root=None: "0f1e2d3 (dirty)")
-    calls = _fake_fleet(monkeypatch, plan={"a.gguf": "quill", "b.gguf": "lantern"})
-    kept = tmp_path / "runs.ladybug"
-    assert bench._main(["sweep", "--fleet", "--serve", "a.gguf", "--serve", "b.gguf",
-                        "--kept", str(kept)]) == 0, "a plan that names no commit is trusted"
-    assert [j["peer"] for j in calls["dispatch"]] == ["quill", "lantern"]
-    capsys.readouterr()
-
-    calls = _fake_fleet(monkeypatch, plan=[{"model": "a.gguf", "peer": "quill",
-                                            "commit": "deadbee"}])
-    assert bench._main(["sweep", "--fleet", "--serve", "a.gguf", "--kept", str(kept)]) == 2
-    said = capsys.readouterr()
-    assert "quill is on commit deadbee, this checkout is on 0f1e2d3 (dirty)" in said.err
-    assert "dispatch" not in calls and "gather" not in calls
-    assert bench._main(["sweep", "--fleet", "--on", "x=http://127.0.0.1:1",
-                        "--kept", str(kept)]) == 2
-    assert "pass --serve MODEL" in capsys.readouterr().err
+# The rest of `sweep --fleet` -- discovering real peers, planning and dispatching real jobs
+# over them -- is in tests/test_fleet_bench.py, beside the real daemons it needs.
 
 
 # -- the prompt cache, per turn --------------------------------------------------------------

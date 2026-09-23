@@ -625,3 +625,200 @@ def test_the_bench_home_moves_with_the_environment(tmp_path):
                            "from ml_stack.bench import keep; print(keep.home_dir())"],
                           capture_output=True, text=True, env=env, check=True).stdout.strip()
     assert Path(said) == tmp_path / "elsewhere"
+
+
+# -- ops.fleet_planned / fleet_measure: the ml-stack-bench sweep --fleet side -----------
+#
+# `bench/ops.py` is the glue between `ml-stack-bench sweep --fleet` and the fleet
+# functions above: it has to turn `--peers` names (or none) into the real peers `plan`
+# needs, and the placement `plan` returns into the ``{peer: Job}`` mapping `dispatch`
+# needs. Discovery itself (real UDP, a real cluster key) is `tests/test_fleet_discovery.py`'s
+# job; here `ml_stack.fleet.join.peers` and `ml_stack.fleet.pausing.peer_clients` are stood
+# in for, so what is real is exactly what was broken: `plan`, `jobs_from`, `dispatch`,
+# `wait` and `gather`, over the same two daemons as the rest of this module.
+
+def _discovery_stub(monkeypatch, clients):
+    """`ml_stack.fleet.join.peers` and `ml_stack.fleet.pausing.peer_clients` answering with
+    ``clients`` (``{name: Peer}``), so `ops._discovered` runs for real over them."""
+    import ml_stack.fleet.join as join_module
+    import ml_stack.fleet.pausing as pausing_module
+
+    monkeypatch.setattr(join_module, "peers", lambda **kw: [{"name": n} for n in clients])
+    monkeypatch.setattr(pausing_module, "peer_clients", lambda rows, **kw: dict(clients))
+
+
+def test_fleet_planned_and_measure_spread_real_jobs_over_discovered_peers(boxes, tmp_path,
+                                                                          monkeypatch):
+    """The bug: `fleet_planned` handed `sweeps.plan` the ``--peers`` names as strings (or
+    None), and `fleet_measure` handed `sweeps.dispatch` a list where it takes
+    ``{peer: Job}``. Both are real peers and a real mapping here."""
+    import ml_stack.fleet.sweeps as sweeps_module
+    from ml_stack.bench import ops, runs
+
+    roomy, small = boxes
+    monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
+    _discovery_stub(monkeypatch, {"roomy": roomy.peer, "small": small.peer})
+    real_wait = sweeps_module.wait
+    monkeypatch.setattr(sweeps_module, "wait",
+                        lambda handles: real_wait(handles, poll_s=0.1, timeout_s=20))
+
+    argv = ["sweep", "--fleet", "--plain-only", "--kept", "unused", "--serve", "big.gguf",
+            "--serve", "tiny.gguf"]
+    planned = ops.fleet_planned(argv, ["big.gguf", "tiny.gguf"])
+
+    by_peer = {roomy.peer: "roomy", small.peer: "small"}
+    named = {by_peer[peer]: job for peer, job in planned.jobs.items()}
+    assert set(named) == {"roomy", "small"}, "one real Job per real peer, not a list"
+    assert named["roomy"].argv == ("sweep", "--plain-only", "--serve", "big.gguf"), \
+        "--kept never rides to a peer: it keeps its own runs in its own store"
+    assert named["small"].argv == ("sweep", "--plain-only", "--serve", "tiny.gguf")
+    said = "\n".join(planned.lines)
+    assert "plan: 2 model(s) on commit ab12cd3 over roomy, small" in said
+    assert "  big.gguf -> roomy" in said and "  tiny.gguf -> small" in said
+
+    _kept(roomy.store, "big-plain", _later(30))
+    _kept(small.store, "tiny-plain", _later(30))
+    into = tmp_path / "home.ladybug"
+
+    ops.fleet_measure(planned.jobs, into=into)
+
+    assert sorted(r["label"] for r in runs(into)) == ["big-plain", "tiny-plain"]
+
+
+def test_fleet_planned_refuses_before_dispatch_when_the_assigned_peer_is_on_another_commit(
+        boxes, monkeypatch):
+    from ml_stack.bench import ops
+    from ml_stack.bench.ops import Refused as OpsRefused
+
+    roomy, small = boxes
+    monkeypatch.setattr(ops, "_commit", lambda root=None: "ffffff (dirty)")
+    _discovery_stub(monkeypatch, {"roomy": roomy.peer, "small": small.peer})
+
+    with pytest.raises(OpsRefused) as caught:
+        ops.fleet_planned(["sweep", "--fleet", "--serve", "m.gguf"], ["m.gguf"])
+    assert f"roomy is on commit {COMMIT}, this checkout is on ffffff (dirty)" in caught.value.error
+    assert any(line.startswith("plan:") for line in caught.value.said)
+
+
+def test_fleet_planned_refuses_a_named_peer_discovery_did_not_find(boxes, monkeypatch):
+    from ml_stack.bench import ops
+    from ml_stack.bench.ops import Refused as OpsRefused
+
+    roomy, small = boxes
+    monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
+    _discovery_stub(monkeypatch, {"roomy": roomy.peer, "small": small.peer})
+
+    with pytest.raises(OpsRefused, match="lantern"):
+        ops.fleet_planned(["sweep", "--fleet", "--serve", "m.gguf"], ["m.gguf"],
+                          peers=["lantern"])
+
+
+def test_fleet_planned_refuses_when_discovery_finds_nobody(monkeypatch):
+    from ml_stack.bench import ops
+    from ml_stack.bench.ops import Refused as OpsRefused
+
+    monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
+    _discovery_stub(monkeypatch, {})
+
+    with pytest.raises(OpsRefused, match="no peer answered discovery"):
+        ops.fleet_planned(["sweep", "--fleet", "--serve", "m.gguf"], ["m.gguf"])
+
+
+# -- the whole thing, with nothing stood in but the model -------------------------------
+
+_FLEET_LLAMA_META = {
+    "general.architecture": "llama",
+    "llama.block_count": 2,
+    "llama.attention.head_count_kv": 2,
+    "llama.attention.key_length": 8,
+}
+
+
+@pytest.mark.slow
+def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_path, monkeypatch):
+    """Nothing here is mocked: a real ``ml-stack-fleet`` daemon booted as a subprocess, found
+    by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench``, on a
+    llama-server-shaped process instead of a GPU."""
+    import os
+    import socket
+
+    from conftest import write_gguf
+
+    import ml_stack.bench as bench
+    from ml_stack.bench import runs
+    from ml_stack.fleet.discovery import create_cluster_key, derive_token, load_cluster_key
+    from ml_stack.fleet.remote import Peer, PeerError
+    from ml_stack.testing.fakes import fake_llama_binary
+
+    def _free_udp() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
+    def _free_tcp() -> int:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
+    repo_src = str(Path(__file__).resolve().parents[1] / "src")
+    keyfile = tmp_path / "cluster.key"
+    create_cluster_key(keyfile)
+    disco_port = _free_udp()
+    token = derive_token(load_cluster_key(keyfile))
+
+    def boot(name: str):
+        root = tmp_path / name
+        http_port = _free_tcp()
+        log = tmp_path / f"{name}.out"
+        fh = log.open("wb")
+        env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
+              "PYTHONPATH": repo_src, "PYTHONUNBUFFERED": "1"}
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "ml_stack.fleet.daemon", "--root", str(root / "traind"),
+             "--bench-home", str(root / "bench"), "--host", "127.0.0.1",
+             "--port", str(http_port), "--name", name, "--cluster-key", str(keyfile)],
+            env=env, stdout=fh, stderr=subprocess.STDOUT)
+        driver = Peer(f"http://127.0.0.1:{http_port}", token)
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                if driver.health().get("ok"):
+                    return proc, log, fh
+            except PeerError:
+                if proc.poll() is not None:
+                    pytest.fail(f"{name} traind died:\n{log.read_text(errors='replace')}")
+            time.sleep(0.1)
+        proc.kill()
+        pytest.fail(f"{name} traind never answered /health:\n{log.read_text(errors='replace')}")
+
+    booted = [boot("quill"), boot("lantern")]
+    try:
+        monkeypatch.setenv("ML_STACK_CLUSTER_KEY", str(keyfile))
+        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(disco_port))
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "dispatcher-home"))
+
+        gguf = write_gguf(tmp_path / "tiny.gguf", _FLEET_LLAMA_META)
+        binary = fake_llama_binary(tmp_path)
+        kept = tmp_path / "runs.ladybug"
+
+        # the graph and questions are left at their defaults -- the community that ships
+        # with the package -- because a run over any other graph is never exported by a
+        # peer (`score._over_invented`): gathering it home would need that gate lifted,
+        # which is not what this bug is about.
+        argv = ["sweep", "--fleet", "--serve", str(gguf), "--binary", str(binary),
+                "--store", "", "--sample", "2", "--plain-only", "--no-smoke", "--no-profile",
+                "--kept", str(kept), "--serve-port", str(_free_tcp())]
+        code = bench._main(argv)
+        assert code == 0, "\n".join(p[1].read_text(errors="replace") for p in booted)
+
+        kept_runs = runs(kept)
+        assert kept_runs, "the fleet measured nothing"
+        assert kept_runs[0]["server"]["host"] in ("quill", "lantern")
+    finally:
+        for proc, _log, fh in booted:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            fh.close()

@@ -224,13 +224,6 @@ across `src/`.
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
   releases or main on its own (`fleet status` shows COMMIT/UPDATES).
-- [ ] **`sweep --fleet` cannot reach `fleet/sweeps.py` as `bench/ops.py` calls it.**
-  `fleet_planned` hands `sweeps.plan` the `--peers` names as strings, or `None` when none
-  are given, where `plan` iterates peers and asks each for `health()`; `fleet_measure`
-  hands `sweeps.dispatch` a list of job dicts where it takes `{peer: Job}`. No test drives
-  `bench/run.py`'s `--fleet` branch. It needs the peers found by discovery
-  (`join.peers` rows into `Peer`s, the way `pausing.peer_clients` makes them), `jobs_from`
-  between `plan` and `dispatch`, and a test that runs it against two loopback daemons.
 
 ### The window
 

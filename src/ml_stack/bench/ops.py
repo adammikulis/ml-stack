@@ -57,10 +57,10 @@ class Kept:
 
 @dataclass(frozen=True, slots=True)
 class Fleeted:
-    """The jobs a ``sweep --fleet`` would dispatch, and the plan lines that say where each
-    one goes."""
+    """The jobs a ``sweep --fleet`` would dispatch, one `fleet.measuring.Job` per peer, and
+    the plan lines that say where each model goes."""
 
-    jobs: list[dict[str, Any]] = field(default_factory=list)
+    jobs: dict[Any, Any] = field(default_factory=dict)
     lines: list[str] = field(default_factory=list)
 
 
@@ -219,9 +219,32 @@ def serving_fields(args: Any) -> dict[str, Any]:
 
 
 # The flags `sweep --fleet` takes off the line before handing it to a peer: what is about
-# this machine's session, not about the measuring.
+# this machine's session, not about the measuring -- a peer keeps its own runs in its own
+# store, under its own detached process, so `--kept`, like `--detach` and `--no-queue`,
+# is never on a job's argv (`fleet.measuring.Job` refuses it).
 _NOT_FOR_A_PEER = ("--fleet", "--detach", "--no-queue")
-_NOT_FOR_A_PEER_VALUED = ("--peers", "--serve", "--serve-draft")
+_NOT_FOR_A_PEER_VALUED = ("--peers", "--serve", "--serve-draft", "--kept")
+
+
+def _stripped(argv: Sequence[str]) -> tuple[list[str], list[str]]:
+    """``argv`` minus what a peer never sees -- ``--fleet``, ``--detach``, ``--no-queue``,
+    every ``--peers``, ``--serve`` and ``--serve-draft`` -- and the ``--serve-draft``
+    values it carried, in the order they were given."""
+    rest: list[str] = []
+    skip = False
+    for word in argv:
+        if skip:
+            skip = False
+            continue
+        if word in _NOT_FOR_A_PEER:
+            continue
+        flag, sep, _value = word.partition("=")
+        if flag in _NOT_FOR_A_PEER_VALUED:
+            if not sep:
+                skip = True
+            continue
+        rest.append(word)
+    return rest, list(_values_of(argv, "--serve-draft"))
 
 
 def fleet_jobs(argv: Sequence[str], models: Sequence[str], *, commit: str) -> list[dict[str, Any]]:
@@ -233,22 +256,7 @@ def fleet_jobs(argv: Sequence[str], models: Sequence[str], *, commit: str) -> li
     the short sha, and ``dirty`` says whether the tree had changes: a peer on another
     commit is measuring other code, and both ends refuse it.
     """
-    rest: list[str] = []
-    heads: list[str] = []
-    skip = False
-    for word in argv:
-        if skip:
-            skip = False
-            continue
-        if word in _NOT_FOR_A_PEER:
-            continue
-        flag, sep, value = word.partition("=")
-        if flag in _NOT_FOR_A_PEER_VALUED:
-            if not sep:
-                skip = True
-            continue
-        rest.append(word)
-    heads = list(_values_of(argv, "--serve-draft"))
+    rest, heads = _stripped(argv)
     sha, _, dirtiness = commit.partition(" ")
     out = []
     for n, model in enumerate(models):
@@ -271,24 +279,43 @@ def _values_of(argv: Sequence[str], flag: str) -> list[str]:
     return out
 
 
-def _planned(plan: Any) -> list[dict[str, Any]]:
-    """The fleet's plan as one record per job, whatever shape `plan` gave it: a list of
-    mappings as they are, a mapping of model to peer as ``{"model", "peer"}`` records."""
-    if isinstance(plan, Mapping):
-        return [{"model": str(k), "peer": v} for k, v in plan.items()]
-    return [dict(one) if isinstance(one, Mapping) else {"model": str(one)}
-            for one in (plan or ())]
+def _discovered(peers: Sequence[str]) -> dict[str, Any]:
+    """Every peer on this machine's cluster(s), by name, narrowed to ``peers`` when named.
+
+    `Refused` when a name in ``peers`` answered to no daemon, or when discovery found
+    nobody at all.
+    """
+    join = importlib.import_module("ml_stack.fleet.join")
+    pausing = importlib.import_module("ml_stack.fleet.pausing")
+
+    clients = pausing.peer_clients(join.peers())
+    if peers:
+        wanted = {str(p) for p in peers}
+        named = {name: client for name, client in clients.items() if name in wanted}
+        absent = sorted(wanted - set(named))
+        if absent:
+            raise Refused(f"error: --peers named {', '.join(absent)}, which no daemon on "
+                          f"this cluster answered to"
+                          + (f" (found: {', '.join(sorted(clients))})" if clients else ""))
+        clients = named
+    if not clients:
+        raise Refused("error: no peer answered discovery; is another machine running "
+                      "'ml-stack-fleet join'?")
+    return clients
 
 
 def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
                   peers: Sequence[str] = ()) -> Fleeted:
-    """One job per model over the fleet, and the plan lines that say where each goes.
+    """The fleet's plan for ``models``, and the jobs it dispatches.
 
-    The fleet side is `ml_stack.fleet.sweeps` -- `plan(models, peers)`, `dispatch(jobs)`,
-    `wait(handles)`, `gather(handles, into=store)` -- reached by name here so this
-    machine's sweep needs none of it. A peer the plan says is on another commit raises
-    `Refused` carrying the plan so far: the daemon refuses too, but finding out from four
-    peers' logs is later than from one line.
+    Peers are this machine's own discovery (`ml_stack.fleet.join.peers`, turned into
+    `remote.Peer` clients the way `ml_stack.fleet.pausing.peer_clients` does), narrowed to
+    ``peers`` by name when given. `ml_stack.fleet.sweeps.plan` then places each model,
+    largest first, and `ml_stack.fleet.measuring.jobs_from` turns the placement into one
+    `Job` per peer -- reached by name, both of them, so this machine's sweep needs neither
+    module until a fleet run actually asks for one. A peer already on another commit is
+    refused before anything is dispatched: the daemon refuses too, but finding out from
+    four peers' logs is later than from one line.
     """
     if not models:
         raise Refused("error: --fleet spreads --serve models over the fleet; pass --serve "
@@ -303,31 +330,39 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
     if missing:
         raise Refused(f"error: ml_stack.fleet.sweeps has no {', '.join(missing)}; the fleet "
                       f"side of the bench is not in this build")
-    jobs = fleet_jobs(argv, models, commit=mine)
-    plan = _planned(fleet.plan(models, list(peers) or None))
-    sha = mine.partition(" ")[0]
-    lines = [f"plan: {len(jobs)} job(s) on commit {mine}"
-             + (f" over {', '.join(peers)}" if peers else "")]
-    for one in plan:
-        theirs = str(one.get("commit") or "")
-        lines.append(f"  {one.get('model', '?')} -> "
-                     f"{one.get('peer') or one.get('host') or '?'}"
-                     + (f" ({theirs})" if theirs else ""))
-        if theirs and theirs.partition(" ")[0] != sha:
-            raise Refused(f"error: {one.get('peer') or one.get('host') or 'a peer'} is on "
-                          f"commit {theirs}, this checkout is on {mine}; a peer measuring "
-                          f"other code is refused, and its daemon would refuse too", *lines)
-    where = {str(one.get("model")): one for one in plan if one.get("model")}
-    for job in jobs:
-        peer = (where.get(job["model"]) or {}).get("peer")
-        if peer is not None:
-            job["peer"] = peer
+    measuring = importlib.import_module("ml_stack.fleet.measuring")
+
+    clients = _discovered(peers)
+    ordered = sorted(clients.items())
+    by_peer = {peer: name for name, peer in ordered}
+    planned = fleet.plan(models, [client for _, client in ordered])
+    lines = [f"plan: {len(models)} model(s) on commit {mine} over "
+             + ", ".join(name for name, _ in ordered)]
+    mismatched: list[str] = []
+    for peer, assigned in planned.items():
+        if not assigned:
+            continue
+        name = by_peer.get(peer, getattr(peer, "name", str(peer)))
+        theirs = str(fleet._health_of(peer).get("bench_commit") or "")
+        for model in assigned:
+            lines.append(f"  {model} -> {name}" + (f" ({theirs})" if theirs else ""))
+        if theirs and not measuring.same_commit(mine, theirs):
+            mismatched.append(f"{name} is on commit {theirs}, this checkout is on {mine}")
+    for model, why in planned.unplaced:
+        lines.append(f"  {model} -> unplaced: {why}")
+    if mismatched:
+        raise Refused("error: " + "; ".join(mismatched) + "; a peer measuring other code "
+                      "is refused, and its daemon would refuse too", *lines)
+    rest, heads = _stripped(argv)
+    drafts = {model: heads[n] for n, model in enumerate(models) if n < len(heads)}
+    jobs = measuring.jobs_from(planned, rest, commit=mine, drafts=drafts)
     return Fleeted(jobs=jobs, lines=lines)
 
 
-def fleet_measure(jobs: Sequence[Mapping[str, Any]], *, into: str | Path) -> None:
-    """Dispatch ``jobs`` over the fleet, wait for them, and gather their runs into ``into``."""
+def fleet_measure(jobs: Mapping[Any, Any], *, into: str | Path) -> None:
+    """Dispatch ``jobs`` (one per peer) over the fleet, wait for them, and gather their
+    runs into ``into``."""
     fleet = importlib.import_module("ml_stack.fleet.sweeps")
-    handles = fleet.dispatch([dict(job) for job in jobs])
+    handles = fleet.dispatch(dict(jobs))
     fleet.wait(handles)
     fleet.gather(handles, into=into)
