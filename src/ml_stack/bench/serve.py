@@ -152,16 +152,16 @@ def _with_projector(config: Any) -> Any:
 
 def _manager(config: Any, binary: str) -> tuple[Any, str]:
     """The manager for ``binary`` or the profile's named build (None for the default), and
-    the build it runs."""
+    the build it runs. Raises `NotLoaded` when the named build is not on this machine."""
     if binary:
         return ServerManager(LlamaServerBackend(binary=binary)), binary
-    if config.serving.build:
-        try:
+    try:
+        if config.serving.build:
             manager = config.serving.manager()
             return manager, str(manager.backend.binary)
-        except BinaryNotFound as exc:
-            say(f"    the profile names build {config.serving.build!r}, not found here: {exc}")
-    return None, str(binaries.find_binary() or "llama-server")
+        return None, str(binaries.find_binary() or "llama-server")
+    except BinaryNotFound as exc:
+        raise NotLoaded(str(exc)) from exc
 
 
 def _preflighted(spec: Any, build: str) -> Any:

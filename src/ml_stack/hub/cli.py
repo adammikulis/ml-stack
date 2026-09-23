@@ -19,7 +19,7 @@ def _head_lines(repo: str) -> list[str]:
     This listing never serves anything, so the head is named even when every build here
     would withhold it -- ``borrows=True`` -- and the per-build lines say who would.
     """
-    from ml_stack.serve.binary import find_binary, named_builds
+    from ml_stack.serve.binary import BinaryNotFound, find_binary, named_builds
 
     shown = hub.choose_head(hub.ref(repo), binary=None, borrows=True)
     if not shown.path:
@@ -27,7 +27,11 @@ def _head_lines(repo: str) -> list[str]:
     out = [f"draft head shipped with it: {shown.path}"]
     if shown.note:
         out.append(f"  {shown.note}")
-    builds: list[tuple[str, Path | None]] = [("this build", find_binary())]
+    builds: list[tuple[str, Path | None]] = []
+    try:
+        builds.append(("this build", find_binary()))
+    except BinaryNotFound as exc:
+        out.append(f"  this build: {exc}")
     builds += [(f"--build {name}", binary) for name, binary in named_builds()]
     for label, binary in builds:
         one = hub.choose_head(hub.ref(repo), binary=binary)

@@ -4717,3 +4717,16 @@ def test_a_record_beats_the_lock_it_was_written_beside(tmp_path, monkeypatch):
     (tmp_path / "measuring.json").write_text(json.dumps(
         {"pid": os.getpid(), "argv": ["sweep"], "ended": True}))
     assert measuring() is None, "its own lock is not another measurement"
+
+
+def test_a_profile_naming_a_build_that_is_not_here_is_not_served(tmp_path, monkeypatch):
+    import ml_stack.serve
+    from ml_stack.bench.serve import NotLoaded, up
+    from ml_stack.serve.serving import Config, Serving
+
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+    monkeypatch.setattr(ml_stack.serve, "serve", lambda *a, **k: pytest.fail("served"))
+    _preflight_ok(monkeypatch)
+    with pytest.raises(NotLoaded, match="'gone'"), up(
+            Config(serving=Serving(model="tiny.gguf", build="gone"))):
+        pytest.fail("a record naming build 'gone' was about to run on another binary")

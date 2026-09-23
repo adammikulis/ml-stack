@@ -8,7 +8,7 @@ from pathlib import Path
 
 import ml_stack.setup as setup_module
 from ml_stack.log import say, warn
-from ml_stack.serve.binary import find_binary
+from ml_stack.serve.binary import BinaryNotFound, find_binary
 from ml_stack.serve.build_paths import builds_dir, current_link, named_dir, src_dir
 from ml_stack.serve.build_platform import arches_from_source, server_name, version_of
 from ml_stack.serve.build_verify import point_current
@@ -43,7 +43,11 @@ def report(args) -> int:
     if link.is_symlink() or link.exists():
         target = link / server_name()
     else:
-        found = find_binary("llama-server")
+        try:
+            found = find_binary("llama-server")
+        except BinaryNotFound as exc:
+            say(str(exc))
+            return 1
         target = Path(found) if found else None
     if target is None or not target.is_file():
         say("no llama-server build found")

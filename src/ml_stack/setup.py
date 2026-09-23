@@ -111,9 +111,14 @@ def look() -> list[Finding]:
             fix="ml-stack-serve memory --persist",
             root=False))
 
-    from ml_stack.serve.binary import find_binary
+    from ml_stack.serve.binary import BinaryNotFound, find_binary
 
-    binary = str(find_binary("llama-server") or "")
+    try:
+        binary = str(find_binary("llama-server") or "")
+    except BinaryNotFound as exc:
+        said, _, how = str(exc).partition("\n")
+        out.append(Finding(name="llama-server", good=False, said=said, note=how))
+        binary = ""
     if binary:
         arches = _arches(binary)
         out.append(Finding(

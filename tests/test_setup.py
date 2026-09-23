@@ -599,3 +599,12 @@ def test_fleet_findings_see_a_real_booted_daemon(tmp_path):
     assert found["fleet: seen"].said == "sees itself among 1 peer(s)"
     assert found["ports"].good
     assert "this machine's own daemon" in found["ports"].said
+
+
+def test_a_named_build_that_is_not_here_is_a_finding(monkeypatch, tmp_path):
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+    monkeypatch.setenv("MLSTACK_LLAMA_BUILD", "gone")
+    found = [f for f in look() if f.name == "llama-server"]
+    assert len(found) == 1 and not found[0].good
+    assert "'gone'" in found[0].said
+    assert "--name gone" in found[0].note

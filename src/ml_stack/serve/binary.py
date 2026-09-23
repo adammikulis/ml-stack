@@ -59,13 +59,14 @@ def find_binary(
     vendor_dir: Path | None = None,
     build: str | None = None,
 ) -> Path | None:
-    """Locate a llama.cpp binary. ``None`` if it is nowhere to be found.
+    """Locate a llama.cpp binary. ``None`` if it is nowhere to be found; raises
+    `BinaryNotFound` when the build it names is not installed.
 
     ``build`` (or, absent that, ``$MLSTACK_LLAMA_BUILD``) names a build ``ml-stack-serve
     build --name NAME`` made and kept beside ``current`` rather than replacing it -- a fork
     whose fixes have not reached master. It outranks ``current`` but never an explicit path
     or ``$LLAMA_CPP_SERVER``, so a caller that names a build gets it even while ``current``
-    stays mainline.
+    stays mainline, and never another binary in its place.
     """
     candidates = _name_variants(name)
 
@@ -94,7 +95,8 @@ def find_binary(
                 path = managed_named() / named / candidate
                 if path.is_file():
                     return path.resolve()
-            logger.debug("named build %r has no %s; falling through", named, name)
+            raise BinaryNotFound(_absent_build(named, name, "build=" if build
+                                               else "$MLSTACK_LLAMA_BUILD"))
 
         # A verified `ml-stack-serve build` outranks a login shell's PATH and the stale
         # bottle a release lags behind -- but never an explicit path or $LLAMA_CPP_SERVER,
@@ -113,6 +115,14 @@ def find_binary(
                 return path.resolve()
 
     return machine_binary(name, candidates)
+
+
+def _absent_build(named: str, name: str, source: str) -> str:
+    """What `find_binary` says of a named build with no ``name`` under `managed_named`."""
+    return (f"llama.cpp build {named!r} (named by {source}) is not installed: "
+            f"{managed_named() / named} holds no {name}.\n"
+            f"ml-stack-serve build --repo OWNER/REPO --ref REF --name {named}   builds it; "
+            f"ml-stack-serve build --check lists the builds this machine holds.")
 
 
 def machine_binary(name: str, candidates: tuple[str, ...]) -> Path | None:

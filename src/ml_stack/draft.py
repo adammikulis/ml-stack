@@ -25,7 +25,7 @@ from ml_stack.hub import choose_head, located, spec_for
 from ml_stack.ingest.extract import extract_unit, schema
 from ml_stack.log import say, warn
 from ml_stack.serve.backend import LlamaServerBackend
-from ml_stack.serve.binary import find_binary
+from ml_stack.serve.binary import BinaryNotFound, find_binary
 from ml_stack.serve.mlx_tree import is_mlx
 from ml_stack.serve.profile import profile_for, profiles
 from ml_stack.serve.serving import Config, Serving, Talking
@@ -361,14 +361,8 @@ def _head_for(model: str, asked: str, build: str) -> tuple[str, str]:
     """
     if asked:
         return asked, "named on the command line"
-    binary = None
-    if build:
-        try:
-            binary = LlamaServerBackend(build=build).binary
-        except (OSError, ValueError) as why:
-            warn(f"build {build} is not on this machine ({why}); reading the head against "
-                 f"the default build instead")
-    chosen = choose_head(model, binary=binary if binary is not None else find_binary())
+    binary = LlamaServerBackend(build=build).binary if build else find_binary()
+    chosen = choose_head(model, binary=binary)
     return chosen.path, chosen.why
 
 
@@ -456,7 +450,11 @@ def cmd_draft(args: argparse.Namespace) -> int:
     args.build = build_for(model, str(args.build or ""))
     if args.build:
         say(f"build: {args.build} -- the build this model measured in")
-    head, why = _head_for(model, str(args.draft or ""), str(args.build or ""))
+    try:
+        head, why = _head_for(model, str(args.draft or ""), str(args.build or ""))
+    except BinaryNotFound as exc:
+        warn(str(exc))
+        return 1
     if not head:
         warn(f"no draft head for {Path(model).name}: {why}.")
         warn("There is nothing to measure. `ml-stack-models files REPO` lists what a "

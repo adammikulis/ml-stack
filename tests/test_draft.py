@@ -193,6 +193,16 @@ class TestTheCommand:
         assert "no draft head" in said.out + said.err
         assert "nothing to measure" in said.out + said.err
 
+    def test_a_build_that_is_not_here_stops_before_a_head_is_chosen(self, tmp_path,
+                                                                    monkeypatch, capsys):
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+        monkeypatch.setattr(draft, "located", lambda m: None)
+        monkeypatch.setattr(draft, "choose_head", lambda *a, **k: pytest.fail("chose a head"))
+        assert draft.main(["marrowgate-Q4.gguf", "--build", "gone"]) == 1
+        said = capsys.readouterr()
+        assert "'gone'" in said.out + said.err
+        assert "--name gone" in said.out + said.err
+
     def test_a_busy_machine_refuses_before_anything_is_served(self, monkeypatch, capsys):
         from ml_stack.bench.quiet import Quiet
 

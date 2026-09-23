@@ -383,10 +383,17 @@ class TestFindBinaryPrefersTheManagedBuild:
         monkeypatch.setenv("LLAMA_CPP_SERVER", str(env_pick))
         assert binary_module.find_binary("llama-server", build="unsloth") == env_pick
 
-        # A named build that does not exist falls through to current, not to nothing.
+        # A named build that does not exist is refused, naming it and the command that builds it.
         monkeypatch.delenv("LLAMA_CPP_SERVER", raising=False)
-        assert (binary_module.find_binary("llama-server", build="missing")
-                == current / "llama-server")
+        with pytest.raises(binary_module.BinaryNotFound) as refused:
+            binary_module.find_binary("llama-server", build="missing")
+        assert "'missing'" in str(refused.value)
+        assert "ml-stack-serve build --repo OWNER/REPO" in str(refused.value)
+        assert "--name missing" in str(refused.value)
+
+        monkeypatch.setenv("MLSTACK_LLAMA_BUILD", "missing")
+        with pytest.raises(binary_module.BinaryNotFound, match="MLSTACK_LLAMA_BUILD"):
+            binary_module.find_binary("llama-server")
 
 
 class TestCheck:
