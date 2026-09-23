@@ -54,13 +54,6 @@ capability; every line is something that already exists not being what it says.
   add the pending publisher -- owner `adammikulis`, repository `ml-stack`, workflow
   `release.yml`, no environment -- and the `pypi` job in `release.yml` uploads with no
   code change. Until then it uploads nothing and the docs install from git.
-- [ ] **The `windows` job in `ci.yml` has not run on GitHub yet.** It runs
-  `install.ps1 -Headless` end to end against a scratch prefix and a wheel built in the same
-  job, then `-Uninstall`, on `windows-latest` -- written and checked with `actionlint` and
-  the pwsh-driven tests in `tests/test_packaging_install_runs.py`, but never on an actual
-  Windows runner, because a work branch is not pushed until it lands. Watch its first run
-  after this merge reaches `0.2dev`.
-
 ### Not losing what it read
 - [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
   upstreaming to public repositories). `CypherStore._run` prepares every statement that
