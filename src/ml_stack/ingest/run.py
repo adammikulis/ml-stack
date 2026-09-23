@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -174,13 +174,37 @@ def _stopping() -> Any:
         signal.signal(signal.SIGTERM, before)
 
 
+@dataclass
+class _RunContext:
+    """What every document in a read run shares."""
+
+    args: Any
+    client: Any
+    progress: Progress
+    words: Any
+    spent: Any
+    run_id: str
+    shape: Mapping[str, Any]
+    ingest: Any
+
+
+@dataclass
+class _Source:
+    """One document, and what has been read of it into the store so far."""
+
+    document: Any
+    slug: str
+    wanted: list[Any]
+    units_by_id: Mapping[str, Any]
+    reads_by_unit: dict[str, dict[str, Any]]
+
+
 def _read_run(args: Any) -> int:
     from ml_stack import ingest
     from ml_stack.client.spent import Spent
     from ml_stack.http import Refused
     from ml_stack.ingest.vocabulary import Vocabulary
     from ml_stack.media.download import DownloadError
-    from ml_stack.sources import units as source_units
 
     progress = Progress(Progress.beside(args.out))
     spent = Spent()
@@ -191,34 +215,13 @@ def _read_run(args: Any) -> int:
     code = 0
     stopped = False
 
-    folded_seconds = 0.0
-
-    def keep(slug: str, title: str, rows: Sequence[Mapping[str, Any]],
-             units_by_id: Mapping[str, Any]) -> dict[str, Any]:
-        nonlocal folded_seconds
-        judge = None if args.no_tidy else ingest._judge(client, args.out, model=args.model)
-        got = fold_into(args.out, slug, title=title, reads=rows, units_by_id=units_by_id,
-                        progress=progress, judge=judge)
-        if words is not None:
-            words.write(args.out)
-        folded_seconds = float(got["seconds"])
-        landed = got.get("absorbed") or {}
-        say(f"  folded {slug} at unit {got['units']} in {got['seconds']:.1f}s: "
-            f"{got['nodes']} nodes, {got['edges']} edges"
-            + (" (partial)" if got["partial"] else "")
-            + (f"; {landed['same_name'] + landed['plural']} name(s) landed on existing "
-                 f"nodes, judge: {landed['judged_same']} same, "
-                 f"{landed['judged_different']} different, {landed['possible']} left"
-                 if landed else "")
-            + (f"; the next fold is {_fold_interval(folded_seconds)} unit(s) away"
-                 if _fold_interval(folded_seconds) != ingest.FOLD_EVERY else ""))
-        return got
-
     try:
         with _stopping(), ingest._serving(args) as client, _counted(args, client) as counted:
             run_id = write_run(args.out,
                                run_record(args, serving=ingest._serving_said(args)))
             say(f"  run {run_id}: units read now point at it")
+            ctx = _RunContext(args=args, client=client, progress=progress, words=words,
+                              spent=spent, run_id=run_id, shape=shape, ingest=ingest)
             for path in args.docs:
                 text = str(path)
                 began = time.time()
@@ -230,91 +233,7 @@ def _read_run(args: Any) -> int:
                     warn(f"error: {why}")
                     code = 2
                     continue
-                _named(args, document, len(args.docs))
-                wanted = source_units.units(document, **({"max_tokens": args.max_tokens}
-                                                         if args.max_tokens else {}))
-                if args.sample:
-                    wanted = wanted[:args.sample]
-                slug = document.slug
-                progress.source(slug, title=document.title, path=document.path,
-                                sections=len(wanted), marks=asdict(marks))
-                banks = source_units.question_banks(document, **({"max_tokens": args.max_tokens}
-                                                                 if args.max_tokens else {}))
-                say(f"{document.title}: {len(document.chapters)} chapter(s), "
-                    f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
-                    f"the {document.how}" + (", OpenStax" if document.openstax else "")
-                    + (f", {banks} question-bank part(s) skipped" if banks else "")
-                    + f" -- read in {time.time() - began:.0f}s")
-
-                units_by_id = {unit.id: unit for unit in wanted}
-                folded_seconds = float(
-                    (progress.state["sources"].get(slug) or {}).get("folded_seconds") or 0.0)
-                held_reads = _read_json(reads_path(args.out, slug))
-                held_reads = held_reads if isinstance(held_reads, dict) else {}
-                reads_by_unit: dict[str, dict[str, Any]] = {}
-                to_read = []
-                for unit in wanted:
-                    if args.resume and progress.done(slug, unit.id) and unit.id in held_reads:
-                        reads_by_unit[unit.id] = held_reads[unit.id]
-                        continue
-                    to_read.append(unit)
-
-                # one at a time, on the one slot: each unit is written down the moment it
-                # finishes, so a run killed mid-source loses at most the unit in flight,
-                # and the source is folded into the store as it goes, so a run that will
-                # take days can be asked questions today
-                since = 0
-                try:
-                    for index, unit in enumerate(to_read):
-                        row = read_unit(client, unit, shape, images=args.images,
-                                        per_section=args.per_section,
-                                        cache_dir=args.cache or None, vocabulary=words)
-                        fresh = words.note(row.extracted, unit.id) if words is not None else []
-                        row.run = run_id
-                        reads_by_unit[unit.id] = asdict(row)
-                        for call in row.calls:
-                            spent.add(_call_of(call))
-                        progress.note(slug, row)
-                        _keep_reads(args.out, slug, [reads_by_unit[unit.id]])
-                        if row.error.startswith("ServerUnreachable") and not ingest._alive(client):
-                            # the server is gone -- killed, crashed, evicted. Every unit
-                            # after this one would fail in a second and be written down as
-                            # a failure (2026-09-03: 209 of them, in under a minute), so the
-                            # run folds what it has and ends; the unit is written down but
-                            # not counted against, and --resume reads on once something
-                            # serves again
-                            say(f"  the model server went away at {unit.id}; folding what "
-                                f"was read and stopping -- --resume reads on")
-                            raise Stopped("server gone")
-                        since += 1
-                        say(f"  ch {unit.chapter or '-':>3}  "
-                            f"{unit.section or unit.section_title[:12]:<8}"
-                            f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
-                            f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
-                            + (" (read again after a reset)" if row.retried else "")
-                            + (f"  coined {', '.join(fresh)}" if fresh else "")
-                            + (f"  {row.error}" if row.error else ""))
-                        ahead = to_read[index + 1] if index + 1 < len(to_read) else None
-                        if ahead is not None and _time_to_fold(
-                                since, ahead.chapter != unit.chapter,
-                                seconds=folded_seconds):
-                            keep(slug, document.title, _rows(wanted, reads_by_unit), units_by_id)
-                            since = 0
-                except Stopped:
-                    stopped = True
-
-                counts = keep(slug, document.title, _rows(wanted, reads_by_unit), units_by_id)
-                if not args.no_tidy:
-                    # the hygiene pass over the store, with this run's model as the judge
-                    # and the units still in memory as its source -- automated, recorded,
-                    # nothing deferred
-                    from ml_stack.graph.tidy import tidy as hygiene
-                    texts = {unit.id: unit.text for unit in wanted}
-                    judged = hygiene(args.out, judge=ingest._judge(
-                        client, args.out, model=args.model, texts=texts), log=None)
-                    say(f"  tidied: {judged.said()}")
-                say(f"  {document.title}: {counts['nodes']} nodes, {counts['edges']} edges "
-                    f"into {args.out}")
+                stopped = _read_document(ctx, document, marks, began, len(args.docs))
                 if stopped:
                     break
     except Stopped:
@@ -338,6 +257,134 @@ def _read_run(args: Any) -> int:
     else:
         _embedded(args)
     return code
+
+
+def _read_document(ctx: _RunContext, document: Any, marks: Any, began: float, docs: int) -> bool:
+    """Read one opened document into the store, folding and tidying it as it goes.
+
+    Returns whether a stop -- SIGTERM, or the model server going away -- cut it short.
+    """
+    from ml_stack.sources import units as source_units
+
+    args = ctx.args
+    _named(args, document, docs)
+    wanted = source_units.units(document, **({"max_tokens": args.max_tokens}
+                                             if args.max_tokens else {}))
+    if args.sample:
+        wanted = wanted[:args.sample]
+    slug = document.slug
+    ctx.progress.source(slug, title=document.title, path=document.path,
+                        sections=len(wanted), marks=asdict(marks))
+    banks = source_units.question_banks(document, **({"max_tokens": args.max_tokens}
+                                                     if args.max_tokens else {}))
+    say(f"{document.title}: {len(document.chapters)} chapter(s), "
+        f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
+        f"the {document.how}" + (", OpenStax" if document.openstax else "")
+        + (f", {banks} question-bank part(s) skipped" if banks else "")
+        + f" -- read in {time.time() - began:.0f}s")
+
+    units_by_id = {unit.id: unit for unit in wanted}
+    folded_seconds = float(
+        (ctx.progress.state["sources"].get(slug) or {}).get("folded_seconds") or 0.0)
+    held_reads = _read_json(reads_path(args.out, slug))
+    held_reads = held_reads if isinstance(held_reads, dict) else {}
+    reads_by_unit: dict[str, dict[str, Any]] = {}
+    to_read = []
+    for unit in wanted:
+        if args.resume and ctx.progress.done(slug, unit.id) and unit.id in held_reads:
+            reads_by_unit[unit.id] = held_reads[unit.id]
+            continue
+        to_read.append(unit)
+
+    source = _Source(document=document, slug=slug, wanted=wanted, units_by_id=units_by_id,
+                     reads_by_unit=reads_by_unit)
+    stopped, _ = _read_units(ctx, source, to_read, folded_seconds)
+
+    counts = _fold(ctx, source)
+    if not args.no_tidy:
+        # the hygiene pass over the store, with this run's model as the judge
+        # and the units still in memory as its source -- automated, recorded,
+        # nothing deferred
+        from ml_stack.graph.tidy import tidy as hygiene
+        texts = {unit.id: unit.text for unit in wanted}
+        judged = hygiene(args.out, judge=ctx.ingest._judge(
+            ctx.client, args.out, model=args.model, texts=texts), log=None)
+        say(f"  tidied: {judged.said()}")
+    say(f"  {document.title}: {counts['nodes']} nodes, {counts['edges']} edges "
+        f"into {args.out}")
+    return stopped
+
+
+def _read_units(ctx: _RunContext, source: _Source, to_read: Sequence[Any],
+                folded_seconds: float) -> tuple[bool, float]:
+    """Read every unit in ``to_read`` into ``source``, folding it in along the way.
+
+    One at a time, on the one slot: each unit is written down the moment it finishes, so a
+    run killed mid-source loses at most the unit in flight. Returns whether the read
+    stopped early, and the last fold's seconds.
+    """
+    args = ctx.args
+    since = 0
+    try:
+        for index, unit in enumerate(to_read):
+            row = read_unit(ctx.client, unit, ctx.shape, images=args.images,
+                            per_section=args.per_section,
+                            cache_dir=args.cache or None, vocabulary=ctx.words)
+            fresh = ctx.words.note(row.extracted, unit.id) if ctx.words is not None else []
+            row.run = ctx.run_id
+            source.reads_by_unit[unit.id] = asdict(row)
+            for call in row.calls:
+                ctx.spent.add(_call_of(call))
+            ctx.progress.note(source.slug, row)
+            _keep_reads(args.out, source.slug, [source.reads_by_unit[unit.id]])
+            if row.error.startswith("ServerUnreachable") and not ctx.ingest._alive(ctx.client):
+                # the server is gone -- killed, crashed, evicted. Every unit after this one
+                # would fail in a second and be written down as a failure (2026-09-03: 209
+                # of them, in under a minute), so the run folds what it has and ends; the
+                # unit is written down but not counted against, and --resume reads on once
+                # something serves again
+                say(f"  the model server went away at {unit.id}; folding what "
+                    f"was read and stopping -- --resume reads on")
+                raise Stopped("server gone")
+            since += 1
+            say(f"  ch {unit.chapter or '-':>3}  "
+                f"{unit.section or unit.section_title[:12]:<8}"
+                f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
+                f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
+                + (" (read again after a reset)" if row.retried else "")
+                + (f"  coined {', '.join(fresh)}" if fresh else "")
+                + (f"  {row.error}" if row.error else ""))
+            ahead = to_read[index + 1] if index + 1 < len(to_read) else None
+            if ahead is not None and _time_to_fold(
+                    since, ahead.chapter != unit.chapter, seconds=folded_seconds):
+                got = _fold(ctx, source)
+                folded_seconds = float(got["seconds"])
+                since = 0
+    except Stopped:
+        return True, folded_seconds
+    return False, folded_seconds
+
+
+def _fold(ctx: _RunContext, source: _Source) -> dict[str, Any]:
+    """Fold what has been read of ``source`` into the store so far, and print what changed."""
+    args = ctx.args
+    judge = None if args.no_tidy else ctx.ingest._judge(ctx.client, args.out, model=args.model)
+    got = fold_into(args.out, source.slug, title=source.document.title,
+                    reads=_rows(source.wanted, source.reads_by_unit),
+                    units_by_id=source.units_by_id, progress=ctx.progress, judge=judge)
+    if ctx.words is not None:
+        ctx.words.write(args.out)
+    landed = got.get("absorbed") or {}
+    say(f"  folded {source.slug} at unit {got['units']} in {got['seconds']:.1f}s: "
+        f"{got['nodes']} nodes, {got['edges']} edges"
+        + (" (partial)" if got["partial"] else "")
+        + (f"; {landed['same_name'] + landed['plural']} name(s) landed on existing "
+             f"nodes, judge: {landed['judged_same']} same, "
+             f"{landed['judged_different']} different, {landed['possible']} left"
+             if landed else "")
+        + (f"; the next fold is {_fold_interval(float(got['seconds']))} unit(s) away"
+             if _fold_interval(float(got['seconds'])) != ctx.ingest.FOLD_EVERY else ""))
+    return got
 
 
 def _named(args: Any, document: Any, docs: int) -> None:
