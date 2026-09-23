@@ -10,6 +10,8 @@ and write under ``~/.ml-stack``. Nothing here reads that directory. Every name i
 from __future__ import annotations
 
 import json
+import os
+import socket
 import subprocess
 import sys
 import threading
@@ -20,9 +22,9 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack.bench.peer_runs import gather, import_runs
 from ml_stack.fleet.api import make_handler
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.gathering import import_runs
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.measuring import (
     BenchHost,
@@ -41,7 +43,6 @@ from ml_stack.fleet.sweeps import (
     Handle,
     bench_export,
     dispatch,
-    gather,
     plan,
     submit_bench,
     wait,
@@ -95,15 +96,14 @@ class Box:
         return self.home / "runs.ladybug"
 
 
-def _box(tmp_path: Path, name: str, *, room: int, commit: str = COMMIT, launch=None,
-         busy: bool = False) -> Box:
+def _box(tmp_path: Path, name: str, *, room: int, launch=None, busy: bool = False) -> Box:
     root = tmp_path / name
     files = root / "files"
     files.mkdir(parents=True)
     home = root / "bench"
     token = load_or_create_token(root)
     runner = JobRunner(root, files)
-    host = BenchHost(runner, home=home, commit=commit, room=lambda: room,
+    host = BenchHost(runner, home=home, commit=COMMIT, room=lambda: room,
                      launch=launch or scripted_launch(), name=name, poll_s=0.1)
     host.machine = f"id-{name}"
 
@@ -141,7 +141,7 @@ def _job(*models: str, needs: dict | None = None, commit: str = COMMIT, label: s
     for m in models:
         line += ["--serve", m]
     return Job(argv=tuple(line), models=models, commit=commit, kept_label=label,
-               needs=needs or {m: 4 * G for m in models})
+               needs=needs or dict.fromkeys(models, 4 * G))
 
 
 def _await(predicate, timeout=10.0):
@@ -438,11 +438,9 @@ def test_gather_imports_each_peers_runs_with_host_set_and_skips_duplicates(boxes
     into = tmp_path / "home.ladybug"
     handles = dispatch({roomy.peer: _job("big.gguf"), small.peer: _job("tiny.gguf")},
                        log=lambda _l: None)
-    # kept while the jobs ran: one each, plus one before the job began and one over some
-    # other graph, neither of which may come home
+    # kept while the jobs ran: one each, and one before the job began, which stays there
     _kept(roomy.store, "big-plain", _later(30))
     _kept(roomy.store, "big-old", "2020-01-01T00:00:00")
-    _kept(roomy.store, "big-real", _later(31), invented=False)
     _kept(small.store, "tiny-plain", _later(30))
     wait(handles, poll_s=0.1, timeout_s=20, log=lambda _l: None)
     said: list[str] = []
@@ -467,6 +465,27 @@ def test_gather_imports_each_peers_runs_with_host_set_and_skips_duplicates(boxes
     assert again == {"id-roomy": [], "id-small": []}
     assert len(runs(into)) == 2, "nothing imported twice, nothing overwritten"
     assert "1 already there" in "\n".join(said)
+
+
+def test_gather_brings_home_a_run_over_another_graph_and_export_here_still_holds_it(
+        boxes, tmp_path):
+    from ml_stack.bench import runs
+    from ml_stack.bench.score import _exportable
+
+    roomy, _ = boxes
+    into = tmp_path / "home.ladybug"
+    handles = dispatch({roomy.peer: _job("big.gguf")}, log=lambda _l: None)
+    _kept(roomy.store, "big-real", _later(30), invented=False)
+    _kept(roomy.store, "big-plain", _later(31))
+    wait(handles, poll_s=0.1, timeout_s=20, log=lambda _l: None)
+
+    got = gather(handles, into=into, log=lambda _l: None)
+
+    back = {r["label"]: r for r in runs(into)}
+    assert len(got["id-roomy"]) == 2 and set(back) == {"big-real", "big-plain"}
+    assert back["big-real"]["server"]["graph"] == "someone-elses-graph"
+    exported, held = _exportable(list(back.values()))
+    assert [r["label"] for r in exported] == ["big-plain"] and held == 1
 
 
 def test_a_peer_that_kept_nothing_is_said_not_skipped_silently(boxes, tmp_path):
@@ -726,6 +745,18 @@ def test_fleet_planned_refuses_when_discovery_finds_nobody(monkeypatch):
 
 # -- the whole thing, with nothing stood in but the model -------------------------------
 
+_OWN_GRAPH = {
+    "nodes": [
+        {"id": "topic:kiln", "kind": "topic", "label": "kiln", "mentions": 2, "attrs": {}},
+        {"id": "person:wren", "kind": "person", "label": "Wren Tallis", "mentions": 1,
+         "attrs": {}},
+    ],
+    "edges": [{"source": "person:wren", "target": "topic:kiln", "rel": "interested_in",
+               "weight": 1}],
+}
+_OWN_QUESTIONS = [{"q": "who fires the kiln?", "expect": ["person:wren"]},
+                  {"q": "what is Wren Tallis interested in?", "expect": ["topic:kiln"]}]
+
 _FLEET_LLAMA_META = {
     "general.architecture": "llama",
     "llama.block_count": 2,
@@ -734,64 +765,70 @@ _FLEET_LLAMA_META = {
 }
 
 
+def _free_port(kind: int = socket.SOCK_STREAM) -> int:
+    with socket.socket(socket.AF_INET, kind) as s:
+        s.bind(("127.0.0.1" if kind == socket.SOCK_STREAM else "", 0))
+        return s.getsockname()[1]
+
+
+def _boot_daemon(tmp_path: Path, name: str, *, keyfile: Path, disco_port: int):
+    """A real ``ml-stack-fleet`` daemon in a subprocess, once it answers /health: (proc,
+    log, open log handle)."""
+    from ml_stack.fleet.discovery import derive_token, load_cluster_key
+
+    root = tmp_path / name
+    http_port = _free_port()
+    log = tmp_path / f"{name}.out"
+    fh = log.open("wb")
+    env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
+           "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+           "PYTHONUNBUFFERED": "1"}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "ml_stack.fleet.daemon", "--root", str(root / "traind"),
+         "--bench-home", str(root / "bench"), "--host", "127.0.0.1",
+         "--port", str(http_port), "--name", name, "--cluster-key", str(keyfile)],
+        env=env, stdout=fh, stderr=subprocess.STDOUT)
+    driver = Peer(f"http://127.0.0.1:{http_port}", derive_token(load_cluster_key(keyfile)))
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        try:
+            if driver.health().get("ok"):
+                return proc, log, fh
+        except PeerError:
+            if proc.poll() is not None:
+                pytest.fail(f"{name} traind died:\n{log.read_text(errors='replace')}")
+        time.sleep(0.1)
+    proc.kill()
+    pytest.fail(f"{name} traind never answered /health:\n{log.read_text(errors='replace')}")
+
+
+def _own_graph(tmp_path: Path) -> list[str]:
+    """``--graph`` and ``--questions`` over `_OWN_GRAPH`, written under ``tmp_path``."""
+    graph = tmp_path / "own.json"
+    graph.write_text(json.dumps(_OWN_GRAPH))
+    asked = tmp_path / "own.jsonl"
+    asked.write_text("".join(json.dumps(q) + "\n" for q in _OWN_QUESTIONS))
+    return ["--graph", str(graph), "--questions", str(asked)]
+
+
 @pytest.mark.slow
 def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_path, monkeypatch):
     """Nothing here is mocked: a real ``ml-stack-fleet`` daemon booted as a subprocess, found
-    by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench``, on a
-    llama-server-shaped process instead of a GPU."""
-    import os
-    import socket
-
+    by real UDP discovery, given a real HTTP job that runs the real ``ml-stack-bench`` over a
+    graph that is not the shipped community, on a llama-server-shaped process instead of a
+    GPU; the run it keeps comes home."""
     from conftest import write_gguf
 
     import ml_stack.bench as bench
     from ml_stack.bench import runs
-    from ml_stack.fleet.discovery import create_cluster_key, derive_token, load_cluster_key
-    from ml_stack.fleet.remote import Peer, PeerError
+    from ml_stack.fleet.discovery import create_cluster_key
     from ml_stack.testing.fakes import fake_llama_binary
 
-    def _free_udp() -> int:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
-
-    def _free_tcp() -> int:
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
-
-    repo_src = str(Path(__file__).resolve().parents[1] / "src")
     keyfile = tmp_path / "cluster.key"
     create_cluster_key(keyfile)
-    disco_port = _free_udp()
-    token = derive_token(load_cluster_key(keyfile))
-
-    def boot(name: str):
-        root = tmp_path / name
-        http_port = _free_tcp()
-        log = tmp_path / f"{name}.out"
-        fh = log.open("wb")
-        env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
-              "PYTHONPATH": repo_src, "PYTHONUNBUFFERED": "1"}
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "ml_stack.fleet.daemon", "--root", str(root / "traind"),
-             "--bench-home", str(root / "bench"), "--host", "127.0.0.1",
-             "--port", str(http_port), "--name", name, "--cluster-key", str(keyfile)],
-            env=env, stdout=fh, stderr=subprocess.STDOUT)
-        driver = Peer(f"http://127.0.0.1:{http_port}", token)
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            try:
-                if driver.health().get("ok"):
-                    return proc, log, fh
-            except PeerError:
-                if proc.poll() is not None:
-                    pytest.fail(f"{name} traind died:\n{log.read_text(errors='replace')}")
-            time.sleep(0.1)
-        proc.kill()
-        pytest.fail(f"{name} traind never answered /health:\n{log.read_text(errors='replace')}")
-
-    booted = [boot("quill"), boot("lantern")]
+    disco_port = _free_port(socket.SOCK_DGRAM)
+    booted = [_boot_daemon(tmp_path, name, keyfile=keyfile, disco_port=disco_port)
+              for name in ("quill", "lantern")]
     try:
         monkeypatch.setenv("ML_STACK_CLUSTER_KEY", str(keyfile))
         monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(disco_port))
@@ -800,20 +837,16 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
         gguf = write_gguf(tmp_path / "tiny.gguf", _FLEET_LLAMA_META)
         binary = fake_llama_binary(tmp_path)
         kept = tmp_path / "runs.ladybug"
-
-        # the graph and questions are left at their defaults -- the community that ships
-        # with the package -- because a run over any other graph is never exported by a
-        # peer (`score._over_invented`): gathering it home would need that gate lifted,
-        # which is not what this bug is about.
         argv = ["sweep", "--fleet", "--serve", str(gguf), "--binary", str(binary),
-                "--store", "", "--sample", "2", "--plain-only", "--no-smoke", "--no-profile",
-                "--kept", str(kept), "--serve-port", str(_free_tcp())]
+                *_own_graph(tmp_path), "--store", "", "--plain-only", "--no-smoke",
+                "--no-profile", "--kept", str(kept), "--serve-port", str(_free_port())]
         code = bench._main(argv)
         assert code == 0, "\n".join(p[1].read_text(errors="replace") for p in booted)
 
         kept_runs = runs(kept)
         assert kept_runs, "the fleet measured nothing"
         assert kept_runs[0]["server"]["host"] in ("quill", "lantern")
+        assert kept_runs[0]["server"]["graph"] not in ("", bench.invented_digest())
     finally:
         for proc, _log, fh in booted:
             proc.terminate()

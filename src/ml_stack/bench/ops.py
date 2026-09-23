@@ -9,7 +9,6 @@ The `Config` a ``--serve``'d model is measured in (`measured_run`, `swept`,
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,11 +18,13 @@ from typing import Any
 # so anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
 from ml_stack.bench.askings import sampling_from
-from ml_stack.bench.keep import _commit
 from ml_stack.bench.counting import PER_QUESTION
+from ml_stack.bench.keep import _commit
+from ml_stack.bench.peer_runs import gather
 from ml_stack.bench.record import of
 from ml_stack.bench.score import derived
 from ml_stack.bench.show import NOT_ANSWERING
+from ml_stack.fleet import join, measuring, pausing, sweeps
 from ml_stack.log import say
 from ml_stack.serve.serving import Config, Serving
 
@@ -159,15 +160,12 @@ def measured_run(args: Any, model: str, head: str, heads: Sequence[str], n: int)
     return config
 
 
-def swept(args: Any, model: str, measured: Any, *, context: int, head: str | None,
-          port: int) -> Any:
+def swept(args: Any, model: str, measured: Any, *, context: int, head: str | None) -> Any:
     """The `Config` one ``--serve``'d model is measured in: what a record measured, with this
-    sweep's own flags laid over it.
+    sweep's own flags laid over it; the caller lays its port over the result.
 
-    One object rather than twenty keyword arguments, and one place that lays a flag over a
-    record, so the lease `served` takes, the asking it asks with and the client it asks with
-    cannot say different things. ``context`` is the total across the slots, which is what
-    ``-c`` takes; a `Serving` holds it as every slot's share.
+    ``context`` is the total across the slots, which is what ``-c`` takes; a `Serving`
+    holds it as every slot's share.
 
     ``head`` is what ``--serve-draft`` named for this model -- ``""`` for the bare model it
     asked for outright -- and None when it named nothing, which is where a record's own
@@ -175,7 +173,7 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     """
     slots = max(1, int(getattr(args, "parallel", 1) or 1))
     config = measured if measured is not None else Config(serving=Serving(model=str(model)))
-    config = config.over(model=str(model), port=int(port), slots=slots,
+    config = config.over(model=str(model), slots=slots,
                    slot_context=max(1, int(context) // slots),
                    timeout=float(getattr(args, "per_question", PER_QUESTION)),
                    terse=bool(getattr(args, "terse", False)),
@@ -285,9 +283,6 @@ def _discovered(peers: Sequence[str]) -> dict[str, Any]:
     `Refused` when a name in ``peers`` answered to no daemon, or when discovery found
     nobody at all.
     """
-    join = importlib.import_module("ml_stack.fleet.join")
-    pausing = importlib.import_module("ml_stack.fleet.pausing")
-
     clients = pausing.peer_clients(join.peers())
     if peers:
         wanted = {str(p) for p in peers}
@@ -312,10 +307,7 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
     `remote.Peer` clients the way `ml_stack.fleet.pausing.peer_clients` does), narrowed to
     ``peers`` by name when given. `ml_stack.fleet.sweeps.plan` then places each model,
     largest first, and `ml_stack.fleet.measuring.jobs_from` turns the placement into one
-    `Job` per peer -- reached by name, both of them, so this machine's sweep needs neither
-    module until a fleet run actually asks for one. A peer already on another commit is
-    refused before anything is dispatched: the daemon refuses too, but finding out from
-    four peers' logs is later than from one line.
+    `Job` per peer. A peer on another commit is refused before anything is dispatched.
     """
     if not models:
         raise Refused("error: --fleet spreads --serve models over the fleet; pass --serve "
@@ -324,18 +316,10 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
     if not mine:
         raise Refused("error: --fleet needs to know this checkout's commit, and git would "
                       "not say")
-    fleet = importlib.import_module("ml_stack.fleet.sweeps")
-    missing = [name for name in ("plan", "dispatch", "wait", "gather")
-               if not hasattr(fleet, name)]
-    if missing:
-        raise Refused(f"error: ml_stack.fleet.sweeps has no {', '.join(missing)}; the fleet "
-                      f"side of the bench is not in this build")
-    measuring = importlib.import_module("ml_stack.fleet.measuring")
-
     clients = _discovered(peers)
     ordered = sorted(clients.items())
     by_peer = {peer: name for name, peer in ordered}
-    planned = fleet.plan(models, [client for _, client in ordered])
+    planned = sweeps.plan(models, [client for _, client in ordered])
     lines = [f"plan: {len(models)} model(s) on commit {mine} over "
              + ", ".join(name for name, _ in ordered)]
     mismatched: list[str] = []
@@ -343,7 +327,7 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
         if not assigned:
             continue
         name = by_peer.get(peer, getattr(peer, "name", str(peer)))
-        theirs = str(fleet._health_of(peer).get("bench_commit") or "")
+        theirs = str(sweeps._health_of(peer).get("bench_commit") or "")
         for model in assigned:
             lines.append(f"  {model} -> {name}" + (f" ({theirs})" if theirs else ""))
         if theirs and not measuring.same_commit(mine, theirs):
@@ -362,7 +346,6 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
 def fleet_measure(jobs: Mapping[Any, Any], *, into: str | Path) -> None:
     """Dispatch ``jobs`` (one per peer) over the fleet, wait for them, and gather their
     runs into ``into``."""
-    fleet = importlib.import_module("ml_stack.fleet.sweeps")
-    handles = fleet.dispatch(dict(jobs))
-    fleet.wait(handles)
-    fleet.gather(handles, into=into)
+    handles = sweeps.dispatch(dict(jobs))
+    sweeps.wait(handles)
+    gather(handles, into=into)

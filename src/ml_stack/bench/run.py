@@ -172,8 +172,8 @@ def cmd_drafts(args: Any) -> int:
     asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
     before = {r["key"] for r in bench._kept(args.kept)}
     model = str(hub.located(args.model, loose=True) or args.model)
-    rows = drafts(ops.swept(args, model, None, context=args.context, head=None,
-                            port=args.port),
+    rows = drafts(ops.swept(args, model, None, context=args.context, head=None)
+                  .over(port=int(args.port)),
                   args.draft or [""], asked, invented(),
                   binary=args.binary,
                   kept=args.kept, store=args.store or None,
@@ -337,8 +337,9 @@ def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
         # has a drafting head that speeds it up at some config, always use it at that
         # config (be sure to report it)". --no-profile serves it bare.
         chosen = ops.swept(args, model, ops.measured_run(args, model, head, heads, n),
-                           context=total_context, port=args.serve_port,
-                           head=head if n < len(heads) else None)
+                           context=total_context,
+                           head=head if n < len(heads) else None).over(
+                               port=int(args.serve_port))
         try:
             bench.served(chosen, questions, graph, label=stem,
                          askings=_asked(args, parts),

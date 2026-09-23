@@ -21,6 +21,7 @@ from ml_stack.bench.speed import (
     count_tokens,
     grid,
     only,
+    pairs,
     prompt_text,
     speed_table,
 )
@@ -194,8 +195,13 @@ def test_a_cell_on_a_program_that_reports_nothing_keeps_the_wall_and_nothing_els
 
 def test_a_smoke_grid_is_one_cell_and_a_full_grid_is_every_pair():
     client = _Llama()
-    assert len(grid(client, prompts=[64, 128], streams=[1, 2], generate=8, smoke=True)) == 1
-    cells = grid(client, prompts=[64, 128], streams=[1, 2], generate=8)
+    lines: list[str] = []
+    assert len(grid(client, pairs([64, 128], [1, 2], smoke=True), generate=8,
+                    log=lines.append)) == 1
+    assert len(lines) == 1 and lines[0].startswith("      64 tok x1: prefill ")
+    assert "decode " in lines[0] and "s wall" in lines[0] and "/stream" not in lines[0]
+    assert pairs([64, 128], [1, 2], sample=3) == [(64, 1), (64, 2), (128, 1)]
+    cells = grid(client, pairs([64, 128], [1, 2]), generate=8)
     assert [(c["prompt_tokens"], c["streams"]) for c in cells] == [(64, 1), (64, 2), (128, 1),
                                                                     (128, 2)]
 

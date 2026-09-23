@@ -1,6 +1,5 @@
 """A model sweep spread over the fleet: `plan` puts each model on the idle peer with the
-most room that fits it, `dispatch` sends the jobs, `wait` polls the daemons, and `gather`
-brings every peer's runs home into one store.
+most room that fits it, `dispatch` sends the jobs, and `wait` polls the daemons.
 
 `submit_bench` and `bench_export` are the two calls a peer answers, over its daemon or, for
 a `fleet.measuring.Local`, in this process.
@@ -14,18 +13,16 @@ import time
 import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from ml_stack.log import say
 from ml_stack.units import human_bytes
 
-from .gathering import import_runs
 from .measuring import TAIL, Job, Local, Refused
 from .remote import PeerError
 from .sizing import estimate
 
-__all__ = ["Handle", "Plan", "bench_export", "dispatch", "gather", "plan", "submit_bench",
+__all__ = ["Handle", "Plan", "bench_export", "dispatch", "plan", "submit_bench",
            "wait"]
 
 
@@ -255,34 +252,3 @@ def wait(handles: Sequence[Handle], *, poll_s: float = 20.0, timeout_s: float | 
                         f"{timeout_s:.0f}s; left running")
             return list(handles)
         time.sleep(poll_s)
-
-
-
-
-def gather(handles: Sequence[Handle], *, into: str | Path,
-           log: Callable[[str], None] = say) -> dict[str, list[str]]:
-    """Bring home what each dispatched job measured: every peer's runs kept since its job
-    started, imported into ``into`` by `import_runs` with the peer's name as host and the
-    machine id and commit its export names. A refused or never-started job has nothing to gather.
-    Returns the keys written per machine; a peer whose export holds nothing is said, since
-    a job marked done that kept no run is the thing worth noticing."""
-    out: dict[str, list[str]] = {}
-    for handle in handles:
-        if not handle.id:
-            continue
-        try:
-            answered = bench_export(handle.peer, job=handle.id, full=True)
-        except Exception as exc:  # noqa: BLE001 - said, and the others still come home
-            log(f"  {handle.peer_name}: could not export: {exc}")
-            continue
-        host = str(answered.get("host") or handle.peer_name)
-        machine = str(answered.get("machine") or handle.machine)
-        if not answered.get("runs"):
-            log(f"  {host}: kept no run since {answered.get('since', '?')}"
-                + (f" ({answered['skipped']} not over the invented community)"
-                   if answered.get("skipped") else ""))
-            out[machine or host] = []
-            continue
-        out[machine or host] = import_runs({**answered, "machine": machine}, into,
-                                           host=host, log=log)
-    return out

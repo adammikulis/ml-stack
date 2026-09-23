@@ -172,8 +172,8 @@ def _sum(values: Sequence[float | None]) -> float | None:
     return sum(said) if said else None
 
 
-def cell(client: Any, *, tokens: int, streams: int, generate: int, seed: int = 0,
-         log: Callable[[str], None] | None = None) -> dict[str, Any]:
+def cell(client: Any, *, tokens: int, streams: int, generate: int,
+         seed: int = 0) -> dict[str, Any]:
     """One cell: ``streams`` prompts of ``tokens`` each, sent at once, each written to
     ``generate`` tokens. Every figure is None where the program did not report it."""
     prompts = []
@@ -224,34 +224,42 @@ def cell(client: Any, *, tokens: int, streams: int, generate: int, seed: int = 0
     if out["decode_tps"] is None and out["completion_tokens"] is not None and wall > 0:
         # a program with no clocks of its own: what was written over the wall, marked
         out["decode_tps_wall"] = float(out["completion_tokens"]) / wall
-    if log:
-        log(f"  {tokens:>6} tok x{streams}: "
-            + (f"prefill {out['prefill_tps']:.0f} tok/s, " if out["prefill_tps"] is not None
-               else "prefill -, ")
-            + (f"decode {out['decode_tps']:.1f} tok/s" if out["decode_tps"] is not None
-               else "decode -")
-            + (f" ({out['decode_tps_per_stream']:.1f}/stream)" if streams > 1
-               and out["decode_tps_per_stream"] is not None else "")
-            + (f", ttft {out['ttft_s']:.2f}s" if out["ttft_s"] is not None else "")
-            + f", {wall:.1f}s wall"
-            + (f", {out['errors']} failed" if out["errors"] else ""))
     return out
 
 
-def grid(client: Any, *, prompts: Sequence[int], streams: Sequence[int], generate: int,
-         log: Callable[[str], None] | None = None, smoke: bool = False,
-         sample: int = 0) -> list[dict[str, Any]]:
-    """Every (prompt, streams) cell in turn -- the smallest of each alone for ``smoke``,
+def said(one: Mapping[str, Any]) -> str:
+    """One cell as the line a sweep prints for it."""
+    streams = int(one["streams"])
+    return (f"  {one['prompt_tokens']:>6} tok x{streams}: "
+            + (f"prefill {one['prefill_tps']:.0f} tok/s, " if one["prefill_tps"] is not None
+               else "prefill -, ")
+            + (f"decode {one['decode_tps']:.1f} tok/s" if one["decode_tps"] is not None
+               else "decode -")
+            + (f" ({one['decode_tps_per_stream']:.1f}/stream)" if streams > 1
+               and one["decode_tps_per_stream"] is not None else "")
+            + (f", ttft {one['ttft_s']:.2f}s" if one["ttft_s"] is not None else "")
+            + f", {one['wall_s']:.1f}s wall"
+            + (f", {one['errors']} failed" if one["errors"] else ""))
+
+
+def pairs(prompts: Sequence[int], streams: Sequence[int], *, smoke: bool = False,
+          sample: int = 0) -> list[tuple[int, int]]:
+    """Every (prompt, streams) cell in order -- the smallest of each alone for ``smoke``,
     the first ``sample`` of them when asked."""
     sizes = [min(prompts)] if smoke else list(prompts)
     widths = [min(streams)] if smoke else list(streams)
+    every = [(int(tokens), int(width)) for tokens in sizes for width in widths]
+    return every[:sample] if sample else every
+
+
+def grid(client: Any, cells: Sequence[tuple[int, int]], *, generate: int,
+         log: Callable[[str], None] | None = None) -> list[dict[str, Any]]:
+    """Each of ``cells`` measured in turn, each said to ``log``."""
     out = []
-    for i, tokens in enumerate(sizes):
-        for j, width in enumerate(widths):
-            if sample and len(out) >= sample:
-                return out
-            out.append(cell(client, tokens=int(tokens), streams=int(width), generate=generate,
-                            seed=i * len(widths) + j + 1, log=log))
+    for n, (tokens, width) in enumerate(cells):
+        out.append(cell(client, tokens=tokens, streams=width, generate=generate, seed=n + 1))
+        if log:
+            log(said(out[-1]))
     return out
 
 
@@ -343,14 +351,15 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
         say(f"\n{label} on {url}")
         if smoking_first:
             say("  smoke: one cell first")
-            proved = grid(client, prompts=prompts, streams=streams, generate=args.generate,
-                          log=print, smoke=True)
+            proved = grid(client, pairs(prompts, streams, smoke=True),
+                          generate=args.generate, log=print)
             key = save(args.kept, proved, server=_server_record(url, client), kind=KIND, label=label)
             _proved(read_back(args.kept, [key]), f"{label} smoke")
             keys.append(key)
             say("  smoke: ok")
-        cells = grid(client, prompts=prompts, streams=streams, generate=args.generate,
-                     log=print, smoke=smoke, sample=int(getattr(args, "sample", 0) or 0))
+        cells = grid(client, pairs(prompts, streams, smoke=smoke,
+                                   sample=int(getattr(args, "sample", 0) or 0)),
+                     generate=args.generate, log=print)
         keys.append(save(args.kept, cells, server=_server_record(url, client), kind=KIND, label=label))
     return keys
 
@@ -408,10 +417,9 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
         say(f"\n{label}: {len(prompts)} prompt size(s) x {len(streams)} stream count(s)")
         args.parallel = slots
         run = swept(args, model, measured_run(args, model, head, heads, n),
-                    context=per_slot * slots, port=args.serve_port,
-                    head=head if n < len(heads) else None)
-        run = run.over(timeout=float(args.per_question), n_predict=int(args.generate),
-                       temperature=0.0)
+                    context=per_slot * slots, head=head if n < len(heads) else None)
+        run = run.over(port=int(args.serve_port), timeout=float(args.per_question),
+                       n_predict=int(args.generate), temperature=0.0)
         try:
             with up(run, binary=args.binary or "", name=label) as (server, held_up):
                 held_up.pop("baseline", None)
@@ -419,16 +427,16 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                 client = run.client(server.base_url)
                 if smoking_first:
                     say("  smoke: one cell first, on this load")
-                    proved = grid(client, prompts=prompts, streams=streams,
-                                  generate=args.generate, log=print, smoke=True)
+                    proved = grid(client, pairs(prompts, streams, smoke=True),
+                                  generate=args.generate, log=print)
                     key = save(args.kept, proved, server={**_server_record(server.base_url, client),
                                                         **held_up}, kind=KIND, label=label)
                     _proved(read_back(args.kept, [key]), f"{label} smoke")
                     keys.append(key)
                     say("  smoke: ok")
-                cells = grid(client, prompts=prompts, streams=streams, generate=args.generate,
-                             log=print, smoke=smoke,
-                             sample=int(getattr(args, "sample", 0) or 0))
+                cells = grid(client, pairs(prompts, streams, smoke=smoke,
+                                           sample=int(getattr(args, "sample", 0) or 0)),
+                             generate=args.generate, log=print)
                 keys.append(save(args.kept, cells,
                                  server={**_server_record(server.base_url, client),
                                          **held_up},

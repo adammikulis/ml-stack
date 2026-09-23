@@ -1,7 +1,7 @@
-"""A peer's exported runs into this machine's store. `import_runs` writes them as
-``bench:`` docs with ``server["host"]``, ``server["machine"]`` and ``server["commit"]`` set,
-so a sweep spread over the fleet reads back as one set of runs that says which machine
-measured each."""
+"""A peer's exported runs into this machine's store. `gather` fetches what each dispatched
+job kept and `import_runs` writes them as ``bench:`` docs with ``server["host"]``,
+``server["machine"]`` and ``server["commit"]`` set, so a sweep spread over the fleet reads
+back as one set of runs that says which machine measured each."""
 
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.bench.score import machine_of
+from ml_stack.fleet.sweeps import Handle, bench_export
 from ml_stack.log import say
 
-__all__ = ["SERVER_KEYS", "import_runs"]
+__all__ = ["SERVER_KEYS", "gather", "import_runs"]
 
 
 SERVER_KEYS = ("model", "draft_model", "binary", "context", "slots", "cache_type",
@@ -125,3 +126,31 @@ def _records(source: Any) -> tuple[list[Mapping[str, Any]], Mapping[str, Any]]:
     if not isinstance(source, (list, tuple)):
         raise ValueError("an export is a list of runs, or {'runs': [...]}")
     return [r for r in source if isinstance(r, Mapping)], said
+
+
+def gather(handles: Sequence[Handle], *, into: str | Path,
+           log: Callable[[str], None] = say) -> dict[str, list[str]]:
+    """Bring home what each dispatched job measured: every peer's runs kept since its job
+    started, whatever graph they read, imported into ``into`` by `import_runs` with the
+    peer's name as host and the machine id and commit its export names. The whole record
+    comes home, ``server["graph"]`` included, so `show --export` and `ranking` here gate
+    it as they gate a run measured here. A refused or never-started job has nothing to
+    gather. Returns the keys written per machine; a peer whose export holds nothing is said."""
+    out: dict[str, list[str]] = {}
+    for handle in handles:
+        if not handle.id:
+            continue
+        try:
+            answered = bench_export(handle.peer, job=handle.id, full=True, anyway=True)
+        except Exception as exc:  # noqa: BLE001 - said, and the others still come home
+            log(f"  {handle.peer_name}: could not export: {exc}")
+            continue
+        host = str(answered.get("host") or handle.peer_name)
+        machine = str(answered.get("machine") or handle.machine)
+        if not answered.get("runs"):
+            log(f"  {host}: kept no run since {answered.get('since', '?')}")
+            out[machine or host] = []
+            continue
+        out[machine or host] = import_runs({**answered, "machine": machine}, into,
+                                           host=host, log=log)
+    return out
