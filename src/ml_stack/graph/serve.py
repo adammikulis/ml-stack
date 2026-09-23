@@ -449,7 +449,9 @@ class AskRoutes(MetricsRoutes):
                 if store is None:
                     return
                 for node in held:
-                    store.upsert_node(node)
+                    if not store.query("MATCH (n:Node {id:$id}) RETURN 1 AS ok",
+                                       {"id": node["id"]}):
+                        store.upsert_node(node)
                 remember_turn(store, thread=ask.thread, role="user", text=ask.question,
                               embedder=embed)
                 remember_turn(store, thread=ask.thread, role="assistant",

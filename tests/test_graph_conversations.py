@@ -104,6 +104,23 @@ def test_the_flag_keeps_the_conversation_in_the_corpus(corpus):
     assert turns[1].drew["shown"] == ["person:iris"]
 
 
+def test_a_pointer_never_overwrites_an_entry_the_conversation_store_holds(corpus):
+    with GraphStore(corpus) as store:
+        store.upsert_node({"id": "person:iris", "kind": "person", "label": "Iris Bellweather",
+                           "attrs": {"role": "surveyor"}})
+
+    def threads(self, *, write=False):
+        return GraphStore(corpus, read_only=not write)
+
+    with threaded_server(_served(corpus, threads=threads)) as url:
+        assert _post(url + "/ask", {"question": "who surveys land?", "thread": "c1"})[0] == 200
+
+    with GraphStore(corpus, read_only=True) as store:
+        iris = next(n for n in store.nodes() if n["id"] == "person:iris")
+        assert iris["attrs"] == {"role": "surveyor"}
+        assert [t.role for t in follow(store, "c1")] == ["user", "assistant"]
+
+
 def test_reading_a_thread_before_any_ask_creates_no_store(corpus):
     with threaded_server(_served(corpus)) as url:
         assert _get(url + "/thread/c1") == {"thread": "c1", "turns": []}
