@@ -343,3 +343,66 @@ def test_processes_lease_through_the_broker_they_start(tmp_path, llama_binary, m
             if server["pid"]:
                 kill_process_tree(server["pid"])
         kill_process_tree(record["pid"])
+
+
+def _broker_process(tmp_path: Path, *extra: str) -> tuple[subprocess.Popen, Path]:
+    """``ml-stack-serve broker`` as its own process under a state root in ``tmp_path``, once
+    its record names it."""
+    state = tmp_path / "broker-home"
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    env = {**os.environ, "ML_STACK_HOME": str(state),
+           "PYTHONPATH": os.pathsep.join(p for p in (src, os.environ.get("PYTHONPATH")) if p)}
+    proc = subprocess.Popen([sys.executable, "-m", "ml_stack.serve.cli", "broker", *extra],
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    record = state / "broker.json"
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and proc.poll() is None:
+        try:
+            if json.loads(record.read_text()).get("pid") == proc.pid:
+                return proc, state
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.1)
+    proc.kill()
+    raise AssertionError(f"the broker did not write its record: {proc.communicate()[0]}")
+
+
+@pytest.mark.slow
+def test_a_broker_with_nothing_to_supervise_exits_on_its_own(tmp_path):
+    proc, state = _broker_process(tmp_path, "--quit-after", "2")
+    try:
+        assert proc.wait(timeout=20) == 0
+    finally:
+        kill_process_tree(proc.pid)
+    assert "nothing to supervise for 2s" in proc.stdout.read()
+    assert not (state / "broker.json").exists()
+
+
+@pytest.mark.slow
+def test_a_broker_whose_home_is_removed_exits(tmp_path):
+    import shutil
+
+    proc, state = _broker_process(tmp_path)
+    try:
+        shutil.rmtree(state)
+        assert proc.wait(timeout=20) == 0
+    finally:
+        kill_process_tree(proc.pid)
+    assert "its record is gone" in proc.stdout.read()
+
+
+def test_asking_for_cores_with_no_broker_starts_none():
+    from ml_stack import home
+    from ml_stack.testing.cores import workers_for
+
+    assert workers_for(3) == 3
+    assert not home.state("broker.json").exists()
+
+
+def test_a_claim_is_supervised_and_nothing_is_not(broker, holders):
+    assert not broker.supervising()
+    holder = holders()
+    broker.claim("gpu", holder.pid, {})
+    assert broker.supervising()
+    broker.unclaim("gpu", holder.pid)
+    assert not broker.supervising()

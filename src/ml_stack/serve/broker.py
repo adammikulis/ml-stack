@@ -476,6 +476,13 @@ class Broker:
             self._cond.notify_all()
         return found
 
+    def supervising(self) -> bool:
+        """Whether anything is the broker's to look after: a server of ours, a held or loading
+        one, a waiting ask, a claim or a core grant."""
+        with self._cond:
+            return bool(self.queue or self.claims or self.cores
+                        or any(h.ours or h.holders or h.loading for h in self.servers.values()))
+
     def snapshot(self) -> dict[str, Any]:
         """Servers, their holders, the queue and the claims, for a person looking."""
         now = time.monotonic()

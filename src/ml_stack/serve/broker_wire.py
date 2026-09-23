@@ -35,6 +35,7 @@ __all__ = ["call", "claim", "cores", "give_back_cores", "lease", "record_path", 
 START_WAIT_S = 30.0
 REAP_EVERY_S = 1.0
 ADOPT_EVERY_S = 30.0
+QUIET_S = 900.0
 
 
 def record_path() -> Path:
@@ -93,8 +94,9 @@ class _Server(socketserver.ThreadingTCPServer):
         return {"ok": False, "error": f"no such broker call: {op!r}"}
 
 
-def serve(*, idle_s: float = IDLE_S, say=say_out) -> int:
-    """Run this machine's broker until a quit signal. Returns 0, also when one is running."""
+def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> int:
+    """Run this machine's broker until a quit signal, until it has had nothing to supervise
+    for ``quiet_s``, or until its record is gone. Returns 0, also when one is running."""
     try:
         with only_one(home.state("broker.lock"), wait=False, announce=say):
             broker = Broker(idle_s=idle_s)
@@ -107,7 +109,8 @@ def serve(*, idle_s: float = IDLE_S, say=say_out) -> int:
             say(f"broker on {DEFAULT_HOST}:{server.server_address[1]} (pid {os.getpid()}), "
                 f"{len(broker.servers)} of {len(adopted)} running server(s) taken in")
             done = threading.Event()
-            threading.Thread(target=_upkeep, args=(broker, done), daemon=True).start()
+            threading.Thread(target=_upkeep, args=(broker, done, server, quiet_s),
+                             daemon=True).start()
             on_quit(lambda *_: threading.Thread(target=server.shutdown).start())
             try:
                 server.serve_forever()
@@ -121,15 +124,25 @@ def serve(*, idle_s: float = IDLE_S, say=say_out) -> int:
     return 0
 
 
-def _upkeep(broker: Broker, done: threading.Event) -> None:
-    """Reap every second, and take in servers started since the last look every
-    ``ADOPT_EVERY_S``."""
-    looked = time.monotonic()
+def _upkeep(broker: Broker, done: threading.Event, server: _Server, quiet_s: float) -> None:
+    """Reap every second, take in servers started since the last look every
+    ``ADOPT_EVERY_S``, and stop the server once the broker's record is gone or it has had
+    nothing to supervise for ``quiet_s``."""
+    looked = busy = time.monotonic()
     while not done.wait(REAP_EVERY_S):
         broker.reap()
-        if time.monotonic() - looked >= ADOPT_EVERY_S:
+        now = time.monotonic()
+        if now - looked >= ADOPT_EVERY_S:
             broker.adopt()
-            looked = time.monotonic()
+            looked = now
+        if broker.supervising():
+            busy = now
+        why = ("its record is gone" if _record().get("pid") != os.getpid()
+               else f"nothing to supervise for {quiet_s:.0f}s" if now - busy >= quiet_s else "")
+        if why:
+            broker.say(f"broker stopping: {why}")
+            server.shutdown()
+            return
 
 
 def _record() -> dict[str, Any]:
@@ -178,7 +191,13 @@ def call(op: str, *, timeout: float | None = 30.0, start: bool = True,
          **fields: Any) -> dict[str, Any]:
     """Send ``op`` to the broker, starting it first when ``start``. Raises `BrokerError`
     with the broker's own words when it refuses."""
-    reply = _send(_reach(start=start), {"op": op, "pid": os.getpid(), **fields}, timeout=timeout)
+    body = {"op": op, "pid": os.getpid(), **fields}
+    try:
+        reply = _send(_reach(start=start), body, timeout=timeout)
+    except ConnectionRefusedError:
+        if not start:
+            raise
+        reply = _send(_reach(start=True), body, timeout=timeout)  # it quit after the ping
     if not reply.get("ok"):
         raise BrokerError(str(reply.get("error") or f"the broker refused {op}"))
     return reply
@@ -221,8 +240,9 @@ def claim(name: str, info: dict[str, Any], *, timeout: float = 0.0) -> dict[str,
 
 
 def cores(want: int) -> dict[str, Any]:
-    """Cores for this process to run tests on, out of what the machine has free."""
-    return call("cores", want=want)
+    """Cores for this process to run tests on, out of what the running broker says is free.
+    Raises `BrokerError` when no broker is running."""
+    return call("cores", start=False, want=want)
 
 
 def give_back_cores(lease: str) -> bool:

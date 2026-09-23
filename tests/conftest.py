@@ -191,6 +191,24 @@ def _no_machine_state(monkeypatch, tmp_path):
         monkeypatch.setattr(speech, attr, speech.Registry(kind=attr.lower()))
 
 
+@pytest.fixture(autouse=True)
+def _no_broker_left(_no_machine_state):
+    """Fails a test that leaves a broker running under its temporary state root, and stops it."""
+    yield
+    from ml_stack.home import state
+    from ml_stack.serve.process import kill_process_tree, pid_exists
+
+    record = state("broker.json")
+    try:
+        pid = json.loads(record.read_text(encoding="utf-8")).get("pid")
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(pid, int) and pid != os.getpid() and pid_exists(pid):
+        kill_process_tree(pid)
+        pytest.fail(f"a broker (pid {pid}) was left running; its record is {record}",
+                    pytrace=False)
+
+
 # -- awaiting a coroutine without depending on who ran first ----------------------------
 
 def on_a_fresh_loop(coro):
@@ -578,13 +596,65 @@ def points_at(link) -> str:
         return ""
 
 
+#: Names at the top of the real state root that a process outside the suite rewrites on
+#: its own: a running broker's holders, record and lock, the edit guard's cache, and the
+#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content.
+LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
+                          "servers.lock", "logs", "guard"})
+
+
+def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
+    """Every file under ``root`` by relative path with its mtime in ns, leaving out the
+    top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
+    out: dict[str, int] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel = Path(dirpath).relative_to(root)
+        if rel == Path("."):
+            dirnames[:] = [d for d in dirnames if d not in skip]
+            filenames = [f for f in filenames if f not in skip]
+        for name in filenames:
+            if name.endswith(".tmp"):
+                continue
+            try:
+                out[(rel / name).as_posix()] = os.lstat(os.path.join(dirpath, name)).st_mtime_ns
+            except OSError:
+                continue
+    return out
+
+
+def changed_files(before: dict[str, int], after: dict[str, int]) -> list[str]:
+    """The paths written, created or removed between two `file_mtimes` snapshots."""
+    return sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _real_cache_and_state_untouched():
+def _real_home(tmp_path_factory):
+    """The real state and cache roots, captured before the session moves ``HOME``,
+    ``ML_STACK_HOME`` and ``ML_STACK_CACHE`` into a temporary directory; fails the run when
+    a file under the real state root was written, created or removed."""
+    from ml_stack import home
+
+    real = types.SimpleNamespace(state=home.home(), cache=home.cache())
+    before = file_mtimes(real.state)
+    away = tmp_path_factory.mktemp("home")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("HOME", str(away))
+        mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
+        mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
+        yield real
+    written = changed_files(before, file_mtimes(real.state))
+    if written:
+        pytest.fail(f"the real state root {real.state} was written during the run: "
+                    + ", ".join(written[:20]), pytrace=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_cache_and_state_untouched(_real_home):
     """Fails the run if a test wrote into the real ml_stack cache or server state.
 
     Snapshots the log directory, the lease file, the two settings files and the link
-    naming the managed llama.cpp build -- resolved once at session start, before any
-    per-test fixture moves the state or cache root -- and compares again once every test
+    naming the managed llama.cpp build under the real roots `_real_home` captured, and
+    compares again once every test
     in the session has run. Safe when no path exists.
 
     The log directory holds one file per server start, so a file that got *shorter* is a
@@ -593,15 +663,13 @@ def _real_cache_and_state_untouched():
     start old enough to have been rotated out. The lease file is a single record touched only by a lease or a release, so
     its entries are compared directly.
     """
-    from ml_stack.home import cache, state
-
-    log_dir = state("logs")
-    lease_file = state("servers.json")
-    older_lease = cache("servers.json")
-    settings = [where(name) for name in ("limits.json", "idle.json")
-                for where in (state, cache)]
-    current_build = state("llama.cpp") / "current"
-    builds_dir = state("llama.cpp") / "builds"
+    state, cache = _real_home.state, _real_home.cache
+    log_dir = state / "logs"
+    lease_file = state / "servers.json"
+    older_lease = cache / "servers.json"
+    settings = [root / name for name in ("limits.json", "idle.json") for root in (state, cache)]
+    current_build = state / "llama.cpp" / "current"
+    builds_dir = state / "llama.cpp" / "builds"
 
     def build_names() -> set[str]:
         try:
