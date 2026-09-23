@@ -8,7 +8,7 @@
   "file-locks": 0,
   "home-paths": 0,
   "http-servers": 2,
-  "local-imports": 458,
+  "local-imports": 454,
   "long-docstrings": 83,
   "long-functions": 10,
   "module-skips": 31,
@@ -18,14 +18,14 @@
   "pyright-errors": 1,
   "ruff-blind-except": 19,
   "ruff-bugbear": 56,
-  "ruff-other": 483,
+  "ruff-other": 471,
   "ruff-security": 86,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
-  "wide-signatures": 34,
+  "wide-signatures": 33,
   "floors-only-rise": {
-    "tests-collected": 5515
+    "tests-collected": 5532
   },
   "ratchet": {
     "date": "2026-09-18",
