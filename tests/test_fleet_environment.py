@@ -72,6 +72,23 @@ class TestEnvironment:
         have = env.installed()
         assert "pytest" in have
 
+    def test_a_frozen_app_reports_only_what_its_environment_holds(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        env = Environment(tmp_path)
+        assert env.installed() == {}
+        env.python.parent.mkdir(parents=True)
+        env.python.write_text('#!/bin/sh\necho \'[{"name": "Numpy", "version": "2.0.0"}]\'\n')
+        env.python.chmod(0o755)
+        assert env.installed() == {"numpy": "2.0.0"}
+
+    def test_a_checkout_merges_its_own_interpreter_with_the_environment(self, tmp_path):
+        env = Environment(tmp_path)
+        env.python.parent.mkdir(parents=True)
+        env.python.write_text('#!/bin/sh\necho \'[{"name": "Nonesuch", "version": "9.9"}]\'\n')
+        env.python.chmod(0o755)
+        have = env.installed()
+        assert have["nonesuch"] == "9.9" and "pytest" in have
+
     def test_the_state_names_every_library_and_whether_it_is_there(self, tmp_path):
         state = Environment(tmp_path).state("apple" if sys.platform == "darwin" else "cpu")
         assert state["ready"] is False

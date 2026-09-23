@@ -232,8 +232,12 @@ class Environment:
         return out
 
     def installed(self) -> dict[str, str]:
-        """Package name to version, for what the daemon or its environment can import."""
-        have = self.daemon_installed()
+        """Package name to version, for what a job run here can import.
+
+        A frozen app runs jobs in this environment alone; a checkout also runs them on its own
+        interpreter, whose distributions are merged in.
+        """
+        have = {} if getattr(sys, "frozen", False) else self.daemon_installed()
         if not self.exists:
             return have
         try:
