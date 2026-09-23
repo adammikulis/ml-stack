@@ -242,7 +242,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
             if group in advertisers:
                 continue
             beacon = Beacon(name=live_name[0], port=port, device=report(),
-                            slots=runner.slots, free=runner.slots)
+                            slots=runner.slots, free=runner.slots,
+                            machine=bench_host[0].machine)
             try:
                 # Not group=: that is the multicast address every cluster shares.
                 # Clusters are told apart by the key their beacons are signed with.

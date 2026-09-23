@@ -2,18 +2,20 @@
 
 `state()` names anything under the state root; `cache()` names anything under the cache
 root. Both read the environment when they are called, so a caller that moves a root sees
-the move without reloading a module.
+the move without reloading a module. `machine_id()` is the identity this machine is kept
+under wherever its name would not tell two machines apart.
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 
 from ml_stack.files import promote
 
-__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "moved",
-           "state", "user_home"]
+__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "machine_id",
+           "moved", "state", "user_home"]
 
 ROOT_ENV = "ML_STACK_HOME"
 """Moves the state root."""
@@ -82,3 +84,24 @@ def moved(*parts: str) -> Path:
     except OSError:
         return older
     return current
+
+
+def machine_id() -> str:
+    """This machine's identity: minted once under the state root and read from there after."""
+    path = state("machine-id")
+    try:
+        held = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        held = ""
+    if held:
+        return held
+    path.parent.mkdir(parents=True, exist_ok=True)
+    draft = path.with_name(f".machine-id.{os.getpid()}.{secrets.token_hex(4)}")
+    draft.write_text(secrets.token_hex(8), encoding="utf-8")
+    try:
+        os.link(draft, path)  # fails when another process minted first; theirs is kept
+    except FileExistsError:
+        pass
+    finally:
+        draft.unlink()
+    return path.read_text(encoding="utf-8").strip()

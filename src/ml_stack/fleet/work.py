@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -32,7 +33,7 @@ class Unit:
     env: Mapping[str, str] = field(default_factory=dict)
     requires: Requires = Requires()
     peer: str = ""
-    """Pin to one named peer. Empty means place it automatically."""
+    """Pin to one peer, by name or machine id. Empty means place it automatically."""
     work: float = 1.0
     """How much work this is, in whatever unit ``kind``'s measured rate is in."""
 
@@ -45,6 +46,7 @@ class Placement:
     state: str = "pending"
     """pending | done | failed | stopped | unreachable | unplaceable"""
     peer: str = ""
+    machine: str = ""
     base_url: str = ""
     job_id: str = ""
     returncode: int | None = None
@@ -85,18 +87,15 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
 
     emit = emitting(on_event)
 
-    def take(name: str) -> str | None:
-        """The next unit this peer may run, or None."""
+    def take(machine: str) -> str | None:
+        """The next unit the peer on ``machine`` may run, or None."""
         with lock:
             for uid in list(pending):
-                unit = by_id[uid]
-                if unit.peer and unit.peer != name:
+                if machine not in admits.get(uid, ()):
                     continue
-                if name not in admits.get(uid, ()):
+                if (machine in results[uid].tried and len(results[uid].tried) <= retries
+                        and any(o != machine for o in _admitting(uid))):
                     continue
-                if name in results[uid].tried and len(results[uid].tried) <= retries:
-                    if any(o != name for o in _admitting(uid)):
-                        continue
                 pending.remove(uid)
                 return uid
             return None
@@ -106,15 +105,15 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
 
     admits: dict[str, tuple[str, ...]] = {}
 
-    def worker(peer: Peer, name: str) -> None:
+    def worker(peer: Peer, machine: str, name: str) -> None:
         while not stop.is_set():
-            held_until = cooldown.get(name, 0.0)
+            held_until = cooldown.get(machine, 0.0)
             if held_until > time.time():
                 if all(results[u].state != "pending" for u in by_id):
                     return
                 time.sleep(min(1.0, held_until - time.time()))
                 continue
-            uid = take(name)
+            uid = take(machine)
             if uid is None:
                 if all(results[u].state != "pending" for u in by_id):
                     return
@@ -123,8 +122,8 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
             unit = by_id[uid]
             place = results[uid]
             place.attempts += 1
-            place.tried = tuple(dict.fromkeys(place.tried + (name,)))
-            place.peer, place.base_url = name, peer.base_url
+            place.tried = tuple(dict.fromkeys((*place.tried, machine)))
+            place.peer, place.machine, place.base_url = name, machine, peer.base_url
             place.started_at = place.started_at or time.time()
             emit("start", unit=uid, peer=name, attempt=place.attempts)
             try:
@@ -146,18 +145,18 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
             place.finished_at = time.time()
 
             if place.ok:
-                strikes[name] = 0
-                rate = rates.record(name, kind, units=unit.work,
+                strikes[machine] = 0
+                rate = rates.record(machine, kind, units=unit.work,
                                     seconds=place.elapsed_s)
                 emit("done", unit=uid, peer=name, seconds=place.elapsed_s, rate=rate)
                 continue
 
-            strikes[name] = strikes.get(name, 0) + 1
+            strikes[machine] = strikes.get(machine, 0) + 1
             emit("fail", unit=uid, peer=name, state=place.state, error=place.error)
-            if strikes[name] >= QUARANTINE_AFTER:
-                wait = min(300.0, 30.0 * 2 ** (strikes[name] - QUARANTINE_AFTER))
-                cooldown[name] = time.time() + wait
-                emit("quarantine", peer=name, seconds=wait, strikes=strikes[name])
+            if strikes[machine] >= QUARANTINE_AFTER:
+                wait = min(300.0, 30.0 * 2 ** (strikes[machine] - QUARANTINE_AFTER))
+                cooldown[machine] = time.time() + wait
+                emit("quarantine", peer=name, seconds=wait, strikes=strikes[machine])
 
             if len(place.tried) <= retries and len(_admitting(uid)) > len(place.tried):
                 place.state = "pending"
@@ -166,14 +165,14 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
             elif place.state == "pending":
                 place.state = "failed"
 
-    bench = {peer: score for (peer, k), score in rates.as_map().items()
+    bench = {machine: score for (machine, k), score in rates.as_map().items()
              if k == BENCH_KIND}
     snapshot = candidates(peers, kind=kind, rates=rates.as_map(), bench=bench)
     for unit in units:
         kept, refused = eligible(list(snapshot), unit.requires)
         if unit.peer:
-            kept = [c for c in kept if c.name == unit.peer]
-        admits[unit.id] = tuple(c.name for c in kept)
+            kept = [c for c in kept if unit.peer in (c.name, c.machine)]
+        admits[unit.id] = tuple(c.machine for c in kept)
         if not kept:
             place = results[unit.id]
             place.state = "unplaceable"
@@ -185,7 +184,7 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
                     pending.remove(unit.id)
             emit("unplaceable", unit=unit.id, reasons=refused)
 
-    threads = [threading.Thread(target=worker, args=(c.peer, c.name), daemon=True,
+    threads = [threading.Thread(target=worker, args=(c.peer, c.machine, c.name), daemon=True,
                                 name=f"fanout-{c.name}-{i}")
                for c in snapshot for i in range(max(1, c.slots))]
     for t in threads:
@@ -206,10 +205,8 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
         raise
     finally:
         stop.set()
-        try:
+        with contextlib.suppress(OSError):
             rates.save()
-        except OSError:
-            pass
 
     for place in results.values():
         if place.state == "pending":

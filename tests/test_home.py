@@ -177,3 +177,25 @@ class TestAStatePathThatUsedToLiveInTheCache:
         assert (held.servers, held.slots) == (2, 4)
         assert reclaim.state_path() == tmp_path / "state" / "idle.json"
         assert (tmp_path / "state" / "idle.json").read_text() == '{"8100": {"idle": 90.0}}'
+
+
+class TestTheMachineId:
+    def test_it_is_minted_once_and_read_back(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+        first = home.machine_id()
+        assert len(first) == 16 and int(first, 16) >= 0
+        assert (tmp_path / "state" / "machine-id").read_text() == first
+        assert home.machine_id() == first
+        assert [p.name for p in (tmp_path / "state").iterdir()] == ["machine-id"]
+
+    def test_another_state_root_is_another_machine(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "one"))
+        one = home.machine_id()
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "two"))
+        assert home.machine_id() != one
+
+    def test_one_already_written_is_kept(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+        (tmp_path / "state").mkdir()
+        (tmp_path / "state" / "machine-id").write_text("0123456789abcdef\n")
+        assert home.machine_id() == "0123456789abcdef"

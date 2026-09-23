@@ -105,6 +105,7 @@ def _box(tmp_path: Path, name: str, *, room: int, commit: str = COMMIT, launch=N
     runner = JobRunner(root, files)
     host = BenchHost(runner, home=home, commit=commit, room=lambda: room,
                      launch=launch or scripted_launch(), name=name, poll_s=0.1)
+    host.machine = f"id-{name}"
 
     def report():
         return {"cpus": 8, **host.report()}
@@ -448,21 +449,22 @@ def test_gather_imports_each_peers_runs_with_host_set_and_skips_duplicates(boxes
 
     got = gather(handles, into=into, log=said.append)
 
-    assert sorted(got) == ["roomy", "small"]
-    assert len(got["roomy"]) == 1 and len(got["small"]) == 1
+    assert sorted(got) == ["id-roomy", "id-small"]
+    assert len(got["id-roomy"]) == 1 and len(got["id-small"]) == 1
     kept = {r["key"]: r for r in runs(into)}
-    assert set(kept) == {*got["roomy"], *got["small"]}
-    home = kept[got["roomy"][0]]
+    assert set(kept) == {*got["id-roomy"], *got["id-small"]}
+    home = kept[got["id-roomy"][0]]
     assert home["label"] == "big-plain"
     assert home["server"]["host"] == "roomy"
+    assert home["server"]["machine"] == "id-roomy"
     assert home["server"]["commit"] == COMMIT
     assert home["server"]["model"] == "invented-4B.gguf", "the peer's server record survives"
     assert len(home["rows"]) == 4, "the whole run comes home, rows and all"
-    assert got["roomy"][0].endswith("@roomy")
+    assert got["id-roomy"][0].endswith("@roomy")
     assert "roomy: imported 1 run(s)" in "\n".join(said)
 
     again = gather(handles, into=into, log=said.append)
-    assert again == {"roomy": [], "small": []}
+    assert again == {"id-roomy": [], "id-small": []}
     assert len(runs(into)) == 2, "nothing imported twice, nothing overwritten"
     assert "1 already there" in "\n".join(said)
 
@@ -473,8 +475,39 @@ def test_a_peer_that_kept_nothing_is_said_not_skipped_silently(boxes, tmp_path):
     wait(handles, poll_s=0.1, timeout_s=20, log=lambda _l: None)
     said: list[str] = []
     got = gather(handles, into=tmp_path / "home.ladybug", log=said.append)
-    assert got == {"roomy": []}
+    assert got == {"id-roomy": []}
     assert "roomy: kept no run since" in "\n".join(said)
+
+
+def test_two_machines_of_one_name_gather_as_two_machines(tmp_path):
+    from ml_stack.bench import runs
+    from ml_stack.bench.score import machine_of
+
+    made = [_box(tmp_path / where, "Mac", room=24 * G) for where in ("one", "two")]
+    made[1].host.machine = "id-Mac-other"
+    try:
+        into = tmp_path / "home.ladybug"
+        handles = dispatch({box.peer: _job("tiny.gguf") for box in made},
+                           log=lambda _l: None)
+        assert [h.host for h in handles] == ["Mac", "Mac"]
+        assert [h.machine for h in handles] == ["id-Mac", "id-Mac-other"]
+        at = _later(30)
+        for box in made:
+            _kept(box.store, "tiny-plain", at)
+        wait(handles, poll_s=0.1, timeout_s=20, log=lambda _l: None)
+
+        got = gather(handles, into=into, log=lambda _l: None)
+
+        assert sorted(got) == ["id-Mac", "id-Mac-other"]
+        assert all(len(keys) == 1 for keys in got.values()), got
+        kept = runs(into)
+        assert sorted(machine_of(r) for r in kept) == ["id-Mac", "id-Mac-other"]
+        assert {r["server"]["host"] for r in kept} == {"Mac"}
+    finally:
+        for box in made:
+            box.runner.shutdown()
+            box.httpd.shutdown()
+            box.httpd.server_close()
 
 
 def test_the_export_route_answers_the_flat_shape_show_export_writes(boxes):
@@ -551,7 +584,7 @@ def test_a_local_peer_goes_through_the_same_path(tmp_path):
         assert done[0].state == "done"
         _kept(me.host.home / "runs.ladybug", "m-plain", _later(30))
         got = gather(handles, into=tmp_path / "home.ladybug", log=lambda _l: None)
-        assert len(got["desk"]) == 1
+        assert len(got[me.host.machine]) == 1
     finally:
         me.host.runner.shutdown()
 

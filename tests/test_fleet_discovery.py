@@ -34,6 +34,7 @@ from ml_stack.fleet.discovery import (
     discover,
     fit_beacon,
     load_cluster_key,
+    named_apart,
 )
 from ml_stack.fleet.remote import Peer, PeerError
 
@@ -223,6 +224,15 @@ def test_a_replayed_reply_is_refused(key):
     assert _verify(key, raw, kind="beacon", nonce="a-fresh-nonce") is None
 
 
+def test_only_a_shared_name_is_told_apart_and_by_as_little_as_it_takes():
+    rows = [{"name": "Mac", "machine": "a1b2c3d4"}, {"name": "Mac", "machine": "a1b2ffff"},
+            {"name": "Mac", "machine": "99990000"}, {"name": "rtx", "machine": "12345678"}]
+    assert [r["name"] for r in named_apart(rows)] == [
+        "Mac#a1b2c", "Mac#a1b2f", "Mac#99990", "rtx"]
+    once = [{"name": "Mac", "machine": "a1b2c3d4"}, {"name": "Mac", "machine": "a1b2c3d4"}]
+    assert [r["name"] for r in named_apart(once)] == ["Mac", "Mac"]
+
+
 def test_garbage_on_the_port_does_not_kill_the_listener(key, port):
     """An unrelated service on the group must not take discovery down."""
     with Advertiser(Beacon(name="rtx", port=8770), key, port=port, interval_s=0.2):
@@ -299,6 +309,20 @@ def _driver(keyfile: Path, http_port: int) -> Peer:
 def _probe(rtx: Peer, out: Path) -> dict:
     return rtx.submit([sys.executable, "-c", f"open({str(out)!r}, 'w').write('ran')"],
                       name="probe")
+
+
+def test_a_restarted_daemon_keeps_its_machine_id(tmp_path):
+    from ml_stack.home import machine_id
+
+    seen = []
+    for _ in range(2):
+        with _booted(tmp_path) as (keyfile, disco_port, http_port, _log):
+            found = discover(load_cluster_key(keyfile), timeout_s=3.0, port=disco_port)
+            health = _driver(keyfile, http_port).health()
+            seen.append((health["machine"], [b.machine for b in found],
+                         [b.instance for b in found]))
+    assert seen[0][:2] == seen[1][:2] == (machine_id(), [machine_id()])
+    assert seen[0][2] != seen[1][2], "the per-process instance is minted afresh"
 
 
 def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, tmp_path):

@@ -251,8 +251,8 @@ def bench_run(argv: list[str]) -> dict[str, Any]:
 def bench_status() -> dict[str, Any]:
     """What is measuring right now, its last log line, or that nothing is
     (``ml-stack-bench status``)."""
-    from ml_stack.bench.underway import measuring
     from ml_stack.bench.progress import status
+    from ml_stack.bench.underway import measuring
 
     return {"text": status(), "measuring": measuring()}
 
@@ -292,7 +292,7 @@ def fleet_peers(timeout_s: float = 2.0) -> list[dict[str, Any]]:
     from ml_stack.fleet.launch import already_running
 
     me = already_running() or {}
-    return peers(timeout_s=timeout_s, self_name=str(me.get("name") or ""))
+    return peers(timeout_s=timeout_s, self_machine=str(me.get("machine") or ""))
 
 
 def fleet_join(passphrase: str = "", group: str = "ml-stack", name: str = "",

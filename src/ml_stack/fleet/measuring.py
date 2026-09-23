@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.home import machine_id
 from ml_stack.hub import room as machine_room
 from ml_stack.lock import held_by
 from ml_stack.paths import repo_root
@@ -176,7 +177,7 @@ class Job:
                 "needs": {str(k): int(v) for k, v in self.needs.items()}}
 
     @classmethod
-    def from_request(cls, req: Mapping[str, Any]) -> "Job":
+    def from_request(cls, req: Mapping[str, Any]) -> Job:
         """A `Job` out of a request body, or a `ValueError` saying what was wrong."""
         if not isinstance(req, Mapping):
             raise ValueError("a bench job is a JSON object")
@@ -304,7 +305,7 @@ class BenchHost:
     ``launch`` are `hub.room` and `detach_bench` unless a test hands in fakes.
     """
 
-    def __init__(self, runner: "JobRunner", *, home: Path | str,
+    def __init__(self, runner: JobRunner, *, home: Path | str,
                  commit: str | None = None, room: Callable[[], int] | None = None,
                  launch: Callable[[Sequence[str], Path], tuple[int, Path]] = detach_bench,
                  name: str = "", poll_s: float = 1.0) -> None:
@@ -314,8 +315,9 @@ class BenchHost:
         self.room = machine_room if room is None else room
         self.launch = launch
         self.name = name or socket.gethostname()
+        self.machine = machine_id()
         self.poll_s = poll_s
-        self._mine: dict[str, "DaemonJob"] = {}
+        self._mine: dict[str, DaemonJob] = {}
         self._lock = threading.Lock()
 
     # -- what this machine says about itself --
@@ -333,16 +335,16 @@ class BenchHost:
 
     def report(self) -> dict[str, Any]:
         """What the beacon and ``/health`` carry for `plan`: the memory a model may use,
-        the code this machine runs, and whether it is measuring."""
+        the code this machine runs, whether it is measuring, and its `machine_id`."""
         return {"room_bytes": int(self.room() or 0), "bench_commit": self.commit,
-                "measuring": self.measuring()}
+                "measuring": self.measuring(), "machine": self.machine}
 
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return [j.public() for j in self._mine.values()]
 
     # -- taking a job --
-    def submit(self, job: Job) -> "DaemonJob":
+    def submit(self, job: Job) -> DaemonJob:
         """Start ``job`` here, or raise `Refused` saying why not.
 
         Three refusals, checked in this order: the dispatcher's ``commit`` is not this
@@ -389,7 +391,7 @@ class BenchHost:
                          name=f"bench-watch-{mine.id}").start()
         return mine
 
-    def _watch(self, job: "DaemonJob") -> None:
+    def _watch(self, job: DaemonJob) -> None:
         """Wait for the detached pid to go, then settle the job from its log. A job
         `stop` already marked ``stopped`` stays so."""
         while _alive(int(job.pid or 0)):
@@ -416,7 +418,8 @@ class BenchHost:
             since = time.strftime("%FT%T", time.localtime(found.started_at or found.submitted_at))
         store = self.home / STORE
         out: dict[str, Any] = {"runs": [], "skipped": 0, "since": since,
-                               "commit": self.commit, "store": str(store), "full": full}
+                               "commit": self.commit, "store": str(store), "full": full,
+                               "machine": self.machine}
         if not store.exists():
             return out
         try:

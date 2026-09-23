@@ -15,16 +15,14 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.home_dir`,
 # `bench.runs` -- so anything patchable is looked up there at call time, never bound here
 # at import.
 from ml_stack import bench
-from ml_stack.home import state
+from ml_stack.home import machine_id, state
 
-if TYPE_CHECKING:
-    pass
 
 def home_dir() -> Path:
     """Where every run this machine measured is kept. ``MLSTACK_BENCH_HOME`` moves it."""
@@ -103,17 +101,20 @@ def beside_the_run() -> list[Mapping[str, Any]]:
 
 
 def stamped(server: Mapping[str, Any] | None) -> dict[str, Any]:
-    """A run's ``server`` record with ``host``, ``commit`` and ``beside`` on it, unless it
-    names them.
+    """A run's ``server`` record with ``host``, ``machine``, ``commit`` and ``beside`` on
+    it, unless it names them.
 
     Every run says which machine measured it and which code: a fleet gathers runs from
     several hosts into one store, and the table, the ranking and the frontier must tell
     them apart. A record that arrives with a host -- gathered from a peer, or measured
-    under ``--host`` -- keeps it; an empty one is filled in. ``beside`` is what else held
-    the card while it was measured, written only when something did.
+    under ``--host`` -- keeps it; an empty one is filled in with this machine's hostname
+    and `home.machine_id`. ``beside`` is what else held the card while it was measured,
+    written only when something did.
     """
     out = dict(server or {})
-    out.setdefault("host", socket.gethostname())
+    if not out.get("host"):
+        out["host"] = socket.gethostname()
+        out.setdefault("machine", machine_id())
     out.setdefault("commit", _commit())
     if beside := beside_the_run():
         out.setdefault("beside", [dict(one) for one in beside])

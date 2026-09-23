@@ -1,6 +1,7 @@
 """A peer's exported runs into this machine's store. `import_runs` writes them as
-``bench:`` docs with ``server["host"]`` and ``server["commit"]`` set, so a sweep spread
-over the fleet reads back as one set of runs that says which machine measured each."""
+``bench:`` docs with ``server["host"]``, ``server["machine"]`` and ``server["commit"]`` set,
+so a sweep spread over the fleet reads back as one set of runs that says which machine
+measured each."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.bench.score import machine_of
 from ml_stack.log import say
 
 __all__ = ["SERVER_KEYS", "import_runs"]
@@ -20,14 +22,16 @@ SERVER_KEYS = ("model", "draft_model", "binary", "context", "slots", "cache_type
 """The fields ``show --export`` flattens out of a run's ``server``, put back there on import."""
 
 
-def _doc_from(record: Mapping[str, Any], *, host: str, commit: str) -> dict[str, Any]:
+def _doc_from(record: Mapping[str, Any], *, host: str, machine: str,
+              commit: str) -> dict[str, Any]:
     """A ``bench:`` doc out of one record -- a whole run as `runs` reads it, or a flat one
     as `show --export` writes it. Either way ``server["host"]`` and ``server["commit"]``
-    are set. A flat record has no rows, so its totals go under ``totals`` and its
+    are set, and ``server["machine"]`` when ``machine`` names one. A flat record has no rows, so its totals go under ``totals`` and its
     ``derived`` is precomputed, which is what `rates`, `pareto` and `composed` read."""
+    named = {"host": host, "commit": commit, **({"machine": machine} if machine else {})}
     if "rows" in record:
         one = {k: v for k, v in record.items() if k != "key"}
-        one["server"] = {**(one.get("server") or {}), "host": host, "commit": commit}
+        one["server"] = {**(one.get("server") or {}), **named}
         return one
     server = {k: record[k] for k in SERVER_KEYS if _said(record.get(k))}
     right = float(record.get("f1") or 0)
@@ -52,7 +56,7 @@ def _doc_from(record: Mapping[str, Any], *, host: str, commit: str) -> dict[str,
     if memory > 0:
         derived["right_per_gb"] = right * 2**30 / memory
     return {"at": str(record.get("at") or ""), "label": str(record.get("label") or ""),
-            "server": {**server, "host": host, "commit": commit}, "rows": [],
+            "server": {**server, **named}, "rows": [],
             "totals": dict(record), "derived": derived}
 
 
@@ -67,30 +71,31 @@ def _said(value: Any) -> bool:
 def import_runs(path_or_json: str | Path | Sequence[Mapping[str, Any]] | Mapping[str, Any],
                 into: str | Path, *, host: str, commit: str = "",
                 log: Callable[[str], None] = say) -> list[str]:
-    """Put a peer's runs into ``into`` as new ``bench:`` docs with ``server["host"]`` and
-    ``server["commit"]`` set. Returns the keys written.
+    """Put a peer's runs into ``into`` as new ``bench:`` docs with ``server["host"]``,
+    ``server["machine"]`` and ``server["commit"]`` set. Returns the keys written.
 
     ``path_or_json`` is a file ``ml-stack-bench show --export`` wrote on the peer, the
     JSON text of one, the list it holds, or what `bench_export` answered (``{"runs":
-    [...]}``); a whole run record, rows and all, is taken as it is. A run already in
-    ``into`` -- same label, ``at`` and host -- is skipped, and nothing there is ever
+    [...]}``, which names the peer's commit and `home.machine_id`); a whole run record,
+    rows and all, is taken as it is. A run already in ``into`` -- same label, ``at`` and
+    machine, or host where no machine is named -- is skipped, and nothing there is ever
     overwritten: a key that exists gets ``-n`` on the newcomer. Usable by hand for a peer
     with no daemon: export there, copy the file, import here.
     """
     from ml_stack.graph.store import GraphStore
 
     records, said = _records(path_or_json)
-    commit = commit or said
+    commit = commit or str(said.get("commit") or "")
+    machine = str(said.get("machine") or "")
     with GraphStore(into) as writer:
         kept = writer.docs()
-        present = {(str(v.get("label", "")), str(v.get("at", "")),
-                    str((v.get("server") or {}).get("host") or ""))
+        present = {(str(v.get("label", "")), str(v.get("at", "")), machine_of(v))
                    for k, v in kept.items() if k.startswith("bench:") and isinstance(v, dict)}
         written: list[str] = []
         skipped = 0
         for record in records:
-            doc = _doc_from(record, host=host, commit=commit)
-            mark = (doc["label"], doc["at"], host)
+            doc = _doc_from(record, host=host, machine=machine, commit=commit)
+            mark = (doc["label"], doc["at"], machine_of(doc))
             if mark in present:
                 skipped += 1
                 continue
@@ -106,18 +111,17 @@ def import_runs(path_or_json: str | Path | Sequence[Mapping[str, Any]] | Mapping
     return written
 
 
-def _records(source: Any) -> tuple[list[Mapping[str, Any]], str]:
+def _records(source: Any) -> tuple[list[Mapping[str, Any]], Mapping[str, Any]]:
     """The runs in an export -- a file, JSON text, a list, or a `bench_export` answer --
-    and the commit the answer named, "" when it named none."""
+    and the answer itself, {} for a bare list."""
     if isinstance(source, (str, Path)):
         text = str(source)
         if not text.lstrip().startswith(("[", "{")):
             text = Path(source).expanduser().read_text(encoding="utf-8")
         source = json.loads(text)
-    commit = ""
+    said: Mapping[str, Any] = {}
     if isinstance(source, Mapping):
-        commit = str(source.get("commit") or "")
-        source = source.get("runs") or []
+        said, source = source, source.get("runs") or []
     if not isinstance(source, (list, tuple)):
         raise ValueError("an export is a list of runs, or {'runs': [...]}")
-    return [r for r in source if isinstance(r, Mapping)], commit
+    return [r for r in source if isinstance(r, Mapping)], said

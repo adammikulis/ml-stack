@@ -86,6 +86,8 @@ class Candidate:
     peer: Peer
     name: str
     report: Mapping[str, Any] = field(default_factory=dict)
+    machine: str = ""
+    """The peer's `home.machine_id`, or its name when its ``/health`` gives none."""
     slots: int = 1
     free: int = 0
     queued: int = 0
@@ -101,7 +103,8 @@ def candidates(peers: Sequence[Peer], *, kind: str = "",
                rates: Mapping[tuple[str, str], float] | None = None,
                bench: Mapping[str, float] | None = None,
                held: Callable[[Peer], float] | None = None) -> list[Candidate]:
-    """Ask every peer what it looks like now. Unreachable peers drop out silently."""
+    """Ask every peer what it looks like now. Unreachable peers drop out silently.
+    ``rates`` and ``bench`` are keyed on each peer's `Candidate.machine`."""
     out: list[Candidate] = []
     for peer in peers:
         try:
@@ -109,13 +112,14 @@ def candidates(peers: Sequence[Peer], *, kind: str = "",
         except Exception:                             # noqa: BLE001
             continue
         name = health.get("name") or peer.name
+        machine = str(health.get("machine") or name)
         slots = int(health.get("slots") or 1)
         out.append(Candidate(
-            peer=peer, name=name, report=health, slots=slots,
+            peer=peer, name=name, report=health, machine=machine, slots=slots,
             free=int(health.get("free", slots if not health.get("busy") else 0)),
             queued=int(health.get("queued") or 0),
-            rate=(rates or {}).get((name, kind)),
-            bench=(bench or {}).get(name),
+            rate=(rates or {}).get((machine, kind)),
+            bench=(bench or {}).get(machine),
             transfer_gb=held(peer) if held else 0.0,
         ))
     return out
@@ -135,7 +139,7 @@ def eligible(cands: Sequence[Candidate],
 
 
 def soonest(work: float = 1.0, *, link_gbps: float = 1.0,
-            queue_penalty_s: float = 60.0) -> "Score":
+            queue_penalty_s: float = 60.0) -> Score:
     """Score by estimated seconds until this unit is *finished* here. Lower is better."""
     def score(c: Candidate, typical: float) -> float:
         rate = c.rate or typical
@@ -147,7 +151,7 @@ def soonest(work: float = 1.0, *, link_gbps: float = 1.0,
     return score
 
 
-def choose(cands: Sequence[Candidate], *, score: "Score | None" = None,
+def choose(cands: Sequence[Candidate], *, score: Score | None = None,
            explore: bool = True) -> Candidate | None:
     """The peer to use, or ``None`` when every one of them is full."""
     free = [c for c in cands if c.free > 0]

@@ -23,7 +23,7 @@ from ml_stack.fleet.api import make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.device import device_report
 from ml_stack.fleet.jobs import JobRunner
-from ml_stack.fleet.pool import Candidate, Requires, choose, eligible, soonest
+from ml_stack.fleet.pool import Candidate, Requires, candidates, choose, eligible, soonest
 from ml_stack.fleet.rates import Rates
 from ml_stack.fleet.remote import Peer
 from ml_stack.fleet.work import Unit, run
@@ -39,8 +39,10 @@ class Box:
     """One real daemon in this process, with a real HTTP server on a real port."""
 
     def __init__(self, root: Path, name: str, *, slots: int = 1,
-                 labels: tuple[str, ...] = (), extra: dict | None = None) -> None:
+                 labels: tuple[str, ...] = (), extra: dict | None = None,
+                 machine: str = "") -> None:
         self.name = name
+        self.machine = machine or f"id-{name}"
         self.files = root / "files"
         self.files.mkdir(parents=True)
         token = load_or_create_token(root)
@@ -48,7 +50,8 @@ class Box:
         port = _free_port()
 
         def report() -> dict:
-            return {**device_report(lambda: dict(extra or {})), "labels": list(labels)}
+            return {**device_report(lambda: dict(extra or {})), "labels": list(labels),
+                    "machine": self.machine}
 
         self.httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
@@ -262,10 +265,43 @@ def test_a_completed_unit_leaves_a_measurement_behind(boxes, tmp_path, rates):
                      poll_s=0.1)
 
     assert all(p.ok for p in placements)
-    measured = [rates.get(p.peer, "tokenize") for p in placements]
+    measured = [rates.get(p.machine, "tokenize") for p in placements]
     assert all(m is not None and m > 0 for m in measured), measured
-    assert Rates(rates.path).get(placements[0].peer, "tokenize") is not None, \
+    assert Rates(rates.path).get(placements[0].machine, "tokenize") is not None, \
         "the measurement did not survive being written to disk"
+
+
+def test_two_machines_of_one_name_are_measured_apart(tmp_path, rates):
+    made = [Box(tmp_path / where, "Mac", machine=f"id-mac-{where}") for where in ("a", "b")]
+    marker = tmp_path / "same-name.jsonl"
+    try:
+        placements = run([_marker_unit(f"s{i}", marker, seconds=0.3) for i in range(4)],
+                         [b.peer for b in made], kind="tokenize", rates=rates, poll_s=0.05)
+    finally:
+        for b in made:
+            b.close()
+
+    assert all(p.ok for p in placements), [p.error for p in placements]
+    assert {p.peer for p in placements} == {"Mac"}
+    assert {p.machine for p in placements} == {"id-mac-a", "id-mac-b"}
+    on_disk = Rates(rates.path)
+    assert len(on_disk) == 2
+    assert on_disk.get("id-mac-a", "tokenize") and on_disk.get("id-mac-b", "tokenize")
+    assert on_disk.get("Mac", "tokenize") is None
+
+
+def test_candidates_read_each_machines_own_rate_under_one_name(tmp_path, rates):
+    made = [Box(tmp_path / where, "Mac", machine=f"id-mac-{where}") for where in ("a", "b")]
+    rates.record("id-mac-a", "tokenize", units=10, seconds=1)
+    rates.record("id-mac-b", "tokenize", units=2, seconds=1)
+    try:
+        seen = candidates([b.peer for b in made], kind="tokenize", rates=rates.as_map())
+    finally:
+        for b in made:
+            b.close()
+
+    assert [(c.name, c.machine, c.rate) for c in seen] == [
+        ("Mac", "id-mac-a", 10.0), ("Mac", "id-mac-b", 2.0)]
 
 
 def test_a_broken_peer_is_quarantined_instead_of_draining_the_queue(tmp_path, rates):

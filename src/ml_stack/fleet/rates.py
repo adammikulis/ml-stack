@@ -1,4 +1,5 @@
-"""How fast each peer is at each kind of work, remembered across runs."""
+"""How fast each machine is at each kind of work, remembered across runs, keyed on its
+`home.machine_id`."""
 
 from __future__ import annotations
 
@@ -25,33 +26,33 @@ def default_path() -> Path:
 
 
 class Rates:
-    """Observed units/second, per (peer, kind of work)."""
+    """Observed units/second, per (machine, kind of work)."""
 
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = _DOC.path(path)
         self._seen: dict[str, float] = _DOC.read(self.path)
 
     @staticmethod
-    def key(peer: str, kind: str) -> str:
-        return f"{peer}\t{kind}"
+    def key(machine: str, kind: str) -> str:
+        return f"{machine}\t{kind}"
 
-    def get(self, peer: str, kind: str) -> float | None:
-        return self._seen.get(self.key(peer, kind))
+    def get(self, machine: str, kind: str) -> float | None:
+        return self._seen.get(self.key(machine, kind))
 
     def as_map(self) -> dict[tuple[str, str], float]:
         """The shape ``pool.candidates`` wants."""
         out = {}
         for k, v in self._seen.items():
-            peer, _, kind = k.partition("\t")
-            out[(peer, kind)] = v
+            machine, _, kind = k.partition("\t")
+            out[(machine, kind)] = v
         return out
 
-    def record(self, peer: str, kind: str, *, units: float, seconds: float) -> float | None:
+    def record(self, machine: str, kind: str, *, units: float, seconds: float) -> float | None:
         """Fold one completed job in. Returns the new rate, or None if unusable."""
         if units <= 0 or seconds <= 0:
             return None
         observed = units / seconds
-        key = self.key(peer, kind)
+        key = self.key(machine, kind)
         prior = self._seen.get(key)
         self._seen[key] = observed if prior is None else (
             ALPHA * observed + (1 - ALPHA) * prior)

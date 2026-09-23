@@ -40,6 +40,7 @@ from .discovery import (
     in_cluster,
     key_path,
     memberships,
+    named_apart,
 )
 from .discovery import (
     join as join_cluster,
@@ -128,10 +129,12 @@ class Joined:
     persisted: bool = False
     persist_note: str = ""
     tracking: str = ""
+    machine: str = ""
     peers: list[dict[str, Any]] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
-        return {"name": self.name, "port": self.port, "root": str(self.root),
+        return {"name": self.name, "machine": self.machine, "port": self.port,
+                "root": str(self.root),
                 "group": self.group, "checks": [c.public() for c in self.checks],
                 "started": self.started, "daemon_pid": self.daemon_pid,
                 "persisted": self.persisted, "persist_note": self.persist_note,
@@ -280,7 +283,8 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
 
 
 # -- what the fleet sees ---------------------------------------------------------------
-def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "") -> dict[str, Any]:
+def describe(beacon: Beacon, *, clusters: Iterable[str] = (),
+             self_machine: str = "") -> dict[str, Any]:
     """One peer as a row: what it serves, its room, whether it is busy, its commit.
 
     Read out of the beacon's device report, defensively: a daemon on an older build
@@ -307,7 +311,8 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
     lock = d.get("lock") or ("measuring" if d.get("measuring") else "")
     said = d.get("availability") or {}
     return {
-        "name": beacon.name, "host": beacon.host, "base_url": beacon.base_url,
+        "name": beacon.name, "called": beacon.name, "machine": beacon.machine,
+        "host": beacon.host, "base_url": beacon.base_url,
         "port": beacon.port, "busy": bool(beacon.busy), "free": beacon.free,
         "slots": beacon.slots, "queued": beacon.queued,
         "room": room, "serving": served,
@@ -325,33 +330,36 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
         "update_error": str(d.get("update_error") or ""),
         "gpu": str(d.get("gpu") or ""),
         "clusters": list(clusters),
-        "is_self": bool(self_name) and beacon.name == self_name,
+        "is_self": bool(self_machine) and beacon.machine == self_machine,
         "device": d,
     }
 
 
 def peers(*, cluster_key_path: Path | str | None = None, timeout_s: float = 2.0,
-          port: int | None = None, self_name: str = "",
+          port: int | None = None, self_machine: str = "",
           finder: Callable[..., list[Beacon]] = discover) -> list[dict[str, Any]]:
     """Every daemon on the LAN that proves it holds one of this machine's cluster keys.
 
-    One machine in two clusters answers on each; it is listed once with both.
+    One machine in two clusters answers on each; it is listed once with both. Machines
+    that share a name are listed apart (`named_apart`).
     """
     # Keyed on the daemon, not its address: the same daemon answers each cluster with a
     # beacon of its own, and can be heard on loopback for one and the LAN for the other.
     found: dict[str, dict[str, Any]] = {}
     for member in memberships(cluster_key_path):
         for beacon in finder(member.key, timeout_s=timeout_s, port=port):
-            who = f"{beacon.hostname}:{beacon.name}:{beacon.port}"
+            who = f"{beacon.machine or beacon.hostname}:{beacon.port}"
             row = found.get(who)
             if row is None:
-                found[who] = describe(beacon, clusters=[member.group], self_name=self_name)
+                found[who] = describe(beacon, clusters=[member.group],
+                                      self_machine=self_machine)
                 continue
             if member.group not in row["clusters"]:
                 row["clusters"].append(member.group)
             if beacon.host.startswith("127.") and not row["host"].startswith("127."):
                 row["host"], row["base_url"] = beacon.host, beacon.base_url
-    return sorted(found.values(), key=lambda r: (not r["is_self"], r["name"]))
+    return sorted(named_apart(list(found.values())),
+                  key=lambda r: (not r["is_self"], r["name"]))
 
 
 def _ago(seconds: float) -> str:
@@ -475,6 +483,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
 
     if running is not None:
         joined.name = str(running.get("name") or name)
+        joined.machine = str(running.get("machine") or "")
         say(f"the daemon is already running as '{joined.name}' on port {port}")
         if joined.tracking:
             say(f"  it reads '{joined.tracking}' at its next start; restart it to follow "
@@ -495,12 +504,13 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
                                 f"{wait_s:.0f}s; its log is {root / 'traind.log'}")
             running = already_running(port) or {}
         joined.name = str((running or {}).get("name") or name)
+        joined.machine = str((running or {}).get("machine") or "")
     if persist and not joined.persisted and not joined.persist_note:
         joined.persisted, joined.persist_note = _persist(persist_with, say)
 
     say(f"asking the network (discovery port {discovery_port or default_port()})")
     joined.peers = peers(cluster_key_path=cluster_key_path, timeout_s=timeout_s,
-                         port=discovery_port, self_name=joined.name, finder=finder)
+                         port=discovery_port, self_machine=joined.machine, finder=finder)
     say(table(joined.peers))
     return joined
 
@@ -637,7 +647,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
-                 self_name=str((me or {}).get("name") or ""))
+                 self_machine=str((me or {}).get("machine") or ""))
     if args.json:
         say(json.dumps(rows, indent=1, default=str))
         return 0 if rows else 1
@@ -725,7 +735,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
-                 self_name=str((me or {}).get("name") or ""))
+                 self_machine=str((me or {}).get("machine") or ""))
     servings, fits = _measurements()
     placement = place(args.users, args.context, rows, servings, fits,
                       prefer=args.prefer)

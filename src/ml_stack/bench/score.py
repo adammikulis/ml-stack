@@ -11,8 +11,9 @@ text.
 
 from __future__ import annotations
 
-import math
+import itertools
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -168,7 +169,7 @@ def prefix_kept(per_call: Sequence[Sequence[int]], *, slack: int = PREFIX_SLACK)
     timings says nothing about its cache, and nothing is not a hit.
     """
     kept = turns = 0
-    for before, after in zip(per_call, per_call[1:]):
+    for before, after in itertools.pairwise(per_call):
         if before[0] is None or after[0] is None:
             continue                    # a call that reported nothing judges nothing
         cached_before, processed_before = int(before[0]), int(before[1] or 0)
@@ -249,7 +250,7 @@ _BANDS_CAP = 512
 def _pct(sorted_values: Sequence[float], share: float) -> float:
     """The value at ``share`` of the way through values already sorted."""
     last = len(sorted_values) - 1
-    return sorted_values[min(last, max(0, int(round(share * last))))]
+    return sorted_values[min(last, max(0, round(share * last)))]
 
 
 def bands(rows: Sequence[Mapping[str, Any]], *, draws: int = BOOTSTRAP,
@@ -474,6 +475,12 @@ def host_of(one: Mapping[str, Any]) -> str:
     return str((one.get("server") or {}).get("host") or "")
 
 
+def machine_of(one: Mapping[str, Any]) -> str:
+    """The `home.machine_id` a run was measured on, else its host for a run that names none."""
+    server = one.get("server") or {}
+    return str(server.get("machine") or server.get("host") or "")
+
+
 def hosts_of(kept: Sequence[Mapping[str, Any]]) -> set[str]:
     """Every host named among ``kept``; more than one means every table says which."""
     return {host_of(one) for one in kept if host_of(one)}
@@ -582,7 +589,7 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
         accuracy = max(mine, key=lambda o: (derived(o)["questions"], derived(o)["right"],
                                             _faithful(o), str(o.get("at") or "")))
         top = derived(accuracy)["right"]
-        here = [o for o in mine if host_of(o) == host_of(accuracy)]
+        here = [o for o in mine if machine_of(o) == machine_of(accuracy)]
         elsewhere = [o for o in mine if o not in here]
         held = [o for o in here if held_up(o, accuracy, noise=noise)]
         cost = min(held, key=lambda o: (per_question(o), o is not accuracy))

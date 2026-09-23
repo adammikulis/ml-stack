@@ -322,6 +322,9 @@ class Beacon:
     host: str = ""
     hostname: str = ""
     instance: str = ""
+    """Minted per advertiser: tells one daemon's answers from another's in one listen."""
+    machine: str = ""
+    """`home.machine_id` of the machine it runs on: kept across restarts."""
 
     @property
     def base_url(self) -> str:
@@ -331,12 +334,31 @@ class Beacon:
         return {"name": self.name, "port": self.port, "device": self.device,
                 "busy": self.busy, "queued": self.queued,
                 "slots": self.slots, "free": self.free,
-                "hostname": self.hostname, "instance": self.instance}
+                "hostname": self.hostname, "instance": self.instance,
+                "machine": self.machine}
 
     @property
     def identity(self) -> str:
         """What distinguishes one daemon from another, address aside."""
         return self.instance or f"{self.hostname}:{self.name}:{self.port}"
+
+
+def named_apart(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``rows``, each ``name`` two machines share followed by ``#`` and the shortest prefix
+    of four or more characters of its ``machine`` that tells them apart."""
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_name.setdefault(str(row.get("name") or ""), []).append(row)
+    for name, same in by_name.items():
+        machines = {str(row.get("machine") or "") for row in same}
+        if len(machines) < 2:
+            continue
+        width = 4
+        while len({m[:width] for m in machines}) < len(machines):
+            width += 1
+        for row in same:
+            row["name"] = f"{name}#{str(row.get('machine') or '')[:width] or '?'}"
+    return rows
 
 
 def _prefer(existing: Beacon, candidate: Beacon) -> Beacon:
@@ -403,10 +425,8 @@ def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT"):
-        try:
+        with contextlib.suppress(OSError):
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except OSError:
-            pass
     if broadcast:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     # TTL 1: this is a LAN facility. Never let it escape the local segment.
@@ -414,11 +434,9 @@ def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
     ip = primary_ip()
     if ip:
-        try:
+        with contextlib.suppress(OSError):
             s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
                          socket.inet_aton(ip))
-        except OSError:
-            pass
     if bind is not None:
         s.bind(bind)
     if group is not None:
@@ -453,7 +471,7 @@ class Advertiser:
         self._said: set[str] = set()
 
     # -- lifecycle --
-    def start(self, *, wait_s: float = 2.0) -> "Advertiser":
+    def start(self, *, wait_s: float = 2.0) -> Advertiser:
         for target in (self._serve, self._announce_loop, self._sample_loop):
             t = threading.Thread(target=target, daemon=True,
                                  name=f"advertiser-{target.__name__.strip('_')}")
@@ -474,14 +492,12 @@ class Advertiser:
         self._stop.set()
         self._asked.set()
         if self._sock is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
         for t in self._threads:
             t.join(timeout=2.0)
 
-    def __enter__(self) -> "Advertiser":
+    def __enter__(self) -> Advertiser:
         return self.start()
 
     def __exit__(self, *exc: object) -> None:
@@ -508,10 +524,8 @@ class Advertiser:
     def _sample(self) -> None:
         """Run ``refresh`` and keep what it produced as the beacon to send."""
         if self.refresh is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.refresh(self.beacon)
-            except Exception:                         # noqa: BLE001
-                pass
         self._state = self._body()
 
     def _sample_loop(self) -> None:
@@ -537,7 +551,7 @@ class Advertiser:
         while not self._stop.is_set():
             try:
                 raw, addr = sock.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -602,7 +616,7 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
             sock.settimeout(max(0.0, min(deadline, next_query) - time.time()))
             try:
                 raw, addr = sock.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -623,7 +637,8 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
                                 else (0 if body.get("busy") else 1),
                                 host=addr[0],
                                 hostname=str(body.get("hostname", "")),
-                                instance=str(body.get("instance", "")))
+                                instance=str(body.get("instance", "")),
+                                machine=str(body.get("machine", "")))
             except (TypeError, ValueError):
                 continue
             key_id = beacon.identity

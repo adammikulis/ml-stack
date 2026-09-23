@@ -132,15 +132,28 @@ def plan(models: Sequence[str], peers: Sequence[Any], *, needs: Mapping[str, int
 def _name_of(peer: Any, health: Mapping[str, Any] | None = None) -> str:
     """What a peer calls itself: its beacon's name, else what ``/health`` says, else
     whatever it is addressed by -- a `Peer` made from a URL alone is named by the URL."""
+    return _said_by(peer, "name", health) or str(getattr(peer, "name", peer))
+
+
+def _machine_of(peer: Any, health: Mapping[str, Any] | None = None) -> str:
+    """A peer's `home.machine_id`: its beacon's, else what ``/health`` says, else ""."""
+    return _said_by(peer, "machine", health)
+
+
+def _said_by(peer: Any, field_name: str, health: Mapping[str, Any] | None) -> str:
+    """``field_name`` off the peer's beacon, else out of its ``/health``, else ""."""
     beacon = getattr(peer, "beacon", None)
-    if beacon is not None and getattr(beacon, "name", ""):
-        return str(beacon.name)
-    if health is None:
-        try:
-            health = peer.health()
-        except Exception:  # noqa: BLE001
-            health = {}
-    return str(health.get("name") or getattr(peer, "name", peer))
+    if beacon is not None and getattr(beacon, field_name, ""):
+        return str(getattr(beacon, field_name))
+    return str((_health_of(peer) if health is None else health).get(field_name) or "")
+
+
+def _health_of(peer: Any) -> Mapping[str, Any]:
+    """The peer's ``/health``, or {} when it does not answer."""
+    try:
+        return peer.health()
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _not_idle(health: Mapping[str, Any]) -> str:
@@ -166,7 +179,9 @@ class Handle:
     log: str = ""
     why: str = ""
     host: str = ""
-    """What the peer calls itself, which is what `gather` files its runs under."""
+    """What the peer calls itself: the label `gather` files its runs under."""
+    machine: str = ""
+    """The peer's `home.machine_id`, which `gather` stamps on its runs."""
 
     @property
     def peer_name(self) -> str:
@@ -182,7 +197,9 @@ def dispatch(jobs: Mapping[Any, Job], *, log: Callable[[str], None] = say) -> li
     reason, printed, not an exception: the rest of the sweep still goes out."""
     out: list[Handle] = []
     for peer, job in jobs.items():
-        handle = Handle(peer=peer, job=job, host=_name_of(peer))
+        health = _health_of(peer)
+        handle = Handle(peer=peer, job=job, host=_name_of(peer, health),
+                        machine=_machine_of(peer, health))
         try:
             answered = submit_bench(peer, job)
         except Refused as why:
@@ -246,9 +263,9 @@ def gather(handles: Sequence[Handle], *, into: str | Path,
            log: Callable[[str], None] = say) -> dict[str, list[str]]:
     """Bring home what each dispatched job measured: every peer's runs kept since its job
     started, imported into ``into`` by `import_runs` with the peer's name as host and the
-    peer's commit. A refused or never-started job has nothing to gather. Returns the keys
-    written per peer; a peer whose export holds nothing is said, since a job marked done
-    that kept no run is the thing worth noticing."""
+    machine id and commit its export names. A refused or never-started job has nothing to gather.
+    Returns the keys written per machine; a peer whose export holds nothing is said, since
+    a job marked done that kept no run is the thing worth noticing."""
     out: dict[str, list[str]] = {}
     for handle in handles:
         if not handle.id:
@@ -259,12 +276,13 @@ def gather(handles: Sequence[Handle], *, into: str | Path,
             log(f"  {handle.peer_name}: could not export: {exc}")
             continue
         host = str(answered.get("host") or handle.peer_name)
+        machine = str(answered.get("machine") or handle.machine)
         if not answered.get("runs"):
             log(f"  {host}: kept no run since {answered.get('since', '?')}"
                 + (f" ({answered['skipped']} not over the invented community)"
                    if answered.get("skipped") else ""))
-            out[host] = []
+            out[machine or host] = []
             continue
-        out[host] = import_runs(answered, into, host=host,
-                                commit=str(answered.get("commit") or ""), log=log)
+        out[machine or host] = import_runs({**answered, "machine": machine}, into,
+                                           host=host, log=log)
     return out

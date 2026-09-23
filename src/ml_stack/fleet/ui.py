@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from ml_stack.home import machine_id
 from ml_stack.http import ServerError, open_stream
 
 from . import pausing
@@ -22,6 +23,7 @@ from .discovery import (
     join_cluster,
     load_cluster_key,
     memberships,
+    named_apart,
 )
 from .join import DEFAULT_ROOT
 from .page import FIT_ONLY
@@ -157,7 +159,7 @@ class UI:
         other one is on the network."""
         status = self.runner.status() if self.runner is not None else {}
         slots = int(status.get("slots") or 1)
-        return {"name": self.name, "port": self.peer_port,
+        return {"name": self.name, "port": self.peer_port, "machine": machine_id(),
                 "device": self.report() if callable(self.report) else {},
                 "busy": bool(status.get("busy")), "queued": int(status.get("queued") or 0),
                 "slots": slots, "free": int(status.get("free", slots)),
@@ -186,12 +188,13 @@ class UI:
                     row = beacon.public()
                     row["host"] = beacon.host
                     row["base_url"] = beacon.base_url
-                    row["is_self"] = beacon.name == self.name
+                    row["called"] = beacon.name
+                    row["is_self"] = beacon.machine == machine_id()
                     row["clusters"] = []
                     by_address[beacon.base_url] = row
                 if member.group not in row["clusters"]:
                     row["clusters"].append(member.group)
-        found = sorted(by_address.values(),
+        found = sorted(named_apart(list(by_address.values())),
                        key=lambda r: (not r["is_self"], r["name"]))
         self._peers = (time.time(), found)
         return found
@@ -212,10 +215,8 @@ class UI:
         self.throttle.succeeded(source)
         self._peers = (0.0, [])
         if self.on_join is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.on_join()
-            except Exception:                         # noqa: BLE001
-                pass
         return self.state(), self.sessions.open("setup").sid
 
     def apply_prefs(self, req: dict[str, Any]) -> dict[str, Any]:
@@ -309,9 +310,11 @@ class UI:
                             device=dict(row.get("device") or {}), busy=bool(row.get("busy")),
                             queued=int(row.get("queued") or 0), slots=int(row.get("slots") or 1),
                             free=int(row.get("free", 1)), host=str(row.get("host") or ""),
-                            hostname=str(row.get("hostname") or ""))
-            rows.append(describe(beacon, clusters=row.get("clusters") or [],
-                                 self_name=self.name))
+                            hostname=str(row.get("hostname") or ""),
+                            machine=str(row.get("machine") or ""))
+            rows.append({**describe(beacon, clusters=row.get("clusters") or [],
+                                    self_machine=machine_id()),
+                         "called": str(row.get("called") or row["name"])})
         models = sorted({m for r in rows for m in r["models"]})
         return {"peers": rows, "models": models, "self": self.name,
                 "group": cluster_group(self.cluster_key_path), "bench": self.bench_state()}
@@ -360,8 +363,8 @@ class UI:
         """What ``ml-stack-bench status`` says, for the page. The bench's home is
         `ml_stack.bench.home_dir`, the one the command reads."""
         try:
-            from ml_stack.bench.underway import measuring
             from ml_stack.bench.progress import status
+            from ml_stack.bench.underway import measuring
         except ImportError as exc:
             return {"available": False, "text": f"the bench is not installed here: {exc}",
                     "measuring": None}
@@ -426,9 +429,9 @@ class UI:
         """
         try:
             from ml_stack.bench import home_dir
+            from ml_stack.bench.frontier import AXES, pareto
             from ml_stack.bench.keep import _kept
             from ml_stack.bench.score import COSTS, NOISE, composed, derived, host_of
-            from ml_stack.bench.frontier import AXES, pareto
         except ImportError as exc:                       # a device-tier install has no bench
             return {"error": f"the bench is not installed here: {exc}",
                     "runs": [], "axes": {}, "keys": {}, "store": ""}
@@ -449,7 +452,7 @@ class UI:
                 "composed": bool(one.get("composed")),
                 "from": str(one.get("from") or ""),
                 "front": [cost for cost in AXES if id(one) in front[cost]],
-                **{k: v for k, v in got.items()},
+                **dict(got.items()),
             })
         rows.sort(key=lambda r: -r.get("right", 0.0))
         return {"runs": rows, "axes": dict(AXES), "keys": dict(COSTS), "store": str(store),
@@ -494,8 +497,8 @@ class UI:
 
     def stop_sweep(self, pid: int) -> str:
         """Stop the detached measurement, but only the one the page was shown."""
-        from ml_stack.bench.underway import measuring
         from ml_stack.bench.progress import stop
+        from ml_stack.bench.underway import measuring
 
         held = measuring()
         if held is None or int(held.get("pid") or 0) != int(pid):

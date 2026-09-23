@@ -66,14 +66,16 @@ class FakeDaemon:
     `join` started would do, without the daemon."""
 
     def __init__(self, port: int, key: bytes, udp: int, name: str = "larch",
-                 device: dict | None = None) -> None:
+                 device: dict | None = None, machine: str = "") -> None:
         self.name = name
+        machine = machine or f"id-{name}"
         device = dict(DEVICE if device is None else device)
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self_) -> None:
-                body = json.dumps({"ok": True, "name": name, "busy": False,
-                                   "free": 1, "slots": 1, "queued": 0}).encode()
+                body = json.dumps({"ok": True, "name": name, "machine": machine,
+                                   "busy": False, "free": 1, "slots": 1,
+                                   "queued": 0}).encode()
                 self_.send_response(200 if self_.path == "/health" else 404)
                 self_.send_header("Content-Type", "application/json")
                 self_.send_header("Content-Length", str(len(body)))
@@ -85,7 +87,8 @@ class FakeDaemon:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        self.advertiser = Advertiser(Beacon(name=name, port=port, device=device),
+        self.advertiser = Advertiser(Beacon(name=name, port=port, device=device,
+                                            machine=machine),
                                      key, port=udp, interval_s=0.2).start()
 
     def close(self) -> None:
@@ -370,11 +373,12 @@ class TestStatus:
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
         tcp = _free_tcp()
-        beacon = Beacon(name="larch", port=tcp, device=dict(DEVICE))
+        beacon = Beacon(name="larch", port=tcp, device=dict(DEVICE), machine="id-larch")
         both = [Advertiser(beacon, m.key, port=udp, interval_s=0.2).start()
                 for m in memberships(key)]
         try:
-            rows = peers(cluster_key_path=key, timeout_s=1.0, port=udp, self_name="larch")
+            rows = peers(cluster_key_path=key, timeout_s=1.0, port=udp,
+                         self_machine="id-larch")
         finally:
             for a in both:
                 a.stop()
@@ -393,6 +397,28 @@ class TestStatus:
         rows = json.loads(capsys.readouterr().out)
         assert code == 0 and [r["name"] for r in rows] == ["larch"]
         assert rows[0]["is_self"], "the daemon on --port is this machine"
+
+    def test_two_machines_of_one_name_are_listed_apart(self, key, udp, daemons,
+                                                        monkeypatch, capsys):
+        from ml_stack.fleet.discovery import join as join_cluster
+
+        join_cluster(WORDS, group="home", path=key)
+        tcp = _free_tcp()
+        daemons.append(FakeDaemon(tcp, load_cluster_key(key), udp, name="Mac",
+                                  machine="a1b2c3d4e5f60708"))
+        daemons.append(FakeDaemon(_free_tcp(), load_cluster_key(key), udp, name="Mac",
+                                  machine="a1b2f00000000000"))
+        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        code = main(["--cluster-key", str(key), "--port", str(tcp), "status", "--json",
+                     "--timeout", "1"])
+        rows = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert [(r["name"], r["called"], r["is_self"]) for r in rows] == [
+            ("Mac#a1b2c", "Mac", True), ("Mac#a1b2f", "Mac", False)]
+
+        main(["--cluster-key", str(key), "--port", str(tcp), "status", "--timeout", "1"])
+        text = capsys.readouterr().out
+        assert "Mac#a1b2c" in text and "Mac#a1b2f" in text
 
     def test_status_in_no_cluster_says_join(self, key, capsys):
         assert main(["--cluster-key", str(key), "status"]) == 1
@@ -652,8 +678,8 @@ class PausableDaemon:
                     self_._reply(200, schedule.public())
                     return
                 self_._reply(200 if self_.path == "/health" else 404,
-                             {"ok": True, "name": name, "busy": False, "free": 1,
-                              "slots": 1, "queued": 0})
+                             {"ok": True, "name": name, "machine": f"id-{name}",
+                              "busy": False, "free": 1, "slots": 1, "queued": 0})
 
             def do_POST(self_) -> None:
                 said = json.loads(self_.rfile.read(
@@ -673,7 +699,7 @@ class PausableDaemon:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        beacon = Beacon(name=name, port=port, device=dict(DEVICE))
+        beacon = Beacon(name=name, port=port, device=dict(DEVICE), machine=f"id-{name}")
         self.advertiser = Advertiser(beacon, key, port=udp, interval_s=0.2,
                                      refresh=refresh).start()
 
@@ -699,7 +725,8 @@ def cluster(tmp_path, key, udp):
 def _rows(key: Path, udp: int, made: list, self_name: str = "") -> list[dict]:
     """The discovery rows, addressed to where these fakes actually listen."""
     ports = {d.name: d.httpd.server_address[1] for d in made}
-    rows = joining.peers(cluster_key_path=key, port=udp, self_name=self_name)
+    rows = joining.peers(cluster_key_path=key, port=udp,
+                         self_machine=f"id-{self_name}" if self_name else "")
     for row in rows:
         row["base_url"] = f"http://127.0.0.1:{ports[row['name']]}"
     return rows

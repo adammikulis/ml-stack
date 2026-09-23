@@ -92,21 +92,23 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-def calibrate(peers: "Sequence[Peer]", rates: "Rates", *,
+def calibrate(peers: Sequence[Peer], rates: Rates, *,
               budget_s: float = BUDGET_S, timeout_s: float = 120.0,
-              force: bool = False, on_event: "Events | None" = None,
+              force: bool = False, on_event: Events | None = None,
               ) -> dict[str, float]:
-    """Benchmark every peer that has never been benchmarked. Returns name -> score."""
+    """Benchmark every peer that has never been benchmarked. Returns machine -> score."""
     emit = emitting(on_event)
     scores: dict[str, float] = {}
     for peer in peers:
         try:
-            name = peer.health().get("name") or peer.name
+            health = peer.health()
         except Exception as exc:                      # noqa: BLE001
             emit("skip", peer=peer.base_url, why=str(exc))
             continue
-        if not force and rates.get(name, BENCH_KIND) is not None:
-            scores[name] = rates.get(name, BENCH_KIND)      # type: ignore[assignment]
+        name = health.get("name") or peer.name
+        machine = str(health.get("machine") or name)
+        if not force and rates.get(machine, BENCH_KIND) is not None:
+            scores[machine] = rates.get(machine, BENCH_KIND)      # type: ignore[assignment]
             continue
         emit("bench", peer=name)
         try:
@@ -120,7 +122,7 @@ def calibrate(peers: "Sequence[Peer]", rates: "Rates", *,
         except Exception as exc:                      # noqa: BLE001
             emit("skip", peer=name, why=str(exc))
             continue
-        rates.record(name, BENCH_KIND, units=score, seconds=1.0)
-        scores[name] = score
+        rates.record(machine, BENCH_KIND, units=score, seconds=1.0)
+        scores[machine] = score
         emit("benched", peer=name, score=score)
     rates.save()

@@ -224,17 +224,13 @@ across `src/`.
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
   releases or main on its own (`fleet status` shows COMMIT/UPDATES).
-- [ ] **Two machines with the same name share one speed record and one run history.**
-  Discovery is safe: each daemon mints a random token when it starts advertising and peers
-  are keyed on that, so two machines both called `Mac` are two peers and both get work.
-  Nothing else uses that token. `fleet/rates.py` keys measured speed on `(peer name, kind)`,
-  so two machines of one name average into a single number and placement scores them
-  identically; `fleet/sweeps.py` stamps gathered runs with `_name_of(peer)`, so their
-  measurements land in the store indistinguishable. Nothing checks for the collision at
-  join. The default name is the hostname, and this machine already records `"host": "Mac"`.
-  Fix: a stable per-machine identity, persisted, that rates and the run host are keyed on;
-  the name stays a label, a duplicate is accepted at join, and listings disambiguate it
-  (Adam, 2026-09-23).
+- [ ] **`sweep --fleet` cannot reach `fleet/sweeps.py` as `bench/ops.py` calls it.**
+  `fleet_planned` hands `sweeps.plan` the `--peers` names as strings, or `None` when none
+  are given, where `plan` iterates peers and asks each for `health()`; `fleet_measure`
+  hands `sweeps.dispatch` a list of job dicts where it takes `{peer: Job}`. No test drives
+  `bench/run.py`'s `--fleet` branch. It needs the peers found by discovery
+  (`join.peers` rows into `Peer`s, the way `pausing.peer_clients` makes them), `jobs_from`
+  between `plan` and `dispatch`, and a test that runs it against two loopback daemons.
 
 ### The window
 

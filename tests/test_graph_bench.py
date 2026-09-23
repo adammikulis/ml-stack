@@ -3288,6 +3288,7 @@ def test_every_run_carries_the_host_and_the_commit(tmp_path, monkeypatch):
     import socket
 
     from ml_stack.bench import keep
+    from ml_stack.home import machine_id
 
     store = tmp_path / "runs.ladybug"
     monkeypatch.setattr(keep, "_commit", lambda root=None: "0f1e2d3 (dirty)")
@@ -3297,8 +3298,27 @@ def test_every_run_carries_the_host_and_the_commit(tmp_path, monkeypatch):
          server={"host": "lantern", "commit": "abc1234"})
     mine, theirs = runs(store)
     assert mine["server"]["host"] == socket.gethostname()
+    assert mine["server"]["machine"] == machine_id()
     assert mine["server"]["commit"] == "0f1e2d3 (dirty)" and mine["server"]["context"] == 32768
     assert theirs["server"] == {"host": "lantern", "commit": "abc1234"}
+
+
+def test_a_cost_run_from_another_machine_of_the_same_name_is_never_taken(tmp_path):
+    from ml_stack.bench import choices
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
+              host="Mac", machine="aaaa1111")
+    _kept_run(store, "draft:mtp-tiny@n4", model="flash.gguf", questions=20, hits=12,
+              seconds=200.0, host="Mac", machine="bbbb2222")
+    chosen, _ = choices(runs(store))
+    assert chosen[0].own
+    assert [r["label"] for r in chosen[0].elsewhere] == ["draft:mtp-tiny@n4"]
+
+    _kept_run(store, "draft:mtp-tiny@n8", model="flash.gguf", questions=20, hits=12,
+              seconds=200.0, host="Mac", machine="aaaa1111")
+    chosen, _ = choices(runs(store))
+    assert chosen[0].cost["label"] == "draft:mtp-tiny@n8"
 
 
 def test_the_table_names_the_host_only_when_more_than_one_measured(tmp_path, capsys):
