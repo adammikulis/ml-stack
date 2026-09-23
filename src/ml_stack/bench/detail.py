@@ -134,7 +134,7 @@ def transcript(kept: Sequence[Mapping[str, Any]], label: str = "",
                 for line in _trace_lines(entry):
                     say(f"  {line}")
     if not shown:
-        say(f"no traced question found"
+        say("no traced question found"
             + (f" for {label!r}" if label else "")
             + (f" matching {question!r}" if question else "")
             + f". A run of {bench.SHORT} questions or fewer traces by default; "

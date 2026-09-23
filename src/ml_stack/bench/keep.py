@@ -24,7 +24,7 @@ from ml_stack import bench
 from ml_stack.home import state
 
 if TYPE_CHECKING:
-    from ml_stack.bench.score import Row
+    pass
 
 def home_dir() -> Path:
     """Where every run this machine measured is kept. ``MLSTACK_BENCH_HOME`` moves it."""

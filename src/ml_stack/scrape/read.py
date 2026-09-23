@@ -11,7 +11,6 @@ The page is anything with ``evaluate(js, arg)``; Playwright's is one, and so is 
 
 from __future__ import annotations
 
-import json
 from typing import Any, Protocol
 
 from ml_stack.scrape.presets import Site
