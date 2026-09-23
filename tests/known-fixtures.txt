@@ -1,4 +1,4 @@
-# Invented names used by the tests. Never add a real person.
+# Invented names, and long-dead public figures, used by the tests. Never add a living person.
 Ada Lovelace
 Alan Turing
 Grace Hopper

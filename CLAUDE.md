@@ -403,7 +403,10 @@ not in source, not in a test, not in a fixture, not in a docstring, not in a com
 data is invented. If a real value revealed a bug, reproduce its *shape* — the casing, the
 punctuation, a dot in a handle, a missing surname — never its content.
 
-The one exception is attribution a license requires: a copyright line in `NOTICE`, `LICENSE` or
+Long-dead public figures are not covered: a fixture may use a name like Alan Turing, Ada
+Lovelace or Grace Hopper, listed in `tests/known-fixtures.txt`. A living person never.
+
+The other exception is attribution a license requires: a copyright line in `NOTICE`, `LICENSE` or
 a vendored file's own license header names its holder, because the license makes keeping it a
 condition of using the code. The hook does not read those files. `scripts/hooks/` enforces it —
 `no-real-names` on staged files, `commit-msg` on the message — and is worth installing:
