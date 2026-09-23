@@ -8,13 +8,16 @@ Each is a `Finding`. `BEHAVIOURS` is what the stack does on its own.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
 import socket
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
 from ml_stack import home
@@ -172,8 +175,9 @@ def look() -> list[Finding]:
             fix="" if gguf else "ml-stack-models fetch hf:owner/repo/file.gguf",
             note="" if gguf else "llama-server serves GGUF only; a safetensors checkpoint "
                                  "on disk is not enough to load"))
-    except Exception:  # noqa: BLE001
-        pass
+    except OSError as exc:
+        out.append(Finding(name="models on this machine", good=False,
+                           said=f"could not read the model roots: {exc}"))
 
     out.extend(Finding(name=one.name, good=here,
                        said=f"{one.module} is here" if here else "not installed",
@@ -324,22 +328,14 @@ def _scripts() -> list[str]:
     """Every command the package installs: the installed metadata's entry points, and the
     `[project.scripts]` of the checkout's pyproject, together."""
     names: set[str] = set()
-    try:
-        from importlib.metadata import distribution
-
+    with contextlib.suppress(PackageNotFoundError):
         names |= {one.name for one in distribution("ml-stack").entry_points
                   if one.group == "console_scripts"}
-    except Exception:  # noqa: BLE001
-        pass
     where = checkout()
     if where is not None:
-        try:
-            import tomllib
-
+        with contextlib.suppress(OSError, tomllib.TOMLDecodeError):
             table = tomllib.loads((where / "pyproject.toml").read_text(encoding="utf-8"))
             names |= set(table.get("project", {}).get("scripts", {}))
-        except Exception:  # noqa: BLE001
-            pass
     return sorted(names)
 
 

@@ -533,7 +533,8 @@ def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
     keyfile = tmp_path / "cluster.key"
     create_cluster_key(keyfile)
     found = {f.name: f for f in
-             _fleet_findings(port=_free_tcp_port(), cluster_key_path=keyfile)}
+             _fleet_findings(port=_free_tcp_port(), discovery_port=_free_udp_port(),
+                             cluster_key_path=keyfile)}
     assert found["fleet: joined"].good
     assert not found["fleet: daemon"].good
     assert found["fleet: daemon"].fix == "ml-stack-fleet join"
@@ -608,3 +609,30 @@ def test_a_named_build_that_is_not_here_is_a_finding(monkeypatch, tmp_path):
     assert len(found) == 1 and not found[0].good
     assert "'gone'" in found[0].said
     assert "--name gone" in found[0].note
+
+
+def test_a_model_root_that_cannot_be_read_is_a_finding(monkeypatch):
+    from ml_stack.fleet import models
+
+    def unreadable(root):
+        raise PermissionError(13, "Permission denied", "/models")
+
+    monkeypatch.setattr(models, "caches", unreadable)
+    found = [f for f in look() if f.name == "models on this machine"]
+    assert len(found) == 1 and not found[0].good
+    assert "Permission denied" in found[0].said
+
+
+def test_a_checkout_with_no_installed_metadata_reads_its_pyproject(monkeypatch, tmp_path):
+    from importlib.metadata import PackageNotFoundError
+
+    import ml_stack.setup as setup
+
+    def not_installed(name):
+        raise PackageNotFoundError(name)
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "ml-stack"\n[project.scripts]\nml-stack-newthing = "m:main"\n')
+    monkeypatch.setattr(setup, "checkout", lambda: tmp_path)
+    monkeypatch.setattr(setup, "distribution", not_installed)
+    assert setup._scripts() == ["ml-stack-newthing"]

@@ -502,8 +502,7 @@ def service_environment(home: Path | str, *, path: str = "") -> dict[str, str]:
 
 
 def system_service(user: str, home: Path | str, *, argv: list[str] | None = None,
-                   log_dir: Path | str = "/var/log", platform: str = "",
-                   environment: dict[str, str] | None = None) -> SystemService:
+                   platform: str = "") -> SystemService:
     """The boot-time service definition for ``platform`` (this one unless named).
 
     macOS gets a LaunchDaemon with ``UserName``: it starts at boot with no login, and
@@ -520,9 +519,9 @@ def system_service(user: str, home: Path | str, *, argv: list[str] | None = None
     # tilde no boot-time process expands. The venv the daemon was installed into, then a
     # plain system PATH.
     where = Path(argv[0]).parent
-    env = dict(environment or service_environment(home, path=f"{where}:{DEFAULT_PATH}"
-                                                  if plat != "win32" else str(where)))
-    logs = Path(log_dir)
+    env = service_environment(home, path=f"{where}:{DEFAULT_PATH}"
+                              if plat != "win32" else str(where))
+    logs = Path("/var/log")
     if plat == "darwin":
         body = plistlib.dumps({
             "Label": SYSTEM_LABEL,
@@ -698,7 +697,7 @@ def _run(argv: list[str]) -> int:
 
 def _reexec() -> None:
     """Replace this process with the same command line, reading the code now on disk."""
-    os.execv(sys.executable, [sys.executable, *sys.argv])
+    os.execv(sys.executable, [sys.executable, *sys.argv])  # noqa: S606 - this interpreter, its own argv
 
 
 def restart(*, run: Callable[[list[str]], int] | None = None,
