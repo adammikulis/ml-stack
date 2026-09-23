@@ -380,6 +380,25 @@ def test_a_job_ships_its_graph_and_questions_and_the_peer_reads_its_own_copy(box
     assert _await(lambda: not given.exists()), "removed once the job ends"
 
 
+def test_a_peer_nobody_answers_for_is_said_and_the_rest_go_on(boxes, tmp_path):
+    roomy, _ = boxes
+    gone = Peer(f"http://127.0.0.1:{_free_port()}", "no-token")
+    said: list[str] = []
+
+    placed = plan(["big.gguf"], [gone, roomy.peer], needs={"big.gguf": 4 * G},
+                  log=said.append)
+    assert placed[roomy.peer] == ["big.gguf"] and "did not answer" in "\n".join(said)
+
+    handles = dispatch({gone: _job("tiny.gguf"), roomy.peer: _job("big.gguf")},
+                       log=said.append)
+    assert handles[0].state == "refused" and handles[0].why.startswith("unreachable: ")
+    assert handles[1].state == "running"
+    wait(handles, poll_s=0.1, timeout_s=20, log=said.append)
+    handles[0].id = "never-there"
+    got = gather(handles, into=tmp_path / "home.ladybug", log=said.append)
+    assert "could not export" in "\n".join(said) and list(got) == ["id-roomy"]
+
+
 def test_a_bench_that_says_error_is_failed(tmp_path):
     box = _box(tmp_path, "shaky", room=96 * G, launch=scripted_launch(fails=True))
     try:

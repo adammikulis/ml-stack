@@ -18,12 +18,16 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.units import human_bytes
 
+from .jobs import DaemonError
 from .measuring import TAIL, Job, Local, Refused
 from .remote import PeerError
 from .sizing import estimate
 
 __all__ = ["Handle", "Plan", "bench_export", "dispatch", "plan", "submit_bench",
            "wait"]
+
+UNANSWERED = (PeerError, DaemonError, ValueError, KeyError, OSError)
+"""What asking a `Peer`, or a `Local` answering as one, raises when it gets no answer."""
 
 
 def submit_bench(peer: Any, job: Job) -> dict[str, Any]:
@@ -93,7 +97,7 @@ def plan(models: Sequence[str], peers: Sequence[Any], *, needs: Mapping[str, int
     for peer in peers:
         try:
             health = peer.health()
-        except Exception as exc:  # noqa: BLE001 - a peer that does not answer is not idle
+        except UNANSWERED as exc:  # a peer that does not answer is not idle
             log(f"  {getattr(peer, 'name', peer)}: did not answer ({exc})")
             continue
         seen.append((peer, _name_of(peer, health), health))
@@ -149,7 +153,7 @@ def _health_of(peer: Any) -> Mapping[str, Any]:
     """The peer's ``/health``, or {} when it does not answer."""
     try:
         return peer.health()
-    except Exception:  # noqa: BLE001
+    except UNANSWERED:
         return {}
 
 
@@ -202,7 +206,7 @@ def dispatch(jobs: Mapping[Any, Job], *, log: Callable[[str], None] = say) -> li
         except Refused as why:
             handle.state, handle.why = "refused", f"{why.kind}: {why}"
             log(f"  {handle.peer_name}: refused ({why.kind}) -- {why}")
-        except Exception as exc:  # noqa: BLE001 - one unreachable peer must not stop the rest
+        except UNANSWERED as exc:  # one unreachable peer must not stop the rest
             handle.state, handle.why = "refused", f"unreachable: {exc}"
             log(f"  {handle.peer_name}: unreachable -- {exc}")
         else:
@@ -228,7 +232,7 @@ def wait(handles: Sequence[Handle], *, poll_s: float = 20.0, timeout_s: float | 
                 continue
             try:
                 current = handle.peer.job(handle.id)
-            except Exception as exc:  # noqa: BLE001 - said, and asked again next round
+            except UNANSWERED as exc:  # said, and asked again next round
                 log(f"  {handle.peer_name}: could not read job {handle.id}: {exc}")
                 continue
             state = str(current.get("state") or "")
@@ -239,7 +243,7 @@ def wait(handles: Sequence[Handle], *, poll_s: float = 20.0, timeout_s: float | 
             if handle.ended:
                 try:
                     tail = handle.peer.log(handle.id, tail=TAIL).rstrip()
-                except Exception:  # noqa: BLE001
+                except UNANSWERED:
                     tail = ""
                 for line in tail.splitlines():
                     log(f"      {line}")

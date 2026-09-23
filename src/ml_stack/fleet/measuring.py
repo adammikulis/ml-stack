@@ -23,6 +23,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -115,10 +116,8 @@ def installed_commit() -> str:
             if sha:
                 return f"{sha} (dirty)" if git("status", "--porcelain") else sha
     try:
-        from importlib.metadata import version
-
         return f"v{version('ml-stack')}"
-    except Exception:  # noqa: BLE001
+    except PackageNotFoundError:
         return ""
 
 
@@ -279,7 +278,7 @@ def _alive(pid: int) -> bool:
         return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
     except ImportError:
         pass
-    except Exception:  # noqa: BLE001 - gone, or not ours to ask about
+    except psutil.Error:  # gone, or not ours to ask about
         return False
     try:
         os.kill(pid, 0)
@@ -392,7 +391,7 @@ class BenchHost:
         line = [*job.argv, *self._placed(job_id, job.files)]
         try:
             pid, log = self.launch(line, self.home)
-        except Exception as exc:
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
             shutil.rmtree(self._given(job_id), ignore_errors=True)
             raise Refused("launch", f"{self.name} could not start ml-stack-bench: {exc}") from exc
         mine = DaemonJob(id=job_id, name=job.name,

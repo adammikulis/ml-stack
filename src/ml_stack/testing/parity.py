@@ -166,12 +166,6 @@ def run_pair(
     torch_forward: Callable[[Any], Any],
     mlx_forward: Callable[[Any], Any],
     target_shape: tuple[int, ...],
-    *,
-    seed: int = 1,
-    atol: float = FORWARD_ATOL,
-    rtol: float = FORWARD_RTOL,
-    grad_rtol: float = GRAD_NORM_RTOL,
-    zero: float = ZERO_GRAD,
 ) -> ParityReport:
     """One set of weights, both forwards, both backwards of an MSE loss, compared.
 
@@ -187,7 +181,7 @@ def run_pair(
     torch_module = build_torch()
     mlx_module = build_mlx()
     copy_torch_weights_to_mlx(torch_module, mlx_module)
-    target = inputs(target_shape, seed=seed)
+    target = inputs(target_shape, seed=1)
 
     torch_module.zero_grad(set_to_none=True)
     torch_out = torch_forward(torch_module)
@@ -203,10 +197,10 @@ def run_pair(
 
     report = ParityReport()
     report.max_forward_diff = assert_forward_parity(
-        torch_out.detach().cpu().numpy(), np.asarray(mlx_out), atol=atol, rtol=rtol
+        torch_out.detach().cpu().numpy(), np.asarray(mlx_out)
     )
     report.grad_norms = assert_grad_parity(
-        torch_grad_norms(torch_module), mlx_grad_norms(grads), rtol=grad_rtol, zero=zero
+        torch_grad_norms(torch_module), mlx_grad_norms(grads)
     )
     report.checked_parameters = len(report.grad_norms)
     return report

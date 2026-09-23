@@ -19,6 +19,7 @@ from ml_stack.asking import Asking
 from ml_stack.bench import Row, _hit, missed, runs, save, table
 from ml_stack.bench.selfcheck import ScriptedModel
 from ml_stack.client import Request, Transport
+from ml_stack.testing.fakes import FakeConverse, FakePreflight, FakeServe, fake_serve
 
 
 def test_hit_is_how_well_what_was_shown_matched_what_was_wanted():
@@ -1062,13 +1063,9 @@ def test_rich_reaches_converse_on_the_asking(monkeypatch):
     import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
-    reached = {}
-
-    def fake_converse(question, graph, client, **kw):
-        reached.update(kw)
-        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
-
-    monkeypatch.setattr(conversation, "converse", fake_converse)
+    conversing = FakeConverse()
+    reached = conversing.reached
+    monkeypatch.setattr(conversation, "converse", conversing)
     asking(TINY, how=Asking(rich=True))("who?", _Scripted())
     assert reached["asking"].rich is True
     reached.clear()
@@ -1280,24 +1277,12 @@ def _preflight_ok(monkeypatch, *, refuse=(), kv_estimate=3 * 2**30, weights=5 * 
     `room` is faked too, so no test asks sysctl what this machine may wire."""
     import ml_stack.hub
     import ml_stack.serve.preflight as preflight
-    from ml_stack.serve.preflight import Check, Report
 
-    seen = []
-
-    def fake_preflight(spec, *, binary, limit_bytes=0):
-        seen.append(spec)
-        bad = any(word in str(spec.model) for word in refuse)
-        return Report(checks=[
-            Check("shards", not bad, "missing or empty: " + str(spec.model) if bad else "complete"),
-            Check("architecture", True, "gemma4"),
-            Check("fit", True, f"{(weights + kv_estimate) / 2**30:.1f}G estimated fits under "
-                               f"{limit_bytes / 2**30:.1f}G"),
-            Check("flags", True, "every flag this spec would emit is one this build accepts"),
-        ], weights_bytes=weights, kv_estimate_bytes=kv_estimate)
-
-    monkeypatch.setattr(preflight, "Preflight", fake_preflight)
+    checking = FakePreflight(refuse=tuple(refuse), weights_bytes=weights,
+                             kv_estimate_bytes=kv_estimate)
+    monkeypatch.setattr(preflight, "Preflight", checking)
     monkeypatch.setattr(ml_stack.hub, "room", lambda: 110 * 2**30)
-    return seen
+    return checking.seen
 
 
 def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatch, capsys):
@@ -1305,15 +1290,10 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
     the (name, url) list `--on` builds, so after serving, the summary unpacked the last
     model's name a character at a time and every `sweep --serve` crashed after answering
     everything. A smoke run caught it; this is the test that should have."""
-    from contextlib import contextmanager
 
     import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-
-    @contextmanager
-    def fake_serve(model, **kw):
-        yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
@@ -1407,15 +1387,10 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
     """The shape that was lost: `sweep --serve` with `--also terse --also card`, a store
     for the finder, a smoke run. Every run comes back from the store whole, and the
     summary the smoke prints is read from the store, not from memory."""
-    from contextlib import contextmanager
 
     import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
-
-    @contextmanager
-    def fake_serve(model, **kw):
-        yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
@@ -1676,20 +1651,12 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
     serve(...)` runs its exit on the way out."""
     import os
     import signal
-    from contextlib import contextmanager
 
     import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
 
-    came_down = []
-
-    @contextmanager
-    def fake_serve(model, **kw):
-        try:
-            yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
-        finally:
-            came_down.append(model)
+    serving = FakeServe()
 
     def fake_measure(ask, questions, **kw):
         os.kill(os.getpid(), signal.SIGTERM)            # what `stop` does, from inside
@@ -1698,7 +1665,7 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "measure", fake_measure)
-    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.serve, "serve", serving)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
     _preflight_ok(monkeypatch)
     graph = tmp_path / "g.json"
@@ -1713,7 +1680,8 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
                     "--questions", str(asked), "--store", "", "--serve-port", "1",
                     "--no-selfcheck"])
     assert left.value.code == 128 + signal.SIGTERM
-    assert came_down == ["tiny.gguf"], "the server was taken down on the way out"
+    assert [str(spec.model) for spec in serving.leased] == ["tiny.gguf"]
+    assert len(serving.released) == 1, "the server was taken down on the way out"
     assert signal.getsignal(signal.SIGTERM) is before, "and the handler was put back"
     from ml_stack.lock import only_one
     with only_one(tmp_path / "home" / "measuring.lock", wait=False):
@@ -1725,23 +1693,17 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
 def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeypatch, capsys):
     """A sweep killed on its third model, re-run with --resume, costs the third model."""
     import time
-    from contextlib import contextmanager
 
     import ml_stack.bench as bench
     import ml_stack.client
     import ml_stack.serve
 
-    served_models = []
-
-    @contextmanager
-    def fake_serve(model, **kw):
-        served_models.append(model)
-        yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
+    serving = FakeServe()
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
-    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.serve, "serve", serving)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
     _preflight_ok(monkeypatch)
     graph = tmp_path / "g.json"
@@ -1772,15 +1734,16 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
     assert "skipping tiny-plain: kept at" in said
     assert "skipping tiny-plain-terse: kept at" in said
     assert "skipping other-plain: kept at" in said
-    assert served_models == ["tiny.gguf"], "the model with a way still to measure, once"
+    assert [str(spec.model) for spec in serving.leased] == ["tiny.gguf"], \
+        "the model with a way still to measure, once"
     assert len(runs(kept, "tiny-plain-card")) == 2, "the third way was the only one measured"
     assert len(runs(kept, "tiny-plain")) == 1 and len(runs(kept, "other-plain")) == 1
 
     # --since after everything kept: nothing counts, and both models are served again
-    served_models.clear()
+    serving.leased.clear()
     later = time.strftime("%FT%T", time.localtime(time.time() + 3600))
     assert bench._main([*argv, "--resume", "--since", later]) == 0
-    assert served_models == ["tiny.gguf", "other.gguf"]
+    assert [str(spec.model) for spec in serving.leased] == ["tiny.gguf", "other.gguf"]
     assert "skipping" not in capsys.readouterr().out
 
     # and a kept run at another context is another measurement, not this one
@@ -2815,13 +2778,9 @@ def test_tight_reaches_converse_on_the_asking(monkeypatch):
     from ml_stack.bench import asking
     from ml_stack.graph.prompts import TERSE, TIGHT_SHOW_TERSE
 
-    reached = {}
-
-    def fake_converse(question, graph, client, **kw):
-        reached.update(kw)
-        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
-
-    monkeypatch.setattr(conversation, "converse", fake_converse)
+    conversing = FakeConverse()
+    reached = conversing.reached
+    monkeypatch.setattr(conversation, "converse", conversing)
     asking(TINY, how=Asking(tight=True))("who?", _Scripted())
     assert reached["asking"].tight is True and reached["tools"] is None
     reached.clear()
@@ -2864,15 +2823,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
            transport=Transport(timeout=1.0))
     built.clear()
 
-    class Server:
-        base_url = "http://127.0.0.1:1"
-
-    class FakeServe:
-        def __init__(self, *a, **k): pass
-        def __enter__(self): return Server()
-        def __exit__(self, *a): return False
-
-    monkeypatch.setattr(ml_stack.serve, "serve", FakeServe)
+    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", Strict)
     monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
     monkeypatch.setattr(bench, "asking", lambda *a, **k: (lambda *x, **y: None))
@@ -2948,13 +2899,9 @@ def test_reach_reaches_converse_on_the_asking_and_is_none_without_one(monkeypatc
     import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
-    reached = {}
-
-    def fake_converse(question, graph, client, **kw):
-        reached.update(kw)
-        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
-
-    monkeypatch.setattr(conversation, "converse", fake_converse)
+    conversing = FakeConverse()
+    reached = conversing.reached
+    monkeypatch.setattr(conversation, "converse", conversing)
     asking(TINY)("who?", _Scripted())
     assert reached["asking"].reach is None, "asked for no budget, sent no budget"
     reached.clear()
@@ -4164,24 +4111,20 @@ def test_batch_kinds_and_summary_reach_converse_on_the_asking(monkeypatch):
     import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
-    reached = {}
-
-    def fake_converse(question, graph, client, **kw):
-        reached.update(kw)
-        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
-
-    monkeypatch.setattr(conversation, "converse", fake_converse)
+    conversing = FakeConverse()
+    reached = conversing.reached
+    monkeypatch.setattr(conversation, "converse", conversing)
     asking(TINY)("who?", _Scripted())
     way = reached["asking"]
     assert not (way.batch or way.kinds or way.summary), \
         "asked for none of them, sent none of them"
-    assert "summary" not in reached, "the rolling summary is not the summary tool"
+    assert reached["summary"] is None, "the rolling summary is not the summary tool"
 
     reached.clear()
     asking(TINY, how=Asking(batch=True, kinds=True, summary=True))("who?", _Scripted())
     way = reached["asking"]
     assert (way.batch, way.kinds, way.summary) == (True, True, True)
-    assert "summary" not in reached
+    assert reached["summary"] is None
 
     reached.clear()
     asking(TINY, how=Asking(terse=True, batch=True, summary=True))("who?", _Scripted())
@@ -4271,13 +4214,9 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
     import ml_stack.graph.conversation as conversation
     from ml_stack.bench import asking
 
-    reached = {}
-
-    def fake_converse(question, graph, client, **kw):
-        reached.update(kw)
-        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
-
-    monkeypatch.setattr(conversation, "converse", fake_converse)
+    conversing = FakeConverse()
+    reached = conversing.reached
+    monkeypatch.setattr(conversation, "converse", conversing)
     plain = asking(TINY)
     plain("who?", _Scripted())
     way = reached["asking"]
@@ -4719,13 +4658,9 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
     assert all("constrain_ids" not in w
                for w in _askings(Namespace(also=["batch"], terse=False, temperature=0.0)))
 
-    reached = {}
-
-    def fake_converse(question, graph, client, **kw):
-        reached.update(kw)
-        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
-
-    monkeypatch.setattr(conversation, "converse", fake_converse)
+    conversing = FakeConverse()
+    reached = conversing.reached
+    monkeypatch.setattr(conversation, "converse", conversing)
     ask = asking(TINY, how=Asking(constrain_ids=True))
     ask("who?", _Scripted())
     assert reached["asking"].constrain_ids is True

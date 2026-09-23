@@ -1,25 +1,15 @@
 """Fakes with the real signatures, so what the real thing refuses, the fake refuses too.
 
-A fake client written as ``def __init__(self, base_url, **kwargs)`` accepts every keyword,
-so a test that hands it one the real `Client` does not take goes green. That is how a
-``--also tight`` flag reached ``Client.__init__`` in production and took an 87G load down
-with it: the test that covered the path had faked the client with ``**kwargs``. Every fake
-here carries the real signature -- the same names, the same kinds, the same defaults, and
-never a ``**kwargs`` the real one lacks -- and `mirrors` diffs them against the real ones
-so they cannot drift when the real one changes. ``tests/test_testing_fakes.py`` runs
-that diff over every fake in this module.
+`mirrors` diffs each against the real one; ``tests/test_testing_fakes.py`` runs it over
+`MIRRORED`.
 
-What is here:
-
-- `FakeClient`: `Client` that reaches no server. Scripted replies, every call recorded.
-- `ScriptedModel`: the graph tests' model -- a script of tool calls, then words.
-- `FakeServe` / `fake_serve`: `serve()` that starts nothing and yields a real `ServerInfo`;
-  `Yielding` is what that info holds.
+- `FakeClient` / `ScriptedModel`: a `Client` that reaches no server; a scripted model.
+- `FakeServe` / `fake_serve` / `Yielding`: `serve()` that starts nothing.
 - `FakeReport` / `FakePreflight`: a preflight that read nothing and passed, or refused.
+- `FakeConverse`: `converse` that asks nothing and records what it was handed.
 - `FakeBackend`: a `ServerBackend` that binds no socket and records every spec.
-- `Served` / `FakeLlamaServer` / `fake_llama_server`: a llama-server on a real socket.
-- `fake_llama_binary` / `fake_binary`: the same as an executable, and a bare `--help` stub.
-- `mirrors` / `drift`: does a fake's signature match the real one, and how not.
+- `Served` / `FakeLlamaServer` / `fake_llama_server` / `fake_llama_binary` / `fake_binary`:
+  a llama-server on a real socket, as an executable, and a bare ``--help`` stub.
 """
 
 from __future__ import annotations
@@ -30,19 +20,22 @@ import os
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
+from ml_stack.asking import ASKING, Asking
 from ml_stack.client import families
 from ml_stack.client.chat import Client, Reply
 from ml_stack.client.counters import Speculative
 from ml_stack.client.families import Family
 from ml_stack.client.settings import Request, Transport
 from ml_stack.extraction import Checking, Kept, Prompting
+from ml_stack.graph.answers import Answer
+from ml_stack.graph.conversation import LIT, SYSTEM, converse
 from ml_stack.http import json_body
 from ml_stack.serve.backend import (
     LlamaServerBackend,
@@ -60,6 +53,7 @@ __all__ = [
     "LLAMA_SERVER_HELP",
     "FakeBackend",
     "FakeClient",
+    "FakeConverse",
     "FakeLlamaServer",
     "FakePreflight",
     "FakeReport",
@@ -134,21 +128,13 @@ def _tool_turns(seen: list[list[dict[str, Any]]]) -> str:
 # ---------------------------------------------------------------- the client
 
 class FakeClient:
-    """`Client` that reaches no server.
+    """`Client` that reaches no server, built with exactly `Client`'s keywords.
 
-    Built exactly as `Client` is built -- the same keywords, no others -- so a keyword the
-    real one would refuse is refused here. ``chat`` and ``extract`` answer from ``replies``:
-    a list is spent in order and its last entry repeated once it is gone (a script ending in
-    words keeps answering them), a callable is asked with ``(messages, tools)`` each time,
-    and an empty script answers nothing. Each entry is read by `reply_from`.
-
-    Code that builds its own clients -- ``served()`` does -- is given a *class*, not an
-    instance: `FakeClient.scripted(replies)` makes a subclass with those replies and a fresh
-    ``built`` list of every instance it constructed, and that is what to monkeypatch in.
-
-    What was seen: ``seen`` is the messages of every ``chat``, ``calls`` is every call to
-    any method with its arguments, ``told()`` is what the tools answered as the model saw
-    it. ``sampling`` is computed as the real one computes it; ``card`` is ``card_says``.
+    ``chat`` and ``extract`` answer from ``replies``: a list is spent in order, its last
+    entry repeated; a callable is asked with ``(messages, tools)``; each entry is read by
+    `reply_from`. `FakeClient.scripted(replies)` makes a subclass with those replies and a
+    fresh ``built`` list, for code that builds its own clients. ``seen`` is every ``chat``'s
+    messages, ``calls`` every call, ``told()`` what the tools answered.
     """
 
     replies: ClassVar[Any] = ()
@@ -419,6 +405,32 @@ class FakePreflight:
         return FakeReport(ok=not bad, weights_bytes=self.weights_bytes,
                           kv_estimate_bytes=self.kv_estimate_bytes, limit_bytes=limit_bytes,
                           model=spec.model)
+
+
+# ---------------------------------------------------------------- the conversation
+
+class FakeConverse:
+    """`converse` that asks nothing: an empty `Answer`. ``reached`` holds the keywords of
+    the last call, ``asked`` every question."""
+
+    def __init__(self) -> None:
+        self.reached: dict[str, Any] = {}
+        self.asked: list[str] = []
+
+    def __call__(self, question: str, graph: Mapping[str, Any], client: Any, *,
+                 asking: Asking = ASKING,
+                 turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
+                 limit: int = LIT,
+                 tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
+                 finder: Any = None, highlighted: Sequence[str] = (),
+                 opening: Sequence[str] = (), summary: Any = None,
+                 recalled: Sequence[Any] = ()) -> Answer:
+        self.asked.append(question)
+        self.reached.clear()
+        self.reached.update(asking=asking, turns=turns, system=system, limit=limit,
+                            tools=tools, finder=finder, highlighted=highlighted,
+                            opening=opening, summary=summary, recalled=recalled)
+        return Answer()
 
 
 # ---------------------------------------------------------------- a llama-server
@@ -865,6 +877,7 @@ MIRRORED: tuple[tuple[str, Any, Any], ...] = (
     ("FakePreflight.__call__", FakePreflight.__call__, Preflight),
     ("FakeBackend.command", FakeBackend.command, ServerBackend.command),
     ("FakeBackend.start", FakeBackend.start, LlamaServerBackend.start),
+    ("FakeConverse.__call__", FakeConverse.__call__, converse),
 )
 """Every fake here beside what it stands in for. The test walks this; a fake added to the
 module and not to this table is a fake nothing checks."""

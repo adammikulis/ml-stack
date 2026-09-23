@@ -22,6 +22,7 @@ from ml_stack.bench.backends import client_for, describe, http_of, timings_of
 from ml_stack.bench.keep import read_back, save
 from ml_stack.client.settings import Request, Transport
 from ml_stack.client.tokens import CHARS_PER_TOKEN
+from ml_stack.http import ServerError
 from ml_stack.log import say, warn
 
 KIND = "speed"
@@ -58,13 +59,13 @@ def count_tokens(client: Any, text: str) -> tuple[int | None, str]:
     ``/tokenize``, else ``reply`` from a one-token request's prompt count; ``(None,
     "unknown")`` when it will say neither."""
     if hasattr(client, "tokenize"):
-        with contextlib.suppress(Exception):  # no /tokenize on this program; ask by reply
+        with contextlib.suppress(ServerError, NotImplementedError):  # no /tokenize here
             got = client.tokenize(text)
             if got:
                 return len(got), "tokenize"
     try:
         reply = client.chat([{"role": "user", "content": text}], think=False, n_predict=1)
-    except Exception:  # noqa: BLE001 - a server that will not answer counts nothing
+    except (ServerError, NotImplementedError):  # a server that will not answer counts nothing
         return None, "unknown"
     timings = timings_of(reply)
     if timings.get("prompt_n") is not None:
@@ -122,7 +123,7 @@ def _one(client: Any, text: str, *, generate: int) -> dict[str, Any]:
     try:
         reply = client.chat([{"role": "user", "content": text}], think=False,
                             **({"on_delta": arrived} if streamed else {}))
-    except Exception as exc:  # noqa: BLE001 - a failed request is a result of the cell
+    except (ServerError, NotImplementedError) as exc:  # a failed request is a result
         error = f"{type(exc).__name__}: {exc}"[:200]
     wall = time.time() - began
     timings = timings_of(reply) if reply is not None else {}

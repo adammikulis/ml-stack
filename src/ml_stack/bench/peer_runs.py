@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.bench.score import machine_of
-from ml_stack.fleet.sweeps import Handle, bench_export
+from ml_stack.fleet.sweeps import UNANSWERED, Handle, bench_export
 from ml_stack.log import say
 
 __all__ = ["SERVER_KEYS", "gather", "import_runs"]
@@ -142,7 +142,7 @@ def gather(handles: Sequence[Handle], *, into: str | Path,
             continue
         try:
             answered = bench_export(handle.peer, job=handle.id, full=True, anyway=True)
-        except Exception as exc:  # noqa: BLE001 - said, and the others still come home
+        except UNANSWERED as exc:  # said, and the others still come home
             log(f"  {handle.peer_name}: could not export: {exc}")
             continue
         host = str(answered.get("host") or handle.peer_name)

@@ -45,6 +45,7 @@ from ml_stack.graph.rebuild import replace
 from ml_stack.serve import ServerInfo
 from ml_stack.serve.backend import (
     LlamaServerBackend,
+    ServerFailed,
     ServerSpec,
     UnknownFlag,
     emitted_flags,
@@ -289,17 +290,15 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
                 Check("shards", True, "selfcheck: taken as complete on this machine"))
 
     def checked_preflight(spec: Any, *, binary: str, limit_bytes: int = 0) -> Report:
-        # the real thing, over the spec the run built, with only the readers replaced:
-        # the shards are present at a plausible size, the header is a dense model this
-        # build reads, the build accepts every flag `command` can emit, a companion
-        # costs a gigabyte. Every check's own code runs, and the argv is built for real.
+        # the real thing, over the spec the run built, with only the readers replaced: the
+        # shards present, a dense header, every flag accepted, a companion of a gigabyte
         try:
             report = _RealPreflight(spec, binary=binary, limit_bytes=limit_bytes,
                                     shards_of=present, read_header=lambda path: dict(_HEADER),
                                     arches=lambda build: {"llama"},
                                     flags=lambda build: _mainline_flags(build) | _raw_flags(spec),
                                     ref_bytes=lambda ref: _COMPANION_BYTES if ref else 0)
-        except Exception as exc:
+        except (ServerFailed, ValueError) as exc:  # what building the argv refuses with
             raise SelfCheckFailed(
                 f"the preflight raised over the spec the run builds for {spec.model}"
                 + (f" with draft {spec.draft}" if spec.draft else "")

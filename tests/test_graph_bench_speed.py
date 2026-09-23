@@ -25,6 +25,7 @@ from ml_stack.bench.speed import (
     prompt_text,
     speed_table,
 )
+from ml_stack.http import ServerUnreachable
 
 
 class _Reply:
@@ -267,7 +268,7 @@ def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monk
         sampling: ClassVar[dict] = {}
 
         def chat(self, messages, **kw):
-            raise ConnectionError("nothing there")
+            raise ServerUnreachable("nothing there")
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
