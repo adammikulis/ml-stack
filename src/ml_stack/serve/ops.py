@@ -102,6 +102,7 @@ class Snapshot:
     drafting: Drafting | None = None
     verdict: str = ""
     reason: str = ""
+    log: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +235,7 @@ def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None =
         recorded=bool(entry),
         load_s=_float_or_none(entry.get("load_s")),
         warmup_s=_float_or_none(entry.get("warmup_s")),
+        log=str(entry["log"]) if entry.get("log") else None,
         drafting=(drafting_of(url, (served or {}).get(port) or {}, params)
                   if served is not None and port in served else None),
     )

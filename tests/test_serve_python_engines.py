@@ -33,7 +33,6 @@ def test_the_manager_serves_a_spec_with_the_engine_it_names(tmp_path):
 
 def test_an_engine_server_is_leased_recorded_and_released(tmp_path, monkeypatch):
     """A real process on a real port: a stand-in engine module that answers /health."""
-    from ml_stack.serve import python_engines
 
     engine = tmp_path / "engine.py"
     engine.write_text(
@@ -45,7 +44,6 @@ def test_an_engine_server_is_leased_recorded_and_released(tmp_path, monkeypatch)
         "    def log_message(self, *a):\n"
         "        pass\n"
         "HTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port') + 1])), H).serve_forever()\n")
-    monkeypatch.setattr(python_engines, "log_dir", lambda: tmp_path / "logs")
     monkeypatch.setattr(VllmBackend, "command",
                         lambda self, spec: [sys.executable, str(engine), "--port", str(spec.port)])
     manager = ServerManager(state_file=tmp_path / "servers.json")
@@ -53,6 +51,7 @@ def test_an_engine_server_is_leased_recorded_and_released(tmp_path, monkeypatch)
                          roam=False, timeout=30.0)
     try:
         assert info.backend == "vllm" and pid_exists(info.pid)
+        assert info.log_path.name.startswith(f"vllm-{info.port}-") and info.log_path.is_file()
     finally:
         manager.release(info)
     assert not pid_exists(info.pid)

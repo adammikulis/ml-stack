@@ -19,7 +19,7 @@ from ml_stack.serve.backend import (
     ServerSpec,
     claim_port,
     launch,
-    log_dir,
+    server_log,
 )
 
 __all__ = ["ENGINES", "SGLangBackend", "VllmBackend", "cuda_devices"]
@@ -51,9 +51,7 @@ class _PythonEngine(ServerBackend):
             raise ServerFailed(f"{self.name} serves no draft model; drop draft from the spec")
         argv = self.command(spec)
         claim_port(spec, lease)
-        logs = log_dir()
-        logs.mkdir(parents=True, exist_ok=True)
-        log_path = logs / f"{self.name}-{spec.port}.log"
+        log_path = server_log(self.name, spec.port)
         process, base_url, load_s = launch(argv, port=spec.port, log_path=log_path,
                                            timeout=timeout, env=dict(os.environ))
         return ServerInfo(base_url=base_url, port=spec.port, pid=process.pid, backend=self.name,

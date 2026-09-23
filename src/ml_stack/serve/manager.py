@@ -475,6 +475,7 @@ class ServerManager:
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
+            **({"log": str(info.log_path)} if info.log_path else {}),
         }
         if info.process is not None:
             self._processes[info.port] = info.process

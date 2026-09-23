@@ -87,6 +87,26 @@ class TestStatus:
         assert "8192 per slot" in out
         assert "slots    2" in out
 
+    def test_it_names_the_log_the_server_writes(self, serving, state, capsys, tmp_path):
+        instance = serving()
+        log = tmp_path / "logs" / f"llama-server-{instance.port}-20260923-170000-1.log"
+        state.write_text(json.dumps({str(instance.port): {
+            "port": instance.port, "pid": 4242, "owner_pid": 4242, "model": MODEL,
+            "base_url": instance.base_url, "log": str(log)}}))
+        assert cli.main(["status", "--port", str(instance.port)]) == 0
+        assert f"  log      {log}" in capsys.readouterr().out
+        assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["servers"][0]["log"] == str(log)
+
+    def test_nothing_serving_names_the_last_log_on_that_port(self, state, capsys):
+        from ml_stack.serve.backend import server_log
+
+        port = free_port()
+        log = server_log("llama-server", port)
+        log.write_text("cleaning up before exit...\n")
+        assert cli.main(["status", "--port", str(port)]) == 1
+        assert f"the last server on port {port} wrote {log}" in capsys.readouterr().out
+
     def test_a_running_server_in_json(self, serving, state, capsys):
         instance = serving(context=8192, slots=2)
         assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0

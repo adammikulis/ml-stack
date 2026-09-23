@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, log_dir
+from ml_stack.serve.backend import LlamaServerBackend, ServerFailed
 from ml_stack.serve.loadlog import Measured, parse_load_log
 from ml_stack.serve.manager import ServerManager
 
@@ -28,8 +28,9 @@ def _load_log(spec, *, backend=None, timeout: float | None = None) -> str:
                 f"{info.base_url} was already serving that model, and an adopted server's "
                 "log is from a load that may not have been asked for -lv 4. Stop it "
                 "(`ml-stack-serve down --port %d`) and measure again." % info.port)
-        where = info.log_path or log_dir() / f"llama-server-{info.port}.log"
-        return Path(where).read_text(encoding="utf-8", errors="replace")
+        if info.log_path is None:
+            raise ServerFailed(f"{info.base_url} kept no log to read")
+        return Path(info.log_path).read_text(encoding="utf-8", errors="replace")
     finally:
         manager.release(info)
 

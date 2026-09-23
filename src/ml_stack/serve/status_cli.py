@@ -11,7 +11,7 @@ from ml_stack.command import flag, option
 from ml_stack.hub import pretty_name
 from ml_stack.log import say
 from ml_stack.serve import ops
-from ml_stack.serve.backend import ServerSpec, parse_context
+from ml_stack.serve.backend import ServerSpec, logs_of, parse_context
 from ml_stack.serve.ops import base_url_for
 
 __all__ = ["OPTIONS", "cmd_status"]
@@ -140,6 +140,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     if not found.servers and not found.foreign:
         say("nothing is serving on port " + ", ".join(str(p) for p in found.ports) + ".")
         say(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")
+        for port in found.ports:
+            written = logs_of("llama-server", port)
+            if written:
+                say(f"  the last server on port {port} wrote {written[-1]}")
         return 1
 
     for snapshot in found.servers:
@@ -150,6 +154,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             " per slot")
         say(f"  slots    {snapshot.slots if snapshot.slots is not None else 'not reported'}")
         say(f"  lease    {_lease_line(snapshot)}")
+        if snapshot.log:
+            say(f"  log      {snapshot.log}")
         if snapshot.load_s is not None:
             warm = f", warm-up {snapshot.warmup_s:.1f}s" if snapshot.warmup_s is not None else ""
             say(f"  loaded   in {snapshot.load_s:.1f}s{warm}")

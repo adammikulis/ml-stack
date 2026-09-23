@@ -35,7 +35,6 @@ from ml_stack.serve import (
     tail,
     wait_until_free,
 )
-from ml_stack.serve.backend import fresh_log
 from ml_stack.serve.leases import orphaned
 from ml_stack.testing.fakes import (
     FakeLlamaServer,
@@ -992,6 +991,8 @@ class TestTheStartedProcess:
         try:
             names = [os.path.basename(one) for one in open_during[0]]
             assert info.log_path.name not in names
+            kept = json.loads((tmp_path / "servers.json").read_text())[str(info.port)]
+            assert kept["log"] == str(info.log_path) and info.log_path.is_file()
         finally:
             manager.release(info)
 
@@ -1062,16 +1063,26 @@ def test_two_processes_recording_at_once_keep_both_records(tmp_path):
     assert sorted(written) == sorted(str(p) for p in ports), written
 
 
-def test_a_restart_gives_the_log_a_new_file_and_leaves_the_old_one_whole(tmp_path):
-    log = tmp_path / "llama-server-50085.log"
-    log.write_bytes(b"the last run said this\n")
-    before = log.stat().st_ino
-    with log.open("rb") as still_reading:
-        with fresh_log(log) as handle:
-            handle.write(b"new run\n")
-        assert log.stat().st_ino != before
-        assert log.read_bytes() == b"new run\n"
-        assert still_reading.read() == b"the last run said this\n"
+def test_every_start_writes_its_own_log_under_the_home_and_the_oldest_go(tmp_path):
+    from ml_stack import home
+    from ml_stack.serve.backend import LOGS_KEPT, logs_of, server_log
+
+    older = []
+    for n in range(LOGS_KEPT + 2):
+        one = home.state("logs") / f"llama-server-8080-20260101-00000{n}-1.log"
+        one.parent.mkdir(parents=True, exist_ok=True)
+        one.write_text(f"run {n}\n")
+        os.utime(one, (1_000_000 + n, 1_000_000 + n))
+        older.append(one)
+    beside = home.state("logs") / "llama-server-8081-20260101-000000-1.log"
+    beside.write_text("another port\n")
+
+    fresh = server_log("llama-server", 8080)
+    assert fresh.parent == home.state("logs") == home.home() / "logs"
+    assert fresh.name.startswith("llama-server-8080-") and fresh not in older
+    fresh.write_text("this run\n")
+    assert logs_of("llama-server", 8080) == [*older[-(LOGS_KEPT - 1):], fresh]
+    assert beside.exists()
 
 
 def test_a_model_served_on_two_ports_is_reported_with_both(server):

@@ -6,13 +6,14 @@ import contextlib
 import difflib
 import logging
 import math
+import os
 import re
 import subprocess
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any
 
 from ml_stack import home
 from ml_stack.client import wait_for_health
@@ -23,9 +24,28 @@ from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 logger = logging.getLogger(__name__)
 
 
+LOGS_KEPT = 5
+"""How many logs are kept for each server name and port, the newest first."""
+
+
 def log_dir() -> Path:
-    """Where each model server this machine started appends its log."""
-    return home.cache("logs")
+    """Where each model server this machine started writes its log, one file a start."""
+    return home.state("logs")
+
+
+def logs_of(name: str, port: int) -> list[Path]:
+    """Every log ``name`` has written on ``port``, oldest first."""
+    found = [one for one in log_dir().glob(f"{name}-{port}-*.log") if one.is_file()]
+    return sorted(found, key=lambda one: (one.stat().st_mtime, one.name))
+
+
+def server_log(name: str, port: int) -> Path:
+    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`."""
+    logs = log_dir()
+    logs.mkdir(parents=True, exist_ok=True)
+    for old in logs_of(name, port)[:-(LOGS_KEPT - 1) or None]:
+        old.unlink(missing_ok=True)
+    return logs / f"{name}-{port}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 
 
 def default_slot_save_path() -> Path:
@@ -458,7 +478,7 @@ def launch(argv: list[str], *, port: int, log_path: Path, timeout: float,
     Raises ``ServerFailed`` with the log's tail when it exits or never answers.
     """
     started_at = time.monotonic()
-    with fresh_log(log_path) as log_handle:
+    with log_path.open("wb") as log_handle:
         process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
                                    **process_group_kwargs())
     base_url = f"http://{DEFAULT_HOST}:{port}"
@@ -757,13 +777,11 @@ class LlamaServerBackend(ServerBackend):
             if not report.ok:
                 raise PreflightFailed(report.said())
 
-        logs = log_dir()
-        logs.mkdir(parents=True, exist_ok=True)
         if spec.slot_save_path:
             # llama-server refuses to start rather than create this itself: "not a
             # directory" is its whole complaint.
             Path(spec.slot_save_path).mkdir(parents=True, exist_ok=True)
-        log_path = logs / f"llama-server-{spec.port}.log"
+        log_path = server_log("llama-server", spec.port)
         logger.info("starting: %s", " ".join(argv))
 
         extra_env = {}
@@ -824,16 +842,6 @@ def fetched(ref: str | Path, what: str) -> str | Path:
         return str(fetch(str(ref)))
     except (ValueError, OSError) as exc:
         raise ServerFailed(f"could not fetch the {what} {ref}: {exc}") from exc
-
-
-def fresh_log(path: Path) -> BinaryIO:
-    """A new, empty log file under ``path``'s name, opened for writing.
-
-    The previous file is unlinked rather than truncated, so a restart gets a new inode
-    and anything still reading the last run's log keeps what it holds.
-    """
-    path.unlink(missing_ok=True)
-    return path.open("wb")
 
 
 def tail(path: Path, lines: int = 40) -> str:

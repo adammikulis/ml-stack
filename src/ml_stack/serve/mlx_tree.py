@@ -23,7 +23,7 @@ from ml_stack.serve.backend import (
     ServerSpec,
     claim_port,
     launch,
-    log_dir,
+    server_log,
 )
 from ml_stack.serve.preflight import Check, Report
 from ml_stack.spec import LAYOUTS
@@ -153,9 +153,7 @@ class MlxTreeBackend(ServerBackend):
             report = report_for(spec, limit_bytes=room())
             if not report.ok:
                 raise ServerFailed(report.said())
-        logs = log_dir()
-        logs.mkdir(parents=True, exist_ok=True)
-        log_path = logs / f"mlx-tree-{spec.port}.log"
+        log_path = server_log("mlx-tree", spec.port)
         process, base_url, load_s = launch(argv, port=spec.port, log_path=log_path,
                                            timeout=timeout, env=dict(os.environ))
         return ServerInfo(base_url=base_url, port=spec.port, pid=process.pid, backend=self.name,

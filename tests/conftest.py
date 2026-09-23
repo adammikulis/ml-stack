@@ -586,15 +586,15 @@ def _real_cache_and_state_untouched():
     per-test fixture moves the state or cache root -- and compares again once every test
     in the session has run. Safe when no path exists.
 
-    The log directory holds one append-only file per server this machine is running, so a
-    file that got *shorter* is a truncation and nothing but a test does that; a file that
-    grew is a live server, and a new name is any server this machine started while the
-    suite ran. The lease file is a single record touched only by a lease or a release, so
+    The log directory holds one file per server start, so a file that got *shorter* is a
+    truncation and nothing but a test does that; a file that grew is a live server, a new
+    name is any server this machine started while the suite ran, and one that went is a
+    start old enough to have been rotated out. The lease file is a single record touched only by a lease or a release, so
     its entries are compared directly.
     """
     from ml_stack.home import cache, state
 
-    log_dir = cache("logs")
+    log_dir = state("logs")
     lease_file = state("servers.json")
     older_lease = cache("servers.json")
     settings = [where(name) for name in ("limits.json", "idle.json")
