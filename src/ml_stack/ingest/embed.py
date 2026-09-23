@@ -3,30 +3,28 @@ vectors of it."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ml_stack.client.embed import embed as _embed
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.vectors import remember
+from ml_stack.graph.vectors import MOST_CHARS as MOST_CHARS
+from ml_stack.graph.vectors import RememberOptions, remember, to_embed
+from ml_stack.graph.vectors import texts_for as texts_for
 
-MOST_CHARS = 1400
 
+@dataclass(frozen=True)
+class Embedded:
+    """How an embedding pass over a store went: what it wrote, out of what it should."""
 
-def texts_for(graph: Mapping[str, Any], *, most: int = MOST_CHARS) -> dict[str, str]:
-    """Node id -> its label and the sentences it was read from, capped at ``most`` characters."""
-    messages = graph.get("messages") or {}
-    out: dict[str, str] = {}
-    for node in graph.get("nodes") or ():
-        said = " ".join((messages.get(m) or {}).get("text", "")
-                        for m in (node.get("messages") or ()))
-        out[str(node["id"])] = (str(node.get("label", "")) + " — " + said)[:most]
-    return out
+    written: int
+    total: int
 
 
 def embed_store(out: str | Path, *, base_url: str, model: str, smooth_hops: int = 0,
-                log: Callable[[str], None] | None = None) -> int:
+                log: Callable[[str], None] | None = None) -> Embedded:
     """Embed every node an ingest store holds, and write the vectors back into it.
 
     Opens the store writable, never read-only: a read-only handle cannot build the vector
@@ -48,7 +46,9 @@ def embed_store(out: str | Path, *, base_url: str, model: str, smooth_hops: int 
             return vectors
 
         graph = store.read()
-        written = remember(store, texts_for(graph), base_url=base_url, model=model,
-                           embedder=fixed, smooth_hops=smooth_hops, graph=graph, log=log)
+        texts = texts_for(graph)
+        written = remember(store, texts, base_url=base_url, model=model,
+                           options=RememberOptions(embedder=fixed, smooth_hops=smooth_hops,
+                                                   graph=graph, log=log))
         store.index()
-    return written
+    return Embedded(written=written, total=len(to_embed(texts)))

@@ -426,10 +426,10 @@ def _dispatch(args: Any, rest: list[str]) -> int:
                 return 2
             from ml_stack.ingest.embed import embed_store
 
-            written = embed_store(args.out, base_url=args.embed_url,
-                                  model=args.embed_model or "embed",
-                                  smooth_hops=args.smooth, log=say)
-            say(f"{written} embedded")
+            got = embed_store(args.out, base_url=args.embed_url,
+                             model=args.embed_model or "embed",
+                             smooth_hops=args.smooth, log=say)
+            say(f"{got.written} of {got.total} embedded")
             return 0
         if word == "tidy":
             # the hygiene pass is graph.tidy's -- a book, a Slack community, any store --

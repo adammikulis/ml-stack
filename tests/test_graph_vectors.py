@@ -10,9 +10,10 @@ import json
 
 import pytest
 from conftest import json_reply
-from ml_stack.graph.store import GraphStore
+
 from ml_stack.client.embed import DOCUMENT, QUERY
-from ml_stack.graph.vectors import embedded, remember
+from ml_stack.graph.store import GraphStore
+from ml_stack.graph.vectors import RememberOptions, embedded, remember
 from ml_stack.testing import needs_a_backend
 
 pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
@@ -99,7 +100,7 @@ class TestRemembering:
         with GraphStore(tmp_path / "g.ladybug") as store:
             store.write(graph())
             written = remember(store, SAID, base_url=instance.base_url, model="gemma",
-                               batch=1, log=said.append)
+                               options=RememberOptions(batch=1, log=said.append))
         assert written == 2, "one batch failed; the other two are still worth having"
         assert any("could not be embedded" in line for line in said)
 
@@ -167,7 +168,7 @@ SMOOTHED = {
 
 
 def _cosine(one, other):
-    top = sum(a * b for a, b in zip(one, other))
+    top = sum(a * b for a, b in zip(one, other, strict=True))
     size = (sum(a * a for a in one) ** 0.5) * (sum(b * b for b in other) ** 0.5)
     return top / size if size else 0.0
 
@@ -234,7 +235,8 @@ class TestSmoothingAStore:
         with GraphStore(path) as store:
             store.write(SMOOTHED)
             written = remember(store, {i: SAID[i] for i in ("person:ada", "person:bea")},
-                               base_url=instance.base_url, model="gemma", smooth_hops=1)
+                               base_url=instance.base_url, model="gemma",
+                               options=RememberOptions(smooth_hops=1))
         assert written == 3, "the two who wrote, and the one they reach"
         with GraphStore(path, read_only=True) as reader:
             assert set(reader.embeddings(model="gemma")) == {

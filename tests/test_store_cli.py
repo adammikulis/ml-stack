@@ -32,7 +32,7 @@ def a_store(tmp_path, docs):
 def test_a_consistent_store_checks_clean_and_exits_0(tmp_path, capsys):
     path = a_store(tmp_path, {"stats": {"nodes": 2, "edges": 1}})
     assert main(["check", str(path)]) == 0
-    assert capsys.readouterr().out == f"{path}: clean\n"
+    assert capsys.readouterr().out == f"{path}: clean\nvectors: 0 of 2 node(s) (0%)\n"
 
 
 def test_docs_lists_every_document_with_its_size(tmp_path, capsys):
@@ -77,6 +77,7 @@ def test_a_document_a_scan_reads_empty_is_reported_then_fixed(tmp_path, capsys, 
     assert capsys.readouterr().out.splitlines() == [
         f"doc bench:tried: scan read 0 chars, key read {size} chars",
         f"{path}: 1 findings",
+        "vectors: 0 of 2 node(s) (0%)",
     ]
     assert main(["docs", str(path)]) == 0
     assert f"bench:tried\t{size} chars  (scan reads 0)" in capsys.readouterr().out.splitlines()
@@ -86,6 +87,7 @@ def test_a_document_a_scan_reads_empty_is_reported_then_fixed(tmp_path, capsys, 
         f"doc bench:tried: scan read 0 chars, key read {size} chars",
         f"rewrote doc bench:tried ({size} chars)",
         f"{path}: rewrote 1, clean",
+        "vectors: 0 of 2 node(s) (0%)",
     ]
     assert main(["check", str(path)]) == 0
     with GraphStore(path, read_only=True) as reader:
@@ -99,7 +101,44 @@ def test_a_document_emptied_on_disk_cannot_be_fixed_and_the_command_says_so(tmp_
     line = "doc bench:tried: empty by key and by scan; nothing left to restore it from"
     assert main(["check", str(path), "--fix"]) == 1
     assert capsys.readouterr().out.splitlines() == [
-        line, f"still: {line}", f"{path}: rewrote 0, 1 findings remain"]
+        line, f"still: {line}", f"{path}: rewrote 0, 1 findings remain",
+        "vectors: 0 of 2 node(s) (0%)"]
+
+
+def test_check_reports_full_vector_coverage(tmp_path, capsys):
+    path = a_store(tmp_path, {"stats": {"nodes": 2, "edges": 1}})
+    with GraphStore(path) as store:
+        for node in store.nodes():
+            store.set_embedding(node["id"], [1.0, 0.0], model="gemma")
+
+    assert main(["check", str(path)]) == 0
+    out, err = capsys.readouterr()
+    assert "vectors: 2 of 2 node(s) (100%)" in out
+    assert err == ""
+
+
+def test_check_warns_and_names_the_finishing_command_when_coverage_is_partial(tmp_path, capsys):
+    path = a_store(tmp_path, {"stats": {"nodes": 2, "edges": 1}})
+    with GraphStore(path) as store:
+        store.set_embedding("person:ada", [1.0, 0.0], model="gemma")
+
+    assert main(["check", str(path)]) == 0
+    out, err = capsys.readouterr()
+    assert "vectors: 1 of 2 node(s) (50%)" in out
+    assert "1 node(s) short of a vector" in err
+    assert "ml-stack-ingest embed --out" in err
+
+
+def test_check_over_nothing_worth_embedding_says_so_without_a_denominator(tmp_path, capsys):
+    path = tmp_path / "g"
+    with GraphStore(path) as store:
+        store.write({"nodes": [{"id": "n1", "kind": "topic", "label": "", "attrs": {}}],
+                    "edges": []})
+
+    assert main(["check", str(path)]) == 0
+    out, err = capsys.readouterr()
+    assert "nothing in the store has anything to embed" in out
+    assert err == ""
 
 
 def test_a_path_with_no_store_exits_2(tmp_path, capsys):

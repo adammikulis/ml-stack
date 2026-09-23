@@ -261,7 +261,7 @@ def cmd_prepare(args: Any) -> int:
     if counted["embedded"] is None:
         say("  no --embed-url, so no vectors: search will be words only")
         return 0
-    say(f"  {counted['embedded']} embedded")
+    say(f"  {counted['embedded'].written} of {counted['embedded'].total} embedded")
     return 0
 
 

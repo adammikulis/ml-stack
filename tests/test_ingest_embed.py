@@ -10,6 +10,7 @@ from conftest import json_reply
 
 pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
 
+from ml_stack.client.embed import BATCH
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.vectors import embedded
 from ml_stack.ingest.embed import embed_store, texts_for
@@ -60,7 +61,7 @@ def test_texts_for_respects_the_character_cap():
 
 def test_texts_for_skips_a_node_with_nothing_said():
     graph = {"nodes": [{"id": "n1", "label": "", "messages": []}], "messages": {}}
-    assert texts_for(graph) == {"n1": " — "}
+    assert texts_for(graph) == {"n1": ""}
 
 
 # -- embed_store --------------------------------------------------------------------------
@@ -72,8 +73,8 @@ def test_embed_store_opens_a_writable_handle_and_the_index_finds_the_vectors(ser
     with GraphStore(path) as store:
         store.write(GRAPH)
 
-    written = embed_store(str(path), base_url=instance.base_url, model="gemma")
-    assert written == 2
+    got = embed_store(str(path), base_url=instance.base_url, model="gemma")
+    assert (got.written, got.total) == (2, 2)
 
     # the shape retrieval uses: a fresh read-only handle over the same store
     with GraphStore(path, read_only=True) as reader:
@@ -105,13 +106,70 @@ def test_a_dimension_mismatch_is_refused_a_batch_at_a_time_not_corrupted(server,
         store.set_embedding("person:ada", [1.0, 0.0], model="gemma")
 
     lines: list[str] = []
-    written = embed_store(str(path), base_url=instance.base_url, model="gemma",
-                          log=lines.append)
-    assert written == 0
+    got = embed_store(str(path), base_url=instance.base_url, model="gemma",
+                      log=lines.append)
+    assert (got.written, got.total) == (0, 2)
     assert any("expected 2" in line for line in lines), lines
 
     with GraphStore(path, read_only=True) as reader:
         assert embedded(reader, model="gemma") == 1, "the seeded vector is untouched"
+
+
+def _dies_after_first_batch():
+    """A server that embeds the first batch it sees, then answers dead for every batch after."""
+    done = {"once": False}
+
+    def handle(method, path, body):
+        asked = list(json.loads(body or b"{}").get("input") or [])
+        if done["once"]:
+            return json_reply({"error": "gone"}, 500)
+        done["once"] = True
+        return json_reply({"data": [{"embedding": [1.0, 0.0]} for _ in asked]})
+
+    return handle
+
+
+def _many_nodes(n: int) -> dict:
+    """A graph of ``n`` nodes, each with its own sentence to embed."""
+    nodes = [{"id": f"n{i}", "kind": "topic", "label": f"topic {i}", "mentions": 1,
+             "attrs": {}, "messages": [f"m{i}"]} for i in range(n)]
+    messages = {f"m{i}": {"text": f"a distinct sentence about topic {i}"} for i in range(n)}
+    return {"nodes": nodes, "edges": [], "messages": messages}
+
+
+def test_a_server_dying_partway_leaves_a_written_count_short_of_the_total(server, tmp_path):
+    n = BATCH + 8
+    instance = server(_dies_after_first_batch())
+    path = tmp_path / "g.ladybug"
+    with GraphStore(path) as store:
+        store.write(_many_nodes(n))
+
+    got = embed_store(str(path), base_url=instance.base_url, model="gemma")
+    assert got.total == n
+    assert got.written == BATCH, "the first batch got through before the server died"
+
+    with GraphStore(path, read_only=True) as reader:
+        assert embedded(reader, model="gemma") == BATCH
+
+
+def test_the_read_run_prints_the_denominator_and_warns_short(server, tmp_path, capsys):
+    import argparse
+
+    from ml_stack.ingest import run
+
+    n = BATCH + 8
+    instance = server(_dies_after_first_batch())
+    path = tmp_path / "g.ladybug"
+    with GraphStore(path) as store:
+        store.write(_many_nodes(n))
+
+    args = argparse.Namespace(out=str(path), embed=True, embed_url=instance.base_url,
+                              embed_model="gemma", smooth=0)
+    run._embedded(args)
+    out, err = capsys.readouterr()
+    assert f"embedded {BATCH} of {n} node(s)" in out
+    assert f"{n - BATCH} node(s) short of a vector" in err
+    assert "ml-stack-ingest embed --out" in err
 
 
 def test_embed_raises_on_a_dimension_mismatch(server):
@@ -134,19 +192,21 @@ class TestAReadRunEmbedsWhatItRead:
                 "smooth": 0, **over}
         return argparse.Namespace(**said)
 
-    def test_it_embeds_when_the_read_finishes(self, tmp_path, monkeypatch):
+    def test_it_embeds_when_the_read_finishes(self, tmp_path, monkeypatch, capsys):
         from ml_stack.ingest import run
+        from ml_stack.ingest.embed import Embedded
 
         asked = {}
 
         def note(out, *, base_url, model, smooth_hops, log):
             asked.update(out=str(out), base_url=base_url, model=model)
-            return 7
+            return Embedded(written=7, total=7)
 
         monkeypatch.setattr("ml_stack.ingest.run.embed_store", note)
         run._embedded(self.args(tmp_path / "s.ladybug"))
         assert asked["base_url"] == run.EMBED_URL
         assert asked["model"] == "embed"
+        assert "embedded 7 of 7 node(s)" in capsys.readouterr().out
 
     def test_no_embed_leaves_it_to_the_embed_command(self, tmp_path, monkeypatch):
         from ml_stack.ingest import run
@@ -172,14 +232,31 @@ class TestAReadRunEmbedsWhatItRead:
 
     def test_the_url_and_the_model_asked_for_win(self, tmp_path, monkeypatch):
         from ml_stack.ingest import run
+        from ml_stack.ingest.embed import Embedded
 
         asked = {}
         monkeypatch.setattr("ml_stack.ingest.run.embed_store",
-                            lambda out, **kw: asked.update(kw) or 1)
+                            lambda out, **kw: asked.update(kw) or Embedded(written=1, total=1))
         run._embedded(self.args(tmp_path / "s.ladybug", embed_url="http://127.0.0.1:9",
                                 embed_model="a-embedder"))
         assert asked["base_url"] == "http://127.0.0.1:9"
         assert asked["model"] == "a-embedder"
+
+    def test_a_partial_embed_warns_with_the_command_that_finishes_it(
+            self, tmp_path, monkeypatch, capsys):
+        from ml_stack.ingest import run
+        from ml_stack.ingest.embed import Embedded
+
+        monkeypatch.setattr("ml_stack.ingest.run.embed_store",
+                            lambda out, **kw: Embedded(written=3, total=5))
+        run._embedded(self.args(tmp_path / "s.ladybug", embed_url="http://127.0.0.1:9",
+                                embed_model="a-embedder"))
+        out, err = capsys.readouterr()
+        assert "embedded 3 of 5 node(s)" in out
+        assert "2 node(s) short of a vector" in err
+        assert ("ml-stack-ingest embed --out" in err
+               and "--embed-url http://127.0.0.1:9" in err
+               and "--embed-model a-embedder" in err)
 
 
 def test_embedding_is_on_unless_the_command_line_says_otherwise():

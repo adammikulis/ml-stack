@@ -26,6 +26,7 @@ from ml_stack.graph.hygiene import written_from
 from ml_stack.graph.judging import ModelJudge
 from ml_stack.graph.store import GraphStore, StoreMismatch, StoreNeedsUpgrade
 from ml_stack.graph.tidy import tidy
+from ml_stack.graph.vectors import coverage
 from ml_stack.log import say, warn
 
 
@@ -36,22 +37,37 @@ def _check(path: Path, fix: bool) -> int:
             for line in findings:
                 say(line)
             say(f"{path}: {'clean' if not findings else f'{len(findings)} findings'}")
-            return 1 if findings else 0
-        for line in findings:
-            say(line)
-        try:
-            rewrote = store.repair()
-        except StoreMismatch as why:
-            say(f"rewrite refused: {why}")
-            rewrote = []
-        for line in rewrote:
-            say(line)
-        left = store.check()
-        for line in left:
-            say(f"still: {line}")
-        say(f"{path}: rewrote {len(rewrote)}, "
-            f"{'clean' if not left else f'{len(left)} findings remain'}")
-        return 1 if left else 0
+            code = 1 if findings else 0
+        else:
+            for line in findings:
+                say(line)
+            try:
+                rewrote = store.repair()
+            except StoreMismatch as why:
+                say(f"rewrite refused: {why}")
+                rewrote = []
+            for line in rewrote:
+                say(line)
+            left = store.check()
+            for line in left:
+                say(f"still: {line}")
+            say(f"{path}: rewrote {len(rewrote)}, "
+                f"{'clean' if not left else f'{len(left)} findings remain'}")
+            code = 1 if left else 0
+        _say_coverage(path, store)
+    return code
+
+
+def _say_coverage(path: Path, store: GraphStore) -> None:
+    """Print how much of the store an embedding reaches, and warn when it falls short."""
+    have, should = coverage(store)
+    if not should:
+        say("vectors: nothing in the store has anything to embed")
+        return
+    say(f"vectors: {have} of {should} node(s) ({have / should:.0%})")
+    if have < should:
+        warn(f"  {should - have} node(s) short of a vector; finish with: "
+             f"ml-stack-ingest embed --out {path} --embed-url URL --embed-model MODEL")
 
 
 def _docs(path: Path) -> int:

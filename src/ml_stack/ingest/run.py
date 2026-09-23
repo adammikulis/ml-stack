@@ -372,15 +372,17 @@ def _embedded(args: Any) -> None:
         return
     base = str(getattr(args, "embed_url", "") or EMBED_URL)
     model = str(getattr(args, "embed_model", "") or "embed")
+    finish = f"ml-stack-ingest embed --out {args.out} --embed-url {base} --embed-model {model}"
     try:
-        written = embed_store(args.out, base_url=base, model=model,
-                              smooth_hops=int(getattr(args, "smooth", 0) or 0), log=None)
+        got = embed_store(args.out, base_url=base, model=model,
+                          smooth_hops=int(getattr(args, "smooth", 0) or 0), log=say)
     except (OSError, ValueError, RuntimeError) as why:
         warn(f"read, not embedded: {type(why).__name__}: {why}")
-        warn(f"  the store answers by words alone until: ml-stack-ingest embed --out "
-             f"{args.out} --embed-url {base} --embed-model {model}")
+        warn(f"  the store answers by words alone until: {finish}")
         return
-    say(f"  embedded {written} node(s) through {base}")
+    say(f"  embedded {got.written} of {got.total} node(s) through {base}")
+    if got.written < got.total:
+        warn(f"  {got.total - got.written} node(s) short of a vector; finish with: {finish}")
 
 
 @contextmanager
@@ -457,5 +459,5 @@ def _rows(wanted: Iterable[Any], reads_by_unit: Mapping[str, Any]) -> list[dict[
 def _call_of(record: Mapping[str, Any]) -> Any:
     from ml_stack.telemetry import Call
 
-    fields = {f for f in Call.__dataclass_fields__}
+    fields = set(Call.__dataclass_fields__)
     return Call(**{k: v for k, v in record.items() if k in fields})

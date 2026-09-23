@@ -67,12 +67,6 @@ capability; every line is something that already exists not being what it says.
   carries values afresh, and `access.read_lock` keeps a writer out while a read runs.
   `tests/test_graph_engine_contract.py` has one test for each that goes red when a ladybug
   release no longer needs it; drop the workaround in the same commit as that test.
-- [ ] **A store that is half embedded reports success with no denominator.**
-  `graph/vectors.py` logs `vectors: N of M` only when it is given a log, and
-  `ingest/run.py` passes none, then prints `embedded N node(s)`. An embedding server that
-  dies at node 3,000 of 9,700 prints `embedded 3000 node(s)` and every question over the
-  rest of the store is answered by words alone, silently. Pass the log through, and have
-  `ml-stack-store check` report vector coverage.
 
 ### Text it was never licensed to keep
 - [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,
