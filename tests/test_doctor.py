@@ -390,12 +390,28 @@ def test_named_builds_are_listed_beside_current(tmp_path):
 
 # -- the command ---------------------------------------------------------------------
 
-def test_repositories_are_those_given_or_the_known_ones_that_exist(tmp_path, monkeypatch):
+def test_repositories_are_those_given_or_the_known_ones_that_are_git_repositories(
+        tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(doctor, "CHECKOUT", tmp_path / "absent")
     monkeypatch.setenv("HOME", str(tmp_path))
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     assert repositories() == [tmp_path]
     assert repositories([str(tmp_path / "a"), str(tmp_path / "a")]) == [tmp_path / "a"]
+
+
+def test_a_directory_an_installer_ran_from_is_not_a_checkout(tmp_path, monkeypatch):
+    """`install.sh` runs `ml-stack-doctor` from wherever it was started, often no repository."""
+    (tmp_path / "home").mkdir()
+    (tmp_path / "downloads").mkdir()
+    monkeypatch.chdir(tmp_path / "downloads")
+    monkeypatch.setattr(doctor, "CHECKOUT", tmp_path / "absent")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    assert repositories() == []
+    found = doctor.look_checkouts(bench_home=tmp_path / "bench",
+                                  current=tmp_path / "current", named=tmp_path / "named")
+    assert not [f for f in found if "repository" in f.name]
 
 
 def test_a_relative_repository_is_named_by_its_directory(tmp_path, monkeypatch):

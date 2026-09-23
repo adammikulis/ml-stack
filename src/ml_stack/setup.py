@@ -510,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", action="append", metavar="PATH",
                     help="a checkout to look at with --checkouts; may repeat. Default: "
                          "the current directory, ~/ai_ceo and the ml-stack checkout, "
-                         "those that exist")
+                         "those that are git repositories")
     ap.add_argument("--bench-home", metavar="PATH",
                     help="the bench's home to check with --checkouts (default: where "
                          "ml-stack-bench keeps its store)")

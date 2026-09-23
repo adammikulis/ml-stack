@@ -51,13 +51,15 @@ def _git(repo: Path, *args: str, strip: bool = True) -> str:
 
 
 def repositories(given: list[str] | None = None) -> list[Path]:
-    """The checkouts to look at: those named, or the current directory and the two that
-    are always here when they exist. Each once, whatever path it was reached by."""
+    """The checkouts to look at: those named, or those of the current directory and the
+    two known ones that are git repositories. Each once, whatever path it was reached by."""
     wanted = [Path(p).expanduser().absolute() for p in given] if given else [
         Path.cwd(), Path("~/ai_ceo").expanduser(), CHECKOUT]
     out: list[Path] = []
     for one in wanted:
-        if (given or one.is_dir()) and one.resolve() not in [p.resolve() for p in out]:
+        if not given and not (one.is_dir() and _git(one, "rev-parse", "--show-toplevel")):
+            continue
+        if one.resolve() not in [p.resolve() for p in out]:
             out.append(one)
     return out
 
@@ -392,7 +394,8 @@ def main(argv: list[str] | None = None) -> int:
                     "llama.cpp. Offers a fix for what has one; never pushes.")
     ap.add_argument("--repo", action="append", metavar="PATH",
                     help="a checkout to look at; may repeat. Default: the current directory, "
-                         "~/ai_ceo and the ml-stack checkout, those that exist")
+                         "~/ai_ceo and the ml-stack checkout, those that are git "
+                         "repositories")
     ap.add_argument("--bench-home", metavar="PATH",
                     help="the bench's home (default: where ml-stack-bench keeps its store)")
     ap.add_argument("--yes", action="store_true",
