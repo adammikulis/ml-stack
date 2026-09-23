@@ -232,7 +232,7 @@ class TestEmittedFlags:
                      "--pooling", "--kv-unified", "--no-kv-unified", "--cache-ram",
                      "--cache-idle-slots", "--no-cache-idle-slots",
                      "--slot-prompt-similarity", "--slot-save-path", "--cache-type-k",
-                     "--cache-type-v", "--no-mmap", "--mlock", "--reasoning-budget",
+                     "--cache-type-v", "--load-mode", "--reasoning-budget",
                      "--rope-scaling", "--rope-scale", "--yarn-orig-ctx",
                      "--yarn-ext-factor", "--yarn-attn-factor", "--yarn-beta-fast",
                      "--yarn-beta-slow"):
@@ -283,7 +283,7 @@ class TestMemoryFlags:
     def test_none_on_every_field_emits_nothing(self, tmp_path):
         argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf"))
-        for flag in ("--cache-type-k", "--cache-type-v", "--no-mmap", "--mlock"):
+        for flag in ("--cache-type-k", "--cache-type-v", "--load-mode"):
             assert flag not in argv, flag
 
     def test_cache_types_carry_their_values(self, tmp_path):
@@ -292,17 +292,18 @@ class TestMemoryFlags:
         assert argv[argv.index("--cache-type-k") + 1] == "q8_0"
         assert argv[argv.index("--cache-type-v") + 1] == "q4_0"
 
-    def test_mmap_false_emits_no_mmap_and_true_emits_nothing(self, tmp_path):
-        """mmap on is the server's own default and passes no flag either way."""
+    def test_mmap_and_mlock_are_one_load_mode(self, tmp_path):
+        """mmap on and no lock is the server's own default and passes no flag."""
         backend_ = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
-        assert "--no-mmap" in backend_.command(ServerSpec(model="m.gguf", mmap=False))
-        assert "--no-mmap" not in backend_.command(ServerSpec(model="m.gguf", mmap=True))
-        assert "--no-mmap" not in backend_.command(ServerSpec(model="m.gguf"))
 
-    def test_mlock_true_emits_mlock(self, tmp_path):
-        backend_ = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
-        assert "--mlock" in backend_.command(ServerSpec(model="m.gguf", mlock=True))
-        assert "--mlock" not in backend_.command(ServerSpec(model="m.gguf", mlock=False))
+        def mode(**over):
+            argv = backend_.command(ServerSpec(model="m.gguf", **over))
+            return argv[argv.index("--load-mode") + 1] if "--load-mode" in argv else ""
+
+        assert mode() == mode(mmap=True) == mode(mlock=False) == ""
+        assert mode(mmap=False) == "none"
+        assert mode(mlock=True) == mode(mmap=True, mlock=True) == "mmap+mlock"
+        assert mode(mmap=False, mlock=True) == "mlock"
 
 
 class TestReasoningBudget:

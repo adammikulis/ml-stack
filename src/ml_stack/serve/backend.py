@@ -138,6 +138,14 @@ def unknown_flags(argv: list[str], known: frozenset[str] | set[str]) -> list[tup
     return lacking
 
 
+def _load_mode(spec: ServerSpec) -> str:
+    """``--load-mode``'s value for ``spec.mmap`` and ``spec.mlock``; "" for the server's own."""
+    no_mmap = spec.mmap is not None and not spec.mmap
+    if spec.mlock:
+        return "mlock" if no_mmap else "mmap+mlock"
+    return "none" if no_mmap else ""
+
+
 def emitted_flags(backend: LlamaServerBackend) -> list[str]:
     """Every flag ``backend.command`` can emit, from specs with every field set.
 
@@ -648,10 +656,9 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--cache-type-k", str(spec.cache_type_k)]
         if spec.cache_type_v:
             argv += ["--cache-type-v", str(spec.cache_type_v)]
-        if spec.mmap is not None and not spec.mmap:
-            argv += ["--no-mmap"]
-        if spec.mlock:
-            argv += ["--mlock"]
+        load_mode = _load_mode(spec)
+        if load_mode:
+            argv += ["--load-mode", load_mode]
         if spec.reasoning_budget is not None:
             argv += ["--reasoning-budget", str(spec.reasoning_budget)]
         return argv

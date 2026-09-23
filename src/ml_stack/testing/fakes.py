@@ -438,8 +438,8 @@ class FakeConverse:
 LLAMA_SERVER_FLAGS = (
     "-m, --model FNAME", "-c, --ctx-size N", "-ngl, --gpu-layers, --n-gpu-layers N",
     "-fa, --flash-attn [on|off|auto]", "-np, --parallel N", "--host HOST", "--port PORT",
-    "--alias NAME", "--jinja", "--metrics", "--embeddings", "--pooling TYPE", "--mlock",
-    "--no-mmap", "--no-warmup", "--chat-template-file FNAME", "--cache-reuse N",
+    "--alias NAME", "--jinja", "--metrics", "--embeddings", "--pooling TYPE",
+    "-lm, --load-mode MODE", "--no-warmup", "--chat-template-file FNAME", "--cache-reuse N",
     "--cache-ram N", "--cache-idle-slots, --no-cache-idle-slots", "-ctk, --cache-type-k TYPE",
     "-ctv, --cache-type-v TYPE", "-kvu, --kv-unified, --no-kv-unified",
     "--kv-unified-per-slot N", "-sps, --slot-prompt-similarity SIMILARITY",
