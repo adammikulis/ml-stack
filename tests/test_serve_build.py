@@ -773,9 +773,9 @@ def _current_build(tag: str, arches: set[str], defined: set[str]) -> Path:
 def test_the_names_llama_cpp_defines_are_read_whatever_family_they_belong_to(tmp_path):
     import ml_stack.setup as setup_module
 
-    _fake_libllama(tmp_path / "libllama.dylib", {"bert", "t5encoder", "gemma4", "phi4", "chatml"})
-    assert setup_module._arches(tmp_path, known={"bert", "t5encoder", "gemma4", "mamba"}) == {
-        "bert", "t5encoder", "gemma4"}
+    _fake_libllama(tmp_path / "libllama.dylib", {"t5", "bert", "gemma3n_e", "gemma4", "phi4", "chatml"})
+    assert setup_module._arches(tmp_path, known={"t5", "bert", "gemma3n_e", "gemma4", "mamba"}) == {
+        "t5", "bert", "gemma3n_e", "gemma4"}
     assert setup_module._arches(tmp_path) == {"gemma4", "phi4"}
 
 

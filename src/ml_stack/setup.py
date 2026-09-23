@@ -464,20 +464,15 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
     for where in dirs:
         for name in sorted(where.glob("libllama*.dylib")) + sorted(where.glob("libllama*.so")):
             try:
-                got = subprocess.run(["strings", str(name)], capture_output=True, text=True,
+                got = subprocess.run(["strings", "-n", "2", str(name)], capture_output=True, text=True,
                                      timeout=30)
             except Exception:  # noqa: BLE001
                 continue
-            for line in got.stdout.splitlines():
-                word = line.strip()
-                if word and word.islower() and 4 <= len(word) <= 20 and word.replace("-", "").isalnum():
-                    found.add(word)
-            # Keep looking until an *architecture* turns up, not merely until some word
-            # does: the first library in the directory is full of ordinary strings and
-            # none of the names, and stopping there reported "supports nothing".
+            found.update(line.strip() for line in got.stdout.splitlines())
     if known is not None:
         return found & known
-    return {w for w in found if any(
+    return {w for w in found if w.islower() and 4 <= len(w) <= 20
+            and w.replace("-", "").isalnum() and any(
         w.startswith(f) for f in ("qwen", "gemma", "llama", "phi", "mistral",
                                   "deepseek", "granite", "olmo", "cohere", "gpt", "glm",
                                   "nemotron", "falcon", "mamba", "rwkv", "exaone"))}
