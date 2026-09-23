@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from ml_stack.log import say, warn
+from ml_stack.serve.process import pid_exists
 
 STAMP = "%Y%m%dT%H%M%S"                    # the log's filename
 ISO = "%Y-%m-%dT%H:%M:%S"                  # `measuring.json`, the header, a run's `at`;
@@ -202,7 +203,6 @@ def history(home: str | Path, kept: str | Path | None = None, *,
     if not logs.is_dir():
         return []
     if alive is None:
-        from ml_stack.serve.process import pid_exists
         alive = pid_exists
     at = _now() if now is None else now
     held = _measuring(home)

@@ -7,7 +7,16 @@ guess, because a wrong "supported" is worse than no answer.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
 
 from ml_stack.checks import Finding, ask
 from ml_stack.setup import BEHAVIOURS, explain, look, main
@@ -405,3 +414,188 @@ def test_a_rule_netsh_cannot_confirm_reads_as_absent():
     from ml_stack.setup import _firewall_rule_present
 
     assert _firewall_rule_present("ml-stack: a rule no machine has") is False
+
+
+def test_the_gguf_finding_only_counts_gguf_files(monkeypatch, tmp_path):
+    """A safetensors checkpoint on disk does not mean llama-server has anything to load."""
+    import ml_stack.setup as setup
+
+    mine = tmp_path / "models"
+    mine.mkdir()
+    (mine / "small.safetensors").write_bytes(b"x")
+    monkeypatch.setattr("ml_stack.hub.default_roots", lambda root: [mine, tmp_path / "absent"])
+    found = {f.name: f for f in setup.look()}
+    assert not found["a GGUF on disk"].good
+    assert found["a GGUF on disk"].fix == "ml-stack-models fetch hf:owner/repo/file.gguf"
+
+    (mine / "small-Q4_K_M.gguf").write_bytes(b"y")
+    found = {f.name: f for f in setup.look()}
+    assert found["a GGUF on disk"].good
+    assert found["a GGUF on disk"].said == "1 file(s)"
+
+
+# -- the store ------------------------------------------------------------
+
+def test_store_finding_says_there_is_nothing_to_open_yet(tmp_path):
+    from ml_stack.setup import _store_finding
+
+    found = _store_finding(tmp_path / "runs.ladybug")
+    assert found.good
+    assert "no store yet" in found.said
+
+
+def test_store_finding_opens_a_real_store(tmp_path):
+    from ml_stack.graph.cypher import CypherStore
+    from ml_stack.setup import _store_finding
+
+    path = tmp_path / "runs.ladybug"
+    with CypherStore(path):
+        pass
+    found = _store_finding(path)
+    assert found.good
+    assert found.said == f"{path} opens"
+
+
+def test_store_finding_reports_a_store_that_will_not_open(tmp_path):
+    from ml_stack.setup import _store_finding
+
+    path = tmp_path / "runs.ladybug"
+    path.write_bytes(b"not a ladybug database")
+    found = _store_finding(path)
+    assert not found.good
+    assert found.fix == f"ml-stack-store check {path}"
+
+
+# -- the ports --------------------------------------------------------------
+
+def _free_tcp_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _free_udp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def test_ports_finding_says_free_when_nothing_listens():
+    from ml_stack.setup import _ports_finding
+
+    http_port, disco_port = _free_tcp_port(), _free_udp_port()
+    found = _ports_finding(http_port, disco_port, None)
+    assert found.good
+    assert found.said == "free"
+
+
+def test_ports_finding_says_what_holds_a_taken_port():
+    from ml_stack.setup import _ports_finding
+
+    http_port, disco_port = _free_tcp_port(), _free_udp_port()
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", http_port))
+    holder.listen(1)
+    try:
+        found = _ports_finding(http_port, disco_port, None)
+    finally:
+        holder.close()
+    assert not found.good
+    assert str(http_port) in found.said
+    assert f"lsof -nP -iTCP:{http_port} -iUDP:{disco_port}" == found.fix
+
+
+def test_ports_finding_says_held_by_the_given_daemon():
+    from ml_stack.setup import _ports_finding
+
+    found = _ports_finding(8770, 8771, {"name": "testbox", "ok": True})
+    assert found.good
+    assert "this machine's own daemon" in found.said
+
+
+# -- the fleet ----------------------------------------------------------------
+
+def test_fleet_finding_says_in_no_cluster_when_never_joined(tmp_path):
+    from ml_stack.setup import _fleet_findings
+
+    found = {f.name: f for f in
+             _fleet_findings(cluster_key_path=tmp_path / "cluster.key")}
+    assert found.keys() == {"fleet: joined", "ports"}
+    assert not found["fleet: joined"].good
+    assert found["fleet: joined"].said == "in no cluster"
+    assert "ml-stack-fleet join --passphrase" in found["fleet: joined"].fix
+
+
+def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
+    from ml_stack.fleet.discovery import create_cluster_key
+    from ml_stack.setup import _fleet_findings
+
+    keyfile = tmp_path / "cluster.key"
+    create_cluster_key(keyfile)
+    found = {f.name: f for f in
+             _fleet_findings(port=_free_tcp_port(), cluster_key_path=keyfile)}
+    assert found["fleet: joined"].good
+    assert not found["fleet: daemon"].good
+    assert found["fleet: daemon"].fix == "ml-stack-fleet join"
+    assert "fleet: seen" not in found
+    assert found["ports"].good
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+@contextlib.contextmanager
+def _booted_daemon(tmp_path):
+    """A real ``ml-stack-traind``, on its own cluster key and its own ports, for the
+    fleet findings to answer and be heard by."""
+    from ml_stack.fleet.discovery import create_cluster_key
+    from ml_stack.fleet.launch import already_running
+
+    keyfile = tmp_path / "cluster.key"
+    create_cluster_key(keyfile)
+    http_port, disco_port = _free_tcp_port(), _free_udp_port()
+    env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
+          "PYTHONPATH": str(REPO / "src"), "PYTHONUNBUFFERED": "1"}
+    log = tmp_path / "traind.out"
+    fh = log.open("wb")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "ml_stack.fleet.daemon",
+         "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
+         "--port", str(http_port), "--name", "setuptestbox",
+         "--cluster-key", str(keyfile), "--no-web"],
+        env=env, stdout=fh, stderr=subprocess.STDOUT)
+    deadline = time.time() + 20
+    try:
+        while time.time() < deadline:
+            if already_running(http_port) is not None:
+                break
+            if proc.poll() is not None:
+                pytest.fail(f"traind died:\n{log.read_text(errors='replace')}")
+            time.sleep(0.1)
+        else:
+            proc.kill()
+            pytest.fail(f"traind never answered /health:\n{log.read_text(errors='replace')}")
+        yield keyfile, http_port, disco_port
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        fh.close()
+
+
+@pytest.mark.slow
+def test_fleet_findings_see_a_real_booted_daemon(tmp_path):
+    from ml_stack.setup import _fleet_findings
+
+    with _booted_daemon(tmp_path) as (keyfile, http_port, disco_port):
+        found = {f.name: f for f in _fleet_findings(
+            port=http_port, discovery_port=disco_port, cluster_key_path=keyfile)}
+    assert found["fleet: joined"].good
+    assert found["fleet: daemon"].good
+    assert "setuptestbox" in found["fleet: daemon"].said
+    assert found["fleet: seen"].good, found["fleet: seen"].said
+    assert found["fleet: seen"].said == "sees itself among 1 peer(s)"
+    assert found["ports"].good
+    assert "this machine's own daemon" in found["ports"].said

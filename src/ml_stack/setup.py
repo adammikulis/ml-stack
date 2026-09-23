@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -163,6 +164,13 @@ def look() -> list[Finding]:
                            said=f"{len(mine)} file(s)" + (f": {where}" if where else ""),
                            note=(f"HF_HOME={hf_home} names the Hub cache" if hf_home else "")
                            if mine else "nothing found; ml-stack-models find <words>"))
+        gguf = [name for name in mine if name.lower().endswith(".gguf")]
+        out.append(Finding(
+            name="a GGUF on disk", good=bool(gguf),
+            said=f"{len(gguf)} file(s)" if gguf else "none",
+            fix="" if gguf else "ml-stack-models fetch hf:owner/repo/file.gguf",
+            note="" if gguf else "llama-server serves GGUF only; a safetensors checkpoint "
+                                 "on disk is not enough to load"))
     except Exception:  # noqa: BLE001
         pass
 
@@ -172,6 +180,8 @@ def look() -> list[Finding]:
                for one, here in standard())
     out.extend(_speech_findings())
     out.append(_commands_finding())
+    out.extend(_fleet_findings())
+    out.append(_store_finding())
 
     if is_windows():
         out.append(_firewall_finding())
@@ -209,6 +219,104 @@ def _speech_findings() -> list[Finding]:
                   if working
                   else "; ".join(f"{one['name']}: {one['detail']}" for one in missing))))
     return out
+
+
+def _fleet_findings(*, port: int | None = None, discovery_port: int | None = None,
+                    cluster_key_path: Path | str | None = None) -> list[Finding]:
+    """Whether this machine has joined a cluster, its daemon answers, discovery hears it
+    among the peers ``ml-stack-fleet status`` would list, and its two ports are free or
+    held by that same daemon.
+
+    Stops naming fleet findings at the first thing that is wrong: a daemon cannot answer
+    before a cluster is joined, and discovery cannot hear a daemon that is not running.
+    """
+    from ml_stack.fleet.discovery import DEFAULT_HTTP_PORT, default_port, memberships
+    from ml_stack.fleet.join import already_running, peers
+
+    port = DEFAULT_HTTP_PORT if port is None else port
+    discovery_port = default_port() if discovery_port is None else discovery_port
+    out: list[Finding] = []
+    mine = memberships(cluster_key_path)
+    me = already_running(port)
+    if not mine:
+        out.append(Finding(name="fleet: joined", good=False, said="in no cluster",
+                           fix="ml-stack-fleet join --passphrase WORDS"))
+    else:
+        out.append(Finding(name="fleet: joined", good=True, said=f"cluster '{mine[0].group}'"))
+        if me is None:
+            out.append(Finding(name="fleet: daemon", good=False,
+                               said=f"does not answer on {port}", fix="ml-stack-fleet join"))
+        else:
+            out.append(Finding(name="fleet: daemon", good=True,
+                               said=f"'{me.get('name', '?')}' answers on {port}"))
+            try:
+                rows = peers(cluster_key_path=cluster_key_path, port=discovery_port,
+                            self_name=str(me.get("name") or ""))
+            except OSError as exc:
+                out.append(Finding(name="fleet: seen", good=False,
+                                   said=f"discovery failed: {exc}", fix="ml-stack-peers ls"))
+            else:
+                seen = any(row.get("is_self") for row in rows)
+                out.append(Finding(
+                    name="fleet: seen", good=seen,
+                    said=(f"sees itself among {len(rows)} peer(s)" if seen else
+                          f"discovery hears {len(rows)} peer(s), none itself"),
+                    fix="" if seen else "ml-stack-peers ls",
+                    note="" if seen else
+                         "the beacon is unreachable even on loopback -- a firewall or a "
+                         "security tool dropping local multicast hides this machine from "
+                         "every peer"))
+    out.append(_ports_finding(port, discovery_port, me))
+    return out
+
+
+def _store_finding(path: Path | None = None) -> Finding:
+    """Whether the default store (bench's own runs.ladybug) opens read-only."""
+    from ml_stack.graph.cypher import CypherStore, GraphStoreUnavailable
+
+    path = (home.state("bench") / "runs.ladybug") if path is None else path
+    if not path.exists():
+        return Finding(name="store", good=True, said=f"no store yet at {tilde(path)}")
+    try:
+        with CypherStore(path, read_only=True):
+            pass
+    except GraphStoreUnavailable as exc:
+        return Finding(name="store", good=False, said=str(exc),
+                       fix="pip install 'ml-stack[store]'")
+    except (RuntimeError, OSError) as exc:
+        return Finding(name="store", good=False, said=f"{tilde(path)} did not open: {exc}",
+                       fix=f"ml-stack-store check {path}")
+    return Finding(name="store", good=True, said=f"{tilde(path)} opens")
+
+
+def _port_free(port: int, *, udp: bool = False) -> bool:
+    """Whether a bare bind to ``port`` succeeds on this machine -- false when something
+    else already holds it."""
+    kind = socket.SOCK_DGRAM if udp else socket.SOCK_STREAM
+    with socket.socket(socket.AF_INET, kind) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _ports_finding(http_port: int, discovery_port: int, daemon: dict[str, object] | None
+                   ) -> Finding:
+    """Whether ``http_port`` and ``discovery_port`` are free, or held by ``daemon`` --
+    this machine's own ``/health`` answer, or None when nothing there is ours."""
+    if daemon is not None:
+        return Finding(name="ports", good=True,
+                       said=f"{http_port} and {discovery_port} held by this machine's "
+                            "own daemon")
+    stuck = [p for p, udp in ((http_port, False), (discovery_port, True))
+             if not _port_free(p, udp=udp)]
+    return Finding(
+        name="ports", good=not stuck,
+        said="free" if not stuck else f"held by something else: {', '.join(map(str, stuck))}",
+        fix="" if not stuck else f"lsof -nP -iTCP:{http_port} -iUDP:{discovery_port}",
+        note="" if not stuck else
+             "ml-stack-fleet join needs both free to start the daemon and hear the LAN")
 
 
 def _scripts() -> list[str]:

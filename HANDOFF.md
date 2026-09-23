@@ -54,15 +54,6 @@ capability; every line is something that already exists not being what it says.
   add the pending publisher -- owner `adammikulis`, repository `ml-stack`, workflow
   `release.yml`, no environment -- and the `pypi` job in `release.yml` uploads with no
   code change. Until then it uploads nothing and the docs install from git.
-- [ ] **Neither `ml-stack-setup` nor `ml-stack-doctor` checks the things that would say
-  whether an installed machine actually works.** `ml-stack-setup` (`look()` in `setup.py`)
-  is now the machine check -- memory, the llama-server binary, models on disk, speech
-  providers, commands -- and `ml-stack-doctor` (`look_checkouts()`) is now the
-  developer-checkout check on its own, run as the last screen both installers show; it no
-  longer reports a bad finding for `~/Documents/repos/ml-stack` or `~/ai_ceo` when they
-  do not exist (`repositories()` now only looks at directories that are actually there).
-  What neither command checks: that the daemon answers, that the machine joined the
-  fleet, that a GGUF is on disk, that a store opens, that 8770 and 8771 are free.
 - [ ] **The `windows` job in `ci.yml` has not run on GitHub yet.** It runs
   `install.ps1 -Headless` end to end against a scratch prefix and a wheel built in the same
   job, then `-Uninstall`, on `windows-latest` -- written and checked with `actionlint` and

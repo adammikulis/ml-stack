@@ -46,6 +46,7 @@ from typing import Any, Callable, Sequence
 
 from ml_stack import bench
 from ml_stack.log import say
+from ml_stack.serve.process import pid_exists
 
 #: what a summary line looks like, so the log can be read by eye and by `grep`
 SUMMARY = "=== {clock} step {n}/{total}: {words} -- {state} ({seconds:.0f}s)"
@@ -259,8 +260,6 @@ def queue_status() -> str:
 
     `status` calls this; nothing else here knows about `status`, so the two stay apart.
     """
-    from ml_stack.serve.process import pid_exists
-
     held = _state()
     if not held:
         return ""
