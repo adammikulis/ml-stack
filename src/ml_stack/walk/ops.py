@@ -56,6 +56,13 @@ BEAT_MS = 300
 SETTLE_MS = 8000
 """How long a screen is given to stop fetching before it is read."""
 
+ANSWERED = """([list, turn, before]) => {
+  const box = document.querySelector(list);
+  return !!box && box.getAttribute('aria-busy') !== 'true'
+    && box.querySelectorAll(turn).length > before;
+}"""
+"""True once a streamed answer has landed: the list holds a new turn and is no longer busy."""
+
 
 @dataclass(frozen=True, slots=True)
 class Walk:
@@ -69,10 +76,12 @@ class Walk:
     passphrase: str = ""
     setup: bool = False
     ask: str = ""
+    say: str = ""
     find: str = ""
     width: int = 1400
     height: int = 950
     timeout_s: float = 20.0
+    answer_s: float = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,6 +308,38 @@ def _tab(page: Any, view: str) -> None:
     page.wait_for_selector(f"#{view}:not([hidden])")
 
 
+def _sent(page: Any, press: Callable[[], Any], list_: str, turn: str,
+          answer_s: float) -> None:
+    """Press send, then wait until the answer it started has finished streaming."""
+    before = page.locator(f"{list_} {turn}").count()
+    press()
+    page.wait_for_function(ANSWERED, arg=[list_, turn, before], timeout=answer_s * 1000)
+
+
+def _said(page: Any, text: str, answer_s: float) -> None:
+    """Type ``text`` into the chat, send it, and wait for the whole reply."""
+    page.wait_for_selector("#chat-askrow:not([hidden])")
+    page.fill("#ask", text)
+    _sent(page, partial(page.click, "#chat-send"), "#chat-messages", ".msg", answer_s)
+
+
+def _chat(walker: Walker) -> None:
+    """The chat screen; with `Walk.say` set, a message is sent and the reply read."""
+    page, what = walker.page, walker.what
+    if not what.say:
+        walker.reached("chat", partial(_tab, page, "chat"), "#chat")
+        return
+    if not walker.through("chat", partial(_tab, page, "chat")):
+        return
+    walker.settle()
+    if page.locator("#chat-askrow").is_hidden():
+        walker.failed("chat", "no model is being served, so there is nothing to say "
+                              "anything to")
+        return
+    walker.reached("chat", partial(_said, page, what.say, what.answer_s),
+                   "#chat-messages", "#chat-note")
+
+
 def _views(walker: Walker, shut: str) -> None:
     """The screens behind the nav bar, one tab click each."""
     for view in FLEET_VIEWS:
@@ -306,6 +347,8 @@ def _views(walker: Walker, shut: str) -> None:
             continue
         if shut:
             walker.skip(view, shut)
+        elif view == "chat":
+            _chat(walker)
         else:
             walker.reached(view, partial(_tab, walker.page, view), f"#{view}")
 
@@ -361,10 +404,10 @@ def _play(page: Any) -> None:
     page.click("#history")
 
 
-def _question(page: Any, question: str) -> None:
+def _question(page: Any, question: str, answer_s: float) -> None:
+    """Ask ``question`` and wait for the whole streamed answer."""
     page.fill("#q", question)
-    page.click("#qform button[type=submit]")
-    page.wait_for_selector("#qturns .turn, #qnote:not(:empty)")
+    _sent(page, partial(page.click, "#qform button[type=submit]"), "#qturns", ".t", answer_s)
 
 
 def _ask_pane(walker: Walker) -> None:
@@ -372,8 +415,9 @@ def _ask_pane(walker: Walker) -> None:
     if not walker.what.ask:
         walker.stop("ask", "#askpane-title", "#qnote")
         return
-    walker.reached("ask", partial(_question, walker.page, walker.what.ask), "#qturns",
-                   "#qnote")
+    walker.reached("ask", partial(_question, walker.page, walker.what.ask,
+                                  walker.what.answer_s),
+                   "#qturns .t:last-child", "#qnote")
 
 
 def _history_pane(walker: Walker) -> None:

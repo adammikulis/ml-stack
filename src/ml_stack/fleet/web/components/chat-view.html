@@ -104,17 +104,18 @@
     async ask() {
       const text = this.input.value.trim();
       if (!text) return;
+      this.list.setAttribute("aria-busy", "true");
       this.input.value = "";
       this.note.replaceChildren();
-      if (!this.open) {
-        const made = await api("/ui/conversations", { method: "POST",
-          body: JSON.stringify({ model: this.picker.value }) });
-        this.open = made.id;
-      }
-      this.say("user", text);
-      const reply = this.say("assistant", "");
       this.send.disabled = true;
       try {
+        if (!this.open) {
+          const made = await api("/ui/conversations", { method: "POST",
+            body: JSON.stringify({ model: this.picker.value }) });
+          this.open = made.id;
+        }
+        this.say("user", text);
+        const reply = this.say("assistant", "");
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers,
           body: JSON.stringify({ conversation: this.open, model: this.picker.value,
             messages: [{ role: "user", content: text }] }) });
@@ -127,6 +128,7 @@
         }
         await this.stream(r, reply);
       } finally {
+        this.list.removeAttribute("aria-busy");
         this.send.disabled = false;
         this.paintList();
       }

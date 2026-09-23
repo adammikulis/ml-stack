@@ -211,6 +211,7 @@
         return;
       }
       asking = true;
+      qTurns.setAttribute('aria-busy', 'true');
       openAnswers('thinking…');
       say('user', question);
       qBox.value = '';
@@ -301,7 +302,7 @@
       } catch (err) {
         sayInto(pending, 'no answer from the server');
         qNote.textContent = ''; turns.pop();
-      } finally { asking = false; }
+      } finally { asking = false; qTurns.removeAttribute('aria-busy'); }
     }
     qBox.addEventListener('keydown', ask);
 

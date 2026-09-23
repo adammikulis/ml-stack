@@ -49,6 +49,8 @@ def _shared(base: str) -> list[Option]:
              help="drive an invisible browser (default); --no-headless opens a window "
                   "where ML_STACK_WINDOW_POSITION says and gives the screen back"),
         option("timeout", default=20.0, help="seconds to wait for a screen (default: 20)"),
+        flag("--wait", type=float, default=300.0,
+             help="seconds to wait for a model's whole answer (default: 300)"),
         flag("--chars", type=int, default=900,
              help="how much of each screen to print (default: 900)"),
     ]
@@ -80,7 +82,7 @@ def _walked(args: argparse.Namespace, page: str, **extra: object) -> int:
         screens = ops.screens_of(page, args.screens)
         stops = ops.walk(Walk(page=page, base=args.base, out=out, screens=screens,
                               headless=args.headless, timeout_s=float(args.timeout),
-                              **extra))  # type: ignore[arg-type]
+                              answer_s=float(args.wait), **extra))  # type: ignore[arg-type]
     except (ValueError, WalkFailed) as exc:
         warn(f"ml-stack-walk: {exc}")
         return 2
@@ -97,9 +99,13 @@ def _walked(args: argparse.Namespace, page: str, **extra: object) -> int:
              flag("--setup", action="store_true",
                   help="press the first-run buttons that save this machine's "
                        "preferences; without it the wizard is walked only as far as it "
-                       "goes without changing anything")])
+                       "goes without changing anything"),
+             flag("--say", default="",
+                  help="a message to send on the chat screen; the walk waits for the "
+                       "whole reply and prints it")])
 def cmd_fleet(args: argparse.Namespace) -> int:
-    return _walked(args, "fleet", passphrase=args.passphrase, setup=bool(args.setup))
+    return _walked(args, "fleet", passphrase=args.passphrase, setup=bool(args.setup),
+                   say=args.say)
 
 
 @COMMANDS.command(
@@ -109,8 +115,9 @@ def cmd_fleet(args: argparse.Namespace) -> int:
     options=[*_shared(GRAPH_BASE),
              flag("--find", default="", help="what to type into the filter box"),
              flag("--ask", default="",
-                  help="a question to send to the model behind the page; without it the "
-                       "question box is only read")])
+                  help="a question to send to the model behind the page; the walk waits "
+                       "for the whole answer and prints it, and without one the question "
+                       "box is only read")])
 def cmd_graph(args: argparse.Namespace) -> int:
     return _walked(args, "graph", find=args.find, ask=args.ask)
 

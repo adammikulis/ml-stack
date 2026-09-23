@@ -139,3 +139,94 @@ class TestWalkingTheDaemon:
             ops.fleet(Walk(page="fleet", base=f"http://127.0.0.1:{dead}",
                            out=tmp_path / "shots", screens=FLEET, timeout_s=5.0),
                       playwright)
+
+
+# -- a model that streams slowly, behind a real page ----------------------------------------
+
+SLOW = ("Ada Lovelace ", "works ", "on ", "iron", ".")
+
+GRAPH_OF_TWO = {
+    "nodes": [{"id": "person:ada", "label": "Ada Lovelace", "kind": "person", "attrs": {},
+               "messages": []},
+              {"id": "topic:iron", "label": "iron", "kind": "topic", "attrs": {},
+               "messages": []}],
+    "edges": [{"source": "person:ada", "rel": "works_on", "target": "topic:iron"}],
+    "messages": {},
+}
+
+
+@pytest.fixture
+def slow_model(monkeypatch):
+    """A model streaming for longer than a screen is given to settle."""
+    from ml_stack.testing.fakes import FakeLlamaServer, Served
+
+    monkeypatch.setattr(ops, "SETTLE_MS", 300)
+    fake = FakeLlamaServer(Served(pieces=SLOW, gap=0.4))
+    try:
+        yield fake
+    finally:
+        fake.close()
+
+
+@pytest.mark.slow
+def test_asking_the_graph_page_waits_for_the_whole_streamed_answer(slow_model, tmp_path,
+                                                                    monkeypatch, playwright):
+    from conftest import threaded_server
+
+    from ml_stack.client import Client
+    from ml_stack.graph.page import render
+    from ml_stack.graph.serve import Handler
+
+    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    page = tmp_path / "page.html"
+    page.write_text(render(GRAPH_OF_TWO, title="Invented"), encoding="utf-8")
+
+    class Slow(Handler):
+        def client_on_slot(self, *, index=0, **over):
+            return Client(slow_model.base_url)
+
+        def log_message(self, *args):
+            pass
+
+    with threaded_server(Slow.configured(name="Slow", site=page, graph=GRAPH_OF_TWO)) as url:
+        what = Walk(page="graph", base=url, out=tmp_path / "shots", screens=("ask",),
+                    ask="who works on iron?", answer_s=60.0)
+        try:
+            stops = ops.graph(what, playwright)
+        except pw.Error as exc:                        # pragma: no cover - depends on setup
+            pytest.skip(f"chromium did not launch: {exc}")
+    assert [s.screen for s in stops] == ["ask"] and stops[0].ok, stops
+    assert "Ada Lovelace works on iron." in stops[0].text.splitlines(), stops[0].text
+
+
+@pytest.mark.slow
+def test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply(slow_model, tmp_path,
+                                                                      monkeypatch,
+                                                                      playwright):
+    import time
+
+    from test_fleet_ui import WORDS, Serving
+
+    from ml_stack.fleet.conversations import Conversations
+    from ml_stack.fleet.discovery import join_cluster
+    from ml_stack.fleet.serving import Serving as Models
+
+    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+    served = Serving(tmp_path, name="laptop")
+    try:
+        join_cluster(WORDS, group="home", path=served.keyfile)
+        served.call("/ui/setup/join", method="POST",
+                    body={"passphrase": WORDS, "group": "home"})
+        served.call("/ui/setup/done", method="POST")
+        served.ui.conversations = Conversations(tmp_path / "chats")
+        models = Models(tmp_path / "serving.json")
+        models.register(slow_model.port, ["quince-2b.gguf"])
+        served.ui.serving = models
+        served.ui._peers = (time.time(), [])
+        stops = walked(served, tmp_path, playwright, screens=("chat",), passphrase=WORDS,
+                       say="hello", answer_s=60.0)
+    finally:
+        served.httpd.shutdown()
+        served.httpd.server_close()
+    assert [s.screen for s in stops] == ["chat"] and stops[0].ok, stops
+    assert "hello" in stops[0].text and "".join(SLOW) in stops[0].text, stops[0].text
