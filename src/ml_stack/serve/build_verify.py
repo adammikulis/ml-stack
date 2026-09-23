@@ -13,7 +13,7 @@ from pathlib import Path
 import ml_stack.setup as setup_module
 from ml_stack.log import say, warn
 from ml_stack.serve.backend import flags_of
-from ml_stack.serve.binary import find_binary, is_windows
+from ml_stack.serve.binary import is_windows
 from ml_stack.serve.build_paths import (
     BuildFailed,
     builds_dir,
@@ -115,6 +115,33 @@ def point_current(dest: Path) -> None:
     relink(current_link(), dest)
 
 
+def _current_server() -> Path | None:
+    """The server binary ``current`` points at, or None before the first build."""
+    binary = current_link() / server_name()
+    return binary if binary.is_file() else None
+
+
+def _recorded_arches(build: Path) -> set[str]:
+    try:
+        info = json.loads((build / "BUILD.json").read_text())
+    except (OSError, ValueError):
+        return set()
+    return set(info.get("arches") or []) if isinstance(info, dict) else set()
+
+
+def _known_arches(dest: Path, current: Path | None) -> set[str] | None:
+    """The architecture names llama.cpp's source defines for either build; None when unread.
+
+    A libllama string sharing a family prefix (``phi4`` is a chat template) is not an
+    architecture, so the strings are read against these names when there are any.
+    """
+    names = arches_from_source(src_dir()) if src_dir().is_dir() else set()
+    names |= _recorded_arches(dest)
+    if current is not None:
+        names |= _recorded_arches(current.resolve().parent)
+    return names or None
+
+
 def verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> None:
     """Trust ``dest`` only once it answers ``--help``, then switch to it.
 
@@ -129,18 +156,10 @@ def verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> N
     if not help_flags:
         raise BuildFailed(f"{binary} did not answer --help; leaving current alone")
 
-    # Restricted to the real architecture names when a source checkout is around to read
-    # them from -- otherwise a dylib string that merely shares a family prefix with an
-    # architecture (a chat-template or vision-projector-type name: "phi4" names a chat
-    # template, not an LLM_ARCH_PHI4 that does not exist) reads as one being lost. Empty
-    # (a checkout with no readable llama-arch.cpp) is "could not read it", not "master has
-    # none" -- restricting to nothing would make every comparison vacuously pass, which is
-    # worse than the imprecise guess it would otherwise fall back to.
-    source = src_dir()
-    known = arches_from_source(source) or None if source.is_dir() else None
+    current = _current_server()
+    known = _known_arches(dest, current)
     new_arches = setup_module._arches(dest, known=known)
-    baseline = find_binary("llama-server")
-    old_arches = setup_module._arches(str(baseline), known=known) if baseline else set()
+    old_arches = setup_module._arches(str(current), known=known) if current else set()
     missing = old_arches - new_arches
 
     if named:

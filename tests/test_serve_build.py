@@ -14,6 +14,7 @@ anything or reaches the network.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -106,9 +107,8 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
     monkeypatch.setattr(build_persist, "PERSIST_PLIST",
                         tmp_path / "Library" / "LaunchAgents" / f"{build_persist.PERSIST_LABEL}.plist")
-    # No earlier build to compare against, unless a test says otherwise.
-    monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
     monkeypatch.setattr(build_report, "find_binary", lambda *a, **k: None)
+    monkeypatch.setattr(build_release, "arches_at", lambda ref, **k: set())
     # No patches, unless a test points this at a directory holding some.
     monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(tmp_path / "no-patches"))
     yield
@@ -207,8 +207,7 @@ class TestVerificationGatesTheSwitch:
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp", "phi9"})
-        monkeypatch.setattr(build_verify, "find_binary",
-                            lambda *a, **k: baseline_dir / build_platform.server_name())
+        build_verify.relink(build.current_link(), baseline_dir)
 
         chain = FakeToolchain(arches={"gemma4", "qwen4exp"})   # missing phi9
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -217,7 +216,7 @@ class TestVerificationGatesTheSwitch:
         assert code == 2
         err = capsys.readouterr().err
         assert "phi9" in err
-        assert not build.current_link().exists() and not build.current_link().is_symlink(), \
+        assert build.current_link().resolve() == baseline_dir.resolve(), \
             "a build that lost an architecture must not become current"
 
     def test_a_build_that_answers_no_help_is_refused(self, monkeypatch, capsys):
@@ -246,8 +245,7 @@ class TestVerificationGatesTheSwitch:
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4"})
-        monkeypatch.setattr(build_verify, "find_binary",
-                            lambda *a, **k: baseline_dir / build_platform.server_name())
+        build_verify.relink(build.current_link(), baseline_dir)
 
         chain = FakeToolchain(arches={"gemma4", "qwen4exp"})
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -275,8 +273,7 @@ class TestVerificationGatesTheSwitch:
         _fake_server_script(baseline_dir / build_platform.server_name())
         # The baseline has the false-positive string too -- exactly the real machine.
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "phi4"})
-        monkeypatch.setattr(build_verify, "find_binary",
-                            lambda *a, **k: baseline_dir / build_platform.server_name())
+        build_verify.relink(build.current_link(), baseline_dir)
 
         chain = FakeToolchain(arches={"gemma4", "qwen4exp"})   # no "phi4" -- correctly so
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -432,8 +429,7 @@ class TestAdopt:
         baseline_dir.mkdir()
         _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4"})
-        monkeypatch.setattr(build_verify, "find_binary",
-                            lambda *a, **k: baseline_dir / build_platform.server_name())
+        build_verify.relink(build.current_link(), baseline_dir)
 
         source = self._existing_dir(tmp_path, arches={"gemma4", "qwen4exp"})
         code = build.cmd_build(_args(adopt=str(source)))
@@ -455,19 +451,17 @@ class TestAdopt:
         baseline_dir.mkdir()
         _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "phi4"})
-        monkeypatch.setattr(build_verify, "find_binary",
-                            lambda *a, **k: baseline_dir / build_platform.server_name())
+        build_verify.relink(build.current_link(), baseline_dir)
 
         source = self._existing_dir(tmp_path, arches={"gemma4", "qwen4exp"})   # no phi4
         code = build.cmd_build(_args(adopt=str(source)))
         assert code == 2
-        assert not build.current_link().exists() and not build.current_link().is_symlink()
+        assert build.current_link().resolve() == baseline_dir.resolve()
         # but it is still registered as a build, ready for --rollback-style bookkeeping
         # once verified -- adoption itself (copying it in) is not what was refused
         assert (build.builds_dir() / "62acc89" / "BUILD.json").is_file()
 
     def test_the_commit_is_read_from_version_when_it_names_one(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
         source = self._existing_dir(
             tmp_path, version="version: 0.3.0 (build 10621, commit c1d0e7a00)")
         assert build.cmd_build(_args(adopt=str(source))) == 0
@@ -475,7 +469,6 @@ class TestAdopt:
 
     def test_a_version_with_no_commit_falls_back_to_a_slug_rather_than_failing(
             self, tmp_path, monkeypatch):
-        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
         source = self._existing_dir(tmp_path, version="llama-server v9.9.9")
         assert build.cmd_build(_args(adopt=str(source))) == 0
         made = list(build.builds_dir().iterdir())
@@ -483,7 +476,6 @@ class TestAdopt:
 
     def test_a_directory_with_no_server_binary_fails_rather_than_adopting_nothing(
             self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
         empty = tmp_path / "empty"
         empty.mkdir()
         code = build.cmd_build(_args(adopt=str(empty)))
@@ -634,8 +626,7 @@ class TestNamedBuild:
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp"})
-        monkeypatch.setattr(build_verify, "find_binary",
-                            lambda *a, **k: baseline_dir / build_platform.server_name())
+        build_verify.relink(build.current_link(), baseline_dir)
 
         chain = FakeToolchain(arches={"gemma4"})   # missing qwen4exp -- fine for --name
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -645,7 +636,7 @@ class TestNamedBuild:
         out = capsys.readouterr().out
         assert "missing qwen4exp" in out
         assert (build.named_dir() / "unsloth").is_symlink()
-        assert not build.current_link().exists()
+        assert build.current_link().resolve() == baseline_dir.resolve()
 
     def test_name_without_repo_is_refused(self, capsys):
         code = build.cmd_build(_args(name="unsloth"))
@@ -681,7 +672,6 @@ class TestNamedBuild:
 
         import ml_stack.fleet.updates as gh_updates
         monkeypatch.setattr(gh_updates, "download", fake_download)
-        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
 
         code = build.cmd_build(_args(repo="unslothai/llama.cpp", name="unsloth",
                                      source_kind="release"))
@@ -734,38 +724,58 @@ class TestNamedReleaseAssetGlobs:
         assert build_release._release_asset_globs(fork=True) == ["app-*-windows-x64-cpu.zip"]
 
 
+def _serve_a_release(monkeypatch, tmp_path, tag: str, arches: set[str],
+                     defined: set[str] | None = None) -> list[str]:
+    """Fake GitHub releases holding one real macOS arm64 archive; returns the downloads made."""
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    name = f"llama-{tag}-bin-macos-arm64"
+    releases = [
+        {"tag_name": "b999999", "assets": [{"name": "llama-b999999-ui.tar.gz"}]},  # no match
+        {"tag_name": tag, "assets": [{"name": f"{name}.tar.gz", "size": 0}]},
+    ]
+    monkeypatch.setattr(build_release, "_llama_releases", lambda *a, **k: releases)
+    if defined is not None:
+        monkeypatch.setattr(build_release, "arches_at",
+                            lambda ref, **k: set(defined) if ref == tag else set())
+
+    archive_dir = tmp_path / "archive"
+    payload = archive_dir / name
+    payload.mkdir(parents=True)
+    _fake_server_script(payload / build_platform.server_name())
+    _fake_libllama(payload / "libllama.dylib", arches)
+    archive = archive_dir / f"{name}.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        tf.add(payload, arcname=payload.name)
+
+    downloaded: list[str] = []
+
+    def fake_download(asset, into, **kw):
+        downloaded.append(asset["name"])
+        return archive
+
+    import ml_stack.fleet.updates as gh_updates
+    monkeypatch.setattr(gh_updates, "download", fake_download)
+    return downloaded
+
+
+def _current_build(tag: str, arches: set[str], defined: set[str]) -> Path:
+    """A managed build ``current`` points at, recording the architectures its source defines."""
+    dest = build.builds_dir() / tag
+    dest.mkdir(parents=True)
+    _fake_server_script(dest / build_platform.server_name())
+    _fake_libllama(dest / "libllama.dylib", arches)
+    (dest / "BUILD.json").write_text(json.dumps(
+        {"commit": tag, "source": "release", "arches": sorted(defined)}))
+    build_verify.relink(build.current_link(), dest)
+    return dest
+
+
 class TestReleaseInstall:
     def test_the_newest_release_with_a_matching_asset_is_downloaded_and_installed(
             self, monkeypatch, tmp_path):
-        monkeypatch.setattr(platform, "system", lambda: "Darwin")
-        monkeypatch.setattr(platform, "machine", lambda: "arm64")
-
-        releases = [
-            {"tag_name": "b999", "assets": [{"name": "llama-b999-ui.tar.gz"}]},  # no match
-            {"tag_name": "b998", "assets": [
-                {"name": "llama-b998-bin-macos-arm64.tar.gz", "size": 0}]},
-        ]
-        monkeypatch.setattr(build_release, "_llama_releases", lambda *a, **k: releases)
-
-        archive_dir = tmp_path / "archive"
-        archive_dir.mkdir()
-        payload = archive_dir / "llama-b998-bin-macos-arm64"
-        payload.mkdir()
-        _fake_server_script(payload / build_platform.server_name())
-        _fake_libllama(payload / "libllama.dylib", {"gemma4"})
-        archive = archive_dir / "llama-b998-bin-macos-arm64.tar.gz"
-        with tarfile.open(archive, "w:gz") as tf:
-            tf.add(payload, arcname=payload.name)
-
-        downloaded = []
-
-        def fake_download(asset, into, **kw):
-            downloaded.append(asset["name"])
-            return archive
-
-        import ml_stack.fleet.updates as gh_updates
-        monkeypatch.setattr(gh_updates, "download", fake_download)
-        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
+        downloaded = _serve_a_release(monkeypatch, tmp_path, "b998", {"gemma4"},
+                                      defined={"gemma4", "qwen4exp"})
 
         code = build.cmd_build(_args(source_kind="release"))
         assert code == 0
@@ -775,6 +785,40 @@ class TestReleaseInstall:
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["commit"] == "b998"
         assert manifest["source"] == "release"
+        assert manifest["arches"] == ["gemma4", "qwen4exp"]
+
+    def test_a_first_build_becomes_current_whatever_llama_server_is_on_path(
+            self, monkeypatch, tmp_path):
+        on_path = tmp_path / "homebrew" / "bin"
+        on_path.mkdir(parents=True)
+        _fake_server_script(on_path / build_platform.server_name())
+        _fake_libllama(on_path / "libllama.dylib", {"gemma4", "phi4", "olmo9"})
+        for name in ("LLAMA_CPP_SERVER", "LLAMA_CPP_DIR", "MLSTACK_LLAMA_BUILD"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("PATH", f"{on_path}{os.pathsep}/usr/bin{os.pathsep}/bin")
+        _serve_a_release(monkeypatch, tmp_path, "b11147", {"gemma4", "qwen4exp"})
+
+        assert build.cmd_build(_args(source_kind="release")) == 0
+        assert build.current_link().resolve() == (build.builds_dir() / "b11147").resolve()
+
+    def test_a_chat_template_name_in_the_current_build_is_not_an_architecture_lost(
+            self, monkeypatch, tmp_path):
+        _current_build("b10621", {"gemma4", "phi4"}, defined={"gemma4"})
+        _serve_a_release(monkeypatch, tmp_path, "b11147", {"gemma4", "qwen4exp"},
+                         defined={"gemma4", "qwen4exp"})
+
+        assert build.cmd_build(_args(source_kind="release")) == 0
+        assert build.current_link().resolve() == (build.builds_dir() / "b11147").resolve()
+
+    def test_an_architecture_the_current_source_defines_and_the_new_build_lacks_is_refused(
+            self, monkeypatch, tmp_path, capsys):
+        old = _current_build("b10621", {"gemma4", "phi4", "olmo9"}, defined={"gemma4", "olmo9"})
+        _serve_a_release(monkeypatch, tmp_path, "b11147", {"gemma4"}, defined={"gemma4"})
+
+        assert build.cmd_build(_args(source_kind="release")) == 2
+        err = capsys.readouterr().err
+        assert "missing olmo9," in err and "phi4" not in err
+        assert build.current_link().resolve() == old.resolve()
 
     def test_no_matching_asset_in_recent_releases_fails_rather_than_silently_picking_one(
             self, monkeypatch):

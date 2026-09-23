@@ -18,6 +18,7 @@ from ml_stack.log import say
 from ml_stack.serve.binary import is_windows
 from ml_stack.serve.build_paths import BuildFailed, builds_dir, named_dest, slug
 from ml_stack.serve.build_platform import (
+    arches_at,
     now_iso,
     server_name,
     version_of,
@@ -167,7 +168,8 @@ def build_from_release(args) -> tuple[Path, str]:
             version = version_of(binary)
             (dest / "BUILD.json").write_text(json.dumps(
                 {"commit": tag, "built_at": now_iso(), "version": version,
-                 "source": "release", "asset": match, "patches": []}, indent=2))
+                 "source": "release", "asset": match, "patches": [],
+                 "arches": sorted(arches_at(tag))}, indent=2))
             return dest, tag
 
     raise BuildFailed(

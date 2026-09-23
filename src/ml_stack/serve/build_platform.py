@@ -12,9 +12,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ml_stack.http import ServerError, request_bytes
 from ml_stack.serve.binary import child_env, is_windows
 
-__all__ = ["arches_from_source", "can_build_from_source", "cmake_flags", "copy_flat",
+__all__ = ["arches_at", "arches_from_source", "can_build_from_source", "cmake_flags", "copy_flat",
            "now_iso", "server_name", "version_of", "vulkan_available"]
 
 # `LLM_ARCH_QWEN4EXP, "qwen4exp"` -- every architecture name llama.cpp's own source reads,
@@ -99,3 +100,13 @@ def arches_from_source(source: Path) -> set[str]:
         return set()
     text = arch_file.read_text(encoding="utf-8", errors="replace")
     return set(_ARCH_NAME.findall(text))
+
+
+def arches_at(ref: str, *, repo: str = "ggml-org/llama.cpp") -> set[str]:
+    """Every architecture name ``repo``'s source reads at ``ref``; empty when it cannot be read."""
+    url = f"https://raw.githubusercontent.com/{repo}/{ref}/src/llama-arch.cpp"
+    try:
+        reply = request_bytes(url, timeout=30.0)
+    except (ServerError, OSError, ValueError):
+        return set()
+    return set(_ARCH_NAME.findall(reply.body.decode("utf-8", errors="replace")))
