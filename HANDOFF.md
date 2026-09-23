@@ -21,6 +21,11 @@ ten questions, unconfirmed.
 Fixes first, then measurements that need the card, then what does not exist yet.
 Inside the fixes, most blocking first.
 
+0.2.0 is cut when these are gone (Adam, 2026-09-23): "Getting it onto a machine", "Not losing
+what it read" (the embedding denominator), the conversation store, `reads.json`, the name gate,
+"Numbers that are quoted", duplicate machine names, and the window's library tick, name test
+and numpy. Everything else here follows the cut.
+
 Nothing here is blocked by a kept measurement, a hash or a pin: `CLAUDE.md` says what that
 means and what it costs. An entry that reads "we cannot change that, it would invalidate
 the benchmarks" is an entry someone should rewrite as the change plus the re-measurement.
@@ -292,15 +297,13 @@ across `src/`.
   identically; `fleet/sweeps.py` stamps gathered runs with `_name_of(peer)`, so their
   measurements land in the store indistinguishable. Nothing checks for the collision at
   join. The default name is the hostname, and this machine already records `"host": "Mac"`.
-  Fixing it means a stable per-machine identity (the current token is per process, so a
-  restarted machine is already a new peer to anything that remembers) and keying rates and
-  the run host on that, leaving the name as a label. Adam's call on what a person sees:
-  refuse a duplicate name at join, accept it and disambiguate in the listing, or accept it
-  silently and fix only the keying.
+  Fix: a stable per-machine identity, persisted, that rates and the run host are keyed on;
+  the name stays a label, a duplicate is accepted at join, and listings disambiguate it
+  (Adam, 2026-09-23).
 
 ### The window
 
-- [ ] **The Tauri window is proven on macOS only, and three things are unfinished.** `app/`
+- [ ] **The Tauri window is proven on macOS only.** `app/`
   is a Tauri 2 project (`app/src-tauri`, tauri 2.11.5, tauri-plugin-shell 2.3.6,
   tauri-plugin-window-state 2.4.1, CLI 2.11.4 pinned in `app/package.json`). It bundles no
   HTML: the window opens on `http://127.0.0.1:8770/ui/`, the page `ml_stack.ui.assemble`
@@ -327,26 +330,6 @@ across `src/`.
     needs numpy. It costs 11.7 MB to 15.5 MB of bundle. It goes when `graph.asking` leaves
     `serve/__init__.py`'s import chain, or when the spec names the `serve` modules the
     daemon reaches instead of the package.
-  - **Adam's call: what a person downloading it gets on macOS.** There is no Apple
-    developer certificate and there is not going to be one, so `packaging/build.py`
-    ad-hoc signs the app, which is enough to open it on the machine that built it. A file
-    fetched by `curl` carries no `com.apple.quarantine`, so the install script's path opens
-    without complaint; a `.dmg` or a zip a browser downloaded is quarantined and refused
-    with "the developer cannot be verified". Nothing publishes a `.dmg` today. Either it
-    stays that way and the release page offers only the install command, or a `.dmg` is
-    published and the README tells a first-time reader to open it from the right-click
-    menu once.
-  - **Adam's call: which updater, and what happens to the rule that nothing updates while
-    a job runs.** `ml_stack.fleet.updates` is what runs now, unchanged: it asks GitHub
-    once a day, checks the download against the digest GitHub publishes, swaps
-    `ml-stack.app` into place and restarts, and `in_the_way` holds it back while a job is
-    running, a benchmark is measuring or a model is loaded. It keeps working because the
-    release zip still holds `ml-stack.app`. Tauri has its own updater, with its own
-    keypair (`tauri signer generate`, the private key and its password in
-    `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the release
-    workflow's secrets, the public key in `tauri.conf.json`; lose the private key and no
-    published app can be updated again). It is not turned on, and it knows nothing about a
-    running job, so turning it on means writing that gate again on the Rust side.
 
 ### What the window has not been driven through
 
