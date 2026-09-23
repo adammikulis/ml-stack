@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.files import UNVERSIONED, read_json, version_of, versioned, write_json
 from ml_stack.http import ServerError, ServerUnreachable, json_body, request_bytes
 from ml_stack.jobs import detach
@@ -57,7 +58,7 @@ from .pausing import (
 from .remote import PeerError
 
 __all__ = [
-    "DEFAULT_ROOT",
+    "default_root",
     "STARTED_FILE",
     "Answer",
     "Check",
@@ -84,7 +85,12 @@ __all__ = [
     "updating",
 ]
 
-DEFAULT_ROOT = "~/.ml-stack/traind"
+
+def default_root() -> Path:
+    """The daemon's root: ``traind`` under the state root."""
+    return home.state("traind")
+
+
 STARTED_FILE = "fleet-daemon.json"
 
 #: 1 -- pid, argv, log, started.
@@ -427,7 +433,7 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
 # -- the join ---------------------------------------------------------------------------
 def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_CLUSTER,
                  persist: bool = False, track: str = "", port: int = HTTP_PORT,
-                 root: Path | str = DEFAULT_ROOT,
+                 root: Path | str | None = None,
                  cluster_key_path: Path | str | None = None,
                  timeout_s: float = 2.0, wait_s: float = 20.0,
                  say: Callable[[str], None] = say,
@@ -446,7 +452,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
     ``persist_with`` and ``finder`` are the four things a test replaces with a fake on
     loopback; everything else is what the command does.
     """
-    root = Path(root).expanduser()
+    root = home.expand(root) if root else default_root()
     root.mkdir(parents=True, exist_ok=True)
     group = (group or "").strip() or DEFAULT_CLUSTER
     joined = Joined(name=name, port=port, root=root, group=group)
@@ -528,7 +534,7 @@ def _persist(persist_with: Callable[..., Any] | None, say: Callable[[str], None]
     return False, note
 
 
-def leave_machine(*, group: str = "", root: Path | str = DEFAULT_ROOT,
+def leave_machine(*, group: str = "", root: Path | str | None = None,
                   cluster_key_path: Path | str | None = None, stop: bool = True,
                   say: Callable[[str], None] = say,
                   unpersist: Callable[[], list[Path]] | None = None) -> dict[str, Any]:
@@ -550,6 +556,7 @@ def leave_machine(*, group: str = "", root: Path | str = DEFAULT_ROOT,
         say(f"removed the logon service {p}")
 
     stopped: int | None = None
+    root = home.expand(root) if root else default_root()
     pid = _started_pid(root)
     if stop and pid is not None:
         from ml_stack.platform import stop_pid
@@ -788,8 +795,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Make this machine a peer in one command, and see what the fleet sees.")
     ap.add_argument("--cluster-key", default=None,
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
-    ap.add_argument("--root", default=DEFAULT_ROOT,
-                    help=f"the daemon's root (default: {DEFAULT_ROOT})")
+    ap.add_argument("--root", default=str(default_root()),
+                    help="the daemon's root (default: traind under the state root)")
     ap.add_argument("--port", type=int, default=HTTP_PORT,
                     help=f"the daemon's HTTP port (default: {HTTP_PORT}); discovery is one "
                          f"above it")

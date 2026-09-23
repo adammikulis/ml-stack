@@ -25,7 +25,7 @@ from .discovery import (
     memberships,
     named_apart,
 )
-from .join import DEFAULT_ROOT
+from .join import default_root
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -281,10 +281,9 @@ class UI:
 
     def _hosting(self) -> Any:
         if self.hosting is None:
-            from .join import DEFAULT_ROOT
             from .serving import Hosting
 
-            self.hosting = Hosting(self.root or DEFAULT_ROOT, self.serving)
+            self.hosting = Hosting(self.root or default_root(), self.serving)
         return self.hosting
 
     def start_serving(self, model: Any) -> Any:
@@ -332,7 +331,7 @@ class UI:
         said: list[str] = []
         joined = join_machine(name=name or self.name, passphrase=passphrase, group=group,
                               persist=persist, port=self.peer_port,
-                              root=self.root or DEFAULT_ROOT,
+                              root=self.root or default_root(),
                               cluster_key_path=self.cluster_key_path, enrol=enrol,
                               persist_with=self.persist_with, say=said.append,
                               discovery_port=self.discovery_port)
@@ -352,7 +351,7 @@ class UI:
                     reason: str = "") -> dict[str, Any]:
         """Pause or resume every machine this one can see, and what each of them said."""
         answers = pausing.pause_fleet(
-            pausing.Fanout(self.root or DEFAULT_ROOT, resume=resume, minutes=minutes,
+            pausing.Fanout(self.root or default_root(), resume=resume, minutes=minutes,
                    reason=reason, cluster_key_path=self.cluster_key_path),
             self.with_self(self.peers(force=True)))
         self._peers = (0.0, [])

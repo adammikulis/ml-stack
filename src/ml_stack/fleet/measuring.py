@@ -28,6 +28,7 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.home import machine_id
 from ml_stack.hub import room as machine_room
 from ml_stack.lock import held_by
@@ -77,21 +78,11 @@ UNDER_WAY = ("preparing", "running")
 
 
 def bench_home(traind_root: Path | str | None = None) -> Path:
-    """Where ``ml-stack-bench`` keeps everything on this machine: the lock, the store, the
-    logs and ``measuring.json``.
-
-    Given a daemon's root, the ``bench`` directory beside it -- ``~/.ml-stack/traind``
-    measures in ``~/.ml-stack/bench``, and a daemon rooted in a test's directory looks
-    beside *that*, never in the real home. A daemon that read ``~/.ml-stack/bench``
-    whatever its root was told the truth about the wrong machine: a training job sent to a
-    daemon under test stayed queued for as long as a real benchmark was measuring on the
-    developer's box. Without a root, ``~/.ml-stack/bench``: the same path
-    `ml_stack.bench.home_dir` names, written here rather than imported so a daemon that
-    never measures never loads the bench.
-    """
+    """Where ``ml-stack-bench`` keeps its lock, store, logs and ``measuring.json``: the
+    ``bench`` directory beside a daemon's root, or the state root's ``bench`` without one."""
     if traind_root is not None:
-        return Path(traind_root).expanduser().parent / "bench"
-    return Path("~/.ml-stack/bench").expanduser()
+        return home.expand(traind_root).parent / "bench"
+    return home.state("bench")
 
 
 # -- the pin -------------------------------------------------------------------------

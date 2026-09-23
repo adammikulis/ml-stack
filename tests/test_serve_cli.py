@@ -385,6 +385,16 @@ class TestTellingTheFleet:
         assert served[0].slots == 2
         assert served[0].models == [MODEL]
 
+    def test_with_no_root_it_announces_under_the_state_root(self, serving, state, tmp_path):
+        from ml_stack import home
+
+        root = home.state("traind")
+        root.mkdir(parents=True)
+        instance = serving()
+        assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
+        assert [s.port for s in self.beacon(root).all()] == [instance.port]
+        assert root.is_relative_to(tmp_path)
+
     def test_taking_it_down_withdraws_it(self, state, tmp_path):
         """A registration outlives its server, and the beacon then points at a dead port."""
         root = tmp_path / "traind"

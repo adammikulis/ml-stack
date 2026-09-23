@@ -17,9 +17,8 @@ from ml_stack.serve import (
     profile_cli,
     status_cli,
 )
-from ml_stack.serve.ops import DEFAULT_ROOT
 
-__all__ = ["COMMANDS", "DEFAULT_ROOT", "main"]
+__all__ = ["COMMANDS", "main"]
 
 COMMANDS = Group(
     "ml-stack-serve",

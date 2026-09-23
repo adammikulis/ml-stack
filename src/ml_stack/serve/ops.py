@@ -45,7 +45,7 @@ from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import every_server, machine_memory, pid_exists
 from ml_stack.units import human_bytes
 
-__all__ = ["DEFAULT_ROOT", "FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Limits",
+__all__ = ["FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Limits",
            "Machine",
            "Processes", "Recorded", "Refused", "Resolved", "Snapshot", "Started",
            "Status", "Stopped", "alongside", "announce", "base_url_for", "beacon",
@@ -55,8 +55,6 @@ __all__ = ["DEFAULT_ROOT", "FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Li
            "status", "tensors", "up", "withdraw", "write_plist"]
 
 PROBE_TIMEOUT = 2.0
-DEFAULT_ROOT = "~/.ml-stack/traind"
-"""Where the daemon keeps the list of what this machine is serving; peers read it."""
 
 
 class Refused(Exception):
@@ -312,17 +310,14 @@ def processes() -> Processes:
                      tuple({"port": o["port"], "pid": o["pid"]} for o in strays))
 
 
-def beacon(root: str) -> Serving | None:
-    """This machine's beacon, or None when no fleet was ever set up here.
-
-    A machine with no daemon has no beacon to write to, and creating one would advertise a
-    model to nobody through a file nothing reads.
-    """
-    where = home.expand(root)
+def beacon(root: str | Path | None = None) -> Serving | None:
+    """The beacon under ``root`` (``traind`` in the state root when None), or None when that
+    directory does not exist."""
+    where = home.expand(root) if root else home.state("traind")
     return Serving(where / "serving.json") if where.is_dir() else None
 
 
-def announce(root: str, spec: ServerSpec) -> str:
+def announce(root: str | Path | None, spec: ServerSpec) -> str:
     """Tell the fleet this machine is serving it. Returns a line to print, or ''."""
     try:
         known = beacon(root)
@@ -334,7 +329,7 @@ def announce(root: str, spec: ServerSpec) -> str:
         return f"could not announce it to the fleet: {exc}"
 
 
-def withdraw(root: str, port: int) -> str:
+def withdraw(root: str | Path | None, port: int) -> str:
     """Take ``port`` out of the fleet's beacon; returns a line to print, or ''."""
     # A registration outlives the server it describes, and every peer then pays a timeout
     # to find that out.
@@ -466,7 +461,7 @@ def preflight(spec: ServerSpec, *, manager: ServerManager) -> Any:
 
 
 def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None,
-       escalate: bool = False, anyway: bool = False, root: str = DEFAULT_ROOT,
+       escalate: bool = False, anyway: bool = False, root: str | Path | None = None,
        say: Callable[[str], None] | None = None,
        on_event: Callable[[dict], None] | None = None) -> Started:
     """Lease a server for ``spec`` -- adopting one already up, or starting one -- record it
@@ -708,7 +703,7 @@ def reclaim_once(older: float, watcher: Any, *, settle: float = 0.0,
     return reclaim_mod.reclaim_idle(older_than=older, idleness=watcher, say=say)
 
 
-def down(port: int, *, root: str = DEFAULT_ROOT) -> tuple[Stopped, str]:
+def down(port: int, *, root: str | Path | None = None) -> tuple[Stopped, str]:
     """Stop the server this machine recorded on ``port`` and withdraw it from the fleet."""
     records = recorded_servers(lease_file())
     entry = records.get(port)
@@ -735,7 +730,7 @@ def down(port: int, *, root: str = DEFAULT_ROOT) -> tuple[Stopped, str]:
     return Stopped(port, url, pid, running, owner), withdraw(root, port)
 
 
-def orphans(*, root: str = DEFAULT_ROOT) -> list[tuple[Stopped, str]]:
+def orphans(*, root: str | Path | None = None) -> list[tuple[Stopped, str]]:
     """Stop every recorded server whose leasing process has gone; leave every other."""
     records = recorded_servers(lease_file())
     found = [(port, entry) for port, entry in sorted(records.items()) if orphaned(entry)]

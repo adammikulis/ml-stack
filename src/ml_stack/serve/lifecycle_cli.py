@@ -12,7 +12,7 @@ from ml_stack.log import say, warn
 from ml_stack.serve import build, ops
 from ml_stack.serve.backend import ServerFailed, ServerSpec, UnknownFlag, parse_context
 from ml_stack.serve.binary import BinaryNotFound
-from ml_stack.serve.ops import DEFAULT_ROOT, Refused
+from ml_stack.serve.ops import Refused
 from ml_stack.serve.profile import ASK, WORKLOADS, profile_for, resolved
 from ml_stack.serve.serving import said_cache, split_cache_type
 from ml_stack.serve.weights import DEFAULT_TIMEOUT_S
@@ -152,9 +152,9 @@ OPTIONS_UP = [
               "build reads, an estimate against what this machine may use, every flag "
               "the build accepts -- and print the report without starting or adopting "
               "anything. Exits 0 or 1"),
-    flag("--root", default=DEFAULT_ROOT,
-         help=f"the fleet root whose beacon to announce in, when there is one "
-              f"(default: {DEFAULT_ROOT})"),
+    flag("--root", default=None,
+         help="the fleet root whose beacon to announce in, when there is one "
+              "(default: traind under the state root)"),
     flag("--binary", default="", metavar="PATH",
          help="the llama-server to run, when the one on PATH cannot read this model. A "
               "release lags master by an architecture or two: gemma-4 and qwen3moe are "
@@ -335,8 +335,8 @@ OPTIONS_DOWN = [
     flag("--orphans", action="store_true",
          help="instead of a port: stop every recorded server whose leasing process has "
               "gone, and nothing else"),
-    flag("--root", default=DEFAULT_ROOT,
-         help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})"),
+    flag("--root", default=None,
+         help="the fleet root to withdraw it from (default: traind under the state root)"),
 ]
 
 

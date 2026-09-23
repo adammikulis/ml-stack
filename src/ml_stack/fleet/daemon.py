@@ -19,6 +19,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
 from ml_stack.platform import on_quit, private_file
@@ -41,6 +42,7 @@ from .discovery import (
 from .environment import Environment
 from .files import Fetcher
 from .jobs import JobRunner
+from .join import default_root
 from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .pausing import ADOPT_S, adopt_pause, peer_pause
@@ -70,7 +72,7 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
     return tok
 
 
-def serve_forever(root: Path | str = "~/.ml-stack/traind",
+def serve_forever(root: Path | str | None = None,
                   host: str = "0.0.0.0", port: int = DEFAULT_PORT, *,
                   name: str = "", announce: bool = True,
                   cluster_key_path: Path | str | None = None,
@@ -89,7 +91,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     ``track`` is a branch this machine follows instead of releases -- ``main`` on a machine
     you trust to run unreviewed code -- and it is remembered, so it is asked for once.
     ``off`` turns it back to releases; None leaves whatever the settings hold."""
-    root = Path(root).expanduser()
+    root = home.expand(root) if root else default_root()
     root.mkdir(parents=True, exist_ok=True)
     live_token: list[str] = [""]
     files_root = root / "files"
@@ -386,10 +388,10 @@ def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -
 def main(argv: list[str] | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
-    ap.add_argument("--root", default="~/.ml-stack/traind")
+    ap.add_argument("--root", default=str(default_root()))
     ap.add_argument("--bench-home", default=None, metavar="DIR",
                     help="where this machine's ml-stack-bench keeps its measuring lock "
-                         "(default: the 'bench' beside --root, so ~/.ml-stack/bench). "
+                         "(default: the 'bench' beside --root). "
                          "While that lock is held, queued training waits.")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)

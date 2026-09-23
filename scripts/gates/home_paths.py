@@ -1,7 +1,8 @@
-"""Home-directory lookups outside the module that resolves paths."""
+"""Home-directory lookups and state-root path literals outside the module that resolves paths."""
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from . import Finding
@@ -14,7 +15,15 @@ OWNS = ("src/ml_stack/home.py",)
 
 
 def describe() -> str:
-    return "A home directory resolved in place; ml_stack.home names every directory once."
+    return ("A home directory resolved in place, or the state root written as a literal path; "
+            "ml_stack.home names every directory once.")
+
+
+def state_literal(value: object) -> bool:
+    """Whether a string constant names the state root as a path rather than asking for it."""
+    if not isinstance(value, str):
+        return False
+    return value in ("~/.ml-stack", ".ml-stack") or value.startswith(("~/.ml-stack/", ".ml-stack/"))
 
 
 def find(root: Path) -> list[Finding]:
@@ -32,4 +41,7 @@ def find(root: Path) -> list[Finding]:
                 out.append(Finding(where, node.lineno, "Path.home()"))
             elif plain == "expanduser" or plain.endswith(".expanduser"):
                 out.append(Finding(where, node.lineno, "expanduser()"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and state_literal(node.value):
+                out.append(Finding(where, node.lineno, f"{node.value!r}"))
     return out
