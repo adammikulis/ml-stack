@@ -214,7 +214,7 @@ jobs:
             fi
             if [ -n "$wheel" ] && [ "$PYPI" = "success" ]; then
               echo
-              echo "**If you write Python**: \`pip install $dist\`, and \`$dist[train]\`, \`[serve]\` or \`[all]\` for what needs more than the standard library."
+              echo "**If you write Python**: \`pip install $dist\`, and \`${dist}[train]\`, \`[serve]\` or \`[all]\` for what needs more than the standard library."
             fi
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
