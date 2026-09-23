@@ -16,12 +16,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from ml_stack.world import check as check
-
-__all__ = ["World", "Writer", "check"]
+__all__ = ["World", "Writer"]
 
 Writer = Callable[[Mapping[str, Any], str, Mapping[str, Any]], str]
 """What writes one message: ``(persona, prompt, context) -> str``."""
@@ -49,11 +46,3 @@ class World:
     seed: int = 0
     size: str = "small"
     kind: str = "company"
-
-
-def __getattr__(name: str) -> Any:
-    if name == "check":
-        import importlib
-
-        return importlib.import_module("ml_stack.world.check")
-    raise AttributeError(name)

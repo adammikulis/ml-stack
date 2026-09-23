@@ -32,11 +32,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import importlib
 import inspect
 import io
 import json
 import os
+import tempfile
 import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
@@ -49,11 +49,32 @@ from unittest import mock
 # are strict against -- so they stay strict as `Client` changes, with nothing to maintain;
 # the real preflight, bound the same way, is what the self-check runs whatever a test has
 # put over `preflight.Preflight` for the run it then makes
+import ml_stack.client
+import ml_stack.hub
+import ml_stack.serve
+import ml_stack.serve.binary
+import ml_stack.serve.preflight as preflight
+from ml_stack import bench
+from ml_stack.bench import extract as bench_extract
+from ml_stack.bench.extract import SMOKE_MESSAGES
 from ml_stack.client.chat import Client as _RealClient
+from ml_stack.client.embed import embed as _real_embed
 from ml_stack.client.families import GENERIC
 from ml_stack.client.settings import Request, Transport
+from ml_stack.graph.community import graph as invented
+from ml_stack.graph.rebuild import replace
+from ml_stack.serve import ServerInfo
+from ml_stack.serve.backend import (
+    LlamaServerBackend,
+    ServerSpec,
+    UnknownFlag,
+    emitted_flags,
+    unknown_flags,
+)
+from ml_stack.serve.preflight import Check, Report
 from ml_stack.serve.preflight import Preflight as _RealPreflight
 from ml_stack.world import about
+from ml_stack.world.organisation import make
 
 __all__ = ["ScriptedModel", "ScriptedReader", "SelfCheckFailed", "selfcheck"]
 
@@ -151,9 +172,6 @@ class ScriptedReader:
 def _scratch_store(where: Path) -> Path:
     """The invented community in a store of its own, word index built, as `prepare` builds
     the real one; what look_up searches and a shortlist reads when the run names one."""
-    from ml_stack.graph.community import graph as invented
-    from ml_stack.graph.rebuild import replace
-
     replace(where, invented())
     return where
 
@@ -161,8 +179,6 @@ def _scratch_store(where: Path) -> Path:
 def _scratch_world(where: Path) -> Path:
     """A tiny invented company, written the way `ml-stack-world make --out` writes one;
     `load_world` then simulates its messages, as it does for any world without them."""
-    from ml_stack.world.organisation import make
-
     world = make("company", "small", seed=1)
     where.mkdir(parents=True, exist_ok=True)
     (where / "graph.json").write_text(json.dumps(world.graph), encoding="utf-8")
@@ -176,9 +192,6 @@ def _rewritten(args: argparse.Namespace, scratch: Path) -> argparse.Namespace:
     """The same command, pointed at scratch: the invented community and two of its
     questions, a store under the scratch home when the run has one, runs kept in a scratch
     store. Every flag about the asking or the serving is left exactly as given."""
-    from ml_stack import bench
-    from ml_stack.bench.extract import SMOKE_MESSAGES
-
     out = argparse.Namespace(**vars(args))
     home = scratch / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -240,8 +253,6 @@ def _mainline_flags(binary: str | Path) -> frozenset[str]:
     """Every flag `command` can emit, as the build's --help: the flags check then judges
     the argv it builds for real, rather than giving an unread build no opinion and
     never building one."""
-    from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
-
     return frozenset(emitted_flags(LlamaServerBackend(binary=binary)))
 
 
@@ -251,22 +262,6 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
     replaced for the block: the served model never starts, the preflight runs for real
     over facts that touch nothing, the client is scripted (and strict), nothing is asked
     of a port."""
-    import ml_stack.client
-    import ml_stack.hub
-    import ml_stack.serve
-    import ml_stack.serve.binary
-    import ml_stack.serve.preflight as preflight
-    from ml_stack import bench
-    from ml_stack.bench import extract as bench_extract
-    from ml_stack.serve import ServerInfo
-    from ml_stack.serve.backend import (
-        LlamaServerBackend,
-        ServerSpec,
-        UnknownFlag,
-        unknown_flags,
-    )
-    from ml_stack.serve.preflight import Check, Report
-
     fake_client = ScriptedReader if args.cmd == "extract" else ScriptedModel
     stand_in = _stand_in_binary(home)
 
@@ -350,30 +345,33 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
     def no_embedder(*a: Any, **k: Any) -> Any:
         raise ConnectionError("selfcheck: nothing embeds here; the words vote")
 
+    # `--serve-draft auto` asks the one resolver; here it answers with a head that never
+    # loads, and says so the way the real one does
+    def chosen(model: Any, **_: Any) -> Any:
+        return ml_stack.hub.Chosen(f"mtp-{Path(str(model)).name}", "",
+                                   "selfcheck: a head that never loads", False)
+
+    stand_ins = (
+        (ml_stack.hub, "located", lambda *a, **k: None),
+        (bench, "busy", lambda url: 0),
+        (bench, "slot_count", lambda url: 1),
+        (bench, "footprint", fake_footprint),
+        (bench_extract, "footprint", fake_footprint),
+        (bench, "ask_from", fake_ask_from),
+        (ml_stack.serve, "serve", fake_serve),
+        (ml_stack.serve.binary, "find_binary", find_stand_in),
+        (ml_stack.hub, "fetch", fetched),
+        (ml_stack.hub, "choose_head", chosen),
+        (preflight, "Preflight", checked_preflight),
+        (ml_stack.hub, "room", lambda: 1 << 40),
+        (ml_stack.client, "Client", Built),
+        # the module `embed` is defined in; the package re-exports the function by its name
+        (inspect.getmodule(_real_embed), "embed", no_embedder),
+    )
     with contextlib.ExitStack() as patched:
-        patch = patched.enter_context
-        patch(mock.patch.dict(os.environ, {"MLSTACK_BENCH_HOME": str(home)}))
-        patch(mock.patch.object(ml_stack.hub, "located", lambda *a, **k: None))
-        patch(mock.patch.object(bench, "busy", lambda url: 0))
-        patch(mock.patch.object(bench, "slot_count", lambda url: 1))
-        patch(mock.patch.object(bench, "footprint", fake_footprint))
-        patch(mock.patch.object(bench_extract, "footprint", fake_footprint))
-        patch(mock.patch.object(bench, "ask_from", fake_ask_from))
-        patch(mock.patch.object(ml_stack.serve, "serve", fake_serve))
-        patch(mock.patch.object(ml_stack.serve.binary, "find_binary", find_stand_in))
-        patch(mock.patch.object(ml_stack.hub, "fetch", fetched))
-        # `--serve-draft auto` asks the one resolver; here it answers with a head that
-        # never loads, and says so the way the real one does
-        patch(mock.patch.object(ml_stack.hub, "choose_head",
-                                lambda model, **k: ml_stack.hub.Chosen(
-                                    f"mtp-{Path(str(model)).name}", "",
-                                    "selfcheck: a head that never loads", False)))
-        patch(mock.patch.object(preflight, "Preflight", checked_preflight))
-        patch(mock.patch.object(ml_stack.hub, "room", lambda: 1 << 40))
-        patch(mock.patch.object(ml_stack.client, "Client", Built))
-        # the module, not the function the package re-exports under the same name
-        patch(mock.patch.object(importlib.import_module("ml_stack.client.embed"), "embed",
-                                no_embedder))
+        patched.enter_context(mock.patch.dict(os.environ, {"MLSTACK_BENCH_HOME": str(home)}))
+        for target, name, value in stand_ins:
+            patched.enter_context(mock.patch.object(target, name, value))
         yield
 
 
@@ -402,11 +400,6 @@ def selfcheck(argv: Sequence[str]) -> str:
     traceback and everything the run printed, otherwise. ``--detach``, ``--no-queue`` and
     ``--no-selfcheck`` are ignored; a command line that does not parse exits as it would.
     """
-    import tempfile
-
-    from ml_stack import bench
-    from ml_stack.bench import extract as bench_extract
-
     rest = [a for a in argv if a not in ("--detach", "--no-queue", "--no-selfcheck")]
     args = bench._parser().parse_args(rest)
     if args.cmd not in bench.MEASURING:

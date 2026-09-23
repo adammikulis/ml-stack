@@ -29,7 +29,7 @@ import sys
 from ml_stack import home
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
-from ml_stack.world import ops
+from ml_stack.world import check, ops
 from ml_stack.world.check import default_fixtures
 from ml_stack.world.ops import EXPORTS, Export, read_messages
 from ml_stack.world.organisation import KINDS, SIZES
@@ -157,8 +157,6 @@ def cmd_emit(args: argparse.Namespace) -> int:
              help="the domain the corpus was emitted at"),
     ])
 def cmd_check(args: argparse.Namespace) -> int:
-    from ml_stack.world import check
-
     try:
         consistent = check.consistency(args.corpus, args.truth, domain=args.domain)
         private = check.privacy(args.truth, fixtures=args.fixtures, allow=args.allow)

@@ -14,11 +14,30 @@ ROOTS = ("src/ml_stack",)
 
 
 def describe() -> str:
-    return "An ml_stack import inside a function; a deferred import hides an import cycle."
+    return ("An ml_stack import inside a function, or an import_module of a literal ml_stack "
+            "name; a deferred import hides an import cycle.")
 
 
-def _modules(node: ast.stmt) -> list[str]:
-    """The ml_stack modules one import statement defers, empty for any other statement."""
+_LOADERS = {"import_module", "__import__"}
+
+
+def _loaded(node: ast.Call) -> list[str]:
+    """The ml_stack module an ``import_module``/``__import__`` call names by a literal."""
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+    if name not in _LOADERS or not node.args:
+        return []
+    first = node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str) \
+            and first.value.split(".")[0] == "ml_stack":
+        return [first.value]
+    return []
+
+
+def _modules(node: ast.AST) -> list[str]:
+    """The ml_stack modules one import statement or loader call defers, else empty."""
+    if isinstance(node, ast.Call):
+        return _loaded(node)
     if isinstance(node, ast.Import):
         return [a.name for a in node.names if a.name.split(".")[0] == "ml_stack"]
     if isinstance(node, ast.ImportFrom):
