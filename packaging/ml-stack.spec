@@ -28,8 +28,16 @@ hidden = [
     "ml_stack.serve", "psutil",
 ]
 
+# fleet.ui's bench_state and bench_history import these to report a running measurement,
+# inside a try/except that already reads "the bench is not installed here" -- true of a
+# frozen daemon, whose bench runs as the detached ml-stack-bench process, never in this one.
+# PyInstaller's static analysis cannot see that the import is optional, so without the
+# exclude it bundles graph, world and ingest -- and the numpy they need -- for a path this
+# binary never takes.
 a = Analysis(["launcher-headless.py"], datas=datas, hiddenimports=hidden,
-             excludes=["tkinter", "test", "unittest", "pydoc_data", "webview"])
+             excludes=["tkinter", "test", "unittest", "pydoc_data", "webview",
+                       "numpy", "ml_stack.graph", "ml_stack.world", "ml_stack.bench",
+                       "ml_stack.ingest"])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="ml-stack-headless",
           console=True, strip=False, upx=False)

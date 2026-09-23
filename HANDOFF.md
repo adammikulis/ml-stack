@@ -264,13 +264,6 @@ across `src/`.
     has not happened is a person installing the NSIS setup or the AppImage on a real
     machine of that kind and using it -- which is what `install.ps1` and `install.sh`
     expect to exist. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
-  - **The frozen daemon bundles numpy because `ml_stack.serve` reaches the graph.**
-    `packaging/ml-stack.spec` names `ml_stack.serve` as a hidden import, for the reclaim
-    watcher and the hosting routes; `ml_stack/serve/__init__.py` imports `serve/serving.py`,
-    which imports `graph.asking` and so `graph/__init__.py` and `graph/topology.py`, which
-    needs numpy. It costs 11.7 MB to 15.5 MB of bundle. It goes when `graph.asking` leaves
-    `serve/__init__.py`'s import chain, or when the spec names the `serve` modules the
-    daemon reaches instead of the package.
 
 ### What the window has not been driven through
 
