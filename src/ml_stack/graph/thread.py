@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.graph.search import rrf_scored
+from ml_stack.log import warn
 
 __all__ = [
     "DREW",
@@ -380,8 +381,8 @@ def recall(store: Any, thread: str, question: str, *,
             vector = list(embedder([want])[0])
             near = store.similar(vector, model=_tag(thread), limit=k)
             rankings.append([str(r["id"]) for r in near if str(r["id"]) in allowed])
-        except Exception:  # noqa: BLE001 - nothing embedded yet is one voter fewer, not an error
-            pass
+        except (RuntimeError, ValueError) as exc:
+            warn(f"recall in {thread} by words alone: {exc}")
     chosen = [turn_id for turn_id, _ in rrf_scored(*rankings, limit=limit)] if rankings else []
     if not chosen:
         return []

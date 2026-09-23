@@ -251,3 +251,24 @@ def test_an_entry_with_no_digest_recorded_is_swept(store):
     remember(store, fingerprint("who surveys?", graph=GRAPH), Answer(content="Iris does."))
     assert forget(store, keeping=digest(GRAPH)) == 1
     assert kept(store) == {}
+
+
+def test_an_answer_the_store_refuses_is_warned_of_and_not_kept(store, capsys):
+    remember(store, PREFIX + "shape", 7, question="who?")
+    assert kept(store) == {}
+    assert "answer not cached under _answer:shape" in capsys.readouterr().err
+    where = store.path
+    store.close()
+    with GraphStore(where, read_only=True) as reader:
+        remember(reader, PREFIX + "read-only", Answer(content="Iris."), question="who?")
+        assert kept(reader) == {}
+    assert "answer not cached under _answer:read-only" in capsys.readouterr().err
+
+
+def test_a_fault_outside_the_store_is_not_swallowed_as_a_cache_miss(store):
+    class Broken:
+        def put_doc(self, key, value):
+            raise KeyError(key)
+
+    with pytest.raises(KeyError):
+        remember(Broken(), PREFIX + "k", Answer(content="Iris."))

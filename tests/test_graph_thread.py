@@ -487,3 +487,24 @@ class TestAStoreFaultIsNotAnEmptyConversation:
 
         with pytest.raises(RuntimeError, match="IO exception"):
             _rows(Broken(), "MATCH (t:Turn) RETURN t")
+
+
+def test_an_embedder_that_fails_leaves_recall_to_the_words_and_says_so(store, capsys):
+    from ml_stack.http import ServerUnreachable
+
+    for n in range(12):
+        remember_turn(store, thread="t1", role="user", text=f"Iris and surveying, take {n}")
+
+    def down(texts):
+        raise ServerUnreachable("embedding server on 8081 is not answering")
+
+    got = recall(store, "t1", "what about Iris and surveying?", embedder=down, window=10,
+                 limit=5)
+    assert got and {t.seq for t in got} <= {1, 2}
+    assert "recall in t1 by words alone: embedding server on 8081" in capsys.readouterr().err
+
+    def wrong(texts):
+        raise TypeError("not a fault recall may absorb")
+
+    with pytest.raises(TypeError):
+        recall(store, "t1", "Iris", embedder=wrong, window=10)

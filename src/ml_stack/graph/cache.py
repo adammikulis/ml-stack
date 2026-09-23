@@ -13,7 +13,10 @@ import hashlib
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, is_dataclass
 from typing import Any
+
+from ml_stack.log import warn
 
 __all__ = ["PREFIX", "asked", "digest", "fingerprint", "forget", "kept", "recall", "remember"]
 
@@ -76,21 +79,19 @@ def fingerprint(question: str, *, graph: Mapping[str, Any] | None = None, on: st
 
 
 def remember(store: Any, key: str, answer: Any, *, question: str = "", on: str = "") -> None:
-    """Keep an answer under its fingerprint. Anything unstorable is simply not kept.
+    """Keep an answer under its fingerprint; one the store refuses is warned of and not kept.
 
     ``on`` is the graph digest this answer was drawn from. It is already inside the key, but
     a key is a hash and cannot be read back — so it is written beside the answer as well,
     which is the only way to later tell which entries belong to a graph that no longer
     exists. Without it a cache grows for the life of the machine.
     """
-    from dataclasses import asdict, is_dataclass
-
     try:
         body = asdict(answer) if is_dataclass(answer) else dict(answer)
         store.put_doc(key, {"at": time.strftime("%FT%T"), "question": question,
                             "on": str(on), "answer": body})
-    except Exception:  # noqa: BLE001 - a cache that cannot write is a cache that is slow
-        pass
+    except (RuntimeError, TypeError, ValueError) as exc:
+        warn(f"answer not cached under {key}: {exc}")
 
 
 def recall(store: Any, key: str, *, kind: Callable[..., Any] | None = None,
