@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import promote
 from ml_stack import home
+from ml_stack.files import promote
 from ml_stack.log import say, warn
 
 from .launch import last_screen
@@ -326,8 +326,8 @@ def needs_bytes(fit: dict[str, Any], context: int = 0) -> int:
 
 
 def choose_model(room_bytes: int, *, want: str = "auto",
-                 profiles: "Sequence[Any] | None" = None,
-                 fits: "Sequence[dict[str, Any]] | None" = None) -> "dict[str, Any] | None":
+                 profiles: Sequence[Any] | None = None,
+                 fits: Sequence[dict[str, Any]] | None = None) -> dict[str, Any] | None:
     """The best model this machine has room for, out of the ones that were measured.
 
     ``profiles`` is in the order the measurements ranked them, so this walks it and takes
@@ -485,7 +485,7 @@ class SystemService:
 DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin"
 
 
-def service_environment(home: "Path | str", *, path: str = "") -> dict[str, str]:
+def service_environment(home: Path | str, *, path: str = "") -> dict[str, str]:
     """What the daemon needs in its environment when nobody logged in to give it one.
 
     ``HF_HOME`` is the point: it names the cache the models are already in, so a service
@@ -501,9 +501,9 @@ def service_environment(home: "Path | str", *, path: str = "") -> dict[str, str]
     }
 
 
-def system_service(user: str, home: "Path | str", *, argv: "list[str] | None" = None,
-                   log_dir: "Path | str" = "/var/log", platform: str = "",
-                   environment: "dict[str, str] | None" = None) -> SystemService:
+def system_service(user: str, home: Path | str, *, argv: list[str] | None = None,
+                   log_dir: Path | str = "/var/log", platform: str = "",
+                   environment: dict[str, str] | None = None) -> SystemService:
     """The boot-time service definition for ``platform`` (this one unless named).
 
     macOS gets a LaunchDaemon with ``UserName``: it starts at boot with no login, and
@@ -614,7 +614,7 @@ def _gb(n: int) -> str:
     return f"{n / 1e9:.1f} GB" if n >= 1e8 else f"{n / 1e6:.0f} MB"
 
 
-def models_in(cache: "Path | str") -> list[tuple[str, int]]:
+def models_in(cache: Path | str) -> list[tuple[str, int]]:
     """Every model in a Hub cache, with its size on disk. Biggest first.
 
     The Hub's layout is one ``models--owner--repo`` directory per repository; anything else
@@ -630,7 +630,7 @@ def models_in(cache: "Path | str") -> list[tuple[str, int]]:
     return sorted(found, key=lambda pair: -pair[1])
 
 
-def plan_cache(user_cache: "Path | str", service_cache: "Path | str", *,
+def plan_cache(user_cache: Path | str, service_cache: Path | str, *,
                same_user: bool, adopt: bool = False) -> CachePlan:
     """Decide -- and carry out -- what happens to the models already on this machine.
 
@@ -701,8 +701,8 @@ def _reexec() -> None:
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
-def restart(*, run: "Callable[[list[str]], int] | None" = None,
-            reexec: "Callable[[], None] | None" = None) -> str:
+def restart(*, run: Callable[[list[str]], int] | None = None,
+            reexec: Callable[[], None] | None = None) -> str:
     """Bring the daemon back on the code that is now on disk. Says how it did it.
 
     Where a login service is installed, stopping is enough: launchd's ``KeepAlive`` and
@@ -767,7 +767,35 @@ def status() -> dict[str, object]:
 
 
 # -- the installer's side of it ----------------------------------------------------------
-def main(argv: "list[str] | None" = None) -> int:
+def _install_system(user: str, home_dir: str, *, only_print: bool = False) -> int:
+    """Write and load the boot service; 0 once installed, 2 when it needs root."""
+    made = system_service(user, home_dir)
+    if only_print:
+        say(made.body)
+        return 0
+    target = Path(made.path)
+    try:
+        if made.platform == "win32":
+            if _run(["cmd", "/c", made.body]) != 0:
+                warn(f"could not register the task; run as administrator:\n  {made.body}")
+                return 2
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(made.body)
+    except OSError as exc:
+        warn(f"needs root: {exc}\n  {made.install}")
+        return 2
+    if made.platform == "darwin":
+        _run(["launchctl", "unload", str(target)])
+        _run(["launchctl", "load", "-w", str(target)])
+    elif made.platform.startswith("linux"):
+        _run(["systemctl", "daemon-reload"])
+        _run(["systemctl", "enable", "--now", SERVICE])
+    say(f"starts at boot as {made.user}: {made.path}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
     """What ``packaging/install.sh`` calls rather than writing any of it in shell.
 
     What an installer has to know and a shell script should not answer for itself:
@@ -813,30 +841,7 @@ def main(argv: "list[str] | None" = None) -> int:
         return 0
 
     if a.cmd == "system":
-        made = system_service(a.user, a.home)
-        if a.only_print:
-            say(made.body)
-            return 0
-        target = Path(made.path)
-        try:
-            if made.platform == "win32":
-                if _run(["cmd", "/c", made.body]) != 0:
-                    warn(f"could not register the task; run as administrator:\n  {made.body}")
-                    return 2
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(made.body)
-        except OSError as exc:
-            warn(f"needs root: {exc}\n  {made.install}")
-            return 2
-        if made.platform == "darwin":
-            _run(["launchctl", "unload", str(target)])
-            _run(["launchctl", "load", "-w", str(target)])
-        elif made.platform.startswith("linux"):
-            _run(["systemctl", "daemon-reload"])
-            _run(["systemctl", "enable", "--now", SERVICE])
-        say(f"starts at boot as {made.user}: {made.path}")
-        return 0
+        return _install_system(a.user, a.home, only_print=a.only_print)
 
     if a.cmd == "cache":
         shared = a.service_cache or str(Path("/opt/ml-stack/cache/huggingface"))

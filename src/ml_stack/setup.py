@@ -111,13 +111,9 @@ def look() -> list[Finding]:
             fix="ml-stack-serve memory --persist",
             root=False))
 
-    binary = ""
-    try:
-        from ml_stack.serve.binary import find_binary
+    from ml_stack.serve.binary import find_binary
 
-        binary = str(find_binary("llama-server") or "")
-    except Exception:  # noqa: BLE001
-        pass
+    binary = str(find_binary("llama-server") or "")
     if binary:
         arches = _arches(binary)
         out.append(Finding(
@@ -464,9 +460,9 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
     for where in dirs:
         for name in sorted(where.glob("libllama*.dylib")) + sorted(where.glob("libllama*.so")):
             try:
-                got = subprocess.run(["strings", "-n", "2", str(name)], capture_output=True, text=True,
-                                     timeout=30)
-            except Exception:  # noqa: BLE001
+                got = subprocess.run(["strings", "-n", "2", str(name)], capture_output=True,
+                                     text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
                 continue
             found.update(line.strip() for line in got.stdout.splitlines())
     if known is not None:

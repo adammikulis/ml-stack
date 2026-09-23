@@ -9,7 +9,7 @@ import platform
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ml_stack.http import ServerError, request_bytes
@@ -55,7 +55,7 @@ def cmake_flags() -> list[str]:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 LIB_GLOBS = ("lib*.dylib", "lib*.so", "*.dll")
@@ -76,7 +76,7 @@ def copy_flat(src_dir: Path, dest: Path) -> list[str]:
             if target.exists() or target.is_symlink():
                 target.unlink()
             if item.is_symlink():
-                target.symlink_to(os.readlink(item))
+                target.symlink_to(item.readlink())
             else:
                 shutil.copy2(item, target)
             copied.append(item.name)
