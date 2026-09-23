@@ -54,6 +54,7 @@ capability; every line is something that already exists not being what it says.
   add the pending publisher -- owner `adammikulis`, repository `ml-stack`, workflow
   `release.yml`, no environment -- and the `pypi` job in `release.yml` uploads with no
   code change. Until then it uploads nothing and the docs install from git.
+
 ### Not losing what it read
 - [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
   upstreaming to public repositories). `CypherStore._run` prepares every statement that
