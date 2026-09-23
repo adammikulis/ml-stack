@@ -60,9 +60,9 @@ def _install_git_hooks() -> None:
 _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
-from ml_stack.testing.fakes import (
-    LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,  # noqa: E402
-    fake_binary as fake_binary,  # noqa: E402
+from ml_stack.testing.fakes import (  # noqa: E402
+    LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
+    fake_binary as fake_binary,
 )
 
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
@@ -84,7 +84,7 @@ class _Server:
                 outer.requests.append((self.command, self.path, body))
                 try:
                     status, payload = outer.handler(self.command, self.path, body)
-                except Exception as exc:  # surface handler bugs as 500s, not hangs
+                except Exception as exc:  # noqa: BLE001 - a handler's bug answers 500 rather than hanging
                     status, payload = 500, str(exc).encode()
                 self.send_response(status)
                 self.send_header("Content-Length", str(len(payload)))
@@ -208,7 +208,7 @@ def on_a_fresh_loop(coro):
         loop = asyncio.new_event_loop()
         try:
             done.append(loop.run_until_complete(coro))
-        except BaseException as exc:  # re-raised in the calling thread below
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the calling thread below
             raised.append(exc)
         finally:
             asyncio.set_event_loop(None)
@@ -230,7 +230,7 @@ def on_a_fresh_thread(fn, *args, **kw):
     def go() -> None:
         try:
             done.append(fn(*args, **kw))
-        except BaseException as exc:  # re-raised in the calling thread below
+        except BaseException as exc:  # noqa: BLE001 - re-raised in the calling thread below
             raised.append(exc)
 
     worker = threading.Thread(target=go, name="fresh-thread")

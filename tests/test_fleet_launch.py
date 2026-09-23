@@ -14,7 +14,7 @@ from ml_stack.fleet.discovery import join_cluster
 
 
 class _Health(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802
+    def do_GET(self):
         body = json.dumps({"name": "box", "machine": "m1"}).encode()
         self.send_response(200 if self.path == "/health" else 404)
         self.send_header("Content-Type", "application/json")

@@ -61,7 +61,6 @@ def ask(findings: list[Finding], *, yes: bool = False) -> int:
         answer = "y" if yes else input("      run it now? [y/N] ").strip().lower()
         if answer != "y":
             continue
-        # sudo is run so that it prompts on this terminal. The password goes from the
-        # keyboard to sudo; nothing here reads it, passes it, or keeps it.
-        subprocess.run(one.fix, shell=True, check=False)
+        # a sudo in the line prompts on this terminal; nothing here reads the password
+        subprocess.run(one.fix, shell=True, check=False)  # noqa: S602 - the shell line just shown and confirmed
     return worst

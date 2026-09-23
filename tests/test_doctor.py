@@ -97,7 +97,7 @@ def test_hooks_not_installed_is_named_with_the_installer_as_the_fix(tmp_path):
 
 def test_the_offered_fix_installs_them_and_the_next_look_is_good(tmp_path):
     repo = make_repo(tmp_path / "quenlow")
-    subprocess.run(hooks_of(repo).fix, shell=True, check=True, capture_output=True)
+    subprocess.run(hooks_of(repo).fix, shell=True, check=True, capture_output=True)  # noqa: S602
     found = hooks_of(repo)
     assert found.good
     assert found.said == "installed, from scripts/hooks"
@@ -124,7 +124,7 @@ def test_a_repository_shipping_hooks_under_services_gets_a_link_fix(tmp_path):
     assert found.fix == (f"cd {repo} && ln -sf ../../services/hooks/pre-commit .git/hooks/pre-commit"
                          " && ln -sf ../../services/hooks/commit-msg .git/hooks/commit-msg"
                          " && ln -sf ../../services/hooks/pre-push .git/hooks/pre-push")
-    subprocess.run(found.fix, shell=True, check=True)
+    subprocess.run(found.fix, shell=True, check=True)  # noqa: S602 - a fix is a shell line
     assert hooks_of(repo).said == "installed, from services/hooks"
 
 

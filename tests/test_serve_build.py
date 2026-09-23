@@ -116,9 +116,9 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def _args(**over):
-    base = dict(commit="", jobs=0, source="", force=False, check=False, rollback=False,
-               persist=False, source_kind="source", adopt="", repo="", ref="", tag="",
-               name="", list=False)
+    base = {"commit": "", "jobs": 0, "source": "", "force": False, "check": False,
+            "rollback": False, "persist": False, "source_kind": "source", "adopt": "",
+            "repo": "", "ref": "", "tag": "", "name": "", "list": False}
     base.update(over)
     return SimpleNamespace(**base)
 
