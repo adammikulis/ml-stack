@@ -12,7 +12,8 @@ from typing import Any
 
 from ml_stack.files import write_json
 
-__all__ = ["Damaged", "Read", "reads_path", "tokens_of", "unit_of", "units_of"]
+__all__ = ["Damaged", "Read", "forget_reads", "reads_beside", "reads_path", "tokens_of",
+           "unit_of", "units_of"]
 
 
 class Damaged(OSError):
@@ -94,6 +95,26 @@ def units_of(reads: Iterable[Mapping[str, Any]]) -> dict[str, _Unit]:
 def reads_path(out: str | Path, slug: str) -> Path:
     """Where one source's extractions are kept, beside the store."""
     return Path(str(Path(out).expanduser()) + f".{slug}.reads.json")
+
+
+def reads_beside(out: str | Path) -> list[Path]:
+    """Every ``<store>.<slug>.reads.json`` beside a store."""
+    where = Path(out).expanduser()
+    if not where.parent.is_dir():
+        return []
+    return sorted(where.parent.glob(f"{where.name}.*.reads.json"))
+
+
+def forget_reads(out: str | Path, *, source: str = "") -> list[Path]:
+    """Delete the reads files beside a store -- every source's, or ``source``'s alone --
+    and return the paths deleted."""
+    doomed = [reads_path(out, source)] if source else reads_beside(out)
+    gone = []
+    for path in doomed:
+        if path.is_file():
+            path.unlink()
+            gone.append(path)
+    return gone
 
 
 def tokens_of(reads: Iterable[Mapping[str, Any]]) -> tuple[int, int]:

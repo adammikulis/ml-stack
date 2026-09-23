@@ -10,11 +10,10 @@ from ml_stack.files import promote
 from ml_stack.graph.rebuild import count_store, roll_back, snapshot
 from ml_stack.graph.store import GraphStore
 from ml_stack.ingest.progress import Progress
-from ml_stack.ingest.reads import _read_json, _write_json
+from ml_stack.ingest.reads import _read_json, _write_json, reads_beside
 from ml_stack.log import say
 
-__all__ = ["NEW_NAME", "NEW_PREFIX", "OLD_NAME", "OLD_PREFIX", "migrate", "pending",
-           "reads_beside"]
+__all__ = ["NEW_NAME", "NEW_PREFIX", "OLD_NAME", "OLD_PREFIX", "migrate", "pending"]
 
 OLD_PREFIX = "book:"
 NEW_PREFIX = "source:"
@@ -24,14 +23,6 @@ NEW_NAME = "sources"
 
 class NotSound(RuntimeError):
     """The migrated store did not read back as the store that went in."""
-
-
-def reads_beside(out: str | Path) -> list[Path]:
-    """Every ``<store>.<slug>.reads.json`` beside a store."""
-    where = Path(out).expanduser()
-    if not where.parent.is_dir():
-        return []
-    return sorted(where.parent.glob(f"{where.name}.*.reads.json"))
 
 
 def pending(out: str | Path) -> dict[str, int]:

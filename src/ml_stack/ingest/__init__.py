@@ -173,7 +173,6 @@ from ml_stack.ingest.migrate import (
     OLD_PREFIX as OLD_PREFIX,
     migrate as migrate,
     pending as pending,
-    reads_beside as reads_beside,
     _rewrite as _rewrite,
     _rewrite_progress as _rewrite_progress,
     _rewrite_reads as _rewrite_reads,
@@ -193,6 +192,8 @@ from ml_stack.ingest.stats import (
 from ml_stack.ingest.reads import (
     Damaged as Damaged,
     Read as Read,
+    forget_reads as forget_reads,
+    reads_beside as reads_beside,
     reads_path as reads_path,
     tokens_of as tokens_of,
     unit_of as unit_of,

@@ -10,7 +10,7 @@ from typing import Any
 
 from ml_stack.ingest.fold import fold_source
 from ml_stack.ingest.progress import GIVE_UP, Progress
-from ml_stack.ingest.reads import _read_json, reads_path, tokens_of, units_of
+from ml_stack.ingest.reads import _read_json, reads_beside, reads_path, tokens_of, units_of
 from ml_stack.log import say
 
 __all__ = ["Source", "Sources", "run_attrs", "show", "sources"]
@@ -101,9 +101,7 @@ class Sources:
 
     def _slugs(self) -> list[str]:
         head, tail = self.out.name + ".", ".reads.json"
-        if not self.out.parent.is_dir():
-            return []
-        return [p.name[len(head):-len(tail)] for p in self.out.parent.glob(f"{head}*{tail}")
+        return [p.name[len(head):-len(tail)] for p in reads_beside(self.out)
                 if len(p.name) > len(head) + len(tail)]
 
 

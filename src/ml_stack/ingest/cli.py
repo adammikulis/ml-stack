@@ -22,7 +22,7 @@ from ml_stack.ingest.fold import fold
 from ml_stack.ingest.gold import gold_lines, gold_score, read_gold
 from ml_stack.ingest.migrate import migrate
 from ml_stack.ingest.progress import GIVE_UP, Progress, _folded_at
-from ml_stack.ingest.reads import _read_json
+from ml_stack.ingest.reads import _read_json, forget_reads
 from ml_stack.ingest.run import Stopped, _read_run, _stopping
 from ml_stack.ingest.sources import show, sources
 from ml_stack.ingest.stats import status
@@ -172,7 +172,7 @@ def _out_of(argv: Iterable[str]) -> str:
 
 
 _WORDS = ("status", "show", "sources", "ask", "fold", "import", "retry", "tidy", "migrate",
-          "embed")
+          "embed", "forget")
 """What a run does instead of reading a document, when one is named where a PDF would be."""
 
 
@@ -203,11 +203,19 @@ def parser() -> argparse.ArgumentParser:
                "           progress file and the reads files\n"
                "  embed    embed every node into the store's vector index --\n"
                "           `embed --out STORE --embed-url URL --embed-model M`\n"
+               "  forget   delete the extractions kept beside the store: every\n"
+               "           STORE.<slug>.reads.json, or --source SLUG's alone. Each holds\n"
+               "           every concept read with the definition in its source's words,\n"
+               "           and the model's whole reply for a unit that failed. The store's\n"
+               "           nodes and edges stay; fold, show and sources have nothing left\n"
+               "           for a forgotten source, and --resume still skips the units the\n"
+               "           progress file records as done\n"
                "  stop     end the detached run, after it has folded what it has read\n"
                "  wait     block until the detached run has ended\n")
     ap.add_argument("docs", nargs="*", metavar="DOC",
                     help="the PDFs to read; or one of `status`, `show`, `sources`, `ask`, "
-                         "`fold`, `import`, `retry`, `migrate`, `stop` (see below), which "
+                         "`fold`, `import`, `retry`, `migrate`, `forget`, `stop` (see "
+                         "below), which "
                          "does that and stops. `ask` takes the question after it, `import` "
                          "the CSV pair")
     ap.add_argument("--out", default="", metavar="STORE",
@@ -290,7 +298,7 @@ def parser() -> argparse.ArgumentParser:
                          "it every predicate comes in and the ones outside them are marked "
                          "as extensions")
     ap.add_argument("--source", default="", metavar="SLUG",
-                    help="with `show` or `fold`, only this source")
+                    help="with `show`, `fold` or `forget`, only this source")
     ap.add_argument("--chapter", default="", metavar="N",
                     help="read only this chapter of each document")
     ap.add_argument("--resume", action="store_true",
@@ -420,6 +428,8 @@ def _dispatch(args: Any, rest: list[str]) -> int:
             return retry(args.out)
         if word == "migrate":
             return migrate(args.out)
+        if word == "forget":
+            return _forget(args.out, source=args.source)
         if word == "embed":
             if not args.embed_url:
                 warn("error: embed needs --embed-url URL")
@@ -479,6 +489,16 @@ def _dispatch(args: Any, rest: list[str]) -> int:
     if args.gold:
         return _gold_run(args)
     return _read_run(args)
+
+
+def _forget(out: str, *, source: str = "") -> int:
+    """``forget``: the reads files deleted, each one named."""
+    gone = forget_reads(out, source=source)
+    for path in gone:
+        say(f"deleted {path}")
+    if not gone:
+        say(f"no reads kept beside {out}" + (f" for {source}" if source else ""))
+    return 0
 
 
 def _ask_run(args: Any) -> int:

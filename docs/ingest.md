@@ -141,6 +141,11 @@ way the bench prints it, so *answerable* is a number and `--fail-under` gates th
 them; `tidy` is the hygiene pass over the store -- dry unless `--apply`, and it refuses to
 run beside a detached ingest, because one job is on the GPU.
 
+The reads files keep every extraction for good: each concept with the definition in its
+source's words, and the model's whole reply for a unit that failed. `forget --out STORE`
+deletes them all, and `--source SLUG` one source's. The store keeps its nodes and edges;
+`fold`, `show` and `sources` have nothing left to read for a forgotten source.
+
 `Sources` is the same thing for an application:
 
 ```python
