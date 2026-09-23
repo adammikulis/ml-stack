@@ -18,10 +18,7 @@ from ml_stack.bench.record import of
 from ml_stack.bench.score import derived, held_up, host_of, per_question
 from ml_stack.serve.profile import ASK
 
-# Every word a label can carry about the asking, and what it means to `converse`. Wider
-# than `ASKINGS`, which is only what the tables print: `batch`, `kinds` and `summary` ride
-# on an asking rather than naming one, and a profile has to carry them or a model measured with
-# all three would be served with none.
+# Every word a label can carry about the asking; wider than `ASKINGS`, which the tables print.
 FLAGS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
         "constrain_ids", "reach", "rounds")
 
@@ -29,14 +26,8 @@ FLAGS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
 def flags_of(one: Mapping[str, Any]) -> dict[str, Any]:
     """The asking a run records, as the fields of a profile.
 
-    A run kept since `asked_with` carries ``asking`` -- the keywords `converse` was actually
-    handed -- and that is taken as it is: it is the record, and reading a label instead
-    would be inferring what is already written down.
-
-    Older runs have only the label, so it is read by whole word, never by substring -- a
-    model called ``tightfit`` is not a ``tight`` asking. ``loose`` is the one word that
-    means the *absence* of a way: it is the control the ranking runs were measured with,
-    and it is how ``tight=False`` is said.
+    Read from the run's ``asking`` record when it has one, otherwise from its label by
+    whole word; ``loose`` in a label means ``tight=False``.
     """
     said = one.get("asking")
     if isinstance(said, Mapping) and said:
@@ -57,23 +48,17 @@ def flags_of(one: Mapping[str, Any]) -> dict[str, Any]:
     if "reach" in words:
         from ml_stack.bench.askings import REACH
 
-        # the label says a run reached; it does not say how far, and `--also reach` is the
-        # only thing that puts the word there, so its own figure is what was measured
+        # a label says `reach` without a distance; `--also reach` uses REACH
         out["reach"] = int(REACH)
     return out
 
 
 def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
                   ) -> Mapping[str, Any] | None:
-    """The run one model's record should be written from: the fastest whose F1 held.
+    """The run one model's record is written from: the fastest whose F1 held.
 
-    Held is `score.held_up`: it did not fall at all, or the fall is inside what the
-    questions can account for. Compared only among the model's longest runs, since a score
-    means nothing beside a score over a different number of questions; ties go to the
-    higher F1, then to the later run.
-
-    None for a model whose longest run is under `SHORT` questions -- a record is never set
-    from a smoke run -- and `main` says so.
+    Held is `score.held_up`, compared among the model's longest runs; ties go to the
+    higher F1, then the later run. None when the longest run is under `SHORT` questions.
     """
     pool = [one for one in mine if derived(one)]
     if not pool:
@@ -97,14 +82,8 @@ def workload_of(one: Mapping[str, Any]) -> str:
 
 
 def profile_of(model: str, one: Mapping[str, Any]) -> Any:
-    """The settings a run records, as a `ml_stack.serve.profile.Profile`.
-
-    One row sets one record, and the record says which row: settings composed from the
-    accuracy of one run and the speed of another is a configuration nobody ever served.
-    Nothing is guessed -- a field the run does not carry is left at its default, and `add`
-    keeps whatever the older record knew about the two fields a kept run cannot see (the
-    extra llama-server flags and the vision projector).
-    """
+    """The settings one run records, as a `ml_stack.serve.profile.Profile`; a field the
+    run does not carry is left at its default."""
     from ml_stack.hub import spec_for
     from ml_stack.serve.profile import record
 
@@ -150,15 +129,8 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
 
 def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
                    path: Path | None = None) -> list[tuple[Any, Path]]:
-    """Write one record per model and workload, from the row `across` ranks it by. Returns
-    what it wrote.
-
-    The ranking fixes the *order* and `measured_best` fixes the *row*. They are not the
-    same question: the ranking asks which model answers best, and a record asks how this
-    model should be asked, where two askings the questions cannot tell apart should be
-    settled by the seconds rather than by a hundredth of an F1. Both read only a model's
-    longest runs, so a profile is never settings chosen by a coin toss over two questions.
-    """
+    """Write one record per model and workload, in `across` order, each from the row
+    `measured_best` picks. Returns what it wrote."""
     grouped = by_model(kept)
     out = []
     for model, _ranked in across(kept, full_n=full_n):
@@ -177,14 +149,16 @@ def _written(model: str, workload: str, one: Mapping[str, Any],
     """One record, written from ``one`` into the ``model`` and ``workload`` slot."""
     from dataclasses import replace
 
-    from ml_stack.serve.profile import FLAGS, add, profile_for, records_in, writable_file
+    from ml_stack.serve.profile import (FLAGS, _plain, add, profile_for, records_in,
+                                        writable_file)
 
     made_one = profile_of(model, one)
     if not asked_recorded(one):
-        # a run whose label is all `flags_of` could read keeps the asking the record holds
+        # a run whose label is all `flags_of` could read keeps the asking its own record holds
         older = profile_for(model, workload=workload,
                             records=records_in(path or writable_file()))
-        if older is not None and older.workload == workload:
+        if (older is not None and older.workload == workload
+                and _plain(older.model) == _plain(model)):
             asked = {flag: getattr(older, flag) for flag in FLAGS}
             asked.update(reach=older.reach, rounds=older.rounds)
             made_one = replace(made_one, **asked,

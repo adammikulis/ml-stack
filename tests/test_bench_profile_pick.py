@@ -79,6 +79,26 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
     assert "predates" not in got.note
 
 
+def test_a_run_without_an_asking_record_never_takes_another_quantisations_asking(tmp_path):
+    """The record for another file of the same family is not this file's asking."""
+    from ml_stack.bench.profiles import write_profiles
+    from ml_stack.serve.profile import add, profile_for, record, records_in
+
+    where = tmp_path / "profiles.json"
+    add(record("Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf", tight=True, batch=True, kinds=True,
+               summary=True, questions=100, right=0.8), path=where)
+    store = tmp_path / "runs.ladybug"
+    _run(store, "flashnext-plain", questions=100, hits=60, seconds=4000.0,
+         model="Qwen3.8-Flash-Next-UD-IQ4_XS.gguf")
+
+    write_profiles(runs(store), path=where)
+
+    got = profile_for("Qwen3.8-Flash-Next-UD-IQ4_XS.gguf", records=records_in(where))
+    assert got.label == "flashnext-plain"
+    assert (got.batch, got.kinds, got.summary) == (False, False, False)
+    assert "predates" not in got.note
+
+
 def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
     """One model measured two askings writes two records, and neither overwrites the other."""
     from ml_stack.bench.profiles import write_profiles
