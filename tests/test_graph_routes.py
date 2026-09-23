@@ -238,3 +238,76 @@ def test_the_served_page_is_a_whole_document_with_the_live_sign_first(tmp_path):
 def test_the_bare_handler_still_404s_the_optional_routes(path):
     with threaded_server(Quiet.configured(name="Bare2")) as url:
         assert call(url + path)[0] == 404
+
+
+# ------------------------------------------------------------------ the command
+
+
+def _bound(argv):
+    from ml_stack.graph.serve import bind
+
+    httpd = bind(argv)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
+
+
+def _listed(url):
+    rows: list = []
+    for _ in range(100):
+        rows = call(url + "/review")[1]
+        if rows:
+            break
+        time.sleep(0.05)
+    return rows
+
+
+def test_the_command_files_a_request_into_the_review_queue_beside_the_store(tmp_path):
+    page = tmp_path / "page.html"
+    page.write_text("<p></p>", encoding="utf-8")
+    graph = tmp_path / "graph.json"
+    write_json(graph, GRAPH)
+    store = tmp_path / "g.ladybug"
+    httpd, url = _bound(["serve", "--site", str(page), "--port", "0", "--graph", str(graph),
+                         "--store", str(store)])
+    try:
+        assert call(url + "/review") == (200, [])
+        body = {"at": "2026-01-02T00:00:00Z", "kind": "Fix my information",
+                "claimed": "person:iris", "claimedLabel": "Iris Bellweather", "attested": True,
+                "text": "drop my topic", "targets": []}
+        assert call(url + "/request", "POST", body)[0] == 204
+        rows = _listed(url)
+        assert [r["text"] for r in rows] == ["drop my topic"]
+        assert rows[0]["status"] == "proposed" and rows[0]["edits"] == []
+        assert any("model" in c for c in rows[0]["concerns"]), rows[0]["concerns"]
+        assert call(url + "/review", "POST", {"id": rows[0]["id"], "action": "refuse"})[0] == 200
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert (tmp_path / "g.ladybug.requests.jsonl").is_file()
+    assert read_json(tmp_path / "g.ladybug.review.json", {})[rows[0]["id"]]["status"] == "refused"
+    assert not store.exists(), "nothing is written into the store"
+
+
+def test_the_command_puts_requests_and_the_queue_where_it_is_told(tmp_path):
+    page = tmp_path / "page.html"
+    page.write_text("<p></p>", encoding="utf-8")
+    httpd, url = _bound(["serve", "--site", str(page), "--port", "0",
+                         "--requests", str(tmp_path / "r" / "in.jsonl"),
+                         "--review", str(tmp_path / "q" / "queue.json")])
+    try:
+        assert call(url + "/request", "POST", {"text": "add my town"})[0] == 204
+        assert [r["text"] for r in _listed(url)] == ["add my town"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert (tmp_path / "r" / "in.jsonl").is_file()
+    assert [p["text"] for p in read_json(tmp_path / "q" / "queue.json", {}).values()] \
+        == ["add my town"]
+    httpd, _ = _bound(["serve", "--site", str(page), "--port", "0"])
+    try:
+        handler = httpd.RequestHandlerClass
+        assert handler.requests == tmp_path / "page.html.requests.jsonl"
+        assert handler.queue.path == tmp_path / "page.html.review.json"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

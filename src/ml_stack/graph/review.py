@@ -10,6 +10,7 @@ accepted edits -- something a rebuild applies over fresh extractions -- hands th
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,7 @@ class Queue:
         self.journal = journal
         self.exported = exported
         self.log = log
+        self.lock = threading.Lock()
 
     def read(self) -> dict[str, Any]:
         return read_json(self.path, {})
@@ -79,6 +81,16 @@ class Queue:
     def listed(self) -> list[dict[str, Any]]:
         """Every proposal, for a page: `listed` over what is on disk."""
         return listed(self.read())
+
+    def put(self, key: str, proposal: Mapping[str, Any]) -> bool:
+        """Add one proposal under ``key``; False when the queue already holds it."""
+        with self.lock:
+            proposals = self.read()
+            if key in proposals:
+                return False
+            proposals[key] = dict(proposal)
+            write_json(self.path, proposals)
+            return True
 
     def act(self, key: str, action: str) -> list[str]:
         """Accept, refuse or undo one proposal on disk. Returns what could not be applied.
@@ -89,6 +101,10 @@ class Queue:
         """
         if action not in ACTIONS:
             raise ValueError(f"no such action: {action}")
+        with self.lock:
+            return self._act(key, action)
+
+    def _act(self, key: str, action: str) -> list[str]:
         proposals = self.read()
         if key not in proposals:
             raise KeyError(key)

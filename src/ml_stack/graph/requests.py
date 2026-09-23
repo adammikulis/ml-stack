@@ -110,20 +110,36 @@ def propose(requests: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], cli
             listed.append({"op": change.op, "target": change.target, "other": change.other,
                            "name": change.name, "value": change.value, "reason": change.reason,
                            "problems": change.problems, "proposed": True})
-        out[k] = {
-            "at": request.get("at", ""),
-            "kind": request.get("kind", ""),
-            "claimed": request.get("claimed", ""),
-            "claimedLabel": request.get("claimedLabel", ""),
-            "attested": bool(request.get("attested")),
-            "concerns": concerns(dict(request), listed, dict(graph)),
-            "text": request.get("text", ""),
-            "targets": request.get("targets") or [],
-            "edits": listed,
-            "status": "proposed",
-        }
+        out[k] = proposal(request, listed, concerns(dict(request), listed, dict(graph)))
         log(f"request {request.get('at', '')!r}: {len(edits)} proposed edit(s)")
     return out
+
+
+def proposal(request: Mapping[str, Any], edits: list[dict[str, Any]],
+             said: Sequence[str]) -> dict[str, Any]:
+    """One request as a queue entry: its fields, ``concerns``, ``edits`` and ``status: proposed``."""
+    return {
+        "at": request.get("at", ""),
+        "kind": request.get("kind", ""),
+        "claimed": request.get("claimed", ""),
+        "claimedLabel": request.get("claimedLabel", ""),
+        "attested": bool(request.get("attested")),
+        "concerns": list(said),
+        "text": request.get("text", ""),
+        "targets": request.get("targets") or [],
+        "edits": edits,
+        "status": "proposed",
+    }
+
+
+def unread(request: Mapping[str, Any], graph: Mapping[str, Any] | None,
+           reason: str) -> dict[str, Any]:
+    """A request no model read, as a queue entry with no edits and ``reason`` among its concerns."""
+    from ml_stack.graph.concerns import concerns
+
+    held = {"nodes": list((graph or {}).get("nodes") or []),
+            "edges": list((graph or {}).get("edges") or [])}
+    return proposal(request, [], [*concerns(dict(request), [], held), reason])
 
 
 def from_chat(text: str, graph: Mapping[str, Any], client: Any, *, at: str = "",

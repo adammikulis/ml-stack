@@ -530,7 +530,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
     reads under, ``graph`` what questions are answered over, ``store`` the corpus
     conversations are kept beside (`AskRoutes.store`), and ``config`` the model (`AskRoutes.config`); ``queue``, ``requests``, ``stages``
     and ``drafter`` are the review, request, refresh and draft routes' (each a 404 until
-    set). :meth:`configured` makes a subclass with those set, so two servers in one process
+    set); ``proposed`` puts a filed request into ``queue``. :meth:`configured` makes a subclass with those set, so two servers in one process
     do not share them.
     """
 
@@ -565,6 +565,25 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
         if stream:
             return converse_stream(question, self.graph, client, on_event=emit, **asked)
         return converse(question, self.graph, client, **asked)
+
+    def proposed(self, row: Mapping[str, Any]) -> None:
+        """Put a filed request in ``queue``: read by the model over ``graph``, or with no
+        edits and the reason when it cannot be."""
+        if self.queue is None:
+            return
+        from ml_stack.graph.requests import key, propose, unread
+
+        k = key(row)
+        if k in self.queue.read():
+            return
+        try:
+            if self.graph is None:
+                raise RuntimeError("no graph on this server")
+            made = propose([row], self.graph, self.client_on_slot(index=0))[k]
+        except Exception as exc:  # noqa: BLE001 - the queue carries the reason
+            warn(f"{time.strftime('%FT%T')} request kept, not read by a model: {exc}")
+            made = unread(row, self.graph, f"not read by a model: {str(exc)[:200]}")
+        self.queue.put(k, made)
 
     # ------------------------------------------------------------------- the routes
 
@@ -689,6 +708,12 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--conversations-in-store", action="store_true",
                        help="keep questions and answers in --store itself, as nodes beside "
                             "the corpus")
+    serve.add_argument("--requests", type=Path,
+                       help="the JSONL file the page's change requests are appended to "
+                            "(default: STORE.requests.jsonl, or beside --site without a store)")
+    serve.add_argument("--review", type=Path,
+                       help="the review queue each request is proposed into, as JSON "
+                            "(default: STORE.review.json, or beside --site without a store)")
     placed = subs.add_parser(
         "geocode", help="give every entry that names a place a point, and optionally join "
                         "the nearest of them",
@@ -732,8 +757,14 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
     graph = None
     if args.graph:
         graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    from ml_stack.graph.review import Queue
+
+    beside = str(args.store or args.site)
+    requests = args.requests or Path(beside + ".requests.jsonl")
+    queue = Queue(args.review or Path(beside + ".review.json"), store=args.store)
     handler = Handler.configured(site=args.site, export=args.export, graph=graph,
-                                 store=args.store, config=config,
+                                 store=args.store, config=config, queue=queue,
+                                 requests=requests,
                                  conversations_in_store=bool(args.conversations_in_store))
     return ThreadingHTTPServer(("127.0.0.1", int(args.port)), handler)
 
