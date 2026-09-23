@@ -85,8 +85,8 @@ def cmd_build(args) -> int:
 
     kind = args.source_kind or ("source" if can_build_from_source() else "release")
     if kind == "release" and patch_files():
-        warn(f"a downloaded release carries none of the {len(patch_files())} patches in "
-             f"{patches_dir()}; build --from source for those")
+        warn(f"a downloaded release carries none of ml-stack's {len(patch_files())} "
+             "llama.cpp patches; 'ml-stack-serve build --from source' applies them")
     try:
         if name:
             if kind == "release":

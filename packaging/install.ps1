@@ -402,10 +402,10 @@ switch ($mode) {
 }
 
 if ($mode -ne "app") {
-    Show-Sizing
     Build-Llama
     Fetch-Models
     Join-Fleet
+    Show-Sizing
     Show-WhatCameWithIt
     Check-Over
     Last-Screen

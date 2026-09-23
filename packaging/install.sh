@@ -431,11 +431,11 @@ case "$MODE" in
 esac
 
 if [ "$MODE" != app ]; then
-  sizing
   choose_model
   llama_build
   fetch_models
   join_fleet
+  sizing
   what_came_with_it
   check_over
   last_screen

@@ -770,6 +770,15 @@ def _current_build(tag: str, arches: set[str], defined: set[str]) -> Path:
     return dest
 
 
+def test_the_names_llama_cpp_defines_are_read_whatever_family_they_belong_to(tmp_path):
+    import ml_stack.setup as setup_module
+
+    _fake_libllama(tmp_path / "libllama.dylib", {"bert", "t5encoder", "gemma4", "phi4", "chatml"})
+    assert setup_module._arches(tmp_path, known={"bert", "t5encoder", "gemma4", "mamba"}) == {
+        "bert", "t5encoder", "gemma4"}
+    assert setup_module._arches(tmp_path) == {"gemma4", "phi4"}
+
+
 class TestReleaseInstall:
     def test_the_newest_release_with_a_matching_asset_is_downloaded_and_installed(
             self, monkeypatch, tmp_path):

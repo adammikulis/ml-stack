@@ -453,7 +453,7 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
     ``target`` is the server binary (its sibling ``lib/`` and its own directory are
     searched) or a directory holding the dylibs directly. A prefix match alone is
     imprecise -- ``"phi4"`` names a chat template, not an architecture -- so ``known``
-    (the real names, from a source checkout) restricts the guess when it is given.
+    (the names llama.cpp's source defines) replaces the guess when it is given.
     """
     path = Path(target)
     if path.is_dir():
@@ -475,11 +475,12 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
             # Keep looking until an *architecture* turns up, not merely until some word
             # does: the first library in the directory is full of ordinary strings and
             # none of the names, and stopping there reported "supports nothing".
-    guessed = {w for w in found if any(
+    if known is not None:
+        return found & known
+    return {w for w in found if any(
         w.startswith(f) for f in ("qwen", "gemma", "llama", "phi", "mistral",
                                   "deepseek", "granite", "olmo", "cohere", "gpt", "glm",
                                   "nemotron", "falcon", "mamba", "rwkv", "exaone"))}
-    return guessed & known if known is not None else guessed
 
 
 def explain() -> None:
