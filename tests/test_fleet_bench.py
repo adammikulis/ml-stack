@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack.bench.peer_runs import gather, import_runs
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.measuring import (
@@ -113,7 +113,7 @@ def _box(tmp_path: Path, name: str, *, room: int, launch=None, busy: bool = Fals
         return {"cpus": 8, **host.report()}
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0),
-                                make_handler(runner, files, token, name, report, bench=host))
+                                make_handler(Daemon(runner, files, token, name, report, bench=host)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     peer = Peer(f"http://127.0.0.1:{httpd.server_address[1]}", token)
     box = Box(name=name, peer=peer, host=host, runner=runner, home=home, httpd=httpd)

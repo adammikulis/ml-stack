@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -46,26 +47,40 @@ INFER_CHUNK = 1 << 13
 INFER_TIMEOUT = 600.0
 
 
-def make_handler(runner: JobRunner, files_root: Path,
-                 token: "str | Callable[[], str]",
-                 name: str | Callable[[], str] = "",
-                 report: Callable[[], dict[str, Any]] = device_report,
-                 fetcher: "Fetcher | None" = None,
-                 ui: "Any | None" = None,
-                 schedule: "Availability | None" = None,
-                 on_paused: str = "stop",
-                 schedule_path: "Path | None" = None,
-                 serving: "Serving | None" = None,
-                 models: "Models | None" = None,
-                 cluster_key_path: "Path | str | None" = None,
-                 tokens: "Callable[[], set[str]] | None" = None,
-                 bench: "BenchHost | None" = None,
-                 hosting: "Hosting | None" = None):
-    """``bench`` is a `fleet.measuring.BenchHost`: with one, this daemon takes bench jobs
-    beside training jobs (``POST /bench``), says what it can measure (``GET /bench``) and
-    hands back what it measured (``GET /bench/export``). ``hosting`` is a
-    `fleet.serving.Hosting`: with one and ``models``, ``POST /serve`` runs a model this
+@dataclass
+class Daemon:
+    """What the daemon's routes answer from. ``bench`` is a `fleet.measuring.BenchHost`:
+    with one, the daemon takes bench jobs (``POST /bench``), says what it can measure
+    (``GET /bench``) and hands back what it measured (``GET /bench/export``). ``hosting`` is
+    a `fleet.serving.Hosting`: with one and ``models``, ``POST /serve`` runs a model this
     machine holds."""
+
+    runner: JobRunner
+    files_root: Path
+    token: str | Callable[[], str]
+    name: str | Callable[[], str] = ""
+    report: Callable[[], dict[str, Any]] = device_report
+    fetcher: Fetcher | None = None
+    ui: Any | None = None
+    schedule: Availability | None = None
+    on_paused: str = "stop"
+    schedule_path: Path | None = None
+    serving: Serving | None = None
+    models: Models | None = None
+    cluster_key_path: Path | str | None = None
+    tokens: Callable[[], set[str]] | None = None
+    bench: BenchHost | None = None
+    hosting: Hosting | None = None
+
+
+def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
+    """The request handler class for ``daemon``."""
+    runner, files_root, token, name = daemon.runner, daemon.files_root, daemon.token, daemon.name
+    report, fetcher, ui, schedule = daemon.report, daemon.fetcher, daemon.ui, daemon.schedule
+    on_paused, schedule_path, serving = daemon.on_paused, daemon.schedule_path, daemon.serving
+    models, cluster_key_path, tokens = daemon.models, daemon.cluster_key_path, daemon.tokens
+    bench, hosting = daemon.bench, daemon.hosting
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -223,6 +238,10 @@ def make_handler(runner: JobRunner, files_root: Path,
             return ui_routes(ui, self)
 
         def do_GET(self) -> None:
+            if self.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
+                return
             if self._proxy():
                 return
             if self._ui():

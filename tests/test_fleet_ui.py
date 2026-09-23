@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import in_cluster, primary_ip
 from ml_stack.fleet.jobs import JobRunner
@@ -63,10 +63,10 @@ class Serving:
         self.port = _free_port()
         self.httpd = ThreadingHTTPServer(
             ("0.0.0.0", self.port),
-            make_handler(self.runner, self.files, token, name, ui=self.ui,
+            make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
                          cluster_key_path=self.keyfile,
-                         schedule_path=(root / "availability.json") if schedule else None))
+                         schedule_path=(root / "availability.json") if schedule else None)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def _cluster_tokens(self):

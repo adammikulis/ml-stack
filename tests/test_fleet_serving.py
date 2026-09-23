@@ -12,7 +12,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Endpoint, Serving, answers
@@ -25,7 +25,7 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-class Daemon:
+class Running:
     def __init__(self, tmp_path, serving):
         root = tmp_path / "traind"
         files = root / "files"
@@ -35,7 +35,7 @@ class Daemon:
         self.port = free_port()
         self.httpd = ThreadingHTTPServer(
             ("127.0.0.1", self.port),
-            make_handler(self.runner, files, self.token, "box", serving=serving))
+            make_handler(Daemon(self.runner, files, self.token, "box", serving=serving)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def post(self, path, body=None, token=None, stream=False):
@@ -68,7 +68,7 @@ def model():
 def wired(tmp_path, model):
     serving = Serving(tmp_path / "serving.json")
     serving.register(model.port, ["qwen3-4b.gguf"], slots=4)
-    d = Daemon(tmp_path, serving)
+    d = Running(tmp_path, serving)
     try:
         yield d, serving, model
     finally:
@@ -179,7 +179,7 @@ class TestProxy:
 
     def test_a_machine_with_no_model_says_so(self, tmp_path):
         serving = Serving(tmp_path / "empty.json")
-        daemon = Daemon(tmp_path, serving)
+        daemon = Running(tmp_path, serving)
         try:
             with pytest.raises(urllib.error.HTTPError) as exc:
                 daemon.post("/infer/v1/chat/completions", {})

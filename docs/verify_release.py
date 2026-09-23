@@ -104,7 +104,14 @@ def _():
 # -- the daemon ----------------------------------------------------------
 class Box:
     def __init__(self, name="box", slots=1, labels=(), extra=None, host="127.0.0.1"):
-        from ml_stack.fleet import JobRunner, Peer, device_report, load_or_create_token, make_handler
+        from ml_stack.fleet import (
+            Daemon,
+            JobRunner,
+            Peer,
+            device_report,
+            load_or_create_token,
+            make_handler,
+        )
         from ml_stack.fleet.settings import Settings
         from ml_stack.fleet.ui import UI
         root = TMP / name
@@ -119,7 +126,7 @@ class Box:
         self.ui.settings_path, self.ui.report = root / "settings.json", report
         self.httpd = ThreadingHTTPServer(
             (host, self.port),
-            make_handler(self.runner, self.files, token, name, report, ui=self.ui))
+            make_handler(Daemon(self.runner, self.files, token, name, report, ui=self.ui)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.peer = Peer(f"http://127.0.0.1:{self.port}", token)
 
@@ -513,7 +520,7 @@ def _():
     import threading
     from http.server import ThreadingHTTPServer
 
-    from ml_stack.fleet import JobRunner, Models, join_cluster, make_handler
+    from ml_stack.fleet import Daemon, JobRunner, Models, join_cluster, make_handler
     from ml_stack.fleet.daemon import load_or_create_token
 
     key = join_cluster(WORDS, path=TMP / "models.key")
@@ -527,9 +534,9 @@ def _():
     files.mkdir(parents=True, exist_ok=True)
     runner = JobRunner(root, files)
     port = free_port()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(Daemon(
         runner, files, load_or_create_token(root, key), "haver",
-        models=Models([where], where), cluster_key_path=TMP / "models.key"))
+        models=Models([where], where), cluster_key_path=TMP / "models.key")))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         want = TMP / "wanter"
@@ -723,7 +730,7 @@ def _():
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    from ml_stack.fleet import JobRunner, Serving, join_cluster, make_handler
+    from ml_stack.fleet import Daemon, JobRunner, Serving, join_cluster, make_handler
     from ml_stack.fleet.chat import find, reply_text, stream, targets
     from ml_stack.fleet.daemon import load_or_create_token
     from ml_stack.fleet.discovery import derive_token
@@ -761,8 +768,8 @@ def _():
     serving.register(model.server_address[1], ["tiny-test.gguf"])
     runner = JobRunner(root, files)
     port = free_port()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
-        runner, files, load_or_create_token(root, key), "host", serving=serving))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(Daemon(
+        runner, files, load_or_create_token(root, key), "host", serving=serving)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
     try:
@@ -793,7 +800,7 @@ def _():
     from http.server import ThreadingHTTPServer
 
     from ml_stack import speech as package
-    from ml_stack.fleet import JobRunner, make_handler
+    from ml_stack.fleet import Daemon, JobRunner, make_handler
     from ml_stack.fleet.daemon import load_or_create_token
     from ml_stack.fleet.remote import Peer
     from ml_stack.media import wav
@@ -826,7 +833,7 @@ def _():
     token = load_or_create_token(root)
     runner = JobRunner(root)
     port = free_port()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(runner, files, token))
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(Daemon(runner, files, token)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         peer = Peer(f"http://127.0.0.1:{port}", token)

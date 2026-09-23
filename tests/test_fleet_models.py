@@ -434,7 +434,7 @@ class TestDraftModels:
         """The internet is only for what nobody nearby holds."""
         from http.server import ThreadingHTTPServer
 
-        from ml_stack.fleet.api import make_handler
+        from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.jobs import JobRunner
 
@@ -449,9 +449,9 @@ class TestDraftModels:
         port = free_port()
         httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
-            make_handler(runner, root / "files", token,
+            make_handler(Daemon(runner, root / "files", token,
                          models=Models([theirs], theirs),
-                         cluster_key_path=tmp_path / "their.key"))
+                         cluster_key_path=tmp_path / "their.key")))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
         asked = []
@@ -857,7 +857,7 @@ class TestOverHTTP:
     def served(self, tmp_path):
         from http.server import ThreadingHTTPServer
 
-        from ml_stack.fleet.api import make_handler
+        from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.jobs import JobRunner
         from ml_stack.fleet.remote import Peer
@@ -872,9 +872,9 @@ class TestOverHTTP:
         port = free_port()
         httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
-            make_handler(runner, files, token,
+            make_handler(Daemon(runner, files, token,
                          models=Models([theirs], theirs),
-                         cluster_key_path=tmp_path / "cluster.key"))
+                         cluster_key_path=tmp_path / "cluster.key")))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         try:
             yield Peer(f"http://127.0.0.1:{port}", token), theirs

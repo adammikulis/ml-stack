@@ -17,7 +17,7 @@ from http.server import ThreadingHTTPServer
 import pytest
 from test_fleet_ui import WORDS, Serving as UIServing
 
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.chat import find, targets
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import join_cluster
@@ -62,7 +62,7 @@ def host(tmp_path, model_server):
     port = _free_port()
     httpd = ThreadingHTTPServer(
         ("127.0.0.1", port),
-        make_handler(runner, files, token, "host", serving=serving))
+        make_handler(Daemon(runner, files, token, "host", serving=serving)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         yield {"name": "host", "base_url": f"http://127.0.0.1:{port}",
@@ -351,7 +351,7 @@ class TestAnsweringToSeveralClusters:
     def daemon(self, tmp_path, anchor):
         from http.server import ThreadingHTTPServer
 
-        from ml_stack.fleet.api import make_handler
+        from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.discovery import derive_token, memberships
         from ml_stack.fleet.jobs import JobRunner
@@ -365,10 +365,10 @@ class TestAnsweringToSeveralClusters:
         port = _free_port()
         httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
-            make_handler(runner, files, token, "box",
+            make_handler(Daemon(runner, files, token, "box",
                          cluster_key_path=anchor,
                          tokens=lambda: {derive_token(m.key)
-                                         for m in memberships(anchor)}))
+                                         for m in memberships(anchor)})))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         return f"http://127.0.0.1:{port}", runner, httpd
 

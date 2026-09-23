@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack.files import sha256_file
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.device import device_report, resolve_report, stdlib_device_report
 from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
@@ -46,7 +46,7 @@ def daemon(tmp_path):
     runner = JobRunner(root)
     port = _free_port()
     httpd = ThreadingHTTPServer(("127.0.0.1", port),
-                                make_handler(runner, files, token))
+                                make_handler(Daemon(runner, files, token)))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     client = Peer(f"http://127.0.0.1:{port}", token)
@@ -88,6 +88,14 @@ def test_ordinary_nested_paths_are_allowed(tmp_path):
 def test_health_needs_no_token(daemon):
     client, *_ = daemon
     assert client.health()["ok"] is True
+
+
+def test_the_favicon_is_a_204_without_a_token(daemon):
+    import urllib.request
+
+    client, *_ = daemon
+    with urllib.request.urlopen(client.base_url + "/favicon.ico", timeout=5) as r:
+        assert r.status == 204 and r.read() == b""
 
 
 def test_everything_else_requires_the_token(daemon):
@@ -133,8 +141,6 @@ def test_an_environment_value_that_is_not_a_string_reaches_the_job(daemon):
 
 
 @pytest.mark.slow
-
-
 def test_only_one_job_runs_at_a_time(daemon):
     """A GPU is not shareable: two jobs contend, both get slower, and the
     slowdown is silent. The second must queue, not compete."""
@@ -174,8 +180,6 @@ def test_stop_sends_sigterm_so_a_checkpointing_loop_can_save(daemon, tmp_path):
 
 
 @pytest.mark.slow
-
-
 def test_stopping_a_queued_job_dequeues_it(daemon):
     client, *_ = daemon
     a = client.submit([sys.executable, "-c", "import time; time.sleep(2)"])
@@ -469,7 +473,7 @@ def multi_daemon(tmp_path):
     runner = JobRunner(root, slots=3)
     port = _free_port()
     httpd = ThreadingHTTPServer(("127.0.0.1", port),
-                                make_handler(runner, files, token))
+                                make_handler(Daemon(runner, files, token)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
     try:
@@ -503,8 +507,6 @@ def test_slots_let_several_jobs_run_at_once(multi_daemon):
 
 
 @pytest.mark.slow
-
-
 def test_stopping_one_job_does_not_kill_its_neighbour(multi_daemon):
     """The specific failure: with a single `_current` handle, "the running process" is
     not a thing, and stopping job B reaches for whatever ran last -- killing job A."""
@@ -699,8 +701,8 @@ def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
     port = _free_port()
     httpd = ThreadingHTTPServer(
         ("127.0.0.1", port),
-        make_handler(runner, root / "files", token, "rtx",
-                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"})))
+        make_handler(Daemon(runner, root / "files", token, "rtx",
+                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"}))))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         health = Peer(f"http://127.0.0.1:{port}", token).health()
@@ -737,7 +739,7 @@ def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
     called = ["hollowbrook"]
     httpd = ThreadingHTTPServer(
         ("127.0.0.1", port),
-        make_handler(runner, root / "files", token, lambda: called[0]))
+        make_handler(Daemon(runner, root / "files", token, lambda: called[0])))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
     try:

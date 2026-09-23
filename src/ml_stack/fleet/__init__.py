@@ -15,6 +15,7 @@ _WHERE = {
     "Conversation": "conversations",
     "Conversations": "conversations",
     "Message": "conversations",
+    "Daemon": "api",
     "make_handler": "api",
     "load_or_create_token": "daemon",
     "serve_forever": "daemon",

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.device import device_report
 from ml_stack.fleet.jobs import JobRunner
@@ -55,7 +55,7 @@ class Box:
 
         self.httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
-            make_handler(self.runner, self.files, token, name, report))
+            make_handler(Daemon(self.runner, self.files, token, name, report)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.peer = Peer(f"http://127.0.0.1:{port}", token)
 

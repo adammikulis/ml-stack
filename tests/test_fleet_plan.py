@@ -16,7 +16,7 @@ import pytest
 from test_fleet_join import WORDS, FakeDaemon, _free_tcp, _free_udp
 
 from ml_stack.fleet import join as joining
-from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import Advertiser, Beacon, join as join_cluster, load_cluster_key
 from ml_stack.fleet.jobs import JobRunner
@@ -323,9 +323,9 @@ class ServingDaemon:
         self.port = _free_tcp()
         self.httpd = ThreadingHTTPServer(
             ("127.0.0.1", self.port),
-            make_handler(self.runner, root / "files", self.token, name,
+            make_handler(Daemon(self.runner, root / "files", self.token, name,
                          report=lambda: {"room_bytes": room}, serving=self.serving,
-                         models=self.models, hosting=self.hosting))
+                         models=self.models, hosting=self.hosting)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.client = Peer(f"http://127.0.0.1:{self.port}", self.token)
         self.advertiser = None

@@ -25,7 +25,7 @@ from ml_stack.platform import on_quit, private_file
 from ml_stack.speech import service as speech
 
 from . import autostart, updates as updating
-from .api import make_handler
+from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
 from .device import device_report as default_report, resolve_report, stdlib_device_report
@@ -184,13 +184,13 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
 
     httpd = ThreadingHTTPServer((host, port),
-                                make_handler(runner, files_root,
-                                             lambda: live_token[0],
-                                             lambda: live_name[0], report,
-                                             fetcher, interface, schedule, on_paused,
-                                             schedule_path, serving, models,
-                                             cluster_key_path, every_token,
-                                             bench=bench_host[0], hosting=hosting))
+                                make_handler(Daemon(
+                                    runner, files_root, lambda: live_token[0],
+                                    name=lambda: live_name[0], report=report, fetcher=fetcher,
+                                    ui=interface, schedule=schedule, on_paused=on_paused,
+                                    schedule_path=schedule_path, serving=serving, models=models,
+                                    cluster_key_path=cluster_key_path, tokens=every_token,
+                                    bench=bench_host[0], hosting=hosting)))
     # Keeping this machine current, in one of two modes and never in both. Either way the
     # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
     nothing_running = updating.quiet(
