@@ -85,9 +85,8 @@ and `read_from` edges, the same `<source>:<chapter>:<section>` unit ids behind e
 and `sources`, `show`, `tidy` and `ask` work over it unchanged. The model and run id on the
 rows become a `run` node the units point at, so `origin()` still says which model said this.
 
-The two vocabularies are joined by a table. This library sets nineteen verbs itself; an
-extractor free to choose its own writes thousands -- one anatomy textbook carries 2,110
-distinct predicates. A predicate with a counterpart is normalised onto that verb, subject
+The two vocabularies are joined by a table. This library sets its own verbs (`ingest.CORE`);
+an extractor free to choose writes thousands of its own. A predicate with a counterpart is normalised onto that verb, subject
 and object swapped where the natural reading is the inverse: `includes` is `has_part`,
 `defines` is `defined_by`, `enables` is `requires`, `caused_by` is `causes` the other way
 round. Every other predicate comes in as it stands, its edges carrying `extension`, so a
@@ -96,9 +95,8 @@ reader and a query can tell a verb this library set from a verb the extractor ch
 printed, and kept in the store as `ingest:predicates:<source>`.
 
 Some of what an open vocabulary writes stands in for a relation rather than being one.
-`related_to`, `describes` and `supports` mostly say the two things were named near one
-another -- 3,861 of the anatomy textbook's 21,922 relations, under 92 predicates that
-`ingest.VAGUE` lists. Mostly, not always: `associated_with` is the exact claim an
+`related_to`, `describes`, `supports` and the other predicates `ingest.VAGUE` lists mostly say
+the two things were named near one another. Mostly, not always: `associated_with` is the exact claim an
 epidemiological source means, and reading it as `causes` would say more than the source
 did. Telling the deliberate hedge from the shrug takes the passage, and an import has no
 passage -- it has another extractor's output, where the two look alike. So those relations
@@ -124,10 +122,8 @@ own nodes and edges out, then the full fold from its reads -- is the one path th
 anything, for after a fix that changed what a read means. `fold --dry-run` says what a fold
 would add and writes nothing.
 
-The interval is a measured cost rather than a formality. The fold is `entities.fold`
-comparing every concept name against every other, so it grows with the square of the
-vocabulary: 400 invented sections of a twelve-word vocabulary fold and write in 3.8 s, and
-300 sections of a 2,700-word one take 44 s to fold and 9 s to write.
+The fold is `entities.fold` comparing every concept name against every other, so its cost
+grows with the square of the vocabulary.
 
 `ml-stack-ingest fold --out STORE [--source SLUG]` does the same from the reads on demand,
 and is idempotent. `show` prints what each source was read as -- concepts with their kind

@@ -138,7 +138,8 @@ Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
   measured at --parallel 2, 16384 per slot
   per request draft 4 ahead, greedy -- sent with each call, where the build takes it
   ask with    tight + batch + kinds + summary + greedy
-  measured    85% F1 (89% recall, 83% precision) at 26.0 s/question over 10 question(s)
+  measured    80% F1 (89% recall, 77% precision) at 26.7 s/question over 100 question(s)
+              2026-09-02, Mac, from `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`
 ```
 
 A record has a **startup half** and a **request half**. The build, the draft head file, the
@@ -198,8 +199,9 @@ the weights again.
 
 `Asking.for_model(name, workload=...)` is the way that model measured best at that work, and
 `Profile.asked()` is the same record's. A model matched only by family (the same weights at
-another quantisation) comes back with `note` saying so: settings measured on Q4_K_XL are the
-right place to start for IQ4_XS and is not a measurement of it.
+another quantisation) comes back with `note` saying so. A rewrite from a run that predates
+asking records keeps the asking of the record for the same file, never another
+quantisation's.
 
 Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model **and
 workload**, **the fastest row whose F1 the questions could not tell apart from the best** — among that model's

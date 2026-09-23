@@ -188,7 +188,7 @@ on whichever machine is free rather than the one you are typing at.
 
 | | |
 | --- | --- |
-| [What it does](docs/FEATURES.md) | every feature, each with a check in `docs/verify_release.py` |
+| [What it does](docs/FEATURES.md) | every feature; `docs/verify_release.py` checks claims from each section but Entities |
 | [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
 | [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
 | [The fleet](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |

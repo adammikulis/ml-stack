@@ -1,9 +1,5 @@
-"""Every name `docs/verify_release.py` imports from ml_stack still exists.
-
-`docs/FEATURES.md` says each feature has a check there, and a check that cannot import
-its subject reports FAIL for a feature that works. Two of them named
-`ml_stack.fleet.models.SUGGESTED` for eight days after the catalogue moved.
-"""
+"""Every name `docs/verify_release.py` imports from ml_stack still exists; a check that
+cannot import its subject reports FAIL for a feature that works."""
 
 from __future__ import annotations
 

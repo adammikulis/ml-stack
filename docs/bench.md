@@ -1,71 +1,29 @@
 # Measuring
 
-## What this measured, and what it changed
+## What has been measured
 
-Architectures that behave unlike a dense transformer when served have their own notes
-under [`docs/architectures/`](architectures/README.md): what the header says, what it
-meant when measured. Flash-Next's 51B-parameter n-gram table is there.
+What the kept runs say is in [`report-2026-09-23.md`](report-2026-09-23.md) and
+[`model-ranking.md`](model-ranking.md). Each names the date it was written, the command that
+wrote it, the store it read and the models in it; `ml-stack-bench report` and `ml-stack-bench
+show --rank` write them again from any store. Architectures that behave unlike a dense
+transformer when served have their own notes under
+[`docs/architectures/`](architectures/README.md).
 
-**IQ quantisations are the slow choice on Apple silicon.** Measured 2026-09-02, the same
-ten questions, the same fork build, the same 32k x 2 slots, Qwen3.8-Flash-Next answering
-plain with thinking on: `UD-IQ4_XS` (87 GB) took 70 s a question at 54% F1; `UD-Q4_K_XL`
-(104 GB) took 44 s at 64%. The IQ formats decode through lookup tables that Metal runs
-markedly slower than the K-quant kernels, so on a Mac the smaller file is the slower
-model, and at ten questions the accuracy gap is suggestive rather than settled. Rule: on
-macOS take a K-quant (`Q4_K_M`, unsloth's `UD-Q4_K_XL`) and spend the memory; take an IQ
-build only when a K-quant does not fit at all. `ml-stack-models files` marks IQ builds on
-a Mac so the choice is made knowingly. On a CUDA card the IQ kernels are fine, and the
-memory saved is worth having.
+Read against that report:
 
-Answering a graph is the case this was built for, so the numbers are here rather than in
-somebody's notes. Ten questions over the invented community, 32k per slot, greedy, one run
-at a time on an otherwise idle machine. **F1** over the entries an answer lights, with the
-pair behind it, because the pair is what says how a run was wrong:
+- **On a Mac, take a K-quant.** Qwen3.8-Flash-Next answering plain with thinking on:
+  `UD-IQ4_XS` took 70.1 s a question at 54% F1 over ten questions, `UD-Q4_K_XL` 43.7 s at 64%
+  over nine. `ml-stack-models files` marks IQ builds on a Mac.
+- **Accuracy is F1 over the entries an answer lights**, with recall and precision beside it.
+  Under recall alone, an answer that lit every entry in the graph would score 100%.
+- **A shortlist handed to a small model is echoed, not selected from.** Over ten questions,
+  gemma-4 E4B scored 50-58% F1 asked plain and 31-41% handed a shortlist; E2B 30-41% against
+  29-36%, recall rising as precision fell.
+- **Tight asking is the default.** Qwen3.8-Flash-Next `UD-IQ4_XS`, thinking off, nine
+  questions: 43-44% precision asked `plain`, 83% asked `plain+tight`, the searching the same.
+  `--also loose` measures the untightened asking as the control.
 
-| run | F1 | recall | precision | lit per question | wall | KV + runtime |
-| --- | --- | --- | --- | --- | --- | --- |
-| gptoss-shortlist | **62%** | 70% | 59% | 2.0 | 198s | 11.89G |
-| gptoss-plain | 61% | 65% | 62% | 2.0 | 127s | 11.89G |
-| e4b-plain | 58% | 70% | 51% | 2.0 | 159s | 7.75G |
-| e2b-plain | 41% | 55% | 39% | 2.3 | 59s | 3.21G |
-| e4b-shortlist | 33% | 70% | 25% | 4.5 | 300s | 8.34G |
-| e2b-shortlist | 29% | 80% | 18% | 6.1 | 64s | 3.50G |
-
-A good answer lights about **1.7** entries. Read the last column against that and the table
-explains itself.
-
-**Scoring on recall alone said the opposite, and it was wrong.** Under it, `e2b-shortlist`
-was the most accurate run there was at 80%, beating the 120B — because showing more costs
-nothing under recall, and it lit six entries where fewer than two were wanted. A model that
-lit every entry in the graph on every question scored 100%. That metric survived a day and
-twenty-four green tests, none of which asked what the degenerate strategy would score. One
-does now.
-
-**A shortlist handed to a small model is echoed, not selected from.** It is the single
-largest effect here: E4B 58% → 33%, E2B 41% → 29%, precision halving while recall rises.
-The same shortlist does nothing for the 120B either way. The idea is sound and the machinery
-is worth keeping; what is missing is teaching a model that a shortlist is somewhere to look.
-
-**The table above was measured with the loose asking, which is no longer how anything
-asks.** Every run in it let `show` name what the answer was about, uncapped — what
-`tight=False` still does, and what `--also loose` now measures as the control. Telling
-`show` instead to light only the entries that answer the question moved Qwen3.8-Flash-Next
-from 43% to 83% precision over the invented community (2026-09-02) with nothing about the
-searching changed, so tight is what `converse` does when it is asked nothing. Re-measure
-before reading a row of that table as current.
-
-**What the tool descriptions changed was real.** E4B answered 17% before they carried a
-worked call and 70% recall after, on the same weights and the same questions. Six of its
-nine failures had been the identical shape: two model calls, a hundred characters of prose,
-no search at all. The large models never needed telling, which is why this went unseen until
-a small one was measured.
-
-Two mistakes cost the earlier numbers their meaning. Timings were taken while other runs
-shared the GPU, which is why `sweep` and `run` refuse a busy server now. And every model had
-512 tokens for thinking, tool calls and answer together, because `n_predict` defaulted low:
-a thinking model fills that with reasoning and returns an empty answer.
-
-None of this survives a new model release. Re-run it.
+A new model release invalidates all of it. Re-run it.
 
 The runs themselves are in a graph store under `~/.ml-stack/bench`, which nothing backs up.
 `ml-stack-bench show --export PATH` writes them out, so a day of GPU time is not on one disk.
@@ -97,11 +55,8 @@ them all in one table. `run` does one of those on its own, and `show --compare A
 side by side with the difference.
 
 `sweep` and `run` **refuse a server that is already working**, because a timing taken while
-another run has the same GPU is not a timing. It is a real failure and not a hypothetical:
-several sweeps left running in the background against one server produced wall clocks that
-were two runs sharing a machine, and nothing in the numbers said so. A server that will not
-answer `/slots` is reported as unknown rather than assumed idle. `--anyway` proceeds on
-purpose.
+another run has the same GPU is not a timing. A server that will not answer `/slots` is
+reported as unknown rather than assumed idle. `--anyway` proceeds regardless.
 
 Every measuring command **estimates itself before it starts** -- after the self-check, before
 a download or the lock -- from what is kept: seconds per question from the newest run of
@@ -119,9 +74,8 @@ line so a mismatch is visible rather than silent.
 `look_up` is measured **as the application ships it**. With a store -- `prepare` builds one,
 and `run` and `sweep` take it as their default once it exists -- every `look_up` the model
 makes is `ml_stack.graph.search.hybrid`: the characters, the store's word index and, given
-`--embed-url`, its vectors, fused by rank. Without one it is character matching alone, which
-is what the bench measured for months while the application ran the other thing, so every
-ranking it wrote ranked a `look_up` nobody used. The table prints `find` on every line --
+`--embed-url`, its vectors, fused by rank. Without one it is character matching alone. The
+table prints `find` on every line --
 `chars`, `words` or `meaning` -- beside `draft`, and for the same reason as `ctx`: a run
 with one finder against a run with another is two measurements, not a comparison.
 
@@ -182,27 +136,22 @@ the last column naming which run and which build it was (`--noise` widens or tig
 five). A run that fell outside the noise is listed under the table as `rejected`, so a head
 that hurt accuracy is seen rather than skipped, and a smoke run supplies neither accuracy nor
 cost. `--rates` and `--plot` carry the same composed point per model, marked `=` and drawn as
-a ring, beside the runs themselves. The question that made it was how to rank a model whose
-draft head was not yet settled: before this, the ranking took each model's best-F1 run and
-reported that run's cost, which ranked a drafted model at its undrafted speed, or not at all
-when the drafted run was short.
+a ring, beside the runs themselves.
 
 `--n-predict` is a **ceiling, not a budget**: nothing is spent that is not generated, so a
-high one costs nothing and a low one truncates. It defaults high on purpose. A thinking
-model spends most of a turn reasoning before it writes anything — measured, gemma-4 filled
-a 220-token ceiling entirely with thought and returned empty content — so what a low
-ceiling cuts is always the answer, never the thinking.
+high one costs nothing and a low one truncates. It defaults high. A thinking model spends
+most of a turn reasoning before it writes anything, so what a low ceiling cuts is the
+answer, never the thinking.
 
 `--card` asks with what the model itself recommends, which is the only place a
 recommendation is ever applied. It is read from the served model's **GGUF metadata** where
 that exists — `general.sampling.temp`, `.top_k`, `.top_p` are written into the file, so they
 cannot drift from the weights and need no prose parsed out of a README — and from the card
 otherwise. The two agree where both exist: gemma-4 says temperature 1.0 / top_p 0.95 /
-top_k 64 in each. They are per model, not per family: Qwen3.8-Flash-Next asks for top_k 20. A publisher's advice is a hypothesis about a task they have not seen: gemma-4
-asks for temperature 1.0 across all use cases, and on this one — calling tools with exact
-ids, where sampling noise becomes a wrong argument rather than a livelier sentence — greedy
-measured better on the plain path. Read the card with `ml-stack-models card <repo>`, test it
-with `--card`, and ship what the measurement favoured.
+top_k 64 in each. They are per model, not per family: Qwen3.8-Flash-Next asks for top_k 20.
+A publisher's advice is written for their tasks, not this one, where a sampled token can
+become a wrong id. Read the card with `ml-stack-models card <repo>`, measure it with
+`--card`, and ship what the measurement favoured.
 
 A score is only worth acting on when you can see which questions made it, so
 `show --detail` prints the questions themselves — what each one wanted, what the answer
@@ -287,7 +236,7 @@ the environment, and a `smoke:` whose failure skips the `then:` under it and say
 rest of the evening still happens. Every line is checked against this parser as the file is
 read, so `--sampel` on the last line is refused before the first model loads rather than
 after the eighth measurement, and an unset `${FX}` is refused rather than expanded to
-nothing and measured as the default model for six hours.
+nothing and measured as the default model.
 
 It is not a second scheduler. Each step is its own `ml-stack-bench` process, so it brings
 the measuring lock, the self-check, the estimate and the smoke it already has, and a step
@@ -337,11 +286,8 @@ exit 4 and the traceback -- before the lock is taken and before anything is fetc
 messages, for `extract`) through the real server and the real store, read back, before its
 own questions -- on the same load where a model is served, so a sweep smokes each model as
 it comes up and pays for it once -- and a smoke where every question fails ends the run with
-exit 1 and the reason before anything else starts. The day this was written a new `--also
-tight` way reached `Client.__init__` as a keyword and took an 87G load down with it, because
-the smoke was a step in a plan and the test's fake client accepted anything; now the fake is
-the runner's own -- `bench.selfcheck.ScriptedModel`, bound against the real signature, and
-the tests use it too -- and the check is not a step anyone has to remember.
+exit 1 and the reason before anything else starts. The scripted model is
+`bench.selfcheck.ScriptedModel`, bound against `Client`'s signature, and the tests use it too.
 
 **A load is fetched, checked and timed before it is measured.** Every `hf:` reference a
 measuring command names -- the models `--serve` puts up, the heads `--serve-draft` and

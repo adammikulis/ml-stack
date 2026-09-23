@@ -28,18 +28,15 @@ because nothing is *labelled* company — a small model searched "company", then
 "organization", found nothing and gave up. A kind the graph does not have comes back as the
 kinds it does, with counts, so a wrong guess costs one call rather than a turn. An answer
 that comes back empty says why in `steps` — `no answer: finish_reason=stop, thinking 628
-chars, answer 0 chars` — because the assumption is always the token budget and, measured,
-it almost never is. A tool of the caller's own that returns pictures (`_images` in its
+chars, answer 0 chars`. A tool of the caller's own that returns pictures (`_images` in its
 result) has them shown to the model as a message of their own, since a tool result cannot
 carry an image; a picture that cannot be prepared is a line in `steps`, not a crash.
 
-**Fewer, fatter calls, for a model that reads far faster than it writes.** Measured
-2026-09-02 over the invented community, Qwen3.8-Flash-Next — hybrid recurrent, 256k of
-context at 48K bytes a token — found nearly everything (89-95% recall, and 76-83% precision
-once the asking was tight), and spent 5-9 tool calls a question at about 2k new tokens each:
-half the wall clock reading results back at ~390 tok/s, the other half writing at ~35. For
-that model a round trip is the expensive part and reading is nearly free, so the way to make
-a question cheaper is to take more per call. `look_around(ids, hops=1)` is the fat call: the
+**Fewer, fatter calls, for a model that reads far faster than it writes.** Over the invented
+community Qwen3.8-Flash-Next found nearly everything: 77-95% recall across its runs of nine
+questions or more, and up to 83% precision once the asking was tight ([`report-2026-09-23.md`](report-2026-09-23.md)). For a model that
+reads prompt far faster than it writes, a round trip is the expensive part, so the way to
+make a question cheaper is to take more per call. `look_around(ids, hops=1)` is the fat call: the
 entries you name, and under each of them everything joined to it with the relation, the
 neighbour's kind, **its id in brackets** and a line of its own words — so "who could help
 with X" is one `look_up` and one `look_around` where it used to be five `look_at`s, and the
@@ -47,10 +44,8 @@ answer may select a neighbour it never looked up. `Asking(reach=N)` is the budge
 that makes such a result safe to ask for: N tokens per tool result instead of the flat 6000
 characters, with `look_at`, `look_around` and `list_kind` packing **whole entries with their
 quotes**, most-mentioned first, rather than every entry with its words clipped — because the
-quote is the evidence, and `list_kind`'s fixed forty was only ever a guess at what a result
-may cost. Both are off by default (`reach=None`), because the small models have the opposite
-profile — E4B and E2B reach about 60% recall with cheap decoding and an expensive cache, and
-a fatter result is a worse trade for them. `ml-stack-bench --also reach` measures the fat
+quote is the evidence. Both are off by default (`reach=None`): a small model decodes
+cheaply and holds an expensive cache, and a fatter result is a worse trade for it. `ml-stack-bench --also reach` measures the fat
 asking against the default on one load, and `--reach N` sets the size on every way.
 
 **`look_up`'s first hits are put in the order the vectors mean.** Fusion decides which
@@ -75,8 +70,7 @@ the ones a store already holds without asking a model anything.
 **A hit that says why it matched, and who is joined to it, is behind a flag until it is
 measured.** `look_up` returns `{id, label, kind}` and nothing else, so a model cannot tell an
 exact label from one word in one quote, and a topic it finds is only halfway to the people
-who have it — measured against a real graph, every staffing question spent rounds guessing
-spellings. `tools_for(graph, rich=True)` (and `Asking(rich=True)`, `hybrid(...,
+who have it. `tools_for(graph, rich=True)` (and `Asking(rich=True)`, `hybrid(...,
 rich=True)`) adds `score`, `matched` — which of `label`, `attribute`, `said`, `words`,
 `meaning` found it — and, on anything that is not a person, `joined`: the eight
 most-mentioned people on any edge to it. The look_up description gains one sentence saying
@@ -85,10 +79,10 @@ answer cache fingerprints those descriptions and a sweep of the current behaviou
 comparable with the one that measures this.
 
 **Lighting only what answers the question is the asking, not a variant.** A model that
-finds nearly everything can then light nearly everything: measured over the invented
-community, 34 questions at 32k, Qwen3.8-Flash-Next reached 92% recall at 44% precision, and
-named 70 entries its tools never found, read or showed, where a good answer lights about
-two. So `converse` and `tools_for` ask tight by default — the words about `show` change, on
+finds nearly everything can then light nearly everything: over 34 questions of the invented
+community, Qwen3.8-Flash-Next `UD-IQ4_XS` asked `plain` with thinking on reached 92% recall
+at 44% precision and named about two entries a question that its tools never found, read or
+showed ([`report-2026-09-23.md`](report-2026-09-23.md)), where a good answer lights about two in all. So `converse` and `tools_for` ask tight by default — the words about `show` change, on
 a copy: light only the entries that answer the question, the ones the asker would act on,
 never what was looked at on the way, usually one to three — the closing nudge says the same,
 one sentence is added to the system prompt (name only what a tool returned; say when
@@ -100,8 +94,9 @@ fingerprinted, the same schema objects, byte for byte as they were — and
 `ml-stack-bench --also loose` measures it against the default on the same load.
 
 **Three more askings, each off until it is measured: `batch`, `kinds`, `summary`.**
-Measured 2026-09-02 over the invented community, Qwen3.8-Flash-Next answered at 70% F1 —
-85% recall, 65% precision — and spent 25 seconds a question over about seven tool calls.
+Over a hundred questions of the invented community, Qwen3.8-Flash-Next `UD-Q4_K_XL` asked
+`plain` with thinking off and its head at length 4 answered at 70% F1 -- 85% recall, 65%
+precision -- at 25.4 s a question ([`report-2026-09-23.md`](report-2026-09-23.md)).
 `Asking(batch=True)` is for the seconds: the calls were one question asked one entry
 at a time, because nothing said the ids are a list, so the system prompt says it, each
 searching tool's description gains a worked three-entry call, and a turn that reads one
@@ -113,8 +108,7 @@ the topic lit beside the people for a question that asked *who* — and the ques
 already says what kind the answer is, so `asked_kinds` reads it off the asking clause and
 `show` keeps only that kind. It filters nothing when the question named several kinds or
 none (`how is X connected to Y`, `tell me about X`), a listing is exempt as it is from the
-cap, and a filter that would empty the selection is not applied; over the bench's own 110
-questions it filters 72 to the right kind, leaves 31 alone and gets exactly one wrong.
+cap, and a filter that would empty the selection is not applied.
 `Asking(summary=True)` is for the broad question no search reaches — "what is
 this group about?" has no name in it to look up — and adds `summarise`: counts per kind, the
 ten most-mentioned entries of each kind with a line of their own words and their ids in
@@ -194,9 +188,7 @@ that would take most of a store, and leaves a verified snapshot when it would ta
 **A store checks itself.** Every `put_doc` reads its document back by key and raises
 `StoreMismatch` when what comes back is not what went in; a node is read back by id the same
 way, an edge from its own `RETURN`, and `replace` counts what it wrote before committing.
-Measured 2026-09-01: twelve bench runs read back empty through a scan of `Doc.value` while a
-lookup by key returned them whole, so `ml-stack-store check PATH` reads every document, node
-and edge by key *and* by scan and prints one line per disagreement (exit 1 on any);
+`ml-stack-store check PATH` reads every document, node and edge by key *and* by scan and prints one line per disagreement (exit 1 on any);
 `--fix` rewrites a document the scan lost and checks again rather than announcing a repair,
 and `ml-stack-store docs PATH` lists the documents with their sizes.
 
@@ -277,17 +269,12 @@ of it: a question against prose describing a capability is comparing unlike thin
 question against questions is like-to-like. The examples live in `ask.TOOL_PROMPTS` and are
 never sent to the chat model, which wants the opposite text — what a tool *does*.
 
-Both sides carry the same embedding prefix, because both are questions. Using the
-asymmetric `QUERY`/`DOCUMENT` pair here scored "tell me about Otto Vance" at 0.409 against
-an example reading "tell me about Iris Bellweather", which is the same sentence; with the
-symmetric prefix it is 0.83.
+Both sides carry the same embedding prefix, because both are questions.
 
 The useful case is the one that is not a tool at all. `CHAT` collects greetings, jokes and
 asides, and a message routed there is offered **no tools whatsoever** — one model call
-instead of the six a graph question takes. Without somewhere for those to go, a greeting is
-matched against four search tools and wins one of them: "hi" scored 0.900 against
-"highlight them on the graph", because everything is close to everything and the only
-question is close to *what*.
+instead of the several a graph question takes. Without somewhere for those to go, a greeting
+is matched against the search tools and wins one of them.
 
 "Which companies are here?" is the other question that is not a search. Nothing in a graph
 is labelled company, so `look_up` finds nothing however it is worded, and a question that
@@ -302,10 +289,9 @@ confident answer and is about nothing.
 
 When a search has already been run for the question — a shortlist, from the word index and
 the vectors — what it found is read to the model *before* the question, as candidates to
-check, and never after it as material to answer from. Measured on gemma-4-E4B: eight likely
-entries handed over as the last message, phrased "use them if they answer it", took it from
-58% F1 to 33%, because it echoed the list rather than selecting from it. What comes last is
-what a small model answers about, so the question is the last thing it reads.
+check, and never after it as material to answer from. Handed a shortlist, gemma-4 E4B
+scored 31-41% F1 over ten questions against 50-58% asked plain ([`report-2026-09-23.md`](report-2026-09-23.md)), echoing the
+list rather than selecting from it. The question is the last thing the model reads.
 
 ## Answering the same question twice
 
@@ -319,7 +305,7 @@ out, again = asked(store, question, lambda: converse(question, graph, client),
 ```
 
 `asked` hands back the answer already given when nothing that shaped it has changed, and
-calls the model only on a miss — measured at 27.9s against 0.00s for the repeat. What makes
+calls the model only on a miss; a hit makes no model call. What makes
 that safe is the fingerprint, which covers the graph, the model, the system prompt, **the
 tool schemas including their descriptions**, the shortlist and whatever `context=` the
 caller adds (the turns before this one, most obviously). Rewording a tool changes what the
@@ -375,9 +361,9 @@ more short model call — over eight turns of text plus the previous paragraph, 
 answer has gone out. Prompt tokens per question are the summary (a paragraph), up to three
 recalled turns, the ten-turn window and the question; because the summary sits ahead of
 everything that changes per question, it is inside the cached prefix and re-read for free
-until it changes. Measured on the fake model: a fact stated at turn one is in front of the
-model at turn two hundred twice, once in the summary and once recalled, and the prefix is
-identical across turns 193–200. Measure the `cached` share per turn with `ml-stack-bench
+until it changes. `tests/test_graph_thread.py` holds, with a scripted model, that a fact
+stated at turn one is in front of the model at turn two hundred twice, once in the summary
+and once recalled, and that the prefix is identical across turns 193–200. Measure the `cached` share per turn with `ml-stack-bench
 concurrent` after changing `EVERY`; a summary that changes too often shows up there.
 
 A fact stated in conversation reaches the *graph* through the change-request path, not

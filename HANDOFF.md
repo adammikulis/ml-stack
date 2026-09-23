@@ -8,22 +8,22 @@ fixtures and never read `~/.ml-stack`; a measurement is estimated before it runs
 before it is paid for; the development branch is pushed after every merge and `main` is
 pushed by Adam alone (a push there cuts a release).
 The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
-Slack-specific. What was measured on 2026-09-02 and what it settled is
-`docs/report-2026-09-02.md`, `docs/model-ranking.md`, `docs/architectures/` and
-`src/ml_stack/data/profiles.json` (the shape a model measured best in for one workload --
+Slack-specific. What the kept runs say is `docs/report-2026-09-23.md`,
+`docs/model-ranking.md`, `docs/architectures/` and `src/ml_stack/data/profiles.json` (the shape a model measured best in for one workload --
 `ask`, `ingest` or `chat` -- read by `ml-stack-serve up --for WORKLOAD` (profile by default;
 `--no-profile` serves the model bare), `sweep`, `extract` and `converse`).
 
-Settled: Flash-Next answers (80% F1 at 27 s/q, 100 questions) and extracts (96% node / 76%
-relation F1); draft length 4 for both; one slot for extraction; `single` +8 pts on E4B at
-ten questions, unconfirmed.
+Settled: Flash-Next answers (80% F1 at 26.7 s/q, 100 questions) and extracts (96% node / 76%
+relation F1); its head is served at length 4, and the paired runs put lengths 2 to 7 at
+1.14-1.74x without separating them; one slot for extraction; `single` +8 pts on E4B at ten
+questions, unconfirmed.
 
 Fixes first, then measurements that need the card, then what does not exist yet.
 Inside the fixes, most blocking first.
 
 0.2.0 is cut when these are gone (Adam, 2026-09-23): "Getting it onto a machine", "Not losing
 what it read" (the embedding denominator), the conversation store, `reads.json`,
-"Numbers that are quoted", duplicate machine names, and the window's library tick, name test
+duplicate machine names, and the window's library tick, name test
 and numpy. Everything else here follows the cut.
 
 Nothing here is blocked by a kept measurement, a hash or a pin: `CLAUDE.md` says what that
@@ -111,34 +111,6 @@ capability; every line is something that already exists not being what it says.
   definition -- and `raw`, the model's whole reply when it failed. `_keep_reads` only ever
   merges more in; nothing rotates, expires or deletes. `ml-stack-ingest forget`, and the
   licence and redaction gates above run before the write, not only before the store.
-
-### Numbers that are quoted
-- [ ] **Re-read every draft-head speedup taken before 2026-09-05.** The bench pairs a
-  drafted run against a "baseline" to say what the head bought. That pairing used to match
-  on the label string, so it happily paired runs that also differed in cache type,
-  reasoning budget, slot count or asking. On this machine's store: 225 runs carry a head,
-  the old rule paired 175 of them, the new rule (identity minus the head) pairs 54, and the
-  121 that fell away were comparisons across more than one change. Any head speedup quoted
-  from those runs was partly measuring the KV quantisation or a different way of asking.
-  `ml-stack-bench show` and `compare` now use the new pairing, so the numbers are already
-  right going forward; what is pending is deciding which recorded conclusions rested on the
-  old ones. The three-configuration comparison above is the first place it matters.
-
-
-- [ ] **`docs/report-2026-09-02.md` was never regenerated after the pairing bug was fixed,
-  and two shipped serving defaults were derived from it.** The report holds 136 speedup
-  figures and was last written on 09-02; the fix to how a drafted run is paired with its
-  baseline landed 09-05. One quoted 4.69x is a row that also changed `-ub 2048` and the way
-  of asking. `data/profiles.json` sets `spec_draft_max 2` for gemma-4 E2B and E4B from two
-  of these rows. Re-run `ml-stack-bench report` over `runs.ladybug`, commit the regenerated
-  file, and re-derive the profiles with `report --profile`.
-- [ ] **Two documentation claims are not true as written.** `README.md` and
-  `docs/FEATURES.md` say every feature has a check in `docs/verify_release.py`: there are
-  83 bullets across 23 sections against 57 checks across 19 areas, and 16 sections have no
-  check area at all. `docs/architectures/qwen4exp.md` and `gpt-oss.md` restate the suspect
-  pairings as flat prose with no qualifier, and `docs/bench.md`, `docs/graph.md` and
-  `docs/ingest.md` state measurements with no date, command or store. Soften the first to
-  what is true; give every loose number its command and store or delete it.
 
 ### The vocabulary
 
@@ -376,6 +348,36 @@ across `src/`.
 
 Each needs the GPU and Adam's call. Estimate before it runs, smoke it before it is
 paid for, and one thing on the card at a time.
+
+### Served shapes with no paired baseline
+
+`docs/report-2026-09-23.md` pairs a drafted run only with the undrafted run whose identity
+is the same minus the head. Three served shapes in `src/ml_stack/data/profiles.json` have
+no such pair, so what their head buys is unmeasured; each is read again with
+`ml-stack-bench report --profile` once its baseline is kept.
+
+- [ ] **Whether the gemma-4 E2B and E4B heads are worth serving at all.** Both records serve
+  `mtp-gemma-4-E{2,4}B-it.gguf` at `spec_draft_max 2` with a q8_0 cache, set from the
+  hundred-question rows `gemma-4-E2B-it-plain-kv-q8_0` (1.5 s/q, 30% F1) and
+  `gemma-4-E4B-it-plain-kv-q8_0` (3.1 s/q, 40%). No undrafted run shares those rows' identity.
+  The paired sweeps over fewer questions put length 2 at 0.99-1.29x and length 4 at
+  0.85-1.30x, the fastest inside the noise, so depth 2 is kept and nothing yet says the head
+  beats none. `ml-stack-bench drafts gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf --draft ''
+  --draft mtp-gemma-4-E4B-it.gguf --n-max 2 --n-max 4 --serve-kv q8_0`, then the same for
+  E2B; at the recorded s/q a hundred questions is ~5 and ~3 minutes an arm plus a load.
+- [ ] **The gemma-4 26B-A4B record serves a head nothing has paired.** Its record is new,
+  from `gemma-4-26B-A4-plain-rb4096` (34 questions, 37% F1, 25.4 s/q): the MTP head and
+  `--reasoning-budget 4096`, against 43% F1 at 39.5 s/q plain with no head and unlimited
+  thinking, a fall `held_up` reads as inside the noise at 34 questions. The report has no
+  `draft:none` run at that identity. `ml-stack-bench drafts gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+  --draft '' --draft mtp-gemma-4-26B-A4B-it.gguf --reasoning-budget 4096`, ~15-25 minutes
+  an arm at 34 questions.
+- [ ] **Flash-Next's `-ub 2048` and `--spec-draft-p-min 0.5` rest on one nine-question run
+  each whose record carries neither flag.** The `ub2048` and `pmin05` rows share the recorded
+  identity of the plain row (25.5 and 23.6 s/q against 29.2-29.4), so only their labels say
+  what differed, and `extra_args` holds both because `report --profile` carries them from
+  the older record. Runs now record `spec_p_min`; a sampled sweep with and without each flag
+  on the profile's serving (`--sample 20`, ~10 minutes an arm) settles both.
 
 ### The store
 

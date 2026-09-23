@@ -2,6 +2,9 @@
 
 Read off the GGUF header (`unsloth/Qwen3.8-Flash-Next-GGUF`, UD-Q4_K_XL, 2026-09-02) and
 measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is the header.
+Memory figures are `ml-stack-serve fit` records from 2026-09-02; answering and draft figures
+are the runs in [`docs/report-2026-09-23.md`](../report-2026-09-23.md), which names its
+command and store.
 
 ## What it is
 
@@ -26,11 +29,10 @@ measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is t
 
 - **Memory is not the file size.** The build is 103.7G on disk: ~77G of everything else (the
   experts are Q8_0 -- `blk.N.ffn_down_exps` is 0.8G a layer) plus the 26.8G table, which is
-  mmapped and paged in row by row as n-grams are seen. Real Mem sat at ~90G through a day of
-  questions. Measured split in the serving shape (`fit`, q8_0 cache, 32k x 2, 2026-09-02
+  mmapped and paged in row by row as n-grams are seen. Measured split in the serving shape (`fit`, q8_0 cache, 32k x 2, 2026-09-02
   evening): 106.3G on disk with the head, 78.8G of it in GPU memory and 27.5G mapped on the
-  CPU -- the table -- so the GPU holds ~79G of weights and the resident peak over a hundred
-  questions was 99G. That split is llama.cpp's own placement, not a flag of ours: an
+  CPU -- the table -- so the GPU holds ~79G of weights, and the hundred-question run of
+  2026-09-02 peaked at 99G resident. That split is llama.cpp's own placement, not a flag of ours: an
   input-side table gathered per token stays host-mapped the way token embeddings do. On
   unified memory the two halves are one pool of RAM and nothing is gained by forcing it
   either way, so ml-stack passes no override on a Mac; `--on-cpu per_layer_token_embd=CPU`
@@ -46,19 +48,26 @@ measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is t
   the MTP head's own cache). At 32k a user costs 1.8G (f16) or ~1.4G (q8_0). Users at 32k on
   110G: 12 at f16 when the whole file is counted; 22 at q8_0 once the table is counted on
   the CPU side where it lives, 31 at 16k a slot. (`fit`, 2026-09-02.)
-- **Take a K-quant, not an IQ quant, on Metal**: UD-Q4_K_XL answered in 44 s a question at
-  64% F1 where UD-IQ4_XS took 70 s at 54% -- the IQ lookup-table kernels are slow on Metal.
-  (The table tensor itself is IQ4_NL in both builds; it is a gather, so that does not matter.)
+- **UD-Q4_K_XL against UD-IQ4_XS on Metal**, plain asking, thinking on, no head: 43.7 s a
+  question at 64% F1 on nine questions against 70.1 s at 54% on ten. (The table tensor itself
+  is IQ4_NL in both builds.)
 - **The MTP head loads only on the unsloth fork** (`b10715-mix-86bd2d3`+; mainline's
-  qwen4exp MTP graph is PR #27836, open). Shared-Q8_0 head at `--spec-draft-n-max 4` and
-  `--spec-draft-p-min 0.5`: 1.47x, 73-79% accepted; length 8 loses; head precision is
-  irrelevant. See `docs/research/qwen38-flash-next-mtp.md`.
-- **It thinks unless told not to through the template**; with thinking off it answered
-  better and faster (tight asking: 81-85% F1 at 29 s/q on ten questions, 80% at 27 s/q on
-  a hundred). `-ub 2048` helps prefill (13%); q8_0 cache is free; 16k a slot answers like
-  32k (peak use 6.5k). Its measured serving shape is `ml-stack-serve profile`'s record.
-- **Recall is its strength (85-95%), precision its weakness** until asked tightly; it
-  calls tools 5-9 times a question; half the wall clock is reading tool results.
+  qwen4exp MTP graph is PR #27836, open). The shared-Q8_0 head against the same run with the
+  head taken out, UD-Q4_K_XL, thinking off, q8_0 cache: 1.27-1.32x at length 4 (72-78%
+  accepted), 1.25-1.51x at 2, 1.14-1.74x at 7, 0.99-1.07x at 8. On UD-IQ4_XS, thinking on:
+  1.46-1.73x at 4, 0.73-0.95x at 8; the shared and unshared Q8_0 heads are within 0.01x of
+  each other. No run served with `--spec-draft-p-min 0.5` has a baseline without the head.
+  See `docs/research/qwen38-flash-next-mtp.md`.
+- **It thinks unless told not to through the template.** Thinking off, q8_0 cache, head at
+  length 4: 81-85% F1 at 25-33 s/q on nine questions, 80% at 26.7 s/q on a hundred. Thinking
+  on, no head, f16 cache: 64% and 81% on nine questions (43.7 and 27.6 s/q); no
+  hundred-question run had thinking on. On nine questions with the head at length 4, the run
+  labelled `ub2048` took 25.5 s/q against 29.2-29.4 for the same serving without it; the run
+  records no `-ub`, so only its label says what differed. 16k a slot answered as 32k did on
+  nine questions (81% F1). On UD-IQ4_XS a q8_0 cache answered as f16 did (85% F1 on nine
+  questions, 31.5 against 36.6 s/q). Its serving shape is `ml-stack-serve profile`'s record.
+- **Recall runs 77-95% across its runs of nine questions or more; precision is lower**, 43-83%
+  depending on the asking.
 
 ## What to check when a new build appears
 

@@ -1,6 +1,7 @@
 # What ml-stack does
 
-Every claim here has a check in `docs/verify_release.py`. Run it:
+`docs/verify_release.py` checks at least one claim from every section here except Entities
+and Known limits; a claim it has no check for is not verified by it. Run it:
 
 ```
 python docs/verify_release.py
