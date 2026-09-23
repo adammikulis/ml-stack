@@ -104,6 +104,10 @@ LIVE = b"<script>window.GRAPH_LIVE=1</script>"
 finds this on for answers, and asks nothing otherwise."""
 
 
+READING = "the model is reading this request"
+"""The concern a filed request carries until the model has proposed its edits."""
+
+
 PORT = 8794
 """Where ``ml-stack-graph serve`` listens unless told otherwise."""
 
@@ -567,14 +571,14 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
         return converse(question, self.graph, client, **asked)
 
     def proposed(self, row: Mapping[str, Any]) -> None:
-        """Put a filed request in ``queue``: read by the model over ``graph``, or with no
-        edits and the reason when it cannot be."""
+        """Put a filed request in ``queue`` at once, then replace it with what the model
+        read out of it over ``graph``, or with the reason it could not be read."""
         if self.queue is None:
             return
         from ml_stack.graph.requests import key, propose, unread
 
         k = key(row)
-        if k in self.queue.read():
+        if not self.queue.put(k, unread(row, self.graph, READING)):
             return
         try:
             if self.graph is None:
@@ -583,7 +587,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
         except Exception as exc:  # noqa: BLE001 - the queue carries the reason
             warn(f"{time.strftime('%FT%T')} request kept, not read by a model: {exc}")
             made = unread(row, self.graph, f"not read by a model: {str(exc)[:200]}")
-        self.queue.put(k, made)
+        self.queue.put(k, made, replacing=True)
 
     # ------------------------------------------------------------------- the routes
 

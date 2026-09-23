@@ -288,6 +288,32 @@ def test_the_command_files_a_request_into_the_review_queue_beside_the_store(tmp_
     assert not store.exists(), "nothing is written into the store"
 
 
+def test_a_request_is_in_the_queue_while_the_model_is_still_reading_it(tmp_path):
+    from ml_stack.graph.serve import READING
+
+    reading = threading.Event()
+
+    def client_on_slot(self, *, index=0, **over):
+        reading.wait(10)
+        raise RuntimeError("the model went away")
+
+    handler = Quiet.configured(name="Reading", graph=GRAPH, client_on_slot=client_on_slot,
+                               requests=tmp_path / "requests.jsonl",
+                               queue=Queue(tmp_path / "review.json"))
+    with threaded_server(handler) as url:
+        assert call(url + "/request", "POST", {"text": "drop my topic"})[0] == 204
+        rows = _listed(url)
+        assert [r["text"] for r in rows] == ["drop my topic"] and READING in rows[0]["concerns"]
+        reading.set()
+        for _ in range(100):
+            rows = call(url + "/review")[1]
+            if READING not in rows[0]["concerns"]:
+                break
+            time.sleep(0.05)
+        assert "not read by a model: the model went away" in rows[0]["concerns"]
+        assert len(rows) == 1
+
+
 def test_the_command_puts_requests_and_the_queue_where_it_is_told(tmp_path):
     page = tmp_path / "page.html"
     page.write_text("<p></p>", encoding="utf-8")

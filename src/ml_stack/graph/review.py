@@ -82,11 +82,13 @@ class Queue:
         """Every proposal, for a page: `listed` over what is on disk."""
         return listed(self.read())
 
-    def put(self, key: str, proposal: Mapping[str, Any]) -> bool:
-        """Add one proposal under ``key``; False when the queue already holds it."""
+    def put(self, key: str, proposal: Mapping[str, Any], *, replacing: bool = False) -> bool:
+        """Add one proposal under ``key``, or with ``replacing`` put it over one still
+        proposed; False when neither."""
         with self.lock:
             proposals = self.read()
-            if key in proposals:
+            held = proposals.get(key)
+            if held is not None and not (replacing and held.get("status") == "proposed"):
                 return False
             proposals[key] = dict(proposal)
             write_json(self.path, proposals)

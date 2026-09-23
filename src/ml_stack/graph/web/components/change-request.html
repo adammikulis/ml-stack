@@ -174,7 +174,7 @@
             // is a moment behind it. Asking again a few times is the difference between a
             // member seeing their request waiting and seeing nothing at all.
             if (window.reloadReview) {
-              for (const wait of [1200, 4000, 9000, 16000]) setTimeout(window.reloadReview, wait);
+              for (const wait of [1200, 4000, 9000, 16000, 30000, 60000, 120000]) setTimeout(window.reloadReview, wait);
             }
           }
         } catch (err) { askNote.textContent = 'Could not reach the local server.'; }
