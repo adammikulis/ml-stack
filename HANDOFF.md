@@ -224,6 +224,10 @@ across `src/`.
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
   releases or main on its own (`fleet status` shows COMMIT/UPDATES).
+- [ ] **`sweep --fleet --graph`/`--questions` send the dispatcher's paths.** The job's argv
+  carries them as written, so a peer reads the file at that path on its own disk, and a
+  peer that does not hold it fails the job. Ship the graph and questions with the job
+  (a `Job` field the daemon writes under the bench home) or refuse up front.
 
 ### The window
 
