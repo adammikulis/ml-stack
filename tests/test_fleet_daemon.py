@@ -91,11 +91,14 @@ def test_health_needs_no_token(daemon):
 
 
 def test_the_favicon_is_a_204_without_a_token(daemon):
-    import urllib.request
+    import http.client
 
     client, *_ = daemon
-    with urllib.request.urlopen(client.base_url + "/favicon.ico", timeout=5) as r:
-        assert r.status == 204 and r.read() == b""
+    conn = http.client.HTTPConnection(client.base_url.removeprefix("http://"), timeout=5)
+    conn.request("GET", "/favicon.ico")
+    got = conn.getresponse()
+    assert got.status == 204 and got.read() == b""
+    conn.close()
 
 
 def test_everything_else_requires_the_token(daemon):

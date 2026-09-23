@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json, write_json
+from ml_stack.graph.propose import Change, apply
+from ml_stack.graph.store import GraphStore
 
 ACTIONS = ("accept", "refuse", "undo")
 
@@ -30,14 +32,12 @@ def listed(proposals: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [{"id": k, "index": i, **p} for i, (k, p) in enumerate(sorted(proposals.items()), 1)]
 
 
-def as_change(edit: Mapping[str, Any]) -> Any:
+def as_change(edit: Mapping[str, Any]) -> Change:
     """One edit as the `Change` the store applies.
 
     ``remove_relation`` names an edge as one ``source|relation|target`` id, and ``set_attr``
     and ``remove`` are short forms; the store's vocabulary is `ml_stack.graph.propose`'s.
     """
-    from ml_stack.graph.propose import Change
-
     op, target = str(edit.get("op") or ""), str(edit.get("target") or "")
     reason = str(edit.get("reason") or "") or ACCEPTED
     if op == "remove_relation":
@@ -157,9 +157,6 @@ class Queue:
             self.log("store: not there yet, so the edit waits for the rebuild")
             return []
         try:
-            from ml_stack.graph.propose import apply
-            from ml_stack.graph.store import GraphStore
-
             changes = [as_change(e) for e in edits]
             problems = [f"{c.op} {c.target}: {'; '.join(c.problems)}"
                         for c in changes if c.problems]

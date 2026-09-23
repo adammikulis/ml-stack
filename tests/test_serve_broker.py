@@ -243,7 +243,8 @@ def test_a_server_put_up_by_hand_is_held_by_itself_and_never_reaped(
     said: list[str] = []
     watcher = Broker(ServerManager(LlamaServerBackend(binary=llama_binary),
                                    state_file=tmp_path / "servers.json"),
-                     idle_s=0.0, room=lambda: 0, scan=lambda: [], say=said.append)
+                     idle_s=0.0, room=lambda: 0, scan=lambda: [])
+    watcher.say = said.append
     try:
         watcher.adopt()
         held = watcher.servers[info.port]

@@ -76,6 +76,8 @@ from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.metrics import MetricsRoutes
 from ml_stack.graph.payloads import answer_payload, drained, sse, thread_request
 from ml_stack.graph.questions import Ask, History
+from ml_stack.graph.requests import key, propose, unread
+from ml_stack.graph.review import Queue
 from ml_stack.graph.routes import (
     DraftRoutes,
     RefreshRoutes,
@@ -575,8 +577,6 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
         read out of it over ``graph``, or with the reason it could not be read."""
         if self.queue is None:
             return
-        from ml_stack.graph.requests import key, propose, unread
-
         k = key(row)
         if not self.queue.put(k, unread(row, self.graph, READING)):
             return
@@ -584,7 +584,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
             if self.graph is None:
                 raise RuntimeError("no graph on this server")
             made = propose([row], self.graph, self.client_on_slot(index=0))[k]
-        except Exception as exc:  # noqa: BLE001 - the queue carries the reason
+        except (RuntimeError, OSError, ValueError, KeyError) as exc:
             warn(f"{time.strftime('%FT%T')} request kept, not read by a model: {exc}")
             made = unread(row, self.graph, f"not read by a model: {str(exc)[:200]}")
         self.queue.put(k, made, replacing=True)
@@ -761,8 +761,6 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
     graph = None
     if args.graph:
         graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
-    from ml_stack.graph.review import Queue
-
     beside = str(args.store or args.site)
     requests = args.requests or Path(beside + ".requests.jsonl")
     queue = Queue(args.review or Path(beside + ".review.json"), store=args.store)

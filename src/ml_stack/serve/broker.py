@@ -148,13 +148,13 @@ class Broker:
     def __init__(self, manager: ServerManager | None = None, *, idle_s: float = IDLE_S,
                  room: Callable[[], int | None] = free_memory,
                  alive: Callable[[int | None], bool] = pid_exists,
-                 scan: Callable[[], list[dict]] = every_server,
-                 busy: Callable[[str], bool | None] = busy_now,
-                 say: Callable[[str], Any] = lambda _line: None) -> None:
+                 scan: Callable[[], list[dict]] = every_server) -> None:
         self.manager = manager or ServerManager()
         self.scan = scan
-        self.busy = busy
-        self.say = say
+        #: whether a server's slots are processing, asked before an idle one is stopped
+        self.busy: Callable[[str], bool | None] = busy_now
+        #: told which server is stopped and why
+        self.say: Callable[[str], Any] = lambda _line: None
         #: who holds what, beside the lease record, so a restart does not forget
         self.held_file = self.manager.state_file.with_name("broker-leases.json")
         self.idle_s = idle_s

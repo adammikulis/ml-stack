@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json, write_json
+from ml_stack.graph.concerns import concerns
 
 #: what a request that arrived as a sentence in the chat is called in the review list
 CHAT_KIND = "Asked in the chat"
@@ -94,7 +95,6 @@ def propose(requests: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], cli
     (checked against the graph, unapplied) and ``status: proposed``.
     """
     from ml_stack.entities.edits import plan_edits
-    from ml_stack.graph.concerns import concerns
 
     out = dict(done or {})
     nodes = {n["id"]: n["label"] for n in graph["nodes"]}
@@ -135,8 +135,6 @@ def proposal(request: Mapping[str, Any], edits: list[dict[str, Any]],
 def unread(request: Mapping[str, Any], graph: Mapping[str, Any] | None,
            reason: str) -> dict[str, Any]:
     """A request no model read, as a queue entry with no edits and ``reason`` among its concerns."""
-    from ml_stack.graph.concerns import concerns
-
     held = {"nodes": list((graph or {}).get("nodes") or []),
             "edges": list((graph or {}).get("edges") or [])}
     return proposal(request, [], [*concerns(dict(request), [], held), reason])
