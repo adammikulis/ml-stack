@@ -116,6 +116,22 @@ def test_failing_job_is_reported_as_failed(daemon):
     assert done["returncode"] == 3
 
 
+def test_a_job_that_cannot_start_is_failed_with_why(daemon, tmp_path):
+    client, *_ = daemon
+    job = client.submit([str(tmp_path / "no-such-program")])
+    done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
+    assert done["state"] == "failed" and done["returncode"] == -1
+    assert client.log(job["id"]).startswith("failed to start:")
+
+
+def test_an_environment_value_that_is_not_a_string_reaches_the_job(daemon):
+    client, *_ = daemon
+    job = client.submit([sys.executable, "-c", "import os; print(os.environ['ANSWER'])"],
+                        env={"ANSWER": 42})
+    done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
+    assert done["state"] == "done" and client.log(job["id"]).strip() == "42"
+
+
 @pytest.mark.slow
 
 

@@ -522,19 +522,12 @@ class BenchHost:
         if not store.exists():
             return out
         asked = {"store": str(store), "since": since, "full": full, "anyway": anyway}
-        if getattr(sys, "frozen", False):
-            done = subprocess.run([str(bench_python(self.runner.environment)), "-m",
-                                   "ml_stack.bench.peer_runs"], input=json.dumps(asked),
-                                  capture_output=True, text=True, timeout=300)
-            if done.returncode != 0:
-                raise DaemonError(f"reading {store} failed: {done.stderr.strip()[-400:]}")
-            return {**out, **json.loads(done.stdout)}
-        try:
-            from ml_stack.bench.peer_runs import exported
-        except ImportError as exc:
-            return {**out, "error": f"the bench is not installed here: {exc}"}
-
-        return {**out, **exported(**asked)}
+        done = subprocess.run([str(bench_python(self.runner.environment)), "-m",
+                               "ml_stack.bench.peer_runs"], input=json.dumps(asked),
+                              capture_output=True, text=True, timeout=300)
+        if done.returncode != 0:
+            raise DaemonError(f"reading {store} failed: {done.stderr.strip()[-400:]}")
+        return {**out, **json.loads(done.stdout)}
 
 
 # -- this machine as a peer ----------------------------------------------------------

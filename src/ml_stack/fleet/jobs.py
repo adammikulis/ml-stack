@@ -158,7 +158,8 @@ class JobRunner:
             raise DaemonError("empty argv")
         job_id = f"{int(time.time())}-{secrets.token_hex(3)}"
         job = Job(id=job_id, name=name or argv[0], argv=argv, cwd=cwd,
-                  submitted_at=time.time(), env=dict(env or {}))
+                  submitted_at=time.time(),
+                  env={str(k): str(v) for k, v in (env or {}).items()})
         d = self.job_dir(job_id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "job.json").write_text(json.dumps(job.public(), indent=2))
@@ -267,7 +268,7 @@ class JobRunner:
                     job.pid = proc.pid
                     job.started_at = time.time()
                 rc = proc.wait()
-        except Exception as exc:                      # noqa: BLE001
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
             job.state = "failed"
             job.returncode = -1
             log.write_text(f"failed to start: {exc}\n")
