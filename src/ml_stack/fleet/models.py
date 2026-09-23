@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import shutil
 import threading
 import time
-import shutil
 import urllib.error
 import urllib.parse
 from collections.abc import Callable
@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import UNVERSIONED, promote, read_json, version_of, versioned, write_json
 from ml_stack import hub
+from ml_stack.files import UNVERSIONED, promote, read_json, version_of, versioned, write_json
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
 
 from .weights import ModelError, resolve

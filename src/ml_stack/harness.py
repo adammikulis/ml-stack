@@ -141,8 +141,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
     takes the smallest one on this machine, 'none' takes none -- and a measured record's
     own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
     allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...)."""
-    from ml_stack.serve import chat_template, leases
-    from ml_stack.serve import profile as records
+    from ml_stack.serve import chat_template, leases, profile as records
     from ml_stack.serve.recent import note
     from ml_stack.serve.serving import Config, Serving, drafted, served
 

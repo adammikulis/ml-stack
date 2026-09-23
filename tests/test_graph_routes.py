@@ -10,12 +10,11 @@ import urllib.error
 import urllib.request
 
 import pytest
+from conftest import threaded_server
 
+from ml_stack.files import read_json, write_json
 from ml_stack.graph.review import Queue
 from ml_stack.graph.serve import Handler
-from ml_stack.files import read_json, write_json
-
-from conftest import threaded_server
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",

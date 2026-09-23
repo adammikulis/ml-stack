@@ -60,8 +60,10 @@ def _install_git_hooks() -> None:
 _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
-from ml_stack.testing.fakes import LLAMA_SERVER_HELP as LLAMA_SERVER_HELP  # noqa: E402
-from ml_stack.testing.fakes import fake_binary as fake_binary  # noqa: E402
+from ml_stack.testing.fakes import (
+    LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,  # noqa: E402
+    fake_binary as fake_binary,  # noqa: E402
+)
 
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""

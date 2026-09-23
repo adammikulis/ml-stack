@@ -6,8 +6,7 @@ import importlib.util
 import platform
 import re
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, requires
-from importlib.metadata import version as installed_version
+from importlib.metadata import PackageNotFoundError, requires, version as installed_version
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name

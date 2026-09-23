@@ -390,8 +390,7 @@ def test_the_binary_really_launches_and_answers_on_the_port_it_was_given(tmp_pat
     import json as encoding
 
     from ml_stack.client import reported_models
-    from ml_stack.serve import LlamaServerBackend, ServerSpec, free_port
-    from ml_stack.serve import backend as backend_module
+    from ml_stack.serve import LlamaServerBackend, ServerSpec, backend as backend_module, free_port
     from ml_stack.serve.process import every_server
 
     monkeypatch = pytest.MonkeyPatch()

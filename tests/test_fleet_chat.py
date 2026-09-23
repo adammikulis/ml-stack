@@ -15,8 +15,7 @@ import time
 from http.server import ThreadingHTTPServer
 
 import pytest
-from test_fleet_ui import WORDS
-from test_fleet_ui import Serving as UIServing
+from test_fleet_ui import WORDS, Serving as UIServing
 
 from ml_stack.fleet.api import make_handler
 from ml_stack.fleet.chat import find, targets

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from ml_stack.serve.chat_template import forgiving, needs_forgiving
 
 GUARD = ("{%- for message in messages %}\n"

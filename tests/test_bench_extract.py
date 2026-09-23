@@ -17,9 +17,7 @@ from typing import ClassVar
 import pytest
 
 from ml_stack import hub
-from ml_stack.bench import MEASURING, RunNotKept, _parser, runs
-from ml_stack.bench import extract as bx
-from ml_stack.bench import truth as bt
+from ml_stack.bench import MEASURING, RunNotKept, _parser, extract as bx, runs, truth as bt
 from ml_stack.client.families import GENERIC
 from ml_stack.world.organisation import make
 from ml_stack.world.simulate import simulate

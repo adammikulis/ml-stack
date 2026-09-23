@@ -9,21 +9,20 @@ without the answer on it, a 409 sent after the stream headers.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
+from conftest import threaded_server
 
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.payloads import answer_payload, sse, thread_request
 from ml_stack.graph.questions import Ask, History
 from ml_stack.graph.serve import AskRoutes
 from ml_stack.graph.store import GraphStore
-
-from conftest import threaded_server
 from ml_stack.graph.thread import SUMMARY, WINDOW, follow
 
 GRAPH = {
@@ -521,9 +520,7 @@ def test_the_page_shows_the_served_model_and_what_each_answer_spent():
 def test_the_session_totals_add_up_every_answer_in_the_thread(served):
     """Each remembered answer keeps its `spent`; the done frame and `/thread` carry the
     session's totals -- the conversation's cost so far, not the last turn's."""
-    from urllib.request import urlopen
-
-    from urllib.request import Request
+    from urllib.request import Request, urlopen
 
     def post(where, body):
         req = Request(where, data=json.dumps(body).encode("utf-8"),

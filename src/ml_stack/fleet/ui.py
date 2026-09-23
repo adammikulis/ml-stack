@@ -389,8 +389,7 @@ class UI:
         """
         try:
             from ml_stack.hub import room as room_here
-            from ml_stack.serve import charts as charts_mod
-            from ml_stack.serve import fit as fit_mod
+            from ml_stack.serve import charts as charts_mod, fit as fit_mod
         except ImportError as exc:                        # a device-tier install has no serve
             return {"error": f"this install cannot measure or read fits: {exc}",
                     "records": [], "room": 0, "at_room": 0, "name": self.name}

@@ -90,8 +90,7 @@ def test_unit_where_carries_the_url():
 
 
 def test_reader_for_picks_the_reader_by_suffix(tmp_path, monkeypatch):
-    from ml_stack.sources import html as html_module
-    from ml_stack.sources import pdf as pdf_module
+    from ml_stack.sources import html as html_module, pdf as pdf_module
 
     seen = []
     monkeypatch.setattr(html_module, "read", lambda where, **kw: seen.append(("html", where)))

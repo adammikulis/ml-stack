@@ -8,12 +8,11 @@ from __future__ import annotations
 import json
 
 import pytest
+from conftest import scored_rows
 
 from ml_stack.bench import invented_digest, runs, save
 from ml_stack.bench.comparison import assemble, read_standards, write
 from ml_stack.bench.speed import KIND as SPEED
-
-from conftest import scored_rows
 
 G = 2**30
 

@@ -493,8 +493,7 @@ class TestAutostartOnWindows:
 class TestTraindPersist:
     def test_persist_installs_at_login_with_the_flags_given_and_does_not_serve(
             self, monkeypatch, capsys, tmp_path):
-        from ml_stack.fleet import autostart
-        from ml_stack.fleet import daemon as daemon_module
+        from ml_stack.fleet import autostart, daemon as daemon_module
 
         asked: list[dict] = []
 
@@ -517,8 +516,7 @@ class TestTraindPersist:
         assert "installed to start at login" in out and "t.cmd" in out
 
     def test_a_refused_install_says_what_to_run_and_fails(self, monkeypatch, capsys):
-        from ml_stack.fleet import autostart
-        from ml_stack.fleet import daemon as daemon_module
+        from ml_stack.fleet import autostart, daemon as daemon_module
 
         monkeypatch.setattr(autostart, "install", lambda mode, **k: autostart.Autostart(
             mode, installed=False, command="schtasks /Create ...", note="no permission"))

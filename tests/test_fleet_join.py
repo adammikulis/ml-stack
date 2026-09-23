@@ -967,8 +967,7 @@ class TestWhoAPauseIsSentTo:
     """`pausing.peer_clients` builds the clients `pause_fleet` posts to."""
 
     def test_a_row_gets_a_client_holding_the_token_its_cluster_derives(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token
-        from ml_stack.fleet.discovery import join as join_cluster
+        from ml_stack.fleet.discovery import derive_token, join as join_cluster
         from ml_stack.fleet.pausing import peer_clients
 
         key = tmp_path / "clusters.json"

@@ -20,9 +20,7 @@ from conftest import write_gguf
 from ml_stack.asking import Asking
 from ml_stack.client import Reply
 from ml_stack.graph.conversation import converse
-from ml_stack.serve import cli as serve_cli
-from ml_stack.serve import ops as serve_ops
-from ml_stack.serve import profile as prof
+from ml_stack.serve import cli as serve_cli, ops as serve_ops, profile as prof
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, add, asking_for, profile_for, profiles, record, said
 

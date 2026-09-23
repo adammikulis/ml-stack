@@ -10,8 +10,10 @@ from typing import Any
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 
-from .discovery import DEFAULT_PORT as DISCOVERY_PORT  # noqa: F401  (keeps ports in view)
-from .discovery import memberships
+from .discovery import (
+    DEFAULT_PORT as DISCOVERY_PORT,  # noqa: F401  (keeps ports in view)
+    memberships,
+)
 from .updates import state
 
 __all__ = ["already_running", "last_screen", "main", "wait_for_health"]

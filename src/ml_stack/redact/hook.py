@@ -31,9 +31,9 @@ import re
 import subprocess
 import sys
 import time
-from pathlib import Path
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import home

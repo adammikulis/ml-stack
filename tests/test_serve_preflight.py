@@ -17,8 +17,7 @@ import pytest
 from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
 
 import ml_stack.serve.preflight as preflight
-from ml_stack.serve import backend as backend_module
-from ml_stack.serve import preflight
+from ml_stack.serve import backend as backend_module, preflight
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
 from ml_stack.testing.fakes import fake_llama_binary

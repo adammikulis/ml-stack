@@ -250,8 +250,8 @@ def test_a_source_read_further_grows_its_own_share_of_a_shared_node(tmp_path):
 
 
 def test_a_fold_in_memory_a_dry_fold_and_a_read_only_absorb_write_no_landing(tmp_path):
-    from ml_stack.graph.store import GraphStore
     from ml_stack.graph.absorbing import absorb
+    from ml_stack.graph.store import GraphStore
     from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
@@ -346,9 +346,8 @@ def test_a_name_merged_across_two_sources_is_between_them_with_a_weight(tmp_path
 
 
 def test_a_name_merged_within_one_source_is_not_between_sources(tmp_path):
-    from ml_stack.graph.tidy import tidy
-
     from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import tidy
 
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)

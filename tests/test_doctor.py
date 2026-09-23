@@ -26,12 +26,12 @@ from ml_stack.doctor import (
     builds_of,
     hooks_of,
     install_of,
+    look_checkouts as look,
     main,
     repositories,
     status_of,
     worktrees_of,
 )
-from ml_stack.doctor import look_checkouts as look
 
 REPO = Path(__file__).resolve().parent.parent
 AUTHOR = ("Ada Lovelace", "ada@invented.example")

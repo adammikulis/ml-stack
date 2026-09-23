@@ -25,10 +25,13 @@ from typing import Any
 # the tests and `selfcheck`, so each is read off its module at call time.
 import ml_stack.client
 from ml_stack import bench, hub, jobs, lock
-from ml_stack.bench import extract as bench_extract
-from ml_stack.bench import ops, options
-from ml_stack.bench import selfcheck as bench_selfcheck
-from ml_stack.bench import speed as bench_speed
+from ml_stack.bench import (
+    extract as bench_extract,
+    ops,
+    options,
+    selfcheck as bench_selfcheck,
+    speed as bench_speed,
+)
 from ml_stack.bench.askings import _asked, asking_from, halves, sampling_from, with_card
 from ml_stack.bench.backends import client_for, http_of, parse_on
 from ml_stack.bench.detail import missed, shape
@@ -58,8 +61,7 @@ from ml_stack.bench.show import compare, table
 from ml_stack.bench.underway import MEASURING, detach, ended, remember, wants_smoke
 from ml_stack.client.settings import Request, Transport
 from ml_stack.command import Group
-from ml_stack.graph.community import QUESTIONS
-from ml_stack.graph.community import graph as invented
+from ml_stack.graph.community import QUESTIONS, graph as invented
 from ml_stack.log import say, warn
 from ml_stack.serve.backend import ServerFailed
 from ml_stack.serve.profile import ASK

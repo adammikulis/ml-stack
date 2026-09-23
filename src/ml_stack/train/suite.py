@@ -19,10 +19,10 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.backend import detect_backend, set_seeds
 from ml_stack.bench.keep import _commit
 from ml_stack.bench.record import Measured, Spread
 from ml_stack.log import say, warn
-from ml_stack.backend import detect_backend, set_seeds
 
 __all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "lock_path",
            "peak_memory_bytes", "register", "registered", "run", "said", "suite_lock"]

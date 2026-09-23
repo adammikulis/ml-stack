@@ -51,11 +51,11 @@ def test_the_bench_parser_knows_the_flags_standard_and_animate_take():
 
 
 def test_compare_takes_positional_labels_and_last(tmp_path, monkeypatch):
+    from conftest import scored_rows
+
+    import ml_stack.bench as bench
     from ml_stack.bench import invented_digest, save
     from ml_stack.bench.comparison import newest_labels
-    import ml_stack.bench as bench
-
-    from conftest import scored_rows
 
     kept = tmp_path / "runs.ladybug"
     mine = invented_digest()

@@ -6,6 +6,7 @@ import json
 import re
 
 import pytest
+
 from ml_stack.contracts import Budget, contracts_dir, fits, largest_that_fits, tiers
 
 GIB = 1024**3

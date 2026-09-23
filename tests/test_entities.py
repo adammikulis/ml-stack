@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from ml_stack.entities import canonical, fold_duplicates, fold_key, looks_like_handle, stem
 
 # a word and its inflections have to reduce to one form, or a fold key never matches

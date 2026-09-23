@@ -10,8 +10,7 @@ import time
 import pytest
 
 from ml_stack.graph.answers import Answer
-from ml_stack.graph.cache import (PREFIX, asked, digest, fingerprint, forget, kept, recall,
-                                  remember)
+from ml_stack.graph.cache import PREFIX, asked, digest, fingerprint, forget, kept, recall, remember
 from ml_stack.graph.store import GraphStore
 
 GRAPH = {

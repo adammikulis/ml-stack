@@ -44,10 +44,10 @@ from ml_stack.sources.units import (
     Section,
     Unit,
     _slug,
+    is_question_bank as is_question_bank,
+    question_banks as question_banks,
+    units as units,
 )
-from ml_stack.sources.units import is_question_bank as is_question_bank
-from ml_stack.sources.units import question_banks as question_banks
-from ml_stack.sources.units import units as units
 
 __all__ = [
     "IMAGE_WIDTH",

@@ -8,6 +8,7 @@ survive unless they say otherwise.
 from __future__ import annotations
 
 import pytest
+
 from ml_stack.fleet.uninstall import plan, remove
 
 

@@ -12,7 +12,6 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
-
 from packaging.version import Version
 
 from ml_stack import installed

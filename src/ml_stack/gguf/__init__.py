@@ -53,5 +53,8 @@ __all__ = [
 ]
 
 from ml_stack.gguf.verify import (
-    Check, FidelityReport, verify_metadata, verify_tokenizer_fidelity,
+    Check,
+    FidelityReport,
+    verify_metadata,
+    verify_tokenizer_fidelity,
 )

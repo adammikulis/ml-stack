@@ -5,12 +5,12 @@ import contextlib
 import pathlib
 import sys
 import types
+from pathlib import Path
 
 import pytest
-
 from conftest import on_a_fresh_thread
+
 from ml_stack import harness
-from pathlib import Path
 
 
 class _Text:

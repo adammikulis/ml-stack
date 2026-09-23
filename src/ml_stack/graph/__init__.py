@@ -4,6 +4,7 @@ topology construction, and a Cypher-queryable store that outlives the process.""
 from __future__ import annotations
 
 from ml_stack.asking import Asking
+from ml_stack.client.embed import DOCUMENT, QUERY, TASK
 from ml_stack.graph.access import LockError, holder, reading, release_all, write_lock, writing
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.concerns import concerns
@@ -41,7 +42,6 @@ from ml_stack.graph.search import hybrid, lexical, rrf
 from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, snapshots, take
 from ml_stack.graph.store import GraphStore, StoreNeedsUpgrade, WouldLoseTooMuch
 from ml_stack.graph.tensors import tensors
-from ml_stack.client.embed import DOCUMENT, QUERY, TASK
 from ml_stack.graph.vectors import embedded, remember, smooth
 
 __all__ = [

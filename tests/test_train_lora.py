@@ -17,14 +17,14 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import write_gguf
+from test_train_tools import PROMPTS, TOOLS, make_tiny_base
+
 from ml_stack.train import lora as lora_mod
 from ml_stack.train.lora import CEILING_MIN, Lora, OverCeiling, fingerprint
 from ml_stack.train.recipes import validate
 from ml_stack.train.run import main, plan_for, run
 from ml_stack.train.tools import synthesise, write_dataset
-from test_train_tools import PROMPTS, TOOLS, make_tiny_base
-
-from conftest import write_gguf
 
 # One invented base, named the way the recipe's e4b size names it, for the plans that must
 # never load anything.

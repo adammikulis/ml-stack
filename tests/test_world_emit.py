@@ -15,12 +15,21 @@ from datetime import UTC, datetime
 
 import pytest
 
-from ml_stack.sources import mbox as read_mbox
-from ml_stack.sources import rows as read_rows
-from ml_stack.sources import slack_export as read_slack
-from ml_stack.sources import teams as read_teams
-from ml_stack.messages import (Message, directory, slack_channel_id, slack_user_id,
-                               teams_user_id, ts_of, when)
+from ml_stack.messages import (
+    Message,
+    directory,
+    slack_channel_id,
+    slack_user_id,
+    teams_user_id,
+    ts_of,
+    when,
+)
+from ml_stack.sources import (
+    mbox as read_mbox,
+    rows as read_rows,
+    slack_export as read_slack,
+    teams as read_teams,
+)
 from ml_stack.world.emit import mbox, msgid, rows, slack_export, teams
 
 PEOPLE = {

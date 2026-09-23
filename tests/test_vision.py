@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 
 import pytest
+
 from ml_stack.media import from_data_url, kind, probe_png
 from ml_stack.vision import (
     PALETTE,
@@ -512,6 +513,7 @@ class TestColourBlob:
         length zero and the span comes back (0, -1) -- a right edge left of the left
         edge, which a caller turns into a negative width and then a nonsense bearing."""
         import numpy as np
+
         from ml_stack.vision.geometry import find_color_blob
         f = np.zeros((240, 320, 3), np.uint8)
         f[:, :] = [60, 60, 60]
@@ -524,6 +526,7 @@ class TestColourBlob:
 
     def test_a_2d_frame_is_not_mistaken_for_a_colour_image(self):
         import numpy as np
+
         from ml_stack.vision.geometry import find_color_blob
         assert find_color_blob(np.zeros((240, 320), np.uint8)) == (0, 0, 0)
 
@@ -559,8 +562,9 @@ class TestFieldOfViewFromKnownWidth:
     def test_a_half_width_object_implies_a_wider_field_than_twice_its_angle(self):
         """Tangent, not linear. Treating it as linear under-reports the field, and every
         turn then comes up short by the same proportion."""
-        from ml_stack.vision.geometry import hfov_from_known_width
         import math
+
+        from ml_stack.vision.geometry import hfov_from_known_width
         half = hfov_from_known_width(160, 320, 100.0, 1000.0)
         obj = 2 * math.degrees(math.atan(50.0 / 1000.0))
         assert half > obj * 2 * 0.99
@@ -570,6 +574,7 @@ class TestFieldOfViewFromKnownWidth:
         """Round trip: place an object, compute the pixels a 62.2-degree camera would see
         it across, and check the solver gives 62.2 back."""
         import math
+
         from ml_stack.vision.geometry import hfov_from_known_width
         hfov, width_px, obj_mm, dist_mm = 62.2, 320, 66.0, 500.0
         half_obj = math.atan((obj_mm / 2) / dist_mm)

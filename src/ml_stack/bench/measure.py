@@ -262,8 +262,7 @@ def asking(graph: Mapping[str, Any], *, how: Any = None, shortlist: int = 0,
         # no vectors to search means no vector to search with
         if not embed_url or finder_name != "meaning":
             return None
-        from ml_stack.client.embed import embed
-        from ml_stack.client.embed import QUERY
+        from ml_stack.client.embed import QUERY, embed
 
         try:
             return embed([QUERY + text], base_url=embed_url, model=embed_model)[0]

@@ -13,6 +13,7 @@ import math
 import struct
 
 import pytest
+
 from ml_stack.media import wav
 from ml_stack.speech import (
     ASRProvider,
@@ -22,8 +23,8 @@ from ml_stack.speech import (
     Registry,
     Speech,
     SystemTTS,
-    TTSProvider,
     Transcript,
+    TTSProvider,
     VADProvider,
     pcm_to_floats,
     rms,

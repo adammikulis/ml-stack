@@ -5,15 +5,14 @@ the tools themselves — which are the part with judgement in them — run for r
 graph. What is asserted is what the tools returned and what came back as touched.
 """
 
+import json
 from dataclasses import replace
 
+from ml_stack.asking import Asking
 from ml_stack.client import Reply
-import json
-
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.looking import LISTED, list_kind, look_at, look_up, path_between, tools_for
-from ml_stack.asking import Asking
 from ml_stack.testing import ScriptedModel
 
 GRAPH = {
@@ -785,8 +784,8 @@ def test_the_tool_descriptions_show_a_call_and_never_use_the_bench_community():
     people, a rising bench score would mean the examples had been memorised rather than the
     convention learned, so the two sets of names are kept apart on purpose.
     """
-    from ml_stack.graph.prompts import TOOLS
     from ml_stack.graph.community import graph as invented
+    from ml_stack.graph.prompts import TOOLS
 
     nodes = invented()["nodes"]
     theirs = {n["id"].casefold() for n in nodes}
@@ -1116,6 +1115,7 @@ def test_pictures_a_tool_brings_back_are_shown_in_a_message_of_their_own():
     the result before it is encoded and follow it as a user message the vision model can
     see. The encoder must never meet the bytes."""
     import json
+
     import pytest
 
     pytest.importorskip("PIL", reason="ml-stack[vision]")
@@ -1352,9 +1352,17 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
     ranking runs and the answer cache fingerprinted, so it is still the same schemas (not
     copies), the same nudge and the same system prompt, byte for byte."""
     from ml_stack.graph.looking import tools_for
-    from ml_stack.graph.prompts import (SHOW_PARAGRAPH, SYSTEM, TERSE, TIGHT_NUDGE, TIGHT_SENTENCE,
-                                        TIGHT_SHOW, TIGHT_SHOW_PARAGRAPH, TIGHT_SYSTEM_SENTENCE,
-                                        TOOLS)
+    from ml_stack.graph.prompts import (
+        SHOW_PARAGRAPH,
+        SYSTEM,
+        TERSE,
+        TIGHT_NUDGE,
+        TIGHT_SENTENCE,
+        TIGHT_SHOW,
+        TIGHT_SHOW_PARAGRAPH,
+        TIGHT_SYSTEM_SENTENCE,
+        TOOLS,
+    )
 
     for got, base in zip(tools_for(GRAPH, asking=Asking(tight=False)), TOOLS, strict=True):
         assert got[0] is base
@@ -1386,8 +1394,14 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
 
 def test_tight_changes_what_show_says_on_a_copy_of_every_set():
     from ml_stack.graph.looking import tools_for
-    from ml_stack.graph.prompts import (RICH_SENTENCE, TERSE, TIGHT_SENTENCE, TIGHT_SHOW,
-                                        TIGHT_SHOW_TERSE, TOOLS)
+    from ml_stack.graph.prompts import (
+        RICH_SENTENCE,
+        TERSE,
+        TIGHT_SENTENCE,
+        TIGHT_SHOW,
+        TIGHT_SHOW_TERSE,
+        TOOLS,
+    )
 
     for terse, base, want in ((False, TOOLS, TIGHT_SHOW), (True, TERSE, TIGHT_SHOW_TERSE)):
         got = tools_for(GRAPH, terse=terse, asking=Asking(tight=True))
@@ -1410,9 +1424,15 @@ def test_tight_changes_what_show_says_on_a_copy_of_every_set():
 
 def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     from ml_stack.graph.looking import tools_for
-    from ml_stack.graph.prompts import (SYSTEM, TIGHT_NUDGE, TIGHT_SHOW, TIGHT_SHOW_TERSE,
-                                        TIGHT_SYSTEM_SENTENCE)
-    from ml_stack.graph.prompts import SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH
+    from ml_stack.graph.prompts import (
+        SHOW_PARAGRAPH,
+        SYSTEM,
+        TIGHT_NUDGE,
+        TIGHT_SHOW,
+        TIGHT_SHOW_PARAGRAPH,
+        TIGHT_SHOW_TERSE,
+        TIGHT_SYSTEM_SENTENCE,
+    )
 
     model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
     converse("who?", GRAPH, model, asking=Asking(tight=True))
@@ -1457,10 +1477,10 @@ def test_tight_keeps_what_a_tool_returned_and_drops_what_none_did():
     the first tight rule dropped her -- measured 2026-09-02, that rule cut a listed place.
     A name no tool ever returned is the guess (the `made` case) and goes.
     Mutation: build `seen` from `out.read` alone, or skip the drop."""
+    import copy
+
     from ml_stack.graph.conversation import converse
     from ml_stack.graph.looking import look_up
-
-    import copy
 
     graph = copy.deepcopy(GRAPH)
     # somebody in the graph whom no tool returns and nothing read is joined to
@@ -1532,8 +1552,14 @@ def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_
 
 from types import SimpleNamespace  # noqa: E402
 
-from ml_stack.graph.prompts import (EARLIER, RECALLED, SHOW_PARAGRAPH,  # noqa: E402
-                                    SYSTEM, TIGHT_SHOW_PARAGRAPH, TIGHT_SYSTEM_SENTENCE)
+from ml_stack.graph.prompts import (  # noqa: E402
+    EARLIER,
+    RECALLED,
+    SHOW_PARAGRAPH,
+    SYSTEM,
+    TIGHT_SHOW_PARAGRAPH,
+    TIGHT_SYSTEM_SENTENCE,
+)
 
 # The system prompt as the default asking sends it: tight. `SYSTEM` itself is what the
 # control -- tight=False -- still sends, byte for byte.
@@ -2003,8 +2029,12 @@ def test_the_single_sentence_and_the_one_entry_calls_are_said_only_when_asked_fo
     """On copies, like rich, tight and batch: with the flag off the descriptions and the
     system prompt are byte for byte what every run before this measured."""
     from ml_stack.graph.looking import tools_for
-    from ml_stack.graph.prompts import (BATCH_SYSTEM_SENTENCE, SINGLE_EXAMPLES,
-                                        SINGLE_SYSTEM_SENTENCE, TOOLS)
+    from ml_stack.graph.prompts import (
+        BATCH_SYSTEM_SENTENCE,
+        SINGLE_EXAMPLES,
+        SINGLE_SYSTEM_SENTENCE,
+        TOOLS,
+    )
 
     said = ScriptedModel([])
     converse("who?", GRAPH, said, asking=Asking(single=True))
@@ -2245,7 +2275,6 @@ def test_a_broad_question_routes_to_the_summary_only_where_it_is_offered():
     question routed to something the model was never given is a question with no tool."""
     from ml_stack.graph.prompts import SUMMARY_PROMPTS, TOOL_PROMPTS, prompts_for, routing_prompts
     from ml_stack.graph.route import rank
-
     from ml_stack.testing.embedding import bag_of_words_embedder
 
     embedder = bag_of_words_embedder(

@@ -24,13 +24,11 @@ from ml_stack.log import say, warn
 from ml_stack.platform import on_quit, private_file
 from ml_stack.speech import service as speech
 
-from . import autostart
-from . import updates as updating
+from . import autostart, updates as updating
 from .api import make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
-from .device import device_report as default_report
-from .device import resolve_report, stdlib_device_report
+from .device import device_report as default_report, resolve_report, stdlib_device_report
 from .discovery import (
     Advertiser,
     Beacon,
@@ -43,8 +41,7 @@ from .discovery import (
 from .environment import Environment
 from .files import Fetcher
 from .jobs import JobRunner
-from .measuring import BenchHost
-from .measuring import bench_home as bench_home_beside
+from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .pausing import ADOPT_S, adopt_pause, peer_pause
 from .serving import Hosting, Serving

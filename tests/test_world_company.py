@@ -15,8 +15,7 @@ import pytest
 
 from ml_stack.world import World
 from ml_stack.world.names import company_name, person_name, product_name, slug
-from ml_stack.world.organisation import (KINDS, SIZES, UNIT_KIND, load, make, role_catalogue,
-                                         summary)
+from ml_stack.world.organisation import KINDS, SIZES, UNIT_KIND, load, make, role_catalogue, summary
 from ml_stack.world.questions import KINDS as KINDS_OF_QUESTION, questions
 
 
@@ -217,9 +216,8 @@ def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
-    from ml_stack.graph.looking import list_kind, look_up, path_between, tools_for
     from ml_stack.bench import SHORT, read_questions, sample
-
+    from ml_stack.graph.looking import list_kind, look_up, path_between, tools_for
     from ml_stack.world.cli import main
 
     out = tmp_path / "world"

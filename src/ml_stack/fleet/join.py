@@ -38,15 +38,11 @@ from .discovery import (
     default_port,
     discover,
     in_cluster,
+    join as join_cluster,
     key_path,
+    leave as leave_cluster,
     memberships,
     named_apart,
-)
-from .discovery import (
-    join as join_cluster,
-)
-from .discovery import (
-    leave as leave_cluster,
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
 from .pausing import (

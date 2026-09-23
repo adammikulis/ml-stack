@@ -708,8 +708,7 @@ def parser() -> argparse.ArgumentParser:
 
 def geocode(args: argparse.Namespace) -> int:
     """`graph.places.geocode` over a graph file, written back as JSON."""
-    from ml_stack.graph.places import geocode as place
-    from ml_stack.graph.places import points
+    from ml_stack.graph.places import geocode as place, points
 
     graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
     placed = place(graph, args.cache, near=int(args.near))

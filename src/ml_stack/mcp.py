@@ -262,8 +262,7 @@ def bench_history(since: str = "", limit: int = 20) -> list[dict[str, Any]]:
     ended and what it kept (``ml-stack-bench history``); ``since`` is an ISO date or a
     span like ``2d``."""
     from ml_stack.bench import home_dir
-    from ml_stack.bench.history import _iso, history
-    from ml_stack.bench.history import since as since_at
+    from ml_stack.bench.history import _iso, history, since as since_at
 
     rows = history(home_dir())
     if since:

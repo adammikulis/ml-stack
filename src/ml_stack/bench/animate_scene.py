@@ -12,9 +12,30 @@ from pathlib import Path
 from typing import Any
 
 import manimpango
-from manim import (DOWN, LEFT, RIGHT, UP, AnimationGroup, Create, DashedVMobject, Dot, FadeIn,
-                   FadeOut, GrowFromEdge, LaggedStart, Line, Rectangle, Scene, Square, Text,
-                   ValueTracker, VGroup, VMobject, always_redraw, tempconfig)
+from manim import (
+    DOWN,
+    LEFT,
+    RIGHT,
+    UP,
+    AnimationGroup,
+    Create,
+    DashedVMobject,
+    Dot,
+    FadeIn,
+    FadeOut,
+    GrowFromEdge,
+    LaggedStart,
+    Line,
+    Rectangle,
+    Scene,
+    Square,
+    Text,
+    ValueTracker,
+    VGroup,
+    VMobject,
+    always_redraw,
+    tempconfig,
+)
 
 from . import animate as tables
 

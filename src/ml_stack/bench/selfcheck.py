@@ -51,8 +51,7 @@ from ml_stack.serve.backend import (
     emitted_flags,
     unknown_flags,
 )
-from ml_stack.serve.preflight import Check, Report
-from ml_stack.serve.preflight import Preflight as _RealPreflight
+from ml_stack.serve.preflight import Check, Preflight as _RealPreflight, Report
 from ml_stack.world import about
 from ml_stack.world.organisation import make
 

@@ -12,11 +12,10 @@ import os
 import pathlib
 
 import pytest
+from conftest import a_row
 
 import ml_stack.bench as bench
 from ml_stack.bench import queue as q
-
-from conftest import a_row
 
 FX = ("hf:hearthstone/Bellwether-12B-GGUF/UD-Q4_K_XL/"
       "Bellwether-12B-UD-Q4_K_XL-00001-of-00002.gguf")

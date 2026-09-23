@@ -3113,8 +3113,7 @@ def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, m
     import subprocess
 
     import ml_stack.bench as bench
-    from ml_stack.bench import history
-    from ml_stack.bench import underway as recording
+    from ml_stack.bench import history, underway as recording
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")

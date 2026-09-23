@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from ml_stack.fleet.discovery import (
     DEFAULT_HTTP_PORT,
     FIREWALL_RULE_DISCOVERY,

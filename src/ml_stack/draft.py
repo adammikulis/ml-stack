@@ -19,8 +19,7 @@ from ml_stack.bench.quiet import look
 from ml_stack.bench.score import Row
 from ml_stack.bench.serve import Loading, NotLoaded, Ways, refused, served, up
 from ml_stack.command import Group, flag, option
-from ml_stack.graph.community import QUESTIONS
-from ml_stack.graph.community import graph as invented
+from ml_stack.graph.community import QUESTIONS, graph as invented
 from ml_stack.hub import choose_head, located, spec_for
 from ml_stack.ingest.extract import extract_unit, schema
 from ml_stack.log import say, warn

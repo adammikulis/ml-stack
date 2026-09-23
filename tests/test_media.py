@@ -7,6 +7,7 @@ import struct
 import zlib
 
 import pytest
+
 from ml_stack.media import (
     DownloadError,
     ImageError,

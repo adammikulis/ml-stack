@@ -8,18 +8,19 @@ import json
 import sys
 from typing import Any
 
+from ml_stack.log import say, warn
+
 from .discovery import (
     MIN_PASSPHRASE,
     DiscoveryError,
+    cluster_group,
     create_cluster_key,
     derive_token,
     discover,
-    cluster_group,
     join_cluster,
     key_path,
     load_cluster_key,
 )
-from ml_stack.log import say, warn
 
 DEFAULT_GROUP_NAME = "ml-stack"
 """The group a passphrase belongs to. Two households that both chose the same words end"""

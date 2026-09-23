@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import pytest
+
 from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
@@ -582,9 +583,7 @@ class TestPassphrase:
             key_from_passphrase(bad)
 
     def test_joining_writes_a_key_only_this_user_can_read(self, tmp_path):
-        from ml_stack.fleet.discovery import join_cluster
-
-        from ml_stack.fleet.discovery import clusters_path
+        from ml_stack.fleet.discovery import clusters_path, join_cluster
 
         keyfile = tmp_path / "cluster.key"
         join_cluster(self.WORDS, path=keyfile)
@@ -635,7 +634,7 @@ class TestTheGroupIsRemembered:
     def test_the_keys_are_not_left_where_anyone_can_read_them(self, tmp_path):
         """The passphrase protects the cluster, so the keys derived from it are the
         one thing on disk that no other account may read."""
-        from ml_stack.fleet.discovery import clusters_path, cluster_group, join_cluster
+        from ml_stack.fleet.discovery import cluster_group, clusters_path, join_cluster
 
         keyfile = tmp_path / "cluster.key"
         join_cluster("correct horse battery", group="garage", path=keyfile)
@@ -711,7 +710,12 @@ class TestBelongingToSeveralClusters:
 
     def test_the_machine_answers_as_the_first_one(self, tmp_path):
         from ml_stack.fleet.discovery import (
-            cluster_group, join, leave, load_cluster_key, memberships)
+            cluster_group,
+            join,
+            leave,
+            load_cluster_key,
+            memberships,
+        )
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -745,7 +749,10 @@ class TestBelongingToSeveralClusters:
     def test_a_machine_set_up_before_the_list_existed_is_still_in_its_cluster(
             self, tmp_path):
         from ml_stack.fleet.discovery import (
-            cluster_group, in_cluster, key_from_passphrase, load_cluster_key,
+            cluster_group,
+            in_cluster,
+            key_from_passphrase,
+            load_cluster_key,
         )
 
         anchor = tmp_path / "cluster.key"
@@ -767,7 +774,10 @@ class TestBelongingToSeveralClusters:
 
     def test_the_old_key_is_moved_into_the_list_once(self, tmp_path):
         from ml_stack.fleet.discovery import (
-            join, key_from_passphrase, leave, memberships,
+            join,
+            key_from_passphrase,
+            leave,
+            memberships,
         )
 
         anchor = tmp_path / "cluster.key"

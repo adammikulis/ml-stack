@@ -77,8 +77,7 @@ def newest(kept: list[dict[str, Any]], *, last: int = 0, since: str = "") -> lis
 def kept_for(store: str | Path, *, last: int = 0, since: str = "") -> Kept:
     """What ``store`` holds, split into the tables `show` prints: the answering runs, the
     extractions and the speed grids."""
-    from ml_stack.bench import extract as bench_extract
-    from ml_stack.bench import speed as bench_speed
+    from ml_stack.bench import extract as bench_extract, speed as bench_speed
 
     everything = bench.runs(store) if Path(store).expanduser().exists() else []
     answering = [r for r in everything if r.get("kind") not in NOT_ANSWERING]

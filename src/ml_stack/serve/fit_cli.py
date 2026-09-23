@@ -10,8 +10,7 @@ from pathlib import Path
 from ml_stack import home
 from ml_stack.command import flag, option
 from ml_stack.log import say, warn
-from ml_stack.serve import charts, ops
-from ml_stack.serve import fit as fit_mod
+from ml_stack.serve import charts, fit as fit_mod, ops
 from ml_stack.serve.backend import ServerSpec, parse_context
 from ml_stack.serve.ops import Refused
 from ml_stack.serve.serving import split_cache_type

@@ -30,10 +30,10 @@ from __future__ import annotations
 
 import contextlib
 import os
-import sys
 import platform as _platform
 import signal
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path

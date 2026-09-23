@@ -16,6 +16,7 @@ from __future__ import annotations
 import pathlib
 
 import pytest
+from conftest import scored_rows
 
 from ml_stack import bench
 from ml_stack.bench.gathered import (
@@ -29,8 +30,6 @@ from ml_stack.bench.gathered import (
 )
 from ml_stack.bench.report import report
 from ml_stack.serve.fit import Fit
-
-from conftest import scored_rows
 
 GIB = 1024 ** 3
 

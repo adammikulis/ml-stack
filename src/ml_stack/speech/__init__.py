@@ -19,8 +19,8 @@ from ml_stack.speech.protocols import (
     Speech,
     SpeechRegion,
     StreamingASR,
-    TTSProvider,
     Transcript,
+    TTSProvider,
     VADProvider,
     VoiceActivity,
 )

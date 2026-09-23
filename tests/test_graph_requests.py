@@ -5,8 +5,15 @@ from __future__ import annotations
 import json
 
 from ml_stack.graph.conversation import draft
-from ml_stack.graph.requests import (CHAT_KIND, as_prompt, edge_id, from_chat, key, propose,
-                                     read_requests)
+from ml_stack.graph.requests import (
+    CHAT_KIND,
+    as_prompt,
+    edge_id,
+    from_chat,
+    key,
+    propose,
+    read_requests,
+)
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",

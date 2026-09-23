@@ -10,6 +10,7 @@ holding.
 from __future__ import annotations
 
 import pytest
+
 from ml_stack.contracts import ContractError, grammar_for
 
 EXTRACTION = {

@@ -35,8 +35,7 @@ from ml_stack.paths import repo_root
 from ml_stack.units import human_bytes
 
 from .environment import Environment
-from .jobs import DaemonError, JobRunner
-from .jobs import Job as DaemonJob
+from .jobs import DaemonError, Job as DaemonJob, JobRunner
 
 __all__ = [
     "FAILED_MARKS",

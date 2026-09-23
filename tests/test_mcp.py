@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from ml_stack import mcp as server
 
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",

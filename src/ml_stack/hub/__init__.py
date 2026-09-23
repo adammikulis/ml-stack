@@ -16,11 +16,11 @@ from __future__ import annotations
 from ml_stack.hub.cards import advice, card, in_gguf
 from ml_stack.hub.cli import main
 from ml_stack.hub.drafts import (
+    _DRAFT_NOTES,  # noqa: F401 - the per-process cache a test clears
     DRAFT_DEPTH,
     NO_HEAD,
     Chosen,
     Head,
-    _DRAFT_NOTES,  # noqa: F401 - the per-process cache a test clears
     choose_head,
     draft_for,
     draft_note,
@@ -62,8 +62,8 @@ from ml_stack.hub.naming import (
     aside,
     base_words,
     borrowed_head,
-    is_head,
     iq_on_metal,
+    is_head,
     pretty_name,
     spec_for,
 )

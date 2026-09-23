@@ -592,8 +592,7 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
 def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):
     """Preflight reads the fetched file, not the reference. Mutation: drop resolved_model()
     from start."""
-    from ml_stack.serve import backend as be
-    from ml_stack.serve import preflight as pf
+    from ml_stack.serve import backend as be, preflight as pf
 
     weights = tmp_path / "thing-Q4_K_M.gguf"
     weights.write_bytes(b"GGUF")

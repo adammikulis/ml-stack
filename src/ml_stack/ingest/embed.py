@@ -10,9 +10,13 @@ from typing import Any
 
 from ml_stack.client.embed import embed as _embed
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.vectors import MOST_CHARS as MOST_CHARS
-from ml_stack.graph.vectors import RememberOptions, remember, to_embed
-from ml_stack.graph.vectors import texts_for as texts_for
+from ml_stack.graph.vectors import (
+    MOST_CHARS as MOST_CHARS,
+    RememberOptions,
+    remember,
+    texts_for as texts_for,
+    to_embed,
+)
 
 
 @dataclass(frozen=True)

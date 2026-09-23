@@ -50,8 +50,6 @@ from ml_stack.train.holdout import (
     stratified,
 )
 from ml_stack.train.metrics import MetricsLog, Throughput, read
-from ml_stack.train.step import MLXStep, Step, TorchStep, step_for
-from ml_stack.train.trainer import Trainer, TrainReport, batches_from
 from ml_stack.train.schedule import (
     Schedule,
     constant,
@@ -59,6 +57,8 @@ from ml_stack.train.schedule import (
     warmup_cosine,
     warmup_stable_decay,
 )
+from ml_stack.train.step import MLXStep, Step, TorchStep, step_for
+from ml_stack.train.trainer import Trainer, TrainReport, batches_from
 
 __all__ = [
     "GUARD",
@@ -122,5 +122,8 @@ __all__ = [
 ]
 
 from ml_stack.train.fertility import (
-    Fertility, embedding_params, measure, report_markdown,
+    Fertility,
+    embedding_params,
+    measure,
+    report_markdown,
 )

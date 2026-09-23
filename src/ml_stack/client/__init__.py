@@ -17,9 +17,11 @@ from ml_stack.client.embed import (
     rank_pairs,
     top_k,
 )
-from ml_stack.client.families import Family
-from ml_stack.client.families import by_name as family_by_name
-from ml_stack.client.families import for_model_id as family_for_model_id
+from ml_stack.client.families import (
+    Family,
+    by_name as family_by_name,
+    for_model_id as family_for_model_id,
+)
 from ml_stack.client.health import (
     HEALTH_PATHS,
     ServingParams,

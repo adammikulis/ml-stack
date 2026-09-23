@@ -24,9 +24,7 @@ from ml_stack.bench.measure import found as finder_of
 from ml_stack.bench.score import Row, _which
 from ml_stack.bench.show import drafted
 from ml_stack.log import say, warn
-from ml_stack.serve import binary as binaries
-from ml_stack.serve import mlx_tree
-from ml_stack.serve import preflight as checks
+from ml_stack.serve import binary as binaries, mlx_tree, preflight as checks
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import ServerManager

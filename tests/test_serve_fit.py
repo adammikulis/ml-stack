@@ -21,9 +21,7 @@ from pathlib import Path
 import pytest
 from conftest import write_gguf
 
-from ml_stack.serve import charts, loadlog, measuring
-from ml_stack.serve import fit as fit_mod
-from ml_stack.serve import tensors as tensors_mod
+from ml_stack.serve import charts, fit as fit_mod, loadlog, measuring, tensors as tensors_mod
 from ml_stack.serve.fit import Fit, parse_room, records, render
 from ml_stack.serve.loadlog import Measured, parse_load_log
 

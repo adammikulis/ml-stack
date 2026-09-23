@@ -10,11 +10,10 @@ import time
 from http.server import BaseHTTPRequestHandler
 
 import pytest
+from conftest import threaded_server
 
 from ml_stack import limits as caps
 from ml_stack.serve import reclaim as reclaimer
-
-from conftest import threaded_server
 
 
 @pytest.fixture(autouse=True)

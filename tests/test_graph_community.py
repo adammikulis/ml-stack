@@ -14,7 +14,7 @@ from collections import Counter
 import pytest
 
 from ml_stack.bench.questions import mix, sample
-from ml_stack.graph.community import QUESTIONS, _MORE_SAID, graph
+from ml_stack.graph.community import _MORE_SAID, QUESTIONS, graph
 from ml_stack.graph.store import GraphStore
 
 
