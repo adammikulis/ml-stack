@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -734,6 +735,52 @@ def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
 
     assert before == "hollowbrook"
     assert after == "quillhaven"
+
+
+@pytest.mark.slow
+def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
+    """A real `ml-stack-traind` process, started with no --name, reads the name a
+    machine was given through settings.json rather than falling back to the hostname --
+    the path the rename wizard relies on, which no `make_handler`-only test can see."""
+    from ml_stack.fleet.settings import Settings
+
+    root = tmp_path / "traind"
+    (root / "files").mkdir(parents=True)
+    Settings(name="briarcombe-loop").save(root / "settings.json")
+    port = _free_port()
+    repo = Path(__file__).resolve().parent.parent
+    env = {**os.environ, "PYTHONPATH": str(repo / "src"), "PYTHONUNBUFFERED": "1"}
+    log = tmp_path / "traind.out"
+    fh = log.open("wb")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "ml_stack.fleet.daemon",
+         "--root", str(root), "--host", "127.0.0.1", "--port", str(port),
+         "--no-web", "--no-announce"],
+        env=env, stdout=fh, stderr=subprocess.STDOUT)
+    client = Peer(f"http://127.0.0.1:{port}", "unused")
+    deadline = time.time() + 20
+    health = None
+    try:
+        while time.time() < deadline:
+            try:
+                health = client.health()
+                break
+            except PeerError:
+                if proc.poll() is not None:
+                    pytest.fail(f"traind died:\n{log.read_text(errors='replace')}")
+                time.sleep(0.1)
+        else:
+            pytest.fail(f"traind never answered /health:\n{log.read_text(errors='replace')}")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        fh.close()
+
+    assert health is not None and health["name"] == "briarcombe-loop"
+    assert health["name"] != socket.gethostname()
 
 
 def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):

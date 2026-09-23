@@ -280,10 +280,6 @@ across `src/`.
   system sans stack. Nothing needed a resize to appear and no font fell back. Not yet
   driven in the window: the Chat screen with a model behind it, the Models screen's
   download, and the Fit screen's tables beyond confirming they draw.
-- [ ] **`serve_forever` preferring `Settings.name` over the hostname has no test.** It was
-  driven by hand -- the wizard renames the machine, the daemon restarts, `/health` answers
-  with the new name -- but every test that boots a daemon builds `make_handler` directly, so
-  nothing covers the resolution order. A subprocess boot with a settings file would.
 - [ ] **`ml-stack-walk` has never walked a screen with a model behind it.** Every walk so
   far was against a daemon serving nothing and an `ml-stack-graph serve` with no `--model`,
   so Chat reads "No model is running yet", the graph's question box is only read, and the
