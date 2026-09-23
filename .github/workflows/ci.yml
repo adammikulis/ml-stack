@@ -202,3 +202,48 @@ jobs:
             [ -f "$f" ] && files+=("$f")
           done
           python -m pytest "${files[@]}" -q
+
+  # scripts/hooks/no-real-names and commit-msg, over a pushed range rather than a commit
+  # being made, on a machine that always has the [privacy] extra.
+  privacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: install the name gate
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[privacy]"
+          python -m spacy download en_core_web_sm
+
+      # A pull request compares against its base; a push (and any other trigger, which
+      # carries neither) against the commit before it, or HEAD itself on a first commit.
+      - name: find the base of this push or pull request
+        id: base
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          [ -z "$BASE" ] && BASE="${{ github.event.before }}"
+          case "$BASE" in
+            ""|0000000000000000000000000000000000000000)
+              BASE="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)" ;;
+          esac
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: no name in the files this range changed
+        run: scripts/hooks/no-real-names --against "${{ steps.base.outputs.sha }}"
+
+      - name: no name in the commit messages this range adds
+        run: |
+          for sha in $(git rev-list "${{ steps.base.outputs.sha }}..HEAD"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/commit-msg.txt"
+            scripts/hooks/commit-msg "$RUNNER_TEMP/commit-msg.txt"
+          done
