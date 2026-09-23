@@ -76,11 +76,16 @@ jobs:
           echo "starting $BIN"
           "$BIN" --port 8899 --no-browser &
           for _ in $(seq 1 40); do
-            curl -sf http://127.0.0.1:8899/health >/dev/null && break || sleep 1
+            if curl -sf http://127.0.0.1:8899/health >/dev/null; then
+              break
+            fi
+            sleep 1
           done
           curl -sf http://127.0.0.1:8899/health
           curl -sf -o /dev/null -w 'ui %{http_code}\n' http://127.0.0.1:8899/ui/
-          curl -sf -o /dev/null http://127.0.0.1:8899/ui/static/app.js
+          curl -sf -o /dev/null http://127.0.0.1:8899/ui/static/style.css
+          curl -sf http://127.0.0.1:8899/ui/ | grep -q '<title>ml-stack</title>' \
+            || { echo "the page did not render"; exit 1; }
 
       # The screens, not just the assets. ml_stack.serve is reached through a lazy
       # import, so nothing static points at it and only a running bundle says whether
