@@ -25,7 +25,9 @@ from typing import Any
 # the tests and `selfcheck`, so each is read off its module at call time.
 import ml_stack.client
 from ml_stack import bench, hub, jobs, lock
+from ml_stack.bench import extract as bench_extract
 from ml_stack.bench import ops, options
+from ml_stack.bench import selfcheck as bench_selfcheck
 from ml_stack.bench import speed as bench_speed
 from ml_stack.bench.askings import _asked, asking_from, halves, sampling_from, with_card
 from ml_stack.bench.backends import client_for, http_of, parse_on
@@ -429,10 +431,6 @@ COMMANDS.borrow(lambda sub: _module("extract").add_arguments(sub),
 @COMMANDS.command("show", help="compare two runs, or list what is kept",
                   options=options.show_options, allow_abbrev=False)
 def cmd_show(args: Any) -> int:
-    # an extraction run is kept in the same store and is not an answering run: it has
-    # no questions to score, and its table is its own
-    from ml_stack.bench import extract as bench_extract  # extract imports smoke_first from here
-
     kept = ops.kept_for(args.kept, last=int(getattr(args, "last", 0) or 0),
                         since=str(getattr(args, "since", "") or ""))
     if getattr(args, "speed", False):
@@ -663,17 +661,10 @@ def main(argv: list[str] | None = None) -> int:
     refuse = "--no-queue" in rest
     rest = [a for a in rest if a != "--no-queue"]
     if "--no-selfcheck" not in rest:
-        # Before the prefetch and before the lock, on purpose: this is the run itself,
-        # with the model and the machine faked, and what it catches -- a flag the client
-        # does not take, a way that never reaches the store -- cost an 87G load the day
-        # it was left to a person to remember (2026-09-02). It needs no GPU and holds
-        # nobody up.
-        from ml_stack.bench.selfcheck import SelfCheckFailed, selfcheck
-
         began = time.monotonic()
         try:
-            proved = selfcheck(rest)
-        except SelfCheckFailed as why:
+            proved = bench_selfcheck.selfcheck(rest)
+        except bench_selfcheck.SelfCheckFailed as why:
             warn(f"selfcheck: FAILED -- this command would not get through with a "
                  f"scripted model, so nothing was loaded:\n{why}")
             warn("error: the self-check failed; fix it, or pass --no-selfcheck to "

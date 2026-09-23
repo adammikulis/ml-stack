@@ -4730,3 +4730,16 @@ def test_a_profile_naming_a_build_that_is_not_here_is_not_served(tmp_path, monke
     with pytest.raises(NotLoaded, match="'gone'"), up(
             Config(serving=Serving(model="tiny.gguf", build="gone"))):
         pytest.fail("a record naming build 'gone' was about to run on another binary")
+
+
+@pytest.mark.parametrize("module", ["run", "extract", "estimate", "selfcheck"])
+def test_a_bench_module_imports_first_in_a_fresh_interpreter(module):
+    import os
+    import subprocess
+    import sys
+
+    src = pathlib.Path(__file__).resolve().parent.parent / "src"
+    done = subprocess.run([sys.executable, "-c", f"import ml_stack.bench.{module}"],
+                          env={**os.environ, "PYTHONPATH": str(src)}, capture_output=True,
+                          text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr

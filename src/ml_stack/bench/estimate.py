@@ -16,6 +16,7 @@ from typing import Any
 
 from ml_stack import hub
 from ml_stack.bench.askings import _asked, halves
+from ml_stack.bench.extract import SMOKE_MESSAGES, only
 from ml_stack.bench.keep import SMOKE
 from ml_stack.bench.questions import _how_many, read_questions, sample
 from ml_stack.bench.speed import PROMPTS, STREAMS, _ints
@@ -260,8 +261,6 @@ def _concurrent(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstim
 
 
 def _extract(args: Any, kept: Sequence[Mapping[str, Any]]) -> list[ModelEstimate]:
-    from ml_stack.bench.extract import SMOKE_MESSAGES, only  # extract imports the bench package
-
     serving = list(getattr(args, "serve", None) or [])
     model, stem = _located(serving[0]) if serving else ("", "")
     n = SMOKE_MESSAGES if getattr(args, "smoke", False) else int(getattr(args, "sample", 0) or 0)

@@ -18,25 +18,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import hub
-from ml_stack.bench import (
-    PER_QUESTION,
-    Counting,
-    RunNotKept,
-    _idle,
-    _shown,
-    _which,
-    footprint,
-    home_dir,
-    runs,
-    sampling_from,
-    smoke_first,
-    smoked,
-    stamped,
-    wants_smoke,
-)
+from ml_stack import bench, hub
+from ml_stack.bench.askings import sampling_from
+from ml_stack.bench.counting import PER_QUESTION, Counting
 from ml_stack.bench.folding import consistency, fold, score
+from ml_stack.bench.holding import _idle, footprint
+from ml_stack.bench.keep import RunNotKept, _plain, home_dir, runs, stamped
+from ml_stack.bench.score import _which
+from ml_stack.bench.serve import smoked
+from ml_stack.bench.show import _shown
 from ml_stack.bench.truth import BUCKETS, gold, load_world, sample_messages, schema
+from ml_stack.bench.underway import wants_smoke
 from ml_stack.extraction import Checking, Prompting
 from ml_stack.log import say, warn
 
@@ -225,7 +217,6 @@ def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: st
     The same discipline as `bench.save`, for the same reason: the store once took twelve
     runs and gave back nothing, and the read-back is the only proof a run exists.
     """
-    from ml_stack.bench import _plain
     from ml_stack.graph.store import GraphStore
 
     stem = f"bench:{label}:{time.strftime('%Y%m%dT%H%M%S')}"
@@ -580,7 +571,7 @@ def run(args: Any) -> int:
             read_and_keep(client, picked, server=server, twice_over=args.twice, n=len(picked))
     else:
         if wants_smoke(args):
-            smoke_first(args)
+            bench.smoke_first(args)
         if not _idle(args.base_url, args):
             return 3
         client = Client(args.base_url, request=Request(**sampling),
