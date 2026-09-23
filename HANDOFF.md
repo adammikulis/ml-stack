@@ -264,6 +264,15 @@ across `src/`.
     has not happened is a person installing the NSIS setup or the AppImage on a real
     machine of that kind and using it -- which is what `install.ps1` and `install.sh`
     expect to exist. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
+  - **`release.yml`'s `it starts and serves the interface` step curls a file that does
+    not exist.** `curl -sf ... http://127.0.0.1:8899/ui/static/app.js` 404s against a
+    freshly built headless binary: the page has no separate `app.js` (`shell.html`'s
+    `__SCRIPTS__` is filled with each component's own inline `<script>`, and
+    `ml_stack/fleet/web/` holds only `shell.html`, `style.css` and `components/`), and
+    nothing in the tree writes one. Either the step is checking for a file this UI
+    architecture never produces and should check something that does exist (`style.css`,
+    or a real screen), or `app.js` is meant to exist and something upstream of packaging
+    stopped writing it.
 
 ### What the window has not been driven through
 
