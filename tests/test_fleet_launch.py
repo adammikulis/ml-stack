@@ -72,3 +72,21 @@ def test_the_version_is_not_said_twice():
 def test_the_installer_prints_it(capsys):
     assert autostart.main(["done", "--name", "box"]) == 0
     assert "  machine     box" in capsys.readouterr().out
+
+
+def test_a_vcs_install_names_its_commit_on_the_done_screen(monkeypatch):
+    from ml_stack.fleet import measuring, updates
+
+    class VcsInstalled:
+        def read_text(self, name):
+            return ('{"url": "https://example.invalid/ml-stack.git", "vcs_info": '
+                    '{"vcs": "git", "commit_id": "0ce5bc5' + "1" * 33 + '"}}')
+
+    monkeypatch.setattr(measuring, "repo_root", lambda where: None)
+    monkeypatch.setattr(measuring, "distribution", lambda name: VcsInstalled())
+    monkeypatch.setattr(updates, "_COMMIT", [])
+    monkeypatch.setattr(updates, "LAST", {})
+    monkeypatch.setattr(updates, "commit_age_s", lambda commit: 0.0)
+    running = next(line for line in launch.last_screen("box", port=_free_port())
+                   if line.startswith("  running"))
+    assert running.endswith("  0ce5bc5"), running

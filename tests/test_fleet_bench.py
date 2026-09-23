@@ -412,6 +412,24 @@ def test_a_bundle_answers_the_commit_it_was_built_from(tmp_path, monkeypatch):
     assert same_commit(installed_commit(), COMMIT)
 
 
+class _VcsInstalled:
+    """A distribution pip installed from a VCS URL, as PEP 610's direct_url.json records it."""
+
+    def read_text(self, name):
+        return json.dumps({"url": "https://example.invalid/ml-stack.git",
+                           "vcs_info": {"vcs": "git", "commit_id": "9f2c1ab" + "0" * 33}}
+                          ) if name == "direct_url.json" else None
+
+
+def test_a_vcs_install_answers_the_commit_pip_recorded(tmp_path, monkeypatch):
+    from ml_stack.fleet import measuring
+
+    monkeypatch.setattr(measuring, "__file__", str(tmp_path / "measuring.py"))
+    monkeypatch.setattr(measuring, "repo_root", lambda where: None)
+    monkeypatch.setattr(measuring, "distribution", lambda name: _VcsInstalled())
+    assert installed_commit() == "9f2c1ab"
+
+
 def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkeypatch):
     from ml_stack.fleet.measuring import bench_python
 

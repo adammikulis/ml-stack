@@ -24,7 +24,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import Any
 
@@ -103,8 +103,8 @@ BUILT_FROM = "built-from"
 
 def installed_commit() -> str:
     """Which ml-stack this process runs: the short sha of the checkout the package is
-    imported from, ``(dirty)`` appended when that tree has changes; ``v<version>`` from
-    ``importlib.metadata`` for a package installed from a wheel; "" when neither answers.
+    imported from, ``(dirty)`` appended when that tree has changes; the short sha pip
+    recorded for a VCS install; ``v<version>`` for a wheel; "" when none answers.
 
     Found from the package's own path -- this file's, up to the nearest ``.git``, a
     directory or a worktree's file (``ml_stack`` is a namespace package and has no
@@ -129,9 +129,19 @@ def installed_commit() -> str:
             if sha:
                 return f"{sha} (dirty)" if git("status", "--porcelain") else sha
     try:
-        return f"v{version('ml-stack')}"
+        return _vcs_commit() or f"v{version('ml-stack')}"
     except PackageNotFoundError:
         return ""
+
+
+def _vcs_commit() -> str:
+    """The short sha pip recorded for a VCS install (PEP 610 ``direct_url.json``), or ""."""
+    try:
+        said = json.loads(distribution("ml-stack").read_text("direct_url.json") or "{}")
+    except ValueError:
+        return ""
+    commit = str((said.get("vcs_info") or {}).get("commit_id") or "")
+    return commit[:7]
 
 
 def same_commit(mine: str, theirs: str) -> bool:
