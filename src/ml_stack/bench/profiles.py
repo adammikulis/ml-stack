@@ -149,8 +149,7 @@ def _written(model: str, workload: str, one: Mapping[str, Any],
     """One record, written from ``one`` into the ``model`` and ``workload`` slot."""
     from dataclasses import replace
 
-    from ml_stack.serve.profile import (FLAGS, _plain, add, profile_for, records_in,
-                                        writable_file)
+    from ml_stack.serve.profile import FLAGS, _plain, add, profile_for, records_in, writable_file
 
     made_one = profile_of(model, one)
     if not asked_recorded(one):

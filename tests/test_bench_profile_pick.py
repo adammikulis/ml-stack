@@ -8,19 +8,15 @@ from ml_stack.bench.score import held_up, separated
 from tests.test_graph_bench import scored_rows
 
 
-def _run(store, label, *, questions, hits, seconds, model="flash.gguf"):
+def _run(store, label, *, questions, hits, seconds, **server):
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds)
-    return save(store, rows, server={"graph": invented_digest(), "model": model})
+    return save(store, rows, server={"graph": invented_digest(), "model": "flash.gguf", **server})
 
 
 def test_fifteen_points_over_a_hundred_questions_is_a_measurement(tmp_path):
     """80% against 65% over a hundred right-or-wrong questions: each band is about nine
     points wide either side, the two overlap, and the difference is still measured --
-    its own interval is the two spreads in quadrature, and fifteen points is outside it.
-
-    This is the pick that wrote a shape ten points worse (80% ±6 against 70% ±6 on
-    per-question F1, whose bands are narrower than these) into a profile the evening the
-    intervals were compared by overlap."""
+    its own interval is the two spreads in quadrature, and fifteen points is outside it."""
     store = tmp_path / "runs.ladybug"
     _run(store, "best", questions=100, hits=80, seconds=2700.0)
     _run(store, "faster-worse", questions=100, hits=65, seconds=2500.0)
@@ -41,7 +37,6 @@ def test_a_difference_the_questions_cannot_see_still_goes_to_the_cheaper_row(tmp
 
 
 def test_a_profile_is_never_set_from_a_smoke(tmp_path):
-    """A 27B once got its record from a two-question row: whichever way the coin fell."""
     store = tmp_path / "runs.ladybug"
     _run(store, "smoke", questions=2, hits=1, seconds=180.0, model="big-27B.gguf")
     _run(store, "short", questions=SHORT - 1, hits=10, seconds=900.0, model="big-27B.gguf")
@@ -53,8 +48,7 @@ def test_a_profile_is_never_set_from_a_smoke(tmp_path):
 
 
 def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says(tmp_path):
-    """The hundred-question row asked with batch, kinds and summary carried no asking
-    record (it predates them), and a rewrite from it set all three to false."""
+    """A run with no asking record keeps the batch, kinds and summary its file's record holds."""
     from ml_stack.bench.profiles import write_profiles
     from ml_stack.serve.profile import add, profile_for, record, records_in
 
