@@ -46,7 +46,12 @@ from ml_stack.serve.leases import (
 from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
-from ml_stack.serve.process import kill_process_tree, pid_exists, self_or_ancestor
+from ml_stack.serve.process import (
+    kill_process_tree,
+    measuring,
+    pid_exists,
+    self_or_ancestor,
+)
 from ml_stack.serve.python_engines import ENGINES
 from ml_stack.serve.weights import scaled_timeout, weight_of
 
@@ -60,10 +65,6 @@ class Measuring(ServerFailed):
 def measurement_on_the_card() -> dict[str, Any] | None:
     """The measurement holding the bench's lock, or None when nothing is or this process
     is the holder."""
-    try:
-        from ml_stack.bench.underway import measuring
-    except ImportError:
-        return None
     held = measuring()
     if not held or self_or_ancestor(held.get("pid")):
         return None

@@ -820,7 +820,12 @@ class JobRoutes:
         if not pid:
             self.send(400, {"error": "say which pid to stop -- the one the page was shown"})
             return True
-        self.send(200, {"stopped": self.ui.stop_sweep(int(pid))})
+        try:
+            stopped = self.ui.stop_sweep(int(pid))
+        except ImportError as exc:
+            self.send(501, {"error": f"the bench is not installed here: {exc}"})
+            return True
+        self.send(200, {"stopped": stopped})
         return True
 
 

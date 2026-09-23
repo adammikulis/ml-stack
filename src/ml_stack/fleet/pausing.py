@@ -120,7 +120,7 @@ def remember_seen(rows: Sequence[dict[str, Any]], root: Path | str) -> Path:
 
 def minutes_of(span: str) -> float | None:
     """``'2h 30m'`` as minutes; None when it is not a length of time."""
-    from ml_stack.bench.history import parse_duration
+    from ml_stack.units import parse_duration
 
     seconds = parse_duration(span) if span else None
     return seconds / 60 if seconds else None

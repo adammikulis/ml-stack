@@ -2,14 +2,117 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import sys
 from pathlib import Path
+from typing import Any
 
 from ml_stack.client.health import reported_models
+from ml_stack.home import state
 from ml_stack.units import human_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def measuring_file(home: Path | None = None) -> Path:
+    """Where the run holding this machine's measuring lock writes its pid, argv, log,
+    start time and how it is asking."""
+    return (home or state("bench")) / "measuring.json"
+
+
+def measuring_lock_file(home: Path | None = None) -> Path:
+    """Where the run holding this machine's measuring lock is named, whatever else it
+    wrote."""
+    return (home or state("bench")) / "measuring.lock"
+
+
+def _locked_by(home: Path | None = None) -> int | None:
+    """The pid written into the measuring lock, or None."""
+    try:
+        said = measuring_lock_file(home).read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    return int(said[-1]) if said and said[-1].isdigit() else None
+
+
+def measuring(home: Path | None = None) -> dict[str, Any] | None:
+    """The measurement still running on this machine, or None. Read from
+    `measuring_file`; a record marked ended, or one whose pid has gone, is a measurement
+    that finished.
+
+    A live lock with no record of its own is still a measurement, reported with the little
+    the lock knows: a machine whose GPU is busy must never read as idle.
+    """
+    try:
+        record = json.loads(measuring_file(home).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if isinstance(record, dict) and not record.get("ended") and pid_exists(record.get("pid")):
+        return record
+    pid = _locked_by(home)
+    if pid is None or not pid_exists(pid) \
+            or (isinstance(record, dict) and record.get("pid") == pid):
+        return None
+    return {"pid": pid, "argv": [], "log": "", "how": {},
+            "started": "", "lock_only": True}
+
+# `proc_pid_rusage(pid, RUSAGE_INFO_V4, &buf)`, and where `ri_phys_footprint` sits in
+# `rusage_info_v4`: sixteen bytes of uuid, then user and system time, two wakeup counts,
+# pageins, wired size, resident size, and the footprint -- the eighth `uint64_t`. Verified
+# against `ps -o rss` on this machine rather than counted off the header, because counting
+# it off the header put it one slot late and read the process's start time as a footprint
+# of eight terabytes.
+RUSAGE_INFO_V4 = 4
+PHYS_FOOTPRINT_AT = 16 + 7 * 8
+
+
+def _rusage_footprint(pid: int) -> int:
+    """macOS's phys_footprint for ``pid`` -- Activity Monitor's "Memory" -- or 0.
+
+    0 for a process that is gone, a platform without the call, or any failure at all -- a
+    memory reading is never worth a caller failing over.
+    """
+    if sys.platform != "darwin":
+        return 0
+    try:
+        import ctypes
+        import ctypes.util
+
+        lib = ctypes.CDLL(ctypes.util.find_library("System") or "libSystem.dylib")
+        buf = ctypes.create_string_buffer(1024)
+        if lib.proc_pid_rusage(ctypes.c_int(int(pid)), ctypes.c_int(RUSAGE_INFO_V4),
+                               ctypes.byref(buf)) != 0:
+            return 0
+        return int.from_bytes(buf.raw[PHYS_FOOTPRINT_AT:PHYS_FOOTPRINT_AT + 8], sys.byteorder)
+    except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
+        return 0
+
+
+def footprint_of(process: Any) -> int:
+    """One process's phys_footprint in bytes -- Activity Monitor's "Memory".
+
+    psutil's own field where a build has one (some expose it in ``memory_full_info``), the
+    `proc_pid_rusage` read where it does not, and the resident set on every platform that
+    has no such distinction -- Linux and Windows charge a process for what is resident, so
+    there the two figures are the same number and the table says so by printing it twice.
+    """
+    try:
+        info = process.memory_info()
+        for name in ("phys_footprint", "footprint"):
+            got = int(getattr(info, name, 0) or 0)
+            if got:
+                return got
+    except Exception:  # noqa: BLE001
+        pass
+    through_kernel = _rusage_footprint(int(getattr(process, "pid", 0) or 0))
+    if through_kernel:
+        return through_kernel
+    try:
+        return int(process.memory_info().rss)
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def pid_exists(pid: int | None) -> bool:
@@ -131,8 +234,6 @@ def every_server() -> list[dict]:
             state = ""
         rss = int(getattr(mem, "rss", 0) or 0)
         if isinstance(proc, psutil.Process):
-            from ml_stack.bench.holding import footprint_of
-
             rss = footprint_of(proc) or rss
         ahead = after("--spec-draft-n-max")
         out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),

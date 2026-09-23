@@ -22,7 +22,13 @@ from ml_stack import bench, jobs
 from ml_stack.bench.askings import sampling_from
 from ml_stack.bench.keep import _commit
 from ml_stack.client.settings import SAMPLERS, Request
-from ml_stack.serve.process import pid_exists
+from ml_stack.serve.process import (  # noqa: F401 - the package's own re-export
+    _locked_by,
+    measuring,
+    measuring_file,
+    measuring_lock_file,
+    pid_exists,
+)
 from ml_stack.serve.serving import DEFAULT_CACHE
 
 __all__ = ["MEASURING", "_last_line", "_locked_by", "_named_in", "asking_said", "detach",
@@ -31,47 +37,6 @@ __all__ = ["MEASURING", "_last_line", "_locked_by", "_named_in", "asking_said", 
 
 # Which subcommands put load on the GPU, and so must never overlap with each other.
 MEASURING = ("run", "sweep", "drafts", "concurrent", "extract", "speed")
-
-
-def measuring_file(home: Path | None = None) -> Path:
-    """Where the run holding the measuring lock writes its pid, argv, log, start time and
-    how it is asking."""
-    return (home or bench.home_dir()) / "measuring.json"
-
-
-def measuring_lock_file(home: Path | None = None) -> Path:
-    """Where the run holding the measuring lock is named, whatever else it wrote."""
-    return (home or bench.home_dir()) / "measuring.lock"
-
-
-def _locked_by(home: Path | None = None) -> int | None:
-    """The pid written into the measuring lock, or None."""
-    try:
-        said = measuring_lock_file(home).read_text(encoding="utf-8").split()
-    except OSError:
-        return None
-    return int(said[-1]) if said and said[-1].isdigit() else None
-
-
-def measuring(home: Path | None = None) -> dict[str, Any] | None:
-    """The measurement still running, or None. Read from `measuring_file`; a record marked
-    ended, or one whose pid has gone, is a measurement that finished.
-
-    A live lock with no record of its own is still a measurement, reported with the little
-    the lock knows: a machine whose GPU is busy must never read as idle.
-    """
-    try:
-        record = json.loads(measuring_file(home).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        record = None
-    if isinstance(record, dict) and not record.get("ended") and pid_exists(record.get("pid")):
-        return record
-    pid = _locked_by(home)
-    if pid is None or not pid_exists(pid) \
-            or (isinstance(record, dict) and record.get("pid") == pid):
-        return None
-    return {"pid": pid, "argv": [], "log": "", "how": {},
-            "started": "", "lock_only": True}
 
 
 def asking_said(argv: Sequence[str]) -> dict[str, Any]:

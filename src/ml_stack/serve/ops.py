@@ -653,8 +653,8 @@ def limits(*, memory_size: str = "", servers: int | None = None, slots: int | No
     Every limit is off until somebody sets one. Raises `Refused` on a size or a length of
     time that cannot be read.
     """
-    from ml_stack.bench.history import parse_duration
     from ml_stack.hub import machine_room
+    from ml_stack.units import parse_duration
 
     if clear:
         return Limits((), limits_mod.clear(), 0, 0)
@@ -687,7 +687,7 @@ def reclaim(*, idle: str = "") -> tuple[float, Any]:
 
     Raises `Refused` when no idle time is given and none is set.
     """
-    from ml_stack.bench.history import parse_duration
+    from ml_stack.units import parse_duration
 
     older = parse_duration(idle) if idle else limits_mod.read().idle_s
     if not older:

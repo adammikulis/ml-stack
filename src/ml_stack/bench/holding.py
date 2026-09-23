@@ -10,7 +10,6 @@ is using.
 
 from __future__ import annotations
 
-import sys
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -23,6 +22,12 @@ from ml_stack import bench
 from ml_stack.bench.backends import http_of, processes, served_by
 from ml_stack.http import request_json
 from ml_stack.log import warn
+from ml_stack.serve.process import (  # noqa: F401 - the package's own re-export
+    PHYS_FOOTPRINT_AT,
+    RUSAGE_INFO_V4,
+    _rusage_footprint,
+    footprint_of,
+)
 
 # -------------------------------------------------------- what the server held, at its most
 #
@@ -56,66 +61,6 @@ from ml_stack.log import warn
 # first request holds the weights within a second of it, and a llama-server's resident
 # set moves on the scale of a prompt being read.
 SAMPLE_EVERY = 1.0
-
-# `proc_pid_rusage(pid, RUSAGE_INFO_V4, &buf)`, and where `ri_phys_footprint` sits in
-# `rusage_info_v4`: sixteen bytes of uuid, then user and system time, two wakeup counts,
-# pageins, wired size, resident size, and the footprint -- the eighth `uint64_t`. Verified
-# against `ps -o rss` on this machine rather than counted off the header, because counting
-# it off the header put it one slot late and read the process's start time as a footprint
-# of eight terabytes.
-RUSAGE_INFO_V4 = 4
-PHYS_FOOTPRINT_AT = 16 + 7 * 8
-
-
-def _rusage_footprint(pid: int) -> int:
-    """macOS's phys_footprint for ``pid`` -- Activity Monitor's "Memory" -- or 0.
-
-    The seam: everything else about the sampler is ordinary Python, and this one function
-    reaches into libSystem through ctypes. `footprint_of` calls it as ``bench.``, the way
-    everything patchable in this package is called, so a test replaces this one function and
-    nothing anywhere else has to pretend to be a kernel. 0 for a process that is gone, a platform without the
-    call, or any failure at all -- a memory reading is never worth a run not finishing.
-    """
-    if sys.platform != "darwin":
-        return 0
-    try:
-        import ctypes
-        import ctypes.util
-
-        lib = ctypes.CDLL(ctypes.util.find_library("System") or "libSystem.dylib")
-        buf = ctypes.create_string_buffer(1024)
-        if lib.proc_pid_rusage(ctypes.c_int(int(pid)), ctypes.c_int(RUSAGE_INFO_V4),
-                               ctypes.byref(buf)) != 0:
-            return 0
-        return int.from_bytes(buf.raw[PHYS_FOOTPRINT_AT:PHYS_FOOTPRINT_AT + 8], sys.byteorder)
-    except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
-        return 0
-
-
-def footprint_of(process: Any) -> int:
-    """One process's phys_footprint in bytes -- Activity Monitor's "Memory".
-
-    psutil's own field where a build has one (some expose it in ``memory_full_info``), the
-    `proc_pid_rusage` read where it does not, and the resident set on every platform that
-    has no such distinction -- Linux and Windows charge a process for what is resident, so
-    there the two figures are the same number and the table says so by printing it twice.
-    """
-    try:
-        info = process.memory_info()
-        for name in ("phys_footprint", "footprint"):
-            got = int(getattr(info, name, 0) or 0)
-            if got:
-                return got
-    except Exception:  # noqa: BLE001
-        pass
-    through_kernel = bench._rusage_footprint(int(getattr(process, "pid", 0) or 0))
-    if through_kernel:
-        return through_kernel
-    try:
-        return int(process.memory_info().rss)
-    except Exception:  # noqa: BLE001
-        return 0
-
 
 def machine_memory() -> dict[str, int]:
     """``wired`` and ``unpressured`` for the whole machine, as far as this platform says.

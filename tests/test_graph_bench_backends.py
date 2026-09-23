@@ -448,12 +448,13 @@ def test_the_sampler_sums_the_tree_and_sees_a_runner_that_arrives_late(monkeypat
     the weights. The pids are re-read every tick, so the child is counted from the tick
     it appears, and the peak is the sum over the tree."""
     import ml_stack.bench as measuring
+    import ml_stack.serve.process as process_mod
 
     runner = _Proc(5001, 60 * G)
     listener = _Proc(5000, 1 * G, children=[])
     tree = _Tree([listener, runner])
     monkeypatch.setitem(sys.modules, "psutil", tree)
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: 0)
 
     class Ollama:
         base_url = "http://127.0.0.1:11434"
@@ -480,10 +481,11 @@ def test_the_sampler_sums_the_tree_and_sees_a_runner_that_arrives_late(monkeypat
 
 def test_the_sampler_falls_back_to_the_llama_server_on_the_port(monkeypatch):
     import ml_stack.bench as measuring
+    import ml_stack.serve.process as process_mod
 
     server = _Proc(7000, 50 * G, cmdline=["llama-server", "--port", "8099"])
     monkeypatch.setitem(sys.modules, "psutil", _Tree([server]))
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: 0)
 
     class Plain:
         base_url = "http://127.0.0.1:8099"

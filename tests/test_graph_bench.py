@@ -4624,9 +4624,10 @@ def test_the_sampler_keeps_the_worst_of_a_rising_series(monkeypatch):
     import sys
 
     import ml_stack.bench as measuring
+    import ml_stack.serve.process as process_mod
 
     footprints = iter([40 * G, 62 * G, 71 * G, 68 * G])
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: next(footprints))
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: next(footprints))
     monkeypatch.setitem(sys.modules, "psutil", _FakePsutil(
         _FakeProcess([70 * G, 88 * G, 91 * G, 87 * G]),
         [(84 * G, 30 * G, 6 * G), (92 * G, 14 * G, 5 * G),
@@ -4653,8 +4654,9 @@ def test_a_run_against_someone_elses_server_samples_nothing_and_says_so(monkeypa
     import sys
 
     import ml_stack.bench as measuring
+    import ml_stack.serve.process as process_mod
 
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: 0)
     monkeypatch.setitem(sys.modules, "psutil",
                         _FakePsutil(None, [(80 * G, 20 * G, 4 * G)]))
     watcher = measuring.Watching("http://elsewhere:8099", every=0.01, start=False)
@@ -4707,15 +4709,16 @@ def test_the_kernel_read_is_behind_a_seam_and_never_raises(monkeypatch):
     """The one ctypes call in the package. It may fail on any machine, and a memory reading
     is never worth a run not finishing."""
     import ml_stack.bench as measuring
+    import ml_stack.serve.process as process_mod
 
     class _Boom:
         pid = 7
         def memory_info(self):
             raise OSError("gone")
 
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: 0)
     assert measuring.footprint_of(_Boom()) == 0
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 5 * G)
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: 5 * G)
     assert measuring.footprint_of(_Boom()) == 5 * G, "the kernel read stands in for psutil"
 
     class _Plain:
@@ -4723,7 +4726,7 @@ def test_the_kernel_read_is_behind_a_seam_and_never_raises(monkeypatch):
         def memory_info(self):
             return _FakeMemory(3 * G)
 
-    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    monkeypatch.setattr(process_mod, "_rusage_footprint", lambda pid: 0)
     assert measuring.footprint_of(_Plain()) == 3 * G, \
         "no footprint anywhere: on Linux and Windows it is the resident set, said twice"
 
@@ -4801,11 +4804,10 @@ def test_a_held_measuring_lock_with_no_record_still_reads_as_measuring(tmp_path,
     record beside it can be missing, and the answer is still "measuring"."""
     import os
 
-    from ml_stack import bench
     from ml_stack.bench.progress import _status_line
     from ml_stack.bench.underway import measuring
 
-    monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path))
     assert measuring() is None, "no lock, nothing measuring"
 
     (tmp_path / "measuring.lock").write_text(f"pid {os.getpid()}")
@@ -4824,10 +4826,9 @@ def test_a_record_beats_the_lock_it_was_written_beside(tmp_path, monkeypatch):
     import json
     import os
 
-    from ml_stack import bench
     from ml_stack.bench.underway import measuring
 
-    monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path))
     (tmp_path / "measuring.lock").write_text(f"pid {os.getpid()}")
     (tmp_path / "measuring.json").write_text(json.dumps(
         {"pid": os.getpid(), "argv": ["sweep"], "log": "", "started": "", "how": {}}))

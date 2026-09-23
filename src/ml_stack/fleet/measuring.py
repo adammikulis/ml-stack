@@ -419,7 +419,10 @@ class BenchHost:
                                "commit": self.commit, "store": str(store), "full": full}
         if not store.exists():
             return out
-        from ml_stack import bench as measured
+        try:
+            from ml_stack import bench as measured
+        except ImportError as exc:
+            return {**out, "error": f"the bench is not installed here: {exc}"}
 
         kept = [r for r in measured.runs(store) if str(r.get("at", "")) >= since]
         if full:

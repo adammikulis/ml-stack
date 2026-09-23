@@ -31,6 +31,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ml_stack.log import say, warn
 from ml_stack.serve.process import pid_exists
+from ml_stack.units import parse_duration
 
 STAMP = "%Y%m%dT%H%M%S"                    # the log's filename
 ISO = "%Y-%m-%dT%H:%M:%S"                  # `measuring.json`, the header, a run's `at`;
@@ -39,7 +40,6 @@ HEADER_LINES = 12                          # how far into a log a header is look
 
 _HEADER = re.compile(r"^\s*#?\s*(argv|started|commit)\s*:\s*(.*?)\s*$")
 _ESTIMATE = re.compile(r"^\s*#?\s*estimate\s*:\s*(.*?)\s*$", re.IGNORECASE)
-_DURATION = re.compile(r"(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?|s|sec|secs|seconds?)\b")
 _QUESTION = re.compile(r"^\s*\d+(?:\.\d+)?s\s+\d+\s+calls\b")
 _LOG_NAME = re.compile(r"^(?P<sub>[^-]+)-(?P<name>.+)-(?P<stamp>\d{8}T\d{6})$")
 _TRACEBACK = "Traceback (most recent call last):"
@@ -79,18 +79,6 @@ def _epoch(iso: str) -> float | None:
 
 def _iso(epoch: float) -> str:
     return time.strftime(ISO, time.localtime(epoch))
-
-
-def parse_duration(text: str) -> float | None:
-    """``2h 15m``, ``90s``, ``1.5h``, ``~600`` -> seconds; a bare number is seconds."""
-    total, found = 0.0, False
-    for amount, unit in _DURATION.findall(text):
-        found = True
-        total += float(amount) * {"h": 3600.0, "m": 60.0, "s": 1.0}[unit[0]]
-    if found:
-        return total
-    bare = re.search(r"\d+(?:\.\d+)?", text)
-    return float(bare.group()) if bare else None
 
 
 def _measuring(home: Path) -> dict[str, Any]:

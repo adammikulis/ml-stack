@@ -149,8 +149,8 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     Idleness is asked of each server and what the looks found is kept, so a pass adds
     `--settle` seconds of its own watching to whatever the daemon has already seen.
     """
-    from ml_stack.bench.history import parse_duration
     from ml_stack.serve.reclaim import watching
+    from ml_stack.units import parse_duration
 
     try:
         older, watcher = ops.reclaim(idle=args.idle)

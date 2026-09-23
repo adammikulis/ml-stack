@@ -43,7 +43,6 @@ KNOWN = {
     ("hub", "serve"),
     ("ingest", "bench"),
     ("ingest", "serve"),
-    ("serve", "bench"),
     ("serve", "fleet"),
     ("serve", "setup"),
     ("setup", "fleet"),
