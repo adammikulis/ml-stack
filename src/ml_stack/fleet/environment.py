@@ -66,6 +66,9 @@ CATALOG: tuple[Library, ...] = (
             "Training on Apple silicon, using the GPU.",
             ("mlx>=0.18",), size_mb=120, default=True,
             platforms=("darwin",), vendors=("apple",)),
+    Library("bench", "Measuring",
+            "Running the model sweeps other machines send this one.",
+            ("ml-stack[graph,store,serve,hub]",), size_mb=150),
     Library("vision", "Images",
             "Reading and resizing pictures.",
             ("pillow>=10.0",), size_mb=15),
@@ -138,13 +141,13 @@ class Environment:
         try:
             release = request_json(STANDALONE, method="GET", timeout=60, tries=3) or {}
         except (ServerError, ValueError) as exc:
-            raise EnvironmentError(f"could not reach the Python builds: {exc}") from None
+            raise OSError(f"could not reach the Python builds: {exc}") from None
         want = self._asset_name()
         assets = [a for a in release.get("assets", ())
                   if want in a["name"] and a["name"].endswith(".tar.gz")
                   and f"cpython-{PYTHON}." in a["name"]]
         if not assets:
-            raise EnvironmentError(
+            raise OSError(
                 f"no Python {PYTHON} build for this machine ({want.strip('-')})")
 
         base = Path(self.root).expanduser() / "python"
@@ -156,24 +159,24 @@ class Environment:
                         archive.open("wb") as fh:
                     shutil.copyfileobj(r, fh)
             except ServerError as exc:
-                raise EnvironmentError(f"could not download Python: {exc}") from None
+                raise OSError(f"could not download Python: {exc}") from None
             if on_progress:
                 on_progress("Unpacking Python")
             with tarfile.open(archive) as tf:
-                for member in tf.getmembers():
-                    if member.name.startswith("/") or ".." in Path(member.name).parts:
-                        raise EnvironmentError("refusing an archive that escapes its "
-                                               "directory")
-                tf.extractall(tmp)
+                try:
+                    tf.extractall(tmp, filter="data")
+                except tarfile.FilterError as exc:
+                    raise OSError(f"refusing an archive that escapes its directory: "
+                                  f"{exc}") from None
             unpacked = Path(tmp) / "python"
             if not unpacked.is_dir():
-                raise EnvironmentError("the download did not contain a python directory")
+                raise OSError("the download did not contain a python directory")
             shutil.rmtree(base, ignore_errors=True)
             promote(unpacked, base)
 
         got = self.standalone_python()
         if got is None:
-            raise EnvironmentError("the downloaded Python is not where it was expected")
+            raise OSError("the downloaded Python is not where it was expected")
         return got
 
     # -- building it ----------------------------------------------------
@@ -190,7 +193,7 @@ class Environment:
         made = subprocess.run([str(base), "-m", "venv", str(self.path)],
                               capture_output=True, text=True)
         if made.returncode != 0:
-            raise EnvironmentError(
+            raise OSError(
                 f"could not build the environment: {_last_error(made.stderr)}")
         return self.python
 

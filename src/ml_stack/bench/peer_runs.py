@@ -6,11 +6,13 @@ back as one set of runs that says which machine measured each."""
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ml_stack.bench.score import machine_of
+from ml_stack.bench.keep import runs
+from ml_stack.bench.score import _exportable, _over_invented, machine_of
 from ml_stack.fleet.sweeps import UNANSWERED, Handle, bench_export
 from ml_stack.log import say
 
@@ -154,3 +156,21 @@ def gather(handles: Sequence[Handle], *, into: str | Path,
         out[machine or host] = import_runs({**answered, "machine": machine}, into,
                                            host=host, log=log)
     return out
+
+
+def exported(store: str | Path, *, since: str = "", full: bool = False,
+             anyway: bool = False) -> dict[str, Any]:
+    """The runs in ``store`` kept at or after ``since``: whole with ``full``, else flattened
+    as ``show --export`` writes them, and held to the invented community unless
+    ``anyway``. ``{"runs": [...], "skipped": N}``."""
+    kept = [r for r in runs(store) if str(r.get("at", "")) >= since]
+    if full:
+        over, skipped = _over_invented(kept, anyway=anyway)
+        return {"runs": [dict(one) for one in over], "skipped": skipped}
+    flat, skipped = _exportable(kept, anyway=anyway)
+    return {"runs": flat, "skipped": skipped}
+
+
+if __name__ == "__main__":
+    # the keywords of `exported` as a JSON object on stdin, its answer as JSON on stdout
+    sys.stdout.write(json.dumps(exported(**json.loads(sys.stdin.read()))))

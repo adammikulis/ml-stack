@@ -50,6 +50,18 @@ def wheelhouse(out: Path) -> list[Path]:
     return sorted(out.glob("*.whl"))
 
 
+def built_from() -> Path:
+    """Write the commit this tree is at where ``ml-stack.spec`` puts it beside
+    `ml_stack.fleet.measuring`, which is what the frozen daemon answers as its commit."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from ml_stack.fleet.measuring import BUILT_FROM, installed_commit
+
+    where = ROOT / ".build-work" / BUILT_FROM
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text(installed_commit() + "\n", encoding="utf-8")
+    return where
+
+
 def daemon() -> Path:
     """Freeze the daemon with PyInstaller. Returns the binary it wrote."""
     env = ROOT / ".build-venv"
@@ -62,6 +74,7 @@ def daemon() -> Path:
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
          "--force-reinstall", "--no-deps", "ml-stack"])
 
+    built_from()
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
     run([str(tool), "--clean", "--noconfirm", "--distpath", str(DIST / "bundle"),
          "--workpath", str(ROOT / ".build-work"), "ml-stack.spec"],

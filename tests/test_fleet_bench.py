@@ -61,8 +61,9 @@ def scripted_launch(*, seconds: float = 0.4, says: str = "kept as bench:tried:20
     goes when it exits, the way a detached bench's does once launchd has it."""
     calls: list[list[str]] = []
 
-    def launch(line, home: Path):
+    def launch(line, home: Path, python: Path):
         calls.append(list(line))
+        launch.pythons.append(python)
         logs = home / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         log = logs / f"sweep-{len(calls)}-{int(time.time() * 1000)}.log"
@@ -77,6 +78,7 @@ def scripted_launch(*, seconds: float = 0.4, says: str = "kept as bench:tried:20
         return proc.pid, log
 
     launch.calls = calls
+    launch.pythons = []
     return launch
 
 
@@ -399,6 +401,51 @@ def test_a_peer_nobody_answers_for_is_said_and_the_rest_go_on(boxes, tmp_path):
     assert "could not export" in "\n".join(said) and list(got) == ["id-roomy"]
 
 
+def test_a_bundle_answers_the_commit_it_was_built_from(tmp_path, monkeypatch):
+    from ml_stack.fleet import measuring
+
+    monkeypatch.setattr(measuring, "__file__", str(tmp_path / "measuring.py"))
+    (tmp_path / measuring.BUILT_FROM).write_text("ab12cd3 (dirty)\n")
+    assert installed_commit() == "ab12cd3 (dirty)"
+    assert same_commit(installed_commit(), COMMIT)
+
+
+def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkeypatch):
+    from ml_stack.fleet.measuring import bench_python
+
+    roomy, _ = boxes
+    (handle,) = dispatch({roomy.peer: _job("big.gguf")}, log=lambda _l: None)
+    assert roomy.host.launch.pythons == [Path(sys.executable)]
+    wait([handle], poll_s=0.1, timeout_s=20, log=lambda _l: None)
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    with pytest.raises(RuntimeError, match="What this machine can train with"):
+        bench_python(None)
+    (refused,) = dispatch({roomy.peer: _job("big.gguf")}, log=lambda _l: None)
+    assert refused.state == "refused" and "launch" in refused.why
+    assert "Measuring" in refused.why
+
+
+def test_an_export_reads_the_store_through_peer_runs(tmp_path):
+    from ml_stack.bench.peer_runs import exported
+
+    store = tmp_path / "runs.ladybug"
+    _kept(store, "kept-before", "2020-01-01T00:00:00")
+    _kept(store, "kept-over-another", "2026-09-02T10:00:00", invented=False)
+    _kept(store, "kept-after", "2026-09-02T11:00:00")
+    since = "2026-09-02T00:00:00"
+    flat = exported(store, since=since)
+    assert [r["label"] for r in flat["runs"]] == ["kept-after"] and flat["skipped"] == 1
+    assert "rows" not in flat["runs"][0]
+    whole = exported(store, since=since, full=True, anyway=True)
+    assert sorted(r["label"] for r in whole["runs"]) == ["kept-after", "kept-over-another"]
+    assert all(r["rows"] for r in whole["runs"])
+    said = subprocess.run([sys.executable, "-m", "ml_stack.bench.peer_runs"],
+                          input=json.dumps({"store": str(store), "since": since}),
+                          capture_output=True, text=True, check=True).stdout
+    assert json.loads(said) == flat
+
+
 def test_a_bench_that_says_error_is_failed(tmp_path):
     box = _box(tmp_path, "shaky", room=96 * G, launch=scripted_launch(fails=True))
     try:
@@ -664,15 +711,16 @@ def test_a_detached_bench_is_told_the_home_whose_lock_the_daemon_watches(tmp_pat
     seen = {}
 
     def run(argv, **kw):
-        seen["env"] = kw.get("env") or {}
+        seen["argv"], seen["env"] = argv, kw.get("env") or {}
         home = Path(seen["env"]["MLSTACK_BENCH_HOME"])
         home.mkdir(parents=True, exist_ok=True)
         (home / "measuring.json").write_text(json.dumps({"pid": 4242, "log": str(home / "x.log")}))
         return subprocess.CompletedProcess(argv, 0, "log: " + str(home / "x.log"), "")
 
     monkeypatch.setattr(fb.subprocess, "run", run)
-    pid, log = fb.detach_bench(["run", "m.gguf"], tmp_path / "bench")
+    pid, log = fb.detach_bench(["run", "m.gguf"], tmp_path / "bench", Path("/env/bin/python"))
     assert pid == 4242 and log == tmp_path / "bench" / "x.log"
+    assert seen["argv"][:3] == ["/env/bin/python", "-m", "ml_stack.bench"]
     assert seen["env"]["MLSTACK_BENCH_HOME"] == str(tmp_path / "bench")
     assert "PATH" in seen["env"]                     # the rest of the environment came along
 

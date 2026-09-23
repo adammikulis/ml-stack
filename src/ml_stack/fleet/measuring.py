@@ -33,6 +33,7 @@ from ml_stack.lock import held_by
 from ml_stack.paths import repo_root
 from ml_stack.units import human_bytes
 
+from .environment import CATALOG, Environment
 from .jobs import DaemonError, JobRunner
 from .jobs import Job as DaemonJob
 
@@ -91,6 +92,11 @@ def bench_home(traind_root: Path | str | None = None) -> Path:
 
 
 # -- the pin -------------------------------------------------------------------------
+BUILT_FROM = "built-from"
+"""The file beside this module in a frozen bundle naming the commit it was built from;
+``packaging/build.py`` writes it."""
+
+
 def installed_commit() -> str:
     """Which ml-stack this process runs: the short sha of the checkout the package is
     imported from, ``(dirty)`` appended when that tree has changes; ``v<version>`` from
@@ -104,6 +110,9 @@ def installed_commit() -> str:
     whose ``commit`` differs from this. Compared with `same_commit`, which ignores dirtiness
     -- a tree edited on one side is a warning in the record, not a reason to refuse.
     """
+    built = Path(__file__).with_name(BUILT_FROM)
+    if built.is_file():
+        return built.read_text(encoding="utf-8").strip()
     where = repo_root(Path(__file__).resolve().parent)
     if where is not None:
         def git(*words: str) -> str:
@@ -242,13 +251,39 @@ def jobs_from(planned: Mapping[Any, Sequence[str]], base: Job, *,
 
 
 # -- the daemon side -----------------------------------------------------------------
-def detach_bench(line: Sequence[str], home: Path) -> tuple[int, Path]:
-    """Start ``ml-stack-bench <line> --no-queue --detach`` here and return the child's pid
-    and log. ``--detach`` re-runs the command in its own session with its output in a log
-    under ``home/logs`` and writes the pid into ``home/measuring.json``, which is where
+MEASURING = "bench"
+"""The `environment.CATALOG` library a frozen app measures through."""
+ON_THE_SCREEN = ('install "Measuring" under Settings, "What this machine can train with"')
+
+
+def bench_python(environment: Environment | None) -> Path:
+    """The interpreter that runs ``ml-stack-bench`` here: this one, or in the frozen app,
+    which holds no bench, ``environment``'s, with `MEASURING` installed when it is not."""
+    if not getattr(sys, "frozen", False):
+        return Path(sys.executable)
+    if environment is None:
+        raise RuntimeError(f"this app measures through its own environment and has none; "
+                           f"{ON_THE_SCREEN}")
+    wanted = next(lib for lib in CATALOG if lib.name == MEASURING)
+    if not environment.has(wanted):
+        try:
+            done = environment.install([MEASURING]).get(MEASURING) or {}
+        except (OSError, subprocess.SubprocessError) as exc:
+            done = {"ok": False, "error": str(exc)}
+        if not done.get("ok") or not environment.has(wanted):
+            raise RuntimeError(f"could not install ml-stack's bench into {environment.path}: "
+                               f"{done.get('error') or 'it is still not there'}; "
+                               f"{ON_THE_SCREEN}")
+    return environment.python
+
+
+def detach_bench(line: Sequence[str], home: Path, python: Path) -> tuple[int, Path]:
+    """Start ``python -m ml_stack.bench <line> --no-queue --detach`` and return the child's
+    pid and log. ``--detach`` re-runs the command in its own session with its output in a
+    log under ``home/logs`` and writes the pid into ``home/measuring.json``, which is where
     this reads it back; ``--no-queue`` makes a race for the lock a failed job rather than a
     run queued behind another, since the lock was checked before this was called."""
-    done = subprocess.run([sys.executable, "-m", "ml_stack.bench", *line,
+    done = subprocess.run([str(python), "-m", "ml_stack.bench", *line,
                            "--no-queue", "--detach"],
                           capture_output=True, text=True, timeout=120,
                           env={**os.environ, "MLSTACK_BENCH_HOME": str(home)})
@@ -320,7 +355,7 @@ class BenchHost:
 
     def __init__(self, runner: JobRunner, *, home: Path | str,
                  room: Callable[[], int] | None = None,
-                 launch: Callable[[Sequence[str], Path], tuple[int, Path]] = detach_bench,
+                 launch: Callable[[Sequence[str], Path, Path], tuple[int, Path]] = detach_bench,
                  name: str = "") -> None:
         self.runner = runner
         self.home = Path(home).expanduser()
@@ -390,7 +425,7 @@ class BenchHost:
         job_id = f"{int(time.time())}-{secrets.token_hex(3)}"
         line = [*job.argv, *self._placed(job_id, job.files)]
         try:
-            pid, log = self.launch(line, self.home)
+            pid, log = self.launch(line, self.home, bench_python(self.runner.environment))
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
             shutil.rmtree(self._given(job_id), ignore_errors=True)
             raise Refused("launch", f"{self.name} could not start ml-stack-bench: {exc}") from exc
@@ -450,19 +485,20 @@ class BenchHost:
                                "machine": self.machine}
         if not store.exists():
             return out
+        asked = {"store": str(store), "since": since, "full": full, "anyway": anyway}
+        if getattr(sys, "frozen", False):
+            done = subprocess.run([str(bench_python(self.runner.environment)), "-m",
+                                   "ml_stack.bench.peer_runs"], input=json.dumps(asked),
+                                  capture_output=True, text=True, timeout=300)
+            if done.returncode != 0:
+                raise DaemonError(f"reading {store} failed: {done.stderr.strip()[-400:]}")
+            return {**out, **json.loads(done.stdout)}
         try:
-            from ml_stack import bench as measured
+            from ml_stack.bench.peer_runs import exported
         except ImportError as exc:
             return {**out, "error": f"the bench is not installed here: {exc}"}
 
-        kept = [r for r in measured.runs(store) if str(r.get("at", "")) >= since]
-        if full:
-            over, skipped = measured._over_invented(kept, anyway=anyway)
-            out["runs"] = [dict(one) for one in over]
-        else:
-            out["runs"], skipped = measured._exportable(kept, anyway=anyway)
-        out["skipped"] = skipped
-        return out
+        return {**out, **exported(**asked)}
 
 
 # -- this machine as a peer ----------------------------------------------------------

@@ -10,6 +10,11 @@ datas = [
     (str(package_dir("ml_stack.contracts") / "_data"), "ml_stack/contracts/_data"),
 ]
 
+# The commit this was built from, beside ml_stack.fleet.measuring, which answers it.
+_built = Path("../.build-work/built-from")
+if _built.is_file():
+    datas.append((str(_built), "ml_stack/fleet"))
+
 # The ml-stack wheels themselves, so the app can build a training environment on a
 # machine that has never heard of this project.
 _wheels = Path("../dist")
