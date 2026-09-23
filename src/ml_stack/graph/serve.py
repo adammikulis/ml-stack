@@ -63,13 +63,14 @@ import json
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, nullcontext, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from ml_stack.asking import ASKING
+from ml_stack.client.spent import Spent
 from ml_stack.graph.completions import CompletionRoutes
 from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.metrics import MetricsRoutes
@@ -82,7 +83,18 @@ from ml_stack.graph.routes import (
     ReviewRoutes,
 )
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.thread import EVERY, WINDOW
+from ml_stack.graph.thread import (
+    EVERY,
+    WINDOW,
+    conversation_store,
+    drew_on,
+    follow,
+    latest_summary,
+    recall,
+    recent,
+    remember_turn,
+    summarise,
+)
 from ml_stack.log import say, warn
 
 __all__ = ["EXPORT_TYPES", "LIVE", "PORT", "AskRoutes", "Handler", "bind", "exported", "main"]
@@ -205,8 +217,6 @@ class AskRoutes(MetricsRoutes):
     def conversations(self) -> Path:
         """The path conversations are kept at: `conversation_store` of ``store``, or
         ``store`` itself with ``conversations_in_store``."""
-        from ml_stack.graph.thread import conversation_store
-
         corpus = Path(str(self.store))
         return corpus if self.conversations_in_store else conversation_store(corpus)
 
@@ -286,9 +296,6 @@ class AskRoutes(MetricsRoutes):
     def session(self, thread: str) -> dict[str, Any] | None:
         """`Spent.totals` over every answer remembered in ``thread``, or None without a
         store: what the session has cost, not just the last turn."""
-        from ml_stack.client.spent import Spent
-        from ml_stack.graph.thread import follow
-
         try:
             with self._opened() as store:
                 if store is None:
@@ -358,10 +365,8 @@ class AskRoutes(MetricsRoutes):
         except Exception as exc:  # noqa: BLE001
             self.failed(ask, exc)
             frame = {"event": "error", "error": str(exc)[:200]}
-            try:
+            with suppress(OSError):
                 sse(self.wfile, frame)
-            except OSError:
-                pass
             return frame
 
     def handle_thread(self, name: str, working: bool = False) -> dict[str, Any]:
@@ -371,15 +376,11 @@ class AskRoutes(MetricsRoutes):
         a store that cannot be opened, or none at all, is an empty conversation with a
         note, never an error.
         """
-        from ml_stack.graph.thread import follow
-
         name = str(name)[:64]
         try:
             with self._opened() as store:
                 turns = ([] if store is None
                          else [t.as_dict() for t in follow(store, name, working=working)])
-            from ml_stack.client.spent import Spent
-
             session = Spent.totals([(t.get("meta") or {}).get("spent") for t in turns
                                     if t.get("role") == "assistant"])
             held_back = {"thread": name, "turns": turns}
@@ -408,8 +409,6 @@ class AskRoutes(MetricsRoutes):
             return History(sent)
         keep = int(self.remembered_turns if window is None else window)
         try:
-            from ml_stack.graph.thread import latest_summary, recall, recent
-
             with self._opened() as store:
                 if store is None:
                     return History(sent)
@@ -439,8 +438,6 @@ class AskRoutes(MetricsRoutes):
         if not ask.thread:
             return
         try:
-            from ml_stack.graph.thread import drew_on, remember_turn, summarise
-
             payload = answer_payload(out)
             drew = drew_on(payload)
             held = self.pointers([i for ids in drew.values() for i in ids])

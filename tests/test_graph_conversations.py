@@ -6,17 +6,16 @@ model; every store is read back on a fresh handle after the server has written i
 
 from __future__ import annotations
 
+import http.client
 import json
-import urllib.request
 
 import pytest
+from conftest import threaded_server
 
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.serve import Handler, bind
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.thread import conversation_store, follow
-
-from conftest import threaded_server
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person"},
@@ -30,20 +29,27 @@ ANSWER = Answer(content="Iris surveys land.", ids=["person:iris", "topic:surveyi
                 show=["person:iris", "person:ghost"], steps=["found 2 entries"])
 
 
-def _asker(self, question, *, turns, highlighted, stream, emit):
+def _asker(self, question, **_):
     return ANSWER
 
 
-def _post(url, body):
-    req = urllib.request.Request(url, method="POST", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.status, r.read()
+def _request(url, method, path, body=None):
+    conn = http.client.HTTPConnection(url.removeprefix("http://"), timeout=10)
+    try:
+        conn.request(method, path, body=None if body is None else json.dumps(body),
+                     headers={"Content-Type": "application/json"})
+        got = conn.getresponse()
+        return got.status, got.read()
+    finally:
+        conn.close()
 
 
-def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
-        return json.loads(r.read())
+def _post(url, path, body):
+    return _request(url, "POST", path, body)[0]
+
+
+def _get(url, path):
+    return json.loads(_request(url, "GET", path)[1])
 
 
 def _tables(path):
@@ -70,10 +76,9 @@ def test_conversation_store_sits_beside_the_corpus(tmp_path):
 
 def test_an_ask_leaves_the_corpus_untouched_and_the_conversation_beside_it(corpus):
     with threaded_server(_served(corpus)) as url:
-        status, _ = _post(url + "/ask/stream", {"question": "who surveys land?",
-                                                 "thread": "c1"})
-        assert status == 200
-        replay = _get(url + "/thread/c1?working=1")
+        assert _post(url, "/ask/stream", {"question": "who surveys land?",
+                                           "thread": "c1"}) == 200
+        replay = _get(url, "/thread/c1?working=1")
 
     assert "Turn" not in _tables(corpus)
     with GraphStore(corpus, read_only=True) as store:
@@ -95,7 +100,7 @@ def test_an_ask_leaves_the_corpus_untouched_and_the_conversation_beside_it(corpu
 
 def test_the_flag_keeps_the_conversation_in_the_corpus(corpus):
     with threaded_server(_served(corpus, conversations_in_store=True)) as url:
-        assert _post(url + "/ask", {"question": "who surveys land?", "thread": "c1"})[0] == 200
+        assert _post(url, "/ask", {"question": "who surveys land?", "thread": "c1"}) == 200
 
     assert not conversation_store(corpus).exists()
     with GraphStore(corpus, read_only=True) as store:
@@ -113,7 +118,7 @@ def test_a_pointer_never_overwrites_an_entry_the_conversation_store_holds(corpus
         return GraphStore(corpus, read_only=not write)
 
     with threaded_server(_served(corpus, threads=threads)) as url:
-        assert _post(url + "/ask", {"question": "who surveys land?", "thread": "c1"})[0] == 200
+        assert _post(url, "/ask", {"question": "who surveys land?", "thread": "c1"}) == 200
 
     with GraphStore(corpus, read_only=True) as store:
         iris = next(n for n in store.nodes() if n["id"] == "person:iris")
@@ -123,7 +128,7 @@ def test_a_pointer_never_overwrites_an_entry_the_conversation_store_holds(corpus
 
 def test_reading_a_thread_before_any_ask_creates_no_store(corpus):
     with threaded_server(_served(corpus)) as url:
-        assert _get(url + "/thread/c1") == {"thread": "c1", "turns": []}
+        assert _get(url, "/thread/c1") == {"thread": "c1", "turns": []}
     assert not conversation_store(corpus).exists()
 
 

@@ -1,16 +1,11 @@
-"""A conversation kept as part of the graph.
+"""A conversation kept as a graph, in `conversation_store` beside the corpus it asks.
 
 A turn is a node, turns are chained newest-after-oldest, and each is joined to the entries
 it drew on with how it drew on them.
 
-What goes back to the model with a question is three things, in this order: the latest
-summary, one paragraph ``summarise`` writes every ``EVERY`` turns; what ``recall`` finds,
-the earlier turns outside the window whose words or meaning match the question; and the
-last ``WINDOW`` ordinary turns, chosen by recency alone.
-
-A fact stated in conversation reaches the graph through the change-request path, not
-through any of this. Turns are kept in a store of their own, `conversation_store` beside the
-corpus they were asked of, unless a caller hands the corpus itself.
+What goes back to the model with a question, in order: the latest summary, which
+``summarise`` writes every ``EVERY`` turns; the earlier turns ``recall`` finds by words or
+meaning; and the last ``WINDOW`` ordinary turns, chosen by recency alone.
 """
 
 from __future__ import annotations

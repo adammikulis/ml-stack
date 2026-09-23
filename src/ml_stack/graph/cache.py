@@ -1,20 +1,10 @@
-"""An answer already given, given again.
+"""An answer already given, given again, keyed by everything that shaped it.
 
-Asking a graph a question costs seconds of a large model's time and a few thousand tokens.
-Asking it the *same* question, of the same graph, with the same model and the same tools,
-costs exactly the same again and produces the same answer — so it is worth keeping.
-
-What makes this safe is the fingerprint. An answer depends on more than the question: the
-graph it was read from, the model that wrote it, the system prompt it was written under, the
-tools it could call and how they were described, and any shortlist handed over before it
-started. All of them go into the key, so changing any one of them misses the cache rather
-than serving an answer that was true of the old arrangement. Editing a tool's description
-invalidates every answer that description could have shaped, which is exactly what should
-happen — that edit changed the answers when it was measured.
-
-An entry holds the question and the answer as they were said, so the store it belongs in is
-the conversation store, `thread.conversation_store` of the corpus, not the corpus. Entries
-are kept under keys beginning with an underscore, which `GraphStore.docs` skips.
+The fingerprint covers the question, the graph it was read from, the model, the system
+prompt, the tools and their descriptions, and any shortlist, so a change to any of them
+misses. An entry holds the question and the answer as they were said, and belongs in the
+conversation store (`thread.conversation_store` of the corpus), under keys beginning with
+an underscore, which `GraphStore.docs` skips.
 """
 
 from __future__ import annotations

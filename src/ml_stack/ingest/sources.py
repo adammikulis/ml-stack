@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack.hub.naming import pretty_name
 from ml_stack.ingest.fold import fold_source
 from ml_stack.ingest.progress import GIVE_UP, Progress
 from ml_stack.ingest.reads import _read_json, reads_beside, reads_path, tokens_of, units_of
@@ -162,11 +163,11 @@ class Sources:
         known = {s.slug: s for s in self.sources()}
         slugs = sorted(set(known) | {str(n["id"])[len("source:"):] for n in nodes
                                      if str(n.get("id") or "").startswith("source:")})
-        node_counts = {slug: 0 for slug in slugs}
+        node_counts = dict.fromkeys(slugs, 0)
         for held_sources in sources_of.values():
             for slug in held_sources:
                 node_counts[slug] = node_counts.get(slug, 0) + 1
-        edge_counts = {slug: 0 for slug in slugs}
+        edge_counts = dict.fromkeys(slugs, 0)
         for edge in edges:
             if edge.get("rel") == "read_from":
                 continue
@@ -400,11 +401,7 @@ def _run_said(out: str | Path, run_id: str) -> str:
     """One run node as a person reads it: the model and when."""
     attrs = run_attrs(out, [run_id]).get(run_id, {})
     model = str(attrs.get("model") or "")
-    try:
-        from ml_stack.hub import pretty_name
-        model = pretty_name(model) if model else model
-    except Exception:  # noqa: BLE001
-        pass
+    model = pretty_name(model) if model else model
     return f"{model or run_id} ({attrs.get('started') or run_id[4:]})"
 
 
