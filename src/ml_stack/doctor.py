@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -15,8 +16,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ml_stack import checks
 from ml_stack.bench.underway import measuring, measuring_file
-from ml_stack.checks import CHECKOUT, Finding, ask
+from ml_stack.checks import Finding, ask
 from ml_stack.log import say
 from ml_stack.serve.binary import child_env, managed_current, managed_named
 from ml_stack.serve.build_platform import server_name
@@ -50,11 +52,15 @@ def _git(repo: Path, *args: str, strip: bool = True) -> str:
     return got.stdout.strip() if strip else got.stdout
 
 
+CHECKOUTS = "ML_STACK_CHECKOUTS"
+"""The environment variable listing the checkouts to look at, `os.pathsep`-separated."""
+
+
 def repositories(given: list[str] | None = None) -> list[Path]:
-    """The checkouts to look at: those named, or those of the current directory and the
-    two known ones that are git repositories. Each once, whatever path it was reached by."""
-    wanted = [Path(p).expanduser().absolute() for p in given] if given else [
-        Path.cwd(), Path("~/ai_ceo").expanduser(), CHECKOUT]
+    """The checkouts to look at: those named, else those `CHECKOUTS` lists that are git
+    repositories; none when neither names one. Each once, whatever path reached it."""
+    listed = [p for p in os.environ.get(CHECKOUTS, "").split(os.pathsep) if p.strip()]
+    wanted = [Path(p).expanduser().absolute() for p in given or listed]
     out: list[Path] = []
     for one in wanted:
         if not given and not (one.is_dir() and _git(one, "rev-parse", "--show-toplevel")):
@@ -159,8 +165,10 @@ def worktrees_of(repo: Path) -> list[Finding]:
 def install_of(repo: Path, *, checkout: Path | None = None,
                python: Path | None = None) -> Finding | None:
     """Where ``import ml_stack`` lands for this repository's interpreter: good only when
-    that is under ``checkout``, since a resolve into site-packages is a copy."""
-    checkout = CHECKOUT if checkout is None else checkout
+    that is under ``checkout``, since a resolve into site-packages is a copy. None when
+    there is no checkout to compare with."""
+    if checkout is None:
+        return None
     if python is None:
         venv = repo / ".venv" / "bin" / "python"
         python = venv if venv.exists() else Path(sys.executable)
@@ -357,7 +365,11 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
 
     out: list[Finding] = []
     seen_python: set[Path] = set()
-    for repo in repositories(None) if repos is None else repos:
+    repos = repositories(None) if repos is None else repos
+    if checkout is None:
+        checkout = next((r for r in repos if (r / "src" / "ml_stack").is_dir()),
+                        checks.checkout())
+    for repo in repos:
         if not _git(repo, "rev-parse", "--show-toplevel"):
             out.append(Finding(name=f"{repo.name}: repository", good=False,
                                said=f"{repo} is not a git repository"))
@@ -393,9 +405,8 @@ def main(argv: list[str] | None = None) -> int:
                     "(empty runs, a dead lock, a log with no run) and the managed "
                     "llama.cpp. Offers a fix for what has one; never pushes.")
     ap.add_argument("--repo", action="append", metavar="PATH",
-                    help="a checkout to look at; may repeat. Default: the current directory, "
-                         "~/ai_ceo and the ml-stack checkout, those that are git "
-                         "repositories")
+                    help="a checkout to look at; may repeat. Default: those "
+                         f"${CHECKOUTS} lists, separated by {os.pathsep!r}")
     ap.add_argument("--bench-home", metavar="PATH",
                     help="the bench's home (default: where ml-stack-bench keeps its store)")
     ap.add_argument("--yes", action="store_true",

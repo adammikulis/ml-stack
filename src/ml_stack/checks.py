@@ -15,10 +15,7 @@ from pathlib import Path
 from ml_stack import home
 from ml_stack.log import say
 
-__all__ = ["CHECKOUT", "Finding", "ask", "checkout", "tilde"]
-
-CHECKOUT = Path("~/Documents/repos/ml-stack").expanduser()
-"""Where the editable install must point: the checkout, not a copy of it."""
+__all__ = ["Finding", "ask", "checkout", "tilde"]
 
 
 @dataclass
@@ -41,10 +38,10 @@ def tilde(path: Path) -> str:
         return str(path)
 
 
-def checkout() -> Path:
-    """The checkout this package is imported from, else the one `ml-stack-doctor` checks."""
+def checkout() -> Path | None:
+    """The checkout this package is imported from, or None for an installed copy."""
     here = Path(__file__).resolve().parents[2]
-    return here if (here / "pyproject.toml").is_file() else CHECKOUT
+    return here if (here / "pyproject.toml").is_file() else None
 
 
 def ask(findings: list[Finding], *, yes: bool = False) -> int:

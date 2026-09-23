@@ -331,13 +331,15 @@ def _scripts() -> list[str]:
                   if one.group == "console_scripts"}
     except Exception:  # noqa: BLE001
         pass
-    try:
-        import tomllib
+    where = checkout()
+    if where is not None:
+        try:
+            import tomllib
 
-        table = tomllib.loads((checkout() / "pyproject.toml").read_text(encoding="utf-8"))
-        names |= set(table.get("project", {}).get("scripts", {}))
-    except Exception:  # noqa: BLE001
-        pass
+            table = tomllib.loads((where / "pyproject.toml").read_text(encoding="utf-8"))
+            names |= set(table.get("project", {}).get("scripts", {}))
+        except Exception:  # noqa: BLE001
+            pass
     return sorted(names)
 
 
@@ -345,12 +347,13 @@ def _commands_finding() -> Finding:
     """Which of the package's commands are on PATH, and the line that puts the rest there."""
     wanted = _scripts()
     missing = [name for name in wanted if not shutil.which(name)]
+    where = checkout()
     return Finding(
         name="commands on PATH",
         good=not missing,
         said=(f"{len(wanted)} command(s) found" if not missing
               else "not found: " + ", ".join(missing)),
-        fix="" if not missing else f"pip install -e {checkout()} && pyenv rehash",
+        fix="" if not missing or where is None else f"pip install -e {where} && pyenv rehash",
         note=(", ".join(wanted) if not missing else
               "an entry point added to pyproject.toml is not a command until the package "
               "is reinstalled and the shims rehashed; a queue step that names one dies "
@@ -506,8 +509,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="also check the repositories and the working state")
     ap.add_argument("--repo", action="append", metavar="PATH",
                     help="a checkout to look at with --checkouts; may repeat. Default: "
-                         "the current directory, ~/ai_ceo and the ml-stack checkout, "
-                         "those that are git repositories")
+                         "those $ML_STACK_CHECKOUTS lists, separated by "
+                         f"{os.pathsep!r}")
     ap.add_argument("--bench-home", metavar="PATH",
                     help="the bench's home to check with --checkouts (default: where "
                          "ml-stack-bench keeps its store)")

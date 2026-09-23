@@ -390,14 +390,34 @@ def test_named_builds_are_listed_beside_current(tmp_path):
 
 # -- the command ---------------------------------------------------------------------
 
-def test_repositories_are_those_given_or_the_known_ones_that_are_git_repositories(
-        tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(doctor, "CHECKOUT", tmp_path / "absent")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    assert repositories() == [tmp_path]
+def test_repositories_are_those_given_or_named_by_the_environment(tmp_path, monkeypatch):
+    for name in ("cwd", "listed", "plain"):
+        (tmp_path / name).mkdir()
+    for name in ("cwd", "listed"):
+        subprocess.run(["git", "init", "-q", str(tmp_path / name)], check=True)
+    monkeypatch.chdir(tmp_path / "cwd")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.delenv("ML_STACK_CHECKOUTS", raising=False)
+    assert repositories() == [], "none by default, not even the current directory"
+
+    monkeypatch.setenv("ML_STACK_CHECKOUTS", os.pathsep.join(
+        [str(tmp_path / "listed"), str(tmp_path / "plain"), str(tmp_path / "listed")]))
+    assert repositories() == [tmp_path / "listed"], "a listed non-repository is skipped"
     assert repositories([str(tmp_path / "a"), str(tmp_path / "a")]) == [tmp_path / "a"]
+
+
+def test_the_install_is_checked_against_the_ml_stack_checkout_examined(tmp_path, monkeypatch):
+    app = make_repo(tmp_path / "quenlow")
+    library = make_repo(tmp_path / "library")
+    imported = library / "src" / "ml_stack" / "graph" / "conversation.py"
+    imported.parent.mkdir(parents=True)
+    imported.write_text("")
+    fake_python(app, str(imported))
+    fake_python(library, str(imported))
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+    found = {f.name: f for f in look([app, library], bench_home=tmp_path / "bench")}
+    assert found["quenlow: editable install"].good
+    assert found["library: editable install"].good
 
 
 def test_a_directory_an_installer_ran_from_is_not_a_checkout(tmp_path, monkeypatch):
@@ -405,7 +425,7 @@ def test_a_directory_an_installer_ran_from_is_not_a_checkout(tmp_path, monkeypat
     (tmp_path / "home").mkdir()
     (tmp_path / "downloads").mkdir()
     monkeypatch.chdir(tmp_path / "downloads")
-    monkeypatch.setattr(doctor, "CHECKOUT", tmp_path / "absent")
+    monkeypatch.delenv("ML_STACK_CHECKOUTS", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     assert repositories() == []
@@ -435,7 +455,7 @@ def everything(tmp_path, monkeypatch):
 
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
     make_build(binary.managed_current(), commit="old0000", days_old=40)
-    monkeypatch.setattr(doctor, "CHECKOUT", checkout)
+    monkeypatch.setattr("ml_stack.checks.checkout", lambda: checkout)
     return repo, home
 
 
