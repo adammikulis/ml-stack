@@ -22,7 +22,7 @@ Fixes first, then measurements that need the card, then what does not exist yet.
 Inside the fixes, most blocking first.
 
 0.2.0 is cut when these are gone (Adam, 2026-09-23): "Getting it onto a machine", "Not losing
-what it read" (the embedding denominator), the conversation store, `reads.json`, the name gate,
+what it read" (the embedding denominator), the conversation store, `reads.json`,
 "Numbers that are quoted", duplicate machine names, and the window's library tick, name test
 and numpy. Everything else here follows the cut.
 
@@ -111,12 +111,6 @@ capability; every line is something that already exists not being what it says.
   definition -- and `raw`, the model's whole reply when it failed. `_keep_reads` only ever
   merges more in; nothing rotates, expires or deletes. `ml-stack-ingest forget`, and the
   licence and redaction gates above run before the write, not only before the store.
-- [ ] **The name gate runs only in a git hook someone has to install, and degrades to
-  nothing without an extra.** `scripts/install-hooks.sh` is by hand, `ci.yml` has no
-  `no-real-names` step, and `redact/hook.py` returns `None` on `ImportError`, so on a
-  machine without the `[privacy]` extra the property this repository claims -- a name it has
-  never seen is refused -- is quietly absent. A CI job over the diff, and a non-zero exit
-  when presidio is missing rather than a pass.
 
 ### Numbers that are quoted
 - [ ] **Re-read every draft-head speedup taken before 2026-09-05.** The bench pairs a
