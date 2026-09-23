@@ -395,8 +395,14 @@ def _git(root: str | None, *args: str) -> str:
     return done.stdout
 
 
-def _staged(root: str | None, rules: Shapes) -> list[str]:
-    listed = _git(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR").split("\n")
+def _staged(root: str | None, rules: Shapes, against: str | None = None) -> list[str]:
+    """The paths this commit adds, changes or renames: the index against ``HEAD``, or, with
+    ``against``, ``HEAD`` against that revision -- the shape CI checks a pushed range in."""
+    if against:
+        listed = _git(root, "diff", "--name-only", "--diff-filter=ACMR",
+                      f"{against}...HEAD").split("\n")
+    else:
+        listed = _git(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR").split("\n")
     return [f for f in listed if f and not f.endswith(rules.skip_suffixes)]
 
 
@@ -467,12 +473,14 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
 def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
          root: str | os.PathLike[str] | None = None, stdout: TextIO | None = None) -> int:
     """Check the staged files of the repository at ``root`` (default: the one around the
-    working directory). Reads its settings from ``env`` (default: the process environment),
-    writes its report to ``stdout`` (default: ``sys.stderr``). ``--why`` (or ``NAMES_WHY``)
-    also reports every pair a shape rule cleared, and which. Returns 1 when a commit is
-    refused, else 0."""
+    working directory), or, with ``--against REV``, ``HEAD`` against that revision. Reads
+    its settings from ``env`` (default: the process environment), writes its report to
+    ``stdout`` (default: ``sys.stderr``). ``--why`` (or ``NAMES_WHY``) also reports every
+    pair a shape rule cleared, and which. Returns 1 when a commit is refused, or when
+    presidio is not installed, else 0."""
     env = os.environ if env is None else env
     out = sys.stderr if stdout is None else stdout
+    argv = list(argv or ())
     if argv and argv[0] == "allow":
         # `python -m ml_stack.redact.hook allow "Windows Defender Firewall"`: the phrase
         # is a product, a code fragment, an invented name -- never a person -- and goes on
@@ -485,9 +493,13 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
                      rules=_rules(env) if asked else None)
     if env.get("SKIP_NAME_CHECK"):
         return 0
+    against = None
+    if "--against" in argv:
+        i = argv.index("--against")
+        against, argv = argv[i + 1], argv[:i] + argv[i + 2:]
     where = os.fspath(root) if root is not None else _git(None, "rev-parse", "--show-toplevel").strip()
     rules = _rules(env)
-    staged = _staged(where, rules)
+    staged = _staged(where, rules, against)
     if not staged:
         return 0
 
@@ -497,33 +509,37 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
     known = {n for n in from_database(env.get("NAMES_GRAPH", ""), env.get("NAMES_SCRAPE", ""))
              if n.casefold() not in allowed}
     engine = recogniser()
-    explain = "--why" in (argv or ()) or bool(env.get("NAMES_WHY"))
+    explain = "--why" in argv or bool(env.get("NAMES_WHY"))
 
     bad: list[tuple[str, int, str]] = []
     cleared: list[tuple[str, int, str]] | None = [] if explain else None
+    ref = "HEAD" if against else ""
     for path in staged:
-        blob = _git(where, "show", f":{path}")
+        blob = _git(where, "show", f"{ref}:{path}")
         if not blob or "\0" in blob[:2048]:
             continue
         bad.extend(_findings(path, blob, known, allowed, engine, rules, cleared))
 
-    if engine is None:
-        print("pre-commit: presidio is not installed, so only known names are checked", file=out)
     if cleared:
         print(f"pre-commit: what a rule in {CONTRACT} stood down", file=out)
         for path, line, why in dict.fromkeys(cleared):
             at = f"{path}:{line}" if line else path
             print(f"           {at}  {why}", file=out)
-    if not bad:
-        return 0
-    unique = list(dict.fromkeys(bad))
-    print("pre-commit: refusing to commit a person's details", file=out)
-    for path, line, why in unique[:SHOWN]:
-        print(f"           {path}:{line}  {why}", file=out)
-    if len(unique) > SHOWN:
-        print(f"           ...and {len(unique) - SHOWN} more", file=out)
-    print(f"           invent the data. If the name is made up, add it to {fixtures}.", file=out)
-    return 1
+    if bad:
+        unique = list(dict.fromkeys(bad))
+        print("pre-commit: refusing to commit a person's details", file=out)
+        for path, line, why in unique[:SHOWN]:
+            print(f"           {path}:{line}  {why}", file=out)
+        if len(unique) > SHOWN:
+            print(f"           ...and {len(unique) - SHOWN} more", file=out)
+        print(f"           invent the data. If the name is made up, add it to {fixtures}.",
+              file=out)
+    if engine is None:
+        print("pre-commit: presidio is not installed, so a name it has never seen is not "
+              "refused. Install it: pip install -e '.[privacy]' && "
+              "python -m spacy download en_core_web_sm", file=out)
+        return 1
+    return 1 if bad else 0
 
 
 def allow(fixtures: str, phrases: list[str], out: TextIO, rules: Shapes | None = None) -> int:

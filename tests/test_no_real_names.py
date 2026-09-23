@@ -41,6 +41,16 @@ def stage(where: Path, files: dict[str, str]) -> None:
         subprocess.run(["git", "add", name], cwd=where, check=True, capture_output=True)
 
 
+def commit(where: Path, files: dict[str, str], message: str) -> str:
+    """Stage and commit those files, and return the commit's sha."""
+    stage(where, files)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=where, check=True,
+                   capture_output=True)
+    done = subprocess.run(["git", "rev-parse", "HEAD"], cwd=where, check=True,
+                          capture_output=True, text=True)
+    return done.stdout.strip()
+
+
 def wiring(tmp_path: Path) -> dict[str, str]:
     return {**os.environ,
             "NAMES_GRAPH": str(tmp_path / "graph.json"),
@@ -259,6 +269,23 @@ def test_the_recogniser_is_built_once_per_process():
     assert hook.recogniser() is hook.recogniser()
 
 
+def test_against_a_revision_checks_a_committed_range_not_the_index(tmp_path):
+    """`--against REV`: the diff between REV and HEAD, the shape CI checks a pushed range in,
+    rather than the staged index a commit uses."""
+    where = repo(tmp_path, PEOPLE)
+    base = commit(where, {"notes.txt": "The kiln needs firing.\n"}, "base")
+    commit(where, {"notes.txt": "The kiln needs firing.\nAsk Wren Halloway about it.\n"},
+          "adds a note")
+    said = io.StringIO()
+    code = hook.main(["--against", base], env=wiring(tmp_path), root=where, stdout=said)
+    assert code == 1
+    assert "Wren Halloway" in said.getvalue()
+
+    clean = io.StringIO()
+    assert hook.main(["--against", "HEAD"], env=wiring(tmp_path), root=where,
+                     stdout=clean) == 0
+
+
 @pytest.mark.slow
 
 
@@ -292,6 +319,25 @@ def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_pa
     assert code == 1, said
     assert "Wren Halloway" in said
     assert "presidio is not installed" in said
+
+
+@pytest.mark.slow
+
+
+def test_a_clean_commit_is_still_refused_without_presidio(tmp_path):
+    """A file with nothing the exact list or the shape rule would catch still fails the hook
+    when presidio cannot be imported: without it, a name the hook has never seen passes
+    unnoticed, so the hook refuses rather than passing silently."""
+    where = repo(tmp_path, {"nodes": [], "messages": {}})
+    bare = tmp_path / "bare-python"
+    bare.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n')
+    bare.chmod(0o755)
+    code, said = check_wrapper(where, tmp_path, python=str(bare),
+                               notes="The kiln needs firing before the studio opens.\n")
+    assert code == 1, said
+    assert "presidio is not installed" in said
+    assert "pip install -e '.[privacy]'" in said
+    assert "python -m spacy download en_core_web_sm" in said
 
 
 def test_the_shape_rules_are_data_and_every_section_the_code_reads_exists():
