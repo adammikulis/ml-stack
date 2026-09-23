@@ -447,9 +447,11 @@ class BenchHost:
         self.runner.hold(mine)
         with self._lock:
             self._mine[mine.id] = mine
+        # the job as accepted: `_start` may end it before the caller has answered
+        accepted = replace(mine)
         threading.Thread(target=self._start, args=(mine, job), daemon=True,
                          name=f"bench-start-{mine.id}").start()
-        return mine
+        return accepted
 
     def _start(self, mine: DaemonJob, job: Job) -> None:
         """Find the interpreter, write what the job shipped, launch the bench and watch

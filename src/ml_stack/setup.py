@@ -251,7 +251,7 @@ def _fleet_findings(*, port: int | None = None, discovery_port: int | None = Non
                                said=f"'{me.get('name', '?')}' answers on {port}"))
             try:
                 rows = peers(cluster_key_path=cluster_key_path, port=discovery_port,
-                            self_name=str(me.get("name") or ""))
+                            self_machine=str(me.get("machine") or ""))
             except OSError as exc:
                 out.append(Finding(name="fleet: seen", good=False,
                                    said=f"discovery failed: {exc}", fix="ml-stack-peers ls"))

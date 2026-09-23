@@ -423,6 +423,9 @@ def test_a_bench_runs_on_this_interpreter_unless_the_app_is_frozen(boxes, monkey
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     with pytest.raises(RuntimeError, match="What this machine can train with"):
         bench_python(None)
+    accepted = roomy.host.submit(_job("big.gguf"))
+    assert _await(lambda: roomy.runner.jobs[accepted.id].state == "failed")
+    assert accepted.state == "preparing", "the answer is the job as accepted, whatever came after"
     said: list[str] = []
     (failed,) = wait(dispatch({roomy.peer: _job("big.gguf")}, log=said.append),
                      poll_s=0.1, timeout_s=20, log=said.append)
