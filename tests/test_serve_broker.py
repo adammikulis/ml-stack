@@ -24,10 +24,7 @@ from ml_stack.testing.fakes import fake_llama_binary
 
 
 @pytest.fixture
-def llama_binary(tmp_path, monkeypatch):
-    from ml_stack.serve import backend as backend_module
-
-    monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
+def llama_binary(tmp_path):
     return fake_llama_binary(tmp_path)
 
 
@@ -229,6 +226,52 @@ def test_a_restarted_broker_keeps_a_live_holders_lease(broker, models, holders, 
     assert held.purpose == "chat"
     assert not successor.reap(), "a held server was unloaded as idle after the restart"
     assert pid_exists(held.pid)
+
+
+def test_a_server_put_up_by_hand_is_held_by_itself_and_never_reaped(
+        models, holders, llama_binary, tmp_path):
+    """`ml-stack-serve up` records the server as its own owner; the broker never stops it."""
+    from ml_stack.serve import ServerSpec
+    from ml_stack.serve.ports import free_port
+
+    manager = ServerManager(LlamaServerBackend(binary=llama_binary),
+                            state_file=tmp_path / "servers.json")
+    info = manager.lease(ServerSpec(model=models[0], port=free_port(), context=512),
+                         roam=False, timeout=30.0, check_flags=False, preflight=False,
+                         warmup_request=False)
+    manager.detach(info)
+    said: list[str] = []
+    watcher = Broker(ServerManager(LlamaServerBackend(binary=llama_binary),
+                                   state_file=tmp_path / "servers.json"),
+                     idle_s=0.0, room=lambda: 0, scan=lambda: [], say=said.append)
+    try:
+        watcher.adopt()
+        held = watcher.servers[info.port]
+        assert [label for _, label in held.holders.values()] == ["ml-stack-serve up"]
+        time.sleep(0.05)
+        assert watcher.reap() == [] and pid_exists(info.pid)
+        with pytest.raises(BrokerError):
+            watcher.lease(ask(models[1], holders().pid), timeout=1.0)
+        assert pid_exists(info.pid), "evicted to make room"
+        assert said == []
+    finally:
+        kill_process_tree(info.pid)
+
+
+def test_a_server_nobody_holds_is_not_reaped_while_it_is_answering(broker, models, holders):
+    a = holders()
+    grant = broker.lease(ask(models[0], a.pid), timeout=30)
+    broker.release(grant.lease)
+    broker.idle_s = 0.0
+    said: list[str] = []
+    broker.say = said.append
+    broker.busy = lambda url: True
+    time.sleep(0.05)
+    assert broker.reap() == [] and grant.port in broker.servers
+    broker.busy = lambda url: False
+    time.sleep(0.05)
+    assert [h.port for h in broker.reap()] == [grant.port]
+    assert said and f"stopping port {grant.port}" in said[0] and "answering nothing" in said[0]
 
 
 def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, holders):

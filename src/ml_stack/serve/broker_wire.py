@@ -97,7 +97,7 @@ def serve(*, idle_s: float = IDLE_S, say=say_out) -> int:
     """Run this machine's broker until a quit signal. Returns 0, also when one is running."""
     try:
         with only_one(home.state("broker.lock"), wait=False, announce=say):
-            broker = Broker(idle_s=idle_s)
+            broker = Broker(idle_s=idle_s, say=lambda line: say(line, flush=True))
             adopted = broker.adopt()
             server = _Server(broker)
             write_json(record_path(), {"pid": os.getpid(), "port": server.server_address[1],

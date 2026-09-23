@@ -5,7 +5,8 @@ one already serving an acceptable model is shared, otherwise one is started on a
 broker picks. A request for a purpose whose server is held with another model waits in a
 first-come queue until its holders let go; nothing held is stopped to make room. Holders
 are processes, so a lease whose pid has ended is released by `reap`, and a server of ours
-nobody holds is stopped once it has been idle for ``idle_s``.
+nobody holds is stopped once it has been idle for ``idle_s`` and is not answering anything.
+A server put up with ``ml-stack-serve up`` is held by itself until it is taken down.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager
 from ml_stack.serve.matching import model_matches
 from ml_stack.serve.ports import DEFAULT_HOST, free_port
 from ml_stack.serve.process import every_server, kill_process_tree, pid_exists
+from ml_stack.serve.reclaim import busy_now
 from ml_stack.serve.weights import weight_of
 
 __all__ = ["Ask", "Broker", "BrokerError", "Grant", "Held", "Waiting"]
@@ -146,9 +148,13 @@ class Broker:
     def __init__(self, manager: ServerManager | None = None, *, idle_s: float = IDLE_S,
                  room: Callable[[], int | None] = free_memory,
                  alive: Callable[[int | None], bool] = pid_exists,
-                 scan: Callable[[], list[dict]] = every_server) -> None:
+                 scan: Callable[[], list[dict]] = every_server,
+                 busy: Callable[[str], bool | None] = busy_now,
+                 say: Callable[[str], Any] = lambda _line: None) -> None:
         self.manager = manager or ServerManager()
         self.scan = scan
+        self.busy = busy
+        self.say = say
         #: who holds what, beside the lease record, so a restart does not forget
         self.held_file = self.manager.state_file.with_name("broker-leases.json")
         self.idle_s = idle_s
@@ -180,6 +186,8 @@ class Broker:
                 return turn
             placeholder, evicted = turn
             for held in evicted:
+                self.say(f"stopping port {held.port} ({held.model}) to make room for "
+                         f"{ask.models[0]} ({ask.purpose})")
                 self._stop(held)
             try:
                 return self._start(waiting, placeholder)
@@ -414,11 +422,19 @@ class Broker:
             self.cores = {k: v for k, v in self.cores.items() if self.alive(v[0])}
             idle = [h for h in self.servers.values() if h.ours and not h.holders
                     and not h.loading and now - h.idle_since > self.idle_s]
+        answering = [h for h in idle if self.busy(h.base_url)]
+        with self._cond:
+            for held in answering:
+                held.idle_since = time.monotonic()
+            idle = [h for h in idle if h not in answering
+                    and self.servers.get(h.port) is h and not h.holders]
             for held in idle:
                 del self.servers[held.port]
             self._write_held()
             self._cond.notify_all()
         for held in idle:
+            self.say(f"stopping port {held.port} ({held.model}): nobody has held it for "
+                     f"{now - held.idle_since:.0f}s and it is answering nothing")
             self._stop(held)
         return idle
 
@@ -437,6 +453,8 @@ class Broker:
                        if self.alive(int(who[0]))}
             if not holders and isinstance(owner, int) and owner not in (pid, me) and self.alive(owner):
                 holders = {f"recorded-{port}": (owner, "recorded owner")}
+            if owner == pid:
+                holders[f"up-{port}"] = (pid, "ml-stack-serve up")
             found.append(Held(port=port, model=str(entry.get("model") or ""), pid=pid,
                               purpose=str(was.get("purpose") or ""), idle_since=now, holders=holders,
                               info=ServerInfo(base_url=f"http://{DEFAULT_HOST}:{port}",
