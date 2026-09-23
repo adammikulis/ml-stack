@@ -64,6 +64,13 @@ class TestEnvironment:
         got = env.uninstall(["nonesuch"])
         assert not got["nonesuch"]["ok"]
 
+    def test_a_package_the_daemons_interpreter_can_import_shows_installed(self, tmp_path):
+        """pytest is only ever importable through the interpreter running this test."""
+        env = Environment(tmp_path)
+        assert not env.exists
+        have = env.installed()
+        assert "pytest" in have
+
     def test_the_state_names_every_library_and_whether_it_is_there(self, tmp_path):
         state = Environment(tmp_path).state("apple" if sys.platform == "darwin" else "cpu")
         assert state["ready"] is False

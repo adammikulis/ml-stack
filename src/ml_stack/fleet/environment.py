@@ -217,20 +217,32 @@ class Environment:
                               capture_output=True, text=True, timeout=timeout)
 
     # -- what is in it --------------------------------------------------
+    def daemon_installed(self) -> dict[str, str]:
+        """Package name to version, for what the daemon's own interpreter can import."""
+        from importlib import metadata
+        out: dict[str, str] = {}
+        for dist in metadata.distributions():
+            name = dist.metadata.get("Name") if dist.metadata else None
+            if name:
+                out[name.lower()] = dist.version
+        return out
+
     def installed(self) -> dict[str, str]:
-        """Package name to version, for what the environment holds."""
+        """Package name to version, for what the daemon or its environment can import."""
+        have = self.daemon_installed()
         if not self.exists:
-            return {}
+            return have
         try:
             out = self.pip(["list", "--format=json"], timeout=60)
         except (OSError, subprocess.SubprocessError):
-            return {}
+            return have
         if out.returncode != 0:
-            return {}
+            return have
         try:
-            return {p["name"].lower(): p["version"] for p in json.loads(out.stdout)}
+            have.update({p["name"].lower(): p["version"] for p in json.loads(out.stdout)})
         except (ValueError, KeyError, TypeError):
-            return {}
+            pass
+        return have
 
     def has(self, library: Library) -> bool:
         have = self.installed()

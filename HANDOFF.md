@@ -284,10 +284,6 @@ across `src/`.
   driven by hand -- the wizard renames the machine, the daemon restarts, `/health` answers
   with the new name -- but every test that boots a daemon builds `make_handler` directly, so
   nothing covers the resolution order. A subprocess boot with a settings file would.
-- [ ] **The first-run library list showed PyTorch as not installed on a machine that could
-  import it.** `/ui/libraries` decides `installed`, and the tick came out clear where torch
-  was importable from the daemon's own interpreter. Worth finding out what it checks before
-  someone downloads 200 MB they already have.
 - [ ] **`ml-stack-walk` has never walked a screen with a model behind it.** Every walk so
   far was against a daemon serving nothing and an `ml-stack-graph serve` with no `--model`,
   so Chat reads "No model is running yet", the graph's question box is only read, and the
