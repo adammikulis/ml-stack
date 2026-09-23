@@ -579,6 +579,35 @@ def test_a_streamed_answer_fills_the_thinking_then_the_bubble(open_page):
     assert errors == []
 
 
+def test_a_show_call_streamed_into_the_answer_is_never_printed(open_page):
+    events = [
+        {"event": "answer", "text": "Ada Lovelace works on iron. "},
+        {"event": "answer", "text": 'show {"ids": ["person'},
+        {"event": "answer", "text": ':ada"]}'},
+        {"event": "done", "content": "Ada Lovelace works on iron.", "show": ["person:ada"],
+         "ids": ["person:ada"], "read": [], "path": [], "found": [], "why": ""},
+    ]
+    paced = PacedStream(events)
+    try:
+        page, errors = open_page(served=True, stream_from=paced.url, origin=paced.origin)
+        page.wait_for_selector("#stats b")
+        page.fill("#q", "who works on iron?")
+        page.press("#q", "Enter")
+        said = page.locator("#qturns .t .said")
+        paced.release()
+        pw.expect(said).to_have_text("Ada Lovelace works on iron.")
+        for _ in range(2):
+            paced.release()
+            page.wait_for_timeout(150)
+            assert "show" not in said.inner_text() and "{" not in said.inner_text()
+        paced.release()
+        pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 1")
+        assert said.inner_text() == "Ada Lovelace works on iron."
+        assert errors == []
+    finally:
+        paced.close()
+
+
 def test_the_line_above_the_trace_says_what_is_happening_now(open_page):
     """Fails when feed() in askStream stops writing the summary.now line on each event."""
     events = [

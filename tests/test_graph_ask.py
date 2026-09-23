@@ -659,6 +659,19 @@ def test_a_tool_call_written_out_as_prose_is_cut_and_believed():
     assert spoken_show(plain) == (plain, [])
 
 
+def test_a_written_out_call_without_brackets_or_mid_answer_is_taken_off():
+    from ml_stack.graph.replies import spoken_show
+
+    said = 'Alan Turing leads the group. show {"ids": ["person:alan"]}'
+    assert spoken_show(said) == ("Alan Turing leads the group.", ["person:alan"])
+    inline = ('Ada leads it show({"ids": ["person:ada"]}) and Bea keeps the books. '
+              'show {"ids": ["person:bea"]} That is all.')
+    assert spoken_show(inline) == ("Ada leads it and Bea keeps the books. That is all.",
+                                   ["person:ada", "person:bea"])
+    shown = "Show {braces} in a sentence stay when they are not a call."
+    assert spoken_show(shown) == (shown, [])
+
+
 def test_the_written_out_call_is_what_gets_lit():
     """A model that says what to light in words is not asked to say it again."""
     class Writes:

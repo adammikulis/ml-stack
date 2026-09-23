@@ -49,25 +49,37 @@ def without_notes(said: str) -> str:
 
 
 # A tool call written out as prose. On the last turn the tools are taken away so the model
-# answers in words — and a model that wanted to call `show` writes the call instead, on the
-# end of an otherwise good answer: "…could enhance Dan's swarm projects.
-# show({"ids":["person:ada","person:bea"]})". It is not an answer, so it is cut; but it is
-# also the model saying exactly what it meant, so the ids are kept.
-_SPOKEN = re.compile(r"\s*(?:<[^>]*>)?\s*show\s*\(\s*(\{.*\})\s*\)\s*(?:<[^>]*>)?\s*$",
-                     re.DOTALL | re.IGNORECASE)
+# answers in words, and a model that wanted to call `show` writes the call instead, at the end
+# of an answer or inside it, with or without brackets: `show({"ids": [...]})`,
+# `show {"ids": [...]}`, sometimes inside a `<|tool_call|>` wrapper. The call is cut and its
+# ids kept.
+_CALL = re.compile(r"\s*(?:<[^>]*>)?\s*\bshow\s*(\()?\s*(?=\{)", re.IGNORECASE)
+_CLOSE = re.compile(r"\s*\)")
+_WRAP = re.compile(r"\s*<[^>]*>")
 
 
 def spoken_show(said: str) -> tuple[str, list[str]]:
-    """``said`` without a trailing written-out ``show`` call, and the ids it named."""
-    found = _SPOKEN.search(said or "")
-    if not found:
-        return (said or "").strip(), []
-    try:
-        args = json.loads(found.group(1))
-    except ValueError:
-        return said[:found.start()].strip(), []
-    ids = [str(i) for i in (args.get("ids") or ())] if isinstance(args, Mapping) else []
-    return said[:found.start()].strip(), ids
+    """``said`` without any written-out ``show`` call, and the ids those calls named."""
+    text, ids, at = said or "", [], 0
+    decoder = json.JSONDecoder()
+    while found := _CALL.search(text, at):
+        try:
+            args, end = decoder.raw_decode(text, found.end())
+        except ValueError:
+            at = found.end()
+            continue
+        if not isinstance(args, Mapping):
+            at = found.end()
+            continue
+        if found.group(1) and (closed := _CLOSE.match(text, end)):
+            end = closed.end()
+        if wrapped := _WRAP.match(text, end):
+            end = wrapped.end()
+        ids += [str(i) for i in (args.get("ids") or ())]
+        tail = text[end:].lstrip()
+        text = text[:found.start()].rstrip() + (" " if tail[:1].isalnum() else "") + tail
+        at = found.start()
+    return text.strip(), ids
 
 
 def is_working(said: str) -> bool:
