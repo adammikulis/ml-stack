@@ -11,8 +11,10 @@ from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 
 from .discovery import DEFAULT_PORT as DISCOVERY_PORT  # noqa: F401  (keeps ports in view)
+from .discovery import memberships
+from .updates import state
 
-__all__ = ["already_running", "main", "wait_for_health"]
+__all__ = ["already_running", "last_screen", "main", "wait_for_health"]
 
 HTTP_PORT = 8770
 
@@ -46,6 +48,30 @@ def wait_for_health(port: int = HTTP_PORT, *, seconds: float = 20.0
             return found
         time.sleep(0.15)
     return None
+
+
+def last_screen(name: str, *, track: str = "", port: int = HTTP_PORT) -> list[str]:
+    """The lines an installer ends on: what this machine runs, and how to open its page."""
+    said = state()
+    version = said["version"] or "?"
+    commit = said["commit"]
+    lines = [f"  machine     {name}",
+             f"  running     {version}" + ("" if commit in ("", f"v{version}") else f"  {commit}")]
+    groups = memberships()
+    if groups:
+        lines.append(f"  cluster     {groups[0].group}")
+    url = f"http://127.0.0.1:{port}/ui/"
+    if already_running(port) is None:
+        return [*lines, "",
+                f"  next        ml-stack                        -- starts it and opens {url}",
+                "              ml-stack-fleet join --persist   -- joins the fleet and starts "
+                "it at every login"]
+    return [*lines,
+            f"  open        {url}",
+            f"  updates     {'follows ' + track if track else 'releases'}, "
+            "whenever nothing is running here",
+            "",
+            "  next        ml-stack-fleet status    -- who else is in the fleet"]
 
 
 def main(argv: list[str] | None = None) -> int:

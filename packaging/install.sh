@@ -387,24 +387,9 @@ check_over() {
 
 last_screen() {
   step "done"
-  say "  machine     ${ML_STACK_NAME:-$(hostname)}"
-  say "  cluster     ${ML_STACK_CLUSTER:-ml-stack}"
-  say "  open        http://127.0.0.1:8770/ui/"
-  if [ -x "$BIN/python" ]; then
-    "$BIN/python" - <<'PYEOF' 2>/dev/null || true
-from ml_stack.fleet import updates
-
-said = updates.state()
-print(f"  running     {said['version'] or '?'}  {said['commit'] or '?'}")
-PYEOF
-  fi
-  if [ -n "$TRACK" ]; then
-    say "  updates     follows $TRACK, whenever nothing is running here"
-  else
-    say "  updates     releases, whenever nothing is running here"
-  fi
-  say ""
-  say "  next        ml-stack-fleet status    -- who else is in the fleet"
+  [ -x "$BIN/python" ] || { say "skipped"; return 0; }
+  "$BIN/python" -m ml_stack.fleet.autostart done --name "${ML_STACK_NAME:-$(hostname)}" \
+    --track "$TRACK" || true
 }
 
 do_uninstall() {

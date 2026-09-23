@@ -360,17 +360,10 @@ function Check-Over {
 
 function Last-Screen {
     Step "done"
-    Write-Host ("  machine     " + $(if ($env:ML_STACK_NAME) { $env:ML_STACK_NAME } else { $env:COMPUTERNAME }))
-    Write-Host ("  cluster     " + $(if ($env:ML_STACK_CLUSTER) { $env:ML_STACK_CLUSTER } else { "ml-stack" }))
-    Write-Host "  open        http://127.0.0.1:8770/ui/"
     $py = Join-Path $script:bin "python.exe"
-    if (Test-Path $py) {
-        & $py -c "from ml_stack.fleet import updates; s = updates.state(); print('  running     ' + (s['version'] or '?') + '  ' + (s['commit'] or '?'))" 2>$null
-    }
-    if ($script:track) { Write-Host "  updates     follows $($script:track), whenever nothing is running here" }
-    else { Write-Host "  updates     releases, whenever nothing is running here" }
-    Write-Host ""
-    Write-Host "  next        ml-stack-fleet status    -- who else is in the fleet"
+    if (-not (Test-Path $py)) { Write-Host "skipped"; return }
+    $name = $(if ($env:ML_STACK_NAME) { $env:ML_STACK_NAME } else { $env:COMPUTERNAME })
+    & $py -m ml_stack.fleet.autostart done --name $name --track "$($script:track)"
 }
 
 function Remove-MlStack {

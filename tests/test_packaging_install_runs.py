@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack.fleet.launch import already_running
 from ml_stack.installed import STANDARD, extras
 
 REPO = Path(__file__).resolve().parent.parent
@@ -90,7 +91,7 @@ def run_installer(root: Path, *args: str, **extra: str) -> subprocess.CompletedP
             env[keep] = os.environ[keep]
     return subprocess.run(["sh", str(SH), *args], stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True,
-                          timeout=900, stdin=subprocess.DEVNULL, env=env)
+                          timeout=900, stdin=subprocess.DEVNULL, env=env, cwd=root)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="install.ps1 is the Windows installer")
@@ -110,6 +111,14 @@ def test_the_headless_installer_leaves_a_machine_that_works(tmp_path):
     for step in ("== headless", "== what this machine can do", "== models",
                  "== checking it over", "== done"):
         assert step in done.stdout, f"{step} never ran:\n{done.stdout}"
+
+    assert "is not a git repository" not in done.stdout, done.stdout
+    page = "open        http://127.0.0.1:8770/ui/"
+    if already_running(8770) is None:
+        assert page not in done.stdout, done.stdout
+        assert "starts it and opens http://127.0.0.1:8770/ui/" in done.stdout, done.stdout
+    else:
+        assert page in done.stdout, done.stdout
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="install.ps1 is the Windows installer")

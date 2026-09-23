@@ -26,6 +26,8 @@ from ml_stack.files import promote
 from ml_stack import home
 from ml_stack.log import say, warn
 
+from .launch import last_screen
+
 __all__ = [
     "ADOPTED",
     "DEFAULT_MODEL",
@@ -768,9 +770,10 @@ def status() -> dict[str, object]:
 def main(argv: "list[str] | None" = None) -> int:
     """What ``packaging/install.sh`` calls rather than writing any of it in shell.
 
-    Three questions an installer has and a shell script should not answer for itself:
+    What an installer has to know and a shell script should not answer for itself:
     ``system`` (write the boot service, or ``--print`` it), ``cache`` (what to do about the
-    models already on the disk) and ``choose`` (which model this machine has room for).
+    models already on the disk), ``choose`` (which model this machine has room for) and
+    ``done`` (the last screen).
     """
     import argparse
     import json as _json
@@ -799,7 +802,15 @@ def main(argv: "list[str] | None" = None) -> int:
     pickp.add_argument("--want", default="auto")
     pickp.add_argument("--json", action="store_true", help="print the answer as JSON")
 
+    donep = sub.add_parser("done", help="the installer's last screen")
+    donep.add_argument("--name", required=True)
+    donep.add_argument("--track", default="")
+
     a = ap.parse_args(argv)
+
+    if a.cmd == "done":
+        say("\n".join(last_screen(a.name, track=a.track)))
+        return 0
 
     if a.cmd == "system":
         made = system_service(a.user, a.home)
