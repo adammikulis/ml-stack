@@ -257,8 +257,11 @@ class TestChattingThroughTheInterface:
         from ml_stack.fleet.models import CHUNK, Downloads, Models
 
         payload = os.urandom(2 * CHUNK)
+        seen = threading.Event()
 
         class Slow(BaseHTTPRequestHandler):
+            """The first chunk, then the rest once the screen has shown the first."""
+
             def log_message(self, *a):
                 pass
 
@@ -266,10 +269,10 @@ class TestChattingThroughTheInterface:
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
-                for i in range(0, len(payload), 65536):
-                    self.wfile.write(payload[i:i + 65536])
-                    self.wfile.flush()
-                    clock.sleep(0.01)
+                self.wfile.write(payload[:CHUNK])
+                self.wfile.flush()
+                seen.wait(30)
+                self.wfile.write(payload[CHUNK:])
 
         blob = Server(("127.0.0.1", _free_port()), Slow)
         threading.Thread(target=blob.serve_forever, daemon=True).start()
@@ -300,11 +303,13 @@ class TestChattingThroughTheInterface:
                     break
                 if 0 < row["done"] < row["total"]:
                     saw_partial = True
+                    seen.set()
                 if row["state"] != "getting":
                     assert row["state"] == "done", row
                     break
                 clock.sleep(0.05)
         finally:
+            seen.set()
             blob.shutdown()
 
         assert saw_partial, "the screen could never show how far along it was"
