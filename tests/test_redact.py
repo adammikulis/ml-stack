@@ -224,6 +224,47 @@ def test_a_product_name_is_not_a_person(tmp_path):
     assert "cleared by context_product: AI" in said
 
 
+CHANGELOG = """# Changelog
+
+## [0.2.0](https://example.invalid/compare/v0.1.7...v0.2.0) (2026-09-24)
+
+
+### Features
+
+* a kiln schedule read from one file ([7746128](https://example.invalid/commit/7746128))
+
+
+### Bug Fixes
+
+* --verify says when the ledger holds nothing to re-run ([df4f9bf](https://example.invalid/commit/df4f9bf))
+
+
+### Miscellaneous Chores
+
+* record the budgets ([3d8af9e](https://example.invalid/commit/3d8af9e))
+"""
+
+
+def test_a_changelog_section_heading_is_not_a_person(tmp_path):
+    """`### Bug Fixes`, as release-please writes it. Mutation: drop the `context_heading`
+    clause and CHANGELOG.md is refused."""
+    _needs_recogniser()
+    repo = _repo(tmp_path)
+    code, said = _check(repo, why=True, **{"CHANGELOG.md": CHANGELOG})
+    assert code == 0, said
+    assert "cleared by context_heading: Bug Fixes" in said
+
+
+def test_an_invented_name_in_a_changelog_heading_is_still_refused(tmp_path):
+    """Only a match that is one of the section titles, whole, stands down."""
+    _needs_recogniser()
+    repo = _repo(tmp_path)
+    code, said = _check(repo, **{"CHANGELOG.md": CHANGELOG.replace(
+        "### Bug Fixes", "### Bug Fixes from Marla Quinn")})
+    assert code == 1, said
+    assert "Marla Quinn" in said
+
+
 def test_an_invented_name_in_a_javascript_string_is_still_refused(tmp_path):
     """The whole point of the context rules is that they stand down code, never a person.
     A two-word name in a JS string, inside a call and beside operators, is still refused:

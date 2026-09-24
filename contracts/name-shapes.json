@@ -20,7 +20,7 @@
     "not_a_contact": "A mailbox nobody reads is not a person's contact. An address containing one of these is not reported.",
     "patterns": "uuid: the middle of one holds digits and dashes at a phone number's length, so a phone-shaped run inside a uuid stands down (learned 2026-09-01 from a Teams id). nameish: a Name-shaped run of one to four words inside a quoted string; a surname may be one letter, because a person with one passed straight through when two were demanded.",
     "skip_suffixes": "Files the hook never reads: images, weights, lockfiles and minified bundles, where a match is noise and the read is slow; and NOTICE/LICENSE, whose copyright lines name holders because the license requires it.",
-    "context": "Five refusals in one day were code, not people: 'null ||' and 'x1 - x0' out of a chart's JavaScript, 'assert label.lower' off a test line, '| ~3' out of a markdown table, and 'Windows Defender Firewall' and 'Practical AI', which are a product and a topic. Each went on the allow-list, which covers that one phrase and nothing else. These rules cover the shape instead, and only the shape: `expression` (the match holds a bracket, or an operator with a space beside it, or an attribute dot -- and for a match that is not a quoted string, operator characters immediately either side of it), `table_cell` (a markdown row, and a match with no letters in it), `keyword` (a keyword or builtin and one identifier after it), `product` (two or more words, one of them a product, OS or vendor token). A quoted string is never stood down by adjacency, so a name in a JavaScript string is still refused, and the exact list from the data is never stood down at all. Learned 2026-09-02 from five allow-list entries. Most specific rule first: table_cell, keyword, product, expression."
+    "context": "Five refusals in one day were code, not people: 'null ||' and 'x1 - x0' out of a chart's JavaScript, 'assert label.lower' off a test line, '| ~3' out of a markdown table, and 'Windows Defender Firewall' and 'Practical AI', which are a product and a topic. Each went on the allow-list, which covers that one phrase and nothing else. These rules cover the shape instead, and only the shape: `expression` (the match holds a bracket, or an operator with a space beside it, or an attribute dot -- and for a match that is not a quoted string, operator characters immediately either side of it), `table_cell` (a markdown row, and a match with no letters in it), `keyword` (a keyword or builtin and one identifier after it), `product` (two or more words, one of them a product, OS or vendor token), `heading` (the match is, whole, one of the section titles release-please writes into CHANGELOG.md; learned 2026-09-23 when '### Bug Fixes' read as a person). A quoted string is never stood down by adjacency, so a name in a JavaScript string is still refused, and the exact list from the data is never stood down at all. Learned 2026-09-02 from five allow-list entries. Most specific rule first: heading, table_cell, keyword, product, expression."
   },
 
   "place_first": [
@@ -85,6 +85,11 @@
       "GPU", "CPU", "Linux", "macOS", "iOS", "Android", "Docker", "Kubernetes", "Nvidia",
       "PyTorch", "Xcode", "Ollama", "Firefox", "Presidio", "Markdown", "JavaScript",
       "Python", "TypeScript"
+    ],
+    "headings": [
+      "Features", "Bug Fixes", "Performance Improvements", "Reverts", "Documentation",
+      "Styles", "Miscellaneous Chores", "Code Refactoring", "Tests", "Build System",
+      "Continuous Integration", "Dependencies", "BREAKING CHANGES", "Deprecations"
     ]
   },
 

@@ -45,7 +45,7 @@ CONTRACT = "name-shapes.json"
 # every section the code reads; a rules file missing one is refused, not guessed at
 SECTIONS = ("place_first", "place_last", "role_last", "shapes_off", "reserved_domains",
             "not_a_contact", "context", "patterns", "skip_suffixes")
-CONTEXT_KEYS = ("operators", "brackets", "adjacent", "keywords", "products")
+CONTEXT_KEYS = ("operators", "brackets", "adjacent", "keywords", "products", "headings")
 DEFAULT_FIXTURES = "tests/known-fixtures.txt"
 FLOOR = 0.6
 SHOWN = 25
@@ -97,6 +97,7 @@ class Shapes:
     adjacent: frozenset[str]
     keywords: frozenset[str]
     products: tuple[str, ...]
+    headings: frozenset[str]
     uuid: re.Pattern[str]
     nameish: re.Pattern[str]
     skip_suffixes: tuple[str, ...]
@@ -129,6 +130,7 @@ class Shapes:
             adjacent=frozenset(context["adjacent"]),
             keywords=frozenset(w.casefold() for w in context["keywords"]),
             products=tuple(context["products"]),
+            headings=frozenset(h.casefold() for h in context["headings"]),
             uuid=re.compile(patterns["uuid"]),
             nameish=re.compile(patterns["nameish"]),
             skip_suffixes=tuple(data["skip_suffixes"]),
@@ -157,8 +159,16 @@ class Shapes:
         body = body.strip()
         if not body:
             return None
-        return (self._table_cell(body, line) or self._keyword(body) or self._product(body)
+        return (self._heading(body) or self._table_cell(body, line)
+                or self._keyword(body) or self._product(body)
                 or self._expression(body, line, span))
+
+    def _heading(self, body: str) -> str | None:
+        """`Bug Fixes`: the whole match is one of the section titles a changelog generator
+        writes. A match holding anything more is not stood down."""
+        if body.strip("⚠️ \t#").casefold() not in self.headings:
+            return None
+        return f"context_heading: {body.strip()}"
 
     def _table_cell(self, body: str, line: str) -> str | None:
         """`| ~3 |`: a markdown row, and a cell that is a number or a symbol. A cell with a
