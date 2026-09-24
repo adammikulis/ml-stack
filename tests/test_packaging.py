@@ -338,8 +338,7 @@ def test_the_package_says_what_it_is_and_where_it_came_from():
 
 # -- one workflow calling another ----------------------------------------
 def workflows() -> dict:
-    """Every workflow file, read as text. Parsed by hand: PyYAML is not a test
-    dependency and CI installs only what the tests import."""
+    """Every workflow file, read as text."""
     return {p.name: p.read_text()
             for p in sorted((REPO / ".github" / "workflows").glob("*.yml"))}
 
@@ -361,6 +360,4 @@ def test_a_called_workflow_declares_the_secrets_it_reads():
 
 
 def test_the_release_is_built_by_the_workflow_that_cuts_it():
-    caller = workflows()["release-please.yml"]
-    assert "uses: ./.github/workflows/release.yml" in caller
-    assert "id-token" not in caller, "the OIDC token is minted in the job that uploads"
+    assert "uses: ./.github/workflows/release.yml" in workflows()["release-please.yml"]

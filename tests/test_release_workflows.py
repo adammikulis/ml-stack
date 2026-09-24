@@ -105,6 +105,28 @@ def test_the_upload_mints_an_oidc_token():
     assert RELEASE["jobs"]["pypi"]["permissions"]["id-token"] == "write"
 
 
+def id_token_jobs(workflow: dict[str, Any]) -> list[str]:
+    """The jobs of ``workflow`` whose permissions name ``id-token``."""
+    return [name for name, job in workflow["jobs"].items()
+            if "id-token" in (job.get("permissions") or {})]
+
+
+def test_only_the_upload_asks_for_the_oidc_token():
+    assert id_token_jobs(RELEASE) == ["pypi"]
+    assert "id-token" not in (RELEASE.get("permissions") or {})
+
+
+def test_the_caller_grants_the_oidc_token_only_to_the_job_that_calls_release():
+    """A called workflow cannot ask for more than the calling job grants; without the grant
+    release-please.yml fails at startup."""
+    calls = [name for name, job in PLEASE["jobs"].items()
+             if job.get("uses") == f"./.github/workflows/{RELEASE_FILE}"]
+    assert calls == ["build"]
+    assert id_token_jobs(PLEASE) == calls
+    assert PLEASE["jobs"]["build"]["permissions"]["id-token"] == "write"
+    assert "id-token" not in (PLEASE.get("permissions") or {})
+
+
 def test_the_upload_passes_no_password():
     """A password is used instead of the OIDC token, so trusted publishing never runs."""
     with_ = upload_step().get("with") or {}
