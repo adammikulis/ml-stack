@@ -110,7 +110,10 @@ def test_macos_has_a_nightly_to_run_on():
 def test_macos_runs_the_slow_tests_on_the_wheels_it_built():
     steps = workflows()["jobs"]["macos"]["steps"]
     assert any("packaging/build.py" in str(s.get("run", "")) for s in steps)
-    assert any("--slow" in str(s.get("run", "")) for s in steps)
+    tests = [s for s in steps if s.get("name") == "tests"]
+    assert tests and "--slow" in str(tests[0]["env"]["MACOS_PYTEST"])
+    for trigger in ("workflow_dispatch", "workflow_call"):
+        assert "--slow" in workflows()["on"][trigger]["inputs"]["macos-pytest"]["default"]
 
 
 def test_ci_runs_the_release_verifier():

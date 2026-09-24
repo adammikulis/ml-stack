@@ -6,6 +6,12 @@ on:
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+    inputs:
+      macos-pytest:
+        description: what the macOS job hands pytest
+        type: string
+        required: false
+        default: tests/ -q --slow
   # 04:30 UTC: the macOS job, which nothing else starts.
   schedule:
     - cron: "30 4 * * *"
@@ -18,6 +24,11 @@ on:
         type: string
         required: false
         default: ""
+      macos-pytest:
+        description: what the macOS job hands pytest
+        type: string
+        required: false
+        default: tests/ -q --slow
 
 # A newer push makes an older run pointless.
 concurrency:
@@ -107,7 +118,15 @@ jobs:
         run: python packaging/build.py
 
       - name: tests
-        run: python -m pytest tests/ -q --slow
+        run: python -m pytest $MACOS_PYTEST --durations=40
+        env:
+          MACOS_PYTEST: ${{ inputs.macos-pytest || 'tests/ -q --slow' }}
+
+      - name: what was still running
+        if: always()
+        run: |
+          ps -axo pid,ppid,rss,etime,command | grep -iE 'python|llama' | grep -v grep || true
+          vm_stat
 
   # Runs install.ps1 -Headless end to end: a virtualenv under a scratch prefix, the console
   # scripts on its own PATH, no network and no model, mirroring what

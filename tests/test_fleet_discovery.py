@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -56,6 +57,51 @@ def _free_tcp_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _heard_by_two(dest: str, via: str = "") -> str:
+    """How many of two sockets sharing a fresh port hear one datagram sent to ``dest``,
+    out of the interface at ``via`` when given, or why it was not sent."""
+    import struct
+
+    from ml_stack.fleet.discovery import _socket, default_group
+
+    port = _free_udp_port()
+    both = [_socket(broadcast=True, bind=("", port), group=default_group())
+            for _ in range(2)]
+    if via:
+        for s in both:
+            with contextlib.suppress(OSError):
+                s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack(
+                    "4s4s", socket.inet_aton(default_group()), socket.inet_aton(via)))
+    try:
+        with _socket(broadcast=True) as out:
+            if via:
+                out.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(via))
+            try:
+                out.sendto(b"probe", (dest, port))
+            except OSError as exc:
+                return f"{type(exc).__name__}: {exc}"
+        heard = 0
+        for s in both:
+            s.settimeout(0.5)
+            with contextlib.suppress(OSError):
+                s.recvfrom(64)
+                heard += 1
+        return f"{heard}/2"
+    finally:
+        for s in both:
+            s.close()
+
+
+def _reach(port: int) -> dict[str, str]:
+    """Each way a query goes out, and how many of two listeners on one port heard it."""
+    from ml_stack.fleet.discovery import default_group, primary_ip
+
+    return {"primary": primary_ip(), "group": _heard_by_two(default_group()),
+            "group on loopback": _heard_by_two(default_group(), "127.0.0.1"),
+            "broadcast": _heard_by_two("255.255.255.255"),
+            "loopback": _heard_by_two("127.0.0.1")}
 
 
 @pytest.fixture
@@ -131,7 +177,7 @@ def test_two_peers_are_told_apart(key, port):
          Advertiser(b, key, port=port, interval_s=0.2):
         found = discover(key, timeout_s=2.5, port=port)
     assert {p.name for p in found} == {"rtx", "mac"}, \
-        f"expected both, got {[p.name for p in found]}"
+        f"expected both, got {[p.name for p in found]}; sending: {_reach(port)}"
     assert len({p.instance for p in found}) == 2, "instances must be distinct"
 
 
@@ -256,6 +302,7 @@ def _booted(tmp_path, *extra: str):
     env = {**os.environ,
            "ML_STACK_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": str(REPO / "src"),
+           "PYTHONFAULTHANDLER": "1",
            "PYTHONUNBUFFERED": "1"}
     # To a file, not a pipe: a test that fails because discovery was off should
     # say so with the daemon's own words, and a pipe nobody drains can only be
@@ -281,6 +328,10 @@ def _booted(tmp_path, *extra: str):
                 pytest.fail(f"traind died:\n{log.read_text(errors='replace')}")
             time.sleep(0.1)
     else:
+        # SIGABRT under PYTHONFAULTHANDLER writes every thread's stack to the log
+        proc.send_signal(signal.SIGABRT)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=10)
         proc.kill()
         pytest.fail(f"traind never answered /health:\n{log.read_text(errors='replace')}")
     try:
