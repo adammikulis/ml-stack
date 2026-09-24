@@ -24,10 +24,7 @@ from tokenizers import Tokenizer, decoders, models, pre_tokenizers  # noqa: E402
 
 from ml_stack.client import Client, Request  # noqa: E402
 from ml_stack.graph.serve import Handler  # noqa: E402
-from ml_stack.http import (
-    Server,
-    ServerError,  # noqa: E402
-)
+from ml_stack.http import Server, ServerError  # noqa: E402
 from ml_stack.serve.backend import ServerSpec  # noqa: E402
 from ml_stack.serve.manager import ServerManager  # noqa: E402
 from ml_stack.serve.mlx_tree_server import TreeCompleter  # noqa: E402

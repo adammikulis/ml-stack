@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.home import machine_id
-from ml_stack.http import ServerError, open_stream
+from ml_stack.http import Server, ServerError, open_stream
 
 from . import pausing
 from .discovery import (
@@ -595,8 +595,6 @@ def serve_page(*, port: int = 0, name: str = "", host: str = "127.0.0.1") -> Any
     """
     import platform as _platform
     import tempfile
-
-    from ml_stack.http import Server
 
     ui = UI(name=name or _platform.node() or "this machine",
             cluster_key_path=Path(tempfile.gettempdir()) / "ml-stack-fit-no-cluster")

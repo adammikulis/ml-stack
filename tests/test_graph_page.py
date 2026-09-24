@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack.http import Server
+
 pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 
 #: Every test here launches headless Chromium and drives a real page. Nothing in
@@ -28,7 +30,6 @@ pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 pytestmark = pytest.mark.slow
 
 from ml_stack.graph import page as graph_page  # noqa: E402
-from ml_stack.http import Server
 
 VENDOR = Path(__file__).resolve().parent / "support" / "vendor"
 

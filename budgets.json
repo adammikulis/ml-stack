@@ -18,14 +18,14 @@
   "pyright-errors": 1,
   "ruff-blind-except": 19,
   "ruff-bugbear": 55,
-  "ruff-other": 464,
+  "ruff-other": 463,
   "ruff-security": 85,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
   "wide-signatures": 33,
   "floors-only-rise": {
-    "tests-collected": 5549
+    "tests-collected": 5557
   },
   "ratchet": {
     "date": "2026-09-18",

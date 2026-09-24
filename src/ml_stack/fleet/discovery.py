@@ -395,12 +395,14 @@ def _destinations(group: str, port: int) -> list[tuple[tuple[str, int], str]]:
 def _say(sock: socket.socket, data: bytes, group: str,
          port: int) -> list[tuple[tuple[str, int], OSError]]:
     """Send ``data`` every way `_destinations` names; returns the ones refused."""
-    lan = primary_ip() or "0.0.0.0"
+    lan = primary_ip()
+    anywhere = struct.pack("!I", socket.INADDR_ANY)
     refused = []
     for dest, via in _destinations(group, port):
+        out = via or lan
         try:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                            socket.inet_aton(via or lan))
+                            socket.inet_aton(out) if out else anywhere)
             sock.sendto(data, dest)
         except OSError as exc:
             refused.append((dest, exc))
