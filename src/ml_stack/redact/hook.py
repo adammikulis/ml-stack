@@ -53,7 +53,8 @@ SHOWN = 25
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
 PHONE = re.compile(r"\+?\d[\d ().-]{8,}\d")
 DATEISH = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
-TIMESTAMP = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}")
+TIMESTAMP = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}"
+                       r"|(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])-[0-2]\d[0-5]\d[0-5]\d")
 FRACTION = re.compile(r"\.\d{4,}")
 # shapes that are code rather than a person
 IDENTIFIER = re.compile(r"[_\[\](){}\"\n@/=]|^[a-z]+$")

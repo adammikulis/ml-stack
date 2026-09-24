@@ -239,6 +239,15 @@ def test_the_middle_of_a_uuid_is_not_a_phone_number(tmp_path):
     assert code == 0, said
 
 
+def test_a_compact_date_time_stamp_is_not_a_phone_number(tmp_path):
+    """A log named `NAME-PORT-YYYYMMDD-HHMMSS-PID.log` holds a run of digits and dashes at a
+    phone number's length."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"t.py": (
+        'LOG = f"llama-server-{port}-20260923-170000-1.log"\n')})
+    assert code == 0, said
+
+
 def test_a_job_title_is_not_shaped_like_a_person(tmp_path):
     """A role catalogue is a page of "Software Engineer", "Account Manager", "Site Reliability
     Engineer". Mutation: drop the `is_role` clause."""
