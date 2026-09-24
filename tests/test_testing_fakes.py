@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import sys
 
 import pytest
 
@@ -418,3 +419,23 @@ def test_the_binary_really_launches_and_answers_on_the_port_it_was_given(tmp_pat
 
         kill_process_tree(info.pid)
         monkeypatch.undo()
+
+
+def test_the_launcher_execs_python_app_on_a_framework_build(tmp_path, monkeypatch):
+    """A framework build's bin/python re-executes Python.app with argv[0] replaced, so the
+    launcher execs Python.app's interpreter itself."""
+    import sysconfig
+
+    from ml_stack.testing import fakes
+
+    app = tmp_path / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    app.parent.mkdir(parents=True)
+    app.write_bytes(b"")
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path))
+    real = sysconfig.get_config_var
+    monkeypatch.setattr(sysconfig, "get_config_var",
+                        lambda name: "Python" if name == "PYTHONFRAMEWORK" else real(name))
+    assert repr(str(app)) in fake_llama_binary(tmp_path).read_text()
+    monkeypatch.setattr(sysconfig, "get_config_var",
+                        lambda name: "" if name == "PYTHONFRAMEWORK" else real(name))
+    assert fakes._interpreter() == sys.executable
