@@ -21,11 +21,6 @@ questions, unconfirmed.
 Fixes first, then measurements that need the card, then what does not exist yet.
 Inside the fixes, most blocking first.
 
-0.2.0 is cut when these are gone (Adam, 2026-09-23): "Getting it onto a machine", "Not losing
-what it read" (the embedding denominator), the conversation store, `reads.json`,
-duplicate machine names, and the window's library tick, name test
-and numpy. Everything else here follows the cut.
-
 Nothing here is blocked by a kept measurement, a hash or a pin: `CLAUDE.md` says what that
 means and what it costs. An entry that reads "we cannot change that, it would invalidate
 the benchmarks" is an entry someone should rewrite as the change plus the re-measurement.
@@ -37,12 +32,6 @@ capability; every line is something that already exists not being what it says.
 
 ### Getting it onto a machine that is not this one
 
-- [ ] **Confirm the `release-pr` job goes green on the first push of `0.2dev` to `main`.**
-  `release-please.yml`'s `release-pr` job runs `ci.yml` against the branch release-please
-  opens, since a `ci` run on that pull request itself sits `action_required`. It exists only
-  on `0.2dev`, so it has never run: after the push, `gh run list --workflow
-  release-please.yml --limit 1` should show it, and a red there blocks merging the release
-  pull request.
 - [ ] **`ml-stack` needs a similarity waiver from PyPI before anything can be uploaded.**
   PyPI's check ignores `-`, `_` and `.`, so `ml-stack` reads as `mlstack` -- 1.0b3,
   "Machine Learning toolkit and algorithms library", last uploaded 2018-09-14 -- and a
