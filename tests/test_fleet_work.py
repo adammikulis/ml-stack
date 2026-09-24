@@ -14,7 +14,6 @@ import socket
 import sys
 import threading
 import time
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -27,6 +26,7 @@ from ml_stack.fleet.pool import Candidate, Requires, candidates, choose, eligibl
 from ml_stack.fleet.rates import Rates
 from ml_stack.fleet.remote import Peer
 from ml_stack.fleet.work import Unit, run
+from ml_stack.http import Server
 
 
 def _free_port() -> int:
@@ -53,7 +53,7 @@ class Box:
             return {**device_report(lambda: dict(extra or {})), "labels": list(labels),
                     "machine": self.machine}
 
-        self.httpd = ThreadingHTTPServer(
+        self.httpd = Server(
             ("127.0.0.1", port),
             make_handler(Daemon(self.runner, self.files, token, name, report)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()

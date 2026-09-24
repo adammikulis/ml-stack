@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,10 @@ from tokenizers import Tokenizer, decoders, models, pre_tokenizers  # noqa: E402
 
 from ml_stack.client import Client, Request  # noqa: E402
 from ml_stack.graph.serve import Handler  # noqa: E402
-from ml_stack.http import ServerError  # noqa: E402
+from ml_stack.http import (
+    Server,
+    ServerError,  # noqa: E402
+)
 from ml_stack.serve.backend import ServerSpec  # noqa: E402
 from ml_stack.serve.manager import ServerManager  # noqa: E402
 from ml_stack.serve.mlx_tree_server import TreeCompleter  # noqa: E402
@@ -76,7 +78,7 @@ def test_a_served_tree_engine_answers_what_plain_greedy_decoding_writes(weights:
                                                                        cache_home: Path) -> None:
     engine = Engine(EngineConfig(model=str(weights), drafter="ngram", max_nodes=8))
     completer = TreeCompleter(engine, name=weights.name, context=512, rule="lossless")
-    server = ThreadingHTTPServer(("127.0.0.1", 0),
+    server = Server(("127.0.0.1", 0),
                                  Handler.configured(name="TreeTest", completer=completer))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -101,7 +103,7 @@ def test_a_streamed_failure_reaches_the_client_as_an_error(weights: Path,
                                                            cache_home: Path) -> None:
     engine = Engine(EngineConfig(model=str(weights), drafter="ngram", max_nodes=8))
     completer = TreeCompleter(engine, name=weights.name, context=512, rule="no-such-rule")
-    server = ThreadingHTTPServer(("127.0.0.1", 0),
+    server = Server(("127.0.0.1", 0),
                                  Handler.configured(name="TreeTest", completer=completer))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

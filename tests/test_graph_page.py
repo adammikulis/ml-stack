@@ -28,6 +28,7 @@ pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
 pytestmark = pytest.mark.slow
 
 from ml_stack.graph import page as graph_page  # noqa: E402
+from ml_stack.http import Server
 
 VENDOR = Path(__file__).resolve().parent / "support" / "vendor"
 
@@ -238,7 +239,7 @@ class PacedStream:
             def log_message(self, *args):
                 pass
 
-        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = Server(("127.0.0.1", 0), Handler)
         # the page must be opened on this origin: Chromium refuses a public-looking page
         # (graph.test) a fetch into loopback, so the stream and the page share one
         self.origin = f"http://127.0.0.1:{self.server.server_address[1]}/"

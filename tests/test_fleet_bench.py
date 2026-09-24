@@ -1,7 +1,7 @@
 """The fleet side of ``ml-stack-bench sweep --fleet``: real daemons on loopback, a bench
 that is a small script rather than a model, and stores in ``tmp_path``.
 
-Two fake daemons are two real ``ThreadingHTTPServer``s running the real handler over a
+Two fake daemons are two real ``Server``s running the real handler over a
 real `JobRunner`; only three things are stood in for -- the memory a peer may use, the
 commit it runs, and the launch of ``ml-stack-bench --detach``, which would load a model
 and write under ``~/.ml-stack``. Nothing here reads that directory. Every name is invented.
@@ -17,7 +17,6 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -47,6 +46,7 @@ from ml_stack.fleet.sweeps import (
     submit_bench,
     wait,
 )
+from ml_stack.http import Server
 
 G = 2**30
 COMMIT = "ab12cd3"
@@ -91,7 +91,7 @@ class Box:
     host: BenchHost
     runner: JobRunner
     home: Path
-    httpd: ThreadingHTTPServer
+    httpd: Server
 
     @property
     def store(self) -> Path:
@@ -112,7 +112,7 @@ def _box(tmp_path: Path, name: str, *, room: int, launch=None, busy: bool = Fals
     def report():
         return {"cpus": 8, **host.report()}
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0),
+    httpd = Server(("127.0.0.1", 0),
                                 make_handler(Daemon(runner, files, token, name, report, bench=host)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     peer = Peer(f"http://127.0.0.1:{httpd.server_address[1]}", token)
@@ -502,7 +502,7 @@ def _slow_index(wheel: Path, *, delay_s: float):
         def log_message(self, *a):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
+    server = Server(("127.0.0.1", 0), Index)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return f"http://127.0.0.1:{server.server_address[1]}/simple", server
 

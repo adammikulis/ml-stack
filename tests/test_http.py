@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ml_stack.http import Refused, check
+from ml_stack.http import Refused, Server, check
 
 
 @pytest.fixture
@@ -49,3 +49,34 @@ def test_a_host_dns_cannot_resolve_is_refused(monkeypatch):
     monkeypatch.setattr("ml_stack.http.socket.getaddrinfo", gone)
     with pytest.raises(Refused, match="cannot resolve"):
         check("https://nowhere.example/")
+
+
+def test_a_server_binds_without_a_reverse_lookup_and_answers(monkeypatch):
+    import socket
+    import threading
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler
+
+    def lookup(*_a):
+        raise AssertionError("the bind looked its own address up")
+
+    class Hello(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"hello")
+
+        def log_message(self, *_a):
+            pass
+
+    monkeypatch.setattr(socket, "getfqdn", lookup)
+    server = Server(("127.0.0.1", 0), Hello)
+    try:
+        assert server.server_name == "127.0.0.1"
+        assert server.server_port == server.server_address[1] != 0
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as r:
+            assert r.read() == b"hello"
+    finally:
+        server.shutdown()
+        server.server_close()

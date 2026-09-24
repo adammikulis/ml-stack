@@ -15,11 +15,11 @@ import secrets
 import socket
 import threading
 from collections.abc import Callable, Iterable
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.http import Server
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
 from ml_stack.platform import on_quit, private_file
@@ -185,7 +185,7 @@ def serve_forever(root: Path | str | None = None,
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
 
-    httpd = ThreadingHTTPServer((host, port),
+    httpd = Server((host, port),
                                 make_handler(Daemon(
                                     runner, files_root, lambda: live_token[0],
                                     name=lambda: live_name[0], report=report, fetcher=fetcher,

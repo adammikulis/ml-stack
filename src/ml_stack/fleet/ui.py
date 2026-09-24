@@ -595,10 +595,11 @@ def serve_page(*, port: int = 0, name: str = "", host: str = "127.0.0.1") -> Any
     """
     import platform as _platform
     import tempfile
-    from http.server import ThreadingHTTPServer
+
+    from ml_stack.http import Server
 
     ui = UI(name=name or _platform.node() or "this machine",
             cluster_key_path=Path(tempfile.gettempdir()) / "ml-stack-fit-no-cluster")
     ui.parts = FIT_ONLY
     handler = type("FitHandler", (_Loopback,), {"ui": ui})
-    return ThreadingHTTPServer((host, port), handler)
+    return Server((host, port), handler)

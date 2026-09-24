@@ -17,7 +17,6 @@ import sys
 import tempfile
 import threading
 import time
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -29,6 +28,7 @@ from ml_stack.fleet.device import device_report, resolve_report, stdlib_device_r
 from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
 from ml_stack.fleet.jobs import DaemonError, JobRunner
 from ml_stack.fleet.remote import Peer, PeerError
+from ml_stack.http import Server
 
 
 def _free_port() -> int:
@@ -45,7 +45,7 @@ def daemon(tmp_path):
     token = load_or_create_token(root)
     runner = JobRunner(root)
     port = _free_port()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port),
+    httpd = Server(("127.0.0.1", port),
                                 make_handler(Daemon(runner, files, token)))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
@@ -475,7 +475,7 @@ def multi_daemon(tmp_path):
     token = load_or_create_token(root)
     runner = JobRunner(root, slots=3)
     port = _free_port()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port),
+    httpd = Server(("127.0.0.1", port),
                                 make_handler(Daemon(runner, files, token)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
@@ -702,7 +702,7 @@ def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
     token = load_or_create_token(root)
     runner = JobRunner(root)
     port = _free_port()
-    httpd = ThreadingHTTPServer(
+    httpd = Server(
         ("127.0.0.1", port),
         make_handler(Daemon(runner, root / "files", token, "rtx",
                      lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"}))))
@@ -740,7 +740,7 @@ def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
     runner = JobRunner(root)
     port = _free_port()
     called = ["hollowbrook"]
-    httpd = ThreadingHTTPServer(
+    httpd = Server(
         ("127.0.0.1", port),
         make_handler(Daemon(runner, root / "files", token, lambda: called[0])))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

@@ -64,7 +64,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext, suppress
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -97,6 +97,7 @@ from ml_stack.graph.thread import (
     remember_turn,
     summarise,
 )
+from ml_stack.http import Server
 from ml_stack.log import say, warn
 
 __all__ = ["EXPORT_TYPES", "LIVE", "PORT", "AskRoutes", "Handler", "bind", "exported", "main"]
@@ -748,7 +749,7 @@ def geocode(args: argparse.Namespace) -> int:
     return 0
 
 
-def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
+def bind(argv: Sequence[str] | None = None) -> Server:
     """A server bound on loopback from the command line, not yet serving."""
     args = parser().parse_args(argv)
     config = None
@@ -768,7 +769,7 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
                                  store=args.store, config=config, queue=queue,
                                  requests=requests,
                                  conversations_in_store=bool(args.conversations_in_store))
-    return ThreadingHTTPServer(("127.0.0.1", int(args.port)), handler)
+    return Server(("127.0.0.1", int(args.port)), handler)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

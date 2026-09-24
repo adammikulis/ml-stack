@@ -21,10 +21,12 @@ import sys
 import threading
 import types
 from collections.abc import Callable
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import pytest
+
+from ml_stack.http import Server
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
@@ -100,7 +102,7 @@ class _Server:
             def log_message(self, *args: object) -> None:
                 pass
 
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _H)
+        self._httpd = Server(("127.0.0.1", 0), _H)
         self.port = self._httpd.server_address[1]
         self.base_url = f"http://127.0.0.1:{self.port}"
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -271,7 +273,7 @@ def threaded_server(handler_class, *, port: int = 0):
     thread and a port into every test that follows, which is how one file's failure
     started showing up in another's.
     """
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), handler_class)
+    httpd = Server(("127.0.0.1", port), handler_class)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         yield f"http://127.0.0.1:{httpd.server_address[1]}"

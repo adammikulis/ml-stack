@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
 from ml_stack.fleet import autostart, launch
 from ml_stack.fleet.discovery import join_cluster
+from ml_stack.http import Server
 
 
 class _Health(BaseHTTPRequestHandler):
@@ -28,7 +29,7 @@ class _Health(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def daemon():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
+    server = Server(("127.0.0.1", 0), _Health)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield server.server_address[1]
     server.shutdown()

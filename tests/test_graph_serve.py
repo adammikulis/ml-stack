@@ -1,7 +1,7 @@
 """The page's three routes, driven over a real socket with a scripted asker and no model.
 
 Every fixture is invented; nothing reads a real graph. The server is a real
-``ThreadingHTTPServer`` on a free port, because the bugs these routes exist to prevent are
+``Server`` on a free port, because the bugs these routes exist to prevent are
 transport-shaped: a frame that was buffered rather than flushed, a ``done`` that arrived
 without the answer on it, a 409 sent after the stream headers.
 """
@@ -12,8 +12,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 from conftest import threaded_server
@@ -24,6 +23,7 @@ from ml_stack.graph.questions import Ask, History
 from ml_stack.graph.serve import AskRoutes
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.thread import SUMMARY, WINDOW, follow
+from ml_stack.http import Server
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
@@ -285,7 +285,7 @@ def test_a_handler_with_no_conversation_store_still_answers_and_has_no_history(t
     class Handler(Scripted):
         asked = []
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    srv = Server(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         url = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -306,7 +306,7 @@ def test_a_store_that_cannot_be_opened_is_an_empty_thread_with_a_note_not_an_err
         def threads(self, *, write=False):
             raise OSError("another process holds the writer")
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    srv = Server(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         url = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -828,7 +828,7 @@ def test_bind_takes_the_command_line_and_answers_on_loopback(site, monkeypatch):
 def test_main_prints_where_it_is_serving_then_serves(site, monkeypatch, capsys):
     page, _ = site
     served = []
-    monkeypatch.setattr("http.server.ThreadingHTTPServer.serve_forever",
+    monkeypatch.setattr("ml_stack.http.Server.serve_forever",
                         lambda self, *a, **k: served.append(self.server_address))
     assert main(["serve", "--site", str(page), "--port", "0"]) == 0
     assert served and served[0][0] == "127.0.0.1"

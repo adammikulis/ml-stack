@@ -1,6 +1,6 @@
 """Where a served page keeps its conversations: a store beside the corpus, never the corpus.
 
-Real stores in a scratch directory, a real ``ThreadingHTTPServer``, a scripted asker and no
+Real stores in a scratch directory, a real ``Server``, a scripted asker and no
 model; every store is read back on a fresh handle after the server has written it.
 """
 

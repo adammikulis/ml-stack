@@ -6,12 +6,14 @@ from __future__ import annotations
 import ipaddress
 import json
 import socket
+import socketserver
 import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,17 @@ class ServerError(RuntimeError):
 
 class ServerUnreachable(ServerError):
     """Nothing is listening, or the connection died mid-request."""
+
+
+class Server(ThreadingHTTPServer):
+    """A threading HTTP server that names itself by the address it bound."""
+
+    def server_bind(self) -> None:
+        # http.server's bind asks socket.getfqdn(host): a reverse lookup that took 35s
+        # on a macOS runner.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = str(host), int(port)
 
 
 class Refused(ValueError):

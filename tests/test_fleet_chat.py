@@ -12,7 +12,6 @@ import json
 import socket
 import threading
 import time
-from http.server import ThreadingHTTPServer
 
 import pytest
 from test_fleet_ui import WORDS, Serving as UIServing
@@ -23,6 +22,7 @@ from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import join_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Serving
+from ml_stack.http import Server
 from ml_stack.testing.fakes import FakeLlamaServer, Served
 
 PIECES = ["Hel", "lo", " there"]
@@ -60,7 +60,7 @@ def host(tmp_path, model_server):
     serving.register(model_server, ["qwen3-4b.gguf"])
     runner = JobRunner(root, files)
     port = _free_port()
-    httpd = ThreadingHTTPServer(
+    httpd = Server(
         ("127.0.0.1", port),
         make_handler(Daemon(runner, files, token, "host", serving=serving)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -271,7 +271,7 @@ class TestChattingThroughTheInterface:
                     self.wfile.flush()
                     clock.sleep(0.01)
 
-        blob = ThreadingHTTPServer(("127.0.0.1", _free_port()), Slow)
+        blob = Server(("127.0.0.1", _free_port()), Slow)
         threading.Thread(target=blob.serve_forever, daemon=True).start()
 
         ui, cookie = bare
@@ -349,12 +349,11 @@ class TestAnsweringToSeveralClusters:
     has two tokens and must accept either."""
 
     def daemon(self, tmp_path, anchor):
-        from http.server import ThreadingHTTPServer
-
         from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.discovery import derive_token, memberships
         from ml_stack.fleet.jobs import JobRunner
+        from ml_stack.http import Server
 
         root = tmp_path / "traind"
         files = root / "files"
@@ -363,7 +362,7 @@ class TestAnsweringToSeveralClusters:
         token = load_or_create_token(root, rows[0].key)
         runner = JobRunner(root, files)
         port = _free_port()
-        httpd = ThreadingHTTPServer(
+        httpd = Server(
             ("127.0.0.1", port),
             make_handler(Daemon(runner, files, token, "box",
                          cluster_key_path=anchor,

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import pytest
@@ -41,6 +41,7 @@ from ml_stack.fleet.join import (
     sweep_argv,
     table,
 )
+from ml_stack.http import Server
 
 WORDS = "quince larch marlow"
 DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
@@ -85,7 +86,7 @@ class FakeDaemon:
             def log_message(self_, *a: object) -> None:
                 pass
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
+        self.httpd = Server(("127.0.0.1", port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.advertiser = Advertiser(Beacon(name=name, port=port, device=device,
                                             machine=machine),
@@ -697,7 +698,7 @@ class PausableDaemon:
         def refresh(b: Beacon) -> None:
             b.device = {**DEVICE, "availability": schedule.public()}
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
+        self.httpd = Server(("127.0.0.1", port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         beacon = Beacon(name=name, port=port, device=dict(DEVICE), machine=f"id-{name}")
         self.advertiser = Advertiser(beacon, key, port=udp, interval_s=0.2,

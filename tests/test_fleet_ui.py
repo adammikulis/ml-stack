@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 import urllib.error
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -26,6 +25,7 @@ from ml_stack.fleet.discovery import in_cluster, primary_ip
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.session import Sessions, Throttle, parse_cookie
 from ml_stack.fleet.ui import UI, asset_bytes
+from ml_stack.http import Server
 
 
 def _maybe_json(raw: bytes) -> dict:
@@ -61,7 +61,7 @@ class Serving:
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
-        self.httpd = ThreadingHTTPServer(
+        self.httpd = Server(
             ("0.0.0.0", self.port),
             make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
@@ -860,7 +860,7 @@ class TestUpdates:
             def log_message(self, *a):
                 pass
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        srv = Server(("127.0.0.1", 0), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             asset = {"name": "x.zip", "size": len(payload),

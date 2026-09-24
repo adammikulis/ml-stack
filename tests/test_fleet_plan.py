@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -25,6 +24,7 @@ from ml_stack.fleet.models import Models
 from ml_stack.fleet.plan import Room, fit_for, place, ranked, room_of, table
 from ml_stack.fleet.remote import Peer, PeerError
 from ml_stack.fleet.serving import Hosting, NoRoom, Serving
+from ml_stack.http import Server
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile
 from ml_stack.testing.fakes import fake_llama_binary
@@ -321,7 +321,7 @@ class ServingDaemon:
                                fits=fits or (lambda: list(FITS)))
         self.models = Models([root / "models"], root / "store")
         self.port = _free_tcp()
-        self.httpd = ThreadingHTTPServer(
+        self.httpd = Server(
             ("127.0.0.1", self.port),
             make_handler(Daemon(self.runner, root / "files", self.token, name,
                          report=lambda: {"room_bytes": room}, serving=self.serving,

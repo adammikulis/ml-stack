@@ -12,6 +12,7 @@ import zipfile
 import pytest
 
 from ml_stack.fleet import llama
+from ml_stack.http import Server
 
 
 def free_port() -> int:
@@ -189,7 +190,7 @@ class TestFetching:
                 self.end_headers()
                 self.wfile.write(out)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
+        srv = Server(("127.0.0.1", port), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             yield f"http://127.0.0.1:{port}/releases", payload
@@ -241,7 +242,7 @@ class TestFetching:
                 self.end_headers()
                 self.wfile.write(out)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
+        srv = Server(("127.0.0.1", port), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             monkeypatch.setattr(llama, "API", f"http://127.0.0.1:{port}/releases")

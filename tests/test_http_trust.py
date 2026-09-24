@@ -11,7 +11,7 @@ import threading
 import pytest
 
 from ml_stack.client.health import is_healthy
-from ml_stack.http import trust
+from ml_stack.http import Server, trust
 
 
 def _self_signed(directory) -> tuple[str, str]:
@@ -61,7 +61,7 @@ def test_a_server_signing_its_own_certificate_is_reachable_once_it_is_trusted(tm
     cert, key = _self_signed(tmp_path)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert, key)
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    httpd = Server(("127.0.0.1", 0), _Handler)
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

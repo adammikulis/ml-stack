@@ -498,9 +498,10 @@ class Answering:
     """A real `AskRoutes` server on a free port, answering with no model at all."""
 
     def __init__(self) -> None:
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from http.server import BaseHTTPRequestHandler
 
         from ml_stack.graph.serve import AskRoutes
+        from ml_stack.http import Server
 
         class Handler(AskRoutes, BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -516,7 +517,7 @@ class Answering:
                     self.send_response(404)
                     self.end_headers()
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd = Server(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_port}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 

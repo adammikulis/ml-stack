@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
@@ -36,7 +36,7 @@ from ml_stack.client.settings import Request, Transport
 from ml_stack.extraction import Checking, Kept, Prompting
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.conversation import LIT, SYSTEM, converse
-from ml_stack.http import json_body
+from ml_stack.http import Server, json_body
 from ml_stack.serve.backend import (
     LlamaServerBackend,
     ServerBackend,
@@ -546,7 +546,7 @@ class FakeLlamaServer:
                        "is_processing": False} for n in range(self.served.slots)]
         self.refuse: dict[str, int] = {}
         self.disconnected = threading.Event()
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", port), _routes(self))
+        self._httpd = Server(("127.0.0.1", port), _routes(self))
         self.port = int(self._httpd.server_address[1])
         self.base_url = f"http://127.0.0.1:{self.port}"
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)

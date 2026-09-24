@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
-from http.server import ThreadingHTTPServer
 from typing import Any
 
 import mlx.core as mx
 
 from ml_stack.command import Group, flag, option
 from ml_stack.graph.serve import Handler
+from ml_stack.http import Server
 from ml_stack.log import say
 from ml_stack.serve.backend import DEFAULT_HOST
 from ml_stack.serve.mlx_tree import PREFIX
@@ -81,7 +81,7 @@ def cmd_tree(args: argparse.Namespace) -> int:
                                  drafter_model=args.drafter_model, max_nodes=args.max_nodes))
     completer = TreeCompleter(engine, name=model, context=int(args.context), rule=args.accept)
     handler = Handler.configured(name="TreeServer", completer=completer)
-    httpd = ThreadingHTTPServer((DEFAULT_HOST, int(args.port)), handler)
+    httpd = Server((DEFAULT_HOST, int(args.port)), handler)
     say(f"serving {model} with the {args.drafter} drafter on "
         f"http://{DEFAULT_HOST}:{args.port}/v1/chat/completions", flush=True)
     try:

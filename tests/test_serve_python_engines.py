@@ -37,13 +37,14 @@ def test_an_engine_server_is_leased_recorded_and_released(tmp_path, monkeypatch)
     engine = tmp_path / "engine.py"
     engine.write_text(
         "import sys\n"
-        "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+        "from http.server import BaseHTTPRequestHandler\n"
+        "from ml_stack.http import Server\n"
         "class H(BaseHTTPRequestHandler):\n"
         "    def do_GET(self):\n"
         "        self.send_response(200); self.end_headers(); self.wfile.write(b'{}')\n"
         "    def log_message(self, *a):\n"
         "        pass\n"
-        "HTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port') + 1])), H).serve_forever()\n")
+        "Server(('127.0.0.1', int(sys.argv[sys.argv.index('--port') + 1])), H).serve_forever()\n")
     monkeypatch.setattr(VllmBackend, "command",
                         lambda self, spec: [sys.executable, str(engine), "--port", str(spec.port)])
     manager = ServerManager(state_file=tmp_path / "servers.json")

@@ -13,6 +13,7 @@ import pytest
 
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.weights import ModelError, resolve
+from ml_stack.http import Server
 
 
 def free_port() -> int:
@@ -103,7 +104,7 @@ class TestGetting:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        srv = Server(("127.0.0.1", free_port()), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             got = store.ensure(
@@ -129,7 +130,7 @@ class TestGetting:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        srv = Server(("127.0.0.1", free_port()), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             with pytest.raises(ModelError, match="resume"):
@@ -145,7 +146,7 @@ class TestResuming:
     """A .part on disk is a claim about a file. Each test breaks that claim."""
 
     def serve(self, handler):
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), handler)
+        srv = Server(("127.0.0.1", free_port()), handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         return srv
 
@@ -415,7 +416,7 @@ class TestDraftModels:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        srv = Server(("127.0.0.1", free_port()), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         big = a_model(tmp_path / "models", name="pair.gguf", mb=2)
         model = store.find("pair.gguf")
@@ -432,11 +433,10 @@ class TestDraftModels:
     def test_a_draft_is_copied_from_a_machine_that_has_it(self, store, tmp_path,
                                                           monkeypatch):
         """The internet is only for what nobody nearby holds."""
-        from http.server import ThreadingHTTPServer
-
         from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.jobs import JobRunner
+        from ml_stack.http import Server
 
         theirs = tmp_path / "theirs"
         payload = a_model(theirs, name="pair.draft.gguf", mb=2).read_bytes()
@@ -447,7 +447,7 @@ class TestDraftModels:
         token = load_or_create_token(root, key)
         runner = JobRunner(root)
         port = free_port()
-        httpd = ThreadingHTTPServer(
+        httpd = Server(
             ("127.0.0.1", port),
             make_handler(Daemon(runner, root / "files", token,
                          models=Models([theirs], theirs),
@@ -665,7 +665,7 @@ class TestProgress:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        srv = Server(("127.0.0.1", free_port()), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
 
         notes, seen = [], []
@@ -702,7 +702,7 @@ class TestGettingInTheBackground:
                     if delay:
                         clock.sleep(delay)
 
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        srv = Server(("127.0.0.1", free_port()), H)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         return srv
 
@@ -855,12 +855,11 @@ class TestOverHTTP:
 
     @pytest.fixture
     def served(self, tmp_path):
-        from http.server import ThreadingHTTPServer
-
         from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.jobs import JobRunner
         from ml_stack.fleet.remote import Peer
+        from ml_stack.http import Server
 
         root = tmp_path / "traind"
         files = root / "files"
@@ -870,7 +869,7 @@ class TestOverHTTP:
         token = load_or_create_token(root)
         runner = JobRunner(root)
         port = free_port()
-        httpd = ThreadingHTTPServer(
+        httpd = Server(
             ("127.0.0.1", port),
             make_handler(Daemon(runner, files, token,
                          models=Models([theirs], theirs),

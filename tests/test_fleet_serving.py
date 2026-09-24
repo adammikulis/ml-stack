@@ -8,7 +8,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 
 import pytest
 
@@ -16,6 +15,7 @@ from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Endpoint, Serving, answers
+from ml_stack.http import Server
 from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 
@@ -33,7 +33,7 @@ class Running:
         self.token = load_or_create_token(root)
         self.runner = JobRunner(root, files)
         self.port = free_port()
-        self.httpd = ThreadingHTTPServer(
+        self.httpd = Server(
             ("127.0.0.1", self.port),
             make_handler(Daemon(self.runner, files, self.token, "box", serving=serving)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
