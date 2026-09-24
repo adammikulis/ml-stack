@@ -533,7 +533,8 @@ class TestDiscoveryAndTheFirewall:
         assert discovery.DEFAULT_GROUP == "239.255.77.70"
         assert discovery.DEFAULT_PORT == 8771 and discovery.DEFAULT_HTTP_PORT == 8770
         assert discovery._destinations(discovery.DEFAULT_GROUP, 8771) == [
-            ("239.255.77.70", 8771), ("255.255.255.255", 8771), ("127.0.0.1", 8771)]
+            (("239.255.77.70", 8771), ""), (("239.255.77.70", 8771), "127.0.0.1"),
+            (("255.255.255.255", 8771), ""), (("127.0.0.1", 8771), "")]
 
     def test_the_two_inbound_rules_name_the_two_ports(self):
         from ml_stack.fleet.discovery import windows_firewall_line, windows_firewall_rules
@@ -559,7 +560,7 @@ class TestDiscoveryAndTheFirewall:
             heard_on = ear.getsockname()[1]
             # Unicast to the listener alone, so this is deterministic on any interface.
             monkeypatch.setattr(discovery, "_destinations",
-                                lambda group, port: [("127.0.0.1", heard_on)])
+                                lambda group, port: [(("127.0.0.1", heard_on), "")])
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.bind(("", 0))
                 serve_on = s.getsockname()[1]

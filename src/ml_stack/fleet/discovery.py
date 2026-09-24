@@ -382,9 +382,29 @@ def primary_ip() -> str:
         s.close()
 
 
-def _destinations(group: str, port: int) -> list[tuple[str, int]]:
-    """Every way to say "anyone out there?" on this link."""
-    return [(group, port), ("255.255.255.255", port), ("127.0.0.1", port)]
+LOOPBACK = "127.0.0.1"
+
+
+def _destinations(group: str, port: int) -> list[tuple[tuple[str, int], str]]:
+    """Every way to say "anyone out there?" on this link, as ``(address, interface)``: a
+    multicast with an interface goes out of that one, and every other out of the LAN's."""
+    return [((group, port), ""), ((group, port), LOOPBACK),
+            (("255.255.255.255", port), ""), ((LOOPBACK, port), "")]
+
+
+def _say(sock: socket.socket, data: bytes, group: str,
+         port: int) -> list[tuple[tuple[str, int], OSError]]:
+    """Send ``data`` every way `_destinations` names; returns the ones refused."""
+    lan = primary_ip() or "0.0.0.0"
+    refused = []
+    for dest, via in _destinations(group, port):
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                            socket.inet_aton(via or lan))
+            sock.sendto(data, dest)
+        except OSError as exc:
+            refused.append((dest, exc))
+    return refused
 
 
 # -- what a firewall has to let in ---------------------------------------
@@ -432,16 +452,15 @@ def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
     # TTL 1: this is a LAN facility. Never let it escape the local segment.
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-    ip = primary_ip()
-    if ip:
-        with contextlib.suppress(OSError):
-            s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                         socket.inet_aton(ip))
     if bind is not None:
         s.bind(bind)
     if group is not None:
         mreq = struct.pack("4sl", socket.inet_aton(group), socket.INADDR_ANY)
         s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        # Linux's lo carries no MULTICAST flag, so this join is refused there
+        with contextlib.suppress(OSError):
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, struct.pack(
+                "4s4s", socket.inet_aton(group), socket.inet_aton(LOOPBACK)))
     return s
 
 
@@ -573,15 +592,9 @@ class Advertiser:
     def announce(self) -> None:
         """Push an unsolicited beacon. Safe to call at any time."""
         data = self._payload("beacon")
-        refused: list[tuple[tuple[str, int], OSError]] = []
-        destinations = _destinations(self.group, self.port)
         with _socket(broadcast=True) as s:
-            for dest in destinations:
-                try:
-                    s.sendto(data, dest)
-                except OSError as exc:
-                    refused.append((dest, exc))
-        if len(refused) == len(destinations):
+            refused = _say(s, data, self.group, self.port)
+        if len(refused) == len(_destinations(self.group, self.port)):
             self._undelivered(*refused[0], len(data))
 
 
@@ -595,11 +608,7 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
                         "nonce": nonce})
     found: dict[str, Beacon] = {}
     with _socket(broadcast=True, bind=("", 0)) as sock:
-        for dest in _destinations(group, port):
-            try:
-                sock.sendto(query, dest)
-            except OSError:
-                continue
+        _say(sock, query, group, port)
         deadline = time.time() + timeout_s
         next_query = time.time() + retry_s
         while True:
@@ -607,11 +616,7 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
             if now >= deadline:
                 break
             if now >= next_query:
-                for dest in _destinations(group, port):
-                    try:
-                        sock.sendto(query, dest)
-                    except OSError:
-                        continue
+                _say(sock, query, group, port)
                 next_query = now + retry_s
             sock.settimeout(max(0.0, min(deadline, next_query) - time.time()))
             try:

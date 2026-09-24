@@ -181,6 +181,23 @@ def test_two_peers_are_told_apart(key, port):
     assert len({p.instance for p in found}) == 2, "instances must be distinct"
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Linux's lo carries no multicast")
+def test_two_peers_on_one_port_are_both_found_when_the_lan_refuses_multicast(
+        key, port, monkeypatch):
+    """A LAN that refuses every multicast and broadcast (EHOSTUNREACH on a macOS runner)
+    leaves loopback, where a unicast reaches one of two sockets sharing a port."""
+    from ml_stack.fleet import discovery
+
+    real = discovery._destinations
+    monkeypatch.setattr(discovery, "_destinations", lambda group, port: [
+        (dest, via) for dest, via in real(group, port)
+        if via or dest[0] == discovery.LOOPBACK])
+    with Advertiser(Beacon(name="rtx", port=8770), key, port=port, interval_s=0.2), \
+         Advertiser(Beacon(name="mac", port=8771), key, port=port, interval_s=0.2):
+        found = discover(key, timeout_s=2.5, port=port)
+    assert sorted(p.name for p in found) == ["mac", "rtx"]
+
+
 def test_one_daemon_on_several_interfaces_is_one_peer():
     """A box with a VPN up answers the same query from each address it holds.
 
