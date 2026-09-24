@@ -13,6 +13,7 @@ import contextlib
 import inspect
 import json
 import os
+import site
 import socket
 import struct
 import subprocess
@@ -609,14 +610,14 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
     out: dict[str, int] = {}
     for dirpath, dirnames, filenames in os.walk(root):
         rel = Path(dirpath).relative_to(root)
-        if rel == Path("."):
+        if not rel.parts:
             dirnames[:] = [d for d in dirnames if d not in skip]
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):
                 continue
             try:
-                out[(rel / name).as_posix()] = os.lstat(os.path.join(dirpath, name)).st_mtime_ns
+                out[(rel / name).as_posix()] = (Path(dirpath) / name).lstat().st_mtime_ns
             except OSError:
                 continue
     return out
@@ -637,7 +638,13 @@ def _real_home(tmp_path_factory):
     real = types.SimpleNamespace(state=home.home(), cache=home.cache())
     before = file_mtimes(real.state)
     away = tmp_path_factory.mktemp("home")
+    account = home.user_home()
+    browsers = account / ("Library/Caches" if sys.platform == "darwin" else ".cache")
     with pytest.MonkeyPatch.context() as mp:
+        # a child python finds the user's site-packages, and playwright its browsers, by HOME
+        mp.setenv("PYTHONUSERBASE", site.getuserbase())
+        mp.setenv("PLAYWRIGHT_BROWSERS_PATH",
+                  os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(browsers / "ms-playwright"))
         mp.setenv("HOME", str(away))
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))

@@ -12,13 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.gguf import tools
-
-#: Captured before any test patches it, so the fixture below cannot hide
-#: what the shipped default actually is.
-REAL_SOURCE_DIRS = tools.source_dirs()
-
-from ml_stack.gguf import (  # noqa: E402  -- after REAL_SOURCE_DIRS, on purpose
+from ml_stack.gguf import (
     ADD_SPACE_PREFIX,
     ConversionError,
     ToolNotFound,
@@ -32,10 +26,15 @@ from ml_stack.gguf import (  # noqa: E402  -- after REAL_SOURCE_DIRS, on purpose
     require_converter,
     require_quantize,
     set_metadata,
+    tools,
 )
 
 gguf = pytest.importorskip("gguf", reason="ml-stack[gguf]")
 np = pytest.importorskip("numpy", reason="ml-stack[arrays]")
+
+
+def test_the_unsloth_checkout_is_searched():
+    assert Path.home() / ".unsloth" / "llama.cpp" in tools.source_dirs()
 
 
 @pytest.fixture
@@ -66,11 +65,6 @@ class TestToolDiscovery:
         put one there explicitly.
         """
         monkeypatch.setattr(tools, "source_dirs", tuple)
-
-    def test_the_unsloth_checkout_is_searched(self):
-        """unsloth vendors llama.cpp, so many machines have the converter without
-        having installed it deliberately."""
-        assert Path.home() / ".unsloth" / "llama.cpp" in REAL_SOURCE_DIRS
 
     def test_explicit_path_wins(self, tmp_path):
         script = tmp_path / "convert_hf_to_gguf.py"
@@ -164,7 +158,7 @@ class TestMetadataRewrite:
     def test_a_non_gguf_is_rejected(self, tmp_path):
         junk = tmp_path / "not.gguf"
         junk.write_bytes(b"this is not a GGUF file at all")
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             set_metadata(junk, tmp_path / "out.gguf", {"k": "v"})
 
     def test_a_missing_source_is_reported_clearly(self, tmp_path):
