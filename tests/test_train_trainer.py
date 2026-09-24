@@ -356,16 +356,16 @@ class TestStopping:
         slow = _batcher(x, y)
 
         def batches(step):
-            time.sleep(0.05)
+            time.sleep(0.2)
             return slow(step)
 
         report = Trainer(model, opt, loss, out=tmp_path / "run").fit(
-            batches, steps=100, max_seconds=0.2)
+            batches, steps=100, max_seconds=1.0)
 
         assert report.stop_reason == "time_limit"
         assert 2 <= report.steps < 10
         [few] = _notes(tmp_path / "run", "time limit fits few steps")
-        assert few["step_seconds"] >= 0.05 and few["steps_that_fit"] < 10
+        assert few["step_seconds"] >= 0.2 and few["steps_that_fit"] < 10
         assert load_state(find_latest(tmp_path / "run")).step == report.steps
 
     @needs_torch
