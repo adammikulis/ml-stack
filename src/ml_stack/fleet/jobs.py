@@ -129,7 +129,8 @@ class JobRunner:
 
     def adopt(self, job: Job) -> Job:
         """Take in a job some other process owns -- a bench started detached, whose pid
-        and log are known -- so it is listed, polled and stopped like one of ours.
+        and log are known -- so it is listed, polled and stopped like one of ours; a job
+        `stop` ended while it was preparing stays stopped and its pid is stopped.
 
         Whoever adopts it settles it: the runner has no ``Popen`` to wait on, so the
         adopter watches the pid and calls `record` with the state it ended in.
@@ -138,11 +139,16 @@ class JobRunner:
             raise DaemonError("an adopted job needs the pid of the process that owns it")
         job.submitted_at = job.submitted_at or time.time()
         job.started_at = job.started_at or time.time()
-        job.state = "running"
         self.job_dir(job.id).mkdir(parents=True, exist_ok=True)
         with self._lock:
+            stopped = job.state == "stopped"
+            if not stopped:
+                job.state = "running"
             self.jobs[job.id] = job
             self._adopted.add(job.id)
+        if stopped:
+            with contextlib.suppress(OSError):
+                stop_pid(job.pid)
         self.record(job)
         return job
 
@@ -181,8 +187,11 @@ class JobRunner:
             proc = self._running.get(job_id)
             adopted = job_id in self._adopted
         if proc is None:
-            if adopted and job.state == "preparing":
-                job.state = "stopped"
+            with self._lock:
+                preparing = adopted and job.state == "preparing"
+                if preparing:
+                    job.state = "stopped"
+            if preparing:
                 job.finished_at = time.time()
                 self.record(job)
             if adopted and job.state == "running" and job.pid:

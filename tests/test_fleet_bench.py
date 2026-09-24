@@ -630,6 +630,27 @@ def test_stopping_a_bench_job_terminates_the_detached_pid(tmp_path):
         box.httpd.server_close()
 
 
+def test_a_job_stopped_while_preparing_stays_stopped_when_its_pid_arrives(tmp_path):
+    from ml_stack.fleet.jobs import Job as DaemonJob
+    from ml_stack.fleet.measuring import _alive
+
+    runner = JobRunner(tmp_path / "runner", slots=1)
+    job = runner.hold(DaemonJob(id="j1", name="bench", argv=["ml-stack-bench"],
+                                cwd=str(tmp_path)))
+    runner.stop(job.id)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        job.pid = proc.pid
+        runner.adopt(job)
+        assert runner.jobs[job.id].state == "stopped"
+        proc.wait(timeout=10)
+        assert not _alive(proc.pid)
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+        runner.shutdown()
+
+
 def test_the_log_tail_names_what_failed():
     from ml_stack.fleet.measuring import FAILED_MARKS
 
