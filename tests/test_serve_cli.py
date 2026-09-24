@@ -7,6 +7,7 @@ one. No model is loaded anywhere in this file.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -944,7 +945,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     assert f"      cache  {tmp_path / 'hub'}  (5M)" in out, "the root it lies under, whole"
     assert f"      cache  {aside}  (4M)" in out, "under no root: the file's own directory"
     lines = out.splitlines()
-    assert lines[lines.index(next(l for l in lines if ":8081" in l)) + 1].startswith(
+    assert lines[lines.index(next(line for line in lines if ":8081" in line)) + 1].startswith(
         "    foreign"), "a model whose directory is not there gets no cache line"
     assert "1 not leased" in out and "python3" not in out
     assert "pid 14  defunct" in out, "a zombie is named as such and not counted as a stray"
@@ -1029,26 +1030,18 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
     monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
     model = tmp_path / "tiny.gguf"
     model.write_bytes(b"x")
-    try:
+    with contextlib.suppress(SystemExit):
         cli.main(["up", str(model), "--kv", "q8_0", "--port", "1"])
-    except SystemExit:
-        pass
     assert seen["spec"].cache_type_k == "q8_0" and seen["spec"].cache_type_v == "q8_0"
-    try:
+    with contextlib.suppress(SystemExit):
         cli.main(["up", str(model), "--port", "1"])
-    except SystemExit:
-        pass
     assert seen["spec"].cache_type_k == "q8_0" and seen["spec"].cache_type_v == "q8_0"
-    try:
+    with contextlib.suppress(SystemExit):
         cli.main(["up", str(model), "--kv", "f16", "--port", "1"])
-    except SystemExit:
-        pass
     assert seen["spec"].cache_type_k == "f16" and seen["spec"].cache_type_v == "f16"
     assert seen["spec"].embedding is False
-    try:
+    with contextlib.suppress(SystemExit):
         cli.main(["up", str(model), "--port", "1", "--embedding"])
-    except SystemExit:
-        pass
     assert seen["spec"].embedding is True
 
 

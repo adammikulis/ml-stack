@@ -58,7 +58,6 @@ from .pausing import (
 from .remote import PeerError
 
 __all__ = [
-    "default_root",
     "STARTED_FILE",
     "Answer",
     "Check",
@@ -67,6 +66,7 @@ __all__ = [
     "Joined",
     "apply_plan",
     "checks",
+    "default_root",
     "describe",
     "join_machine",
     "leave_machine",
@@ -730,7 +730,7 @@ def _measurements() -> tuple[list[Any], list[Any]]:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    from .plan import place, table as plan_table  # noqa: I001
+    from .plan import place, table as plan_table
 
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "

@@ -459,10 +459,8 @@ def main(argv: list[str] | None = None) -> int:
     def report() -> dict[str, Any]:
         out = stdlib_device_report()
         for probe in probes:
-            try:
+            with contextlib.suppress(Exception):
                 out.update(probe() or {})
-            except Exception:                         # noqa: BLE001
-                pass
         return out
 
     serve_forever(a.root, a.host, a.port, name=a.name,
