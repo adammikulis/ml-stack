@@ -26,8 +26,6 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.http import Server
-
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
@@ -64,6 +62,7 @@ def _install_git_hooks() -> None:
 _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
+from ml_stack.http import Server  # noqa: E402
 from ml_stack.testing.fakes import (  # noqa: E402
     LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
     fake_binary as fake_binary,
