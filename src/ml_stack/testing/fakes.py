@@ -18,6 +18,7 @@ import inspect
 import json
 import os
 import sys
+import sysconfig
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -770,13 +771,21 @@ if not os.environ.get("MLSTACK_FAKE_LLAMA"):
     os.environ["MLSTACK_FAKE_LLAMA"] = "1"
     os.environ["PYTHONHOME"] = sys.base_prefix
     os.environ["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
-    os.execv(sys.executable, ["llama-server", __file__, *sys.argv[1:]])
+    os.execv({interpreter!r}, ["llama-server", __file__, *sys.argv[1:]])
 from pathlib import Path
 
 from ml_stack.testing.fakes import serve_from_argv
 
 raise SystemExit(serve_from_argv(sys.argv[1:], where=Path(__file__).parent))
 """
+
+
+def _interpreter() -> str:
+    """The binary that runs this Python. A framework build's ``bin/python`` re-executes
+    ``Python.app`` with argv[0] replaced by that app's path."""
+    app = Path(sys.base_prefix) / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    return str(app) if sysconfig.get_config_var("PYTHONFRAMEWORK") and app.is_file() \
+        else sys.executable
 
 
 def fake_llama_binary(where: Path, *, name: str = "llama-server") -> Path:
@@ -787,7 +796,8 @@ def fake_llama_binary(where: Path, *, name: str = "llama-server") -> Path:
     for the model, context, slots and draft head its command line named.
     """
     path = where / name
-    path.write_text(_LAUNCHER.format(python=sys.executable, root=str(_import_root())))
+    path.write_text(_LAUNCHER.format(python=sys.executable, interpreter=_interpreter(),
+                                     root=str(_import_root())))
     path.chmod(0o755)
     return path
 
