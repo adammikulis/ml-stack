@@ -193,6 +193,8 @@ jobs:
           ref: ${{ inputs.ref }}
           path: repo
           fetch-depth: 0
+      - name: leave the smoke screenshots out
+        run: rm -rf artifacts/*-smoke
       - name: collect the network installers
         run: cp repo/packaging/install.sh repo/packaging/install.ps1 artifacts/
 

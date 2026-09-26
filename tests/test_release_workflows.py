@@ -285,3 +285,12 @@ def test_the_dry_run_calls_release_without_publishing():
     assert "with" not in job or "tag" not in job["with"]
     assert job["permissions"]["contents"] == "write"
     assert job["permissions"]["id-token"] == "write"
+
+
+def test_the_smoke_screenshots_are_not_published():
+    publish = RELEASE["jobs"]["publish"]["steps"]
+    runs = [step.get("run", "") for step in publish]
+    cleared = next(i for i, run in enumerate(runs) if "-smoke" in run and "rm " in run)
+    uploads = [i for i, step in enumerate(publish) if "gh release" in step.get("run", "")
+               or "release" in str(step.get("uses", ""))]
+    assert uploads and all(cleared < i for i in uploads)
