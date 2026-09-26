@@ -118,14 +118,16 @@ jobs:
         run: python packaging/build.py
 
       - name: tests
-        run: python -m pytest $MACOS_PYTEST --durations=40
+        run: |
+          read -ra args <<< "$MACOS_PYTEST"
+          python -m pytest "${args[@]}" --durations=40
         env:
           MACOS_PYTEST: ${{ inputs.macos-pytest || 'tests/ -q --slow' }}
 
       - name: what was still running
         if: always()
         run: |
-          ps -axo pid,ppid,rss,etime,command | grep -iE 'python|llama' | grep -v grep || true
+          pids=$(pgrep -d, -if 'python|llama') && ps -o pid,ppid,rss,etime,command -p "$pids" || true
           vm_stat
 
   # Runs install.ps1 -Headless end to end: a virtualenv under a scratch prefix, the console
