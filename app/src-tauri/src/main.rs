@@ -153,6 +153,7 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("the window could not be built")
         .run(|app, event| match event {
+            #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();

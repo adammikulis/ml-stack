@@ -180,3 +180,30 @@ def test_every_job_caches_the_packages_it_installs(step):
     with_ = step.get("with") or {}
     assert with_.get("cache") == "pip"
     assert with_.get("cache-dependency-path") == "pyproject.toml"
+
+
+def bundle_runs() -> list[str]:
+    """Each shell block of the bundle job, with its continuation lines joined."""
+    return [str(s["run"]).replace("\\\n", " ") for s in RELEASE["jobs"]["bundle"]["steps"]
+            if "run" in s]
+
+
+def test_the_bundle_is_set_up_and_opened_in_a_browser():
+    assert any("packaging/smoke.py" in run for run in bundle_runs())
+
+
+def test_no_curl_is_piped_into_a_reader_that_stops_early():
+    """`grep -q` closes the pipe on its first match; under pipefail curl then fails 23."""
+    for run in bundle_runs():
+        for line in run.splitlines():
+            assert not ("curl" in line and "| grep -q" in line), line
+
+
+def test_the_window_reopens_only_on_the_platform_that_has_the_event():
+    """tauri defines `RunEvent::Reopen` on macOS alone."""
+    main = (WORKFLOWS.parents[1] / "app" / "src-tauri" / "src" / "main.rs").read_text(
+        encoding="utf-8").splitlines()
+    at = [i for i, line in enumerate(main) if "RunEvent::Reopen" in line]
+    assert at, "the window no longer handles a reopen"
+    for i in at:
+        assert main[i - 1].strip() == '#[cfg(target_os = "macos")]'

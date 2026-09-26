@@ -65,10 +65,11 @@ jobs:
       - run: python -m pip install --upgrade pip build
       - run: python packaging/build.py --bundle
 
-      # The bundle has to run on a machine with no Python and no source tree.
-      # The window needs a display, so CI checks the headless binary instead: same
-      # daemon, same interface, and it is the half that can be tested without one.
-      # It is also what the window runs as its sidecar.
+      # The headless binary is the daemon and page the window runs as its sidecar.
+      - name: a browser to drive the page
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
       - name: it starts and serves the interface
         shell: bash
         run: |
@@ -82,10 +83,18 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:8899/health
-          curl -sf -o /dev/null -w 'ui %{http_code}\n' http://127.0.0.1:8899/ui/
-          curl -sf -o /dev/null http://127.0.0.1:8899/ui/static/style.css
-          curl -sf http://127.0.0.1:8899/ui/ | grep -q '<title>ml-stack</title>' \
-            || { echo "the page did not render"; exit 1; }
+      - name: a person sets it up and opens every screen
+        run: >-
+          python packaging/smoke.py http://127.0.0.1:8899
+          --passphrase "correct horse battery staple" --group ci
+          --screenshot dist/smoke.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.asset }}-smoke
+          path: dist/smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
 
       # The screens, not just the assets. ml_stack.serve is reached through a lazy
       # import, so nothing static points at it and only a running bundle says whether
@@ -95,9 +104,6 @@ jobs:
         run: |
           U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
           B=http://127.0.0.1:8899
-          curl -sf -H "$J" -H "$U" -X POST \
-            -d '{"passphrase":"correct horse battery staple","group":"ci"}' \
-            $B/ui/setup/join > /dev/null
           C=$(curl -s -D- -o /dev/null -H "$J" -H "$U" -X POST \
             -d '{"passphrase":"correct horse battery staple"}' \
             $B/ui/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:"{print $2}' \
@@ -108,7 +114,8 @@ jobs:
             echo "$p -> $code $(head -c 120 /tmp/body)"
             test "$code" = "200" || { echo "$p did not answer"; exit 1; }
           done
-          curl -s -H "$U" -H "Cookie: $C" $B/ui/serving | grep -q '"can_serve": true' \
+          curl -sf -o /tmp/serving -H "$U" -H "Cookie: $C" $B/ui/serving
+          grep -q '"can_serve": true' /tmp/serving \
             || { echo "the bundle cannot run a model: ml_stack.serve is missing"; exit 1; }
 
       # Python rather than zip(1): Windows runners have no zip in bash.
