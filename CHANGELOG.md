@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/adammikulis/ml-stack/compare/v0.2.0...v0.2.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* gate the release PR and dev pushes on the same bundle build ([a5f4c7f](https://github.com/adammikulis/ml-stack/commit/a5f4c7ffcec504f19f64bebfe7f5f4985f401fba))
+* release bundles build on Linux and Windows and are checked in a browser ([0ee86f3](https://github.com/adammikulis/ml-stack/commit/0ee86f34e8e2789a22cf20121dd15bb7d766cd41))
+
 ## [0.2.0](https://github.com/adammikulis/ml-stack/compare/v0.1.7...v0.2.0) (2026-09-24)
 
 
