@@ -1,0 +1,26 @@
+name: release dry run
+
+# The bundles ordinary CI never builds: app/**, packaging/** and the packages a bundle
+# carries. release-please.yml calls release.yml the same way for the release branch;
+# this covers a development push and a pull request touching the same surface.
+on:
+  push:
+    branches: ["*dev"]
+  pull_request:
+    paths:
+      - "app/**"
+      - "packaging/**"
+      - "src/ml_stack/fleet/**"
+      - "src/ml_stack/ui/**"
+      - ".github/workflows/release*.yml"
+
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release.yml

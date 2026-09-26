@@ -28,6 +28,8 @@ CI = read("ci.yml")
 PLEASE = read("release-please.yml")
 RELEASE_FILE = "release.yml"
 RELEASE = read(RELEASE_FILE)
+DRY_RUN_FILE = "release-dry-run.yml"
+DRY_RUN = read(DRY_RUN_FILE)
 
 
 def checkouts() -> list[dict[str, Any]]:
@@ -116,14 +118,15 @@ def test_only_the_upload_asks_for_the_oidc_token():
     assert "id-token" not in (RELEASE.get("permissions") or {})
 
 
-def test_the_caller_grants_the_oidc_token_only_to_the_job_that_calls_release():
+def test_the_caller_grants_the_oidc_token_only_to_jobs_that_call_release():
     """A called workflow cannot ask for more than the calling job grants; without the grant
     release-please.yml fails at startup."""
     calls = [name for name, job in PLEASE["jobs"].items()
              if job.get("uses") == f"./.github/workflows/{RELEASE_FILE}"]
-    assert calls == ["build"]
-    assert id_token_jobs(PLEASE) == calls
-    assert PLEASE["jobs"]["build"]["permissions"]["id-token"] == "write"
+    assert set(calls) == {"build", "release-pr-bundles"}
+    assert set(id_token_jobs(PLEASE)) == set(calls)
+    for name in calls:
+        assert PLEASE["jobs"][name]["permissions"]["id-token"] == "write"
     assert "id-token" not in (PLEASE.get("permissions") or {})
 
 
@@ -207,3 +210,78 @@ def test_the_window_reopens_only_on_the_platform_that_has_the_event():
     assert at, "the window no longer handles a reopen"
     for i in at:
         assert main[i - 1].strip() == '#[cfg(target_os = "macos")]'
+
+
+def release_checkouts() -> list[dict[str, Any]]:
+    return [step for job in RELEASE["jobs"].values() for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")]
+
+
+def test_release_can_be_called_by_another_workflow():
+    assert "workflow_call" in RELEASE["on"], "release-please.yml cannot call an uncallable workflow"
+
+
+def test_release_takes_the_ref_to_check_out():
+    ref = RELEASE["on"]["workflow_call"]["inputs"]["ref"]
+    assert ref["type"] == "string"
+    assert ref["default"] == "", "an empty default is the caller's own ref"
+
+
+@pytest.mark.parametrize("step", release_checkouts(), ids=lambda s: s.get("uses", "?"))
+def test_every_release_checkout_honours_the_ref_it_was_given(step):
+    assert (step.get("with") or {}).get("ref") == "${{ inputs.ref }}"
+
+
+def test_a_called_release_run_does_not_cancel_the_run_that_called_it():
+    """Two calls sharing github.ref (release-please's own push, and a bare CI run) must
+    not sit in the same concurrency group."""
+    assert RELEASE["concurrency"]["group"] == "release-${{ github.ref }}-${{ inputs.ref }}"
+    assert RELEASE["concurrency"]["cancel-in-progress"] is True
+
+
+def test_the_release_tag_is_optional_so_a_dry_build_can_omit_it():
+    tag = RELEASE["on"]["workflow_call"]["inputs"]["tag"]
+    assert tag["required"] is False
+    assert tag["default"] == ""
+
+
+def test_pypi_only_runs_once_the_project_is_registered():
+    assert "vars.PYPI_ENABLED == 'true'" in RELEASE["jobs"]["pypi"]["if"]
+
+
+def test_release_please_builds_the_pr_branch_without_publishing():
+    """The release pull request is green only once every bundle builds and passes the
+    smoke check, which release.yml alone runs."""
+    job = PLEASE["jobs"]["release-pr-bundles"]
+    assert job["uses"] == "./.github/workflows/release.yml"
+    assert job["if"] == "needs.propose.outputs.pr_branch != ''"
+    assert job["with"]["ref"] == "${{ needs.propose.outputs.pr_branch }}"
+    assert "tag" not in job["with"], "a tag here would try to publish the PR branch"
+    assert job["permissions"]["contents"] == "write"
+    assert job["permissions"]["id-token"] == "write"
+
+
+def test_the_dry_run_watches_the_development_branches():
+    assert DRY_RUN["on"]["push"]["branches"] == ["*dev"]
+
+
+def test_the_dry_run_path_filter_covers_what_ships_the_app():
+    paths = DRY_RUN["on"]["pull_request"]["paths"]
+    for expected in (
+        "app/**",
+        "packaging/**",
+        "src/ml_stack/fleet/**",
+        "src/ml_stack/ui/**",
+        ".github/workflows/release*.yml",
+    ):
+        assert expected in paths
+
+
+def test_the_dry_run_calls_release_without_publishing():
+    jobs = list(DRY_RUN["jobs"].values())
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job["uses"] == "./.github/workflows/release.yml"
+    assert "with" not in job or "tag" not in job["with"]
+    assert job["permissions"]["contents"] == "write"
+    assert job["permissions"]["id-token"] == "write"

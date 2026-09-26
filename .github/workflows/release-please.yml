@@ -41,6 +41,18 @@ jobs:
     with:
       ref: ${{ needs.propose.outputs.pr_branch }}
 
+  # An empty tag leaves release.yml's pypi and publish jobs skipped, so this builds and
+  # smoke-checks every bundle without uploading or publishing anything.
+  release-pr-bundles:
+    needs: propose
+    if: needs.propose.outputs.pr_branch != ''
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.propose.outputs.pr_branch }}
+
   # A tag pushed by the action's own token starts no workflow, so the build is
   # called from here rather than waiting for refs/tags to fire release.yml.
   build:

@@ -41,8 +41,13 @@ capability; every line is something that already exists not being what it says.
   refused the same way by `llmstack`, which unlike `mlstack` is live and in this field,
   and every other free single word is free because it is obscure. When the waiver lands,
   add the pending publisher -- owner `adammikulis`, repository `ml-stack`, workflow
-  `release.yml`, no environment -- and the `pypi` job in `release.yml` uploads with no
-  code change. Until then it uploads nothing and the docs install from git.
+  `release.yml`, no environment. Until then it uploads nothing and the docs install from
+  git.
+- [ ] **Set the `PYPI_ENABLED` repository variable to `true` once the waiver above lands
+  and the pending publisher is registered.** `release.yml`'s `pypi` job stays off
+  (`vars.PYPI_ENABLED == 'true'`) so every release before the waiver does not fail on a
+  publisher PyPI has not registered yet; flipping the variable is the only step left to
+  turn uploads on.
 
 ### Not losing what it read
 - [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
