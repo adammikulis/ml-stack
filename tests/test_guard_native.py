@@ -13,8 +13,7 @@ import os
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack import do, mcp
-from ml_stack import guard as rails
+from ml_stack import do, guard as rails, mcp
 from ml_stack.decide.logprob import Chat, LogprobDecider
 from ml_stack.decide.types import DecideError
 from ml_stack.guard import native
@@ -314,8 +313,7 @@ def test_a_view_asks_with_its_own_system_prompt(server):
     lease = Leased(url=fake.base_url)
     lease.asking("be strict").decide("q", "s", ["a", "b"])
     lease.decide("q", "s", ["a", "b"])
-    assert [m["content"] for m in (seen[0]["messages"][0], seen[1]["messages"][0])][0] \
-        == "be strict"
+    assert seen[0]["messages"][0]["content"] == "be strict"
     assert seen[1]["messages"][0]["content"] != "be strict"
 
 
