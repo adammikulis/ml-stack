@@ -25,6 +25,9 @@
 | `ml_stack.backend` | One array API over MLX and PyTorch, so math is written once |
 | `ml_stack.testing` | Cross-backend numerical parity harness, behind `ml-stack-train-run parity`, and the fakes the suite shares |
 
+`ml_stack.serve` and `ml_stack.client` can be used alone from another application:
+[embedding.md](embedding.md).
+
 Everything above ships in one package. The extras carry what a module needs beyond the
 standard library: `[claude] [train] [train-lora] [serve] [gguf] [graph] [store]
 [scrape] [web] [hub] [vision] [pdf] [viz] [plot] [testing] [telemetry] [mcp] [standard]
