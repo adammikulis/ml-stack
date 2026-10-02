@@ -72,6 +72,28 @@ def test_a_line_appended_without_the_key_is_found(tmp_path):
     assert not result.ok and any("edited" in p for p in result.problems)
 
 
+def test_a_crash_in_the_middle_of_a_rotation_leaves_a_chain_that_verifies(tmp_path, monkeypatch):
+    from ml_stack.sentinel import events
+
+    log = EventLog(tmp_path / "events.log", max_bytes=500, keep=3)
+    for i in range(40):
+        log.append(Event("t.x", Severity.INFO, "t", f"peer:{i}"))
+    assert len(log.files()) == 3 and log.verify().ok
+
+    def crash(*_args):
+        raise OSError("killed")
+
+    monkeypatch.setattr(events, "promote", crash)
+    with pytest.raises(OSError, match="killed"):
+        while True:
+            log.append(Event("t.x", Severity.INFO, "t", "peer:more"))
+    monkeypatch.undo()
+    result = log.verify()
+    assert result.ok, result.problems
+    log.append(Event("t.x", Severity.INFO, "t", "after"))
+    assert log.verify().ok
+
+
 @pytest.mark.slow
 def test_a_killed_writer_never_leaves_a_bad_state(tmp_path):
     seen = 0

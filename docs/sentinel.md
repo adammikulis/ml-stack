@@ -1,7 +1,8 @@
 # Sentinel: detecting and containing attacks on a node and its fleet
 
-Status: design (phase 1). The implementation is `src/ml_stack/sentinel/`; the last section
-of this file is rewritten from measurements when it lands.
+Status: implemented in `src/ml_stack/sentinel/`. The first half of this file is the design
+and threat model; "What is built and tested" and "Results" say what exists and what was
+measured. Where the two differ, the last two sections are the truth.
 
 Sentinel raises the cost of an attack and limits how far one reaches. It is not a guarantee
 and it does not claim to find a model that was trained to misbehave.
@@ -23,8 +24,11 @@ Designed against these branches (their public interfaces, no merge into this bra
 | `agent/decide`, `agent/port-pcbe` | tool-loop and MCP surfaces that sentinel must keep away from its own verbs |
 | `agent/redteam` | the attack suite whose cases the sentinel red-team tests extend |
 
-The adapters are tested against the real classes on a throwaway integration branch
-(`agent/sentinel-integ`, the three branches above merged), not on this one.
+This branch merges none of them. The adapters are tested against the real `Authenticator`,
+the real `Guard` and the real process finder on a throwaway integration branch
+(`agent/sentinel-integ`: hardening and guardrails merged, plus
+`tests/test_sentinel_integration.py`). The admission-control branch conflicts with hardening
+in `http.py` and `serve/manager.py`, so the Broker itself was not part of that merge.
 
 ## Threat model
 
@@ -121,7 +125,7 @@ The quarantine store holds one record per subject, whatever the kind:
 | `model` | a model file moved into a quarantine directory beside its root, hash and original path recorded | pin mismatch | restore moves it back byte-identically |
 | `artifact` | a downloaded file or archive, LoRA adapter, dataset, installed binary | pin mismatch, failed signature | restore |
 | `mcp_server` | a third-party server disconnected, its tools dropped | unexpected tools or schema change | reconnect on release |
-| `config` | a plugin or config file changed since its pin | hash mismatch | restore the pinned copy kept in the store |
+| `config` | a plugin or config file changed since its pin | hash mismatch | restore moves the changed file back |
 | `credential` | a name marked suspect, withheld from child processes | its value seen in output or a held message | rotation clears it; the value is never printed |
 | `peer` | a device id and address blocked, key and lease revoked on this node | auth failures, replay | unblock on release |
 | `server` | leases revoked and the managed server stopped | binary digest mismatch, unexpected children | restart through the Broker after release |
@@ -165,30 +169,97 @@ Dry-run: `Sentinel(dry_run=True)` writes the event that says what would have bee
 
 ## Self-protection
 
-* State, key, log and quarantine payloads live under `<ML_STACK_HOME>/sentinel/` with mode 0700
-  and files 0600. Writes are atomic.
-* The state file is sealed with an HMAC under a key file next to it. A bad seal raises a
-  critical event, loads the previous sealed copy if its seal holds, and otherwise starts in
-  fail-closed mode: nothing is released, held payloads stay held.
-* Releasing, purging, changing the mode and turning sentinel off need a `HumanGrant`. A grant
-  is minted only by the command line after it finds a terminal on stdin and stdout, finds
-  none of the agent markers in the environment, and the person types the subject's id. The
-  agent-facing surface (`sentinel.human.agent_may`) refuses any tool call whose name, command
-  line or path touches a sentinel verb or the sentinel directory; the MCP and tool-loop
-  adapters call it first.
-* Limits stated plainly: code running inside this Python process as the owner can forge a
-  grant, and a process running as the owner can edit the files. The defence is against the
-  agent loop and peers, which reach sentinel only through tool calls and requests.
+* State, key, log and held text live under `<ML_STACK_HOME>/sentinel/`; files are written
+  atomically and are mode 0600.
+* The state file, the pin manifest, the canary baselines, the decoy list and the log head are
+  each sealed with an HMAC under a key file beside them. A state file that fails its seal
+  raises a critical event and is replaced by the previous sealed copy when that holds;
+  otherwise the store starts in fail-closed mode: every subject reads as blocked and nothing
+  can be released. The held files stay where they were moved (`.ml-stack-quarantine/<id>/`
+  under the managed root), but the list of what was held is gone in that case.
+* Releasing, purging, reading held text and changing the mode need a `HumanGrant`. The
+  command line mints one only when stdin and stdout are terminals, when none of
+  `CLAUDECODE`, `ML_STACK_AGENT` or `ML_STACK_NONINTERACTIVE` is set, and when the person
+  types the record's id back. A grant covers one action on one subject for two minutes.
+* `human.agent_may(tool, arguments)` is the check an agent loop makes before running any
+  tool: it refuses a call whose name or arguments name a sentinel verb, the sentinel code,
+  or the state directory (including the directory a running sentinel was pointed at).
+  `adapters.agent_gate` joins it to the screening of decoys and frozen sessions.
+* Limits. The checks are on strings and on the environment. A call that builds a forbidden
+  name at run time (`"ml-stack " + "sec" + "urity"`, a base64 payload, a script written to
+  disk and run) is not recognised by `agent_may`; the terminal and environment checks and the
+  seal are what stop it then. Code running as the owner inside this process can build a
+  grant, and a process running as the owner can read the key file and rewrite everything.
+  The defence is against the agent loop and against peers, which reach sentinel only through
+  tool calls and requests. A state file replaced by an older, validly sealed copy is not
+  detected (there is no counter outside the file).
 
-## Events
+## Events and the audit log
 
-One typed record: `kind`, `severity` (info, notice, warning, critical), `source` (which
-detector or adapter), `subject` (`kind:key`), `ts`, `evidence` (a mapping of references:
-digests, sizes, counts, ids). The log is append-only JSON lines, bounded by size with
-rotation and a count, and every string passes through the same redaction as credentials
-(token prefixes, `Authorization` values, long base64 or hex runs next to key-like names).
-Subscribers (`bus.subscribe(fn)`) are called with each event; pcb-engine subscribes there.
+One typed record: `kind`, `severity` (info, notice, warning, critical), `source`, `subject`
+(`kind:key`), `ts`, `evidence` (references: digests, sizes, counts, ids). Every string passes
+through `redaction.redact` (token prefixes, bearer and MAC headers, `key=value` secrets, long
+mixed-case runs, private key blocks) and every value under a key-like name is masked.
+
+The log is JSON lines, mode 0600, rotated at 1 MB and kept to four files. Each line carries
+`seq`, the `prev` hash and its own `hash`, an HMAC-SHA256 under the head file's key. The head
+(count, last hash, the hash before the oldest kept line) is sealed in `events.log.head`.
+`ml-stack security verify` finds an edited line, a removed or reordered line, a log cut
+short, a deleted log, a head that fails its seal, and a line appended without the key.
+`ml-stack security verify --anchor "<count> <hash>"` also compares the head with a line
+written down elsewhere; `<state>/anchor.log` appends the head after every event, and the
+person can copy it somewhere the account cannot write. A process killed between writing a
+line and updating the head leaves a log that verifies and is adopted by the next append.
+What it does not do: stop someone with the key and write access from rewriting the whole
+log and head together; only an anchor kept elsewhere catches that.
+
+Subscribers (`bus.subscribe(fn)`) get every event. pcb-engine subscribes there.
+
+## Honeytokens
+
+`ml-stack security honey plant` (also `baseline --honey`) writes decoy files into the state
+root (`.env`, `credentials.toml.bak`, `cluster.key.old`, never over a file the person already
+has) carrying random values shaped like a Hugging Face token and a cluster secret. Nothing
+legitimate reads or sends them, so a sighting is a high-confidence event: the value, or its
+base64, URL-safe base64 or hex form, in tool arguments, tool results, model input or output
+or an outbound request; a decoy path named in a tool call's arguments; a call to one of the
+decoy tools (`export_credentials`, `dump_all_secrets`, definitions from `Honey.schema()` to
+be offered beside the real tools). The subject is the session (else the caller), which is
+frozen in `guarded` mode. A decoy file's access time is a weaker signal: it is reported and
+never acts alone. A listening decoy endpoint was left out: it is a new surface to defend.
+
+## What is built and tested
+
+| Piece | Where | Status |
+|---|---|---|
+| event, bus, redaction, chained log, verify, anchor | `events.py`, `redaction.py` | built, tested, mutation-checked |
+| sealed files, quarantine store, state machine, retention, text hold, file move and restore | `sealed.py`, `store.py`, `moves.py` | built, tested, mutation-checked |
+| human grants, agent surface check | `human.py` | built, tested, mutation-checked |
+| model, binary, artifact, config pins; load-time and periodic checks | `integrity.py`, `Sentinel.verify_before_load`, `scan`, `start` | built, tested |
+| canaries and drift | `canary.py` | built; run against scripted models and two real GGUFs |
+| peer outcomes, flapping, version and binary mismatch, tool mix, resource use | `rates.py` | built, tested on synthetic clocks |
+| guard-rail verdicts to findings, held messages, parked calls, tainted text | `rails.py`, `Sentinel.screen` | built; tested against the real `Guard` on the integration branch |
+| derived memory: summaries that repeat held text, memories of a frozen session | `Sentinel.screen_memory`, `register_derived` | built, tested |
+| decoys | `honey.py` | built, tested |
+| suspect credentials withheld from child environments | `Sentinel.scrub_env` | built, tested; the caller must use it when it starts a child |
+| unmanaged listeners, changed server executable | `servers.py` | built; takes the finder's output and a pid-to-executable function |
+| hooks that stop a server or a model's servers | `adapters.serve_hooks` | built, tested with real processes |
+| status mark | `Sentinel.chip`, `ml-stack security chip` | built; not yet drawn by the page |
+| `ml-stack security` | `cli.py` | built, tested |
+
+Not built. Wrapping the fleet daemon so that it calls `watch_authenticator` and refuses a
+quarantined address is a line in `fleet/api.py`, which another branch owns. Rotating a
+credential is left to the person. No detector reads KV cache or prompt cache contents:
+`screen_memory(key, text)` is the call that decides whether a stored summary may be reused,
+and a cache slot is quarantined by key (`memory`, `kv:slot-3`) by whoever manages it. Nothing
+scans model weights. A server's children and network connections are not examined. The tool
+mix, flapping, rate and unmanaged-server signals only watch.
+
+Considered and left out: filtering the machine's network egress (no portable signal);
+judging a model's weights for backdoors (unsolved); stopping any process ml-stack did not
+start (against the rules); deleting anything on its own (only a person's confirmed purge
+deletes).
 
 ## Results
 
-Written after the tests and measurements run. See the end of this file.
+See the end of this file once the measurements are written down.

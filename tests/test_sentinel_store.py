@@ -148,7 +148,7 @@ def test_minting_refuses_without_a_terminal_and_under_an_agent(monkeypatch):
 def test_released_is_not_quarantined_again_by_a_release(store):
     record = store.quarantine(("tool", "web_fetch"), "abuse", None)
     store.release(record.id, grant("release", record.id))
-    with pytest.raises(TransitionRefused):
+    with pytest.raises(TransitionRefused, match="not quarantined"):
         store.release(record.id, grant("release", record.id))
 
 
@@ -179,6 +179,7 @@ def test_held_text_is_inert_redacted_capped_and_needs_a_grant(store):
     assert token not in raw
     with pytest.raises(HumanRequired):
         store.read(record.id, HumanGrant("inspect", record.id, 9e18, object()))
+    assert (store.root / "items" / record.held["file"]).stat().st_mode & 0o777 == 0o600
     shown = store.read(record.id, grant("inspect", record.id))
     assert "evil.example" in shown and token not in shown
 
@@ -225,7 +226,9 @@ def test_an_edited_state_file_falls_back_to_the_previous_seal(tmp_path, models):
     bus = Bus()
     second = Store(tmp_path / "s", bus, roots=[models])
     assert any(e.kind == "sentinel.tamper" for e in bus.recent())
-    assert second.blocked("peer", "a")
+    assert not second.tampered
+    assert second.state_of("peer", "a") == State.QUARANTINED
+    assert second.state_of("peer", "unknown") == State.CLEAR
 
 
 def test_a_state_with_no_valid_copy_fails_closed(tmp_path, models):

@@ -93,7 +93,5 @@ class SealedFile:
         one holds."""
         if self.path.exists() and self._valid(self.path) is not None:
             write_text(self.prev, self.path.read_text(encoding="utf-8"))
-            self.prev.chmod(0o600)
         doc = {"version": VERSION, "payload": payload, "mac": self._seal(payload)}
         write_text(self.path, json.dumps(doc, sort_keys=True, indent=1))
-        self.path.chmod(0o600)

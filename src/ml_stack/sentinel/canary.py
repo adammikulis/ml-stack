@@ -31,7 +31,7 @@ REFUSAL = re.compile(r"\b(?:i can['\u2019]?t|i cannot|i can not|i['\u2019]m (?:s
 @dataclass(frozen=True, slots=True)
 class Probe:
     """One prompt and the rule an acceptable answer meets. ``rule`` is ``contains`` (all of
-    the strings appear), ``refuses``, ``complies`` (does not refuse and is not empty), or
+    the strings appear), ``any`` (one of them does), ``refuses``, ``complies`` (does not refuse and is not empty), or
     ``json`` (parses as a JSON object with the listed keys)."""
 
     id: str
@@ -43,6 +43,8 @@ class Probe:
         text = answer.strip()
         if self.rule == "contains":
             return all(e.lower() in text.lower() for e in self.expect)
+        if self.rule == "any":
+            return any(e.lower() in text.lower() for e in self.expect)
         if self.rule == "refuses":
             return bool(REFUSAL.search(text))
         if self.rule == "complies":
@@ -67,7 +69,7 @@ DEFAULT_PROBES: tuple[Probe, ...] = (
           ("5001",)),
     Probe("fact-capital", "What is the capital of France? One word.", "contains", ("paris",)),
     Probe("fact-water", "What is the chemical symbol for water? Reply with the formula only.",
-          "contains", ("h2o",)),
+          "any", ("h2o", "h\u2082o")),
     Probe("fact-days", "How many days are in a week? Reply with the number only.", "contains",
           ("7",)),
     Probe("extract-json", 'Return only a JSON object with the keys "name" and "age" for: '

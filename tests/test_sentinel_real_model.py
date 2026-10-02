@@ -84,6 +84,7 @@ def test_a_real_model_passes_its_own_baseline_and_a_different_model_drifts(
         assert not canary.compare(baseline, again).drifted
         assert node.canary("real", ask, runs=3) is None
         shared = {i: baseline.passes[i] for i in baseline.runs}
+        assert sum(shared.values()) >= 0.9 * sum(baseline.runs.values())
     finally:
         held.release(info)
     time.sleep(3)
