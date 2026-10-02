@@ -11,7 +11,7 @@ from ml_stack.guard.loop import parse_call
 from ml_stack.guard.policy import Limits, ToolPolicyRail, check_arguments
 from ml_stack.guard.secrets import SecretRail, redact
 from ml_stack.guard.untrusted import UntrustedRail, fenced, injection_markers, unfenced
-from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Rewrite
+from ml_stack.interventions import Base, Call, Context, Deny, Rewrite
 
 TOKEN = "hf_" + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"
 SCHEMAS = [
@@ -214,37 +214,6 @@ def test_oversized_and_long_list_arguments_are_denied():
     assert denies(policy(limits=Limits(string=10)), call("models_find", {"words": "x" * 11}))
 
 
-def test_a_changing_tool_after_outside_text_needs_the_person():
-    rail = policy()
-    ask = check(rail, call("serve_up", {"model": "x"}), tainted=True)
-    assert isinstance(ask, Confirm) and ask.by == "tool-policy" and "serve_up" in ask.question
-    assert isinstance(check(rail, call("models_find", {"words": "q"}), tainted=True), Proceed)
-    assert isinstance(check(rail, call("serve_up", {"model": "x"})), Proceed)
-
-
-def test_a_confirm_from_the_policy_runs_only_when_the_person_agrees():
-    asked = []
-
-    def person(ask, c):
-        asked.append(c.name)
-        return len(asked) == 1
-
-    run = g.start([policy()], offered=SCHEMAS, confirm=person)
-    run.context.tainted = True
-    assert run.check_call(call("serve_up", {"model": "x"})).allowed
-    assert not run.check_call(call("serve_up", {"model": "y"})).allowed
-    assert asked == ["serve_up", "serve_up"]
-    silent = g.start([policy()], offered=SCHEMAS)
-    silent.context.tainted = True
-    assert not silent.check_call(call("serve_up", {"model": "x"})).allowed
-
-
-def test_approval_names_the_tools_the_person_read():
-    rail = policy()
-    rail.approve("1. serve_up quince-2b on 8099; 2. report")
-    assert isinstance(check(rail, call("serve_up", {"model": "x"}), tainted=True), Proceed)
-    assert check_arguments({"properties": {}}, {}, "t") == ""
-
 
 # -- the run ---------------------------------------------------------------------------
 
@@ -287,7 +256,7 @@ def test_turning_a_rail_off_is_named_needs_a_reason_and_is_logged(caplog, capsys
         g.rails(without=["nonsense"], because="x")
     with caplog.at_level(logging.WARNING, logger="ml_stack.guard"):
         kept = g.rails(without=["secrets"], because="the log is public already")
-    assert [r.name for r in kept] == ["untrusted", "tool-policy"]
+    assert [r.name for r in kept] == ["untrusted", "tool-policy", "taint"]
     assert "secrets turned off: the log is public already" in caplog.text
     assert "secrets turned off" in capsys.readouterr().err
     assert g.off("a measurement") == []
@@ -315,12 +284,9 @@ def test_a_url_that_cannot_be_parsed_is_denied_rather_than_raising():
     assert denies(policy(), call("models_find", {"words": "http://[bad/x"}))
 
 
-def test_approving_one_tool_does_not_approve_another():
-    rail = policy()
-    rail.approve("1. serve_up quince-2b")
-    assert isinstance(check(rail, call("serve_up", {"model": "x"}), tainted=True), Proceed)
-    assert isinstance(check(rail, call("models_fetch", {"reference": "hf:a/b"}), tainted=True),
-                      Confirm)
+
+def test_an_empty_schema_fits_empty_arguments():
+    assert check_arguments({"properties": {}}, {}, "t") == ""
 
 
 def test_a_credential_in_an_argument_name_or_a_nested_list_is_found():

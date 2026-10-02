@@ -42,6 +42,7 @@ from ml_stack.interventions import (
     Run,
     Screened,
 )
+from ml_stack.taint import TaintRail, turn_off
 
 __all__ = ["Agent", "Budget", "Cancelled"]
 
@@ -99,17 +100,23 @@ class Agent:
     the context, and once more if the server refuses a request for being too long.
     ``interventions`` are asked before the run, before each model call and before each tool
     call and after each tool result (`ml_stack.interventions`); ``confirm`` answers their
-    `Confirm`, and without it a `Confirm` is a refusal.
+    `Confirm`, and without it a `Confirm` is a refusal. A `TaintRail` is added to
+    ``interventions`` unless one is there; ``taint=False`` with a ``because`` leaves it out.
     """
 
     def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
                  auto_compact: Compaction | None = None,
-                 interventions: Sequence[Any] = ()) -> None:
+                 interventions: Sequence[Any] = (), taint: bool = True,
+                 because: str = "") -> None:
         self.client = client
         self.tools = tools
         self.budget = budget or Budget()
         self.auto = AutoCompact(client, auto_compact) if auto_compact else None
         self.interventions = list(interventions)
+        if not taint:
+            turn_off(because)
+        elif not any(isinstance(one, TaintRail) for one in self.interventions):
+            self.interventions.append(TaintRail())
         self.confirm: Asker | None = None
         self._asked: asyncio.Queue[Event] = asyncio.Queue()
         if hasattr(tools, "on_elicit"):
@@ -125,8 +132,12 @@ class Agent:
         """Events for one task; a message list is continued in place. Stopping the
         iteration early, or cancelling the task driving it, stops the model's stream."""
         messages = [{"role": "user", "content": task}] if isinstance(task, str) else task
-        schemas = from_mcp(await self.tools.list_tools(), self.budget.profile)
+        listed = await self.tools.list_tools()
+        schemas = from_mcp(listed, self.budget.profile)
         index = index_by_name(schemas)
+        for one in self.interventions:
+            if isinstance(one, TaintRail):
+                one.learn(listed)
         spent = calls = rejected_turns = 0
         run = Run(self.interventions, context=RunContext(
             task=_task_of(messages), messages=messages, tools=schemas), confirm=self.confirm,

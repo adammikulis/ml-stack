@@ -344,7 +344,8 @@ def test_cancelling_during_a_summary_leaves_the_conversation_alone(served, tmp_p
 
 def test_tool_results_inside_a_run_are_not_orphaned_by_a_compaction(served, tmp_path) -> None:
     spec = {"name": "look", "description": "", "inputSchema": {
-        "type": "object", "properties": {"q": {"type": "integer"}}, "required": ["q"]}}
+        "type": "object", "properties": {"q": {"type": "integer"}}, "required": ["q"]},
+            "annotations": {"readOnlyHint": True}}
     tools = FunctionTools([spec], {"look": lambda q: words(150, f"hit{q}_")})
     fake = served(*[Turn(calls=(("look", json.dumps({"q": n})),)) for n in range(5)],
                   Turn(text=("finished",)), context=900)

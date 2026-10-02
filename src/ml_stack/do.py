@@ -372,6 +372,11 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
     return out
 
 
+def on_disk_ids() -> list[str]:
+    """The names and paths of the weights on this machine."""
+    return [str(row[key]) for row in models_on_disk() for key in ("model", "path")]
+
+
 def ollama_models(words: str = "",
                   fetch: Callable[..., dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """The models Ollama holds whose name has every word of ``words``, each with its
@@ -574,7 +579,8 @@ def run(task: str, client: Any, *,
     schemas = [schema for schema, _ in offered]
     run_by = {schema["function"]["name"]: fn for schema, fn in offered}
     screen = native_screen() if guard is None else []
-    watch = rails.start(rails.default(screen=screen) if guard is None else guard,
+    watch = rails.start(rails.default(screen=screen, registries={"models": on_disk_ids})
+                        if guard is None else guard,
                         offered=schemas, task=task, confirm=person.confirm)
     if messages is None:
         messages = [{"role": "system", "content": system_for(person.yes)}]

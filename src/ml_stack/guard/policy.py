@@ -1,4 +1,4 @@
-"""Authorization for tool calls: allow-list, argument schema, egress, paths, limits, taint."""
+"""Authorization for tool calls: allow-list, argument schema, egress, paths, limits."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
+from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
 
 __all__ = ["SENSITIVE", "Limits", "ToolPolicyRail", "check_arguments", "tool_schemas"]
 
@@ -19,8 +19,7 @@ SENSITIVE = frozenset({
     "serve_up", "serve_down", "serve_escalate", "models_fetch", "fleet_join", "speech_say",
     "world_make", "bench_run", "bench_standard", "bench_speed", "bench_compare", "bench_animate",
 })
-"""Tools that start processes, write files or download. Once text from outside the person is in
-the context they run only when the person says so."""
+"""Tools that start processes, write files or download."""
 
 URL = re.compile(r"(?i)\b(?:https?|ftp|wss?)://[^\s\"'<>)]+")
 SENSITIVE_PATH = re.compile(
@@ -51,7 +50,6 @@ class ToolPolicyRail(Base):
     name = "tool-policy"
     schemas: Mapping[str, dict[str, Any]] = field(default_factory=dict)
     limits: Limits = field(default_factory=Limits)
-    sensitive: frozenset[str] = SENSITIVE
     allow_hosts: frozenset[str] = frozenset()
     clock: Callable[[], float] = time.monotonic
     open_world: bool = False
@@ -60,16 +58,10 @@ class ToolPolicyRail(Base):
         self.count = 0
         self.seen: Counter[str] = Counter()
         self.recent: deque[float] = deque()
-        self.approved: set[str] = set()
 
     def bind(self, schemas: Mapping[str, dict[str, Any]]) -> None:
         """Take the tools a run offers; a call to any other is denied."""
         self.schemas = dict(schemas)
-
-    def approve(self, text: str) -> None:
-        """Let the sensitive tools whose names the person just read in ``text`` run."""
-        words = set(re.findall(r"\w+", text))
-        self.approved |= {name for name in self.sensitive if name in words}
 
     def before_tool_call(self, call: Call, context: Context) -> Verdict:
         problem = self._refusal(call)
@@ -77,9 +69,6 @@ class ToolPolicyRail(Base):
             return Deny(problem, self.name)
         self.count += 1
         self.recent.append(self.clock())
-        taint = self._taint(call, context)
-        if taint:
-            return Confirm(taint, {"tool": call.name}, self.name)
         return Proceed()
 
     def _refusal(self, call: Call) -> str:
@@ -133,12 +122,6 @@ class ToolPolicyRail(Base):
             if host and host not in self.allow_hosts and not _loopback(host):
                 return host
         return ""
-
-    def _taint(self, call: Call, context: Context) -> str:
-        if not (context.tainted and call.name in self.sensitive) or call.name in self.approved:
-            return ""
-        return (f"{call.name} changes things and text from outside the person is in the context; "
-                f"it runs only when the person confirms")
 
 
 def _loopback(host: str) -> bool:

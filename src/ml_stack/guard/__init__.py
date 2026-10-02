@@ -23,18 +23,20 @@ from ml_stack.guard.policy import ToolPolicyRail, tool_schemas
 from ml_stack.guard.secrets import SecretRail
 from ml_stack.guard.untrusted import NOTICE, UntrustedRail
 from ml_stack.interventions import Call, Confirm, Context, Run
+from ml_stack.taint import TaintRail
 
 __all__ = ["BUILTIN", "NOTICE", "default", "off", "parse_call", "rails", "start"]
 
 logger = logging.getLogger("ml_stack.guard")
 logger.addHandler(logging.NullHandler())
 
-BUILTIN = ("untrusted", "secrets", "tool-policy")
+BUILTIN = ("untrusted", "secrets", "tool-policy", "taint")
 
 
-def rails(*, without: Iterable[str] = (), because: str = "") -> list[Any]:
+def rails(*, without: Iterable[str] = (), because: str = "",
+          registries: Mapping[str, Callable[[], Iterable[str]]] | None = None) -> list[Any]:
     """The built-in rails, minus the named ones. Dropping any needs a ``because``, and the
-    drop is logged and printed."""
+    drop is logged and printed. ``registries`` are the lists of ids the taint rail accepts."""
     dropped = tuple(without)
     unknown = [n for n in dropped if n not in BUILTIN]
     if unknown:
@@ -46,14 +48,16 @@ def rails(*, without: Iterable[str] = (), because: str = "") -> list[Any]:
         logger.warning(message)
         log.warn(message)
     made: dict[str, Any] = {"untrusted": UntrustedRail(), "secrets": SecretRail(),
-                            "tool-policy": ToolPolicyRail()}
+                            "tool-policy": ToolPolicyRail(),
+                            "taint": TaintRail(registries=registries)}
     return [made[n] for n in BUILTIN if n not in dropped]
 
 
-def default(extra: Sequence[Any] = (), *, screen: Sequence[Any] = ()) -> list[Any]:
+def default(extra: Sequence[Any] = (), *, screen: Sequence[Any] = (),
+            registries: Mapping[str, Callable[[], Iterable[str]]] | None = None) -> list[Any]:
     """The built-in rails, then the model-based ``screen`` (a list of interventions), then
     ``extra`` ones such as a NeMo rail."""
-    return [*rails(), *screen, *extra]
+    return [*rails(registries=registries), *screen, *extra]
 
 
 def off(because: str) -> list[Any]:

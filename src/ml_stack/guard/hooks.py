@@ -20,7 +20,7 @@ MAX_TURNS = 50
 
 def sdk_guard() -> list[Any]:
     """The built-in rails for a tool set the guard has no schemas for."""
-    return [UntrustedRail(), SecretRail(), ToolPolicyRail(open_world=True, sensitive=frozenset())]
+    return [UntrustedRail(), SecretRail(), ToolPolicyRail(open_world=True)]
 
 
 def _decision(kind: str, reason: str) -> dict[str, Any]:
