@@ -29,6 +29,8 @@ from typing import Any
 
 from ml_stack import hub
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of, environment
+from ml_stack.guard import Guard
+from ml_stack.guard.hooks import MAX_TURNS, sdk_guard, sdk_hooks
 from ml_stack.log import say
 
 __all__ = ["Answer", "Harness", "Usage", "main", "session"]
@@ -73,20 +75,29 @@ class Answer:
 
 
 class Harness:
-    """One served model, one SDK configuration, any number of tasks."""
+    """One served model, one SDK configuration, any number of tasks. Every tool the SDK runs
+    passes ``guard`` (the built-in rails unless another is given) and a task is bounded to
+    ``MAX_TURNS`` turns unless ``max_turns`` says otherwise."""
 
     def __init__(self, base_url: str, alias: str, *, offline: bool = True,
-                 options: Mapping[str, Any] | None = None) -> None:
+                 options: Mapping[str, Any] | None = None, guard: Guard | None = None) -> None:
         self.base_url = base_url
         self.alias = alias
         self.env = environment(base_url, alias, offline=offline, base={})
         self.options = dict(options or {})
+        self.guard = guard or sdk_guard()
 
     def configured(self, **over: Any) -> Any:
         """A `ClaudeAgentOptions` for this model: the environment that points every call
         at the server, the served alias as the model, and whatever the caller adds."""
-        return sdk().ClaudeAgentOptions(model=self.alias, **{**self.options, **over,
-                                        "env": {**self.env, **dict(over.get("env") or {})}})
+        merged = {**self.options, **over}
+        ours = sdk_hooks(self.guard)
+        theirs = dict(merged.get("hooks") or {})
+        hooks = {event: [*ours.get(event, []), *theirs.get(event, [])]
+                 for event in {*ours, *theirs}}
+        return sdk().ClaudeAgentOptions(model=self.alias, **{
+            **merged, "max_turns": merged.get("max_turns") or MAX_TURNS, "hooks": hooks,
+            "env": {**self.env, **dict(over.get("env") or {})}})
 
     async def stream(self, prompt: str, **over: Any) -> AsyncIterator[Any]:
         """The SDK's messages for ``prompt``, as they arrive."""
@@ -140,7 +151,8 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
     goes when the block ends. ``draft`` is the head to guess tokens ahead with -- 'auto'
     takes the smallest one on this machine, 'none' takes none -- and a measured record's
     own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
-    allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...)."""
+    allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...) and
+    ``guard``, the `ml_stack.guard.Guard` every tool call passes (the built-in rails if absent)."""
     from ml_stack.serve import chat_template, leases, profile as records
     from ml_stack.serve.recent import note
     from ml_stack.serve.serving import Config, Serving, drafted, served
@@ -165,7 +177,8 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
                         chat_template_file=patched) as base_url:
         alias = alias_of(base_url, found)
         say(f"the harness on {base_url} as {alias!r}")
-        yield Harness(base_url, alias, offline=offline, options=options)
+        guard = options.pop("guard", None)
+        yield Harness(base_url, alias, offline=offline, options=options, guard=guard)
 
 
 def parser() -> argparse.ArgumentParser:

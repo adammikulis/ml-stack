@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack import do, mcp
+from ml_stack.guard.untrusted import unfenced
 from ml_stack.testing import ScriptedModel
 from ml_stack.testing.fakes import reply_from
 
@@ -78,7 +79,7 @@ def drive(script, stdin: str, *, task="run benchmarks with quince-2b", tools=Non
     model = Scripted(script, answer="I have nothing more to do.")
     out = io.StringIO()
     got = do.run(task, model, tools=tools if tools is not None else tools_over(seen),
-                 stdin=io.StringIO(stdin), stdout=out, **kw)
+                 person=do.Person(io.StringIO(stdin), out, yes=kw.pop("yes", False)), **kw)
     return got, model, seen, out.getvalue()
 
 
@@ -317,7 +318,7 @@ def _found(messages, name):
     """The last result ``name`` returned, as the model saw it."""
     for m in reversed(messages):
         if m.get("role") == "tool" and m.get("name") == name:
-            return json.loads(m["content"])
+            return json.loads(unfenced(m["content"]))
     return None
 
 
@@ -391,11 +392,12 @@ def test_with_yes_the_models_are_still_looked_up_and_confirmed_but_nobody_is_ask
         tmp_path):
     seen: list = []
     tools = tools_over(seen, files=model_files(tmp_path), fetch=ollama_fake)
-    got, model, seen, printed = drive(list(ACCEPTANCE), "1\n1\n1\n", task=PROMPT,
+    got, model, seen, printed = drive(list(ACCEPTANCE), "1\n1\n1\ny\ny\ny\ny\ny\n", task=PROMPT,
                                       tools=tools, seen=seen, yes=True)
     names = [c[0] for c in got.calls]
     assert names[:5] == ["models_on_disk", "ollama_models", "ask_user", "ask_user", "ask_user"]
     assert "Use these?" in printed and "go?" not in printed
+    assert printed.count("allow it?") == 5, "--yes skips go, not the confirmation after Ollama's text"
     assert got.done and [n for n, _ in seen if n == "bench_run"] == ["bench_run"] * 3
 
 
