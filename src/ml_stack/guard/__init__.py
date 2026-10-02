@@ -1,31 +1,30 @@
-"""Rails between a model and the world: input, output and tool-call checks that return
-allow, deny or modify with a reason.
+"""Rails between a model and the world, as interventions.
 
-The default :class:`Guard` holds the built-in rails and needs nothing installed. Turning one
-off is :func:`rails` with ``without=`` and a ``because``; it is logged and printed. Another
-library joins as one more :class:`Rail` (`ml_stack.guard.nemo`).
+`rails` holds the built-in checks (tool policy, secrets, untrusted-text fencing); they need
+nothing installed. `default` adds the model-based screen when one is given and anything else
+passed as ``extra``. `start` makes the `Run` a loop asks.
 
-    from ml_stack.guard import Guard
+    from ml_stack import guard
 
-    guard = Guard.default()
-    guard.input(tool_result_text, "tool:models_find").text
-    guard.tool_call(ToolCall("serve_up", {"model": "x.gguf"})).denied
+    run = guard.start(guard.default(), offered=tool_schemas, task="find a model")
+    run.check_call(Call("serve_up", {"model": "x.gguf"})).allowed
+    run.screen_result(Call("models_find"), tool_result_text).text
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from ml_stack import log
+from ml_stack.guard.loop import parse_call
 from ml_stack.guard.policy import ToolPolicyRail, tool_schemas
 from ml_stack.guard.secrets import SecretRail
 from ml_stack.guard.untrusted import NOTICE, UntrustedRail
-from ml_stack.guard.verdict import Rail, ToolCall, Verdict, allow
+from ml_stack.interventions import Call, Confirm, Context, Run
 
-__all__ = ["BUILTIN", "NOTICE", "Guard", "Rail", "ToolCall", "Verdict", "rails"]
+__all__ = ["BUILTIN", "NOTICE", "default", "off", "parse_call", "rails", "start"]
 
 logger = logging.getLogger("ml_stack.guard")
 logger.addHandler(logging.NullHandler())
@@ -33,7 +32,7 @@ logger.addHandler(logging.NullHandler())
 BUILTIN = ("untrusted", "secrets", "tool-policy")
 
 
-def rails(*, without: Iterable[str] = (), because: str = "") -> list[Rail]:
+def rails(*, without: Iterable[str] = (), because: str = "") -> list[Any]:
     """The built-in rails, minus the named ones. Dropping any needs a ``because``, and the
     drop is logged and printed."""
     dropped = tuple(without)
@@ -46,78 +45,30 @@ def rails(*, without: Iterable[str] = (), because: str = "") -> list[Rail]:
         message = f"guard: {', '.join(dropped)} turned off: {because.strip()}"
         logger.warning(message)
         log.warn(message)
-    made: dict[str, Rail] = {"untrusted": UntrustedRail(), "secrets": SecretRail(),
-                             "tool-policy": ToolPolicyRail()}
+    made: dict[str, Any] = {"untrusted": UntrustedRail(), "secrets": SecretRail(),
+                            "tool-policy": ToolPolicyRail()}
     return [made[n] for n in BUILTIN if n not in dropped]
 
 
-class Guard:
-    """An ordered list of rails. The first deny wins; modifications chain."""
+def default(extra: Sequence[Any] = (), *, screen: Sequence[Any] = ()) -> list[Any]:
+    """The built-in rails, then the model-based ``screen`` (a list of interventions), then
+    ``extra`` ones such as a NeMo rail."""
+    return [*rails(), *screen, *extra]
 
-    def __init__(self, rail_list: Sequence[Rail]) -> None:
-        self.rails = list(rail_list)
-        self.tainted = False
-        self.events: list[Verdict] = []
 
-    @classmethod
-    def default(cls, extra: Sequence[Rail] = ()) -> Guard:
-        """The built-in rails, then ``extra`` ones such as a NeMo rail."""
-        return cls([*rails(), *extra])
+def off(because: str) -> list[Any]:
+    """No rails at all; needs a ``because`` and is logged and printed."""
+    return rails(without=BUILTIN, because=because)
 
-    @classmethod
-    def off(cls, because: str) -> Guard:
-        """No rails at all; needs a ``because`` and is logged and printed."""
-        return cls(rails(without=BUILTIN, because=because))
 
-    def bind(self, offered: Sequence[Mapping[str, Any]],
-             confirm: Callable[[ToolCall], bool] | None = None) -> Guard:
-        """Tell the rails which tools a run offers and who confirms a tainted call."""
-        schemas = tool_schemas(offered)
-        for rail in self.rails:
-            if isinstance(rail, ToolPolicyRail):
-                rail.bind(schemas)
-                if confirm is not None:
-                    rail.confirm = confirm
-        return self
-
-    def approve(self, text: str) -> None:
-        """The person has read ``text`` and agreed: the sensitive tools it names may run."""
-        for rail in self.rails:
-            if isinstance(rail, ToolPolicyRail):
-                rail.approve(text)
-
-    def input(self, text: str, source: str) -> Verdict:
-        """Text entering the model's context from ``source`` (``person`` or ``tool:<name>``)."""
-        return self._chain(text, source, "on_input")
-
-    def output(self, text: str, source: str = "model") -> Verdict:
-        """Text the model produced."""
-        return self._chain(text, source, "on_output")
-
-    def tool_call(self, call: ToolCall) -> Verdict:
-        """A call the model asked for, before it runs."""
-        call = replace(call, tainted=self.tainted)
-        for rail in self.rails:
-            verdict = rail.on_tool_call(call)
-            if verdict.denied:
-                return self._note(verdict, f"tool:{call.name}")
-        return allow()
-
-    def _chain(self, text: str, source: str, hook: str) -> Verdict:
-        current, last = text, allow()
-        for rail in self.rails:
-            verdict: Verdict = getattr(rail, hook)(current, source)
-            if verdict.denied:
-                return self._note(verdict, source)
-            if verdict.action == "modify":
-                current, last = verdict.text, verdict
-                self.tainted = self.tainted or verdict.tainted
-                self._note(verdict, source)
-        return replace(last, text=current)
-
-    def _note(self, verdict: Verdict, source: str) -> Verdict:
-        level = logging.WARNING if verdict.denied or verdict.tainted else logging.DEBUG
-        logger.log(level, "%s: %s %s (%s)", verdict.rail, verdict.action, verdict.reason, source)
-        if level == logging.WARNING:
-            self.events.append(verdict)
-        return verdict
+def start(items: Sequence[Any], *, offered: Sequence[Mapping[str, Any]] = (), task: str = "",
+          confirm: Callable[[Confirm, Call | None], bool | Awaitable[bool]] | None = None,
+          notify: Callable[[Confirm, Call | None], Any] | None = None) -> Run:
+    """A `Run` over ``items`` for a loop that offers the tools ``offered`` (OpenAI-style
+    definitions) to answer the request ``task``."""
+    schemas = tool_schemas(offered)
+    for one in items:
+        if isinstance(one, ToolPolicyRail):
+            one.bind(schemas)
+    context = Context(task=task, tools=[dict(t) for t in offered])
+    return Run(items, context=context, confirm=confirm, notify=notify)

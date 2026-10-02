@@ -115,7 +115,9 @@ def _hooks():
     pytest.importorskip("claude_agent_sdk")
     from ml_stack.guard.hooks import sdk_guard, sdk_hooks
 
-    guard = sdk_guard()
+    from ml_stack.guard import start
+
+    guard = start(sdk_guard())
     made = sdk_hooks(guard)
     return guard, made["PreToolUse"][0].hooks[0], made["PostToolUse"][0].hooks[0]
 

@@ -12,6 +12,7 @@ from ml_stack.interventions import (
     Deny,
     Guide,
     Proceed,
+    Rewrite,
     first_deny_wins,
     guard_tool_call,
     merge,
@@ -39,9 +40,9 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def test_severity_orders_the_four_verdicts():
-    order = [Proceed(), Guide("g"), Confirm("q"), Deny("d")]
-    assert [severity(v) for v in order] == [0, 1, 2, 3]
+def test_severity_orders_the_five_verdicts():
+    order = [Proceed(), Rewrite("t"), Guide("g"), Confirm("q"), Deny("d")]
+    assert [severity(v) for v in order] == [0, 1, 2, 3, 4]
 
 
 def test_first_deny_wins_stops_at_the_first_deny_and_skips_the_rest():
@@ -92,9 +93,9 @@ def test_a_deny_keeps_the_tool_from_running():
     assert out.text == "Denied: destructive"
 
 
-def test_a_guide_returns_the_message_instead_of_running():
+def test_a_guide_lets_the_call_run_and_its_message_follows_the_result():
     out = run(guard_tool_call(CALL, Context(), lambda c: "done", [Says(Guide("use trash"))]))
-    assert (out.ran, out.text) == (False, "use trash")
+    assert (out.ran, out.text) == (True, "done\n\nuse trash")
 
 
 def test_a_confirm_runs_only_when_the_person_says_yes():
@@ -142,7 +143,7 @@ def test_async_hooks_and_executors_are_awaited():
 def test_after_tool_call_can_withhold_a_result():
     out = run(guard_tool_call(CALL, Context(), lambda c: "secret",
                               [Says(Proceed(), after=Deny("leaks a key"))]))
-    assert (out.ran, out.text) == (True, "Withheld: leaks a key")
+    assert (out.ran, out.text) == (True, "[withheld by the guard rail: leaks a key]")
 
 
 def test_after_tool_call_guide_is_appended_to_the_result():

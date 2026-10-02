@@ -11,14 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.guard.untrusted import unfenced
-from ml_stack.guard.verdict import ALLOW, ToolCall, Verdict, deny, modify
+from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
 
 __all__ = ["MODEL", "PROSE", "InjectionClassifierRail", "cached", "fetch"]
 
 MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
 FILES = ["onnx/*", "config.json"]
-PROSE = frozenset({"tool:speech_transcribe", "tool:web_search", "tool:web_fetch",
-                   "tool:WebFetch", "tool:WebSearch"})
+PROSE = frozenset({"speech_transcribe", "web_search", "web_fetch", "WebFetch", "WebSearch"})
 """Sources whose results are free text. The model scores a list, table or JSON of eight or more
 records as an injection (0.95 and up), so it is not run on structured tool output."""
 WINDOW = 128
@@ -43,7 +42,7 @@ def cached(cache_dir: str | None = None) -> Path | None:
         return None
 
 
-class InjectionClassifierRail:
+class InjectionClassifierRail(Base):
     """Scores each result from a ``sources`` tool for text that gives the assistant orders.
     Over ``taint`` the result is tainted; over ``withhold``, when one is given, it is replaced
     by a notice."""
@@ -78,18 +77,12 @@ class InjectionClassifierRail:
         exp = np.exp(logits - logits.max())
         return float((exp / exp.sum())[1])
 
-    def on_input(self, text: str, source: str) -> Verdict:
-        if source not in self.sources:
-            return ALLOW
-        score = self.score(unfenced(text))
+    def after_tool_call(self, call: Call, result: str, context: Context) -> Verdict:
+        if call.name not in self.sources:
+            return Proceed()
+        score = self.score(unfenced(result))
         if self.withhold is not None and score >= self.withhold:
-            return deny(self.name, f"reads as an instruction to the assistant (score {score:.2f})")
+            return Deny(f"reads as an instruction to the assistant (score {score:.2f})", self.name)
         if score >= self.taint:
-            return modify(self.name, text, f"may be an instruction (score {score:.2f})", tainted=True)
-        return ALLOW
-
-    def on_output(self, text: str, source: str) -> Verdict:
-        return ALLOW
-
-    def on_tool_call(self, call: ToolCall) -> Verdict:
-        return ALLOW
+            return Rewrite(result, f"may be an instruction (score {score:.2f})", True, self.name)
+        return Proceed()

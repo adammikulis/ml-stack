@@ -12,7 +12,7 @@ import asyncio
 import inspect
 import json
 import threading
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -29,12 +29,19 @@ from ml_stack.agent.events import (
     ToolCall,
     ToolResult,
 )
-from ml_stack.agent.interventions import Confirm, InterventionContext
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
-from ml_stack.agent.vet import Confirmer, Verdict, Vetter
 from ml_stack.client.tokens import estimate_tokens
 from ml_stack.http import ServerError
+from ml_stack.interventions import (
+    Asker,
+    Call,
+    Confirm,
+    Context as RunContext,
+    Gate,
+    Run,
+    Screened,
+)
 
 __all__ = ["Agent", "Budget", "Cancelled"]
 
@@ -72,6 +79,11 @@ Summarise = Callable[[str, ToolOutput], str]
 
 
 @dataclass(slots=True)
+class _Refusal:
+    reason: str = ""
+
+
+@dataclass(slots=True)
 class _Pending:
     id: str
     name: str
@@ -86,8 +98,8 @@ class Agent:
     ``auto_compact`` makes a run compact its conversation before a request would overflow
     the context, and once more if the server refuses a request for being too long.
     ``interventions`` are asked before the run, before each model call and before each tool
-    call (`ml_stack.agent.interventions`); ``confirm`` answers their `Confirm`, and without
-    it a `Confirm` is a refusal.
+    call and after each tool result (`ml_stack.interventions`); ``confirm`` answers their
+    `Confirm`, and without it a `Confirm` is a refusal.
     """
 
     def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
@@ -97,18 +109,11 @@ class Agent:
         self.tools = tools
         self.budget = budget or Budget()
         self.auto = AutoCompact(client, auto_compact) if auto_compact else None
-        self.vet = Vetter(interventions)
+        self.interventions = list(interventions)
+        self.confirm: Asker | None = None
         self._asked: asyncio.Queue[Event] = asyncio.Queue()
         if hasattr(tools, "on_elicit"):
             tools.on_elicit = self._elicited
-
-    @property
-    def confirm(self) -> Confirmer | None:
-        return self.vet.confirm
-
-    @confirm.setter
-    def confirm(self, handler: Confirmer | None) -> None:
-        self.vet.confirm = handler
 
     async def compact_now(self, messages: list[dict[str, Any]]) -> CompactResult:
         """Compact ``messages`` in place now, whatever the context holds."""
@@ -123,19 +128,22 @@ class Agent:
         schemas = from_mcp(await self.tools.list_tools(), self.budget.profile)
         index = index_by_name(schemas)
         spent = calls = rejected_turns = 0
-        verdict = Verdict()
-        async for event in self.vet.check("before_invocation",
-                                          (_context(messages, 0, 0),), verdict):
+        run = Run(self.interventions, context=RunContext(
+            task=_task_of(messages), messages=messages, tools=schemas), confirm=self.confirm,
+            notify=self._notify)
+        refused = _Refusal()
+        async for event in self._decide(run, "before_invocation", refused):
             yield event
         for step in range(1, self.budget.max_steps + 1):
             reply = None
-            async for event in self.vet.check("before_model_call",
-                                              (_context(messages, step, calls),), verdict):
-                yield event
-            if verdict.denied:
-                yield Done("denied", verdict.denied, step - 1, calls, spent, messages)
+            run.context.step, run.context.tool_calls = step, calls
+            if not refused.reason:
+                async for event in self._decide(run, "before_model_call", refused):
+                    yield event
+            if refused.reason:
+                yield Done("denied", refused.reason, step - 1, calls, spent, messages)
                 return
-            self.vet.inject(messages)
+            _inject(run, messages)
             if self.auto:
                 for event in await self.auto.before(messages, schemas):
                     yield event
@@ -164,19 +172,18 @@ class Agent:
                 return
             calls += len(pending)
             messages.append(_assistant(text, pending))
-            async for event in self._vet(pending, messages, step, calls):
+            run.context.step, run.context.tool_calls = step, calls
+            async for event in self._vet(run, pending):
                 yield event
             for one in pending:
                 yield (Repair(one.id, one.name, one.errors) if one.errors
                        else Denied(one.id, one.name, one.denied) if one.denied
                        else ToolCall(one.id, one.name, one.args or {}))
             answers: list[ToolOutput] = []
-            async for event in self._dispatching(pending, answers):
+            async for event in self._dispatching(self._dispatch(pending), answers):
                 yield event
-            for one, answer in zip(pending, answers, strict=True):
-                messages.append({"role": "tool", "tool_call_id": one.id, "name": one.name,
-                                 "content": answer.text})
-                yield ToolResult(one.id, one.name, answer.text, answer.is_error)
+            async for event in self._results(run, pending, answers, messages):
+                yield event
             rejected_turns = rejected_turns + 1 if all(p.errors for p in pending) else 0
             if rejected_turns > self.budget.max_repairs:
                 yield Done("repairs_exhausted", text, step, calls, spent, messages)
@@ -215,46 +222,80 @@ class Agent:
         finally:
             stop.set()
 
+    def _notify(self, ask: Confirm, call: Call | None) -> None:
+        self._asked.put_nowait(ConfirmRequest(call.id if call else "", call.name if call else "",
+                                              ask.question, dict(ask.details)))
+
     async def _elicited(self, message: str, details: dict[str, Any]) -> Any:
         """A server's question to the person mid-call: put to ``confirm`` as a `ConfirmRequest`,
         declined when there is no handler."""
         self._asked.put_nowait(ConfirmRequest("", "elicitation", message, details))
-        if self.vet.confirm is None:
+        if self.confirm is None:
             return None
-        answer = self.vet.confirm(Confirm(message, details), {"name": "elicitation"})
+        answer = self.confirm(Confirm(message, details), Call("elicitation"))
         return await answer if inspect.isawaitable(answer) else answer
 
-    async def _dispatching(self, pending: list[_Pending], out: list[ToolOutput]
-                           ) -> AsyncIterator[Event]:
-        """Run the calls, yielding the questions their servers ask meanwhile; the answers
-        are put in ``out``."""
-        work = asyncio.ensure_future(self._dispatch(pending))
+    async def _watching(self, work: Awaitable[Any]) -> AsyncIterator[Any]:
+        """Run ``work``, yielding the questions asked meanwhile as events, then its result."""
+        task = asyncio.ensure_future(work)
         try:
-            while not work.done():
+            while not task.done():
                 got = asyncio.ensure_future(self._asked.get())
-                await asyncio.wait({work, got}, return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait({task, got}, return_when=asyncio.FIRST_COMPLETED)
                 if got.done():
                     yield got.result()
                 else:
                     got.cancel()
             while not self._asked.empty():
                 yield self._asked.get_nowait()
-            out.extend(work.result())
+            yield task.result()
         finally:
-            work.cancel()
+            task.cancel()
 
-    async def _vet(self, pending: list[_Pending], messages: list[dict[str, Any]], step: int,
-                   calls: int) -> AsyncIterator[Event]:
+    async def _dispatching(self, work: Awaitable[list[ToolOutput]], out: list[ToolOutput]
+                           ) -> AsyncIterator[Event]:
+        """Run the calls, yielding the questions their servers ask meanwhile; the answers are
+        put in ``out``."""
+        async for item in self._watching(work):
+            if isinstance(item, list):
+                out.extend(item)
+            else:
+                yield item
+
+    async def _decide(self, run: Run, hook: str, out: _Refusal) -> AsyncIterator[Event]:
+        """Ask ``hook`` of the run's interventions, yielding the questions put to the person;
+        a refusal is left in ``out``."""
+        async for item in self._watching(run.decide(hook, run.context)):
+            if isinstance(item, Gate):
+                out.reason = "" if item.allowed else getattr(item.verdict, "reason", "")
+            else:
+                yield item
+
+    async def _results(self, run: Run, pending: list[_Pending], answers: list[ToolOutput],
+                       messages: list[dict[str, Any]]) -> AsyncIterator[Event]:
+        """Pass each answer through the interventions, then add it to ``messages``."""
+        for one, answer in zip(pending, answers, strict=True):
+            text = answer.text
+            if not (one.errors or one.denied):
+                async for item in self._watching(
+                        run.after_tool(Call(one.name, one.args, one.id), text)):
+                    if isinstance(item, Screened):
+                        text = item.text
+                    else:
+                        yield item
+            messages.append({"role": "tool", "tool_call_id": one.id, "name": one.name,
+                             "content": text})
+            yield ToolResult(one.id, one.name, text, answer.is_error)
+
+    async def _vet(self, run: Run, pending: list[_Pending]) -> AsyncIterator[Event]:
         for one in pending:
             if one.errors:
                 continue
-            verdict = Verdict()
-            call = {"id": one.id, "name": one.name, "arguments": one.args}
-            async for event in self.vet.check("before_tool_call",
-                                              (call, _context(messages, step, calls)),
-                                              verdict, ident=one.id, name=one.name):
-                yield event
-            one.denied = verdict.denied
+            async for item in self._watching(run.before_tool(Call(one.name, one.args, one.id))):
+                if isinstance(item, Gate):
+                    one.denied = "" if item.allowed else getattr(item.verdict, "reason", "")
+                else:
+                    yield item
 
     def _pending(self, reply: Any, index: dict[str, dict[str, Any]]) -> list[_Pending]:
         out = []
@@ -296,9 +337,25 @@ class Agent:
         return text
 
 
-def _context(messages: Sequence[Mapping[str, Any]], step: int, calls: int
-             ) -> InterventionContext:
-    return InterventionContext(tuple(messages), step, calls)
+def _task_of(messages: Sequence[Mapping[str, Any]]) -> str:
+    """The first user message, as text."""
+    for message in messages:
+        if message.get("role") == "user":
+            return str(message.get("content") or "")
+    return ""
+
+
+def _inject(run: Run, messages: list[dict[str, Any]]) -> None:
+    """Put the guidance the interventions left into ``messages`` as part of the next user turn."""
+    if not run.guides:
+        return
+    text = "[Guidance]\n" + "\n".join(run.guides)
+    run.guides = []
+    if messages and messages[-1].get("role") == "user":
+        last = messages[-1]
+        messages[-1] = {**last, "content": f"{last.get('content') or ''}\n\n{text}"}
+    else:
+        messages.append({"role": "user", "content": text})
 
 
 def _overflowed(exc: ServerError) -> bool:

@@ -13,13 +13,12 @@ import io
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack import do, mcp
+from ml_stack import do, guard as rails, mcp
 from ml_stack.client import Client, Reply, Request
-from ml_stack.guard import Guard
 from ml_stack.guard.nemo import NemoRail, self_check_yaml
 from ml_stack.log import say
 
@@ -198,7 +197,7 @@ BENIGN: tuple[Attack, ...] = (
 )
 
 
-def play(attack: Attack, guard: Guard | None, model: Any = None) -> Run:
+def play(attack: Attack, guard: Sequence[Any] | None, model: Any = None) -> Run:
     """Run one scenario through the real loop and return what it left behind. ``model`` is
     the scripted worst case unless a served model is given."""
     run = Run()
@@ -245,7 +244,7 @@ def injections() -> list[Attack]:
             for n, style in enumerate(STYLES) for tool in TARGETS]
 
 
-def live(url: str, make_guard: Callable[[], Guard | None], reps: int = 2) -> dict[str, int]:
+def live(url: str, make_guard: Callable[[], Sequence[Any] | None], reps: int = 2) -> dict[str, int]:
     """How the served model at ``url`` fares reading each planted text: runs, attacks that
     landed, calls the policy blocked, and results withheld from the model."""
     total = {"runs": 0, "landed": 0, "blocked": 0, "withheld": 0}
@@ -259,7 +258,7 @@ def live(url: str, make_guard: Callable[[], Guard | None], reps: int = 2) -> dic
     return total
 
 
-def measure(make_guard: Callable[[], Guard | None]) -> dict[str, bool]:
+def measure(make_guard: Callable[[], Sequence[Any] | None]) -> dict[str, bool]:
     """``{attack: succeeded}`` for every attack, each against a fresh guard."""
     return {a.name: a.hit(play(a, make_guard())) for a in ATTACKS}
 
@@ -268,13 +267,13 @@ def report_live(url: str, judge: str = "") -> None:
     """Print how the model served at ``url`` fares with the rails off, by default and, when a
     judge server is named, with NeMo Guardrails' input rail answered by that server."""
     say(f"served model at {url}: {len(injections())} planted texts x 2 runs")
-    off = live(url, lambda: Guard.off("measuring the attack success rate without rails"))
+    off = live(url, lambda: rails.off("measuring the attack success rate without rails"))
     say(f"rails off: {off}")
     say(f"default:   {live(url, lambda: None)}")
     if judge:
         nemo = NemoRail.from_yaml(self_check_yaml(judge))
         say(f"default plus NeMo self-check input on {judge}: "
-            f"{live(url, lambda: Guard.default(extra=[nemo]))}")
+            f"{live(url, lambda: rails.default(extra=[nemo]))}")
 
 
 def report(argv: list[str] | None = None) -> int:
@@ -284,7 +283,7 @@ def report(argv: list[str] | None = None) -> int:
         report_live(given[0], given[1] if len(given) > 1 else "")
         return 0
     on = measure(lambda: None)
-    off = measure(lambda: Guard.off("measuring the attack success rate without rails"))
+    off = measure(lambda: rails.off("measuring the attack success rate without rails"))
     for name in on:
         say(f"{name:40} rails off: {'SUCCEEDS' if off[name] else 'fails':9} "
             f"default: {'SUCCEEDS' if on[name] else 'fails'}")

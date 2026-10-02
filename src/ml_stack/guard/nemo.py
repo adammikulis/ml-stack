@@ -16,7 +16,7 @@ import os
 from typing import Any
 
 from ml_stack.guard.untrusted import fenced, unfenced
-from ml_stack.guard.verdict import ALLOW, ToolCall, Verdict, deny, modify
+from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
 
 __all__ = ["NemoRail", "quiet", "self_check_yaml"]
 
@@ -45,7 +45,7 @@ def self_check_yaml(base_url: str, *, model: str = "local") -> str:
         f"prompts:\n  - task: self_check_input\n    content: |\n{indented}\n")
 
 
-class NemoRail:
+class NemoRail(Base):
     """Runs NeMo's input rails on text entering the context and its output rails on text the
     model produced. Blocked becomes deny, modified becomes modify."""
 
@@ -86,23 +86,20 @@ class NemoRail:
             got.status, "passed")
         return status, got.content, got.rail or "nemo"
 
-    def on_input(self, text: str, source: str) -> Verdict:
-        if source == "person":
-            return ALLOW
-        status, content, rail = self._check("input", "user", unfenced(text))
+    def after_tool_call(self, call: Call, result: str, context: Context) -> Verdict:
+        status, content, rail = self._check("input", "user", unfenced(result))
         if status == "blocked":
-            return deny(self.name, f"NeMo rail {rail} blocked it")
+            return Deny(f"NeMo rail {rail} blocked it", self.name)
         if status == "modified":
-            return modify(self.name, fenced(content, source), f"NeMo rail {rail} changed it")
-        return ALLOW
+            return Rewrite(fenced(content, f"tool:{call.name}"), f"NeMo rail {rail} changed it",
+                           False, self.name)
+        return Proceed()
 
-    def on_output(self, text: str, source: str) -> Verdict:
+    def after_model_call(self, context: Context, reply: object) -> Verdict:
+        text = reply if isinstance(reply, str) else str(getattr(reply, "content", "") or "")
         status, content, rail = self._check("output", "assistant", text)
         if status == "blocked":
-            return deny(self.name, f"NeMo rail {rail} blocked it")
+            return Deny(f"NeMo rail {rail} blocked it", self.name)
         if status == "modified":
-            return modify(self.name, content, f"NeMo rail {rail} changed it")
-        return ALLOW
-
-    def on_tool_call(self, call: ToolCall) -> Verdict:
-        return ALLOW
+            return Rewrite(content, f"NeMo rail {rail} changed it", False, self.name)
+        return Proceed()

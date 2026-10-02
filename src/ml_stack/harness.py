@@ -29,7 +29,7 @@ from typing import Any
 
 from ml_stack import hub
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of, environment
-from ml_stack.guard import Guard
+from ml_stack.guard import start
 from ml_stack.guard.hooks import MAX_TURNS, sdk_guard, sdk_hooks
 from ml_stack.log import say
 
@@ -80,18 +80,18 @@ class Harness:
     ``MAX_TURNS`` turns unless ``max_turns`` says otherwise."""
 
     def __init__(self, base_url: str, alias: str, *, offline: bool = True,
-                 options: Mapping[str, Any] | None = None, guard: Guard | None = None) -> None:
+                 options: Mapping[str, Any] | None = None, guard: Sequence[Any] | None = None) -> None:
         self.base_url = base_url
         self.alias = alias
         self.env = environment(base_url, alias, offline=offline, base={})
         self.options = dict(options or {})
-        self.guard = guard or sdk_guard()
+        self.guard = list(guard) if guard is not None else sdk_guard()
 
     def configured(self, **over: Any) -> Any:
         """A `ClaudeAgentOptions` for this model: the environment that points every call
         at the server, the served alias as the model, and whatever the caller adds."""
         merged = {**self.options, **over}
-        ours = sdk_hooks(self.guard)
+        ours = sdk_hooks(start(self.guard))
         theirs = dict(merged.get("hooks") or {})
         hooks = {event: [*ours.get(event, []), *theirs.get(event, [])]
                  for event in {*ours, *theirs}}
@@ -152,7 +152,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
     takes the smallest one on this machine, 'none' takes none -- and a measured record's
     own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
     allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...) and
-    ``guard``, the `ml_stack.guard.Guard` every tool call passes (the built-in rails if absent)."""
+    ``guard``, the list of interventions (`ml_stack.guard`) every tool call passes (the built-in rails if absent)."""
     from ml_stack.serve import chat_template, leases, profile as records
     from ml_stack.serve.recent import note
     from ml_stack.serve.serving import Config, Serving, drafted, served

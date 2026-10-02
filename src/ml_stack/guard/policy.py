@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from ml_stack.guard.verdict import ALLOW, ToolCall, Verdict, deny
+from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
 
 __all__ = ["SENSITIVE", "Limits", "ToolPolicyRail", "check_arguments", "tool_schemas"]
 
@@ -42,8 +42,8 @@ class Limits:
     items: int = 64
 
 
-@dataclass
-class ToolPolicyRail:
+@dataclass(eq=False)
+class ToolPolicyRail(Base):
     """Denies a call unless its tool was offered, its arguments fit the offered schema, and it
     stays inside the limits; text-bearing arguments may not reach outside this machine or
     name a credential file."""
@@ -53,7 +53,6 @@ class ToolPolicyRail:
     limits: Limits = field(default_factory=Limits)
     sensitive: frozenset[str] = SENSITIVE
     allow_hosts: frozenset[str] = frozenset()
-    confirm: Callable[[ToolCall], bool] | None = None
     clock: Callable[[], float] = time.monotonic
     open_world: bool = False
 
@@ -72,25 +71,21 @@ class ToolPolicyRail:
         words = set(re.findall(r"\w+", text))
         self.approved |= {name for name in self.sensitive if name in words}
 
-    def on_input(self, text: str, source: str) -> Verdict:
-        return ALLOW
-
-    def on_output(self, text: str, source: str) -> Verdict:
-        return ALLOW
-
-    def on_tool_call(self, call: ToolCall) -> Verdict:
+    def before_tool_call(self, call: Call, context: Context) -> Verdict:
         problem = self._refusal(call)
         if problem:
-            return deny(self.name, problem)
+            return Deny(problem, self.name)
         self.count += 1
         self.recent.append(self.clock())
-        return ALLOW
+        taint = self._taint(call, context)
+        if taint:
+            return Confirm(taint, {"tool": call.name}, self.name)
+        return Proceed()
 
-    def _refusal(self, call: ToolCall) -> str:
-        return (self._shape(call) or self._limits(call) or self._content(call)
-                or self._taint(call))
+    def _refusal(self, call: Call) -> str:
+        return self._shape(call) or self._limits(call) or self._content(call)
 
-    def _shape(self, call: ToolCall) -> str:
+    def _shape(self, call: Call) -> str:
         if call.arguments is None:
             return f"arguments of {call.name} are not a JSON object"
         if not self.open_world and call.name not in self.schemas:
@@ -98,7 +93,7 @@ class ToolPolicyRail:
         schema = self.schemas.get(call.name)
         return check_arguments(schema, call.arguments, call.name) if schema else ""
 
-    def _limits(self, call: ToolCall) -> str:
+    def _limits(self, call: Call) -> str:
         lim = self.limits
         if self.count >= lim.calls:
             return f"more than {lim.calls} tool calls in one run"
@@ -113,7 +108,7 @@ class ToolPolicyRail:
             return f"{call.name} called with the same arguments more than {lim.repeats} times"
         return ""
 
-    def _content(self, call: ToolCall) -> str:
+    def _content(self, call: Call) -> str:
         lim = self.limits
         for text in _leaves(call.arguments):
             if len(text) > lim.string:
@@ -139,10 +134,8 @@ class ToolPolicyRail:
                 return host
         return ""
 
-    def _taint(self, call: ToolCall) -> str:
-        if not (call.tainted and call.name in self.sensitive) or call.name in self.approved:
-            return ""
-        if self.confirm is not None and self.confirm(call):
+    def _taint(self, call: Call, context: Context) -> str:
+        if not (context.tainted and call.name in self.sensitive) or call.name in self.approved:
             return ""
         return (f"{call.name} changes things and text from outside the person is in the context; "
                 f"it runs only when the person confirms")

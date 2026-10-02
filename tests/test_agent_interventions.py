@@ -43,7 +43,7 @@ class Rule:
         self.seen: list = []
 
     def before_tool_call(self, call, context):
-        self.seen.append(("tool", call["name"], call["arguments"], context.step))
+        self.seen.append(("tool", call.name, call.arguments, context.step))
         return self._answer("before_tool_call", call)
 
     def before_model_call(self, context):
@@ -154,7 +154,7 @@ def test_a_confirm_waits_for_the_person(served, approve) -> None:
     asked: list = []
 
     async def person(decision, call):
-        asked.append((decision.question, call["name"]))
+        asked.append((decision.question, call.name))
         await asyncio.sleep(0.05)
         return approve
 

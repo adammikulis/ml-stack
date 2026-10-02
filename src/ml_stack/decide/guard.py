@@ -74,14 +74,16 @@ class ToolCallGuard(Base):
 
     def _state(self, check: str, call: Call, context: Context) -> str:
         if check == "destructive":
-            return destructive_state(context.task, call.name, call.arguments)
-        return grounded_state(context.task, last_tool_output(context), call.name, call.arguments)
+            return destructive_state(context.task, call.name, call.arguments or {})
+        return grounded_state(context.task, last_tool_output(context), call.name,
+                              call.arguments or {})
 
     def _verdict(self, check: str, answer: Decision, call: Call) -> Verdict | None:
         name = f"{call.name}: {QUESTIONS[check][0]}"
         if answer.abstained:
             return Confirm(f"The guard is unsure ({answer.confidence:.2f} for "
-                           f"{answer.choice!r}). {name}", {"check": check, **answer.public()})
+                           f"{answer.choice!r}). {name}", {"check": check, **answer.public()},
+                           "tool-call-guard")
         action = self.policy.actions.get(check, {}).get(answer.choice, "ok")
         if action == "deny":
             return Deny(f"{check} check: {answer.choice} ({answer.confidence:.2f}). {name}")
@@ -95,7 +97,7 @@ class ToolCallGuard(Base):
         found: list[Verdict] = []
         self.last = {}
         if self.project_dir:
-            bad = violations(call.arguments, self.project_dir, self.allowed_hosts)
+            bad = violations(call.arguments or {}, self.project_dir, self.allowed_hosts)
             if bad:
                 reason = f"{call.name} leaves the project: {'; '.join(bad)}"
                 found.append(Deny(reason) if self.policy.scope == "deny"

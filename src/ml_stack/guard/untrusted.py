@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ml_stack.guard.verdict import ALLOW, ToolCall, Verdict, modify
+from ml_stack.interventions import Base, Call, Context, Rewrite, Verdict
 
 __all__ = ["EXTERNAL", "UntrustedRail", "fenced", "injection_markers", "unfenced"]
 
@@ -61,7 +61,7 @@ def unfenced(text: str) -> str:
     return rest[: -len(CLOSE) - 1]
 
 
-class UntrustedRail:
+class UntrustedRail(Base):
     """Fences every tool result as data, neutralises chat markup, caps its size, and marks the
     text tainted when its source is external or it reads as an instruction."""
 
@@ -71,19 +71,11 @@ class UntrustedRail:
         self.max_chars = max_chars
         self.external = external
 
-    def on_input(self, text: str, source: str) -> Verdict:
-        if source == "person":
-            return ALLOW
+    def after_tool_call(self, call: Call, result: str, context: Context) -> Verdict:
+        text, source = result, f"tool:{call.name}"
         markers = injection_markers(text)
-        tool = source.removeprefix("tool:")
-        tainted = bool(markers) or tool in self.external
+        tainted = bool(markers) or call.name in self.external
         body = text if len(text) <= self.max_chars else text[: self.max_chars] + "\n[cut]"
         why = f"fenced as data; reads like an instruction ({', '.join(markers)})" if markers \
             else "fenced as data"
-        return modify(self.name, fenced(body, source), why, tainted=tainted)
-
-    def on_output(self, text: str, source: str) -> Verdict:
-        return ALLOW
-
-    def on_tool_call(self, call: ToolCall) -> Verdict:
-        return ALLOW
+        return Rewrite(fenced(body, source), why, tainted, self.name)
