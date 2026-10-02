@@ -189,8 +189,10 @@ def _expanded(chunks: Iterator[bytes], encoding: str, most: int) -> Iterator[byt
             out = inflater.decompress(data, CHUNK)
             data = inflater.unconsumed_tail
             given += len(out)
-            if given > most or given > MOST_RATIO * taken + CHUNK:
+            if given > most:
                 raise TooLarge("the body expands past its limit")
+            if given > MOST_RATIO * taken + CHUNK:
+                raise TooLarge(f"the body expands more than {MOST_RATIO} times over")
             if out:
                 yield out
     tail = inflater.flush()

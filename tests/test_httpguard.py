@@ -147,7 +147,7 @@ def test_a_url_that_is_not_plain_http_to_a_host_is_refused_before_resolving(url)
                                   "127.0.0.1", "[::1]", "2130706433", "0x7f.1", "017700000001",
                                   "169.254.169.254", "[::ffff:127.0.0.1]"])
 def test_hosts_that_mean_this_machine_are_refused(host):
-    with pytest.raises(Refused):
+    with pytest.raises(Refused, match="this machine|public internet"):
         fetch(f"http://{host}/", limits=Limits(resolver=lambda h, p: ["127.0.0.1"]))
 
 
@@ -239,6 +239,12 @@ def test_a_compression_bomb_is_stopped_while_it_expands(site):
         fetch(f"{site}/bomb", limits=Limits(allow_hosts=LOCAL.allow_hosts,
                                            max_bytes=1_000_000))
     assert time.monotonic() - started < 3.0
+
+
+def test_a_compression_bomb_under_the_byte_cap_is_stopped_by_its_ratio(site):
+    with pytest.raises(TooLarge, match="times over"):
+        fetch(f"{site}/bomb", limits=Limits(allow_hosts=LOCAL.allow_hosts,
+                                           max_bytes=200_000_000))
 
 
 def test_a_gzip_body_is_expanded(site):
