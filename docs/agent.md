@@ -57,7 +57,9 @@ them first.
 
 ## Interventions
 
-`Agent(interventions=[hook, ...])`: each hook may define `before_invocation(context)`,
+`Agent(interventions=...)` runs the guard's rails and, when a local model can be leased, its model
+tier unless a list is given (`interventions=guard.off(because=...)` for none; any other empty list
+is refused). A list replaces them: `[*guard.default(), hook, ...]` keeps them. Each hook may define `before_invocation(context)`,
 `before_model_call(context)`, `before_tool_call(call, context)` and `after_tool_call(call, result,
 context)`, returning `Proceed()`, `Deny(reason)`, `Confirm(question, details)`, `Guide(message)` or
 `Rewrite(text, tainted=...)`. These are the types of `ml_stack.interventions`, the one mechanism
