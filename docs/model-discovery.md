@@ -111,16 +111,19 @@ against `ml_stack.testing.fakehub`.
 
 ## Memory estimates
 
-`serve.estimate.estimate(model, context=4096, parallel=1, n_gpu_layers="auto",
-kv_cache_type="q8_0", flash_attn=None, batch=512, mmproj=None, draft=None)` returns an
-`Estimate` (`weights_bytes`, `kv_cache_bytes`, `compute_buffer_bytes`, `mmproj_bytes`,
+`serve.estimate.estimate(model, setup=None, **changes)` takes the fields of `Setup` as keywords
+(`context=4096, parallel=1, n_gpu_layers="auto", kv_cache_type="q8_0", flash_attn=None, batch=512,
+mmproj=None, draft=None`) and returns an `Estimate` (`weights_bytes`, `kv_cache_bytes`, `compute_buffer_bytes`, `mmproj_bytes`,
 `draft_bytes`, `state_bytes`, `total_bytes`, `gpu_bytes`, `cpu_bytes`, `breakdown`, `confidence`,
 `notes`) from the header and file sizes. `context` is per slot. `verdict(estimate, machine,
-reserve_bytes=None)` is `green` up to 70% of the memory the estimate lands in, `yellow` while it
-fits, `red` when it does not, `none` when the machine is unknown; the memory is the unified
-working-set limit or available RAM less the reserve (the larger of 2 GiB and a tenth of RAM), or a
-card's free VRAM for the GPU part. `max_context(model, machine, setup, max_verdict="yellow")` is the
-longest context in steps of 256. In `ml-ui`'s `<ml-meter>` use `yellow-at="0.7" red-at="1"`.
+reserve_bytes=None)` is `green` below 80% of the memory the estimate lands in, `yellow` from 80% to
+95%, `red` from 95% or when it does not fit, and `none` when the machine is unknown; the memory is the
+unified working-set limit or available RAM less the reserve (the larger of 2 GiB and a tenth of RAM), or
+a card's free VRAM for the GPU part, so 95% of it is the real limit. The two numbers are the ones
+`ml_stack.ui.verdict` uses. `meters(estimate, machine)` gives one `Meter` per pool with `segments`
+(`[{label, value}]` in bytes), `capacity_bytes` and `verdict`, which `<ml-meter>` takes as `segments`,
+`capacity` and `verdict`. `max_context(model, machine, setup, max_verdict="yellow")` is the longest
+context in steps of 256.
 
 The KV cache is `q8_0` by default: 34 bytes per 32 values, 53% of f16, near-lossless for chat and
 tool use. `q4_0` saves more and costs quality, so it is a last resort. llama.cpp accepts a
