@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -171,10 +172,8 @@ def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:
         pass
     except psutil.NoSuchProcess:
         return
-    try:
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
         proc.kill()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
 
 
 def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:

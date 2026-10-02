@@ -18,6 +18,7 @@ from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.hub import free_memory, room as machine_room
+from ml_stack.serve import exit_guard
 from ml_stack.serve.backend import (
     Lease,
     LlamaServerBackend,
@@ -98,7 +99,9 @@ class ServerManager:
         backend: ServerBackend | None = None,
         *,
         state_file: Path | None = None,
+        stop_on_exit: bool = True,
     ) -> None:
+        self.stop_on_exit = stop_on_exit
         self.backend = backend or LlamaServerBackend()
         self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
@@ -390,6 +393,7 @@ class ServerManager:
         emit(on_event, "stopping", port=spec.port, pid=pid)
         if pid:
             kill_process_tree(pid)
+            exit_guard.release(pid)
         self._forget(spec.port)
 
         # kv_unified keeps the cache's stream count at 1 across the relaunch; any other
@@ -422,12 +426,14 @@ class ServerManager:
             held = info.process
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
+        exit_guard.release(info.pid)
         reap_one(held, grace_s=grace_s)
         self._forget(info.port)
 
     def detach(self, info: ServerInfo) -> None:
         """Record the server under its own pid and stop tracking it in this process."""
         self._processes.pop(info.port, None)
+        exit_guard.release(info.pid)
         entry = self._mine.pop(str(info.port), None)
         if entry is None or not info.pid:
             self._save()
@@ -444,6 +450,7 @@ class ServerManager:
             pid = entry.get("pid")
             if isinstance(pid, int) and pid_exists(pid):
                 stopped += kill_process_tree(pid, grace_s=grace_s)
+            exit_guard.release(pid)
         for held in list(self._processes.values()):
             reap_one(held, grace_s=grace_s)
         self._processes.clear()
@@ -476,7 +483,8 @@ class ServerManager:
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
         }
         self._save()
-        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
+        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file),
+                     stop_on_exit=self.stop_on_exit)
 
     def _record(self, spec: ServerSpec, info: ServerInfo) -> None:
         self._mine[str(spec.port)] = {
