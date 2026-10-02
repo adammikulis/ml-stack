@@ -249,3 +249,13 @@ def test_the_resident_size_of_a_model_directory_uses_the_bounded_reader(tmp_path
     safetensors(tmp_path, b"{}", declared=2**50, name="bad.safetensors")
     with pytest.raises(ValueError, match="not a safetensors file"):
         resident_bytes(tmp_path)
+
+
+def test_the_gguf_package_is_not_handed_a_header_that_lies(tmp_path):
+    from ml_stack.gguf.vocab import read_metadata, set_metadata
+
+    path = gguf(tmp_path, s("k") + i(ARRAY) + i(U8) + q(2**50), kv=1)
+    with pytest.raises(NotAModelFile, match="more than the file holds"):
+        read_metadata(path)
+    with pytest.raises(NotAModelFile, match="more than the file holds"):
+        set_metadata(path, tmp_path / "out.gguf", {"general.name": "x"})
