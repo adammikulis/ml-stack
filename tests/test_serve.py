@@ -52,9 +52,19 @@ def wait_until_exited(pid: int, *, timeout: float = 10.0) -> None:
     are still exiting, which is before ``waitpid`` will report the group at all.
     """
     deadline = time.monotonic() + timeout
-    while os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is None:
+    while not _exited(pid):
         assert time.monotonic() < deadline, f"pid {pid} never exited"
         time.sleep(0.005)
+
+
+def _exited(pid: int) -> bool:
+    """Whether ``pid`` has exited and is waiting to be reaped."""
+    if hasattr(os, "waitid"):
+        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None
+    import psutil
+
+    # os.waitid is missing on macOS before 3.13
+    return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
 
 
 @pytest.fixture
