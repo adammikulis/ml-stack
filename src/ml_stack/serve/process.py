@@ -127,6 +127,18 @@ def pid_exists(pid: int | None) -> bool:
         return False
 
 
+def started_at(pid: int | None) -> float | None:
+    """When ``pid`` started, in seconds since the epoch, or None when it is not running."""
+    if not pid_exists(pid):
+        return None
+    import psutil
+
+    try:
+        return float(psutil.Process(pid).create_time())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def self_or_ancestor(pid: int | None) -> bool:
     """Whether ``pid`` is this process or one of the processes that started it."""
     if not isinstance(pid, int) or pid <= 0:

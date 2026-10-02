@@ -41,6 +41,7 @@ from ml_stack.serve.leases import (
     orphaned,
     reap_one,
     recorded_servers,
+    same_process,
 )
 from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
@@ -50,6 +51,7 @@ from ml_stack.serve.process import (
     measuring,
     pid_exists,
     self_or_ancestor,
+    started_at,
 )
 from ml_stack.serve.python_engines import ENGINES
 from ml_stack.serve.weights import scaled_timeout, weight_of
@@ -485,6 +487,7 @@ class ServerManager:
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
+            "started": started_at(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
         }
         if info.process is not None:
@@ -607,7 +610,7 @@ def stop_all_servers() -> list[int]:
         if not isinstance(entry, dict):
             continue
         pid = entry.get("pid")
-        if isinstance(pid, int) and pid_exists(pid):
+        if isinstance(pid, int) and same_process(entry):
             stopped += kill_process_tree(pid)
 
     held.unlink(missing_ok=True)

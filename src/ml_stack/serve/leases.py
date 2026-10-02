@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
-from ml_stack.serve.process import pid_exists
+from ml_stack.serve.process import pid_exists, started_at
 
 __all__ = ["already_up", "lease_file", "merge_state", "orphaned", "reap_one",
-           "recorded_servers"]
+           "recorded_servers", "same_process"]
+
+START_TOLERANCE_S = 2.0
 
 
 def lease_file() -> Path:
@@ -41,11 +43,24 @@ def reap_one(held: Any, *, grace_s: float) -> None:
         held.wait(timeout=grace_s)
 
 
+def same_process(entry: dict) -> bool:
+    """Whether the process now holding a record's pid is the server the record was written
+    for; a record with no start time is judged by the pid alone."""
+    pid = entry.get("pid")
+    if not isinstance(pid, int) or not pid_exists(pid):
+        return False
+    recorded = entry.get("started")
+    if not isinstance(recorded, (int, float)):
+        return True
+    now = started_at(pid)
+    return now is not None and abs(now - recorded) <= START_TOLERANCE_S
+
+
 def orphaned(entry: dict) -> bool:
     """Whether a record's server is running on after the process that leased it has gone."""
     owner, pid = entry.get("owner_pid"), entry.get("pid")
     return (isinstance(owner, int) and isinstance(pid, int) and owner != pid
-            and not pid_exists(owner) and pid_exists(pid))
+            and not pid_exists(owner) and same_process(entry))
 
 
 def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict | None:
