@@ -232,7 +232,7 @@ def _browse() -> Any:
     """A page in a real browser, as a context manager; ``BrowserUnavailable`` without playwright."""
     from ml_stack.scrape.browser import Window, browser
 
-    return browser(Window(profile=profile_dir()))
+    return browser(Window(profile=profile_dir(), guarded=True))
 
 
 # Removes every element a reader could not see: not displayed, hidden, transparent, smaller than

@@ -15,8 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import net
 from ml_stack.files import promote
-from ml_stack.http import ServerError, open_stream, request_json
+from ml_stack.http import ServerError
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
@@ -139,7 +140,7 @@ class Environment:
             on_progress("Downloading Python")
 
         try:
-            release = request_json(STANDALONE, method="GET", timeout=60, tries=3) or {}
+            release = net.default().json(STANDALONE, net.Ask(purpose="python builds", tries=3)) or {}
         except (ServerError, ValueError) as exc:
             raise OSError(f"could not reach the Python builds: {exc}") from None
         want = self._asset_name()
@@ -152,13 +153,12 @@ class Environment:
 
         base = Path(self.root).expanduser() / "python"
         base.parent.mkdir(parents=True, exist_ok=True)
+        from ml_stack.fleet.updates import UpdateError, download
+
         with tempfile.TemporaryDirectory() as tmp:
-            archive = Path(tmp) / "python.tar.gz"
             try:
-                with open_stream(assets[0]["browser_download_url"], timeout=600) as r, \
-                        archive.open("wb") as fh:
-                    shutil.copyfileobj(r, fh)
-            except ServerError as exc:
+                archive = download(assets[0], Path(tmp))
+            except UpdateError as exc:
                 raise OSError(f"could not download Python: {exc}") from None
             if on_progress:
                 on_progress("Unpacking Python")

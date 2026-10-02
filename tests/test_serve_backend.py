@@ -568,7 +568,8 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
 
 
 def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_path):
-    """Mutation: drop resolved_model() from start, or return the spec unchanged."""
+    """Mutation: drop resolved_model() from start, or return the spec unchanged. A repository
+    alone is pulled too, so llama-server is never given a reference to download."""
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
@@ -584,9 +585,14 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     argv = be.LlamaServerBackend(binary=binary).command(resolved)
     assert argv[argv.index("-m") + 1] == str(weights)
     assert "--hf-repo" not in argv
+    pulled = []
+    monkeypatch.setattr("ml_stack.hub.pull", lambda ref: pulled.append(ref) or weights)
     repo_only = be.ServerSpec(model="hf:owner/thing-GGUF")
-    assert be.LlamaServerBackend.resolved_model(repo_only) == repo_only
+    served = be.LlamaServerBackend.resolved_model(repo_only)
+    assert pulled == ["hf:owner/thing-GGUF"] and served.model == str(weights)
     assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
+    argv = be.LlamaServerBackend(binary=binary).command(served)
+    assert "--hf-repo" not in argv and "-hf" not in argv
 
 
 def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):

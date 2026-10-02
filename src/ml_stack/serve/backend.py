@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import credentials, home
+from ml_stack import home
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
 from ml_stack.serve import exit_guard
@@ -714,8 +714,8 @@ class LlamaServerBackend(ServerBackend):
 
     @staticmethod
     def resolved_model(spec: ServerSpec) -> ServerSpec:
-        """The spec with a model named by `hf:` file fetched into the Hub cache and served
-        by path; a reference naming no file is left for the server."""
+        """The spec with a model named by `hf:` reference fetched into the model store and
+        served by path."""
         return replace(spec, model=fetched(spec.model, "model"))
 
     @staticmethod
@@ -766,6 +766,8 @@ class LlamaServerBackend(ServerBackend):
         ``True`` unless passed otherwise.
         """
         spec = self.resolved_draft(self.resolved_model(spec))
+        if spec.mmproj:
+            spec = replace(spec, mmproj=fetched(spec.mmproj, "projector"))
         spec, yarn_said = self.resolved_context(spec)
         if yarn_said:
             logger.warning(yarn_said)
@@ -802,10 +804,6 @@ class LlamaServerBackend(ServerBackend):
             # once at startup. Without it, escalate()'s summariser has a token count and
             # nothing to summarise.
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
-        if spec.is_hf_ref or ServerSpec.hf_parts(spec.draft or ""):
-            token = credentials.get("HF_TOKEN")
-            if token:
-                extra_env["HF_TOKEN"] = str(token)
 
         process, base_url, load_s = launch(
             argv, lease, log_path=log_path, timeout=timeout,
@@ -847,15 +845,18 @@ class LlamaServerBackend(ServerBackend):
 
 
 def fetched(ref: str | Path, what: str) -> str | Path:
-    """``ref`` downloaded into the Hub cache when it is an `hf:` file, else ``ref``."""
+    """``ref`` downloaded into the model store through the net pipeline when it is an `hf:`
+    reference (a repository alone takes its default build), else ``ref``. llama-server is
+    never handed an `hf:` reference, so it never downloads anything itself."""
     parts = ServerSpec.hf_parts(ref)
-    if not parts or not parts[1]:
+    if not parts:
         return ref
-    from ml_stack.hub import fetch
+    from ml_stack.hub import fetch, pull
+    from ml_stack.hub.remote import RemoteError
 
     try:
-        return str(fetch(str(ref)))
-    except (ValueError, OSError) as exc:
+        return str(fetch(str(ref)) if parts[1] else pull(str(ref)))
+    except (ValueError, OSError, RemoteError) as exc:
         raise ServerFailed(f"could not fetch the {what} {ref}: {exc}") from exc
 
 

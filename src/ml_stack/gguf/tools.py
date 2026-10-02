@@ -76,19 +76,15 @@ def ensure_converter(*, ref: str = "master") -> Path:
     if found := find_converter():
         return found
 
-    git = shutil.which("git")
-    if git is None:
-        raise ToolNotFound("git is not on PATH, so llama.cpp cannot be fetched")
-
-    import subprocess
+    from ml_stack.httpguard import Refused
+    from ml_stack.net import git as netgit
 
     source = llama_cpp_src()
     source.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [git, "clone", "--depth", "1", "--branch", ref,
-         "https://github.com/ggml-org/llama.cpp", str(source)],
-        check=True,
-    )
+    try:
+        netgit.clone("https://github.com/ggml-org/llama.cpp", source, branch=ref)
+    except (netgit.GitFailed, Refused) as exc:
+        raise ToolNotFound(f"llama.cpp could not be fetched: {exc}") from exc
     return require_converter()
 
 

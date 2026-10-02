@@ -35,6 +35,7 @@ from ml_stack import net
 from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable
 from ml_stack.httpguard import Refused
+from ml_stack.net import git as netgit
 from ml_stack.safenames import Unsafe, safe_filename, unpack
 
 from .measuring import installed_commit
@@ -464,14 +465,26 @@ def git_in(checkout: Path | str) -> Git:
     where = str(Path(checkout).expanduser())
 
     def run(args: Any) -> tuple[int, str]:
+        words = [str(a) for a in args]
         try:
-            done = subprocess.run(["git", "-C", where, *[str(a) for a in args]],
-                                  capture_output=True, text=True, timeout=GIT_TIMEOUT)
-        except (OSError, subprocess.SubprocessError) as exc:
+            if words and words[0] in netgit.NETWORK:
+                done = netgit.run(words, cwd=Path(where), url=_remote_in(words),
+                                  protocols="https:ssh")
+            else:
+                done = subprocess.run(["git", "-C", where, *words], capture_output=True,
+                                      text=True, timeout=GIT_TIMEOUT)
+        except netgit.GitFailed as exc:
+            return 1, str(exc)
+        except (OSError, subprocess.SubprocessError, Refused) as exc:
             return 1, str(exc)
         return done.returncode, f"{done.stdout}{done.stderr}".strip()
 
     return run
+
+
+def _remote_in(words: list[str]) -> str:
+    """The address after ``--`` in a git network command, or ''."""
+    return words[words.index("--") + 1] if "--" in words and words.index("--") + 1 < len(words) else ""
 
 
 def pip_install(checkout: Path | str) -> tuple[int, str]:
