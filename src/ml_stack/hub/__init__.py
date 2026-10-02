@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from ml_stack.hub.cards import advice, card, in_gguf
 from ml_stack.hub.cli import main
+from ml_stack.hub.discover import FORMATS, ModelInfo, discover, installed_for
+from ml_stack.hub.discover import find as installed_find
 from ml_stack.hub.drafts import (
     _DRAFT_NOTES,  # noqa: F401 - the per-process cache a test clears
     DRAFT_DEPTH,
@@ -69,6 +71,11 @@ from ml_stack.hub.naming import (
 )
 
 __all__ = [
+    "FORMATS",
+    "ModelInfo",
+    "discover",
+    "installed_find",
+    "installed_for",
     "DRAFT_DEPTH",
     "DRAFT_KINDS",
     "DRAFT_MARK",

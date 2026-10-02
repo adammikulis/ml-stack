@@ -9,42 +9,53 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ml_stack import home, hub
+from ml_stack.hub import places, scan
 from ml_stack.hub.naming import _SHARD, DRAFT_MARK, WEIGHT_SUFFIXES
 
 
 def hub_cache() -> Path:
-    """The Hub's model cache: ``$HF_HOME/hub``, or ``~/.cache/huggingface/hub``."""
-    named = os.environ.get("HF_HOME")
-    root = home.expand(named) if named else home.user_home() / ".cache" / "huggingface"
-    return root / "hub"
+    """The Hub's model cache: ``$HF_HUB_CACHE``, ``$HF_HOME/hub``, or ``~/.cache/huggingface/hub``."""
+    return next(p.path for p in places.places() if p.label == "huggingface")
 
 
 def default_roots(root: Path | str) -> list[Path]:
-    """Where model files live: the store's own, the llama.cpp cache, the Hub cache
-    (``$HF_HOME/hub`` when set, ``~/.cache/huggingface/hub`` otherwise), ``~/models``."""
-    account = home.user_home()
-    return [
-        home.expand(root) / "models",
-        account / ".cache" / "llama.cpp",
-        hub.hub_cache(),
-        account / "models",
-    ]
+    """Where model files live: every folder `places` names, the store's own under ``root``
+    first, in search order."""
+    return [hub.hub_cache() if p.label == "huggingface" else p.path
+            for p in places.places(state=home.expand(root))]
+
+
+def _walk(place: places.Place) -> list[Path]:
+    """The weight files under one folder, to the folder's depth, links left unfollowed."""
+    out: list[Path] = []
+    base = len(place.path.parts)
+    for here, dirs, names in os.walk(place.path):
+        deep = len(Path(here).parts) - base
+        dirs[:] = sorted(d for d in dirs if d not in scan.SKIP_DIRS) if deep < place.depth else []
+        out.extend(p for n in sorted(names)
+                   if (p := Path(here) / n).suffix.lower() in WEIGHT_SUFFIXES and p.is_file())
+    return out
 
 
 def weight_paths(roots: Sequence[Path] | None = None) -> list[Path]:
     """Every weight file under ``roots`` (the model roots by default), in root order.
 
     A Hub cache keeps a snapshot of symlinks into ``blobs/``; the link is returned, never
-    the blob it points at, and a caller reading a size ``stat()``s through it.
+    the blob it points at, and a caller reading a size ``stat()``s through it. An Ollama
+    folder answers with the blob each manifest names.
     """
-    where = list(roots) if roots is not None else hub.default_roots(home.home())
+    known = {p.path: p for p in places.places(state=home.home())}
+    named = list(roots) if roots is not None else hub.default_roots(home.home())
+    where = [known.get(Path(r)) or places.Place("extra", "auto", Path(r), True, 8)
+             for r in named]
     out: list[Path] = []
-    for root in where:
-        try:
-            found = sorted(Path(root).rglob("*")) if Path(root).is_dir() else []
-        except OSError:
+    for place in where:
+        if not place.path.is_dir():
             continue
-        out.extend(p for p in found if p.suffix.lower() in WEIGHT_SUFFIXES and p.is_file())
+        if scan.detect(place.path) == "ollama":
+            out.extend(e.path for e in scan.scan_ollama(place))
+        else:
+            out.extend(_walk(place))
     return out
 
 
