@@ -27,6 +27,12 @@ print(child.pid, flush=True)
 """
 
 
+NO_WATCHDOG = """
+from ml_stack.serve import exit_guard
+exit_guard._watch = lambda pid, created: None
+"""
+
+
 def _host(tmp_path, *, before="", after="", finish="time.sleep(120)"):
     script = tmp_path / "host.py"
     script.write_text(HOST.format(src=str(REPO / "src"), before=textwrap.dedent(before),
@@ -61,20 +67,20 @@ def hosts():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signals are POSIX")
 def test_a_server_stops_when_the_host_exits(tmp_path, hosts):
-    host, child = _host(tmp_path, finish="pass")
+    host, child = _host(tmp_path, before=NO_WATCHDOG, finish="pass")
     hosts.append((host, child))
     host.wait(timeout=20)
-    assert _gone(child, within=0.2), "stopped by the host itself, not by the watchdog"
+    assert _gone(child, within=2.0), "stopped by the host itself"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signals are POSIX")
 def test_a_server_stops_when_the_host_is_terminated(tmp_path, hosts):
-    host, child = _host(tmp_path)
+    host, child = _host(tmp_path, before=NO_WATCHDOG)
     hosts.append((host, child))
     host.send_signal(signal.SIGTERM)
     host.wait(timeout=20)
     assert host.returncode == -signal.SIGTERM, "the host still dies of the signal"
-    assert _gone(child, within=0.2), "stopped by the handler, not by the watchdog"
+    assert _gone(child, within=2.0)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signals are POSIX")
