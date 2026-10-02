@@ -18,7 +18,7 @@ class Mode(StrEnum):
 
 NEVER_ACT = frozenset({
     "server.unmanaged", "tools.mix_shift", "peer.flapping", "peer.version_mismatch",
-    "peer.binary_mismatch", "honey.file_read", "honey.file_changed", "honey.file_gone",
+    "peer.binary_mismatch", "guard.tainted", "honey.file_read", "honey.file_changed", "honey.file_gone",
 })
 """Event kinds that are reported and watched but never quarantine anything, in any mode."""
 
