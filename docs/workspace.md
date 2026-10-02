@@ -9,6 +9,8 @@ person relaying text and instead of colliding on scratch files, ports, branches 
     export ML_STACK_WORKSPACE_TOKEN=...             # per agent process
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
+    ml-stack workspace claim port 8081 --pid $$     # released when this shell exits
+    ml-stack workspace who port 8081
 
 ## Decision record
 
@@ -97,6 +99,62 @@ and a convenience second.
 * It does not stop a model from obeying text it was shown. It labels, fences and screens it.
 * Pattern screens are heuristics and miss paraphrase; quarantine is for what they do catch.
 
+## Using it
+
+Every command takes `--json` and `--token-file`. Exit codes: 0 done, 2 bad input, 3 refused or
+not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
+
+| Area | Commands |
+| --- | --- |
+| identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME`, `whoami` |
+| messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `ack SEQ`, `thread ROOT` |
+| notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
+| scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
+| claims | `claim KIND KEY [--ttl S] [--pid N]`, `release KIND KEY`, `heartbeat`, `who KIND KEY`, `claims` |
+| safety | `quarantine-ls`, `quarantine-release QID` (human token), `audit-verify [--anchor HASH]`, `audit-head`, `gc` |
+| view | `status` (counts, live claims, the machine's test-slot queue, read only) |
+
+Message types are `task`, `status`, `handoff`, `question`, `answer`, `claim`, `release` and
+`note`. Note kinds are `decision`, `rule`, `fact` and `question`. Claim kinds are `branch`,
+`worktree`, `port`, `file` and `server`.
+
+The state directory holds `agents.json` (token hashes), `bus.jsonl`, `notes.jsonl`,
+`quarantine.jsonl`, `audit.jsonl` (all chained), `cursors/`, `claims.json`, `rates.json`,
+`scratch/<agent id>/<name>/` and the owner's `limits.json` and `private-terms`.
+
+`limits.json` overrides these defaults: message body 16 KiB, subject 200 characters, note body
+8 KiB, 30 writes per 60 s per sender, 500 unread per inbox, 500 notes per agent, 7 days of
+messages, 24 hour agent tokens, 15 minute claims, 256 MiB and 16 folders of scratch per agent
+with a 3 day expiry, and an empty `verify_allow` list.
+
+MCP tools (`ml-stack-mcp`) read the sender's token from `ML_STACK_WORKSPACE_TOKEN` in the
+agent's own process. Read-only: `workspace_status`, `_inbox` (does not mark read), `_thread`,
+`_notes_search`, `_note_get`, `_who_owns`, `_claims`, `_scratch_ls`, `_scratch_path`,
+`_audit_verify`. Writes: `workspace_send`, `_ack`, `_note_add`, `_claim`, `_heartbeat`,
+`_scratch_new`; destructive: `_release`, `_scratch_rm`.
+
 ## Status of this implementation
 
-See the end of this file for what is implemented, tested and left out.
+Implemented and tested with real files and processes (101 tests in `tests/test_workspace_*.py`):
+the chained logs (ordering across four concurrent processes, restart durability, torn-line cut,
+a SIGKILLed sender, hand edits, tail truncation against an anchor), tokens and roles, forged
+and revoked and expired tokens, rate limit, size caps, secret and private-term refusal,
+quarantine and human release, fenced delivery, notes with trust levels, TTL, supersession rules
+and allow-listed verification, scratch confinement (traversal, symlinks, other agents),
+claims (conflict, nesting, TTL, heartbeat, release on process death, a four-process race), the
+CLI with `--json`, the MCP tools and their annotations, and the read-only test-slot view.
+
+Mutation check of the guards: 60 mutations applied one at a time to a copy of the tree, 50
+caught. Survivors: `chain-no-fsync` (a crash-durability property a test cannot observe without
+killing the machine), `chain-no-prev-check` and `chain-no-seq-check` (the hash covers `prev`
+and a skipped sequence number changes it, so each check is covered by the other),
+`name-allows-reserved`, `note-kind-unchecked`, `quarantine-text-any`, `secrets-workspace-token`,
+`markers-rule-promotion`, `denylist-comments` and `neutralise-fence-tags` (no test pins them;
+tests to add). The remaining mutations in the list were not run.
+
+Run by hand, not in the suite: the adapters against the real `sentinel` and `guard` modules of
+`agent/sentinel` and `agent/native-guard` (the item was held in the sentinel store and the
+guard's patterns were unioned in). The MCP SDK transport was not exercised: the installed `mcp`
+is 2.x and the SDK path in `ml_stack.mcp` targets 1.x.
+
+Left out: see "The agent workspace" in `HANDOFF.md`.

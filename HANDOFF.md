@@ -302,6 +302,27 @@ across `src/`.
   milliseconds and advertises `tts` and `vad`. Both go away if the probe runs somewhere
   that is not the daemon's own process.
 
+### The agent workspace
+
+`ml_stack.workspace` (`docs/workspace.md`) is a library, a command and MCP tools over a state
+directory. What it does not do yet:
+- [ ] **A loopback daemon** answering `macauth` signed requests, for an agent that runs as
+  another user or in a sandbox that cannot share the directory. Today the boundary is the
+  account.
+- [ ] **A repair command** for a damaged log: a broken chain refuses new rows until someone
+  moves the file aside by hand.
+- [ ] **Claims keyed to a process start time**, so a reused pid does not keep a dead owner's
+  claim alive until its TTL.
+- [ ] **Scratch size enforced as files are written**: the limit is checked when a folder is
+  made and when `scratch-ls` runs, not on each write.
+- [ ] **Embedding search over notes** through the graph store; keyword search through
+  `graph.search.lexical` is what exists.
+- [ ] **Direct imports of `guard` and `sentinel`** once those branches land: the adapters
+  import them by name and fall back to the workspace's own checks; they were run by hand
+  against the branches, and need a test that runs against the real modules.
+- [ ] **`Tool.hints` for the older MCP tools**: the new field defaults every tool but the
+  workspace's to a write; `agent/native-guard` carries a table that sets them.
+
 ## Measurements
 
 Each needs the GPU and Adam's call. Estimate before it runs, smoke it before it is
