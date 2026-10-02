@@ -38,8 +38,9 @@ def letter_probabilities(top: list[dict[str, Any]], count: int) -> list[float]:
     mass = [0.0] * count
     for entry in top:
         token = str(entry.get("token", "")).strip().upper()
-        if len(token) == 1 and token in LETTERS[:count]:
-            mass[LETTERS.index(token)] += math.exp(float(entry.get("logprob", -math.inf)))
+        logprob = entry.get("logprob")
+        if len(token) == 1 and token in LETTERS[:count] and logprob is not None:
+            mass[LETTERS.index(token)] += math.exp(float(logprob))
     return mass
 
 
@@ -105,6 +106,8 @@ class LogprobDecider(BaseDecider):
         mass = letter_probabilities(top, count)
         total = sum(mass)
         if total < MIN_MASS:
-            raise DecideError("the model's first token was not one of the option letters")
+            first = top[0].get("token") if top else None
+            raise DecideError("the model's first token was not one of the option letters "
+                              f"(it was {first!r})")
         self.model = self.model or str(reply.get("model", ""))
         return mass, {"letter_mass": total}

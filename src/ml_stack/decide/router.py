@@ -3,6 +3,7 @@ question, and keep the ones that are loaded warm."""
 
 from __future__ import annotations
 
+import functools
 import os
 import threading
 from dataclasses import dataclass
@@ -89,6 +90,13 @@ def unavailable(name: str, config: Config) -> str:
 
 _WARM: dict[tuple[str, int], tuple[Config, Decider]] = {}
 DEFAULT = Config()
+
+
+@functools.cache
+def shared(backend: str = "auto", url: str = "") -> Config:
+    """The one `Config` for this backend and server, so callers that name only those share a
+    warm decider."""
+    return Config(backend=backend, url=url)
 _LOCK = threading.Lock()
 
 

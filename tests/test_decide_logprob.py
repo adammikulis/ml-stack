@@ -29,6 +29,11 @@ def test_letter_mass_sums_spellings_and_ignores_other_tokens():
     assert letter_probabilities(top, 3) == pytest.approx([0.75, 0.125, 0.0])
 
 
+def test_a_null_log_probability_counts_for_nothing_and_zero_counts_for_one():
+    top = [{"token": "A", "logprob": 0.0}, {"token": "B", "logprob": None}]
+    assert letter_probabilities(top, 2) == [1.0, 0.0]
+
+
 def test_decide_normalises_over_the_letters_and_maps_them_to_option_names(server):
     seen: list[dict] = []
     fake = server(logprob_handler(lambda user: {"A": 0.1, "B": 0.2, "C": 0.6}, seen=seen))
@@ -64,6 +69,10 @@ def test_a_model_that_answers_with_no_letter_is_an_error_not_a_guess(server):
     fake = server(logprob_handler(lambda user: {}))
     with pytest.raises(DecideError, match="option letters"):
         LogprobDecider(fake.base_url).decide("q", "s", ["x", "y"])
+    garbled = server(lambda m, p, b: (200, json.dumps({"choices": [{"logprobs": {"content": [
+        {"token": "@", "top_logprobs": [{"token": "#", "logprob": None}]}]}}]}).encode()))
+    with pytest.raises(DecideError, match="'#'"):
+        LogprobDecider(garbled.base_url).decide("q", "s", ["x", "y"])
 
 
 def test_a_server_without_logprobs_is_named_in_the_error(server):

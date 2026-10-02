@@ -31,6 +31,13 @@ from ml_stack.train.holdout import by_group
 __all__ = ["COMMANDS", "main"]
 
 AUTH_ENV = "ML_STACK_DECIDE_KEY"
+CASES = [
+    flag("cases", help="a JSONL file, or `guards`"), flag("--limit", type=int, default=None),
+    flag("--tag", default="", help="only cases carrying this tag (guards: destructive, "
+                                   "grounded or scope)"),
+    flag("--split", choices=("all", "dev", "test"), default="all",
+         help="dev or test: a fixed half of the groups, so tuning never sees the test half"),
+]
 SERVER = [
     flag("--backend", action="append", default=None,
          help="pointer, logprob, embed or rules; repeat to compare (default: auto)"),
@@ -68,9 +75,14 @@ def _option(text: str) -> Option:
     return Option(name.strip(), desc.strip())
 
 
-def _cases(name: str, limit: int | None) -> list[Case]:
-    found = guard_cases() if name == "guards" else read_cases(name)
-    return found[:limit] if limit else found
+def _cases(args: Namespace) -> list[Case]:
+    found = guard_cases() if args.cases == "guards" else read_cases(args.cases)
+    if args.split != "all":
+        halves = by_group(found, [c.group or c.id for c in found], 0.5, seed=0)
+        found = halves.train if args.split == "dev" else halves.holdout
+    if args.tag:
+        found = [c for c in found if args.tag in c.tags]
+    return found[:args.limit] if args.limit else found
 
 
 def _ask(args: Namespace) -> int:
@@ -99,7 +111,7 @@ def _reports(args: Namespace, cases: list[Case], config: router.Config) -> list[
 
 
 def _eval(args: Namespace) -> int:
-    reports = _reports(args, _cases(args.cases, args.limit), _config(args))
+    reports = _reports(args, _cases(args), _config(args))
     for report in reports:
         say(report.line())
     if args.out:
@@ -109,7 +121,7 @@ def _eval(args: Namespace) -> int:
 
 def _calibrate(args: Namespace) -> int:
     config = _config(args)
-    cases = _cases(args.cases, args.limit)
+    cases = _cases(args)
     name = _backends(args, max(len(c.options) for c in cases), config)[0]
     split = by_group(cases, [c.group or c.id for c in cases], args.holdout, seed=args.seed)
     decider = router.build(name, config)
@@ -133,7 +145,7 @@ def _calibrate(args: Namespace) -> int:
 
 
 def _bench(args: Namespace) -> int:
-    reports = _reports(args, _cases(args.cases, args.limit), _config(args))
+    reports = _reports(args, _cases(args), _config(args))
     say(f"{'backend':<10} {'n':>4} {'err':>3} {'acc':>6} {'brier':>6} {'ece':>6} "
         f"{'p50 ms':>8} {'p95 ms':>8}")
     for r in reports:
@@ -192,7 +204,7 @@ def ask(args: Namespace) -> int:
 
 
 @COMMANDS.command("eval", help="score backends on labelled cases", options=[
-    flag("cases", help="a JSONL file, or `guards`"), flag("--limit", type=int, default=None),
+    *CASES,
     option("out"), *SERVER])
 def evaluate_cmd(args: Namespace) -> int:
     """Score backends on labelled cases."""
@@ -200,7 +212,7 @@ def evaluate_cmd(args: Namespace) -> int:
 
 
 @COMMANDS.command("calibrate", help="fit temperature scaling on held-out groups", options=[
-    flag("cases", help="a JSONL file, or `guards`"), flag("--limit", type=int, default=None),
+    *CASES,
     flag("--isotonic", action="store_true", help="also fit an isotonic map of the top probability"),
     flag("--holdout", type=float, default=0.3, help="share of groups scored, not fitted"),
     flag("--seed", type=int, default=0), option("out", required=True), *SERVER])
@@ -210,7 +222,7 @@ def calibrate_cmd(args: Namespace) -> int:
 
 
 @COMMANDS.command("bench", help="compare backends: accuracy, Brier, ECE, latency", options=[
-    flag("cases", help="a JSONL file, or `guards`"), flag("--limit", type=int, default=None),
+    *CASES,
     option("out"), *SERVER])
 def bench_cmd(args: Namespace) -> int:
     """Compare backends."""
