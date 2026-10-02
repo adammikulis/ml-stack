@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import hub, mcp
+from ml_stack.agent.schema import parse_arguments
 from ml_stack.client import ollama
 from ml_stack.log import say
 
@@ -579,12 +580,7 @@ def run(task: str, client: Any, *,
         for call in calls:
             fn = call.get("function") or {}
             name = str(fn.get("name") or "")
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
+            args = parse_arguments(fn.get("arguments"))[0] or {}
             if name not in OWN:
                 person.say(f"-> {name}({_compact(args)})")
             do = run_by.get(name)

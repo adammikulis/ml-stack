@@ -35,14 +35,6 @@ from ml_stack.serve.ports import (
     server_pids_on_port,
     wait_until_free,
 )
-from ml_stack.serve.slotdump import (
-    SlotDump,
-    SlotGuardRefused,
-    restore_all,
-    restore_slot,
-    save_all,
-    save_slot,
-)
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
 from ml_stack.serve.profile import Profile, profile_for, profiles
 from ml_stack.serve.serving import (
@@ -52,6 +44,14 @@ from ml_stack.serve.serving import (
     draft_for,
     projector_for,
     slot,
+)
+from ml_stack.serve.slotdump import (
+    SlotDump,
+    SlotGuardRefused,
+    restore_all,
+    restore_slot,
+    save_all,
+    save_slot,
 )
 
 __all__ = [
@@ -87,9 +87,9 @@ __all__ = [
     "projector_for",
     "reclaim_port",
     "recorded_servers",
+    "require_binary",
     "restore_all",
     "restore_slot",
-    "require_binary",
     "save_all",
     "save_slot",
     "serve",
