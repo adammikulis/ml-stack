@@ -40,6 +40,7 @@ from ml_stack.agent import Compaction, Counter, Spill, Transcript, compact, mode
 from ml_stack.client import Client
 from ml_stack.home import state
 from ml_stack.log import say
+from ml_stack.workspace import tools as workspace_tools
 
 __all__ = [
     "PROTOCOL",
@@ -457,6 +458,10 @@ _TOOLS: list[Tool] = [
     Tool("decide", "Choose one of a named set of options and report a probability for each.",
          decide),
 ]
+_TOOLS += [Tool(name, (getattr(workspace_tools, name).__doc__ or "").split("\n\n")[0].replace("\n", " "),
+               getattr(workspace_tools, name),
+               _hints(read_only=ro, destructive=bad, idempotent=same))
+          for name, (ro, bad, same) in workspace_tools.HINTS.items()]
 _HINTS: dict[str, dict[str, bool]] = {
     "serve_status": READS, "models_find": _hints(read_only=True, idempotent=True, open_world=True),
     "models_files": _hints(read_only=True, idempotent=True, open_world=True),

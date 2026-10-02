@@ -16,12 +16,13 @@ from pathlib import Path
 import pytest
 
 from ml_stack import mcp as server
+from ml_stack.workspace import tools as workspace_tools
 
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
             "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
             "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor",
             "speech_providers", "speech_transcribe", "speech_say", "decide",
-            "conversation_compact"}
+            "conversation_compact", *workspace_tools.NAMES}
 
 
 def rpc(ident, method, **params):

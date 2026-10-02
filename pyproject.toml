@@ -154,6 +154,8 @@ ml-stack-world = "ml_stack.world.cli:main"
 ml-stack-ingest = "ml_stack.ingest:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 ml-stack-jobs = "ml_stack.jobs:main"
+# agents coordinating: messages, notes, scratch folders and claims, all data and no authority
+ml-stack-workspace = "ml_stack.workspace.cli:main"
 ml-stack-suite = "ml_stack.train.suite:main"
 ml-stack-claude = "ml_stack.claude:main"
 ml-stack-agent = "ml_stack.harness:main"
