@@ -27,6 +27,7 @@ class Answer:
     blocked: bool = False
     status: int | None = None
     detail: str = ""
+    error: bool = False
 
 
 TIMEOUT_S = 120.0
