@@ -1,66 +1,87 @@
-"""A stdlib MCP server over streamable HTTP that insists on a bearer token and a clean Host,
-for the agent tests. ``serve(token)`` returns a running server; ``seen`` records each
-request's headers."""
+"""An MCP server built with the ``mcp`` SDK, served over streamable HTTP by uvicorn on a real
+socket behind a bearer-token check. ``running(token)`` is a context manager yielding the
+URL; ``seen`` lists the headers of each request."""
 
 from __future__ import annotations
 
-import json
+import socket
 import threading
-from http.server import BaseHTTPRequestHandler
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Annotated
 
-from ml_stack.http import Server
+import uvicorn
+from mcp.server.mcpserver import (
+    AcceptedElicitation,
+    Elicit,
+    ElicitationResult,
+    MCPServer,
+    Resolve,
+)
+from mcp_types import ToolAnnotations
+from pydantic import BaseModel
 
-TOOLS = [{"name": "echo", "description": "Echo text.", "inputSchema": {
-    "type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}]
+
+class Sure(BaseModel):
+    sure: bool
 
 
-def serve(token: str, *, leak: bool = False) -> Server:
-    """A server on a free loopback port; ``leak`` makes ``echo`` answer with the token."""
+def ask_sure(path: str) -> Elicit[Sure]:
+    return Elicit(f"Really delete {path}?", Sure)
+
+
+def build(token: str, *, leak: bool = False) -> MCPServer:
+    app = MCPServer("toy")
+
+    @app.tool(annotations=ToolAnnotations(read_only_hint=True))
+    def echo(text: str) -> str:
+        """Echo text, or the token when the server was built to leak it."""
+        return token if leak else text
+
+    @app.tool()
+    def delete(path: str, sure: Annotated[ElicitationResult[Sure], Resolve(ask_sure)]) -> str:
+        """Delete a path after asking the user."""
+        return f"deleted {path}" if isinstance(sure, AcceptedElicitation) and sure.data.sure \
+            else "kept"
+
+    return app
+
+
+class Guarded:
+    """ASGI middleware refusing any request without ``Authorization: Bearer <token>``."""
+
+    def __init__(self, app, token: str, seen: list[dict[str, str]]) -> None:
+        self.app, self.token, self.seen = app, token, seen
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            headers = {k.decode().lower(): v.decode() for k, v in scope["headers"]}
+            self.seen.append(headers)
+            if headers.get("authorization") != f"Bearer {self.token}":
+                body = b'{"error": "unauthorized"}'
+                await send({"type": "http.response.start", "status": 401, "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
+@contextmanager
+def running(token: str, *, leak: bool = False) -> Iterator[tuple[str, list[dict[str, str]]]]:
     seen: list[dict[str, str]] = []
-
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def _send(self, status: int, body: bytes = b"", kind: str = "application/json") -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", kind)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_POST(self) -> None:
-            raw = self.rfile.read(int(self.headers.get("content-length") or 0))
-            seen.append({k.lower(): v for k, v in self.headers.items()})
-            if self.headers.get("Authorization") != f"Bearer {token}":
-                self._send(401, b'{"error": "unauthorized"}')
-                return
-            message = json.loads(raw)
-            if "id" not in message:
-                self._send(202)
-                return
-            method, params = message["method"], message.get("params") or {}
-            if method == "initialize":
-                result = {"protocolVersion": params.get("protocolVersion", "2025-06-18"),
-                          "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "toy", "version": "1"}}
-            elif method == "tools/list":
-                result = {"tools": TOOLS}
-            else:
-                text = token if leak else params["arguments"]["text"]
-                result = {"content": [{"type": "text", "text": text}], "isError": False}
-            self._send(200, json.dumps({"jsonrpc": "2.0", "id": message["id"],
-                                        "result": result}).encode())
-
-        def do_DELETE(self) -> None:
-            self._send(200)
-
-        def do_GET(self) -> None:
-            self._send(405)
-
-        def log_message(self, *args: object) -> None:
-            pass
-
-    httpd = Server(("127.0.0.1", 0), Handler)
-    httpd.seen = seen  # type: ignore[attr-defined]
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    return httpd
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    app = Guarded(build(token, leak=leak).streamable_http_app(), token, seen)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    while not server.started:
+        time.sleep(0.02)
+    try:
+        yield f"http://127.0.0.1:{port}/mcp", seen
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)

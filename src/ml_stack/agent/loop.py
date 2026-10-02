@@ -9,6 +9,7 @@ rejected calls, and a final `Done`.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import threading
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -18,6 +19,7 @@ from typing import Any, Protocol
 from ml_stack.agent.auto import AutoCompact
 from ml_stack.agent.compact import Compaction, CompactResult
 from ml_stack.agent.events import (
+    ConfirmRequest,
     Denied,
     Done,
     Event,
@@ -27,7 +29,7 @@ from ml_stack.agent.events import (
     ToolCall,
     ToolResult,
 )
-from ml_stack.agent.interventions import InterventionContext
+from ml_stack.agent.interventions import Confirm, InterventionContext
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
 from ml_stack.agent.vet import Confirmer, Verdict, Vetter
@@ -96,6 +98,9 @@ class Agent:
         self.budget = budget or Budget()
         self.auto = AutoCompact(client, auto_compact) if auto_compact else None
         self.vet = Vetter(interventions)
+        self._asked: asyncio.Queue[Event] = asyncio.Queue()
+        if hasattr(tools, "on_elicit"):
+            tools.on_elicit = self._elicited
 
     @property
     def confirm(self) -> Confirmer | None:
@@ -165,7 +170,9 @@ class Agent:
                 yield (Repair(one.id, one.name, one.errors) if one.errors
                        else Denied(one.id, one.name, one.denied) if one.denied
                        else ToolCall(one.id, one.name, one.args or {}))
-            answers = await self._dispatch(pending)
+            answers: list[ToolOutput] = []
+            async for event in self._dispatching(pending, answers):
+                yield event
             for one, answer in zip(pending, answers, strict=True):
                 messages.append({"role": "tool", "tool_call_id": one.id, "name": one.name,
                                  "content": answer.text})
@@ -207,6 +214,34 @@ class Agent:
             yield await task
         finally:
             stop.set()
+
+    async def _elicited(self, message: str, details: dict[str, Any]) -> Any:
+        """A server's question to the person mid-call: put to ``confirm`` as a `ConfirmRequest`,
+        declined when there is no handler."""
+        self._asked.put_nowait(ConfirmRequest("", "elicitation", message, details))
+        if self.vet.confirm is None:
+            return None
+        answer = self.vet.confirm(Confirm(message, details), {"name": "elicitation"})
+        return await answer if inspect.isawaitable(answer) else answer
+
+    async def _dispatching(self, pending: list[_Pending], out: list[ToolOutput]
+                           ) -> AsyncIterator[Event]:
+        """Run the calls, yielding the questions their servers ask meanwhile; the answers
+        are put in ``out``."""
+        work = asyncio.ensure_future(self._dispatch(pending))
+        try:
+            while not work.done():
+                got = asyncio.ensure_future(self._asked.get())
+                await asyncio.wait({work, got}, return_when=asyncio.FIRST_COMPLETED)
+                if got.done():
+                    yield got.result()
+                else:
+                    got.cancel()
+            while not self._asked.empty():
+                yield self._asked.get_nowait()
+            out.extend(work.result())
+        finally:
+            work.cancel()
 
     async def _vet(self, pending: list[_Pending], messages: list[dict[str, Any]], step: int,
                    calls: int) -> AsyncIterator[Event]:

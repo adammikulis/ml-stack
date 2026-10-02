@@ -15,9 +15,26 @@ async with McpTools.stdio("python", ["-m", "my_server"]) as tools:      # or Mcp
         ...
 ```
 
-`McpTools` needs the `mcp` extra. `FunctionTools` takes `(schema, callable)` pairs or MCP-shaped
+`McpTools` needs the `mcp` extra (mcp 2.2 or later, MCP revision 2026-07-28) and is built on `mcp.Client`, which negotiates the version itself: a stateless 2026-07-28 server and an older handshake server are both reached, and nothing here keeps a session id. `FunctionTools` takes `(schema, callable)` pairs or MCP-shaped
 dicts with `{name: callable}`; any object with `list_tools()` and `call(name, arguments)`
 coroutines is a `ToolSource`.
+
+## MCP over HTTP
+
+`McpTools.http(url, headers={...}, bearer="token" | callable)` sends the headers on every request;
+a callable bearer is read again each time the connection is made. A 401 or 403 raises
+`McpAuthError` saying the credentials were not accepted. The token is cut from everything the
+server returns (tool text, structured results, descriptions) and is absent from `repr`; it is
+never written anywhere. No `Origin` header is sent.
+
+A server may ask the person a question while a tool runs (elicitation). It arrives as a
+`ConfirmRequest(id="", name="elicitation", question, details)` and is answered by `agent.confirm`:
+return a dict to accept with those form values, `True` to accept with none, anything false to
+decline. With no handler it declines.
+
+Not supported: the tasks extension (long-running calls with polling and cancel). The 2.2 client
+has no tasks API; `McpTools.on_progress(progress, total, message)` receives progress
+notifications for ordinary calls.
 
 ## Events
 

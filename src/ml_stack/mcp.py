@@ -31,7 +31,7 @@ import sys
 import time
 import typing
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -62,18 +62,36 @@ def mcp_home() -> Path:
 own, under its own home, because ``ml-stack-bench status`` reads them from there."""
 
 
+def _hints(*, read_only: bool, destructive: bool = False, idempotent: bool = False,
+           open_world: bool = False) -> dict[str, bool]:
+    return {"readOnly": read_only, "destructive": destructive, "idempotent": idempotent,
+            "openWorld": open_world}
+
+
+READS = _hints(read_only=True, idempotent=True)
+"""Hints for a tool that only looks."""
+
+WRITES = _hints(read_only=False)
+"""Hints for a tool that changes something and can be repeated at a cost."""
+
+
 @dataclass(frozen=True, slots=True)
 class Tool:
     name: str
     description: str
     fn: Callable[..., Any]
+    hints: dict[str, bool] = field(default_factory=lambda: dict(WRITES))
 
     def schema(self) -> dict[str, Any]:
         return schema_of(self.fn)
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description,
-                "inputSchema": self.schema()}
+                "inputSchema": self.schema(), "annotations": self.annotations()}
+
+    def annotations(self) -> dict[str, bool]:
+        """The tool's behaviour hints under the names the protocol uses."""
+        return {f"{k}Hint": v for k, v in self.hints.items()}
 
 
 _JSON_TYPES: dict[Any, dict[str, Any]] = {
@@ -386,7 +404,7 @@ def conversation_compact(path: str, budget: int, keep_last: int = 6, url: str = 
             "notes": list(fitted.notes), "written": write and fitted.strategy_used != "none"}
 
 
-TOOLS: list[Tool] = [
+_TOOLS: list[Tool] = [
     Tool("serve_status", "What is serving on this machine, and what a lease would do.",
          serve_status),
     Tool("serve_up", "Put a model up on a port, detached; returns the log and pid.", serve_up),
@@ -423,6 +441,23 @@ TOOLS: list[Tool] = [
          speech_transcribe),
     Tool("speech_say", "Speak text into a WAV file.", speech_say),
 ]
+_HINTS: dict[str, dict[str, bool]] = {
+    "serve_status": READS, "models_find": _hints(read_only=True, idempotent=True, open_world=True),
+    "models_files": _hints(read_only=True, idempotent=True, open_world=True),
+    "bench_status": READS, "bench_history": READS, "bench_show": READS,
+    "fleet_peers": READS, "setup_look": READS, "doctor": READS, "speech_providers": READS,
+    "speech_transcribe": READS,
+    "serve_up": _hints(read_only=False, idempotent=True, open_world=True),
+    "serve_down": _hints(read_only=False, destructive=True, idempotent=True),
+    "serve_escalate": _hints(read_only=False),
+    "models_fetch": _hints(read_only=False, idempotent=True, open_world=True),
+    "bench_run": _hints(read_only=False),
+    "fleet_join": _hints(read_only=False, idempotent=True),
+    "world_make": _hints(read_only=False, idempotent=True),
+    "speech_say": _hints(read_only=False, idempotent=True),
+    "conversation_compact": _hints(read_only=False, destructive=True),
+}
+TOOLS: list[Tool] = [dataclasses.replace(t, hints=_HINTS.get(t.name, t.hints)) for t in _TOOLS]
 _BY_NAME = {t.name: t for t in TOOLS}
 
 
@@ -506,19 +541,25 @@ def serve(reader: TextIO, writer: TextIO) -> int:
 # -- the SDK transport -----------------------------------------------------------------
 def sdk_available() -> bool:
     try:
-        import mcp.server.fastmcp  # noqa: F401
+        import mcp.server.mcpserver  # noqa: F401
     except ImportError:
         return False
     return True
 
 
 def build_sdk_server() -> Any:
-    """A ``FastMCP`` server carrying the same tools; needs ``pip install 'ml-stack[mcp]'``."""
-    from mcp.server.fastmcp import FastMCP
+    """An ``MCPServer`` carrying the same tools, with their behaviour hints and structured
+    results; needs ``pip install 'ml-stack[mcp]'`` (mcp 2.2 or later)."""
+    from mcp.server.mcpserver import MCPServer
+    from mcp_types import ToolAnnotations
 
-    app = FastMCP("ml-stack")
+    app = MCPServer("ml-stack")
     for tool in TOOLS:
-        app.add_tool(tool.fn, name=tool.name, description=tool.description)
+        hints = tool.hints
+        app.add_tool(tool.fn, name=tool.name, description=tool.description,
+                     annotations=ToolAnnotations(
+                         read_only_hint=hints["readOnly"], destructive_hint=hints["destructive"],
+                         idempotent_hint=hints["idempotent"], open_world_hint=hints["openWorld"]))
     return app
 
 

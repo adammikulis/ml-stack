@@ -91,7 +91,7 @@ class TestTheProtocol:
 
 class TestTheTools:
     def test_serve_status_calls_the_look_the_command_calls(self, monkeypatch):
-        from ml_stack.serve import cli, ops
+        from ml_stack.serve import ops
 
         monkeypatch.setattr(ops, "recorded_servers", lambda state: {8083: {"model": "x"}})
         monkeypatch.setattr(ops, "look", lambda port, records: ops.Snapshot(
@@ -293,4 +293,8 @@ class TestTheCommand:
         listed = on_a_fresh_loop(app.list_tools())
         assert {t.name for t in listed} == EXPECTED
         by_name = {t.name: t for t in listed}
-        assert by_name["bench_run"].inputSchema["required"] == ["argv"]
+        assert by_name["bench_run"].input_schema["required"] == ["argv"]
+        assert by_name["serve_status"].annotations.read_only_hint is True
+        assert by_name["serve_down"].annotations.destructive_hint is True
+        assert by_name["models_find"].annotations.open_world_hint is True
+        assert by_name["serve_status"].output_schema["type"] == "object"

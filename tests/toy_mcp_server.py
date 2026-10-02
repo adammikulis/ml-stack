@@ -31,13 +31,14 @@ def answer(method: str, params: dict) -> dict | None:
             return {"content": [{"type": "text", "text": "it failed"}], "isError": True}
         return {"content": [{"type": "text", "text": fn(**params["arguments"])}],
                 "isError": False}
-    return {}
+    return None
 
 
 for line in sys.stdin:
     message = json.loads(line)
     if "id" in message:
-        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"],
-                                     "result": answer(message["method"],
-                                                      message.get("params") or {})}) + "\n")
+        result = answer(message["method"], message.get("params") or {})
+        reply = ({"result": result} if result is not None else
+                 {"error": {"code": -32601, "message": "method not found"}})
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], **reply}) + "\n")
         sys.stdout.flush()

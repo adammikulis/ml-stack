@@ -74,8 +74,9 @@ viz = ["manim>=0.19"]
 plot = ["matplotlib>=3.11.2"]
 testing = ["numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
-# `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
-mcp = ["mcp>=1.0"]
+# `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that.
+# `ml_stack.agent.McpTools` is an MCP client on the same SDK (2026-07-28 revision).
+mcp = ["mcp>=2.2,<3"]
 # `ml-stack-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;
 # `ifeval` brings langdetect, immutabledict and nltk
 standard = ["lm-eval[ifeval]>=0.4"]

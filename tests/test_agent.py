@@ -260,39 +260,64 @@ def test_tools_from_an_mcp_server_over_stdio(served) -> None:
 
 
 def test_an_http_server_that_wants_a_bearer_token(served) -> None:
+    pytest.importorskip("mcp")
     import toy_mcp_http
 
     from ml_stack.agent import McpAuthError
 
     secret = "tok-7f3a9c"
-    server = toy_mcp_http.serve(secret, leak=True)
-    url = f"http://127.0.0.1:{server.server_address[1]}/mcp"
     fake = served(Turn(calls=(call("echo", text="hi"),)), Turn(text=("done",)))
     tokens = iter([secret])
 
-    async def good() -> tuple[list, str]:
+    async def good(url: str) -> tuple[list, str]:
         async with McpTools.http(url, bearer=lambda: next(tokens),
                                  headers={"X-Client": "a"}) as tools:
             shown = repr(tools)
             events = [e async for e in Agent(Client(fake.base_url), tools).run("go")]
         return events, shown
 
-    async def refused(**kw: object) -> None:
+    async def refused(url: str, **kw: object) -> None:
         async with McpTools.http(url, **kw):
             pass
 
-    try:
-        events, shown = asyncio.run(good())
+    with toy_mcp_http.running(secret, leak=True) as (url, seen):
+        events, shown = asyncio.run(good(url))
         results = [e for e in events if isinstance(e, ToolResult)]
         assert results[0].text == "[redacted]"
         assert secret not in shown and secret not in repr(events)
         assert secret not in json.dumps(fake.bodies)
-        assert {r["authorization"] for r in server.seen} == {f"Bearer {secret}"}
-        assert all(r.get("x-client") == "a" and "origin" not in r for r in server.seen)
+        assert {r["authorization"] for r in seen if "authorization" in r} == {f"Bearer {secret}"}
+        assert all(r.get("x-client") == "a" and "origin" not in r for r in seen)
         for kw in ({}, {"bearer": "wrong-token-1"}):
             with pytest.raises(McpAuthError) as err:
-                asyncio.run(refused(**kw))
+                asyncio.run(refused(url, **kw))
             assert "401" in str(err.value) and "wrong-token-1" not in str(err.value)
-    finally:
-        server.shutdown()
-        server.server_close()
+
+
+@pytest.mark.parametrize(("answer", "outcome"), [(True, "deleted /tmp/x"), (None, "kept")])
+def test_a_question_from_the_server_reaches_the_confirm_handler(served, answer, outcome) -> None:
+    pytest.importorskip("mcp")
+    import toy_mcp_http
+
+    from ml_stack.agent import ConfirmRequest
+
+    fake = served(Turn(calls=(call("delete", path="/tmp/x"),)), Turn(text=("done",)))
+    asked: list = []
+
+    async def person(decision, info):
+        asked.append(decision.question)
+        return {"sure": True} if answer else None
+
+    async def go(url: str) -> list:
+        async with McpTools.http(url, bearer="tok-long-1") as tools:
+            agent = Agent(Client(fake.base_url), tools)
+            if answer is not None:
+                agent.confirm = person
+            return [e async for e in agent.run("go")]
+
+    with toy_mcp_http.running("tok-long-1") as (url, _):
+        events = asyncio.run(go(url))
+    request = next(e for e in events if isinstance(e, ConfirmRequest))
+    assert request.question == "Really delete /tmp/x?" and request.name == "elicitation"
+    assert next(e for e in events if isinstance(e, ToolResult)).text == outcome
+    assert asked == (["Really delete /tmp/x?"] if answer else [])

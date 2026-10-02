@@ -32,17 +32,14 @@ capability; every line is something that already exists not being what it says.
 
 ### The agent loop
 
-- [ ] **`ml-stack[mcp]` allows mcp 2.x, where `ml_stack.mcp.build_sdk_server` does not import.**
-  mcp 2 renamed `mcp.server.fastmcp.FastMCP` to `mcp.server.mcpserver.MCPServer`; the extra
-  says `mcp>=1.0`, so `sdk_available()` is False on a 2.x install and the built-in transport
-  serves instead. `ml_stack.agent.McpTools` uses `ClientSession`, `stdio_client` and, for HTTP,
-  the 2.x `streamable_http_client(url)`, which takes no headers; a server that needs a token
-  needs an `httpx2.AsyncClient` passed through. Pick one major for the extra and write both
-  sides against it.
+- [ ] **MCP tasks are not driven.** The mcp 2.2 client has no tasks API, so a long-running tool
+  call cannot be polled or cancelled through `McpTools`, and task progress is not an agent
+  event. Progress for an ordinary call reaches `McpTools.on_progress` only.
 - [ ] **`ml_stack.agent.interventions` holds a local copy of the decision types.** When
-  `ml_stack.interventions` lands (`Proceed`, `Deny`, `Confirm`, `Guide` and the three hooks),
-  replace the imports in `agent/vet.py`, `agent/loop.py` and `agent/__init__.py` with it and
-  delete the local module; the test in `tests/test_agent_interventions.py` stays.
+  `ml_stack.interventions` lands, its hooks take a `Call` dataclass (name, arguments, id) and a
+  `Context` (task, messages, tools, trusted, notes) where the loop passes a dict and an
+  `InterventionContext`; the four verdict types match. Build `Call` and `Context` in
+  `agent/loop.py`, import the verdicts from it, and delete the local module.
 - [ ] **No tool-calling base-versus-tuned comparison in one command.** `ml-stack-train-tools eval`
   scores one served model; comparing a base and a tuned model means running it against each
   server and diffing the JSON.

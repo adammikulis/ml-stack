@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from contextlib import AsyncExitStack
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -88,24 +87,33 @@ SENSITIVE = ("authorization", "proxy-authorization", "x-api-key", "cookie")
 
 CHECKED = (401, 403)
 
+Elicit = Callable[[str, dict[str, Any]], Awaitable[Any]]
+"""``elicit(message, details)`` -> the form values to send back (a dict), True to accept with
+no values, or a false value to decline."""
+
+Progress = Callable[[float, float | None, str | None], Awaitable[None]]
+
 
 class McpTools:
-    """An MCP server's tools through the official ``mcp`` client, used as an async context
+    """An MCP server's tools through the ``mcp`` 2.x client, used as an async context
     manager: ``async with McpTools.stdio("python", ["-m", "server"]) as tools``.
 
-    Credentials given to `http` are sent on every request, are re-read from a callable
-    ``bearer`` each time the connection is made, and are cut out of everything the server
-    sends back and out of this object's repr.
+    The client negotiates the protocol version itself, so a server on the 2026-07-28 revision
+    (stateless requests) and an older one are both reached; nothing here assumes a session.
+    Credentials given to `http` are sent on every request, a callable ``bearer`` is read again
+    each time the connection is made, and the token is cut out of everything the server sends
+    back and out of this object's repr. A server that asks the user a question while a tool
+    runs is answered by ``on_elicit``, or declined when there is none.
     """
 
-    def __init__(self, connect: Callable[[AsyncExitStack, McpTools], Any],
-                 label: str = "mcp server") -> None:
-        self._connect = connect
+    def __init__(self, transport: Callable[[McpTools], Any], label: str = "mcp server") -> None:
+        self._transport = transport
         self._label = label
-        self._stack = AsyncExitStack()
-        self._session: Any = None
+        self._client: Any = None
         self._secrets: list[str] = []
         self._refused = 0
+        self.on_elicit: Elicit | None = None
+        self.on_progress: Progress | None = None
 
     def __repr__(self) -> str:
         return f"McpTools({self._label})"
@@ -114,15 +122,13 @@ class McpTools:
     def stdio(cls, command: str, args: Sequence[str] = (),
               env: Mapping[str, str] | None = None) -> McpTools:
         """A server spawned as ``command args`` and spoken to over its stdin and stdout."""
-        async def connect(stack: AsyncExitStack, owner: McpTools) -> Any:
+        def transport(owner: McpTools) -> Any:
             from mcp import StdioServerParameters
-            from mcp.client.stdio import stdio_client
 
-            params = StdioServerParameters(command=command, args=list(args),
-                                           env=dict(env) if env else None)
-            return await stack.enter_async_context(stdio_client(params))
+            return StdioServerParameters(command=command, args=list(args),
+                                         env=dict(env) if env else None)
 
-        return cls(connect, command)
+        return cls(transport, command)
 
     @classmethod
     def http(cls, url: str, *, headers: Mapping[str, str] | None = None,
@@ -130,33 +136,26 @@ class McpTools:
         """A server reached at ``url`` over streamable HTTP. ``headers`` go on every request;
         ``bearer`` (a token, or a function returning the current one) is sent as
         ``Authorization: Bearer ...``."""
-        async def connect(stack: AsyncExitStack, owner: McpTools) -> Any:
+        def transport(owner: McpTools) -> Any:
+            from mcp.client.streamable_http import streamable_http_client
+            from mcp.shared._httpx_utils import create_mcp_http_client
+
             sent = dict(headers or {})
             token = bearer() if callable(bearer) else bearer
             if token:
                 sent["Authorization"] = f"Bearer {token}"
             owner._secrets = [v for k, v in sent.items() if k.lower() in SENSITIVE]
             owner._secrets += [token] if token else []
-            return await stack.enter_async_context(owner._http_streams(url, sent))
+            client = create_mcp_http_client(headers=sent)
 
-        return cls(connect, url.split("?")[0])
+            async def note(response: Any) -> None:
+                if response.status_code in CHECKED:
+                    owner._refused = response.status_code
 
-    def _http_streams(self, url: str, headers: dict[str, str]) -> Any:
-        try:
-            from mcp.client.streamable_http import streamable_http_client
-            from mcp.shared._httpx_utils import create_mcp_http_client
-        except ImportError:
-            from mcp.client.streamable_http import streamablehttp_client
+            client.event_hooks["response"].append(note)
+            return streamable_http_client(url, http_client=client)
 
-            return streamablehttp_client(url, headers=headers)
-        client = create_mcp_http_client(headers=headers)
-
-        async def note(response: Any) -> None:
-            if response.status_code in CHECKED:
-                self._refused = response.status_code
-
-        client.event_hooks["response"].append(note)
-        return streamable_http_client(url, http_client=client)
+        return cls(transport, url.split("?")[0])
 
     def _raise_if_refused(self) -> None:
         if self._refused:
@@ -171,29 +170,38 @@ class McpTools:
             text = text.replace(secret, "[redacted]")
         return text
 
+    async def _elicited(self, context: Any, params: Any) -> Any:
+        from mcp_types import ElicitResult
+
+        if self.on_elicit is None:
+            return ElicitResult(action="decline")
+        details = params.model_dump(by_alias=True, exclude_none=True)
+        answer = await self.on_elicit(self._clean(params.message), details)
+        if isinstance(answer, dict):
+            return ElicitResult(action="accept", content=answer)
+        return ElicitResult(action="accept", content={}) if answer else ElicitResult(
+            action="decline")
+
     async def __aenter__(self) -> McpTools:
-        from mcp import ClientSession
+        from mcp import Client
 
         opened = False
         try:
-            streams = await self._connect(self._stack, self)
-            self._session = await self._stack.enter_async_context(
-                ClientSession(streams[0], streams[1]))
-            await self._session.initialize()
+            self._client = Client(self._transport(self), elicitation_callback=self._elicited)
+            await self._client.__aenter__()
             opened = True
         finally:
             if not opened:
                 self._raise_if_refused()
-                await self._stack.aclose()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        await self._stack.aclose()
+        await self._client.__aexit__(*exc)
 
     async def list_tools(self) -> list[dict[str, Any]]:
         done = False
         try:
-            listed = await self._session.list_tools()
+            listed = await self._client.list_tools()
             done = True
         finally:
             if not done:
@@ -205,8 +213,9 @@ class McpTools:
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolOutput:
         done = False
         try:
-            result = (await self._session.call_tool(name, arguments)).model_dump(
-                by_alias=True, exclude_none=True)
+            result = (await self._client.call_tool(
+                name, arguments, progress_callback=self.on_progress)).model_dump(
+                    by_alias=True, exclude_none=True)
             done = True
         finally:
             if not done:
