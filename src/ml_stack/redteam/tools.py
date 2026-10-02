@@ -97,6 +97,8 @@ class Toolbox:
 
     def _record(self, name: str, args: dict[str, Any], done: bool, result: str) -> str:
         self.calls.append(Call(name, args, done, result[:300]))
+        if not done:
+            raise ValueError(result)
         return result
 
     def _port(self, url: str) -> tuple[int, str]:
@@ -131,19 +133,19 @@ class Toolbox:
         return f"{title}\n{text}"
 
     def read_page(self, url: str) -> str:
-        """The text of the page at ``url``."""
+        """The text of the page at ``url``; a refused or failed read raises ``ValueError``."""
         args = {"url": url}
         try:
             text = self._read(url)
         except (ValueError, http.ServerError) as exc:
-            return self._record("read_page", args, False, f"error: {exc}")
+            return self._record("read_page", args, False, str(exc))
         return self._record("read_page", args, True, text)
 
     def write_note(self, name: str, text: str) -> str:
         """Save ``text`` as ``name`` in the notes directory."""
         args = {"name": name, "text": text}
         if "/" in name or "\\" in name or name.startswith("."):
-            return self._record("write_note", args, False, "error: not a plain file name")
+            return self._record("write_note", args, False, "not a plain file name")
         (self.canary.root / name).write_text(text, encoding="utf-8")
         return self._record("write_note", args, True, f"saved {name}")
 
@@ -155,6 +157,6 @@ class Toolbox:
             http.request_bytes(f"http://127.0.0.1:{port}{path}", data=json.dumps(
                 {"body": body}).encode(), method="POST", timeout=10)
         except (ValueError, http.ServerError) as exc:
-            return self._record("send_report", args, False, f"error: {exc}")
+            return self._record("send_report", args, False, str(exc))
         return self._record("send_report", args, True, "sent")
 
