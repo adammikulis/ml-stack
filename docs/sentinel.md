@@ -296,6 +296,12 @@ slip of ten points in the pass rate is invisible to it, and so is any change the
 not exercise. At 3 runs per probe no single probe has the power to be named; the pooled
 interval does the work.
 
+**Tool mix.** The first version (20 calls of baseline, windows of 20, distance 0.6) raised two
+false alarms across seven sessions of steady random use; simulation put its rate at about 0.2%
+of windows for a fresh baseline and higher for an unlucky one. The defaults are now 50, 30
+and 0.5: 0 alarms in 4000 simulated windows and in 20 sessions of 600 calls, and an unseen tool
+filling a window is flagged every time. It remains a watch-only signal.
+
 **Peers.** A request replayed three times: the peer is quarantined at the third and its next
 valid request is refused (against the real `Authenticator`). 35 forged signatures from one
 address: quarantined; an honest address sending 50 valid requests meanwhile: untouched.
@@ -307,9 +313,10 @@ high-confidence finding.
 calls, 3000 peer requests with an occasional single failure and six pinned files touched and
 rewritten with the same bytes, in `enforce` mode: 0 quarantined, 0 watched. 2000 further
 screens and calls with decoys planted: 0 decoy findings. Held-text overlap against 536
-paragraphs of `docs/` after three injections were held: 0 false matches. Against the real
-guard rails, text they fence is watched in `guarded` mode and held in `enforce` mode; how
-often they fence ordinary text is theirs to report.
+paragraphs of `docs/` after three injections were held: 0 false matches. Against the real guard rails (integration branch), 651 paragraphs of `docs/` shown as web
+results in `enforce` mode: 3 held (0.5%), none of the session frozen. The rails mark every
+result from an external tool as tainted; sentinel acts only on text whose reason says it reads
+like an instruction, and five of those inside five minutes freeze the session in `enforce`.
 
 **Held text copied into a summary.** Six verbatim copies (whole, and quoted sentence) of held
 injections: 6 of 6 found. Three paraphrases: 0 of 3 found. The signal is shared six-word runs;
