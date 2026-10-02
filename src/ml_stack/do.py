@@ -28,6 +28,9 @@ from typing import Any, TextIO
 
 from ml_stack import hub, mcp
 from ml_stack.client import ollama
+from ml_stack.guard import NOTICE, Guard
+from ml_stack.guard.loop import parse_call
+from ml_stack.guard.verdict import ToolCall, Verdict
 from ml_stack.log import say
 
 __all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "bench_cli", "client_for",
@@ -70,7 +73,7 @@ YES = ("The person passed --yes: plan prints the steps and does not ask go. Stil
 
 def system_for(yes: bool = False) -> str:
     """The system prompt, with what the person passed on the command line."""
-    return SYSTEM + ("\n\n" + YES if yes else "")
+    return SYSTEM + "\n\n" + NOTICE + ("\n\n" + YES if yes else "")
 
 
 NUDGE = ("You replied in words and called nothing. If the task is finished, call done with "
@@ -486,6 +489,13 @@ class Person:
             return {"go": True, "said": "go"}
         return {"go": False, "said": f"The person said: {got!r}. Change the plan or ask."}
 
+    def confirm(self, call: ToolCall) -> bool:
+        """Ask the person whether a call may run now that text from outside is in the context."""
+        self.say(f"\n! {call.name}({_compact(call.arguments or {})}) after text from outside "
+                 f"this conversation was read")
+        got = self._read("allow it? [y/N] ")
+        return bool(got) and got.lower() in ("y", "yes")
+
     def done(self, summary: str) -> dict[str, Any]:
         """End the task: ``summary`` is what was measured and where it is."""
         self.finished, self.summary = True, summary
@@ -516,6 +526,7 @@ class Outcome:
     seconds: float = 0.0
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    blocked: list[Verdict] = field(default_factory=list)
 
 
 def _compact(args: dict[str, Any], most: int = 160) -> str:
@@ -544,17 +555,21 @@ def transcript(messages: Iterable[dict[str, Any]]) -> str:
 
 def run(task: str, client: Any, *,
         tools: Sequence[tuple[dict[str, Any], Callable[..., Any]]] | None = None,
-        stdin: TextIO | None = None, stdout: TextIO | None = None, yes: bool = False,
-        rounds: int = ROUNDS, messages: list[dict[str, Any]] | None = None) -> Outcome:
+        person: Person | None = None, rounds: int = ROUNDS,
+        messages: list[dict[str, Any]] | None = None, guard: Guard | None = None) -> Outcome:
     """One task through the loop: the model is offered every tool, each call is run and
     answered, ``ask_user`` and ``plan`` reach the person, ``done`` ends it. ``messages``
-    carries a conversation across tasks; a new one is started when none is given."""
-    person = Person(stdin or sys.stdin, stdout or sys.stdout, yes=yes)
+    carries a conversation across tasks; a new one is started when none is given.
+
+    Every call and every tool result passes ``guard`` (`ml_stack.guard`); with none given the
+    built-in rails are on. ``Guard.off(because=...)`` is the only way to run without them."""
+    person = person or Person(sys.stdin, sys.stdout)
     offered = [*(command_tools() if tools is None else tools), *person.tools()]
     schemas = [schema for schema, _ in offered]
     run_by = {schema["function"]["name"]: fn for schema, fn in offered}
+    guard = (guard or Guard.default()).bind(schemas, confirm=person.confirm)
     if messages is None:
-        messages = [{"role": "system", "content": system_for(yes)}]
+        messages = [{"role": "system", "content": system_for(person.yes)}]
     messages.append({"role": "user", "content": task})
     out = Outcome(messages=messages)
     began = time.monotonic()
@@ -563,7 +578,7 @@ def run(task: str, client: Any, *,
     for _ in range(rounds):
         reply = client.chat(messages, think=False, tools=schemas)
         calls = list(getattr(reply, "tool_calls", None) or [])
-        content = getattr(reply, "content", "") or ""
+        content = guard.output(getattr(reply, "content", "") or "").text
         if not calls:
             if content.strip():
                 person.say(content.strip())
@@ -577,30 +592,7 @@ def run(task: str, client: Any, *,
         out.rounds += 1
         messages.append({"role": "assistant", "content": content, "tool_calls": calls})
         for call in calls:
-            fn = call.get("function") or {}
-            name = str(fn.get("name") or "")
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
-            if name not in OWN:
-                person.say(f"-> {name}({_compact(args)})")
-            do = run_by.get(name)
-            if do is None:
-                result: Any = {"error": f"no such tool: {name}"}
-            else:
-                try:
-                    result = do(**args)
-                except Exception as exc:  # noqa: BLE001 - the error is the answer
-                    result = {"error": f"{type(exc).__name__}: {exc}"}
-            out.calls.append((name, args))
-            text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)
-            if name not in OWN:
-                person.say("   " + (text if len(text) <= 300 else text[:297] + "..."))
-            messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
-                             "name": name, "content": text[:CUT]})
+            _answer(call, run_by, guard, person, out)
             if person.finished or person.left:
                 break
         if person.finished or person.left:
@@ -612,6 +604,39 @@ def run(task: str, client: Any, *,
         person.say(f"\nran out of {rounds} rounds without done; the transcript:")
         person.say(transcript(messages))
     return out
+
+
+def _answer(call: dict[str, Any], run_by: dict[str, Callable[..., Any]], guard: Guard,
+            person: Person, out: Outcome) -> None:
+    """Run one call the model made, if the guard lets it, and append what came back."""
+    asked = parse_call(call)
+    args = asked.arguments or {}
+    if asked.name not in OWN:
+        person.say(guard.output(f"-> {asked.name}({_compact(args)})", "display").text)
+    verdict = guard.tool_call(asked)
+    do = run_by.get(asked.name)
+    if verdict.denied:
+        result: Any = {"error": f"blocked by the {verdict.rail} rail: {verdict.reason}"}
+        out.blocked.append(verdict)
+    elif do is None:
+        result = {"error": f"no such tool: {asked.name}"}
+    else:
+        try:
+            result = do(**args)
+        except Exception as exc:  # noqa: BLE001 - the error is the answer
+            result = {"error": f"{type(exc).__name__}: {exc}"}
+    out.calls.append((asked.name, args))
+    if asked.name == "plan" and not verdict.denied and not person.yes and result.get("go"):
+        guard.approve(" ".join(str(step) for step in args.get("steps") or []))
+    text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)[:CUT]
+    answer = text
+    if asked.name not in OWN and not verdict.denied:
+        fed = guard.input(text, f"tool:{asked.name}")
+        answer = f"[withheld by the {fed.rail} rail: {fed.reason}]" if fed.denied else fed.text
+    if asked.name not in OWN:
+        person.say("   " + guard.output(text, "display").text[:300])
+    out.messages.append({"role": "tool", "tool_call_id": call.get("id") or asked.name,
+                         "name": asked.name, "content": answer})
 
 
 # -- the command ------------------------------------------------------------------------
@@ -737,7 +762,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
     client = client_for(args)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_for(args.yes)}]
     if args.task:
-        got = run(args.task, client, tools=tools, stdin=stdin, stdout=stdout, yes=args.yes,
+        got = run(args.task, client, tools=tools, person=Person(stdin, stdout, yes=args.yes),
                   rounds=args.rounds, messages=messages)
         return 0 if got.done else 1
     code = 0
@@ -750,8 +775,8 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
             break
         if not line.strip():
             continue
-        got = run(line.strip(), client, tools=tools, stdin=stdin, stdout=stdout,
-                  yes=args.yes, rounds=args.rounds, messages=messages)
+        got = run(line.strip(), client, tools=tools, person=Person(stdin, stdout, yes=args.yes),
+                  rounds=args.rounds, messages=messages)
         if not got.done:
             code = 1
     return code

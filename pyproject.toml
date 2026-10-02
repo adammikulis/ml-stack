@@ -75,6 +75,12 @@ testing = ["numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
 mcp = ["mcp>=1.0"]
+# NVIDIA NeMo Guardrails as one more rail over the built-in ones (`ml_stack.guard.nemo`); its
+# rails call the llama.cpp server a configuration names. The built-in rails need no extra.
+guardrails = ["nemoguardrails>=0.24.1,<0.25"]
+# a prompt-injection classifier run on the CPU through onnxruntime (`ml_stack.guard.classifier`);
+# the ONNX export of protectai/deberta-v3-base-prompt-injection-v2 is fetched once
+guard-model = ["onnxruntime>=1.20", "tokenizers>=0.21", "numpy>=1.24", "huggingface_hub>=1.32"]
 # `ml-stack-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;
 # `ifeval` brings langdetect, immutabledict and nltk
 standard = ["lm-eval[ifeval]>=0.4"]
