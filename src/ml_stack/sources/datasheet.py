@@ -30,6 +30,8 @@ SECTIONS: dict[str, tuple[tuple[str, int], ...]] = {
                         ("outline drawing", 5), ("package mechanical", 5), ("dimensions in mm", 2),
                         ("top view", 1), ("side view", 1), ("bottom view", 1)),
 }
+MIN_PART = 5
+"""The fewest characters of a part number worth matching."""
 STRONG = 3
 """The weight a section phrase needs to make a page a candidate on its own."""
 DRAWING_STROKES = 40
@@ -79,11 +81,32 @@ def text(path: str | Path, *, limit: int | None = None) -> tuple[str, str, int]:
         return _clean((doc.metadata or {}).get("title")), "".join(out)[:limit], doc.page_count
 
 
+def _squash(value: str) -> str:
+    return re.sub(r"[\s\u2010-\u2015\-_]+", "", value).lower()
+
+
+def part_match(path: str | Path, part: str) -> tuple[float, bool]:
+    """How much of ``part`` the PDF names: ``(share, on_first_page)``.
+
+    The share is the longest leading part of the number found in the text, over its length,
+    so a datasheet for ``STM32U575xx`` matches ``STM32U575CIT6`` at 9/13 and a datasheet for
+    something else matches 0. Under five characters nothing counts. Case, spacing and dashes
+    are ignored.
+    """
+    pymupdf = _pymupdf()
+    wanted = _squash(part)
+    with pymupdf.open(str(Path(path).expanduser())) as doc:
+        pages = [_squash(page.get_text()) for page in doc]
+    for size in range(len(wanted), MIN_PART - 1, -1):
+        head = wanted[:size]
+        if any(head in body for body in pages):
+            return size / len(wanted), head in pages[0]
+    return 0.0, False
+
+
 def mentions(path: str | Path, needle: str) -> bool:
     """Whether the PDF's text contains ``needle``, ignoring case, spacing and dashes."""
-    def squash(value: str) -> str:
-        return re.sub(r"[\s\u2010-\u2015\-_]+", "", value).lower()
-    return squash(needle) in squash(text(path)[1])
+    return part_match(path, needle)[0] == 1.0
 
 
 def _header_rows(rows: list[list[str]]) -> int:

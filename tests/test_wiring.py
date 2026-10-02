@@ -12,6 +12,7 @@ REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "src" / "ml_stack"
 
 STANDALONE = {
+    "datasheet": "loaded by name as python:ml_stack.datasheet:tools, never imported",
     "web": "loaded by name as python:ml_stack.web:tools, never imported",
 }
 

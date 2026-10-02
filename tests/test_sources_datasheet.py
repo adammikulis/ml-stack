@@ -147,3 +147,11 @@ def test_text_and_mentions(sheet):
     assert pages == 6 and "ACME1234" in body and len(body) <= 200
     assert datasheet.mentions(sheet, "acme-1234a")
     assert not datasheet.mentions(sheet, "ZZZ999")
+
+
+def test_a_part_number_matches_by_how_much_of_it_the_text_names(sheet):
+    assert datasheet.part_match(sheet, "ACME1234A") == (1.0, True)
+    share, first = datasheet.part_match(sheet, "ACME1234XYZ")
+    assert 0.6 < share < 1.0 and first
+    assert datasheet.part_match(sheet, "ZZZ999") == (0.0, False)
+    assert datasheet.part_match(sheet, "ACME")[0] == 0.0
