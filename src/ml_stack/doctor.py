@@ -13,7 +13,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ml_stack import checks
@@ -311,8 +311,8 @@ def _days_old(build_dir: Path) -> int | None:
     except ValueError:
         return None
     if then.tzinfo is None:
-        then = then.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - then).days
+        then = then.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).days
 
 
 def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS) -> list[Finding]:

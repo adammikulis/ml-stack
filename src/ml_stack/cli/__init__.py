@@ -12,13 +12,17 @@ import difflib
 import importlib
 import io
 import sys
-import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Callable
 
 from ml_stack.cli.reference import HELP
 from ml_stack.log import say, warn
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 __all__ = ["PREFIX", "commands", "load", "main"]
 

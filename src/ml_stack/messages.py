@@ -14,7 +14,7 @@ import unicodedata
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 __all__ = ["DEFAULT_DOMAIN", "Message", "directory", "dm_members", "is_dm", "message_id",
@@ -151,13 +151,13 @@ def when(ts: str) -> datetime:
     """A Slack `ts` ("1725148800.000100") as an aware UTC datetime."""
     sec, _, frac = str(ts).partition(".")
     micro = int((frac or "0")[:6].ljust(6, "0"))
-    return datetime.fromtimestamp(int(sec), UTC).replace(microsecond=micro)
+    return datetime.fromtimestamp(int(sec), timezone.utc).replace(microsecond=micro)
 
 
 def ts_of(moment: datetime) -> str:
     """A datetime back as a Slack `ts`, six digits of fraction."""
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
+        moment = moment.replace(tzinfo=timezone.utc)
     return f"{int(moment.timestamp())}.{moment.microsecond:06d}"
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 GUARD = 8
 """Rows dropped either side of a split boundary, so no training row is adjacent to a"""
@@ -12,6 +12,9 @@ GUARD = 8
 
 class LeakageError(ValueError):
     """The requested split cannot be made without leaking."""
+
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +28,7 @@ class Split:
         return f"{len(self.train)} train / {len(self.holdout)} holdout ({self.dropped} dropped)"
 
 
-def contiguous_tail[T](rows: Sequence[T], fraction: float = 0.005, *, guard: int = GUARD) -> Split:
+def contiguous_tail(rows: Sequence[T], fraction: float = 0.005, *, guard: int = GUARD) -> Split:
     """Hold out a contiguous block from the end, with a guard band before it."""
     total = len(rows)
     count = max(1, int(total * fraction)) if total else 0
@@ -38,7 +41,7 @@ def contiguous_tail[T](rows: Sequence[T], fraction: float = 0.005, *, guard: int
     return Split(train=list(rows[: cut - guard]), holdout=list(rows[cut:]), dropped=guard)
 
 
-def by_group[T](
+def by_group(
     rows: Sequence[T],
     groups: Sequence[Any],
     fraction: float = 0.1,
@@ -69,7 +72,7 @@ def by_group[T](
     return Split(train=train, holdout=holdout)
 
 
-def stratified[T](rows: Sequence[T], labels: Sequence[Any], fraction: float = 0.2,
+def stratified(rows: Sequence[T], labels: Sequence[Any], fraction: float = 0.2,
                *, seed: int = 0) -> Split:
     """Split keeping each label's proportion. For classification, where by_group on the
     label would put a whole class in the holdout and none of it in training."""

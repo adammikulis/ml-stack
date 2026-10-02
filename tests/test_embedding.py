@@ -36,7 +36,7 @@ def test_every_exported_name_resolves(module):
 
 
 def test_importing_them_loads_nothing_outside_the_standard_library():
-    done = subprocess.run([sys.executable, "-c", PROBE], capture_output=True, text=True,
+    done = subprocess.run([sys.executable, "-S", "-c", PROBE], capture_output=True, text=True,
                           env={"PYTHONPATH": str(SRC)}, check=False)
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "[]"
