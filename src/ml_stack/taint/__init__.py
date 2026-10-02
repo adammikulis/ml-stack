@@ -20,7 +20,16 @@ from ml_stack.taint.judge import Finding, judge
 from ml_stack.taint.labels import Label, Labelled, Level, join
 from ml_stack.taint.ledger import SUMMARY_PREFIX, Ledger, ledger_of
 from ml_stack.taint.rail import TaintRail, turn_off
-from ml_stack.taint.sinks import HARD, Arg, Capability, Sink, Sinks, claude_code, ml_stack_tools, sinks_from_mcp
+from ml_stack.taint.sinks import (
+    HARD,
+    Arg,
+    Capability,
+    Sink,
+    Sinks,
+    claude_code,
+    ml_stack_tools,
+    sinks_from_mcp,
+)
 
 __all__ = [
     "HARD",

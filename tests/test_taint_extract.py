@@ -118,7 +118,7 @@ def test_a_quarantined_tool_hands_the_privileged_model_only_validated_values():
     rail = TaintRail(sinks, validated_tools={"read_page": "listing"})
     context = Context(task="deploy what the page describes", tools=[])
     rail.after_tool_call(Call("read_page"), json.dumps(result), context)
-    assert not taint_of(context).contaminated
+    assert not taint_of(context.notes).contaminated
     rail.after_tool_call(Call("web_fetch"), "an unrelated page", context)
     assert isinstance(rail.before_tool_call(Call("deploy", {"model": "quince-2b.gguf"}), context),
                       Proceed)
