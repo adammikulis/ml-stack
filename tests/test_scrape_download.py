@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import zipfile
 
 import pytest
 
@@ -12,7 +14,16 @@ from ml_stack.scrape.download import ACCEPT_CAD, DownloadError, Wanted, as_dict,
 from ml_stack.scrape.polite import Disallowed, Polite
 from tests.web_site import allow_all, serving
 
-PDF = b"%PDF-1.7\n" + b"x" * 5000
+
+def _zip() -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("a.txt", "hello")
+    return out.getvalue()
+
+
+ZIP = _zip()
+PDF = b"%PDF-1.7\n" + b"x" * 5000 + b"\n%%EOF\n"
 STEP = b"ISO-10303-21;\nHEADER;\nENDSEC;\n"
 
 
@@ -74,14 +85,14 @@ def test_a_redirect_to_a_private_host_is_refused(site, tmp_path):
         raise Refused(f"{url} is not public")
     with pytest.raises(Refused):
         download(f"{site.base}/bounce", tmp_path, polite=polite(guard=only_the_site))
-    assert list(tmp_path.iterdir()) == []
+    assert [p for p in tmp_path.iterdir() if p.name != "machine-state"] == []
 
 
 def test_a_bot_wall_served_as_the_pdf_is_rejected(site, tmp_path):
     site.file("/x.pdf", b"<!DOCTYPE html><title>Access denied</title>", "text/html")
     with pytest.raises(DownloadError, match="is not one of application/pdf"):
         download(f"{site.base}/x.pdf", tmp_path, polite=polite())
-    assert list(tmp_path.iterdir()) == []
+    assert [p for p in tmp_path.iterdir() if p.name != "machine-state"] == []
 
 
 def test_a_wrong_magic_under_the_right_type_is_rejected(site, tmp_path):
@@ -101,12 +112,12 @@ def test_a_declared_length_over_the_limit_is_refused_before_the_body(site, tmp_p
     site.file("/big.pdf", PDF, "application/pdf")
     with pytest.raises(DownloadError, match="over the 1000"):
         download(f"{site.base}/big.pdf", tmp_path, wanted=Wanted(max_bytes=1000), polite=polite())
-    assert list(tmp_path.iterdir()) == []
+    assert [p for p in tmp_path.iterdir() if p.name != "machine-state"] == []
 
 
 def test_step_and_zip_are_accepted_when_asked_for(site, tmp_path):
     site.file("/m.step", STEP, "application/octet-stream")
-    site.file("/m.zip", b"PK\x03\x04rest", "application/zip")
+    site.file("/m.zip", ZIP, "application/zip")
     assert download(f"{site.base}/m.step", tmp_path, wanted=Wanted(accept=ACCEPT_CAD), polite=polite()).size
     assert download(f"{site.base}/m.zip", tmp_path, wanted=Wanted(accept=ACCEPT_CAD), polite=polite()).size
     with pytest.raises(DownloadError):

@@ -18,6 +18,8 @@ import pytest
 
 from ml_stack.fleet import autostart, updates
 
+pytestmark = pytest.mark.usefixtures("loopback_net")
+
 
 class FakeGit:
     """A git that answers from a script, and remembers what it was asked.
@@ -353,9 +355,14 @@ class TestWhatIsFetchedAndFrom:
     def test_a_download_that_does_not_match_its_digest_is_discarded(self, tmp_path):
         import hashlib
         import http.server
+        import io
         import threading
+        import zipfile
 
-        body = b"payload"
+        made = io.BytesIO()
+        with zipfile.ZipFile(made, "w") as archive:
+            archive.writestr("payload.txt", "payload")
+        body = made.getvalue()
 
         class Serves(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
@@ -376,6 +383,7 @@ class TestWhatIsFetchedAndFrom:
             good = {"name": "app.zip", "browser_download_url": url, "size": len(body),
                     "digest": "sha256:" + hashlib.sha256(body).hexdigest()}
             assert updates.download(good, tmp_path / "ok").read_bytes() == body
+            assert (tmp_path / "ok" / "app.zip.provenance.json").is_file()
             bad = {**good, "digest": "sha256:" + "0" * 64}
             with pytest.raises(updates.UpdateError, match="does not match"):
                 updates.download(bad, tmp_path / "bad")

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from keyring.backend import KeyringBackend
+from keyring.compat import properties
 from keyring.errors import PasswordDeleteError
 
 from ml_stack.fleet import tls
@@ -66,7 +67,13 @@ class FileKeyring(KeyringBackend):
     ``ML_STACK_TEST_KEYRING``: stands in for the Keychain so tests never touch it, and lets
     separate processes share one keystore."""
 
-    priority = 5
+    @properties.classproperty
+    def priority(cls) -> float:
+        """Not a candidate while no test names a file: keyring's chainer lists every backend
+        class it has seen, and an unset variable must not make this one answer for the others."""
+        if "ML_STACK_TEST_KEYRING" not in os.environ:
+            return 0  # the chainer keeps only backends above zero
+        return 5
 
     @staticmethod
     def _file() -> Path:

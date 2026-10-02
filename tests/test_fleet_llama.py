@@ -14,6 +14,8 @@ import pytest
 from ml_stack.fleet import llama
 from ml_stack.http import Server
 
+pytestmark = pytest.mark.usefixtures("loopback_net")
+
 
 def free_port() -> int:
     with socket.socket() as s:

@@ -98,7 +98,7 @@ class TestSources:
         with pytest.raises(ModelError):
             resolve(bad)
 
-    def test_a_repository_alone_is_answered_with_its_q4_build(self, monkeypatch):
+    def test_a_repository_alone_is_answered_with_its_q4_build(self, monkeypatch, loopback_net):
         listing = {"siblings": [{"rfilename": n} for n in (
             "README.md", "m-q8_0.gguf", "m-q4_k_m.gguf", "mmproj-f16.gguf",
             "m-q4_k_m-00001-of-00002.gguf")]}
@@ -106,7 +106,7 @@ class TestSources:
             monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
             assert resolve("hf:owner/repo").endswith("/owner/repo/resolve/main/m-q4_k_m.gguf?download=true")
 
-    def test_a_repository_the_hub_does_not_know_is_refused(self, monkeypatch):
+    def test_a_repository_the_hub_does_not_know_is_refused(self, monkeypatch, loopback_net):
         with threaded_server(handler_replying(404, {"error": "not found"})) as base:
             monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
             with pytest.raises(ModelError, match="could not read hf:owner/repo"):

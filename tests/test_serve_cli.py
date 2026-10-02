@@ -459,28 +459,23 @@ def test_a_draft_is_passed_through_and_auto_asks_the_one_chooser(monkeypatch, tm
     assert "no head shipped" in capsys.readouterr().err
 
 
-def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, tmp_path, capsys):
+def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, tmp_path, capsys,
+                                                                  request):
     """`up --draft auto` on a mainline binary serves no head whose README names a fork, and
     prints the chooser's reason with the README's own sentence under it. Mutation: pass
     `borrows=True` in `cmd_up` -- the head is served and the load fails at the far end."""
-    import huggingface_hub
-
     import ml_stack.hub as hub
     from ml_stack.serve import cli, ops
+    from ml_stack.testing.fakehub import FakeHub
 
     hub._DRAFT_NOTES.clear()
     shelves = {"maker/flash-GGUF": [("flash-Q4.gguf", 4_000_000_000),
                                     ("MTP/mtp-flash-shared-Q8_0.gguf", 2_600_000_000)]}
     monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves.get(repo, []))
-    readme = tmp_path / "MTP-README.md"
-    readme.write_text("These do not work on mainline ggml-org/llama.cpp yet.")
-
-    def fake_download(repo, filename, **kw):
-        if filename == "MTP/README.md":
-            return str(readme)
-        raise OSError("no readme")
-
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+    served = FakeHub({"maker/flash-GGUF": {
+        "MTP/README.md": b"These do not work on mainline ggml-org/llama.cpp yet."}})
+    request.addfinalizer(served.close)
+    served.point(monkeypatch)
     preflight = FakePreflight()
     monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
     monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
@@ -796,20 +791,16 @@ class TestBuildFlag:
 
 
 class TestModelsFetch:
-    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys, tmp_path):
-        import huggingface_hub
+    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys):
+        import struct
 
         import ml_stack.hub as hub
+        from ml_stack.testing.fakehub import fake_hub
 
-        monkeypatch.setattr(hub, "files", lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000)])
-
-        def fake_download(repo_id, filename, **kw):
-            target = tmp_path / filename
-            target.write_bytes(b"x" * 10)
-            return str(target)
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-        assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
+        body = b"GGUF" + struct.pack("<IQQ", 3, 0, 0) + b"\0" * 40
+        with fake_hub({"maker/thing-GGUF": {"thing-Q4_K_M.gguf": body}}) as server:
+            server.point(monkeypatch)
+            assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
         assert "thing-Q4_K_M.gguf" in capsys.readouterr().out
 
 

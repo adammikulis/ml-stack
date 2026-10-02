@@ -1,5 +1,5 @@
 {
-  "ad-hoc-fakes": 67,
+  "ad-hoc-fakes": 60,
   "argument-parsers": 26,
   "atomic-writes": 0,
   "broad-excepts": 167,
@@ -25,7 +25,7 @@
   "urlopen-calls": 2,
   "wide-signatures": 33,
   "floors-only-rise": {
-    "tests-collected": 5991
+    "tests-collected": 6587
   },
   "ratchet": {
     "date": "2026-09-18",

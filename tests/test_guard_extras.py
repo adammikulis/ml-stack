@@ -88,8 +88,7 @@ def classifier(_real_home):
     pytest.importorskip("tokenizers")
     from ml_stack.guard import classifier as module
 
-    hub = _real_home.state.parent / ".cache" / "huggingface" / "hub"
-    folder = module.cached(str(hub))
+    folder = module.cached(_real_home.cache / "guard" / "classifier" / module.MODEL.replace("/", "--"))
     if folder is None or not (folder / "model.onnx").exists():
         pytest.skip("the injection model is not fetched: python -c 'from ml_stack.guard.classifier import fetch; fetch()'")
     return module.InjectionClassifierRail(folder)

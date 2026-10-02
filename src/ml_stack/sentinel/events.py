@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
@@ -17,6 +17,7 @@ from ml_stack.files import promote
 from ml_stack.lock import only_one
 from ml_stack.sentinel.redaction import redact_value
 from ml_stack.sentinel.sealed import SealedFile
+from ml_stack.subscribers import Subscribers
 
 __all__ = ["Bus", "Event", "EventLog", "Severity", "Verified"]
 
@@ -259,27 +260,15 @@ class EventLog:
         return 0
 
 
-class Bus:
+class Bus(Subscribers):
     """Fans an event out to the log and to subscribers. A subscriber that raises is
     logged and does not stop the others."""
 
     def __init__(self, log: EventLog | None = None, *, recent: int = 2000) -> None:
+        super().__init__()
         self.log = log
-        self._subscribers: list[Callable[[Event], None]] = []
         self._recent: list[Event] = []
         self._most = recent
-        self._lock = threading.Lock()
-
-    def subscribe(self, fn: Callable[[Event], None]) -> Callable[[], None]:
-        """Call ``fn`` with every event from now on; returns the call that unsubscribes."""
-        with self._lock:
-            self._subscribers.append(fn)
-
-        def stop() -> None:
-            with self._lock:
-                if fn in self._subscribers:
-                    self._subscribers.remove(fn)
-        return stop
 
     def emit(self, event: Event) -> Event:
         """Record ``event`` and hand it to every subscriber."""

@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import home, hub
 from ml_stack.hub import room
 from ml_stack.hub.modelfile import safetensors_header
 from ml_stack.serve.backend import (
@@ -52,15 +52,7 @@ def located(model: str | Path) -> Path | None:
     where = home.expand(text)
     if where.is_dir():
         return where
-    try:
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
-    except ImportError:
-        return None
-    try:
-        return Path(snapshot_download(text, local_files_only=True))
-    except (LocalEntryNotFoundError, ValueError, OSError):
-        return None
+    return hub.held_snapshot(text)
 
 
 def drafter_of(draft: str | Path | None) -> str:

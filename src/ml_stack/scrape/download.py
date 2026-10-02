@@ -18,7 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files
+from ml_stack import files, net
+from ml_stack.httpguard import TooLarge
 from ml_stack.scrape.polite import Polite
 
 MOST_BYTES = 64 * 1024 * 1024
@@ -146,30 +147,35 @@ def download(url: str, dest_dir: str | Path, wanted: Wanted | None = None,
     if not wanted.refresh and (held := _cached(dest, url)) is not None:
         return held
     polite = polite or Polite()
-    with polite.fetch(url, accept=", ".join(accept) + ", */*;q=0.1") as reply:
-        served = str(reply.headers.get("Content-Type", ""))
-        size = int(reply.headers.get("Content-Length") or 0)
-        if size > max_bytes:
-            raise DownloadError(f"{url}: {size} bytes is over the {max_bytes} limit")
-        final = str(reply.geturl())
-        name = _name(final, str(reply.headers.get("Content-Disposition", "")))
-        target = dest / f"{_slot(url)}_{name}"
-        digest, total = hashlib.sha256(), 0
-        with files.writing(target) as tmp, tmp.open("wb") as out:
-            first = reply.read(CHUNK)
-            if not kind_of(served, first, accept):
-                raise DownloadError(
-                    f"{url}: {served or 'no content type'} starting {first[:12]!r} is not "
-                    f"one of {', '.join(accept)}")
-            block = first
-            while block:
-                total += len(block)
-                if total > max_bytes:
-                    raise DownloadError(f"{url}: over the {max_bytes} byte limit")
-                digest.update(block)
-                out.write(block)
-                block = reply.read(CHUNK)
-    got = Download(path=target, url=url, final_url=final, sha256=digest.hexdigest(),
+    target = dest / f"{_slot(url)}_{_name(url, '')}"
+    seen: dict[str, str] = {}
+
+    def verify(path: Path, headers: dict[str, str]) -> str:
+        with path.open("rb") as handle:
+            first = handle.read(CHUNK)
+        seen["served"] = headers.get("content-type", "")
+        if kind_of(seen["served"], first, accept):
+            return ""
+        return (f"{seen['served'] or 'no content type'} starting {first[:12]!r} is not "
+                f"one of {', '.join(accept)}")
+
+    def named(final: str, headers: dict[str, str]) -> str:
+        return f"{_slot(url)}_{_name(final, headers.get('content-disposition', ''))}"
+
+    want = net.Want(max_bytes=max_bytes, admit=False, purpose="web download", verify=verify,
+                    rename=named,
+                    headers={"User-Agent": polite.user_agent,
+                             "Accept": ", ".join(accept) + ", */*;q=0.1"})
+    with polite.turn(url):
+        try:
+            made = net.download(url, target, want)
+        except TooLarge as exc:
+            raise DownloadError(f"{url}: over the {max_bytes} byte limit ({exc})") from exc
+        except net.Blocked as exc:
+            raise DownloadError(str(exc)) from exc
+    served, final, digest, total = seen.get("served", ""), made.final_url, made.sha256, made.size
+    target = Path(made.path)
+    got = Download(path=target, url=url, final_url=final, sha256=digest,
                    content_type=served.split(";")[0].strip().lower(), size=total,
                    fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
                    robots=polite.note(final), licence=wanted.licence)

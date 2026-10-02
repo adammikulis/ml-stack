@@ -85,7 +85,9 @@ from ml_stack.hub.transfer import (
     NotEnoughSpace,
     NotFound,
     Progress,
+    held_snapshot,
     pull,
+    snapshot,
 )
 
 __all__ = [
@@ -135,6 +137,7 @@ __all__ = [
     "free_memory",
     "head_choice",
     "heads_for",
+    "held_snapshot",
     "hub_cache",
     "in_gguf",
     "installed_find",
@@ -154,6 +157,7 @@ __all__ = [
     "room",
     "search",
     "shards_beside",
+    "snapshot",
     "spec_for",
     "standard",
     "total_memory",

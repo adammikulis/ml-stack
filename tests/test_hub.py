@@ -1,27 +1,54 @@
 """What a model card asks for, read out of prose -- and out of the file itself."""
+import struct
+from contextlib import contextmanager
 from typing import ClassVar
 
 import pytest
 
 from ml_stack.hub import advice
+from ml_stack.testing.fakehub import fake_hub
 
 
 @pytest.fixture(autouse=True)
-def _no_network_for_draft_note(monkeypatch):
-    """``draft_for``'s default ``borrows=False`` path asks ``draft_note`` whether a found
-    head's own README warns about needing a fork, which would otherwise reach the real Hub
-    in every test that finds one. A test that cares about ``draft_note`` itself overrides
-    this locally with its own fake."""
-    import huggingface_hub
-
+def _fresh_draft_notes():
+    """The per-process cache of README notes starts empty in every test; the pipeline
+    refuses every host unless a test serves a hub of its own."""
     import ml_stack.hub as hub
 
-    def refuse(*a, **k):
-        raise OSError("no network in tests")
-
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download", refuse)
-    hub._DRAFT_NOTES.clear()   # the cache is process-wide; each test starts with none
+    hub._DRAFT_NOTES.clear()
     yield
+
+
+@contextmanager
+def readmes(monkeypatch, files: dict[str, dict[str, str]]):
+    """A local Hub serving ``{repo: {path: text}}``, which ``HF_ENDPOINT`` points at."""
+    repos = {repo: {path: text.encode() for path, text in held.items()}
+             for repo, held in files.items()}
+    with fake_hub(repos) as server:
+        server.point(monkeypatch)
+        yield server
+
+
+_OPEN: list = []
+
+
+def held_readmes(monkeypatch, files):
+    """`readmes`, closed when the test ends."""
+    manager = readmes(monkeypatch, files)
+    server = manager.__enter__()
+    _OPEN.append(manager)
+    return server
+
+
+@pytest.fixture(autouse=True)
+def _close_hubs():
+    yield
+    while _OPEN:
+        _OPEN.pop().__exit__(None, None, None)
+
+
+def gguf(size: int = 64) -> bytes:
+    return b"GGUF" + struct.pack("<IQQ", 3, 0, 0) + b"\0" * size
 
 
 def test_advice_reads_the_settings_a_card_names():
@@ -343,22 +370,12 @@ class TestDraftForBorrows:
     }
 
     def _repo(self, monkeypatch, tmp_path, *, note: str = ""):
-        import huggingface_hub
-
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
         monkeypatch.setattr(hub, "files", lambda repo, **kw: self.SHELVES.get(repo, []))
-
-        readme = tmp_path / "MTP-README.md"
-        readme.write_text(note)
-
-        def fake_download(repo, filename, **kw):
-            if note and filename == "MTP/README.md":
-                return str(readme)
-            raise OSError("no readme")
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        held = {"maker/thing-GGUF": {"MTP/README.md": note} if note else {"other": "x"}}
+        held_readmes(monkeypatch, held)
         return hub
 
     def test_a_head_whose_readme_warns_is_withheld_by_default(self, monkeypatch, tmp_path):
@@ -385,68 +402,44 @@ class TestDraftForBorrows:
 
 
 class TestFetch:
-    """Downloading an `hf:` reference into the cache without serving it -- what a preflight
-    calls so a download never happens inside a benchmark's timed window."""
+    """Downloading an `hf:` reference into ml-stack's store without serving it -- what a
+    preflight calls so a download never happens inside a benchmark's timed window."""
 
-    def test_every_shard_of_the_named_build_is_downloaded(self, tmp_path, monkeypatch):
-        import huggingface_hub
-
+    def test_every_shard_of_the_named_build_is_downloaded(self, monkeypatch):
         import ml_stack.hub as hub
 
-        shelves = [
-            ("thing-00001-of-00002.gguf", 4_000_000_000),
-            ("thing-00002-of-00002.gguf", 3_000_000_000),
-            ("mmproj-F32.gguf", 900_000_000),      # a companion, not this build
-        ]
-        monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves)
+        held = {"maker/thing-GGUF": {"thing-00001-of-00002.gguf": gguf(40),
+                                     "thing-00002-of-00002.gguf": gguf(30),
+                                     "mmproj-F32.gguf": gguf(9)}}
+        with fake_hub({r: dict(f) for r, f in held.items()}) as server:
+            server.point(monkeypatch)
+            got = hub.fetch("hf:maker/thing-GGUF/thing-00001-of-00002.gguf")
+        assert sorted(server.downloads) == [
+            "maker/thing-GGUF/thing-00001-of-00002.gguf",
+            "maker/thing-GGUF/thing-00002-of-00002.gguf"]
+        assert got.name == "thing-00001-of-00002.gguf" and got.is_file()
+        assert got.with_name("thing-00002-of-00002.gguf").is_file()
+        assert not got.with_name("mmproj-F32.gguf").exists()
 
-        downloaded: list[str] = []
-
-        def fake_download(repo_id, filename, **kw):
-            downloaded.append(filename)
-            target = tmp_path / filename
-            target.write_bytes(b"x")
-            return str(target)
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-
-        got = hub.fetch("hf:maker/thing-GGUF/thing-00001-of-00002.gguf")
-        assert downloaded == ["thing-00001-of-00002.gguf", "thing-00002-of-00002.gguf"]
-        assert got.name == "thing-00001-of-00002.gguf"
-
-    def test_an_unsharded_reference_downloads_just_the_one_file(self, tmp_path, monkeypatch):
-        import huggingface_hub
-
+    def test_an_unsharded_reference_downloads_just_the_one_file(self, monkeypatch):
         import ml_stack.hub as hub
 
-        monkeypatch.setattr(hub, "files",
-                            lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000_000_000)])
-        downloaded: list[str] = []
-
-        def fake_download(repo_id, filename, **kw):
-            downloaded.append(filename)
-            target = tmp_path / filename
-            target.write_bytes(b"x")
-            return str(target)
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-
-        got = hub.fetch("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
-        assert downloaded == ["thing-Q4_K_M.gguf"]
-        assert got.name == "thing-Q4_K_M.gguf"
+        with fake_hub({"maker/thing-GGUF": {"thing-Q4_K_M.gguf": gguf(40),
+                                            "thing-Q8_0.gguf": gguf(50)}}) as server:
+            server.point(monkeypatch)
+            got = hub.fetch("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
+        assert list(server.downloads) == ["maker/thing-GGUF/thing-Q4_K_M.gguf"]
+        assert got.name == "thing-Q4_K_M.gguf" and got.read_bytes() == gguf(40)
 
     def test_a_file_the_repo_does_not_hold_names_what_it_does(self, monkeypatch):
-        import huggingface_hub
-
         import ml_stack.hub as hub
 
-        monkeypatch.setattr(hub, "files", lambda repo, **kw: [
-            ("thing-UD-Q4_K_XL.gguf", 4), ("mmproj-F16.gguf", 1),
-            ("MTP/mtp-thing-Q8_0.gguf", 1)])
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download",
-                            lambda *a, **kw: pytest.fail("downloaded a file the repo lacks"))
-        with pytest.raises(ValueError) as caught:
-            hub.fetch("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
+        with fake_hub({"maker/thing-GGUF": {"thing-UD-Q4_K_XL.gguf": gguf(4),
+                                            "mmproj-F16.gguf": gguf(1)}}) as server:
+            server.point(monkeypatch)
+            with pytest.raises(ValueError) as caught:
+                hub.fetch("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
+        assert server.downloads == {}
         assert str(caught.value) == ("maker/thing-GGUF has no thing-Q4_K_M.gguf; "
                                      "it holds thing-UD-Q4_K_XL.gguf")
 
@@ -545,71 +538,43 @@ class TestDraftNote:
     heads for Qwen3.8-Flash-Next fail to load on mainline with a tensor error, and their
     README says why in one line."""
 
-    def test_reads_the_sentence_naming_mainline(self, monkeypatch, tmp_path):
-        import huggingface_hub
-
+    def test_reads_the_sentence_naming_mainline(self, monkeypatch):
         import ml_stack.hub as hub
 
-        hub._DRAFT_NOTES.clear()
-        readme = tmp_path / "MTP-README.md"
-        readme.write_text(
-            "# MTP heads\n\nThese heads are trained alongside the model. "
-            "These do not work on mainline ggml-org/llama.cpp yet. "
-            "Use unslothai/llama.cpp instead.\n")
+        text = ("# MTP heads\n\nThese heads are trained alongside the model. "
+                "These do not work on mainline ggml-org/llama.cpp yet. "
+                "Use unslothai/llama.cpp instead.\n")
+        with readmes(monkeypatch, {"maker/thing-GGUF": {"MTP/README.md": text}}) as server:
+            note = hub.draft_note("maker/thing-GGUF")
+            assert "mainline" in note.lower()
+            asked = [p for _m, p, _r, _a in server.hub_seen if p.endswith("README.md")]
+            assert asked == ["/maker/thing-GGUF/resolve/main/MTP/README.md"]
 
-        seen: list[tuple[str, str]] = []
+            # cached -- a second call does not fetch again
+            assert hub.draft_note("maker/thing-GGUF") == note
+            assert len([p for _m, p, _r, _a in server.hub_seen if p.endswith("README.md")]) == 1
 
-        def fake_download(repo, filename, **kw):
-            seen.append((repo, filename))
-            if filename == "MTP/README.md":
-                return str(readme)
-            raise OSError("no such file in this repo")
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-        note = hub.draft_note("maker/thing-GGUF")
-        assert "mainline" in note.lower()
-        assert seen == [("maker/thing-GGUF", "MTP/README.md")]
-
-        # cached -- a second call does not fetch again
-        assert hub.draft_note("maker/thing-GGUF") == note
-        assert seen == [("maker/thing-GGUF", "MTP/README.md")]
-
-    def test_falls_back_to_the_plain_readme_when_there_is_no_mtp_one(
-            self, monkeypatch, tmp_path):
-        import huggingface_hub
-
+    def test_falls_back_to_the_plain_readme_when_there_is_no_mtp_one(self, monkeypatch):
         import ml_stack.hub as hub
 
-        hub._DRAFT_NOTES.clear()
-        readme = tmp_path / "README.md"
-        readme.write_text("This repository requires the unsloth fork of llama.cpp.\n")
+        text = "This repository requires the unsloth fork of llama.cpp.\n"
+        with readmes(monkeypatch, {"maker/plain-GGUF": {"README.md": text}}):
+            assert "requires" in hub.draft_note("maker/plain-GGUF").lower()
 
-        def fake_download(repo, filename, **kw):
-            if filename == "README.md":
-                return str(readme)
-            raise OSError("no MTP readme here")
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-        note = hub.draft_note("maker/plain-GGUF")
-        assert "requires" in note.lower()
-
-    def test_a_card_with_nothing_to_say_about_either_returns_empty(
-            self, monkeypatch, tmp_path):
-        import huggingface_hub
-
+    def test_a_card_with_nothing_to_say_about_either_returns_empty(self, monkeypatch):
         import ml_stack.hub as hub
 
-        hub._DRAFT_NOTES.clear()
-        readme = tmp_path / "README.md"
-        readme.write_text("Just an ordinary model card, nothing special here.\n")
+        text = "Just an ordinary model card, nothing special here.\n"
+        with readmes(monkeypatch, {"maker/quiet-GGUF": {"README.md": text}}):
+            assert hub.draft_note("maker/quiet-GGUF") == ""
 
-        def fake_download(repo, filename, **kw):
-            if filename == "README.md":
-                return str(readme)
-            raise OSError("no MTP readme here")
+    def test_invisible_characters_in_a_card_are_stripped_before_it_is_read(self, monkeypatch):
+        import ml_stack.hub as hub
 
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-        assert hub.draft_note("maker/quiet-GGUF") == ""
+        text = "This requires the fork\u200b of llama.cpp \U000e0041.\n"
+        with readmes(monkeypatch, {"maker/odd-GGUF": {"README.md": text}}):
+            note = hub.draft_note("maker/odd-GGUF")
+        assert note == "This requires the fork of llama.cpp ."
 
 
 class TestChooseHead:
@@ -641,22 +606,13 @@ class TestChooseHead:
     }
 
     def _hub(self, monkeypatch, tmp_path, *, notes: dict[str, str] | None = None):
-        import huggingface_hub
-
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
         monkeypatch.setattr(hub, "files", lambda repo, **kw: self.SHELVES.get(repo, []))
-        notes = notes or {}
-
-        def fake_download(repo, filename, **kw):
-            if filename == "MTP/README.md" and repo in notes:
-                readme = tmp_path / f"{repo.replace('/', '--')}-README.md"
-                readme.write_text(notes[repo])
-                return str(readme)
-            raise OSError("no readme")
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        held = {repo: {"MTP/README.md": text} for repo, text in (notes or {}).items()}
+        held.setdefault("maker/unrelated", {"x": "x"})
+        held_readmes(monkeypatch, held)
         return hub
 
     @staticmethod
@@ -780,8 +736,6 @@ class TestChooseHead:
     def test_a_listing_that_cannot_be_fetched_is_answered_from_the_disk(
             self, monkeypatch, tmp_path):
         """Offline, the head already downloaded beside the weights is still the head."""
-        import huggingface_hub
-
         import ml_stack.hub as hub
 
         hub._DRAFT_NOTES.clear()
@@ -790,7 +744,6 @@ class TestChooseHead:
             raise OSError("no network")
 
         monkeypatch.setattr(hub, "files", offline)
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", offline)
         snapshot = tmp_path / "hub" / "models--maker--gem-GGUF" / "snapshots" / "abc"
         snapshot.mkdir(parents=True)
         weights = snapshot / "gem-Q4_K_M.gguf"

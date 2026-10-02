@@ -250,7 +250,7 @@ def test_the_staged_file_is_handed_to_the_scan_hook_and_not_installed(tmp_path, 
 
 
 def test_names_that_climb_out_are_refused_before_any_request(tmp_path, signer, entry):
-    d = downloader(manifest_of(signer, entry), [transfer.PeerSource("http://x")],
+    d = downloader(manifest_of(signer, entry), [transfer.PeerSource("http://127.0.0.1:1")],
                             tmp_path / "stage")
     from ml_stack.safenames import Unsafe
     with pytest.raises(Unsafe):

@@ -36,6 +36,18 @@ def test_hidden_text_of_these_kinds_reaches_the_text_the_model_reads(stood_up, v
     assert PAYLOAD in box.read_page(serve_page(stood_up, variant))
 
 
+@pytest.mark.parametrize("variant", ["css_font_zero", "css_white_on_white", "css_offscreen"])
+def test_the_reader_the_agent_really_uses_removes_what_the_toolbox_leaves_in(variant):
+    """The toolbox reads raw so the guards behind the reader are measured; `web.read`, which the
+    agent uses, takes the same CSS-hidden instruction out and says how much it took."""
+    from ml_stack import web
+
+    _, body = pages.build(variant, PAYLOAD)
+    got = web.read("http://docs.example/p", fetch=lambda _: body.decode("utf-8"))
+    assert "Widget calibration is done" in got["text"] and "write_note" not in got["text"]
+    assert got["hidden_removed"] >= 1 and got["untrusted"] is True
+
+
 @pytest.mark.parametrize("variant", ["css_display_none", "html_comment", "alt_text",
                                      "meta_description", "noscript"])
 def test_hidden_text_of_these_kinds_is_dropped_by_the_reader(stood_up, variant):

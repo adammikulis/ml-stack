@@ -570,7 +570,8 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
 
 
 def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_path):
-    """Mutation: drop resolved_model() from start, or return the spec unchanged."""
+    """Mutation: drop resolved_model() from start, or return the spec unchanged. A repository
+    alone is pulled too, so llama-server is never given a reference to download."""
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
     binary.chmod(0o755)
@@ -586,9 +587,14 @@ def test_a_model_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     argv = be.LlamaServerBackend(binary=binary).command(resolved)
     assert argv[argv.index("-m") + 1] == str(weights)
     assert "--hf-repo" not in argv
+    pulled = []
+    monkeypatch.setattr("ml_stack.hub.pull", lambda ref: pulled.append(ref) or weights)
     repo_only = be.ServerSpec(model="hf:owner/thing-GGUF")
-    assert be.LlamaServerBackend.resolved_model(repo_only) == repo_only
+    served = be.LlamaServerBackend.resolved_model(repo_only)
+    assert pulled == ["hf:owner/thing-GGUF"] and served.model == str(weights)
     assert asked == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf"]
+    argv = be.LlamaServerBackend(binary=binary).command(served)
+    assert "--hf-repo" not in argv and "-hf" not in argv
 
 
 def test_start_fetches_the_model_before_preflight(monkeypatch, tmp_path):
@@ -681,3 +687,35 @@ class TestDraftCacheType:
                           cache_type_k="q8_0", cache_type_v="q8_0",
                           spec_draft_type_k="q4_0", spec_draft_type_v="q4_0")
         assert wrong_cache_types(spec, fake_binary(tmp_path, help_text=HELP), values=values_of) == []
+
+
+def test_start_fetches_the_projector_and_the_server_gets_a_path(monkeypatch, tmp_path):
+    """Mutation: drop the mmproj fetch from start -- llama-server is given a URL to download."""
+    from ml_stack.serve import backend as be
+
+    weights = tmp_path / "thing-Q4_K_M.gguf"
+    weights.write_bytes(b"GGUF")
+    projector = tmp_path / "mmproj-thing-F16.gguf"
+    projector.write_bytes(b"GGUF")
+    fetched = []
+    monkeypatch.setattr("ml_stack.hub.fetch",
+                        lambda ref: fetched.append(ref) or (projector if "mmproj" in ref else weights))
+    monkeypatch.setattr(be, "claim_port", lambda spec, lease: None)
+    seen = []
+
+    def stop(self, spec):
+        seen.append(spec)
+        raise be.ServerFailed("stop here")
+
+    monkeypatch.setattr(be.LlamaServerBackend, "command", stop)
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
+    with pytest.raises(be.ServerFailed, match="stop here"):
+        be.LlamaServerBackend(binary=binary).start(
+            be.ServerSpec(model="hf:owner/thing-GGUF/thing-Q4_K_M.gguf",
+                          mmproj="hf:owner/thing-GGUF/mmproj-thing-F16.gguf"),
+            lease=None, check_flags=False)
+    assert seen[0].mmproj == str(projector) and seen[0].model == str(weights)
+    assert fetched == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf",
+                       "hf:owner/thing-GGUF/mmproj-thing-F16.gguf"]

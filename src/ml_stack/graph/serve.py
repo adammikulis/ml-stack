@@ -100,7 +100,8 @@ from ml_stack.graph.thread import (
 from ml_stack.http import Server
 from ml_stack.log import say, warn
 
-__all__ = ["EXPORT_TYPES", "LIVE", "PORT", "AskRoutes", "Handler", "bind", "exported", "main"]
+__all__ = ["EXPORT_TYPES", "LIVE", "PORT", "AskRoutes", "Handler", "ReplyHandler", "bind", "exported",
+           "main"]
 
 LIVE = b"<script>window.GRAPH_LIVE=1</script>"
 """What goes ahead of a served page and not a published one: the page asks a server it
@@ -116,6 +117,39 @@ PORT = 8794
 
 # what an export is sent as, by suffix; anything else is bytes
 EXPORT_TYPES = {".json": "application/json", ".html": "text/html; charset=utf-8"}
+
+
+class ReplyHandler(BaseHTTPRequestHandler):
+    """A handler whose every route is one function: a subclass says what a request means in
+    ``answer`` and returns a reply (``status``, ``body``, ``content_type``, ``headers``, and
+    ``stream`` with its ``length`` for a file), which is written once, with ``no-store`` and
+    ``nosniff``. The onboarding servers are this; the log is silent."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+    def answer(self) -> Any:
+        raise NotImplementedError("a subclass says what a request means")
+
+    def _serve(self) -> None:
+        reply = self.answer()
+        self.send_response(reply.status)
+        self.send_header("Content-Type", reply.content_type)
+        self.send_header("Content-Length", str(reply.length if reply.stream else len(reply.body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for key_, value in reply.headers.items():
+            self.send_header(key_, value)
+        self.end_headers()
+        if reply.stream is not None:
+            for piece in reply.stream:
+                self.wfile.write(piece)
+        else:
+            self.wfile.write(reply.body)
+
+    do_GET = do_POST = _serve
 
 
 class AskRoutes(MetricsRoutes):

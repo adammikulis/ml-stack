@@ -31,6 +31,7 @@ from ml_stack.fleet.framing import Malformed
 
 from . import pake
 from .events import BUS, Bus
+from .lan import require_local
 from .requests import Refused, Request, Requests, State
 from .web import Call, Listener, Reply, json_reply
 
@@ -236,6 +237,10 @@ class PairingClient:
 
     def _call(self, method: str, path: str, body: dict[str, Any] | None = None
               ) -> tuple[int, dict[str, Any]]:
+        try:
+            require_local(self.host, self.port)
+        except OSError as exc:
+            raise PairError(str(exc)) from None
         conn = http.client.HTTPSConnection(self.host, self.port, context=unverified_context(),
                                            timeout=self.timeout)
         try:

@@ -1,22 +1,26 @@
 """A prompt-injection classifier run on this machine through onnxruntime.
 
-Needs the ``guard-model`` extra (onnxruntime, tokenizers, numpy, huggingface_hub) and the
+Needs the ``guard-model`` extra (onnxruntime, tokenizers, numpy) and the
 ONNX export of ``protectai/deberta-v3-base-prompt-injection-v2`` (Apache-2.0, 738 MB), which
 :func:`fetch` downloads once; after that nothing here touches the network.
 """
 
 from __future__ import annotations
 
+import os
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home, net
 from ml_stack.guard.untrusted import unfenced
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
+from ml_stack.safenames import safe_filename
 
 __all__ = ["MODEL", "PROSE", "InjectionClassifierRail", "cached", "fetch"]
 
 MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
-FILES = ["onnx/*", "config.json"]
+ENDPOINT = "https://huggingface.co"
 PROSE = frozenset({"speech_transcribe", "web_search", "web_fetch", "WebFetch", "WebSearch"})
 """Sources whose results are free text. The model scores a list, table or JSON of eight or more
 records as an injection (0.95 and up), so it is not run on structured tool output."""
@@ -24,22 +28,42 @@ WINDOW = 128
 STRIDE = 64
 
 
-def fetch(cache_dir: str | None = None) -> Path:
-    """Download the model into the Hugging Face cache and return its folder."""
-    from huggingface_hub import snapshot_download
-
-    return Path(snapshot_download(MODEL, allow_patterns=FILES, cache_dir=cache_dir)) / "onnx"
+def _root(cache_dir: str | Path | None) -> Path:
+    return Path(cache_dir) if cache_dir else home.cache("guard", "classifier", MODEL.replace("/", "--"))
 
 
-def cached(cache_dir: str | None = None) -> Path | None:
+def _wanted(path: str) -> bool:
+    return path == "config.json" or path.startswith("onnx/")
+
+
+def fetch(cache_dir: str | Path | None = None) -> Path:
+    """Download the model through the net pipeline (allow-listed host, the Hub's own size and
+    SHA-256 for each file, format check, scan) and return its folder."""
+    base = (os.environ.get("HF_ENDPOINT") or ENDPOINT).rstrip("/")
+    tree = net.default().json(f"{base}/api/models/{MODEL}/tree/main?recursive=true",
+                              net.Ask(purpose="injection classifier", tries=3))
+    root = _root(cache_dir)
+    for row in tree if isinstance(tree, list) else ():
+        if not isinstance(row, dict) or row.get("type") != "file" or not _wanted(str(row.get("path"))):
+            continue
+        path = str(row["path"])
+        lfs = row.get("lfs") if isinstance(row.get("lfs"), dict) else {}
+        size = int(lfs.get("size") or row.get("size") or 0)
+        want = net.Want(sha256=str(lfs.get("oid") or ""), size=size, max_bytes=size + (1 << 20)
+                        if size else 1 << 30, purpose="injection classifier")
+        final = root.joinpath(*(safe_filename(part) for part in path.split("/")))
+        if not final.is_file():
+            net.download(f"{base}/{MODEL}/resolve/main/{urllib.parse.quote(path)}", final, want)
+    folder = root / "onnx"
+    if not (folder / "model.onnx").is_file():
+        raise FileNotFoundError(f"{MODEL} has no onnx/model.onnx on {base}")
+    return folder
+
+
+def cached(cache_dir: str | Path | None = None) -> Path | None:
     """The folder holding the model if it is already on this machine, else None."""
-    from huggingface_hub import snapshot_download
-
-    try:
-        return Path(snapshot_download(MODEL, allow_patterns=FILES, local_files_only=True,
-                                      cache_dir=cache_dir)) / "onnx"
-    except OSError:
-        return None
+    folder = _root(cache_dir) / "onnx"
+    return folder if (folder / "model.onnx").is_file() else None
 
 
 class InjectionClassifierRail(Base):

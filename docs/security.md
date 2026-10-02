@@ -63,8 +63,12 @@ metadata address at any redirect; a GGUF is parsed by llama.cpp, which is outsid
 No model is loaded with a pickle (`torch.load`, `pickle`, `yaml.load` and `eval` are not used on
 a file anywhere in the package), and `trust_remote_code` is never set.
 
-**A malicious page being scraped or read.** `ml_stack.web.read` refuses non-public addresses
-before it fetches. A redirect inside the browser is not yet re-checked (see "Open").
+**A malicious page being scraped or read.** `ml_stack.web.read` goes through `ml_stack.net`:
+the address is resolved once and connected to, every redirect is re-checked, the body is
+capped, hidden text and invisible characters are removed, and the result is fenced and marked
+untrusted. A URL that only fetched content mentioned is not fetched by itself. The browser
+checks every request it makes and downloads nothing. The remaining gap is a name that changes
+answer between the browser's check and its load (`docs/internet.md`).
 
 **A malicious release asset or archive.** Names are checked, links and devices refused,
 entry count and unpacked size capped, and a release asset must carry a sha256 digest that
@@ -98,15 +102,56 @@ These apply to every consumer of the library without a switch.
   a protocol 1 peer is ignored.
 - `ml_stack.http.open_stream` and `build_request` open only `http` and `https`; messages about
   a URL carry no user, password or secret query parameter.
-- Model downloads and release downloads refuse loopback, private, link-local, metadata,
-  carrier-grade-NAT and multicast addresses at every redirect (an operator names an exception in
-  `ML_STACK_FETCH_ALLOW_HOSTS`), cap size, and check a digest where one exists.
+- Everything fetched from the internet goes through `ml_stack.net` (`docs/internet.md`): a
+  host allow-list with recorded approvals; loopback, private, link-local, metadata,
+  carrier-grade-NAT and multicast addresses refused at every redirect (an operator names an
+  exception in `ML_STACK_FETCH_ALLOW_HOSTS`); no downgrade from HTTPS; size and time caps;
+  a pinned SHA-256 where a manifest lists one, and none to download without one where a digest
+  is required; staging in a private directory; GGUF, safetensors, PDF and archive checks;
+  a virus scan where a scanner exists; provenance beside the file; a file that fails goes to
+  sentinel's quarantine. `tests/test_net_no_bypass.py` fails when another module reaches out.
+- llama-server is never handed an `hf:` reference, so it never downloads anything itself.
 - Archives unpack through `safenames.unpack`; a remote file name goes through
   `safenames.safe_filename`.
 - Child processes (model servers, a peer's job) do not inherit tokens and keys.
 - A credential is read through `ml_stack.credentials`, from a file only its owner can read.
 - State, token and credential files are written atomically with mode `0600`.
 - Server logs are bounded in count, size and age.
+
+## What is exempt from the net scan
+
+`tests/test_net_no_bypass.py` fails for any module outside `ml_stack.net` that imports a network
+library, opens a socket, runs `git`, `curl` or `pip install` against a remote, or calls
+`ml_stack.http`'s request functions. The list of modules it lets through is short and each entry
+carries its reason in the test. Three kinds, none of which can fetch from a public host on its
+own:
+
+- **Model servers a person pointed at.** `client/`, `bench/`, `fleet/*` peers, `serve/*` (a
+  server's slots and props by local port), and the decide backend (`decide/logprob.py`,
+  `decide/router.py`, the server in `ML_STACK_DECIDE_URL`, 127.0.0.1:8080 unless set). These
+  talk to an inference server the person configured; nothing they get back is installed or kept.
+  A configured URL can name a remote host, as it can for `client/`; that is the person's choice
+  and is not the web.
+- **LAN onboarding** (`fleet/onboard/pairing.py`, `fleet/onboard/transfer.py`). A peer's
+  certificate is pinned and never looked up in a trust store, so these cannot use the pipeline's
+  client. What keeps them off the internet is `fleet/onboard/lan.py`: every connection first
+  refuses an address that is public (loopback, private, link-local and carrier-grade NAT pass).
+  A `PeerSource` needs a pinned TLS context, or `http` to this machine only. A test removes the
+  check and watches it fail, and another asserts neither module builds a default-trust client.
+- **The red-team lab** (`redteam/tools.py`, `redteam/scenarios/fleet.py`,
+  `redteam/scenarios/isolation.py`), which only connects to servers it started on 127.0.0.1.
+
+A relative import such as `from .requests import ...` is a sibling module, not the `requests`
+library, and is not flagged. Everything that does reach a public host (the Hub, GitHub, the
+geocoder, pages, `huggingface_hub`) goes through `ml_stack.net`: the decider checkpoint and the
+injection classifier now do too.
+
+## Internet pipeline
+
+`docs/internet.md` lists every path, what protected it, what protects it now and what is
+left. Open in that table: `ddgs` makes its own requests; pip installs unpinned dependencies;
+`lm-eval` fetches datasets; a name that changes answer between the browser's check and its
+load; a well-formed model with poisoned weights or malware no signature knows passes a scan.
 
 ## Findings
 

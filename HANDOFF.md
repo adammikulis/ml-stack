@@ -68,6 +68,41 @@ capability; every line is something that already exists not being what it says.
   command sets it, so `ask` adopts nothing from the CLI. vLLM, SGLang and MLX servers
   started by hand are not found at all, only `llama-server`.
 
+### What still reaches the internet around the pipeline
+
+`docs/internet.md` is the list; each of these is a path in it.
+
+- [ ] **`ddgs` makes its own requests.** `web.ddgs_engine` hands the query to the library, which
+  opens its own connections to the engines, so the address check, the host policy and the size
+  cap do not apply to the search call itself (its results are cleaned and labelled). Replace it
+  with an engine written against `net.default().open`, or make SearXNG the default.
+- [ ] **pip installs unpinned dependencies.** `fleet/environment.py:Environment.pip` and
+  `fleet/updates.py:pip_install` run `pip install`, which talks to the index with pip's own
+  transport and checks no hashes. Download wheels through the pipeline into staging and install
+  from there with `--no-index --require-hashes`, or state the index and the packages and pin
+  them.
+- [ ] **`ml-stack-bench standard` lets lm-eval fetch datasets.** `datasets` downloads through
+  `huggingface_hub`'s transport. Fetch the datasets a task names through `hub.snapshot` and run
+  the harness with `HF_HUB_OFFLINE=1`.
+- [ ] **The browser resolves names itself.** `net/browserguard.py` checks the address of every
+  request, then Chromium resolves the name again to connect, so a name whose answer changes in
+  between reaches a private address. Pin with `--host-resolver-rules` from the checked answer,
+  or send the browser through a local proxy that connects to the pinned address.
+- [ ] **Windows Defender and Linux ClamAV are untested here.** The Defender command line and
+  exit codes are tested against a stand-in script; ClamAV was exercised on macOS only. Run
+  `tests/test_net_scan.py` on a Windows machine with Defender and on Linux with `clamav`
+  installed, and keep the result in `docs/internet.md`.
+- [ ] **The hash-reputation lookup has met no real service.** It is tested against a local
+  server shaped like VirusTotal's answer. Run it once with a key
+  (`ML_STACK_NET_HASH_LOOKUP=1`, `ml-stack-credentials set VIRUSTOTAL_API_KEY`, then approve
+  `www.virustotal.com`) and compare the fields.
+- [ ] **A `/metrics` address in the fleet view is fetched from this machine.** `fleet/ui.py:_scraped`
+  opens whatever a signed-in person typed, loopback and LAN included. Limit it to loopback and
+  the fleet's peers, or send it through `net`.
+- [ ] **Branch tracking installs what it pulls.** `fleet/updates.py:track_once` runs
+  `pip install -e .` after a fast-forward of a branch a person chose to follow. Show the diff
+  of the packaging files to the person, or install only from a tag with a digest.
+
 ### Getting it onto a machine that is not this one
 
 - [ ] **`ml-stack` needs a similarity waiver from PyPI before anything can be uploaded.**
@@ -959,11 +994,15 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
 ### Integration (0.3.0)
 
 `docs/INTEGRATION-REPORT.md` has the merge order, the commands and the numbers.
-- [ ] **Merge `agent/lan-onboarding` and `agent/internet-pipeline` into this branch.** The
-  permission classifier refused both merges. After them: fold the `http-servers` handler of
-  `fleet/onboard/web.py` into the daemon's handler, make device-only the default pairing grant,
-  check `spake2` against `fleet/onboard/spake.py`, run the net-pipeline no-bypass scan and its
-  network seal over the merged suite, and make the ClamAV tests skip when `clamscan` is absent.
+- [ ] **Two integration decisions to check by a person.** (1) `redteam/tools.py` reads a page with
+  the plain extractor on purpose, so the hidden-text attacks still reach the guards behind the
+  reader; the reader the agent really uses (`web.read`) strips them first, and
+  `test_redteam_toolbox.py` pins that. A red-team arm that runs the toolbox through `web.read`
+  would measure the pipeline's stripping instead. (2) `ML_STACK_DECIDE_URL` may name a remote
+  host and is exempt from the net scan like `client/`; refusing a public host there would make
+  the exemption a guarantee (`docs/security.md`, "What is exempt from the net scan").
+- [ ] **The `spake2` package was not checked against `fleet/onboard/pake.py` on the wheel the
+  `fleet-onboard` extra installs;** the pairing tests ran with whatever `spake2` this machine has.
 - [ ] **Nine slow-tier tests fail here and eight of them on `agent/hardening` alone:**
   `test_fleet_bench.py::test_a_frozen_peer_installs_the_bench_after_accepting_the_job`,
   `test_fleet_chat.py::...test_asking_for_a_model_answers_before_it_has_arrived`,

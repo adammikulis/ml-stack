@@ -34,6 +34,7 @@ from ml_stack.fleet.framing import Malformed, requested_range
 from ml_stack.safenames import Unsafe, safe_filename, safe_join
 
 from .events import BUS, Bus
+from .lan import require_local_url
 from .manifest import Entry, Manifest
 from .requests import Device
 from .sharing import NEVER, Access, Licences, decide
@@ -202,6 +203,15 @@ class PeerSource:
     """Answers that were wrong, as against merely missing."""
     banned: bool = field(default=False, repr=False)
 
+    def __post_init__(self) -> None:
+        parts = urllib.parse.urlsplit(self.base_url)
+        if parts.scheme == "https" and self.context is None:
+            raise TransferError("a peer is reached over TLS pinned to its certificate")
+        if parts.scheme not in ("https", "http"):
+            raise TransferError(f"a peer is reached over https, not {parts.scheme or 'nothing'}")
+        if parts.scheme == "http" and (parts.hostname or "") not in ("127.0.0.1", "::1", "localhost"):
+            raise TransferError("plain http is for a peer on this machine only")
+
 
 def _disk_free(path: Path) -> int:
     return shutil.disk_usage(path).free
@@ -225,6 +235,7 @@ def fetch_manifest(peer: PeerSource, timeout: float = 20.0) -> bytes:
     """The signed manifest a peer serves, as bytes; the caller verifies it."""
     url = f"{peer.base_url}{API}/manifest"
     parts = urllib.parse.urlsplit(url)
+    require_local_url(url)
     headers = macauth.sign(peer.secret, "GET", url, None) if peer.secret else {}
     conn = http.client.HTTPSConnection(parts.hostname or "", parts.port, timeout=timeout,
                                        context=peer.context) if parts.scheme == "https" \
@@ -401,6 +412,7 @@ class Downloader:
     def _get(self, peer: PeerSource, entry: Entry, start: int, want: int) -> bytes:
         url = f"{peer.base_url}{API}/files/{urllib.parse.quote(entry.name)}"
         parts = urllib.parse.urlsplit(url)
+        require_local_url(url)
         headers = {"Range": f"bytes={start}-{start + want - 1}"}
         if peer.secret:
             headers.update(macauth.sign(peer.secret, "GET", url, None))

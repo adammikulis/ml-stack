@@ -12,7 +12,10 @@ import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 
+from ml_stack import net
 from ml_stack.http import Server
+from ml_stack.httpguard import Limits
+from ml_stack.net.scan import Outcome, ScanResult
 
 Route = tuple[int, dict[str, str], bytes]
 
@@ -61,10 +64,31 @@ class Site:
         self._thread.join(timeout=5)
 
 
+class CleanScanner:
+    """A scanner that finds nothing, so a test about the web does not depend on ClamAV."""
+
+    name = "test-clean"
+
+    def available(self) -> bool:
+        return True
+
+    def scan(self, path: object) -> ScanResult:
+        return ScanResult(self.name, Outcome.CLEAN, "test scanner")
+
+
+def loopback_pipeline() -> net.Pipeline:
+    """A pipeline that may reach 127.0.0.1 and scans with a clean fake."""
+    return net.Pipeline(
+        policy=net.Policy(allowed=["127.0.0.1", "localhost"]),
+        limits=Limits(allow_hosts=frozenset({"127.0.0.1"}), timeout=5.0, deadline_s=20.0),
+        scanners=[CleanScanner()])
+
+
 def serving():
-    """A running ``Site``, closed when the generator is."""
+    """A running ``Site`` reached through a loopback pipeline, both closed when the generator is."""
     held = Site()
-    yield held
+    with net.use(loopback_pipeline()):
+        yield held
     held.close()
 
 

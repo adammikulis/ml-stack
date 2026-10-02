@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import struct
 import threading
 
 import pytest
 
 from ml_stack import http, hub
+from ml_stack.httpguard import Refused
 from ml_stack.hub import remote, transfer as pulling
 from ml_stack.testing.fakehub import fake_hub
 
@@ -15,7 +17,8 @@ MIB = 1 << 20
 
 
 def blob(size: int, seed: int = 0) -> bytes:
-    return bytes((seed + i * 7) % 251 for i in range(256)) * (size // 256)
+    head = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
+    return (head + bytes((seed + i * 7) % 251 for i in range(256)) * (size // 256 + 1))[:size]
 
 
 REPOS = {
@@ -40,7 +43,7 @@ def server(monkeypatch):
     monkeypatch.setenv("HF_HOME", "/nonexistent-hf-home")
     monkeypatch.setattr(http, "check", lambda url: url)
     with fake_hub(REPOS, gated=frozenset({"maker/gated-GGUF"})) as hub_:
-        monkeypatch.setenv("HF_ENDPOINT", hub_.url)
+        hub_.point(monkeypatch)
         yield hub_
 
 
@@ -127,7 +130,10 @@ def test_a_wrong_checksum_is_refused_and_the_partial_removed(server, tmp_path):
     server.corrupt.add("maker/thing-GGUF/thing-Q4_K_M.gguf")
     with pytest.raises(pulling.ChecksumMismatch):
         hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
-    assert not list(tmp_path.rglob("*.gguf*"))
+    assert not list(tmp_path.glob("thing-Q4_K_M.gguf*"))
+    assert not list((tmp_path / "machine-state" / "net" / "staging").glob("*.part*"))
+    (held,) = (tmp_path / "machine-state" / ".ml-stack-quarantine").rglob("*thing-Q4_K_M.gguf")
+    assert held.stat().st_size == 3 * MIB
 
 
 def test_too_little_disk_is_refused_before_a_byte_is_read(server, tmp_path, monkeypatch):
@@ -190,7 +196,7 @@ def test_two_pulls_of_one_file_take_turns_and_end_with_one_good_file(server, tmp
 def test_a_server_without_redirects_is_read_directly(tmp_path, monkeypatch):
     monkeypatch.setenv("HF_HOME", "/nonexistent-hf-home")
     with fake_hub({"o/r": {"a-Q4_K_M.gguf": blob(MIB)}}, redirect=False) as plain:
-        monkeypatch.setenv("HF_ENDPOINT", plain.url)
+        plain.point(monkeypatch)
         assert hub.pull("hf:o/r/a-Q4_K_M.gguf", tmp_path).stat().st_size == MIB
         assert not plain.cdn_seen
 
@@ -254,16 +260,39 @@ def guarded(monkeypatch):
 
 
 def test_a_redirect_to_a_host_the_address_policy_refuses_is_never_followed(guarded, tmp_path):
-    from ml_stack.httpguard import Refused
-
     with pytest.raises(Refused):
         hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
     assert guarded.cdn_seen == []
     assert not list(tmp_path.rglob("*.part")) and not list(tmp_path.rglob("*.gguf"))
 
 
+def test_a_redirect_must_pass_the_allow_list_and_the_address_policy_each_on_its_own(
+        guarded, tmp_path, monkeypatch):
+    from ml_stack.net.policy import NeedsApproval
+
+    cdn = guarded.cdn_url.split("//", 1)[1]
+    monkeypatch.setenv("ML_STACK_NET_ALLOW_HOSTS", cdn)  # listed, but still a private address
+    with pytest.raises(Refused, match="not on the public internet") as listed_only:
+        hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
+    assert not isinstance(listed_only.value, NeedsApproval)
+    monkeypatch.delenv("ML_STACK_NET_ALLOW_HOSTS")
+    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", cdn)  # private allowed, but not on the list
+    with pytest.raises(NeedsApproval):
+        hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
+    assert guarded.cdn_seen == []
+
+
 def test_a_host_the_operator_names_may_be_redirected_to(guarded, tmp_path, monkeypatch):
     monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1,localhost")
+    monkeypatch.setenv("ML_STACK_NET_ALLOW_HOSTS", "127.0.0.1")
     got = hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
     assert got.read_bytes() == REPOS["maker/thing-GGUF"]["thing-Q4_K_M.gguf"]
     assert guarded.cdn_seen
+
+
+def test_a_pull_pins_each_file_to_the_size_and_digest_the_listing_gives():
+    one = remote.RemoteFile("UD/a-Q4_K_M.gguf", 1000, "ab" * 32)
+    want = pulling._want(one, "tok")
+    assert (want.sha256, want.size, want.token, want.kind) == ("ab" * 32, 1000, "tok", "gguf")
+    assert 1000 <= want.max_bytes < 1000 + 2 * pulling.MARGIN
+    assert pulling._want(remote.RemoteFile("README.md", 5), "").kind == ""

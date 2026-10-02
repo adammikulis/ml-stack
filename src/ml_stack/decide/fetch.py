@@ -4,12 +4,16 @@ used that does not match all four."""
 from __future__ import annotations
 
 import json
+import os
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import home, net
 from ml_stack.decide.types import BackendUnavailable, DecideError
 from ml_stack.files import sha256_file, write_json
+from ml_stack.httpguard import Refused
+from ml_stack.safenames import safe_filename
 
 MAX_FILE_BYTES = 8 << 30
 
@@ -47,38 +51,48 @@ def _verified(pin: Pin, path: Path) -> bool:
     return True
 
 
-def _hub():
-    try:
-        import huggingface_hub
-    except ImportError as exc:
-        raise BackendUnavailable("fetching model files needs huggingface_hub: "
-                                 "pip install 'ml-stack[hub]'") from exc
-    return huggingface_hub
+ENDPOINT = "https://huggingface.co"
+
+
+def _url(pin: Pin) -> str:
+    base = (os.environ.get("HF_ENDPOINT") or ENDPOINT).rstrip("/")
+    return (f"{base}/{pin.repo}/resolve/{urllib.parse.quote(pin.revision, safe='')}/"
+            f"{urllib.parse.quote(pin.filename)}")
+
+
+def _where(pin: Pin) -> Path:
+    """Where the verified copy of ``pin`` lives: the repository's own layout under its pinned
+    revision, so files that belong together (a config beside its weights, an adapter folder) sit
+    together as a loader expects."""
+    return home.cache("decide", "snapshots", safe_filename(pin.repo.replace("/", "--")),
+                      safe_filename(pin.revision), *(safe_filename(part)
+                                                      for part in pin.filename.split("/")))
 
 
 def locate(pin: Pin, *, download: bool = False) -> Path:
     """The verified file for ``pin``, downloading it only when ``download`` is set.
 
-    The size is checked against the Hub's listing before any bytes are fetched, the hash
-    after; a file that fails either is deleted and `DecideError` raised.
+    The download goes through the net pipeline (allow-listed host, pinned size and SHA-256,
+    format check, scan); a file that fails any check is held, never kept, and `DecideError` is
+    raised.
     """
     if pin.size > MAX_FILE_BYTES:
         raise DecideError(f"{pin.filename}: {pin.size} bytes is over the {MAX_FILE_BYTES} limit")
-    hub = _hub()
-    try:
-        path = Path(hub.hf_hub_download(pin.repo, pin.filename, revision=pin.revision,
-                                        local_files_only=True))
-    except hub.errors.LocalEntryNotFoundError:
+    path = _where(pin)
+    if not path.is_file():
         if not download:
             raise BackendUnavailable(
                 f"{pin.repo}/{pin.filename} is not downloaded; "
-                "run `ml-stack decide fetch` to download it") from None
-        meta = hub.get_hf_file_metadata(hub.hf_hub_url(pin.repo, pin.filename,
-                                                       revision=pin.revision))
-        if meta.size != pin.size:
-            raise DecideError(f"{pin.repo}/{pin.filename}: the Hub lists {meta.size} bytes, "
-                              f"expected {pin.size}") from None
-        path = Path(hub.hf_hub_download(pin.repo, pin.filename, revision=pin.revision))
+                "run `ml-stack decide fetch` to download it")
+        want = net.Want(sha256=pin.sha256, size=pin.size, require_digest=True,
+                        max_bytes=pin.size + (1 << 20), purpose="decide model")
+        try:
+            net.download(_url(pin), path, want)
+        except net.Blocked as exc:
+            raise DecideError(f"{pin.repo}/{pin.filename} does not match its pinned size and "
+                              f"hash; the file was held: {exc}") from None
+        except (Refused, OSError) as exc:
+            raise DecideError(f"{pin.repo}/{pin.filename} could not be fetched: {exc}") from None
     if not _verified(pin, path):
         path.unlink(missing_ok=True)
         raise DecideError(f"{pin.repo}/{pin.filename} does not match its pinned size and hash; "

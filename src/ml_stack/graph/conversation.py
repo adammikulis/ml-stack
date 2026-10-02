@@ -52,6 +52,7 @@ from ml_stack.graph.prompts import (
     as_asked,
 )
 from ml_stack.graph.replies import all_at_once, is_working, one_by_one, spoken_show, without_notes
+from ml_stack.net.untrusted import shared
 
 # How many tool calls a question may spend. Five was enough to look two names up and read
 # them; it is not enough to staff a project, which means looking up each skill, reading the
@@ -657,6 +658,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: A
               finder: Any, highlighted: Sequence[str], emit: Any, opening: Sequence[str] = (),
               summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
     out = Answer()
+    shared().typed(question)
     offer = _offer(graph, tools, finder=finder, asking=asking)
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
     system, constrain_ids = _telling(system, asking=asking, known=known, graph=graph,

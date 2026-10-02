@@ -9,7 +9,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ml_stack.httpguard import Refused
 from ml_stack.log import say
+from ml_stack.net import git as netgit
 from ml_stack.serve.binary import is_windows
 from ml_stack.serve.build_paths import (
     BuildFailed,
@@ -29,14 +31,11 @@ CMAKE_TARGET = "llama-server"          # the cmake target name, the same on ever
 
 
 # -- git ---------------------------------------------------------------
-def _git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    which = shutil.which("git")
-    if which is None:
-        raise BuildFailed("git is not on PATH")
-    done = subprocess.run([which, *args], cwd=cwd, capture_output=True, text=True)
-    if done.returncode != 0:
-        raise BuildFailed(f"git {' '.join(args)} failed: {(done.stderr or '').strip()}")
-    return done
+def _git(*args: str, cwd: Path | None = None, url: str = "") -> subprocess.CompletedProcess:
+    try:
+        return netgit.run(args, cwd=cwd, url=url)
+    except (netgit.GitFailed, Refused) as exc:
+        raise BuildFailed(str(exc)) from exc
 
 
 def _sync_source(source: Path) -> None:
@@ -46,22 +45,23 @@ def _sync_source(source: Path) -> None:
     against a bare repo was still cloning several minutes in and past 190MB."""
     if (source / ".git").is_dir():
         say(f"  fetching {REPO_URL} into {source}")
-        _git("fetch", "--depth", "1", "origin", "master", cwd=source)
+        _git("fetch", "--depth", "1", "origin", "master", cwd=source, url=REPO_URL)
         _git("checkout", "master", cwd=source)
         _git("reset", "--hard", "origin/master", cwd=source)
     else:
         say(f"  cloning {REPO_URL} into {source} (--depth 1)")
         source.parent.mkdir(parents=True, exist_ok=True)
-        _git("clone", "--depth", "1", "--branch", "master", REPO_URL, str(source))
+        _git("clone", "--depth", "1", "--branch", "master", REPO_URL, str(source), url=REPO_URL)
 
 
-def _checkout_commit(source: Path, commit: str) -> None:
+def _checkout_commit(source: Path, commit: str, url: str = REPO_URL) -> None:
     """A shallow clone has only master's tip, so a specific commit is fetched by name
     before it can be checked out -- GitHub serves an arbitrary reachable commit SHA this
     way without needing the rest of history either."""
     say(f"  fetching and checking out {commit}")
-    _git("fetch", "--depth", "1", "origin", commit, cwd=source)
+    _git("fetch", "--depth", "1", "origin", commit, cwd=source, url=url)
     _git("checkout", "FETCH_HEAD", cwd=source)
+
 
 
 def _short_commit(source: Path) -> str:
@@ -104,13 +104,13 @@ def _sync_named_source(source: Path, repo: str, ref: str) -> None:
     url = f"https://github.com/{repo}"
     if (source / ".git").is_dir():
         say(f"  fetching {url} into {source}")
-        _git("fetch", "--depth", "1", "origin", cwd=source)
+        _git("fetch", "--depth", "1", "origin", cwd=source, url=url)
     else:
         say(f"  cloning {url} into {source} (--depth 1)")
         source.parent.mkdir(parents=True, exist_ok=True)
-        _git("clone", "--depth", "1", url, str(source))
+        _git("clone", "--depth", "1", url, str(source), url=url)
     if ref:
-        _checkout_commit(source, ref)
+        _checkout_commit(source, ref, url)
 
 
 # -- cmake ---------------------------------------------------------------

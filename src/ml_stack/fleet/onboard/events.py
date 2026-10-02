@@ -9,12 +9,12 @@ shows it); nothing here imports sentinel.
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from collections import deque
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from ml_stack.subscribers import Subscribers
 
 __all__ = ["BUS", "SEVERITIES", "Bus", "Event"]
 
@@ -36,23 +36,12 @@ class Event:
     ts: float = field(default_factory=time.time)
 
 
-class Bus:
+class Bus(Subscribers):
     """Hands events to subscribers and keeps the last few for a command to show."""
 
     def __init__(self, keep: int = 512) -> None:
-        self._subscribers: list[Callable[[Event], None]] = []
+        super().__init__()
         self._recent: deque[Event] = deque(maxlen=keep)
-        self._lock = threading.Lock()
-
-    def subscribe(self, fn: Callable[[Event], None]) -> Callable[[], None]:
-        with self._lock:
-            self._subscribers.append(fn)
-
-        def stop() -> None:
-            with self._lock:
-                if fn in self._subscribers:
-                    self._subscribers.remove(fn)
-        return stop
 
     def emit(self, kind: str, severity: str, subject: str = "", **evidence: Any) -> Event:
         if severity not in SEVERITIES:

@@ -12,11 +12,10 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.http import Refused, Retry, ServerError, check, open_stream
+from ml_stack import net
+from ml_stack.http import Refused, ServerError, check
 
 USER_AGENT = "Mozilla/5.0 (compatible; ml-stack)"
-RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
-ROBOTS_TIMEOUT_S = 10.0
 
 
 class Disallowed(Refused):
@@ -77,13 +76,26 @@ class Polite:
         with self._lock(host):
             self._pause(host)
             try:
-                with open_stream(
-                        url, headers={"User-Agent": self.user_agent, "Accept": accept},
-                        timeout=self.timeout_s, guard=self.guard,
-                        retry=Retry(tries=self.tries, backoff=self.backoff_s,
-                                    on_status=RETRY_STATUS,
-                                    when_unreachable=False)) as reply:
+                ask = net.Ask(purpose="web", admit=False, tries=self.tries,
+                              backoff=self.backoff_s,
+                              headers={"User-Agent": self.user_agent, "Accept": accept})
+                with net.default().open(url, ask) as reply:
                     yield reply
+            finally:
+                self._last[host] = self.clock()
+
+    @contextlib.contextmanager
+    def turn(self, url: str) -> Iterator[str]:
+        """Holds this host's turn for a caller that makes the request itself; the URL, once
+        the guard and robots.txt have passed."""
+        url = self.guard(url)
+        if not self.allowed(url):
+            raise Disallowed(f"robots.txt asks for {url} not to be fetched")
+        host = _host(url)
+        with self._lock(host):
+            self._pause(host)
+            try:
+                yield url
             finally:
                 self._last[host] = self.clock()
 
@@ -108,15 +120,16 @@ class Polite:
         robots_url = f"{parts.scheme}://{parts.netloc}/robots.txt"
         parser = urllib.robotparser.RobotFileParser()
         try:
-            with open_stream(self.guard(robots_url), timeout=ROBOTS_TIMEOUT_S,
-                             headers={"User-Agent": self.user_agent}, guard=self.guard) as reply:
+            ask = net.Ask(purpose="web", admit=False, max_bytes=512 * 1024,
+                          headers={"User-Agent": self.user_agent})
+            with net.default().open(self.guard(robots_url), ask) as reply:
                 parser.parse(reply.read(512 * 1024).decode("utf-8", "replace").splitlines())
         except ServerError as exc:
             if exc.status is not None and 400 <= exc.status < 500:
                 self._rules[host] = None
                 return None
             parser.parse(["User-agent: *", "Disallow: /"])
-        except OSError:
+        except (OSError, Refused):
             parser.parse(["User-agent: *", "Disallow: /"])
         self._rules[host] = parser
         return parser

@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ml_stack.net import browserguard
 from ml_stack.platform import applescript_quote
 
 
@@ -41,6 +42,8 @@ class Window:
     channel: str = "chrome"
     timeout_ms: int = 60_000
     position: tuple[int, int] | None = None
+    guarded: bool = False
+    """Only public addresses may be requested and nothing is downloaded: for pages a model chose."""
 
     def args(self) -> list[str]:
         """The Chromium flags this window wants."""
@@ -98,8 +101,10 @@ def _paged(play: Any, window: Window) -> Iterator[Any]:
     with keeping_focus():
         context = play.chromium.launch_persistent_context(
             str(profile), headless=window.headless, channel=window.channel,
-            args=window.args(),
+            args=window.args(), accept_downloads=not window.guarded,
             viewport={"width": window.width, "height": window.height})
+    if window.guarded:
+        browserguard.install(context)
     context.set_default_timeout(window.timeout_ms)
     page = context.pages[0] if context.pages else context.new_page()
     try:

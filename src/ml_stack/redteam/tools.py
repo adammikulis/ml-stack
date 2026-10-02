@@ -75,8 +75,9 @@ class Call:
 @dataclass(slots=True)
 class Toolbox:
     """The tools, wired to a page server and a canary. ``guarded`` reads pages through
-    `ml_stack.web.read`, which refuses addresses on this machine's side of the router; unguarded
-    reads whatever the host names."""
+    the address check of `ml_stack.http`, which refuses addresses on this machine's side of the router;
+    unguarded reads whatever the host names. Both arms read the page with the plain extractor, with no
+    hidden-content removal, so the guards behind the reader are what is measured."""
 
     canary: Canary
     pages: Pages
@@ -126,9 +127,10 @@ class Toolbox:
         html = reply.body.decode("utf-8", "replace")
         if "markdown" in str(reply.headers.get("Content-Type", "")):
             return html
-        if self.guarded:
-            got = web.read(url, fetch=lambda _: html)
-            return f"{got['title']}\n{got['text']}"
+        # Raw extraction on both arms, on purpose: the red-team measures what the guards behind the
+        # reader do with an instruction that reaches the model. `web.read` removes hidden content
+        # (`net.untrusted.strip_hidden`) before extracting, which would leave them nothing to catch;
+        # that reader is tested to drop these variants in `test_redteam_toolbox.py`.
         title, text = web.extract(html, url)
         return f"{title}\n{text}"
 

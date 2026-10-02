@@ -52,6 +52,15 @@ class FakeHub:
         for thread in self._threads:
             thread.start()
 
+    def point(self, monkeypatch: Any) -> None:
+        """Point ``$HF_ENDPOINT`` at this hub, and name its CDN socket as a host that may be reached
+        and may be on this machine, as a person running against a mirror would. The hub itself is
+        the endpoint; without this a redirect to the CDN is refused like any other private host."""
+        cdn = self.cdn_url.split("//", 1)[1]
+        monkeypatch.setenv("HF_ENDPOINT", self.url)
+        monkeypatch.setenv("ML_STACK_NET_ALLOW_HOSTS", cdn)
+        monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", cdn)
+
     def close(self) -> None:
         for server in (self._hub, self._cdn):
             server.shutdown()

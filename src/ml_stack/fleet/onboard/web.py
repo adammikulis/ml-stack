@@ -12,14 +12,12 @@ import ssl
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from ml_stack.fleet.framing import Limited, LimitedServer, Malformed, read_body
+from ml_stack.graph.serve import ReplyHandler
 
 __all__ = ["Call", "Dispatch", "Listener", "Reply", "json_reply"]
-
-SEND_PIECE = 1 << 20
 
 
 @dataclass(slots=True)
@@ -59,40 +57,19 @@ def json_reply(status: int, document: dict[str, Any]) -> Reply:
     return Reply(status, json.dumps(document).encode(), content_type="application/json")
 
 
-def _handler(dispatch: Dispatch) -> type[BaseHTTPRequestHandler]:
-    class Handler(Limited, BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *_args: object) -> None:
-            return
-
-        def _serve(self) -> None:
+def _handler(dispatch: Dispatch) -> type[ReplyHandler]:
+    class Handler(Limited, ReplyHandler):
+        def answer(self) -> Reply:
             call = Call(self.command, self.path, self.headers, self.client_address[0],
                         isinstance(self.connection, ssl.SSLSocket),
                         lambda most: read_body(self, most))
             try:
-                reply = dispatch(call)
+                return dispatch(call)
             except Malformed as bad:
                 self.close_connection = True
-                reply = json_reply(bad.status, {"error": bad.message})
+                return json_reply(bad.status, {"error": bad.message})
             except ValueError:
-                reply = json_reply(400, {"error": "the body is not JSON"})
-            self.send_response(reply.status)
-            self.send_header("Content-Type", reply.content_type)
-            self.send_header("Content-Length", str(reply.length if reply.stream else
-                                                   len(reply.body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            for key, value in reply.headers.items():
-                self.send_header(key, value)
-            self.end_headers()
-            if reply.stream is not None:
-                for piece in reply.stream:
-                    self.wfile.write(piece)
-            else:
-                self.wfile.write(reply.body)
-
-        do_GET = do_POST = _serve
+                return json_reply(400, {"error": "the body is not JSON"})
 
     return Handler
 

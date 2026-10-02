@@ -158,7 +158,6 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
         yield Lease(want, 0.0)
         return
     d = slots_dir()
-    cap = max(budget(), minimum)
     path = d / f"{time.time_ns()}-{os.getpid()}.slot"
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX)                       # held until we exit: this is the liveness signal
@@ -170,6 +169,7 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
     granted = 0
     try:
         while True:
+            cap = max(budget(), minimum)                 # re-read every poll: load falls while a run waits
             with _mutex(d):
                 slots = _read(d, mine=path)
                 waiting = [s for s in slots if s.granted == 0]

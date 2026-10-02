@@ -866,7 +866,7 @@ class TestUpdates:
 
         assert asset_for(Release("9.9.9", "", "", ({"name": "source.tar.gz"},), 0)) is None
 
-    def test_a_download_whose_digest_is_wrong_is_discarded(self, tmp_path):
+    def test_a_download_whose_digest_is_wrong_is_discarded(self, tmp_path, loopback_net):
         import http.server
         import threading
 
@@ -891,8 +891,8 @@ class TestUpdates:
                      "browser_download_url": f"http://127.0.0.1:{srv.server_address[1]}/x",
                      "digest": "sha256:" + "0" * 64}
             with pytest.raises(UpdateError, match="digest"):
-                download(asset, tmp_path)
-            assert not list(tmp_path.iterdir())
+                download(asset, tmp_path / "in")
+            assert not list((tmp_path / "in").iterdir())
         finally:
             srv.shutdown()
 

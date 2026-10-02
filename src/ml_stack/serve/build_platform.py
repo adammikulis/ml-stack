@@ -12,7 +12,8 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ml_stack.http import ServerError, request_bytes
+from ml_stack import net
+from ml_stack.http import ServerError
 from ml_stack.serve.binary import child_env, is_windows
 
 __all__ = ["arches_at", "arches_from_source", "can_build_from_source", "cmake_flags", "copy_flat",
@@ -106,7 +107,9 @@ def arches_at(ref: str, *, repo: str = "ggml-org/llama.cpp") -> set[str]:
     """Every architecture name ``repo``'s source reads at ``ref``; empty when it cannot be read."""
     url = f"https://raw.githubusercontent.com/{repo}/{ref}/src/llama-arch.cpp"
     try:
-        reply = request_bytes(url, timeout=30.0)
+        reply = net.default().get(url, net.Ask(purpose="llama.cpp source", max_bytes=8 << 20))
     except (ServerError, OSError, ValueError):
+        return set()
+    if reply.status >= 400:
         return set()
     return set(_ARCH_NAME.findall(reply.body.decode("utf-8", errors="replace")))

@@ -12,8 +12,10 @@ import urllib.parse
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ml_stack import home, http
+from ml_stack import home, http, net
+from ml_stack.httpguard import Refused
 from ml_stack.hub.naming import _SHARD, QUANT, aside
+from ml_stack.net.untrusted import clean_text
 
 DEFAULT_ENDPOINT = "https://huggingface.co"
 
@@ -123,12 +125,14 @@ class RemoteFile:
 
 def _get(url: str, *, auth: str, repo: str) -> object:
     try:
-        return http.request_json(url, token=auth, timeout=30.0)
+        return net.default().json(url, net.Ask(purpose="model hub", token=auth, tries=3))
     except http.ServerError as exc:
         if exc.status in (401, 403):
             raise GatedRepo(hint(repo, exc.status)) from exc
         if exc.status == 404:
             raise NotFound(f"{repo} is not on {endpoint()}") from exc
+        raise RemoteError(str(exc)) from exc
+    except Refused as exc:
         raise RemoteError(str(exc)) from exc
 
 
@@ -256,3 +260,29 @@ def search(query: str, filters: Filters | None = None) -> list[Repo]:
         if len(out) >= want.limit:
             break
     return out
+
+
+MOST_TEXT = 1 << 20
+
+
+def text_file(repo: str, path: str, revision: str = "main") -> str:
+    """A small text file of a repository (its README), cleaned of invisible characters and
+    cut at one MiB. It is the publisher's text and is untrusted. `NotFound` when absent."""
+    rev = urllib.parse.quote(revision, safe="")
+    url = f"{endpoint()}/{repo}/resolve/{rev}/{urllib.parse.quote(path)}"
+    try:
+        got = net.default().get(url, net.Ask(purpose="model hub", token=token(), max_bytes=MOST_TEXT))
+    except Refused as exc:
+        raise RemoteError(str(exc)) from exc
+    if got.status in (401, 403):
+        raise GatedRepo(hint(repo, got.status))
+    if got.status >= 400:
+        raise NotFound(f"{repo} has no {path}")
+    return clean_text(got.body.decode("utf-8", "replace"))[0]
+
+
+def models(term: str, limit: int = 100) -> list[dict[str, object]]:
+    """The raw model rows of a Hub search for ``term`` (id, downloads, likes)."""
+    params = urllib.parse.urlencode({"search": term, "limit": str(limit)})
+    got = _get(f"{endpoint()}/api/models?{params}", auth=token(), repo="search")
+    return [row for row in got if isinstance(row, dict) and "id" in row] if isinstance(got, list) else []
