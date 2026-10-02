@@ -58,8 +58,8 @@ def test_forged_signatures_block_the_sender_and_not_the_honest_peer(node):
     wrong = macauth.derive(b"an-attackers-key-of-32-bytes-long")
     for i in range(35):
         _send(auth, f"forged{i:018d}", "10.6.6.6", secret=wrong)
-    assert node.store.state_of("peer", "10.6.6.6") in (State.QUARANTINED, State.WATCH)
-    assert node.peer_blocked("10.6.6.6") or node.store.state_of("peer", "10.6.6.6") == State.WATCH
+    assert node.store.state_of("peer", "10.6.6.6") == State.QUARANTINED
+    assert node.peer_blocked("10.6.6.6")
     for i in range(50):
         assert _send(auth, f"honest{i:018d}", "10.1.1.1").ok
     assert node.store.state_of("peer", "10.1.1.1") == State.CLEAR
@@ -104,3 +104,18 @@ def test_the_process_finder_output_is_reported_and_never_acted_on(node):
     node.handle_all(unmanaged_findings(found))
     assert all(node.store.state_of("server", f"port:{s['port']}") != State.QUARANTINED
                for s in found)
+
+
+def test_ordinary_pages_through_the_real_rails_are_not_held_even_in_enforce_mode(tmp_path):
+    from pathlib import Path
+
+    rails = g.Guard.default()
+    node = Sentinel(tmp_path / "s", mode=Mode.ENFORCE, roots=[tmp_path])
+    docs = Path(__file__).resolve().parent.parent / "docs"
+    paragraphs = [p for d in sorted(docs.glob("*.md")) for p in d.read_text().split("\n\n")
+                  if len(p.split()) >= 8]
+    held = [p[:70] for p in paragraphs
+            if node.screen(p, "tool:web_fetch", session="s1", verdict=rails.input).withheld]
+    print(f"{len(paragraphs)} paragraphs of docs through the real rails, {len(held)} held: {held}")
+    assert len(held) <= 3
+    assert node.store.state_of("session", "s1") != State.QUARANTINED
