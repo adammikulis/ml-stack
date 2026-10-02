@@ -14,17 +14,20 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from ml_stack import gate
 from ml_stack.files import promote
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
 from .availability import Availability, parse_window
+from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
 from .discovery import load_cluster_key
 from .files import (
@@ -71,6 +74,7 @@ class Daemon:
     tokens: Callable[[], set[str]] | None = None
     bench: BenchHost | None = None
     hosting: Hosting | None = None
+    decide: Deciding | None = None
 
 
 def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
@@ -79,7 +83,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
     report, fetcher, ui, schedule = daemon.report, daemon.fetcher, daemon.ui, daemon.schedule
     on_paused, schedule_path, serving = daemon.on_paused, daemon.schedule_path, daemon.serving
     models, cluster_key_path, tokens = daemon.models, daemon.cluster_key_path, daemon.tokens
-    bench, hosting = daemon.bench, daemon.hosting
+    bench, hosting, decide = daemon.bench, daemon.hosting, daemon.decide
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
@@ -195,6 +199,16 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if body is not None:
                 upstream.add_header("Content-Length", str(len(body)))
 
+            where = f"http://127.0.0.1:{port}{rest}"
+            try:
+                with gate.turn(where) if gate.is_generation(where) else nullcontext():
+                    return self._forward(upstream)
+            except gate.QueueTimeout as exc:
+                self._send(429, {"error": str(exc)})
+                return True
+
+        def _forward(self, upstream: urllib.request.Request) -> bool:
+            """Relay ``upstream`` to the caller as it is generated."""
             try:
                 response = urllib.request.urlopen(upstream, timeout=INFER_TIMEOUT)
             except urllib.error.HTTPError as exc:
@@ -371,6 +385,23 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
 
         do_HEAD = do_GET
 
+        def _decide(self, length: int) -> None:
+            """Answer ``POST /decide``: refuse a large body before reading it."""
+            if decide is None:
+                self._send(501, {"error": "this daemon makes no decisions"})
+                return
+            if length > MAX_REQUEST:
+                self.close_connection = True
+                self._send(413, {"error": f"at most {MAX_REQUEST} bytes"})
+                return
+            try:
+                asked = json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                self._send(400, {"error": "the body is not JSON"})
+                return
+            status, payload = decide.answer(asked)
+            self._send(status, payload)
+
         def do_POST(self) -> None:
             if self._proxy():
                 return
@@ -380,6 +411,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             parsed = urllib.parse.urlparse(self.path)
             length = int(self.headers.get("Content-Length", "0"))
+            if parsed.path == "/decide":
+                self._decide(length)
+                return
             body = self.rfile.read(length) if length else b"{}"
             if parsed.path == "/speech/transcribe":
                 want = urllib.parse.parse_qs(parsed.query)

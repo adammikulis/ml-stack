@@ -52,6 +52,11 @@ serve = ["psutil>=7.2.2"]
 speech = ["faster-whisper>=1.2.1", "piper-tts>=1.8.0"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
+# `ml-stack-decide`: the embed backend's head
+decide = ["numpy>=1.24", "safetensors>=0.4"]
+# the pointer backend runs a released checkpoint on torch; its files are downloaded only on request
+decide-pointer = ["ml-stack[decide]", "torch>=2.14", "transformers>=5.17", "peft>=0.21.0",
+                  "huggingface_hub>=1.32"]
 # an embedded property graph: one file on disk, native Cypher, no server.
 # tests/test_graph_engine_contract.py is what a bump is measured against
 store = ["ladybug>=0.20.4,<0.21"]
@@ -74,11 +79,21 @@ viz = ["manim>=0.19"]
 plot = ["matplotlib>=3.11.2"]
 testing = ["numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
-# `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
-mcp = ["mcp>=1.0"]
+# `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that.
+# `ml_stack.agent.McpTools` is an MCP client on the same SDK (2026-07-28 revision).
+mcp = ["mcp>=2.2,<3"]
+# NVIDIA NeMo Guardrails as one more rail over the built-in ones (`ml_stack.guard.nemo`); its
+# rails call the llama.cpp server a configuration names. The built-in rails need no extra.
+guardrails = ["nemoguardrails>=0.24.1,<0.25"]
+# a prompt-injection classifier run on the CPU through onnxruntime (`ml_stack.guard.classifier`);
+# the ONNX export of protectai/deberta-v3-base-prompt-injection-v2 is fetched once
+guard-model = ["onnxruntime>=1.20", "tokenizers>=0.21", "numpy>=1.24", "huggingface_hub>=1.32"]
 # `ml-stack-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;
 # `ifeval` brings langdetect, immutabledict and nltk
 standard = ["lm-eval[ifeval]>=0.4"]
+# `python -m ml_stack.redteam`: attacks on this library's own model-facing surfaces, sent through
+# PyRIT: about 110 packages and 550 MB, installed in a virtualenv of its own.
+redteam = ["ml-stack[web,pdf,testing]", "pyrit>=1.1,<2"]
 all = [
     "ml-stack[train,serve,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
 ]
@@ -106,6 +121,10 @@ ml-stack-mcp = "ml_stack.mcp:main"
 ml-stack-train-run = "ml_stack.train.run:main"
 # a project's tools -> synthetic conversations -> a fine-tuned caller -> a GGUF
 ml-stack-train-tools = "ml_stack.train.tools:main"
+# choose one of a named set of options and say how sure: ask, score, calibrate, compare
+ml-stack-decide = "ml_stack.decide_cli:main"
+# a pointer-head decision model fine-tuned from labelled cases
+ml-stack-train-decider = "ml_stack.train.decider:main"
 # what this machine can do, and what it does without being asked; --checkouts adds the
 # repositories and working state ml-stack-doctor checks on their own
 ml-stack-setup = "ml_stack.setup:main"
@@ -165,7 +184,10 @@ addopts = "--strict-markers"
 # `slow` is a browser, a subprocess, a wheel build or a real network wait -- anything that
 # costs more than about two seconds every time it runs, rather than once per worker.
 # `-m "not slow"` is the subset to run while a bench has the GPU; the default runs everything.
-markers = ["slow: needs a browser, a subprocess, a wheel build or a network timeout; left out unless --slow is given"]
+markers = [
+    "slow: needs a browser, a subprocess, a wheel build or a network timeout; left out unless --slow is given",
+    "redteam: needs the redteam extra (PyRIT); left out unless --redteam is given",
+]
 
 [tool.ruff]
 line-length = 100
@@ -209,6 +231,10 @@ combine-as-imports = true
     "S107",
     "S108",  # /tmp paths in fixtures
     "S311",  # a seeded generator makes a fixture repeat
+]
+"src/ml_stack/decide/guards/*.py" = [
+    "S104",  # the benchmark's tool calls are the dangerous strings it labels
+    "S108",
 ]
 "scripts/hooks/**" = [
     "BLE001",  # a guard that fails must let the command through, not block on its own error

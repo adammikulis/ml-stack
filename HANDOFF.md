@@ -30,6 +30,44 @@ the benchmarks" is an entry someone should rewrite as the change plus the re-mea
 What is broken, unproven, or claims more than it does. Nothing here is a new
 capability; every line is something that already exists not being what it says.
 
+### The agent loop
+
+- [ ] **Taint tracking has been run against one served model only.** `docs/taint.md` has Qwen3-4B
+  (20 web attempts per arm, 18 planted-text runs per guard). A larger model, more repetitions
+  and the red-team's direct-injection arms would say how the usability cost and the proven
+  versus unproven split move.
+- [ ] **Taint events have no subscriber.** `taint.subscribe(fn)` receives a `TaintEvent` for each
+  refused or questioned call; the sentinel branch's bus (`docs/sentinel.md`) is the intended
+  subscriber (`taint.subscribe(bus.emit)`) and is not written yet.
+- [ ] **No tool wrapper routes untrusted reads through `taint.extract`.** A tool whose answer has a
+  typed shape (a model listing, a version, a status) could return only the validated fields, and
+  then not contaminate; `taint.quarantined` does it for a callable, and nothing does it for an MCP
+  `ToolSource`. The free-text case (summarise this page) has no schema and stays fenced data.
+- [ ] **Pasted documents in the person's own turn are the person's text.** `Ledger.admit` takes a
+  `Level.UNTRUSTED` label for them, but no entry point (the CLI, a chat front end) labels a paste.
+- [ ] **MCP tasks are not driven.** The mcp 2.2 client has no tasks API, so a long-running tool
+  call cannot be polled or cancelled through `McpTools`, and task progress is not an agent
+  event. Progress for an ordinary call reaches `McpTools.on_progress` only.
+- [ ] **No tool-calling base-versus-tuned comparison in one command.** `ml-stack-train-tools eval`
+  scores one served model; comparing a base and a tuned model means running it against each
+  server and diffing the JSON.
+
+### Serving: one broker, one request at a time per pool
+- [ ] **Run `tests/test_serve_real_llama.py` on a card with nothing else on it** (`pytest
+  --slow tests/test_serve_real_llama.py`). It leases a real llama-server through the
+  broker, sends two requests from separate processes and checks the line of requests and
+  the stop on release; it skips while any other llama-server runs, so it has not run
+  against a real server yet.
+- [ ] **The machine's broker does not deliver `on_event` or `say` to its caller.** Over
+  its socket `RemoteBroker.start` answers once, and the caller is told only that the
+  server is ready. A load's progress (`loading`, `restoring`, a memory wait) belongs
+  streamed back as lines.
+- [ ] **One `gpu` pool.** A machine with several CUDA devices queues all their requests
+  in one line; `ServerSpec` has no device to put a server in a pool of its own.
+- [ ] **`adopt_unmanaged = ask` has no prompt.** `ServerManager.confirm` is the hook; no
+  command sets it, so `ask` adopts nothing from the CLI. vLLM, SGLang and MLX servers
+  started by hand are not found at all, only `llama-server`.
+
 ### Getting it onto a machine that is not this one
 
 - [ ] **`ml-stack` needs a similarity waiver from PyPI before anything can be uploaded.**
@@ -176,6 +214,35 @@ across `src/`.
   `Serving`, `slot` and `held` in `graph/serve.py`. The first goes when the profile store
   moves below `graph`; the other two are a page and a request handler leasing a server,
   which is what the machine layer is for.
+
+### Red-teaming
+
+`python -m ml_stack.redteam` and `docs/redteam.md` exist; what is missing from them:
+
+- [ ] **Re-run `docs/redteam/baseline-2026-10-02.json` after each of agent, decide, hardening and
+  model-discovery lands.** `python -m ml_stack.redteam run --against docs/redteam/baseline-2026-10-02.json`
+  needs an installed GGUF and `pip install -e ".[redteam]"` in its own virtualenv. The kept baseline
+  was measured on `0.2dev` merged with `agent/port-pcbe` and `agent/hardening` (see the baseline's
+  header); the `loop` and `compaction` scenarios import `ml_stack.agent`, so
+  `.github/workflows/redteam.yml` runs only `extraction,chat,fleet` until it is on the
+  development branch -- add `loop,compaction` to its `--scenarios` then.
+- [ ] **The guard benchmark is not written.** The brief's precision/recall of tool-call guards on
+  injected against benign calls needs a `guard` scenario: labelled tool-call contexts built from
+  `styles.json`, the pages and the PyRIT converters, each guard asked `before_tool_call`, recall and
+  false-positive rate reported per guard. `scenarios/loop.py:PolicyGuard` is the reference guard to
+  start from. `ml_stack.decide.guard.ToolCallGuard` uses its own `ml_stack.interventions` (`Call`,
+  `Context`, `Verdict`), not `ml_stack.agent.interventions`; one of the two has to go before the
+  benchmark can take both.
+- [ ] **Multi-turn attacks and a judge are not wired.** PyRIT's `CrescendoAttack`, `PAIRAttack` and
+  `RedTeamingAttack` need an adversarial chat target and a scorer that is not a canary; the local
+  model could play both (`pyrit_bridge.ResponderTarget` wraps any `Responder`), with its scores
+  reported as noisy. Every scorer today is objective evidence.
+- [ ] **The findings in `docs/redteam/findings.md` marked open have an owner and no fix.** Each
+  names the file, a reproducing `python -m ml_stack.redteam run --scenarios ...` line and the
+  test that should go red when it is fixed.
+- [ ] **Check the `redteam` extra on Python 3.11, 3.12 and 3.14 by installing it.** PyRIT 1.1.0
+  declares `>=3.10,<3.15` and `uv pip compile` resolves it for all three; only 3.13 was installed
+  and run.
 
 ### Finding a model
 
@@ -725,6 +792,30 @@ Capabilities that do not exist yet.
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free slot on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
+
+### Decision models
+
+- [ ] **Trained deciders are not in model discovery.** `ml_stack.decide.registry` records them
+  by name under the state root; `hub.discover` (model-discovery branch) should list a directory
+  holding `decider.json` as a model of format `decider`.
+- [ ] **The pointer backend takes the GPU without a lease.** `PointerDecider` loads onto MPS or
+  CUDA directly, so it can run beside a served model; it should ask `ml_stack.serve` for a lease
+  and release it when `/decide` has been idle.
+- [ ] **The pointer backend is slow on Apple silicon at guard-prompt length.** 200 to 450 ms
+  median for 300 to 600 tokens: transformers runs the Gated DeltaNet layers in a PyTorch
+  reference loop. A Metal chunk kernel, or one forward over the shared state for the three
+  guard questions, is the fix; neither exists here.
+- [ ] **No per-process memory figures.** The decision-models document has latency, accuracy,
+  Brier and ECE but only the pointer model's device memory (3.7 GB); measure resident memory
+  of each llama-server and the embedding server with the `ps` of the pid `ml-stack-serve up`
+  prints.
+- [ ] **The guard benchmark has one author.** 412 cases written and checked by one person;
+  a second reviewer, and cases from a project other than the one the templates came from, are
+  what would make an accuracy figure mean more than "on these templates". `make-cases` output
+  is rule-labelled and has never been read in bulk.
+- [ ] **A Qwen3.5-4B Q4_K_M server returns non-finite logits** on llama.cpp build 10816 (the
+  first token is `@` with null log-probabilities). Check against a newer build.
+- [ ] **MLX does not train a decider.** `ml-stack-train-decider` is PyTorch only.
 
 ### Speech
 - [ ] **Nothing streams.** `StreamingASR` in `speech/protocols.py` is a protocol no

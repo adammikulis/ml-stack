@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 
@@ -175,6 +176,7 @@ def _no_machine_state(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "machine-state"))
     monkeypatch.setenv("MLSTACK_STORE_MEMORY", str(STORE_MEMORY))
+    monkeypatch.setenv("ML_STACK_BROKER_LOCAL", "1")
     for name in _STEERING:
         monkeypatch.delenv(name, raising=False)
 
@@ -182,6 +184,9 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     progress = sys.modules.get("ml_stack.bench.progress") or importlib.import_module(
         "ml_stack.bench.progress")
+    unmanaged = sys.modules.get("ml_stack.serve.unmanaged") or importlib.import_module(
+        "ml_stack.serve.unmanaged")
+    monkeypatch.setattr(unmanaged, "every_server", lambda: [])
     monkeypatch.setattr(progress, "serving_lines", lambda: [])
     monkeypatch.setattr(progress, "beside_on_the_card", lambda: [])
     monkeypatch.setattr(progress, "results_since", lambda started, kept=None: "")
@@ -768,15 +773,19 @@ def pytest_addoption(parser) -> None:
     parser.addoption("--slow", action="store_true", default=False,
                      help="also run the tests marked slow (a browser, a subprocess, a "
                           "wheel build, a network timeout)")
+    parser.addoption("--redteam", action="store_true", default=False,
+                     help="also run the tests marked redteam (they need the redteam extra)")
 
 
 def pytest_collection_modifyitems(config, items) -> None:
-    """Leave the slow tests out unless --slow was asked for."""
-    if config.getoption("--slow"):
+    """Leave the slow tests out unless --slow was asked for, and the redteam tests out unless
+    --redteam was."""
+    left_out = [name for name in ("slow", "redteam") if not config.getoption(f"--{name}")]
+    if not left_out:
         return
     kept, dropped = [], []
     for item in items:
-        (dropped if "slow" in item.keywords else kept).append(item)
+        (dropped if any(item.get_closest_marker(name) for name in left_out) else kept).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept

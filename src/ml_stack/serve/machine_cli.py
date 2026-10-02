@@ -98,6 +98,11 @@ OPTIONS_LIMITS = [
     flag("--idle", default="", metavar="TIME",
          help="stop a server unused for this long -- 10m, 1h, 600. "
               "`ml-stack-serve reclaim` and the fleet daemon act on it"),
+    flag("--adopt-unmanaged", default="", metavar="MODE", choices=["", "off", "ask", "auto"],
+         help="off (default): report llama-servers ml-stack did not start and leave them; "
+              "ask: adopt one when asked to confirm; auto: adopt one that passes the "
+              "loopback, owner, binary and fingerprint checks. ML_STACK_ADOPT_UNMANAGED "
+              "overrides it"),
     flag("--clear", action="store_true", help="take every limit off this machine"),
 ]
 
@@ -108,6 +113,8 @@ def cmd_limits(args: argparse.Namespace) -> int:
     Set nothing and it prints what is set; every limit is off until somebody sets one.
     """
     try:
+        if args.adopt_unmanaged:
+            ops.adopt_unmanaged(args.adopt_unmanaged)
         limits = ops.limits(memory_size=args.memory, servers=args.servers,
                             slots=args.slots, idle=args.idle, clear=bool(args.clear))
     except Refused as no:

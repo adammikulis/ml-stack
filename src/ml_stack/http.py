@@ -12,10 +12,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from ml_stack import gate
 
 USER_AGENT = "ml-stack"
 
@@ -151,12 +155,25 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
     raise last
 
 
+@contextmanager
+def _queued(url: str) -> Iterator[None]:
+    """Wait for this request's turn when it runs a model on a server in the lease registry."""
+    if not gate.is_generation(url):
+        yield
+        return
+    try:
+        with gate.turn(url):
+            yield
+    except gate.QueueTimeout as exc:
+        raise ServerError(str(exc), status=429) from exc
+
+
 def request_bytes(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None, token: str = "",
                   timeout: float = 180.0, retry: Retry = ONCE) -> Reply:
     """Send a request and read the whole answer."""
-    with open_stream(url, data=data, method=method, headers=headers, token=token,
-                     timeout=timeout, retry=retry) as response:
+    with _queued(url), open_stream(url, data=data, method=method, headers=headers,
+                                   token=token, timeout=timeout, retry=retry) as response:
         return Reply(int(response.status), response.read(), response.headers)
 
 
@@ -184,10 +201,9 @@ def request_stream(url: str, *, payload: dict[str, Any], timeout: float = 180.0,
     sent = {"Content-Type": "application/json", "Accept": "text/event-stream"}
     sent.update(headers or {})
     data = json.dumps(payload).encode("utf-8")
-    response = open_stream(url, data=data, method="POST", headers=sent, token=token,
-                           timeout=timeout)
     try:
-        with response:
+        with _queued(url), open_stream(url, data=data, method="POST", headers=sent,
+                                       token=token, timeout=timeout) as response:
             for raw in response:
                 line = raw.decode("utf-8", "replace").strip()
                 if not line.startswith("data:"):

@@ -31,10 +31,13 @@ import sys
 import time
 import typing
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
+from ml_stack.decide import router
+from ml_stack.agent import Compaction, Counter, Spill, Transcript, compact, model_summarizer
+from ml_stack.client import Client
 from ml_stack.home import state
 from ml_stack.log import say
 
@@ -60,18 +63,36 @@ def mcp_home() -> Path:
 own, under its own home, because ``ml-stack-bench status`` reads them from there."""
 
 
+def _hints(*, read_only: bool, destructive: bool = False, idempotent: bool = False,
+           open_world: bool = False) -> dict[str, bool]:
+    return {"readOnly": read_only, "destructive": destructive, "idempotent": idempotent,
+            "openWorld": open_world}
+
+
+READS = _hints(read_only=True, idempotent=True)
+"""Hints for a tool that only looks."""
+
+WRITES = _hints(read_only=False)
+"""Hints for a tool that changes something and can be repeated at a cost."""
+
+
 @dataclass(frozen=True, slots=True)
 class Tool:
     name: str
     description: str
     fn: Callable[..., Any]
+    hints: dict[str, bool] = field(default_factory=lambda: dict(WRITES))
 
     def schema(self) -> dict[str, Any]:
         return schema_of(self.fn)
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description,
-                "inputSchema": self.schema()}
+                "inputSchema": self.schema(), "annotations": self.annotations()}
+
+    def annotations(self) -> dict[str, bool]:
+        """The tool's behaviour hints under the names the protocol uses."""
+        return {f"{k}Hint": v for k, v in self.hints.items()}
 
 
 _JSON_TYPES: dict[Any, dict[str, Any]] = {
@@ -357,6 +378,19 @@ def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict
             "sample_rate": spoken.sample_rate, "voice": spoken.voice}
 
 
+def decide(question: str, options: list[str], state_text: str = "", backend: str = "auto",
+           url: str = "", abstain_below: float = -1.0) -> dict[str, Any]:
+    """Choose one of ``options`` (``NAME`` or ``NAME=description``) for ``question`` about
+    ``state_text`` and say how sure (``ml-stack-decide ask``); ``backend`` is ``auto``,
+    ``logprob``, ``pointer``, ``embed`` or ``rules``, ``url`` the chat server for logprob,
+    and a positive ``abstain_below`` flags answers under that probability."""
+    named = {n.strip(): d.strip() for n, _, d in (o.partition("=") for o in options)}
+    got = router.decide(question, state_text, named,
+                        abstain_below=abstain_below if abstain_below > 0 else None,
+                        config=router.shared(backend, url))
+    return got.public()
+
+
 def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
@@ -365,7 +399,26 @@ def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     return [_plain(f) for f in look_checkouts(repositories(list(repos)) if repos else None)]
 
 
-TOOLS: list[Tool] = [
+def conversation_compact(path: str, budget: int, keep_last: int = 6, url: str = "",
+                         write: bool = False) -> dict[str, Any]:
+    """Fit the chat messages in a JSON file to ``budget`` tokens: long tool results cut,
+    repeated calls dropped, the oldest messages summarised by the model at ``url`` (removed
+    outright when there is none). ``write`` replaces the file; removed text is kept under
+    ``~/.ml-stack/compaction``."""
+    messages = json.loads(Path(path).read_text(encoding="utf-8"))
+    client = Client(url) if url else None
+    fitted = compact(messages, budget=budget, count=Counter(client), using=Compaction(
+        keep_last=keep_last, summarize=bool(url),
+        summarizer=model_summarizer(client) if client else None,
+        spill=Spill(Transcript())))
+    if write and fitted.strategy_used != "none":
+        Path(path).write_text(json.dumps(fitted.messages, indent=2), encoding="utf-8")
+    return {"strategy": fitted.strategy_used, "dropped": fitted.dropped_count,
+            "tokens_before": fitted.tokens_before, "tokens_after": fitted.tokens_after,
+            "notes": list(fitted.notes), "written": write and fitted.strategy_used != "none"}
+
+
+_TOOLS: list[Tool] = [
     Tool("serve_status", "What is serving on this machine, and what a lease would do.",
          serve_status),
     Tool("serve_up", "Put a model up on a port, detached; returns the log and pid.", serve_up),
@@ -393,12 +446,34 @@ TOOLS: list[Tool] = [
          setup_look),
     Tool("doctor", "The checkouts, the bench store and the managed llama.cpp, checked.",
          doctor),
+    Tool("conversation_compact", "Fit a chat's messages to a token budget: cut long tool "
+                                 "results, drop repeated calls, summarise the oldest.",
+         conversation_compact),
     Tool("speech_providers", "Every speech engine here: recognition, synthesis, voice "
                              "activity.", speech_providers),
     Tool("speech_transcribe", "An audio file as text, with the times of each segment.",
          speech_transcribe),
     Tool("speech_say", "Speak text into a WAV file.", speech_say),
+    Tool("decide", "Choose one of a named set of options and report a probability for each.",
+         decide),
 ]
+_HINTS: dict[str, dict[str, bool]] = {
+    "serve_status": READS, "models_find": _hints(read_only=True, idempotent=True, open_world=True),
+    "models_files": _hints(read_only=True, idempotent=True, open_world=True),
+    "bench_status": READS, "bench_history": READS, "bench_show": READS,
+    "fleet_peers": READS, "setup_look": READS, "doctor": READS, "speech_providers": READS,
+    "speech_transcribe": READS,
+    "serve_up": _hints(read_only=False, idempotent=True, open_world=True),
+    "serve_down": _hints(read_only=False, destructive=True, idempotent=True),
+    "serve_escalate": _hints(read_only=False),
+    "models_fetch": _hints(read_only=False, idempotent=True, open_world=True),
+    "bench_run": _hints(read_only=False),
+    "fleet_join": _hints(read_only=False, idempotent=True),
+    "world_make": _hints(read_only=False, idempotent=True),
+    "speech_say": _hints(read_only=False, idempotent=True),
+    "conversation_compact": _hints(read_only=False, destructive=True),
+}
+TOOLS: list[Tool] = [dataclasses.replace(t, hints=_HINTS.get(t.name, t.hints)) for t in _TOOLS]
 _BY_NAME = {t.name: t for t in TOOLS}
 
 
@@ -482,19 +557,25 @@ def serve(reader: TextIO, writer: TextIO) -> int:
 # -- the SDK transport -----------------------------------------------------------------
 def sdk_available() -> bool:
     try:
-        import mcp.server.fastmcp  # noqa: F401
+        import mcp.server.mcpserver  # noqa: F401
     except ImportError:
         return False
     return True
 
 
 def build_sdk_server() -> Any:
-    """A ``FastMCP`` server carrying the same tools; needs ``pip install 'ml-stack[mcp]'``."""
-    from mcp.server.fastmcp import FastMCP
+    """An ``MCPServer`` carrying the same tools, with their behaviour hints and structured
+    results; needs ``pip install 'ml-stack[mcp]'`` (mcp 2.2 or later)."""
+    from mcp.server.mcpserver import MCPServer
+    from mcp_types import ToolAnnotations
 
-    app = FastMCP("ml-stack")
+    app = MCPServer("ml-stack")
     for tool in TOOLS:
-        app.add_tool(tool.fn, name=tool.name, description=tool.description)
+        hints = tool.hints
+        app.add_tool(tool.fn, name=tool.name, description=tool.description,
+                     annotations=ToolAnnotations(
+                         read_only_hint=hints["readOnly"], destructive_hint=hints["destructive"],
+                         idempotent_hint=hints["idempotent"], open_world_hint=hints["openWorld"]))
     return app
 
 

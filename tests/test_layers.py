@@ -1,6 +1,7 @@
 """Which package may import which.
 
-The layers are core, model, graph, machine, tools. A package may import a package in a
+The layers are core, model, graph, machine, tools, and dev (the red-team harness, which drives
+the rest). A package may import a package in a
 lower layer, and one in its own layer as long as the other does not import it back.
 ``KNOWN`` lists the edges that break that today; it may only shrink.
 """
@@ -18,16 +19,18 @@ ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("asking", "backend", "checks", "command", "contracts", "data", "entities",
-              "extraction", "files", "geo",
-              "home", "http", "installed", "jobs", "jsonl", "limits", "lock", "log",
+              "extraction", "files", "gate", "geo",
+              "home", "http", "installed", "interventions", "jobs", "jsonl", "limits", "lock", "log",
               "markup",
               "media", "messages", "paths", "platform", "redact", "scrape", "records",
-              "telemetry", "ui", "units")),
-    ("model", ("client", "gguf", "hub", "spec", "speech", "vision")),
+              "taint", "telemetry", "ui", "units")),
+    ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
     ("machine", ("doctor", "fleet", "serve", "setup")),
-    ("tools", ("bench", "claude", "cli", "do", "draft", "harness", "mcp", "surface",
-               "testing", "train", "walk", "web")),
+    ("tools", ("agent", "bench", "claude", "cli", "decide_cli", "do", "draft", "guard", "harness",
+               "mcp",
+               "surface", "testing", "train", "walk", "web")),
+    ("dev", ("redteam",)),
 )
 
 RANK = {package: height for height, (_, packages) in enumerate(LAYERS)

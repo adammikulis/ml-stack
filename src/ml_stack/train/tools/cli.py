@@ -10,8 +10,11 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.client import Client
 from ml_stack.log import say, warn
+from ml_stack.train.tools import drift
 from ml_stack.train.tools.dataset import counts, lines, split, write_dataset
+from ml_stack.train.tools.evaluate import evaluate
 from ml_stack.train.tools.from_bench import from_bench, would_yield
 from ml_stack.train.tools.schemas import schemas_of
 from ml_stack.train.tools.synthesise import synthesise
@@ -40,8 +43,6 @@ def load_tools(spec: str) -> Any:
 
 
 def _asker(url: str) -> Callable[[str], str]:
-    from ml_stack.client import Client
-
     client = Client(url)
 
     def ask(prompt: str) -> str:
@@ -105,16 +106,17 @@ def _from_bench_arguments(ap: Any) -> Any:
     return ap
 
 
-def _from_bench_parser() -> Any:
-    return _from_bench_arguments(argparse.ArgumentParser(
-        prog="ml-stack-train-tools from-bench", allow_abbrev=False, description=FROM_BENCH))
+def _sub_parser(name: str, description: str, arguments: Callable[[Any], Any]) -> Any:
+    """The parser for ``ml-stack-train-tools NAME``, carrying that command's arguments."""
+    return arguments(argparse.ArgumentParser(
+        prog=f"ml-stack-train-tools {name}", allow_abbrev=False, description=description))
 
 
 def _from_bench(argv: list[str]) -> int:
     """``ml-stack-train-tools from-bench``: kept bench traces into a training file."""
     from ml_stack import bench
 
-    a = _from_bench_parser().parse_args(argv)
+    a = _sub_parser("from-bench", FROM_BENCH, _from_bench_arguments).parse_args(argv)
     store = Path(a.kept).expanduser() if a.kept else bench.home_dir() / "runs.ladybug"
     if not store.exists():
         raise FileNotFoundError(f"no bench store at {store}; run ml-stack-bench first")
@@ -152,6 +154,48 @@ def _from_bench(argv: list[str]) -> int:
     return 0
 
 
+EVAL = ("Held-out tool-call accuracy: each held-out conversation up to the assistant turn is "
+        "sent to a served model, and what it called is scored against what the dataset "
+        "says it should: the tool, the required arguments, valid JSON, and all three "
+        "together. With --tools, refuses when the live schemas differ from the ones the "
+        "dataset was made for.")
+
+
+def _eval_arguments(ap: Any) -> Any:
+    ap.add_argument("--data", required=True, metavar="DIR",
+                    help="a dataset directory holding holdout.jsonl and manifest.json")
+    ap.add_argument("--url", required=True, metavar="URL", help="the served model to score")
+    ap.add_argument("--tools", default="",
+                    help="the live tools (JSON file or python:module:attr) to check the "
+                         "dataset against")
+    ap.add_argument("--json", action="store_true", help="print the scores as JSON")
+    return ap
+
+
+def _eval(argv: list[str]) -> int:
+    """``ml-stack-train-tools eval``: a served model scored on the held-out rows."""
+    a = _sub_parser("eval", EVAL, _eval_arguments).parse_args(argv)
+    data = Path(a.data).expanduser()
+    manifest = json.loads((data / "manifest.json").read_text())
+    if a.tools:
+        drift.check(manifest, schemas_of(load_tools(a.tools)))
+    rows = [json.loads(line) for line in (data / "holdout.jsonl").read_text().splitlines()
+            if line.strip()]
+    if not rows:
+        raise ValueError(f"{data}/holdout.jsonl has no rows to score")
+    scores = evaluate(Client(a.url), rows)
+    if a.json:
+        say(json.dumps(scores, indent=2))
+        return 0
+    say(f"eval: {scores['n']} held-out rows")
+    for name in ("tool_name_accuracy", "required_arg_fill", "valid_json_rate",
+                 "arguments_match", "end_to_end"):
+        say(f"  {name:<20} {scores[name]:.3f}")
+    for tool, got in scores["per_tool"].items():
+        say(f"  {tool:<20} n={got['n']:<4} end_to_end {got['end_to_end']:.3f}")
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     """``ml-stack-train-tools``' own parser, with ``from-bench`` registered under it."""
     ap = argparse.ArgumentParser(
@@ -186,20 +230,22 @@ def _parser() -> argparse.ArgumentParser:
     # them. It is not parsed through here: the three stages' --tools and --out are required
     # at this level, and from-bench takes neither. Both carry the same arguments from
     # `_from_bench_arguments`, so the two cannot describe different commands.
-    _from_bench_arguments(ap.add_subparsers(dest="cmd", metavar="{from-bench}")
-                          .add_parser("from-bench", allow_abbrev=False,
-                                      description=FROM_BENCH,
-                                      help="training data out of a bench run's traces"))
+    subs = ap.add_subparsers(dest="cmd", metavar="{from-bench,eval}")
+    _from_bench_arguments(subs.add_parser("from-bench", allow_abbrev=False,
+                                          description=FROM_BENCH,
+                                          help="training data out of a bench run's traces"))
+    _eval_arguments(subs.add_parser("eval", allow_abbrev=False, description=EVAL,
+                                    help="held-out tool-call accuracy of a served model"))
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
     """``ml-stack-train-tools`` -- tool schemas in, a model that calls them out."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "from-bench":
+    if argv and argv[0] in ("from-bench", "eval"):
         try:
-            return _from_bench(argv[1:])
-        except (ValueError, FileNotFoundError, KeyError) as exc:
+            return (_from_bench if argv[0] == "from-bench" else _eval)(argv[1:])
+        except (ValueError, FileNotFoundError, KeyError, drift.SchemaDrift) as exc:
             warn(f"error: {exc}")
             return 2
 
@@ -218,6 +264,7 @@ def _synth(a: Any, data: Path) -> dict[str, Any]:
     """The synth stage: the conversations, written unless they are already there."""
     if (data / "train.jsonl").exists() and not a.dry_run:
         manifest = json.loads((data / "manifest.json").read_text())
+        drift.check(manifest, schemas_of(load_tools(a.tools)))
         say(f"synth: {manifest['rows']} rows already in {data}, skipping")
         return manifest
     tools = schemas_of(load_tools(a.tools))

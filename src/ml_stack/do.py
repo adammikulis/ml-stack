@@ -26,8 +26,12 @@ from functools import partial
 from pathlib import Path
 from typing import Any, TextIO
 
-from ml_stack import hub, mcp
+from ml_stack import guard as rails, hub, mcp
+from ml_stack.agent import Compacted, Compacting, Compaction
 from ml_stack.client import ollama
+from ml_stack.guard import NOTICE, parse_call
+from ml_stack.guard.native import screen as native_screen
+from ml_stack.interventions import Call, Confirm, Deny, Run, Verdict
 from ml_stack.log import say
 
 __all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "bench_cli", "client_for",
@@ -53,10 +57,11 @@ SYSTEM = (
     "and, when it names Ollama or two backends, ollama_models too, and the person is "
     "asked to confirm the exact files before anything starts. Do not start a measurement "
     "the person has not confirmed.\n\n"
-    "Then call plan with the steps in order; it asks the person \"go?\". Only when the "
-    "person passed --yes is that skipped, and even then a task naming more than one "
-    "backend still confirms the models found. Then act: call the tools in the order "
-    "planned. A long command detaches and returns a log and a pid; call jobs_wait to "
+    "Then call plan with the steps in order, each naming the tool and every argument it "
+    "will be called with; it asks the person \"go?\", and the go covers those values and no "
+    "others. Only when the person passed --yes is that skipped, and even then a task naming "
+    "more than one backend still confirms the models found. Then act: call the tools in the "
+    "order planned. A long command detaches and returns a log and a pid; call jobs_wait to "
     "wait for it rather than calling status again and again.\n\n"
     "Last, call done with what was measured and where it is -- the labels, the numbers if "
     "any came back, the files written. Say plainly when something failed and what the "
@@ -70,7 +75,7 @@ YES = ("The person passed --yes: plan prints the steps and does not ask go. Stil
 
 def system_for(yes: bool = False) -> str:
     """The system prompt, with what the person passed on the command line."""
-    return SYSTEM + ("\n\n" + YES if yes else "")
+    return SYSTEM + "\n\n" + NOTICE + ("\n\n" + YES if yes else "")
 
 
 NUDGE = ("You replied in words and called nothing. If the task is finished, call done with "
@@ -209,11 +214,15 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
               'plan(steps=["bench_run sweep flash-next with its draft head, a sample of 10, '
               'kept as Qwen3.8-Flash--plain", "jobs_wait bench", "bench_show"])'),
              (ACCEPTANCE,
-              'plan(steps=["bench_run sweep with the head -> Qwen3.8-Flash--plain", '
-              '"jobs_wait bench", "bench_run sweep without the head, --label-suffix -nodraft '
-              '-> Qwen3.8-Flash--nodraft-plain", "jobs_wait bench", "bench_run run '
-              'Qwen3.8-Flash--ollama-plain --base-url http://127.0.0.1:11434", "jobs_wait '
-              'bench", "bench_compare --export compare.json", "bench_animate compare.json"])')),
+              'plan(steps=[\'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+              '"--serve-draft", "auto", "--plain-only", "--sample", "10"]\', "jobs_wait bench", '
+              '\'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+              '"--serve-draft", "", "--label-suffix", "-nodraft", "--plain-only", "--sample", '
+              '"10"]\', "jobs_wait bench", \'bench_run ["run", "Qwen3.8-Flash--ollama-plain", '
+              '"--base-url", "http://127.0.0.1:11434", "--sample", "10"]\', "jobs_wait bench", '
+              '\'bench_compare ["Qwen3.8-Flash--plain", "Qwen3.8-Flash--nodraft-plain", '
+              '"Qwen3.8-Flash--ollama-plain", "--export", "compare.json"]\', '
+              '\'bench_animate ["compare.json", "--out", "compare.mp4"]\'])')),
     "done": (("run benchmarks with qwen3.8-flash-next",
               'done(summary="Measured 10 questions as Qwen3.8-Flash--plain: 83% F1 at 44 s a '
               'question; the runs are under the bench home, `bench_show` reads them back.")'),
@@ -368,6 +377,11 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
     return out
 
 
+def on_disk_ids() -> list[str]:
+    """The names and paths of the weights on this machine."""
+    return [str(row[key]) for row in models_on_disk() for key in ("model", "path")]
+
+
 def ollama_models(words: str = "",
                   fetch: Callable[..., dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """The models Ollama holds whose name has every word of ``words``, each with its
@@ -472,7 +486,8 @@ class Person:
         return {"answer": got}
 
     def plan(self, steps: list[str]) -> dict[str, Any]:
-        """Print the steps in order and ask the person \"go?\" once; with --yes the plan is
+        """Print the steps in order and ask the person \"go?\" once; each step names a tool and
+        the arguments it will get, and the go covers those values. With --yes the plan is
         printed and taken as agreed."""
         self.say("\nplan:")
         for n, step in enumerate(steps or [], start=1):
@@ -485,6 +500,13 @@ class Person:
         if got.lower() in ("y", "yes", "go", "ok"):
             return {"go": True, "said": "go"}
         return {"go": False, "said": f"The person said: {got!r}. Change the plan or ask."}
+
+    def confirm(self, ask: Confirm, call: Call | None = None) -> bool:
+        """Put an intervention's question to the person and take a yes or no."""
+        what = f"{call.name}({_compact(call.arguments or {})}): " if call is not None else ""
+        self.say(f"\n! {what}{ask.question}")
+        got = self._read("allow it? [y/N] ")
+        return bool(got) and got.lower() in ("y", "yes")
 
     def done(self, summary: str) -> dict[str, Any]:
         """End the task: ``summary`` is what was measured and where it is."""
@@ -516,6 +538,9 @@ class Outcome:
     seconds: float = 0.0
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    blocked: list[Verdict] = field(default_factory=list)
+    screened: int = 0
+    withheld: int = 0
 
 
 def _compact(args: dict[str, Any], most: int = 160) -> str:
@@ -544,26 +569,37 @@ def transcript(messages: Iterable[dict[str, Any]]) -> str:
 
 def run(task: str, client: Any, *,
         tools: Sequence[tuple[dict[str, Any], Callable[..., Any]]] | None = None,
-        stdin: TextIO | None = None, stdout: TextIO | None = None, yes: bool = False,
-        rounds: int = ROUNDS, messages: list[dict[str, Any]] | None = None) -> Outcome:
+        person: Person | None = None, rounds: int = ROUNDS,
+        messages: list[dict[str, Any]] | None = None,
+        guard: Sequence[Any] | None = None) -> Outcome:
     """One task through the loop: the model is offered every tool, each call is run and
     answered, ``ask_user`` and ``plan`` reach the person, ``done`` ends it. ``messages``
-    carries a conversation across tasks; a new one is started when none is given."""
-    person = Person(stdin or sys.stdin, stdout or sys.stdout, yes=yes)
+    carries a conversation across tasks; a new one is started when none is given.
+
+    Every call and every tool result passes the interventions in ``guard`` (`ml_stack.guard`);
+    with none given the built-in rails are on, and so is the model-based screen when a local
+    model can be leased for it. ``guard.off(because=...)`` is the only way to run without
+    them."""
+    person = person or Person(sys.stdin, sys.stdout)
     offered = [*(command_tools() if tools is None else tools), *person.tools()]
     schemas = [schema for schema, _ in offered]
     run_by = {schema["function"]["name"]: fn for schema, fn in offered}
+    screen = native_screen() if guard is None else []
+    watch = rails.start(rails.default(screen=screen, registries={"models": on_disk_ids})
+                        if guard is None else guard,
+                        offered=schemas, task=task, confirm=person.confirm)
     if messages is None:
-        messages = [{"role": "system", "content": system_for(yes)}]
+        messages = [{"role": "system", "content": system_for(person.yes)}]
     messages.append({"role": "user", "content": task})
     out = Outcome(messages=messages)
+    watch.context.messages = messages
     began = time.monotonic()
     nudged = False
     exhausted = True
     for _ in range(rounds):
         reply = client.chat(messages, think=False, tools=schemas)
         calls = list(getattr(reply, "tool_calls", None) or [])
-        content = getattr(reply, "content", "") or ""
+        content = watch.screen_model(getattr(reply, "content", "") or "").text
         if not calls:
             if content.strip():
                 person.say(content.strip())
@@ -577,41 +613,62 @@ def run(task: str, client: Any, *,
         out.rounds += 1
         messages.append({"role": "assistant", "content": content, "tool_calls": calls})
         for call in calls:
-            fn = call.get("function") or {}
-            name = str(fn.get("name") or "")
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
-            if name not in OWN:
-                person.say(f"-> {name}({_compact(args)})")
-            do = run_by.get(name)
-            if do is None:
-                result: Any = {"error": f"no such tool: {name}"}
-            else:
-                try:
-                    result = do(**args)
-                except Exception as exc:  # noqa: BLE001 - the error is the answer
-                    result = {"error": f"{type(exc).__name__}: {exc}"}
-            out.calls.append((name, args))
-            text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)
-            if name not in OWN:
-                person.say("   " + (text if len(text) <= 300 else text[:297] + "..."))
-            messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
-                             "name": name, "content": text[:CUT]})
+            _answer(call, run_by, watch, person, out)
             if person.finished or person.left:
                 break
         if person.finished or person.left:
             exhausted = False
             break
+    for one in screen:
+        close = getattr(one, "close", None)
+        if close is not None:
+            close()
     out.seconds = round(time.monotonic() - began, 2)
     out.done, out.summary = person.finished, person.summary
     if exhausted:
         person.say(f"\nran out of {rounds} rounds without done; the transcript:")
         person.say(transcript(messages))
     return out
+
+
+def _answer(call: dict[str, Any], run_by: dict[str, Callable[..., Any]], watch: Run,
+            person: Person, out: Outcome) -> None:
+    """Run one call the model made, if the interventions let it, and append what came back."""
+    asked = parse_call(call)
+    args = asked.arguments or {}
+    if asked.name not in OWN:
+        person.say(watch.screen_model(f"-> {asked.name}({_compact(args)})").text)
+    gate = watch.check_call(asked)
+    do = run_by.get(asked.name)
+    if not gate.allowed:
+        by = getattr(gate.verdict, "by", "") or "guard"
+        why = gate.verdict.reason if isinstance(gate.verdict, Deny) else gate.text
+        result: Any = {"error": f"blocked by the {by} rail: {why}"}
+        out.blocked.append(gate.verdict)
+    elif do is None:
+        result = {"error": f"no such tool: {asked.name}"}
+    else:
+        try:
+            result = do(**args)
+        except Exception as exc:  # noqa: BLE001 - the error is the answer
+            result = {"error": f"{type(exc).__name__}: {exc}"}
+    out.calls.append((asked.name, args))
+    if asked.name == "plan" and gate.allowed and not person.yes and result.get("go"):
+        watch.approve(" ".join(str(step) for step in args.get("steps") or []))
+    text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)[:CUT]
+    answer = text
+    if asked.name not in OWN and gate.allowed:
+        shown = watch.screen_result(asked, text)
+        answer = shown.text
+        out.screened += 1
+        out.withheld += shown.withheld
+    if watch.guides:
+        answer = f"{answer}\n\n{' '.join(watch.guides)}"
+        watch.guides = []
+    if asked.name not in OWN:
+        person.say("   " + watch.screen_model(text).text[:300])
+    out.messages.append({"role": "tool", "tool_call_id": call.get("id") or asked.name,
+                         "name": asked.name, "content": answer})
 
 
 # -- the command ------------------------------------------------------------------------
@@ -699,7 +756,19 @@ def parser() -> argparse.ArgumentParser:
                     help="the ceiling on one reply (default: %(default)s)")
     ap.add_argument("--timeout", type=float, default=900.0,
                     help="seconds to wait for one reply (default: %(default)s)")
+    ap.add_argument("--auto-compact", action="store_true",
+                    help="summarise the oldest part of the conversation when it fills 80%% of "
+                         "the model's context, down to half of it; what was removed is kept in "
+                         "~/.ml-stack/compaction")
+    ap.add_argument("--context-size", type=int, default=0, metavar="TOKENS",
+                    help="the context --auto-compact measures against (default: ask the server)")
     return ap
+
+
+def _show_compaction(event: Any, out: TextIO) -> None:
+    if isinstance(event, Compacted):
+        out.write(f"(compacted {event.dropped} messages: {event.before:.0%} -> "
+                  f"{event.after:.0%} of the context)\n")
 
 
 def _print_offer(tools: Sequence[tuple[dict[str, Any], Any]], out: TextIO) -> None:
@@ -735,9 +804,12 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
         stdout.write(f"no --model given: {record.model}, the best measured on this machine "
                      f"({record.right:.0%} F1 over {record.questions} questions)\n")
     client = client_for(args)
+    if args.auto_compact:
+        client = Compacting(client, Compaction(context_size=args.context_size or None),
+                            on_event=lambda e: _show_compaction(e, stdout))
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_for(args.yes)}]
     if args.task:
-        got = run(args.task, client, tools=tools, stdin=stdin, stdout=stdout, yes=args.yes,
+        got = run(args.task, client, tools=tools, person=Person(stdin, stdout, yes=args.yes),
                   rounds=args.rounds, messages=messages)
         return 0 if got.done else 1
     code = 0
@@ -750,8 +822,8 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
             break
         if not line.strip():
             continue
-        got = run(line.strip(), client, tools=tools, stdin=stdin, stdout=stdout,
-                  yes=args.yes, rounds=args.rounds, messages=messages)
+        got = run(line.strip(), client, tools=tools, person=Person(stdin, stdout, yes=args.yes),
+                  rounds=args.rounds, messages=messages)
         if not got.done:
             code = 1
     return code
