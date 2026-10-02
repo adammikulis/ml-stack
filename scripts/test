@@ -28,7 +28,6 @@ import affected
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
-SAFE = ("src/ml_stack/", "tests/test_", "docs/", "scripts/gates/", "scripts/affected.py")
 DATAFILE = ".testmondata"
 FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
     "test_spec_decode.py", "test_spec_qwen4.py", "test_spec_qwen4_load.py", "test_spec_serve.py"))]
@@ -63,17 +62,13 @@ def clean(status: int) -> int:
     return 0 if status == 5 else status
 
 
-def reasons_for_everything(changed: list[str], deleted: frozenset[str]) -> list[str]:
-    """Why a change cannot be narrowed, empty when it can."""
-    out = [f"{p}: not source, test or doc" for p in changed
-           if not p.startswith(SAFE) and Path(p).name not in affected.INERT]
-    out += [f"{p}: deleted" for p in changed if p in deleted and p.endswith(".py")]
-    out += [f"{p}: shared by every test" for p in changed if p in affected.EVERYTHING]
-    return out
-
-
 def quick(args: argparse.Namespace, rest: list[str]) -> int:
-    """Run the tests a change reaches: testmon's recorded map, plus the import graph."""
+    """Run the tests a change reaches: testmon's recorded map, plus the import graph.
+
+    Always under xdist: a map recorded with ``-n 0`` and one recorded with workers disagree
+    about the installed packages, and testmon reruns everything when they do.
+    """
+    args.workers = max(1, args.workers)
     tier = ["--slow"] if args.slow else FULL
     try:
         changed, deleted = affected.changed_since(ROOT, args.base)
@@ -83,7 +78,8 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
     if not changed:
         print(f"quick: nothing differs from {args.base}; running nothing")
         return 0
-    why = reasons_for_everything(changed, deleted)
+    picked = affected.select(ROOT, changed, deleted)
+    why = [f"{p}: nothing says which tests it affects" for p in picked.unmapped]
     if testmon_missing():
         why = ["pytest-testmon is not installed (pip install -e '.[test]')", *why]
     elif not (ROOT / DATAFILE).exists():
@@ -94,7 +90,6 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
         print("quick: running the full tier")
         record = [] if testmon_missing() else ["--testmon-noselect"]
         return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env())
-    picked = affected.select(ROOT, changed, deleted)
     if args.explain:
         for test, reasons in sorted(picked.why.items()):
             print(f"quick: {test}  <- {'; '.join(sorted(set(reasons))[:3])}")

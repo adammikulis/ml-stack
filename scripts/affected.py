@@ -18,7 +18,7 @@ PACKAGE_ROOTS = (("src", "ml_stack"), ("scripts", "gates"))
 SCRIPT_TABLE = re.compile(r'''\[["']project["']\]\[["']scripts["']\]''')
 DOTTED = re.compile(r"\b((?:ml_stack|gates|tests)(?:\.\w+)+|ml_stack|gates)\b")
 INERT = {"CHANGELOG.md", "HANDOFF.md", "README.md", "LICENSE", "NOTICE", "CLAUDE.md",
-         "AGENTS.md", "release-please-config.json", "version.txt"}
+         "AGENTS.md", "release-please-config.json", "version.txt", ".gitignore"}
 EVERYTHING = {"pyproject.toml", "budgets.json", "tests/conftest.py", "tests/known-fixtures.txt"}
 DEPTH = 1
 GUARDS = ("test_layers.py", "test_wiring.py", "test_conftest_guard.py", "test_isolation_guard.py",
