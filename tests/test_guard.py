@@ -20,6 +20,9 @@ SCHEMAS = [
                        "tags": {"type": "array", "items": {"type": "string"}},
                        "mode": {"type": "string", "enum": ["a", "b"]},
                        "fast": {"type": "boolean"}, "ratio": {"type": "number"}}}}},
+    {"type": "function", "function": {"name": "models_fetch", "parameters": {
+        "type": "object", "required": ["reference"],
+        "properties": {"reference": {"type": "string"}}}}},
     {"type": "function", "function": {"name": "models_find", "parameters": {
         "type": "object", "required": ["words"], "properties": {"words": {"type": "string"}}}}},
 ]
