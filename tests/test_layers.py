@@ -1,6 +1,7 @@
 """Which package may import which.
 
-The layers are core, model, graph, machine, tools. A package may import a package in a
+The layers are core, model, graph, machine, tools, and dev (the red-team harness, which drives
+the rest). A package may import a package in a
 lower layer, and one in its own layer as long as the other does not import it back.
 ``KNOWN`` lists the edges that break that today; it may only shrink.
 """
@@ -29,6 +30,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tools", ("agent", "bench", "claude", "cli", "decide_cli", "do", "draft", "guard", "harness",
                "mcp",
                "surface", "testing", "train", "walk", "web")),
+    ("dev", ("redteam",)),
 )
 
 RANK = {package: height for height, (_, packages) in enumerate(LAYERS)
