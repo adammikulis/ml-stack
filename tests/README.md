@@ -123,6 +123,28 @@ lookup beyond loopback, the LAN and link-local addresses; the test fails and nam
 variable, or a spawn of the `claude` command anywhere under `tests/`. Local models served through
 the broker are not remote services and are untouched by all of this.
 
+## Attack runs against a served model
+
+`ml_stack.testing.verdicts` is what a model-backed red-team, canary or guard-eval run uses to
+avoid repeating itself. Attacks still go to the model one at a time through the broker.
+
+- **`run(attacks, execute, Subject(model_hash, guard_version))`** serves a *passing* verdict from
+  `$ML_STACK_CACHE/verdicts/attacks/` while its key is unchanged: the hash of the model file
+  (`model_hash`, read once per file version), the attack id, the guard or prompt version, and the
+  bytes of every module or file in `Attack.surfaces`. Editing a guard, a prompt, a surface or
+  swapping the model changes the key, so the attack runs again and a regression shows. A failing
+  verdict is never served; `use_cache=False` (the runner's `--no-cache`) runs everything and
+  records nothing.
+- **`sample(attacks, fraction=0.1, seed=..., changed=...)`** is the quick mode: a seeded tenth plus
+  every attack in a class (`Attack.klass`) with an attack that touches a changed file. The full
+  sweep is the nightly and release command.
+- **`Limits(max_tokens, stop, thinking=False, cache_prompt=True).body(base)`** is the request a run
+  sends: few tokens, thinking off, the prompt prefix kept warm so only the attack text is
+  processed, and the canary as a stop string so generation ends at the objective.
+
+`test_verdicts.py` runs the real Bash guard as the attack target: it breaks a copy of the guard
+and checks the cached run reports the regression.
+
 ## The shared fakes, in `conftest.py`
 
 Import them like the tests already do: `from conftest import write_gguf`.
