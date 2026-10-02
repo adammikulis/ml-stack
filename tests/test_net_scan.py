@@ -101,7 +101,7 @@ def test_the_model_policy_says_why_a_virus_scanner_is_not_enough():
 
 def test_the_policy_can_be_set_by_the_environment(monkeypatch):
     monkeypatch.setenv("ML_STACK_NET_UNSCANNED", "archive:allow, model:refuse, data:bogus")
-    policy = ScanPolicy.from_env()
+    policy = ScanPolicy().from_env()
     assert (policy.archive, policy.model, policy.data) == ("allow", "refuse", "warn")
 
 

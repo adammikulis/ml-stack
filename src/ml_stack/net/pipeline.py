@@ -109,7 +109,7 @@ class Pipeline:
     policy: hosts.Policy = field(default_factory=hosts.default)
     limits: Limits = PAGE
     scanners: list[Scanner] = field(default_factory=default_scanners)
-    scan_policy: ScanPolicy = field(default_factory=ScanPolicy.from_env)
+    scan_policy: ScanPolicy = field(default_factory=ScanPolicy.load)
     hold: Hold = field(default_factory=SentinelHold)
     sleep: Callable[[float], None] = time.sleep
 

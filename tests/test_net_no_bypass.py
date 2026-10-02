@@ -1,0 +1,161 @@
+"""Nothing outside the net pipeline opens a connection to a host on the internet.
+
+The scan reads every module under ``src/ml_stack`` and flags: imports of network libraries,
+a raw connection, a git or download program run by subprocess, and a call into
+``ml_stack.http``'s request functions (the client for servers on this machine or network).
+A module may do these only when it is on a list below with the reason its traffic stays on
+this machine or network, or is handed to a library the pipeline cannot wrap.
+"""
+
+import ast
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent / "src" / "ml_stack"
+
+LIBRARIES = {"urllib.request", "http.client", "requests", "httpx", "aiohttp", "huggingface_hub",
+             "ftplib", "smtplib", "telnetlib", "urllib3", "websocket", "websockets"}
+CALLS = {"socket.create_connection", "urllib.request.urlopen", "urlopen"}
+PROGRAMS = {"curl", "wget", "scp", "sftp", "rsync"}
+GIT_NETWORK = {"clone", "fetch", "pull", "ls-remote", "push", "submodule"}
+REQUESTS = {"open_stream", "request_json", "request_bytes", "request_stream", "head_once"}
+
+PIPELINE = ("net/",)
+
+ALLOWED: dict[str, str] = {
+    "http.py": "the client for model servers on this machine and network; urllib lives here",
+    "httpguard.py": "the guarded connection the pipeline is built on",
+    "fleet/serving.py": "a port check on loopback",
+    "fleet/api.py": "proxies an inference call to a fleet peer",
+    "fleet/remote.py": "calls a fleet peer",
+    "fleet/join.py": "joins a fleet peer",
+    "fleet/chat.py": "chat with a fleet peer",
+    "fleet/launch.py": "the local daemon's health",
+    "fleet/ui.py": "a /metrics address a person typed into the fleet view (needs a session)",
+    "serve/broker_wire.py": "the lease broker on loopback",
+    "serve/escalation.py": "a model server's slots on loopback",
+    "serve/reclaim.py": "a model server's slots on loopback",
+    "bench/": "model servers on this machine or network",
+    "client/": "model servers the person chose; the chat endpoint is configured, not fetched",
+    "fleet/updates.py": "pip install -e after a fast-forward the person asked to follow",
+}
+
+
+def reason(rel: str) -> str:
+    for prefix, why in ALLOWED.items():
+        if rel == prefix or (prefix.endswith("/") and rel.startswith(prefix)):
+            return why
+    return ""
+
+
+def names(node: ast.AST) -> str:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def findings(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [f"import {a.name}" for a in node.names if a.name in LIBRARIES
+                      or any(a.name.startswith(lib + ".") for lib in LIBRARIES)]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            module = node.module
+            if module in LIBRARIES or any(module.startswith(lib + ".") for lib in LIBRARIES):
+                found.append(f"from {module} import ...")
+            elif module in ("urllib", "http"):
+                found += [f"from {module} import {a.name}" for a in node.names
+                          if f"{module}.{a.name}" in LIBRARIES]
+            elif module == "ml_stack.http" or (node.level and module == "http"):
+                found += [f"from ml_stack.http import {a.name}" for a in node.names
+                          if a.name in REQUESTS]
+        elif isinstance(node, ast.Call):
+            called = names(node.func)
+            if called in CALLS or called.split(".")[-1] == "urlopen":
+                found.append(f"call {called}")
+            if called.split(".")[-1] in REQUESTS and called.startswith(("http.", "ml_stack.http.")):
+                found.append(f"call {called}")
+            if called.startswith("subprocess.") and node.args:
+                found += program_findings(node.args[0])
+    return found
+
+
+def program_findings(argv: ast.AST) -> list[str]:
+    if not isinstance(argv, (ast.List, ast.Tuple)):
+        return []
+    words = [e.value for e in argv.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    out = [f"runs {w}" for w in words if w in PROGRAMS]
+    if "git" in words and GIT_NETWORK & set(words):
+        out.append("runs git against a remote")
+    if "pip" in words and "install" in words:
+        out.append("runs pip install")
+    return out
+
+
+def modules() -> list[tuple[str, Path]]:
+    return [(p.relative_to(ROOT).as_posix(), p) for p in sorted(ROOT.rglob("*.py"))]
+
+
+def test_no_module_outside_the_pipeline_reaches_the_internet_on_its_own():
+    bad: list[str] = []
+    for rel, path in modules():
+        if rel.startswith(PIPELINE) or reason(rel):
+            continue
+        for item in findings(path):
+            bad.append(f"{rel}: {item}")
+    assert not bad, "network I/O outside ml_stack.net:\n  " + "\n  ".join(bad)
+
+
+def test_every_allowed_module_exists_and_still_needs_its_place():
+    """A list entry whose module is gone, or whose module no longer does anything on the
+    list, is a door left open for nothing."""
+    existing = {rel for rel, _ in modules()}
+    stale = []
+    for prefix in ALLOWED:
+        matches = [rel for rel in existing if rel == prefix or
+                   (prefix.endswith("/") and rel.startswith(prefix))]
+        if not matches:
+            stale.append(f"{prefix}: no such module")
+        elif not any(findings(ROOT / rel) for rel in matches):
+            stale.append(f"{prefix}: does nothing that needs the allowance")
+    assert not stale, "\n".join(stale)
+
+
+@pytest.mark.parametrize("source", [
+    "import urllib.request\n",
+    "from urllib.request import urlopen\n",
+    "import requests\n",
+    "import socket\nsocket.create_connection(('x', 1))\n",
+    "import subprocess\nsubprocess.run(['git', 'clone', 'u'])\n",
+    "import subprocess\nsubprocess.run(['curl', 'u'])\n",
+    "import subprocess\nsubprocess.run(['python', '-m', 'pip', 'install', 'x'])\n",
+    "from huggingface_hub import hf_hub_download\n",
+    "from ml_stack.http import open_stream\n",
+    "from ml_stack import http\nhttp.request_json('u')\n",
+])
+def test_the_scan_recognises_each_way_of_reaching_out(tmp_path, source):
+    path = tmp_path / "m.py"
+    path.write_text(source)
+    assert findings(path), source
+
+
+def test_the_scan_leaves_alone_a_module_that_only_reads_a_local_file(tmp_path):
+    path = tmp_path / "m.py"
+    path.write_text("import json\nimport subprocess\nsubprocess.run(['git', 'status'])\n")
+    assert findings(path) == []
+
+
+def test_the_pipeline_is_the_one_place_that_opens_connections():
+    """The pipeline itself still goes through httpguard and nothing else."""
+    for rel, path in modules():
+        if not rel.startswith("net/"):
+            continue
+        for item in findings(path):
+            assert "urllib.request" not in item and "requests" not in item, f"{rel}: {item}"

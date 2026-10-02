@@ -169,9 +169,9 @@ def search(query: str, *, limit: int = 8, engine: Engine | None = None, page: in
         if not url or url in seen:
             continue
         seen.add(url)
-        out.append({"title": " ".join(str(row.get("title") or "").split()),
+        out.append({"title": " ".join(untrusted.clean_text(str(row.get("title") or ""))[0].split()),
                     "url": url,
-                    "snippet": " ".join(str(row.get("snippet") or "").split())})
+                    "snippet": " ".join(untrusted.clean_text(str(row.get("snippet") or ""))[0].split())})
         if len(out) >= limit:
             break
     return out
@@ -275,11 +275,12 @@ def _readable(html: str, url: str) -> tuple[str, str, int]:
     return untrusted.clean_text(title)[0], text, removed
 
 
-def _labelled(out: dict[str, Any], text: str, url: str, removed: int) -> dict[str, Any]:
+def _labelled(out: dict[str, Any], text: str, url: str, removed: int,
+              origins: untrusted.Origins | None = None) -> dict[str, Any]:
     """``out`` with its text cleaned, fenced and marked untrusted; the URLs in it are noted
     as found in fetched content."""
     item = untrusted.untrusted(text, url, next(_SERIAL), html_removed=removed)
-    untrusted.shared().page(item.text)
+    (origins or untrusted.shared()).page(item.text)
     out.update(text=item.fenced(), untrusted=True, origin=item.origin)
     if item.removed:
         out["hidden_removed"] = item.removed
@@ -287,7 +288,8 @@ def _labelled(out: dict[str, Any], text: str, url: str, removed: int) -> dict[st
 
 
 def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = None,
-         rendered: bool = False, browse: Callable[[], Any] | None = None) -> dict[str, Any]:
+         rendered: bool = False, browse: Callable[[], Any] | None = None,
+         origins: untrusted.Origins | None = None) -> dict[str, Any]:
     """One page as text: ``{"url", "title", "text", "rendered"}``, ``"truncated": True`` when cut.
 
     ``fetch`` is ``url -> html`` (tests pass one; the default is trafilatura's fetcher, or
@@ -295,11 +297,12 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
     built; a plain fetch that comes back with fewer than ``THIN`` characters of text falls
     through to that on its own, and back to the plain result when there is no browser.
     ``browse`` is the browser to use, as ``ml_stack.scrape.browser.browser`` gives one.
-    Refuses anything ``check`` refuses, before fetching.
+    ``origins`` records the URLs found in the text. Refuses anything ``check`` refuses,
+    before fetching.
     """
     url = check(url)
     if urllib.parse.urlsplit(url).path.lower().endswith(".pdf"):
-        return _read_pdf(url, limit)
+        return _read_pdf(url, limit, origins)
     fetch = fetch or _fetch
     browse = browse or _browse
     title, text, plain_error, was_rendered, html, hidden = "", "", None, False, "", 0
@@ -328,11 +331,11 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
         out["truncated"] = True
     if ahead := next_link(html, url, guess=False):
         out["next"] = ahead
-        untrusted.shared().paginate(url, ahead)
-    return _labelled(out, text, url, hidden)
+        (origins or untrusted.shared()).paginate(url, ahead)
+    return _labelled(out, text, url, hidden, origins)
 
 
-def _read_pdf(url: str, limit: int) -> dict[str, Any]:
+def _read_pdf(url: str, limit: int, origins: untrusted.Origins | None = None) -> dict[str, Any]:
     """A PDF as text: downloaded into ``downloads_dir()``, with the file's path and hash."""
     got = download(url, downloads_dir(), polite=politeness())
     title, text, pages, hidden = pdftext.visible_text(got.path, limit=limit + 1)
@@ -341,7 +344,7 @@ def _read_pdf(url: str, limit: int) -> dict[str, Any]:
                            "pdf": str(got.path), "pages": pages, "sha256": got.sha256}
     if truncated:
         out["truncated"] = True
-    return _labelled(out, text, url, hidden)
+    return _labelled(out, text, url, hidden, origins)
 
 
 def fetch_file(url: str, kind: str = "pdf", *, licence: str = "") -> Download:
@@ -362,7 +365,7 @@ _IMAGES_JS = """() => Array.from(document.images).map(i => ({
 
 def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None = None,
          fetch_bytes: Callable[[str], bytes] | None = None,
-         most: int = MOST_IMAGES) -> dict[str, Any]:
+         most: int = MOST_IMAGES, origins: untrusted.Origins | None = None) -> dict[str, Any]:
     """A page as a vision model sees it.
 
     ``{"url", "title", "text", "_images": [png, ...]}`` — a full-page screenshot first,
@@ -403,7 +406,7 @@ def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None 
         with contextlib.suppress(Exception):  # a picture that will not come is not the answer
             images.append(bytes(fetch_bytes(src)))
     return _labelled({"url": url, "title": title, "text": text, "_images": images}, text, url,
-                     hidden)
+                     hidden, origins)
 
 
 # --- the tools ----------------------------------------------------------------------------
@@ -563,14 +566,15 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
         try:
             seen.admit(str(args.get("url") or ""))
             return read(str(args.get("url") or ""), fetch=fetch, browse=browse,
-                        rendered=bool(args.get("rendered")))
+                        rendered=bool(args.get("rendered")), origins=seen)
         except Exception as exc:
             return {"none": f"could not read {args.get('url')!r}: {exc}"}
 
     def looking(args: Mapping[str, Any]) -> Any:
         try:
             seen.admit(str(args.get("url") or ""))
-            return look(str(args.get("url") or ""), browse=browse, fetch_bytes=fetch_bytes)
+            return look(str(args.get("url") or ""), browse=browse, fetch_bytes=fetch_bytes,
+                        origins=seen)
         except ImportError as exc:
             return {"none": f"no browser: {exc}"}
         except Exception as exc:

@@ -5,16 +5,18 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 __all__ = ["Outcome", "ScanPolicy", "ScanResult", "Scanner", "Summary", "category", "scan_file",
            "summarise"]
 
 UNSCANNED_ENV = "ML_STACK_NET_UNSCANNED"
 SCAN_MODELS_ENV = "ML_STACK_NET_SCAN_MODELS"
+CATEGORIES = ("executable", "archive", "model", "data")
+ACTIONS = ("refuse", "warn", "allow")
 
 
 class Outcome(StrEnum):
@@ -116,16 +118,34 @@ class ScanPolicy:
     scan_models: bool = False
 
     @classmethod
-    def from_env(cls) -> ScanPolicy:
-        """The defaults with ``ML_STACK_NET_UNSCANNED=archive:warn,model:allow`` applied."""
-        values = {}
+    def load(cls) -> ScanPolicy:
+        """The policy a person saved with `save`, with the environment applied over it."""
+        from ml_stack import files, home
+
+        saved = files.read_json(home.state("net", "scan-policy.json"), {})
+        base = cls(**{k: v for k, v in saved.items()
+                      if k in ("executable", "archive", "model", "data", "scan_models")
+                      and (isinstance(v, bool) if k == "scan_models" else v in ACTIONS)})
+        return base.from_env()
+
+    def save(self) -> None:
+        """Keep this policy for every later run."""
+        from ml_stack import files, home
+
+        files.write_json(home.state("net", "scan-policy.json"),
+                         files.versioned(asdict(self), 1))
+
+    def from_env(self) -> ScanPolicy:
+        """This policy with ``ML_STACK_NET_UNSCANNED=archive:warn,model:allow`` applied."""
+        values: dict[str, Any] = {}
         for part in os.environ.get(UNSCANNED_ENV, "").split(","):
             name, _, action = part.partition(":")
             name, action = name.strip(), action.strip()
-            if name in ("executable", "archive", "model", "data") and action in (
-                    "refuse", "warn", "allow"):
+            if name in CATEGORIES and action in ACTIONS:
                 values[name] = action
-        return cls(scan_models=os.environ.get(SCAN_MODELS_ENV) == "1", **values)
+        if os.environ.get(SCAN_MODELS_ENV) == "1":
+            values["scan_models"] = True
+        return replace(self, **values)
 
     def scan(self, path: Path, kind: str, scanners: Sequence[Scanner]) -> Summary:
         """The scan of ``path``; model weights are skipped unless ``scan_models``."""

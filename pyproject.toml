@@ -144,8 +144,9 @@ ml-stack-surface = "ml_stack.surface.cli:main"
 ml-stack-audit = "ml_stack.redact.audit:main"
 # open a page, click through its screens, screenshot each one and read what came back
 ml-stack-walk = "ml_stack.walk.cli:main"
-# what sentinel has seen and holds: events, quarantine, pins, the log's hash chain
-ml-stack-security = "ml_stack.sentinel.cli:command"
+# what sentinel has seen and holds: events, quarantine, pins, the log's hash chain; and what
+# came in from the internet: downloads, hosts, scanners
+ml-stack-security = "ml_stack.net.cli:command"
 
 # What the daemon reports about this box beyond what the standard library can see: the
 # card, its vendor and its memory. Without it every machine reports no accelerator.
