@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Check that `scripts/test quick` notices a broken function.
+
+    scripts/verify-quick src/ml_stack/units.py src/ml_stack/http.py [--workers N]
+
+For each module, one function is mutated (an operator from scripts/gates/_mutation), the mutant
+is written into this checkout, and `scripts/test quick --base HEAD` runs. A passing quick run is
+checked against the test files that name the module; if those fail, quick missed a mutation a
+test would have caught. Run it in a throwaway worktree: it writes into src/ and needs a clean
+tree and a `.testmondata` already recorded by a `quick` run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from gates import _mutation
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / ".testmondata"
+KEPT = ROOT / ".testmondata.verify"
+
+
+def sh(*args: str) -> tuple[int, str]:
+    """Run a command in the checkout and return its status and output."""
+    done = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=False)
+    return done.returncode, done.stdout + done.stderr
+
+
+def reset_data() -> None:
+    """Put the recorded map back as it was before any mutation."""
+    for suffix in ("-wal", "-shm"):
+        DATA.with_name(DATA.name + suffix).unlink(missing_ok=True)
+    shutil.copy2(KEPT, DATA)
+
+
+def failures(output: str) -> list[str]:
+    """The test ids pytest reported as failed."""
+    return [line.split()[1] for line in output.splitlines() if line.startswith("FAILED")]
+
+
+def attempt(target: _mutation.Target, rnd: random.Random, workers: int) -> dict:
+    """Mutate one function, run quick, and say whether it noticed."""
+    path = ROOT / target.path
+    source = path.read_text(encoding="utf-8")
+    mutant = rnd.choice(_mutation.mutants(source, target))
+    covering = _mutation.covering_tests(ROOT, target, 4)
+    reset_data()
+    path.write_text(mutant.source, encoding="utf-8")
+    began = time.time()
+    try:
+        status, output = sh(sys.executable, "scripts/test", "quick", "--base", "HEAD",
+                            "-n", str(workers))
+        row = {"module": target.path, "function": target.qualname, "mutation": mutant.name(),
+               "quick_status": status, "quick_failed": failures(output)[:5],
+               "seconds": round(time.time() - began)}
+        if status == 0:
+            reset_data()
+            ref_status, ref_output = sh(sys.executable, "-m", "pytest", "-q", "-n", str(workers),
+                                        "-p", "no:cacheprovider", *covering)
+            row |= {"naming_tests_status": ref_status, "naming_tests_failed": failures(ref_output)[:5]}
+    finally:
+        path.write_text(source, encoding="utf-8")
+        reset_data()
+    return row
+
+
+def main() -> int:
+    """Mutate each named module and print one JSON row per attempt."""
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("modules", nargs="+", help="repo-relative paths under src/ml_stack")
+    parser.add_argument("--workers", type=int, default=2)
+    args = parser.parse_args()
+    if sh("git", "status", "--porcelain")[1].strip():
+        raise SystemExit("verify-quick: the tree has uncommitted changes; use a clean worktree")
+    if not DATA.exists():
+        raise SystemExit("verify-quick: no .testmondata; run `scripts/test quick` once first")
+    shutil.copy2(DATA, KEPT)
+    pool = _mutation.candidates(ROOT)
+    missed = 0
+    for module in args.modules:
+        rnd = random.Random(module)  # noqa: S311
+        targets = [t for t in pool if t.path == module]
+        rnd.shuffle(targets)
+        for target in targets[:6]:
+            if not _mutation.mutants((ROOT / target.path).read_text(encoding="utf-8"), target):
+                continue
+            row = attempt(target, rnd, args.workers)
+            print(json.dumps(row), flush=True)
+            caught = row["quick_status"] != 0
+            if caught or row.get("naming_tests_status", 0) != 0:
+                missed += not caught
+                break
+    print(f"verify-quick: {missed} mutation(s) quick missed that a test would have caught")
+    return 1 if missed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

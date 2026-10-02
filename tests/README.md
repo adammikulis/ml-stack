@@ -37,8 +37,8 @@ takes the union of two selections:
   by git, one per checkout). The first `quick` in a checkout runs the whole full tier to
   record it; after that testmon reruns the tests that executed a changed function, and the
   ones that failed last time.
-- **The import graph** (`scripts/affected.py`): every test file within two imports of a
-  changed module, counting imports inside functions and a module named in a string
+- **The import graph** (`scripts/affected.py`): every test file that imports a changed
+  module directly, counting imports inside functions and a module named in a string
   (`-m ml_stack.x`, `import_module`). It exists for what testmon cannot see, such as code that
   only a child process runs. `--explain` prints each file and what selected it.
 
@@ -49,7 +49,9 @@ module, or when pytest-testmon is not installed (`pip install -e '.[test]'`).
 `quick` adds the cheap tree-wide checks (`test_layers`, `test_wiring`, the conftest and isolation
 guards) to every selection and leaves out the slow ones (`test_budgets`, `test_gates_*`,
 `test_no_data_files`): the pre-commit hook runs the budgets, and `full` and `all` run all
-of them. `tests/test_quick_select.py` pins the selection rules.
+of them. `tests/test_quick_select.py` pins the selection rules, and `scripts/verify-quick`
+mutates a function in each module named and reports any mutation `quick` let through that a
+test would have caught (run it in a throwaway worktree).
 
 ### `heavy`
 

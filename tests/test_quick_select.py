@@ -56,8 +56,8 @@ def test_a_change_selects_the_tests_that_import_it(toy) -> None:
 
 
 def test_a_lazy_import_inside_a_function_counts_and_the_walk_stops_at_the_depth(toy) -> None:
-    near = chosen(toy, "src/ml_stack/beta.py")
-    assert "tests/test_gamma.py" in near
+    assert "tests/test_gamma.py" not in chosen(toy, "src/ml_stack/beta.py")
+    assert "tests/test_gamma.py" in chosen(toy, "src/ml_stack/beta.py", depth=2)
     assert "tests/test_gamma.py" not in chosen(toy, "src/ml_stack/alpha.py", depth=2)
     assert "tests/test_gamma.py" in chosen(toy, "src/ml_stack/alpha.py", depth=3)
 

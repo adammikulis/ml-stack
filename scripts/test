@@ -34,7 +34,7 @@ FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
     "test_spec_decode.py", "test_spec_qwen4.py", "test_spec_qwen4_load.py", "test_spec_serve.py"))]
 CASE = re.compile(r'<testcase classname="([^"]+)" name="[^"]*" time="([^"]+)"')
 HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
-FULL = ["-m", "not slow"]
+FULL: list[str] = []
 
 
 def pytest_command(workers: int, *rest: str) -> list[str]:
@@ -74,7 +74,7 @@ def reasons_for_everything(changed: list[str], deleted: frozenset[str]) -> list[
 
 def quick(args: argparse.Namespace, rest: list[str]) -> int:
     """Run the tests a change reaches: testmon's recorded map, plus the import graph."""
-    tier = [] if args.slow else FULL
+    tier = ["--slow"] if args.slow else FULL
     try:
         changed, deleted = affected.changed_since(ROOT, args.base)
     except (RuntimeError, IndexError) as exc:
@@ -101,7 +101,7 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
     direct = sorted(picked.files)
     status = 0
     if direct:
-        print(f"quick: {len(direct)} test file(s) within {affected.DEPTH} imports of a change")
+        print(f"quick: {len(direct)} test file(s) importing or naming a changed module")
         status = clean(run(pytest_command(min(args.workers, len(direct)), "--testmon-noselect",
                                           *tier, *direct, *rest), testmon_env()))
     print("quick: every other test whose recorded execution touches a changed line")
