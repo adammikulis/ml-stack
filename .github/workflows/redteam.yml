@@ -24,7 +24,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: install
-        run: python -m pip install -e ".[redteam]" pytest pytest-xdist pyyaml psutil
+        run: python -m pip install -e ".[redteam]" pytest-xdist pyyaml psutil
       - name: tests
         run: python -m pytest tests/test_redteam_*.py -q --redteam -n 0
       - name: attacks on a stub model

@@ -118,7 +118,7 @@ and of a plain function.
 
 ## Dependency
 
-`ml-stack[redteam]` is `pyrit>=1.1,<2` and the `web` and `pdf` extras. PyRIT 1.1.0 requires
+`ml-stack[redteam]` is `pyrit>=1.1,<2` and the `web`, `pdf` and `testing` extras (the stub and the honeypot are built on `ml_stack.testing.fakes`). PyRIT 1.1.0 requires
 Python `>=3.10,<3.15`, which covers the interpreters ml-stack runs on. `pyproject.toml` leaves it
 out of `all`; `tests/test_redteam_*.py` that need it are marked `redteam` and deselected unless
 `--redteam` is given.
