@@ -40,7 +40,7 @@ def server():
 def test_the_guard_is_what_the_server_reports(server) -> None:
     fake = server(context=8192, slots=2, build_info="b1-x")
     assert current_guard(fake.base_url) == {
-        "model": MODEL, "model_bytes": None, "ctx_size": 4096, "parallel": 2,
+        "model": MODEL, "model_bytes": None, "ctx_size": 8192, "parallel": 2,
         "llama_server_version": "b1-x"}
 
 
