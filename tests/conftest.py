@@ -33,6 +33,36 @@ os.environ["HF_HUB_OFFLINE"] = "1"
 sys.path.insert(0, str(REPO / "scripts"))
 
 
+def _no_desktop_notifications() -> None:
+    """A test never raises a real desktop notification or dialog. ``ML_STACK_NOTIFY=console``
+    makes the code under test choose the console, and shims named like the desktop's tools sit
+    first on PATH (so child processes inherit them): a shim records the attempt in
+    ``ML_STACK_SHIM_LOG`` and fails, and the session fails if anything was recorded."""
+    os.environ["ML_STACK_NOTIFY"] = "console"
+    if os.name == "nt":
+        return
+    import tempfile
+
+    shims = Path(tempfile.mkdtemp(prefix="mlstack-shims-"))
+    for name in ("osascript", "notify-send", "zenity", "kdialog"):
+        shim = shims / name
+        shim.write_text('#!/bin/sh\necho "$0 $*" >> "$ML_STACK_SHIM_LOG"\nexit 97\n')
+        shim.chmod(0o755)
+    os.environ["ML_STACK_SHIM_LOG"] = str(shims / "attempts.log")
+    os.environ["PATH"] = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
+_no_desktop_notifications()
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """Fail the run if any process of it reached for a desktop notifier."""
+    log = Path(os.environ.get("ML_STACK_SHIM_LOG", ""))
+    if log.is_file() and log.read_text().strip():
+        print(f"\nDESKTOP NOTIFIER CALLED BY THE TESTS:\n{log.read_text()}")
+        session.exitstatus = 1
+
+
 def _install_git_hooks() -> None:
     """Put this repository's hooks in place when they are not, at the start of any run.
 

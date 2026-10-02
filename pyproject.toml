@@ -50,6 +50,10 @@ train = ["numpy>=1.24", "safetensors>=0.4"]
 train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
 # a daemon on the LAN makes its own TLS certificate with this (or with openssl on PATH)
 fleet-tls = ["cryptography>=42"]
+# adding a machine with a short code (`ml-stack-fleet listen` / `pair`): SPAKE2 from the
+# maintained `spake2` package, Ed25519 signing from cryptography, the signing key in the OS
+# keystore through `keyring`
+fleet-onboard = ["cryptography>=42", "spake2>=0.9", "keyring>=24"]
 # `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
 # each engine still wants
@@ -99,7 +103,7 @@ standard = ["lm-eval[ifeval]>=0.4"]
 # PyRIT: about 110 packages and 550 MB, installed in a virtualenv of its own.
 redteam = ["ml-stack[web,pdf,testing]", "pyrit>=1.1,<2"]
 all = [
-    "ml-stack[train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls]",
+    "ml-stack[train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-onboard]",
 ]
 
 [project.urls]

@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Runs on a machine that is being given ml-stack over SSH. Fixed text: the controller prints it
+in full with its SHA-256 (`bootstrap --ssh HOST --dry-run`), copies it with the files, and runs
+nothing else on the machine. Standard library only. It changes nothing until every check passes:
+Python >= 3.11, macOS or Linux, disk space, the manifest's OpenSSH signature (ssh-keygen -Y
+verify) by the key whose id was sent, the manifest's expiry, and the size and SHA-256 of every
+file. Then it makes a per-user venv (no sudo), installs the wheels in it, and starts
+`ml-stack-fleet listen` so pairing can finish with a code. Models are not copied here."""
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+INBOX = Path(sys.argv[0]).resolve().parent
+HOME = Path.home()
+VENV = HOME / ".ml-stack" / "venv"
+NAMESPACE = "ml-stack-bootstrap"
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,150}")
+
+
+def say(**fields):
+    sys.stdout.write(json.dumps(fields) + "\n")
+    sys.stdout.flush()
+
+
+def refuse(why):
+    say(ok=False, refused=why)
+    sys.exit(2)
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for piece in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(piece)
+    return digest.hexdigest()
+
+
+def check_machine(total):
+    if sys.version_info < (3, 11):
+        refuse(f"Python {sys.version_info[0]}.{sys.version_info[1]} is older than 3.11")
+    if platform.system() not in ("Darwin", "Linux"):
+        refuse(f"{platform.system()} is not a supported target")
+    free = shutil.disk_usage(HOME).free
+    if free < 2 * total + (500 << 20):
+        refuse(f"{free >> 20} MiB free is not enough for {total >> 20} MiB and a venv")
+    if os.geteuid() == 0:
+        refuse("run as the user who will use ml-stack, not root")
+
+
+def check_signature(key_id):
+    manifest, sig = INBOX / "manifest.json", INBOX / "manifest.sig"
+    line = (INBOX / "allowed_signers").read_text().split()
+    if len(line) != 3 or line[1] != "ssh-ed25519":
+        refuse("allowed_signers is not one ed25519 key")
+    import base64
+    blob = base64.b64decode(line[2], validate=True)
+    if hashlib.sha256(blob[-32:]).hexdigest() != key_id:
+        refuse("the signing key is not the one the owner named")
+    if not shutil.which("ssh-keygen"):
+        refuse("ssh-keygen is missing, so the signature cannot be checked")
+    with open(manifest, "rb") as fh:
+        done = subprocess.run(
+            ["ssh-keygen", "-Y", "verify", "-f", str(INBOX / "allowed_signers"), "-I", "ml-stack",
+             "-n", NAMESPACE, "-s", str(sig)], stdin=fh, capture_output=True, timeout=60)
+    if done.returncode != 0:
+        refuse("the manifest's signature does not verify")
+
+
+def check_files():
+    body = json.loads((INBOX / "manifest.json").read_text())["manifest"]
+    if time.time() > body["expires"]:
+        refuse("the manifest has expired")
+    wheels, total = [], 0
+    for entry in body["entries"]:
+        name = entry["name"]
+        if not NAME.fullmatch(name) or entry["kind"] not in ("wheel", "sdist"):
+            refuse(f"{name[:40]!r} is not a program file with a plain name")
+        path = INBOX / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_size != entry["size"] \
+                or sha256(path) != entry["sha256"]:
+            refuse(f"{name} does not match the signed manifest")
+        total += entry["size"]
+        wheels.append(path)
+    listed = {e["name"] for e in body["entries"]}
+    extra = {p.name for p in INBOX.iterdir()} - listed - {
+        "manifest.json", "manifest.sig", "allowed_signers", "KEYID", "install_remote.py"}
+    if extra or not wheels:
+        refuse("the files sent are not exactly the files the manifest lists")
+    return wheels, total
+
+
+def install(wheels):
+    VENV.parent.mkdir(parents=True, exist_ok=True)
+    if not (VENV / "bin" / "python").exists():
+        subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True, timeout=300,
+                       stdout=sys.stderr)
+    subprocess.run([str(VENV / "bin" / "python"), "-m", "pip", "install", "--no-input",
+                    "--disable-pip-version-check", "--upgrade", *map(str, wheels)],
+                   check=True, timeout=1800, stdout=sys.stderr)
+
+
+def listen():
+    log = Path(tempfile.gettempdir()) / f"ml-stack-listen-{os.getuid()}.log"
+    out = open(log, "w")
+    proc = subprocess.Popen(
+        [str(VENV / "bin" / "python"), "-m", "ml_stack.fleet.join", "listen", "--json", "--for",
+         "30m"], stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+        start_new_session=True)
+    for _ in range(100):
+        time.sleep(0.2)
+        text = log.read_text()
+        if '"listening"' in text and text.rstrip().endswith("}"):
+            return json.loads(text)
+        if proc.poll() is not None:
+            break
+    refuse("ml-stack installed but did not start listening: " + log.read_text()[-300:])
+
+
+def main():
+    key_id = (INBOX / "KEYID").read_text().strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", key_id):
+        refuse("KEYID is not a key id")
+    check_signature(key_id)
+    wheels, total = check_files()
+    check_machine(total)
+    say(step="verified", files=[w.name for w in wheels])
+    if "--verify-only" in sys.argv:
+        return
+    install(wheels)
+    say(step="installed", venv=str(VENV))
+    if "--no-listen" in sys.argv:
+        return
+    started = listen()
+    say(step="listening", port=started["port"], fingerprint=started["fingerprint"], ok=True)
+
+
+if __name__ == "__main__":
+    main()
