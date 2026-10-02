@@ -291,3 +291,18 @@ def test_the_rating_follows_the_thresholds():
     assert [admission.rate(share, 100) for share in (0, 79, 80, 94, 95, 200)] == [
         "green", "green", "yellow", "yellow", "red", "red"]
     assert admission.rate(10**12, 0) == "green", "a machine that will not say its memory is not refused"
+
+
+def test_admission_the_estimator_and_the_bars_share_one_pair_of_thresholds():
+    import json
+
+    from ml_stack import ui
+    from ml_stack.serve import estimate
+    from ml_stack.ui import verdict
+
+    shipped = json.loads((ui.assets_dir() / "verdict.json").read_text(encoding="utf-8"))
+    assert (admission.YELLOW_AT, admission.RED_AT) == (shipped["yellow_at"], shipped["red_at"])
+    assert (estimate.YELLOW_AT, estimate.RED_AT) == (shipped["yellow_at"], shipped["red_at"])
+    for share in (0.0, 0.5, 0.79, 0.8, 0.9, 0.94, 0.95, 1.2):
+        assert (admission.rate(share * 100, 100) == estimate.rating(share)
+                == verdict.verdict_of(share, 1.0)), share

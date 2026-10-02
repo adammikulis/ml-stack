@@ -24,6 +24,7 @@ from ml_stack.serve.backend import ServerFailed, ServerSpec
 from ml_stack.serve.preflight import RUNTIME_ALLOWANCE_BYTES, _kv_estimate_bytes, read_gguf_header
 from ml_stack.serve.process import pid_exists
 from ml_stack.serve.weights import weight_of
+from ml_stack.ui.verdict import THRESHOLDS, verdict_of
 
 __all__ = [
     "ENV_WAIT",
@@ -44,8 +45,8 @@ ENV_WAIT = "ML_STACK_ADMISSION_WAIT_S"
 """Seconds a start waits for memory to come free before it is refused."""
 
 DEFAULT_WAIT_S = 60.0
-YELLOW_AT = 0.80
-RED_AT = 0.95
+YELLOW_AT = THRESHOLDS.yellow_at
+RED_AT = THRESHOLDS.red_at
 WEIGHTS_OVERHEAD = 1.1
 """Share of a model's weights taken on top of them when nothing better is known."""
 
@@ -129,10 +130,7 @@ def live(entry: Mapping[str, Any]) -> bool:
 def rate(total: int, budget: int) -> str:
     """``green``, ``yellow`` or ``red`` for ``total`` bytes against ``budget``; green when
     the budget is unknown."""
-    if budget <= 0:
-        return "green"
-    share = total / budget
-    return "red" if share >= RED_AT else "yellow" if share >= YELLOW_AT else "green"
+    return verdict_of(total, budget) if budget > 0 else "green"
 
 
 def check(spec: ServerSpec, records: Mapping[int, Mapping[str, Any]], *, budget: int,

@@ -22,6 +22,7 @@ from ml_stack import hub
 from ml_stack.hub import header
 from ml_stack.hub.probe import MachineMemory
 from ml_stack.serve.preflight import _kv_estimate_bytes, _recurrent_layers
+from ml_stack.ui.verdict import THRESHOLDS, verdict_of
 
 __all__ = ["DEFAULT_KV", "Estimate", "Meter", "Setup", "estimate", "estimate_meta", "max_context", "meters", "rating", "verdict"]
 
@@ -36,10 +37,10 @@ of ``30 MiB + 20 MiB`` per GiB of weights, held between 32 and 160 MiB."""
 MMPROJ_FACTOR = 1.5
 """A projector's worst-case memory over its file size (784 MiB file, 1165 MiB estimated)."""
 
-YELLOW_AT = 0.80
-RED_AT = 0.95
-"""A placement turns yellow at this share of the memory it goes in, and red at this one;
-`ml_stack.ui.verdict` holds the same two numbers for the bars that draw it."""
+YELLOW_AT = THRESHOLDS.yellow_at
+RED_AT = THRESHOLDS.red_at
+"""A placement turns yellow at this share of the memory it goes in, and red at this one; the
+numbers are `ml_stack.ui.verdict`'s, which the bars that draw it read too."""
 
 HIGH_ATTENTION_HEADS = (64, 80, 96, 112, 128, 192, 256, 512)
 
@@ -326,9 +327,7 @@ def verdict(est: Estimate, machine: MachineMemory, reserve_bytes: int | None = N
 
 def rating(share: float) -> str:
     """The verdict for a share of capacity used."""
-    if share >= RED_AT:
-        return "red"
-    return "yellow" if share >= YELLOW_AT else "green"
+    return verdict_of(max(share, 0.0), 1.0)
 
 
 @dataclass(frozen=True, slots=True)
