@@ -82,6 +82,9 @@ def drafter_of(draft: str | Path | None) -> str:
 MAPPED = ".ple.ple_embedding.ngram_embedding."
 
 
+MOST_HEADER = 100 << 20
+
+
 def resident_bytes(where: Path | None) -> int:
     """Bytes of the safetensors under ``where`` a load holds in memory."""
     if where is None:
@@ -89,7 +92,10 @@ def resident_bytes(where: Path | None) -> int:
     held = 0
     for shard in where.glob("*.safetensors"):
         with shard.open("rb") as stream:
-            header = json.loads(stream.read(int.from_bytes(stream.read(8), "little")))
+            size = int.from_bytes(stream.read(8), "little")
+            if size > min(MOST_HEADER, shard.stat().st_size):
+                raise ValueError(f"{shard}: a header of {size} bytes; not a safetensors file")
+            header = json.loads(stream.read(size))
         held += sum(entry["data_offsets"][1] - entry["data_offsets"][0]
                     for name, entry in header.items()
                     if name != "__metadata__" and MAPPED not in name)

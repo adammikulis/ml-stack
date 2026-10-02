@@ -70,6 +70,10 @@ _SCALAR_FMT = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "?",
                10: "Q", 11: "q", 12: "d"}
 
 
+MOST_PAIRS = 1 << 20
+MOST_TEXT = 1 << 26
+
+
 def read_gguf_header(path: Path | str) -> dict[str, object]:
     """Every key/value metadata pair in a GGUF file: strings, ints, floats, bools, arrays.
 
@@ -83,16 +87,27 @@ def read_gguf_header(path: Path | str) -> dict[str, object]:
     one is built to answer one question cheaply before any inference is intended.
     """
     out: dict[str, object] = {}
-    with Path(path).expanduser().open("rb") as f:
+    path = Path(path).expanduser()
+    left = path.stat().st_size
+    with path.open("rb") as f:
         if f.read(4) != _GGUF_MAGIC:
             raise ValueError(f"{path}: not a GGUF file (no GGUF magic at the start)")
         struct.unpack("<I", f.read(4))                       # version -- unused here
         struct.unpack("<Q", f.read(8))                        # tensor count -- unread
         (kv_count,) = struct.unpack("<Q", f.read(8))
+        if kv_count > MOST_PAIRS:
+            raise ValueError(f"{path}: claims {kv_count} metadata pairs; not a model file")
+
+        def room(claimed: int, what: str) -> int:
+            """``claimed`` if the rest of the file could hold that many bytes of it."""
+            if claimed > min(MOST_TEXT, left - f.tell()):
+                raise ValueError(f"{path}: a {what} claims {claimed} bytes, more than the "
+                                 "file holds; not a model file")
+            return claimed
 
         def text() -> str:
             (n,) = struct.unpack("<Q", f.read(8))
-            return f.read(n).decode("utf-8", "replace")
+            return f.read(room(n, "string")).decode("utf-8", "replace")
 
         def value(kind: int) -> object:
             if kind == 8:
@@ -100,7 +115,7 @@ def read_gguf_header(path: Path | str) -> dict[str, object]:
             if kind == 9:
                 (item_kind,) = struct.unpack("<I", f.read(4))
                 (count,) = struct.unpack("<Q", f.read(8))
-                return [value(item_kind) for _ in range(count)]
+                return [value(item_kind) for _ in range(room(count, "array"))]
             code = _SCALAR_FMT[kind]
             return struct.unpack("<" + code, f.read(struct.calcsize(code)))[0]
 
