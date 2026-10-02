@@ -224,3 +224,12 @@ def test_a_read_with_no_address_in_it_is_not_inspected():
     context = dirty(rail)
     assert isinstance(verdict(rail, context, "read_page", {"selector": "h1"}), Proceed)
     assert isinstance(verdict(rail, context, "models_find", {"words": "anything"}), Proceed)
+
+
+def test_an_address_is_found_by_the_name_of_its_argument_or_by_its_shape():
+    rail = reader()
+    context = dirty(rail)
+    assert isinstance(verdict(rail, context, "read_page", {"url": "collect.example/x"}), Confirm)
+    assert isinstance(verdict(rail, context, "read_page", {"q": "see http://collect.example/x"}),
+                      Confirm)
+    assert isinstance(verdict(rail, context, "read_page", {"q": "plain words"}), Proceed)

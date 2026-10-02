@@ -193,6 +193,9 @@ def test_a_second_fetch_of_an_address_the_page_named_is_refused():
 def test_the_harness_gives_the_prompt_to_the_taint_rail():
     pytest.importorskip("claude_agent_sdk")
     agent = harness.Harness("http://127.0.0.1:8899", "kestrel-8B")
-    hook = agent.configured("run make test").hooks["PreToolUse"][0].hooks[0]
-    after = agent.configured("run make test").hooks["PostToolUse"][0].hooks[0]
-    assert _call(after, "WebFetch", "page") and _call(hook, "Bash", {"command": "make test"}) == {}
+    options = agent.configured("run make test")
+    hook, after = options.hooks["PreToolUse"][0].hooks[0], options.hooks["PostToolUse"][0].hooks[0]
+    assert _call(after, "WebFetch", "page")
+    assert _call(hook, "Bash", {"command": "make test"}) == {}
+    assert _call(hook, "Bash", {"command": "make deploy"})["hookSpecificOutput"][
+        "permissionDecision"] == "ask"
