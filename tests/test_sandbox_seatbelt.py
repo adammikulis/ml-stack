@@ -89,7 +89,18 @@ def test_a_program_outside_the_exec_list_is_not_started(tmp_path, seatbelt):
     pol = sandbox.Policy("narrow", read=pol.read, exec=("/bin/sh",), env=dict(pol.env))
     result = run(["/bin/sh", "-c", "/bin/echo hi; echo rc=$?"], pol)
     assert "hi" not in result.stdout
-    assert any(d["operation"].startswith("process-exec") for d in result.denials)
+    assert any(d["operation"].startswith("process-exec") and d["target"] == "/bin/echo"
+               for d in result.denials)
+
+
+def test_a_confined_process_cannot_signal_another_process(tmp_path, seatbelt):
+    bystander = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+    try:
+        result = run(["/bin/sh", "-c", f"kill -9 {bystander.pid}; echo rc=$?"], policy())
+        assert "rc=0" not in result.stdout and bystander.poll() is None
+    finally:
+        os.killpg(bystander.pid, signal.SIGKILL)
+        bystander.wait()
 
 
 def test_a_symlink_inside_an_allowed_directory_does_not_lead_out(tmp_path, seatbelt):

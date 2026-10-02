@@ -53,10 +53,13 @@ def tree(tmp_path):
 
 def test_every_path_must_be_absolute_real_and_plain(tree):
     (tree / "link").symlink_to(tree / "a")
-    for bad in ("rel", str(tree / "a") + "/../b", f"{tree}/a/", f"{tree}//a", f"{tree}/./a",
-                str(tree / "link"), str(tree / "missing"), f"{tree}/a\x00", f"{tree}/a\n",
-                f"{tree}/a\x7f", ""):
-        with pytest.raises(PolicyError):
+    for bad, why in (("rel", "not absolute"), (str(tree / "a") + "/../b", "climbs"),
+                     (f"{tree}/a/", "ends with a slash"), (f"{tree}//a", "empty segment"),
+                     (f"{tree}/./a", r"\. segment"), (str(tree / "link"), "symlink"),
+                     (str(tree / "missing"), "does not exist"),
+                     (f"{tree}/a\x00", "control character"), (f"{tree}/a\n", "control character"),
+                     (f"{tree}/a\x7f", "control character"), ("", "empty")):
+        with pytest.raises(PolicyError, match=why):
             Policy("p", read=(bad,)).validated()
     ok = Policy("p", read=(str(tree / "a"),), write=(str(tree / "b"),)).validated()
     assert ok.read == (str(tree / "a"),) and ok.write == (str(tree / "b"),)
