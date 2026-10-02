@@ -92,7 +92,7 @@ reaches the internet on its own.
 | 24 | Decider checkpoint files | `decide/fetch.py` | `hf_hub_download` (its own transport, hash checked after the file was kept) | pipeline: pinned size and SHA-256 required, laid out as the repository is, held when they differ | |
 | 25 | Injection classifier model | `guard/classifier.py` | `snapshot_download` | pipeline, with the Hub's own size and SHA-256 per file | the Hub's hash is as good as the Hub |
 | 26 | Onboarding: pairing, manifest and file transfer | `fleet/onboard/pairing.py`, `fleet/onboard/transfer.py` | own connections to a peer | unchanged transport (the peer's certificate is pinned), but a public address is refused at every connection (`fleet/onboard/lan.py`) | a peer on a tailnet or VPN counts as this network |
-| 27 | Decide backend | `decide/logprob.py`, `decide/router.py` | `ml_stack.http` to `ML_STACK_DECIDE_URL` | unchanged | the person's configured server, like row 22 |
+| 27 | Decide backend | `decide/logprob.py`, `decide/router.py` | `ml_stack.http` to `ML_STACK_DECIDE_URL` | loopback only unless the host is named in `ML_STACK_FETCH_ALLOW_HOSTS` | a decider sees every call it judges, so a remote one is an explicit choice |
 
 ## Scanning
 

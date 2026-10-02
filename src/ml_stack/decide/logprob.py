@@ -3,11 +3,14 @@ log-probabilities, read over the letters that label the options."""
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import string
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
+from ml_stack import httpguard
 from ml_stack.client import Client
 from ml_stack.decide.base import Asked, BaseDecider
 from ml_stack.decide.calibrate import Calibration
@@ -18,6 +21,7 @@ LETTERS = string.ascii_uppercase
 SYSTEM = ("You answer multiple-choice questions about a situation. "
           "Reply with only the letter of the chosen option.")
 MIN_MASS = 1e-4
+LOOPBACK_NAMES = frozenset({"localhost", "ip6-localhost"})
 
 
 def render(question: str, state: str, options: tuple[Option, ...]) -> str:
@@ -42,6 +46,22 @@ def letter_probabilities(top: list[dict[str, Any]], count: int) -> list[float]:
         if len(token) == 1 and token in LETTERS[:count] and logprob is not None:
             mass[LETTERS.index(token)] += math.exp(float(logprob))
     return mass
+
+
+def require_decider_host(url: str) -> None:
+    """A decider judges tool calls and what they touch, so it talks only to this machine unless
+    the operator has named the host (``ML_STACK_FETCH_ALLOW_HOSTS``, the same list that approves
+    other private or remote hosts). Raises `DecideError` otherwise."""
+    host = (urlsplit(url).hostname or "").lower()
+    if host in LOOPBACK_NAMES or host in httpguard.allowed_hosts():
+        return
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return
+    except ValueError:
+        pass
+    raise DecideError(f"decider server {host or url!r} is not on this machine; to allow it, name it "
+                      f"in {httpguard.ALLOW_ENV} (a remote decider sees every call it judges)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +89,7 @@ class LogprobDecider(BaseDecider):
     def __init__(self, chat: Chat | str | None = None, *, calibration: Calibration | None = None
                  ) -> None:
         self.chat = Chat(chat) if isinstance(chat, str) else chat or Chat()
+        require_decider_host(self.chat.url)
         self.base_url = self.chat.url.rstrip("/")
         self.model = self.chat.model
         self.calibration = calibration

@@ -998,9 +998,10 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
   the plain extractor on purpose, so the hidden-text attacks still reach the guards behind the
   reader; the reader the agent really uses (`web.read`) strips them first, and
   `test_redteam_toolbox.py` pins that. A red-team arm that runs the toolbox through `web.read`
-  would measure the pipeline's stripping instead. (2) `ML_STACK_DECIDE_URL` may name a remote
-  host and is exempt from the net scan like `client/`; refusing a public host there would make
-  the exemption a guarantee (`docs/security.md`, "What is exempt from the net scan").
+  would measure the pipeline's stripping instead. (2) `ML_STACK_DECIDE_URL` is loopback-only unless the host is named in
+  `ML_STACK_FETCH_ALLOW_HOSTS` (decided by the lead: a decider sees every call it judges), so the
+  net-scan exemption for it is a guarantee (`docs/security.md`, "What is exempt from the net scan";
+  `tests/test_decide_hosts.py`).
 - [ ] **The `spake2` package was not checked against `fleet/onboard/pake.py` on the wheel the
   `fleet-onboard` extra installs;** the pairing tests ran with whatever `spake2` this machine has.
 - [ ] **Nine slow-tier tests fail here and eight of them on `agent/hardening` alone:**

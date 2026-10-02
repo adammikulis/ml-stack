@@ -14,7 +14,7 @@ from ml_stack.decide import library, registry
 from ml_stack.decide.base import Decider, State
 from ml_stack.decide.calibrate import Calibration
 from ml_stack.decide.embed import EmbedDecider, Head, server_embedder
-from ml_stack.decide.logprob import LETTERS, Chat, LogprobDecider
+from ml_stack.decide.logprob import LETTERS, Chat, LogprobDecider, require_decider_host
 from ml_stack.decide.pins import STRANDS_V19
 from ml_stack.decide.pointer import PointerDecider
 from ml_stack.decide.rules import RulesDecider
@@ -59,6 +59,10 @@ class Config:
 
 
 def _reachable(url: str, token: str) -> str:
+    try:
+        require_decider_host(url)
+    except DecideError as exc:
+        return str(exc)
     try:
         request_json(f"{url.rstrip('/')}/v1/models", timeout=1.5, token=token)
     except ServerError as exc:
@@ -135,6 +139,7 @@ def build(name: str, config: Config) -> Decider:
                                   calibration=config.calibration)
         elif name == "embed":
             head = Head.load(Path(config.embed_head))
+            require_decider_host(config.embed_url)
             made = EmbedDecider(server_embedder(config.embed_url, token=config.token),
                                 head=head, calibration=config.calibration)
         elif name == "rules" and config.rules is not None:

@@ -48,7 +48,7 @@ ALLOWED: dict[str, str] = {
     "client/": "model servers the person chose; the chat endpoint is configured, not fetched",
     "fleet/updates.py": "pip install -e after a fast-forward the person asked to follow",
     "decide/logprob.py": "the decide backend: the model server the person configured "
-                         "(ML_STACK_DECIDE_URL, 127.0.0.1:8080 unless set), as client/ does",
+                         "(ML_STACK_DECIDE_URL: this machine only unless the operator names the host)",
     "decide/router.py": "reachability of that same configured decide server",
     "serve/slotdump.py": "slot save and restore on a model server this machine started",
     "serve/slots_cli.py": "a model server's slots, addressed by local port",

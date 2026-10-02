@@ -135,8 +135,10 @@ own:
   server's slots and props by local port), and the decide backend (`decide/logprob.py`,
   `decide/router.py`, the server in `ML_STACK_DECIDE_URL`, 127.0.0.1:8080 unless set). These
   talk to an inference server the person configured; nothing they get back is installed or kept.
-  A configured URL can name a remote host, as it can for `client/`; that is the person's choice
-  and is not the web.
+  The decide backend is stricter than `client/`: its URL must be on this machine (127.0.0.1,
+  `localhost`, `::1`) unless the operator names the host in `ML_STACK_FETCH_ALLOW_HOSTS`,
+  because a decider sees every tool call it judges (`decide.logprob.require_decider_host`;
+  `tests/test_decide_hosts.py`). `client/` may still name a remote host; that is the person's choice.
 - **LAN onboarding** (`fleet/onboard/pairing.py`, `fleet/onboard/transfer.py`). A peer's
   certificate is pinned and never looked up in a trust store, so these cannot use the pipeline's
   client. What keeps them off the internet is `fleet/onboard/lan.py`: every connection first
