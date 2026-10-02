@@ -343,3 +343,19 @@ def test_a_real_model_separates_an_injection_from_data():
         pytest.skip(f"the server did not answer: {exc}")
     assert bad.score > 0.5 > good.score, (bad, good)
     assert bad.ms < 5000
+
+
+def test_until_the_model_is_leased_a_changing_call_asks_the_person(monkeypatch):
+    """The lease is refused (a scripted failure): the call is a Confirm, never a Proceed."""
+    from ml_stack.serve import broker_wire
+
+    def refuse(*args, **kwargs):
+        raise OSError("no room for the guard's model")
+
+    monkeypatch.setattr(broker_wire, "lease", refuse)
+    items = screen(decider=Leased(model="/models/judge.gguf"), env={})
+    call, context = asked("serve the model", "ok", model="x.gguf")
+    verdict = items[1].before_tool_call(call, context)
+    assert isinstance(verdict, Confirm) and "could not run" in verdict.question
+    read = items[0].after_tool_call(Call("web_fetch"), PLAIN, Context(task="find"))
+    assert isinstance(read, Rewrite) and read.tainted

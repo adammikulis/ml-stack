@@ -113,9 +113,8 @@ def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake
 
 def _hooks():
     pytest.importorskip("claude_agent_sdk")
-    from ml_stack.guard.hooks import sdk_guard, sdk_hooks
-
     from ml_stack.guard import start
+    from ml_stack.guard.hooks import sdk_guard, sdk_hooks
 
     guard = start(sdk_guard())
     made = sdk_hooks(guard)

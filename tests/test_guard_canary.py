@@ -11,8 +11,7 @@ import io
 
 import pytest
 
-from ml_stack import do
-from ml_stack import guard as rails
+from ml_stack import do, guard as rails
 from ml_stack.testing import canary
 from ml_stack.testing.canary import ATTACKS, BENIGN, Obeying, Run, play
 
