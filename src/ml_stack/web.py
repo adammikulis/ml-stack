@@ -151,18 +151,19 @@ def search(query: str, *, limit: int = 8, engine: Engine | None = None) -> list[
 # --- fetching -------------------------------------------------------------------------------
 
 
-def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
+def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES,
+          guard: Callable[[str], str] | None = None) -> bytes:
     """One GET with a size cap and no refusal: for a search backend, which is often on
     this side of the router. Pages a model chose go through ``_get``."""
     with open_stream(url, headers={"User-Agent": USER_AGENT, "Accept": accept},
                      timeout=TIMEOUT_S,
-                     retry=Retry(tries=3, when_unreachable=False)) as reply:
+                     retry=Retry(tries=3, when_unreachable=False), guard=guard) as reply:
         return reply.read(most)
 
 
 def _get(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
     """One GET, with a size cap, after ``check``."""
-    return _http(check(url), accept=accept, most=most)
+    return _http(check(url), accept=accept, most=most, guard=check)
 
 
 def _fetch(url: str) -> str:
