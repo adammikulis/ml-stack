@@ -302,6 +302,11 @@ passes beside its neighbours is caught there. Do not run the whole suite after e
 commit: the branch has not landed, and it is rebased onto a moved development branch before it does.
 Agents share the machine, so run the suite at `-n 4` or fewer and one run at a time.
 
+No test calls a paid or quota-limited API or a public endpoint on its own, whatever keys or logins
+the machine holds: such a test is marked `live_api` or `live_net` and skipped unless
+`ML_STACK_LIVE_API=1` or `ML_STACK_LIVE_NET=1` is set by a person (`tests/README.md`, *Live
+services*). Do not set either one.
+
 ### Commit before you mutate
 
 A test you rely on is one you have watched fail: break the behaviour it covers and see it go red.

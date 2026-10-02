@@ -167,6 +167,8 @@ addopts = "--strict-markers"
 # `-m "not slow"` is the subset to run while a bench has the GPU; the default runs everything.
 markers = [
     "slow: needs a browser, a subprocess, a wheel build or a network timeout; left out unless --slow is given",
+    "live_api: calls a paid or quota-limited remote API; runs only when ML_STACK_LIVE_API=1",
+    "live_net: reaches a public endpoint; runs only when ML_STACK_LIVE_NET=1",
     "heavy: runs in the default tier and costs seconds a test; `scripts/test fast` leaves it out",
 ]
 

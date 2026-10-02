@@ -104,12 +104,24 @@ What still reads the real machine, on purpose:
 
 - `test_gguf.py` compares the shipped `source_dirs()` against `Path.home() / ".unsloth"`, which
   is the value under test — it asserts what the default *is*, and never opens the path.
-- `test_web.py`'s one live search is skipped unless `MLSTACK_NET` is set on purpose.
+- `test_web.py`'s one live search is marked `live_net` and skipped unless `ML_STACK_LIVE_NET=1`.
 - `test_fleet_install.py` asserts the `HF_HOME` an installer *writes* into a plist or unit
   file. It composes a path from a home directory; it does not read one.
 - `test_serve_build.py` runs a real (tiny, hand-written) executable and real `strings` against
   fake dylibs, all inside `tmp_path`; the packaging tests build real wheels there. Neither
   compiles anything or reaches the network.
+
+## Live services
+
+No test reaches a paid or quota-limited API (Anthropic, OpenAI, any cloud model) or a public
+endpoint on its own. A test that has to is marked `live_api` or `live_net`, and conftest skips it
+unless `ML_STACK_LIVE_API=1` or `ML_STACK_LIVE_NET=1` is set. A key or login in the environment
+switches nothing on, and `conftest.py` deletes the credential variables (`live.CREDENTIALS`) from
+every test's environment. An autouse fixture refuses every other test a connection or a name
+lookup beyond loopback, the LAN and link-local addresses; the test fails and names the call site.
+`test_no_live_calls.py` also fails on an unmarked import of a paid SDK, a read of a credential
+variable, or a spawn of the `claude` command anywhere under `tests/`. Local models served through
+the broker are not remote services and are untouched by all of this.
 
 ## The shared fakes, in `conftest.py`
 

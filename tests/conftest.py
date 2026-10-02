@@ -63,6 +63,7 @@ _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
 from ml_stack.http import Server  # noqa: E402
+from ml_stack.testing import live  # noqa: E402
 from ml_stack.testing.fakes import (  # noqa: E402
     LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
     fake_binary as fake_binary,
@@ -153,7 +154,7 @@ _STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE
              "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE", "MLSTACK_PROFILES_FILE",
              "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_TRAIN_HOME",
              "MLSTACK_WEB_PROFILE", "MLSTACK_WHISPER_CPP_MODEL", "ML_STACK_CHECKOUTS",
-             "ML_STACK_RATES")
+             "ML_STACK_RATES", *live.CREDENTIALS)
 
 
 #: What a store in the suite may hold in memory. Left to the engine it is a share of the
@@ -541,6 +542,52 @@ def _no_real_ports(request):
         pytest.fail("a real port was touched:\n" + "\n".join(violations), pytrace=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_public_network(request):
+    """No test resolves or connects to a host beyond this machine and its LAN.
+
+    A test marked ``live_api`` or ``live_net`` is skipped unless its switch is set, so what
+    reaches this fixture with one of them is already allowed.
+    """
+    if request.node.get_closest_marker("live_api") or request.node.get_closest_marker("live_net"):
+        yield
+        return
+
+    violations: list[str] = []
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    real_resolve = socket.getaddrinfo
+
+    def refuse(what: str, host: object) -> None:
+        violations.append(f"{what} {host} at {_call_site()}")
+        raise OSError(f"a test reached {host}: set {live.LIVE_NET}=1 and mark it live_net")
+
+    def connect(self, address):
+        if isinstance(address, tuple) and live.outside(address[0]):
+            refuse("connect to", address[0])
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if isinstance(address, tuple) and live.outside(address[0]):
+            refuse("connect to", address[0])
+        return real_connect_ex(self, address)
+
+    def resolve(host, *args, **kwargs):
+        if live.outside(host):
+            refuse("resolve", host)
+        return real_resolve(host, *args, **kwargs)
+
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    socket.getaddrinfo = resolve
+    try:
+        yield
+    finally:
+        socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
+        socket.getaddrinfo = real_resolve
+
+    if violations:
+        pytest.fail("a real remote host was reached:\n" + "\n".join(violations), pytrace=False)
+
+
 def truncated_logs(before: dict[str, tuple[int, int]],
                    after: dict[str, tuple[int, int]]) -> list[str]:
     """The log files the same server wrote and something then shortened.
@@ -800,11 +847,15 @@ def heavy_modules() -> frozenset[str]:
 
 
 def pytest_collection_modifyitems(config, items) -> None:
-    """Mark the modules in ``heavy-modules.txt``, and leave the slow tests out unless --slow."""
+    """Mark the modules in ``heavy-modules.txt``, skip the live tests nobody switched on, and
+    leave the slow tests out unless --slow."""
     heavy = heavy_modules()
     for item in items:
         if Path(str(item.fspath)).name in heavy:
             item.add_marker(pytest.mark.heavy)
+        reason = live.skip_reason((m.name for m in item.iter_markers()), os.environ)
+        if reason:
+            item.add_marker(pytest.mark.skip(reason=reason))
     if config.getoption("--slow"):
         return
     kept, dropped = [], []
