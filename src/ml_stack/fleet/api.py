@@ -56,6 +56,8 @@ from .weights import ModelError
 
 INFER_CHUNK = 1 << 13
 INFER_TIMEOUT = 600.0
+READ_ONLY = ("/slots", "/props", "/metrics", "/models", "/health")
+"""Model-server paths the proxy only reads: a write to ``/slots`` saves or erases a cache."""
 PROXIED = re.compile(r"/(v1/[A-Za-z0-9/_.-]*|completions?|chat/completions|tokenize|detokenize|"
                      r"embeddings?|infill|apply-template|props|health|models|metrics|slots)"
                      r"(\?[^\s#]*)?")
@@ -210,7 +212,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return True
             rest = self.path[len("/infer"):] or "/"
             rest = "/" + rest if rest.startswith("?") else rest
-            if not PROXIED.fullmatch(rest) or ".." in rest.split("?")[0].split("/"):
+            route = rest.split("?")[0]
+            if (not PROXIED.fullmatch(rest) or ".." in route.split("/")
+                    or (route.startswith(READ_ONLY) and self.command not in ("GET", "HEAD"))):
                 self._send(403, {"error": "that path is not one the proxy passes on"})
                 return True
             parsed = urllib.parse.urlparse(rest)

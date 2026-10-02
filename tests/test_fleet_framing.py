@@ -201,21 +201,20 @@ def test_query_numbers_that_are_not_numbers_fall_back(served):
 # -- how slowly and how many ------------------------------------------------------------
 
 
-def test_a_client_that_sends_its_headers_slowly_is_hung_up_on(served):
+def test_a_client_that_trickles_its_headers_is_hung_up_on_though_each_wait_is_short(served):
+    """Each pause is under the socket timeout, so only the deadline on the headers ends it."""
     started = time.monotonic()
+    hung_up_at = None
     with socket.create_connection(("127.0.0.1", served["port"]), timeout=6.0) as sock:
         sock.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n")
-        for _ in range(5):
-            time.sleep(0.4)
+        while time.monotonic() - started < 6.0:
+            time.sleep(0.3)
             try:
                 sock.sendall(b"X-Slow: 1\r\n")
             except OSError:
+                hung_up_at = time.monotonic() - started
                 break
-        try:
-            gone = sock.recv(10) == b""
-        except OSError:
-            gone = True
-    assert gone and time.monotonic() - started < 5.0
+    assert hung_up_at is not None and hung_up_at < 3.5, hung_up_at
 
 
 def test_more_connections_than_the_cap_get_503_and_the_daemon_recovers(served):

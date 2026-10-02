@@ -203,6 +203,24 @@ class TestProxy:
             with daemon.post(path, {}) as r:
                 assert r.status == 200, path
 
+    @pytest.mark.parametrize("path", [
+        "/infer/v1/../props", "/infer/v1/%2e%2e/slots", "/infer/admin", "/infer/", "/infer",
+        "/infer//etc/passwd", "/infer/v1/x%20y", "/infer/slots/0?action=erase",
+        "/infer/props", "/infer/models",
+    ])
+    def test_a_path_that_is_not_the_model_servers_to_give_is_refused(self, wired, path):
+        daemon, _, _ = wired
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            daemon.post(path, {})
+        assert exc.value.code == 403, path
+
+    def test_the_caches_and_properties_of_the_model_server_are_read_not_written(self, wired):
+        daemon, _, _ = wired
+        for path in ("/infer/slots", "/infer/props"):
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                daemon.post(path, {})
+            assert exc.value.code == 403, path
+
     def test_a_path_cannot_name_another_host(self, wired):
         """`/infer@host:port/` would read as userinfo in front of a host the caller picked."""
         daemon, _, _ = wired
