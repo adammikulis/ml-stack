@@ -28,6 +28,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
+os.environ["HF_HUB_OFFLINE"] = "1"
 sys.path.insert(0, str(REPO / "scripts"))
 
 
@@ -544,7 +545,9 @@ def _no_real_ports(request):
 
 @pytest.fixture(autouse=True)
 def _no_public_network(request):
-    """No test resolves or connects to a host beyond this machine and its LAN.
+    """No test resolves, connects to or sends to a host beyond this machine and its LAN.
+
+    A UDP socket may ``connect`` anywhere: that only picks the local address and sends nothing.
 
     A test marked ``live_api`` or ``live_net`` is skipped unless its switch is set, so what
     reaches this fixture with one of them is already allowed.
@@ -555,21 +558,27 @@ def _no_public_network(request):
 
     violations: list[str] = []
     real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
-    real_resolve = socket.getaddrinfo
+    real_sendto, real_resolve = socket.socket.sendto, socket.getaddrinfo
 
     def refuse(what: str, host: object) -> None:
         violations.append(f"{what} {host} at {_call_site()}")
         raise OSError(f"a test reached {host}: set {live.LIVE_NET}=1 and mark it live_net")
 
     def connect(self, address):
-        if isinstance(address, tuple) and live.outside(address[0]):
+        if self.type != socket.SOCK_DGRAM and isinstance(address, tuple) and live.outside(address[0]):
             refuse("connect to", address[0])
         return real_connect(self, address)
 
     def connect_ex(self, address):
-        if isinstance(address, tuple) and live.outside(address[0]):
+        if self.type != socket.SOCK_DGRAM and isinstance(address, tuple) and live.outside(address[0]):
             refuse("connect to", address[0])
         return real_connect_ex(self, address)
+
+    def sendto(self, data, *rest):
+        address = rest[-1]
+        if isinstance(address, tuple) and live.outside(address[0]):
+            refuse("send to", address[0])
+        return real_sendto(self, data, *rest)
 
     def resolve(host, *args, **kwargs):
         if live.outside(host):
@@ -577,12 +586,12 @@ def _no_public_network(request):
         return real_resolve(host, *args, **kwargs)
 
     socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
-    socket.getaddrinfo = resolve
+    socket.socket.sendto, socket.getaddrinfo = sendto, resolve
     try:
         yield
     finally:
         socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
-        socket.getaddrinfo = real_resolve
+        socket.socket.sendto, socket.getaddrinfo = real_sendto, real_resolve
 
     if violations:
         pytest.fail("a real remote host was reached:\n" + "\n".join(violations), pytrace=False)
@@ -694,6 +703,20 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
 def changed_files(before: dict[str, int], after: dict[str, int]) -> list[str]:
     """The paths written, created or removed between two `file_mtimes` snapshots."""
     return sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _public_suffix_list_is_the_bundled_one():
+    """tldextract reads the list it ships instead of fetching the current one from the web."""
+    try:
+        import tldextract.tldextract as module
+    except ImportError:
+        yield
+        return
+    kept = module.TLD_EXTRACTOR
+    module.TLD_EXTRACTOR = module.TLDExtract(cache_dir=None, suffix_list_urls=())
+    yield
+    module.TLD_EXTRACTOR = kept
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -176,15 +176,21 @@ def test_a_test_that_reaches_a_public_host_is_refused_and_fails(tmp_path) -> Non
 
         def test_it():
             socket.getaddrinfo("localhost", 80)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                udp.connect(("8.8.8.8", 53))
+                print("UDP-CONNECT-SENDS-NOTHING")
             for call in (lambda: socket.getaddrinfo("api.anthropic.com", 443),
-                         lambda: socket.create_connection(("8.8.8.8", 443), timeout=1)):
+                         lambda: socket.create_connection(("8.8.8.8", 443), timeout=1),
+                         lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                         .sendto(b"x", ("8.8.8.8", 53))):
                 try:
                     call()
                 except OSError as exc:
                     print("REFUSED", exc)
         """), encoding="utf-8")
     done = run_in(tmp_path, {})
-    assert done.stdout.count("REFUSED a test reached") == 2, done.stdout + done.stderr
+    assert "UDP-CONNECT-SENDS-NOTHING" in done.stdout
+    assert done.stdout.count("REFUSED a test reached") == 3, done.stdout + done.stderr
     assert done.returncode != 0 and "a real remote host was reached" in done.stdout
 
 
