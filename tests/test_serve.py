@@ -1025,6 +1025,7 @@ class TestTheStartedProcess:
 
     def test_the_log_is_not_held_open_while_the_load_is_waited_on(self, tmp_path, monkeypatch):
         import psutil
+
         from ml_stack.serve import backend as backend_module
 
         real = backend_module.wait_for_health
