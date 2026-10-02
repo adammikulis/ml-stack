@@ -123,10 +123,10 @@ class _Guarded(urllib.request.HTTPRedirectHandler):
     def __init__(self, guard: Callable[[str], str]) -> None:
         self.guard = guard
 
-    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any,
-                         newurl: str) -> Any:
-        self.guard(urllib.parse.urljoin(req.full_url, newurl))
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+    def redirect_request(self, req: Any, *rest: Any) -> Any:
+        """``rest`` is urllib's ``fp, code, msg, headers, newurl``."""
+        self.guard(urllib.parse.urljoin(req.full_url, rest[-1]))
+        return super().redirect_request(req, *rest)
 
 
 def _open(request: urllib.request.Request, timeout: float, guard: Callable[[str], str] | None
