@@ -23,6 +23,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ml_stack.platform import applescript_quote
+
 
 class BrowserUnavailable(RuntimeError):
     """Playwright is not installed. `pip install ml-stack[scrape]`, then `playwright install`."""
@@ -71,7 +73,8 @@ def keeping_focus() -> Iterator[None]:
     finally:
         if front:
             with contextlib.suppress(Exception):
-                subprocess.run(["osascript", "-e", f'tell application "{front}" to activate'],
+                subprocess.run(["osascript", "-e",
+                                f'tell application "{applescript_quote(front)}" to activate'],
                                capture_output=True, timeout=10, check=False)
 
 
