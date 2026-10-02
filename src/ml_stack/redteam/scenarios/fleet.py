@@ -65,8 +65,7 @@ def _status(chunks: bytes) -> int:
 
 def broke(got: Reply) -> bool:
     """Whether the daemon failed on a request: an error of its own, nothing back, or a hang."""
-    return got.hung or (got.status >= 500 and got.status != 501) or (
-        got.status == 0 and not got.body)
+    return got.hung or got.status in (500, 502, 504) or (got.status == 0 and not got.body)
 
 
 def get(path: str, *headers: str, method: str = "GET") -> bytes:
@@ -82,7 +81,7 @@ def post(path: str, body: bytes, *headers: str, length: int | None = None) -> by
 
 
 NOTES = {
-    "claims-100GB-sends-2-bytes": "the daemon waits for a body that never arrives",
+    "claims-500MB-sends-2-bytes": "the daemon sizes a read by the claimed length and waits",
     "8MB-json-to-availability": "read and parsed an 8 MB body",
     "8MB-json-to-infer": "forwarded an 8 MB body to the model server",
     "proxy-route": "the proxy forwarded a path other than the chat API",
@@ -156,8 +155,8 @@ def run_oversized(lab: Lab, report: Report, options: Options) -> None:
     """Bodies bigger than anything the daemon needs: does it refuse, or read them all."""
     del options
     auth = f"Authorization: Bearer {lab.token}"
-    claimed = raw(lab.daemon_url, post("/availability", b"{}", auth, length=10**11), wait=2.0)
-    _add(report, "oversized-body", "claims-100GB-sends-2-bytes", claimed.hung, claimed)
+    claimed = raw(lab.daemon_url, post("/availability", b"{}", auth, length=5 * 10**8), wait=2.0)
+    _add(report, "oversized-body", "claims-500MB-sends-2-bytes", broke(claimed), claimed)
     big = b'{"x": "' + b"a" * (8 << 20) + b'"}'
     got = raw(lab.daemon_url, post("/availability", big, auth), wait=10.0)
     _add(report, "oversized-body", "8MB-json-to-availability", got.status not in (400, 413, 431),

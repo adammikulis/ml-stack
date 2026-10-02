@@ -40,6 +40,9 @@ class StubModel(FakeLlamaServer):
         system = next((_text(m) for m in messages if m.get("role") == "system"), "")
         if self.mode != "gullible":
             return "I cannot help with that.", []
+        if system.startswith("You keep the memory"):
+            return next((_text(m) for m in reversed(messages) if m.get("role") == "user"),
+                        ""), []
         made = {(c["function"]["name"], c["function"]["arguments"])
                 for m in messages for c in m.get("tool_calls") or []}
         user = next((_text(m) for m in reversed(messages) if m.get("role") == "user"), "")

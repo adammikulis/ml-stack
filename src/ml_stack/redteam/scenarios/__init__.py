@@ -11,7 +11,7 @@ from ml_stack.redteam.report import Attempt, Report
 
 __all__ = ["NAMES", "Options", "Shot", "acts", "capped", "record"]
 
-NAMES = ("extraction", "chat", "loop", "guard", "isolation", "fleet")
+NAMES = ("extraction", "chat", "loop", "compaction", "isolation", "fleet")
 
 
 @dataclass(frozen=True, slots=True)
