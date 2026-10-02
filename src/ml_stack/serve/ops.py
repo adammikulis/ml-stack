@@ -23,6 +23,7 @@ from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.log import warn
 from ml_stack.serve import (
+    broker_wire,
     fit as fit_mod,
     measuring as measuring_mod,
     preflight as preflight_mod,
@@ -37,7 +38,6 @@ from ml_stack.serve.backend import (
     ServerSpec,
     default_slot_save_path,
 )
-from ml_stack.serve import broker_wire
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.leases import lease_file, orphaned, recorded_servers
 from ml_stack.serve.manager import ServerManager

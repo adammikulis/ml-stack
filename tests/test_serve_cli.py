@@ -29,7 +29,7 @@ from ml_stack.serve import cli, ops
 from ml_stack.serve.backend import ServerInfo, ServerSpec
 from ml_stack.serve.ports import free_port
 from ml_stack.testing import FakeLlamaServer, FakePreflight, Served
-from ml_stack.testing.fakes import record_server
+from ml_stack.testing.registry import record_server
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 

@@ -11,7 +11,7 @@ import time
 import pytest
 
 from ml_stack.serve import Measuring, ServerInfo, ServerManager, ServerSpec, free_port
-from ml_stack.testing.fakes import record_server
+from ml_stack.testing.registry import record_server
 
 
 class _Backend:

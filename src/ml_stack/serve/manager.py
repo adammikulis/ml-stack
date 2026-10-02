@@ -9,7 +9,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,10 @@ from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.hub import free_memory, room as machine_room
-from ml_stack.serve import admission
+from ml_stack.limits import read as limits_read
+from ml_stack.lock import only_one
+from ml_stack.serve import admission, unmanaged
+from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
     LlamaServerBackend,
@@ -36,7 +39,6 @@ from ml_stack.serve.escalation import (
     summarise,
 )
 from ml_stack.serve.events import Event, emit
-from ml_stack.lock import only_one
 from ml_stack.serve.leases import (
     lease_file,
     merge_state,
@@ -45,8 +47,6 @@ from ml_stack.serve.leases import (
     recorded_servers,
 )
 from ml_stack.serve.matching import model_matches, serving_mismatch
-from ml_stack.serve import unmanaged
-from ml_stack.serve.unmanaged import unmanaged_servers
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import (
@@ -83,7 +83,6 @@ def measurement_said(held: dict[str, Any]) -> str:
 
 
 UNAVAILABLE_COOLDOWN_S = 3.0
-STATE_LOCK_TIMEOUT_S = 30.0
 
 # How much of what is free a second model may take before it is judged not to fit. Below 1.0
 # because a model needs its weights *and* room to work in, and a machine that fills itself
@@ -91,7 +90,21 @@ STATE_LOCK_TIMEOUT_S = 30.0
 BESIDE_HEADROOM = 0.8
 
 
-class ServerManager:
+@dataclass(frozen=True)
+class Starting:
+    """How a lease may be satisfied: ``roam`` lets it be served on another port, ``escalate``
+    lets a server with too few slots be grown, ``anyway`` starts it during a measurement,
+    and the rest are the checks the start runs."""
+
+    roam: bool = True
+    check_flags: bool = True
+    preflight: bool = True
+    warmup_request: bool = True
+    escalate: bool = False
+    anyway: bool = False
+
+
+class ServerManager(Admitting):
     """Leases model servers, one per (model, port), shared across this machine."""
 
     def __init__(
@@ -138,7 +151,7 @@ class ServerManager:
     def broker(self) -> Any:
         """The broker every start, release and escalation goes through."""
         if self._broker is None:
-            from ml_stack.serve.broker_wire import broker_for
+            from ml_stack.serve.broker_wire import broker_for  # broker_wire imports this module
 
             self._broker = broker_for(self)
         return self._broker
@@ -156,18 +169,15 @@ class ServerManager:
         with the machine's broker. The rest of the arguments are those of
         :meth:`_start_server`.
         """
-        options = {"roam": roam, "check_flags": check_flags, "preflight": preflight,
-                   "warmup_request": warmup_request, "escalate": escalate, "anyway": anyway}
-        info = self.broker.start(spec, timeout=timeout, options=options,
+        how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway)
+        info = self.broker.start(spec, timeout=timeout, options=asdict(how),
                                  on_event=on_event, say=say or self.say)
         if info.lease:
             self._leases[info.lease] = info
         return info
 
     def _start_server(self, spec: ServerSpec, *, timeout: float | None = None,
-                      roam: bool = True, check_flags: bool = True, preflight: bool = True,
-                      warmup_request: bool = True, escalate: bool = False,
-                      anyway: bool = False, on_event: Event | None = None,
+                      how: Starting | None = None, on_event: Event | None = None,
                       say: Callable[[str], None] | None = None) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
         Called by the broker and by nothing else.
@@ -199,6 +209,8 @@ class ServerManager:
         bench's measuring lock; adopting one already up is not. ``anyway=True`` starts it
         regardless.
         """
+        how = how or Starting()
+        roam, escalate, anyway = how.roam, how.escalate, how.anyway
         if escalate:
             # llama.cpp's slot-save file carries the cache's stream count, and a restore
             # raises "n_stream mismatch" the moment that count differs from the file's --
@@ -220,8 +232,8 @@ class ServerManager:
 
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
-        starting = {"check_flags": check_flags, "preflight": preflight,
-                    "warmup_request": warmup_request}
+        starting = {"check_flags": how.check_flags, "preflight": how.preflight,
+                    "warmup_request": how.warmup_request}
         refused = self._over_limit(spec)
         if refused:
             raise ServerFailed(refused)
@@ -281,7 +293,7 @@ class ServerManager:
                 return reused
             try:
                 info = self._launch(spec, timeout=resolved_timeout, on_event=on_event,
-                                    anyway=anyway, **starting)
+                                    anyway=anyway, reuse=roam, **starting)
             except (Measuring, admission.AdmissionRefused):
                 self._forget(spec.port)
                 raise
@@ -291,11 +303,12 @@ class ServerManager:
                 raise
 
             self._unavailable_until.pop(spec.port, None)
-            self._record(spec, info)
+            if not info.adopted:
+                self._record(spec, info)
             return info
 
     def _launch(self, spec: ServerSpec, *, timeout: float, on_event: Event | None = None,
-                anyway: bool = False, **starting: Any) -> ServerInfo:
+                anyway: bool = False, reuse: bool = False, **starting: Any) -> ServerInfo:
         """Start ``spec``, telling ``on_event`` when the load begins and ends.
 
         The one place a fresh process is asked for, so ``up``, an adopt that falls
@@ -312,8 +325,10 @@ class ServerManager:
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
         emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
-        info = self.backend_for(spec).start(spec, lease=self._admitted(spec, on_event=on_event),
-                                            timeout=timeout, **starting)
+        admitted = self._admitted(spec, on_event=on_event, reuse=reuse, load_s=timeout)
+        if isinstance(admitted, ServerInfo):
+            return admitted
+        info = self.backend_for(spec).start(spec, lease=admitted, timeout=timeout, **starting)
         emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
         return info
 
@@ -373,14 +388,15 @@ class ServerManager:
         with self._port_lock(moved.port):
             try:
                 info = self._launch(moved, timeout=timeout, on_event=on_event,
-                                    anyway=anyway, **starting)
+                                    anyway=anyway, reuse=True, **starting)
             except (Measuring, admission.AdmissionRefused):
                 self._forget(moved.port)
                 raise
             except ServerFailed:
                 self._forget(moved.port)
                 return None
-            self._record(moved, info)
+            if not info.adopted:
+                self._record(moved, info)
             return info
 
     def adopt(self, spec: ServerSpec) -> ServerInfo | None:
@@ -496,9 +512,9 @@ class ServerManager:
             self._leases.pop(info.lease, None)
             self.broker.drop(info, grace_s=grace_s)
             return
-        self._stop(info, grace_s=grace_s)
+        self._stop_server(info, grace_s=grace_s)
 
-    def _stop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
+    def _stop_server(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Stop a server this process started. Adopted servers are left running."""
         if info.adopted:
             logger.debug("not stopping %s: we adopted it", info.base_url)
@@ -547,103 +563,6 @@ class ServerManager:
 
     # ------------------------------------------------------------------ state file
 
-    def _admitted(self, spec: ServerSpec, *, on_event: Event | None = None) -> Lease:
-        """The record for a server about to start, written once the machine has the memory
-        for it: waits while the servers up and this one would rate red, and raises
-        `AdmissionRefused` when no room comes free in `admission.wait_s()`."""
-        told = self.say or logger.info
-        deadline = time.monotonic() + admission.wait_s()
-        waiting = False
-        while True:
-            with only_one(self.state_file.with_name("servers.admission.lock"), wait=True,
-                          timeout=STATE_LOCK_TIMEOUT_S, announce=logger.debug):
-                records = recorded_servers(self.state_file)
-                verdict = self._rated(spec, records)
-                if verdict.rating == "red" and self._stop_leaked(records, told):
-                    verdict = self._rated(spec, recorded_servers(self.state_file))
-                if verdict.rating != "red":
-                    if verdict.rating == "yellow":
-                        told(f"port {spec.port}: {verdict.said()}")
-                    return self._pending(spec, est_bytes=verdict.wanted)
-            if time.monotonic() >= deadline:
-                raise admission.AdmissionRefused(
-                    f"port {spec.port}: {verdict.said()}; no memory came free in "
-                    f"{admission.wait_s():.0f}s ({admission.ENV_WAIT} sets the wait)")
-            if not waiting:
-                told(f"port {spec.port}: waiting for memory -- {verdict.said()}")
-                waiting = True
-            time.sleep(0.5)
-
-    def _rated(self, spec: ServerSpec, records: dict[int, dict]) -> admission.Verdict:
-        return admission.check(spec, records, budget=machine_room(),
-                               unmanaged=unmanaged_servers(records))
-
-    def _stop_leaked(self, records: dict[int, dict], told: Callable[[str], None]) -> bool:
-        """Stop every server whose leasing process has gone; whether any was."""
-        stopped = False
-        for port, entry in records.items():
-            if orphaned(entry):
-                told(f"port {port}: stopping the server (pid {entry['pid']}) left running "
-                     f"by pid {entry['owner_pid']}, which has exited")
-                kill_process_tree(int(entry["pid"]))
-                stopped = True
-        if stopped:
-            self._save()
-        return stopped
-
-    def register_unmanaged(self, port: int, seen: unmanaged.Examined) -> None:
-        """Put the examined server on ``port`` in the registry as one ml-stack does not own."""
-        with self._exclusive():
-            state = merge_state(self._load(), self._mine, os.getpid())
-            state[str(port)] = unmanaged.adopt_entry(port, seen)
-            self._write(state)
-
-    def _unmanaged_on(self, spec: ServerSpec, told: Callable[[str], None]) -> ServerInfo | None:
-        """The server ml-stack did not start that listens on ``spec.port``, taken into the
-        registry when the adoption setting allows it and it passes every check; else
-        ``None``."""
-        how = unmanaged.mode()
-        if how == "off":
-            return None
-        seen = unmanaged.examine(spec.port)
-        if not seen.ok:
-            told(f"port {spec.port}: not adopting the server there -- {seen.why}")
-            return None
-        base_url = f"http://{DEFAULT_HOST}:{spec.port}"
-        mismatch = serving_mismatch(spec, reported_models(base_url), serving_params(base_url))
-        if mismatch:
-            told(f"port {spec.port}: not adopting pid {seen.pid} -- " + "; ".join(mismatch))
-            return None
-        what = (f"pid {seen.pid} on port {spec.port} serving {Path(seen.model).name or '?'}")
-        if how == "ask" and not (self.confirm is not None and self.confirm(what)):
-            told(f"port {spec.port}: not adopting {what}; it was not confirmed")
-            return None
-        self.register_unmanaged(spec.port, seen)
-        told(f"port {spec.port}: adopted {what} (setting {unmanaged.ENV}={how}); ml-stack "
-             "queues its requests and counts its memory, and never stops it")
-        logger.warning("adopted unmanaged server: pid=%s port=%s model=%s by pid %s",
-                       seen.pid, spec.port, seen.model, os.getpid())
-        return ServerInfo(base_url=base_url, port=spec.port, pid=seen.pid,
-                          backend=self.backend_for(spec).name, adopted=True)
-
-    def _reusable(self, spec: ServerSpec, *, on_event: Event | None = None) -> ServerInfo | None:
-        """A running server on another port that serves ``spec`` as asked, else ``None``."""
-        for port, entry in recorded_servers(self.state_file).items():
-            if (port == spec.port or entry.get("pending") or not admission.live(entry)
-                    or not model_matches(str(entry.get("model") or ""), spec.model)):
-                continue
-            base_url = f"http://{DEFAULT_HOST}:{port}"
-            if not is_healthy(base_url, timeout=1.0):
-                continue
-            shape = replace(spec, port=port)
-            mismatch = serving_mismatch(shape, reported_models(base_url), serving_params(base_url))
-            if admission.compatible(shape, entry, mismatch):
-                logger.info("reusing the server on %s for %s", base_url, spec.model)
-                emit(on_event, "ready", port=port, adopted=True)
-                return ServerInfo(base_url=base_url, port=port, pid=entry.get("pid"),
-                                  backend=str(entry.get("backend") or ""), adopted=True)
-        return None
-
     def _pending(self, spec: ServerSpec, *, est_bytes: int = 0) -> Lease:
         """Write the server down before it exists, and hand the backend the proof.
 
@@ -657,6 +576,7 @@ class ServerManager:
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
             "pool": admission.pool_of(spec), "est_bytes": est_bytes,
             "embedding": bool(spec.embedding), "mmproj": bool(spec.mmproj),
+            "context": int(spec.context), "parallel": int(spec.parallel or 1),
         }
         self._save()
         return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
@@ -672,6 +592,8 @@ class ServerManager:
             "est_bytes": (self._mine.get(str(spec.port)) or {}).get("est_bytes", 0),
             "embedding": bool(spec.embedding),
             "mmproj": bool(spec.mmproj),
+            "context": int(spec.context),
+            "parallel": int(spec.parallel or 1),
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
@@ -699,8 +621,6 @@ class ServerManager:
     @contextmanager
     def _exclusive(self) -> Iterator[None]:
         """Hold the state file against every other thread and process for the block."""
-        from ml_stack.lock import only_one
-
         with self._lock, only_one(self.state_file.with_suffix(".lock"), wait=True,
                                   timeout=STATE_LOCK_TIMEOUT_S, announce=logger.debug):
             yield
@@ -731,9 +651,7 @@ class ServerManager:
     def _over_limit(self, spec: ServerSpec) -> str:
         """Why this machine's limits refuse this lease, or "". A server already up on this
         port is adopted rather than added, so it is not counted against the server limit."""
-        from ml_stack.limits import read
-
-        limits = read()
+        limits = limits_read()
         if not (limits.servers or limits.slots):
             return ""
         running = sum(1 for port, entry in recorded_servers(self.state_file).items()

@@ -15,23 +15,23 @@ import dataclasses
 import json
 import os
 import sys
-from pathlib import Path
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 from ml_stack import gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
+from ml_stack.serve import unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Event
 from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager
-from ml_stack.serve import unmanaged
+from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager, Starting
 from ml_stack.serve.matching import model_matches
 from ml_stack.serve.ports import DEFAULT_HOST, free_port
 from ml_stack.serve.process import every_server, kill_process_tree, pid_exists
@@ -203,18 +203,20 @@ class Broker:
         serves it is shared; otherwise one is started once the machine has the memory."""
         options = dict(options or {})
         manager = self._manager_for(options)
-        starting = {k: v for k, v in options.items() if k != "backend"}
-        info = manager._start_server(spec, timeout=timeout, on_event=on_event, say=say,
-                                     **starting)
+        how = Starting(**{k: v for k, v in options.items() if k != "backend"})
+        info = manager._start_server(spec, timeout=timeout, how=how, on_event=on_event,
+                                     say=say)
         return self._held_by(info, spec, pid or os.getpid(), label or who())
 
     def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str) -> ServerInfo:
         lease = uuid.uuid4().hex
+        entry = recorded_servers(self.manager.state_file).get(info.port) or {}
         with self._cond:
             held = self.servers.get(info.port)
             if held is None or held.pid != info.pid:
                 held = Held(port=info.port, model=str(spec.model), pid=info.pid,
-                            names=(str(spec.model),), info=info)
+                            ours=not entry.get("unmanaged"), names=(str(spec.model),),
+                            info=info)
                 self.servers[info.port] = held
             elif not info.adopted:
                 held.info = info
@@ -240,7 +242,7 @@ class Broker:
         if held is not None:
             self._stop(held)
         elif not info.adopted and info.pid and self.alive(info.pid):
-            self.manager._stop(info, grace_s=grace_s)
+            self.manager._stop_server(info, grace_s=grace_s)
 
     def escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
                  timeout: float | None = None, anyway: bool = False,
@@ -413,7 +415,7 @@ class Broker:
     def _start(self, waiting: Waiting, placeholder: Held) -> Grant:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
-            info = self.manager._start_server(spec, roam=False)
+            info = self.manager._start_server(spec, how=Starting(roam=False))
         except Measuring:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
@@ -437,7 +439,7 @@ class Broker:
 
     def _stop(self, held: Held) -> None:
         if held.info is not None and not held.info.adopted:
-            self.manager._stop(held.info)
+            self.manager._stop_server(held.info)
         elif held.pid and self.alive(held.pid):
             kill_process_tree(held.pid)
 

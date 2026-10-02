@@ -183,6 +183,9 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     progress = sys.modules.get("ml_stack.bench.progress") or importlib.import_module(
         "ml_stack.bench.progress")
+    unmanaged = sys.modules.get("ml_stack.serve.unmanaged") or importlib.import_module(
+        "ml_stack.serve.unmanaged")
+    monkeypatch.setattr(unmanaged, "every_server", lambda: [])
     monkeypatch.setattr(progress, "serving_lines", lambda: [])
     monkeypatch.setattr(progress, "beside_on_the_card", lambda: [])
     monkeypatch.setattr(progress, "results_since", lambda started, kept=None: "")

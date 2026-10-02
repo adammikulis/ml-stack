@@ -21,11 +21,24 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.serve.backend import ServerFailed, ServerSpec
+from ml_stack.serve.preflight import RUNTIME_ALLOWANCE_BYTES, _kv_estimate_bytes, read_gguf_header
 from ml_stack.serve.process import pid_exists
 from ml_stack.serve.weights import weight_of
 
-__all__ = ["ENV_WAIT", "AdmissionRefused", "RED_AT", "YELLOW_AT", "Verdict", "charge",
-           "check", "compatible", "estimate_bytes", "live", "pool_of", "rate"]
+__all__ = [
+    "ENV_WAIT",
+    "RED_AT",
+    "YELLOW_AT",
+    "AdmissionRefused",
+    "Verdict",
+    "charge",
+    "check",
+    "compatible",
+    "estimate_bytes",
+    "live",
+    "pool_of",
+    "rate",
+]
 
 ENV_WAIT = "ML_STACK_ADMISSION_WAIT_S"
 """Seconds a start waits for memory to come free before it is refused."""
@@ -84,8 +97,6 @@ def estimate_bytes(spec: ServerSpec) -> int:
     """What serving ``spec`` will take: weights, draft and projector files, the KV cache
     read off the GGUF header, and a fixed allowance for the runtime. Weights not on disk
     are unknown and count as 0."""
-    from ml_stack.serve.preflight import RUNTIME_ALLOWANCE_BYTES, _kv_estimate_bytes, read_gguf_header
-
     weights = _size(spec.model)
     if not weights:
         return 0
@@ -144,6 +155,15 @@ def check(spec: ServerSpec, records: Mapping[int, Mapping[str, Any]], *, budget:
                        f"{took / 1024 ** 3:.1f} GiB")
     wanted = estimate_bytes(spec)
     return Verdict(rate(wanted + committed, budget), wanted, committed, budget, tuple(holders))
+
+
+def pending_serves(spec: ServerSpec, entry: Mapping[str, Any]) -> bool:
+    """Whether the server being started on ``entry`` will serve ``spec`` when it is up."""
+    held = max(1, int(entry.get("parallel") or 1))
+    return (int(entry.get("context") or 0) // held >= int(spec.context) // max(1, int(spec.parallel or 1))
+            and held >= max(1, int(spec.parallel or 1))
+            and bool(entry.get("embedding")) == bool(spec.embedding)
+            and not (spec.mmproj and not entry.get("mmproj")))
 
 
 def compatible(spec: ServerSpec, entry: Mapping[str, Any], mismatches: list[str]) -> bool:

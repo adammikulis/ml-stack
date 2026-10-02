@@ -19,7 +19,8 @@ from ml_stack import home
 from ml_stack.serve.backend import ServerFailed, ServerSpec
 from ml_stack.serve.escalation import EscalationRefused
 from ml_stack.serve.manager import ServerManager
-from ml_stack.testing.fakes import FakeBackend, FakeLlamaServer, Served, record_server
+from ml_stack.testing.fakes import FakeBackend, FakeLlamaServer, Served
+from ml_stack.testing.registry import record_server
 
 MODEL = "quince-2b.gguf"
 SUMMARY = "a summary"

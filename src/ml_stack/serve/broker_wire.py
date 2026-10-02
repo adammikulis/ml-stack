@@ -14,7 +14,6 @@ import os
 import secrets
 import socket
 import socketserver
-import sys
 import threading
 import time
 from pathlib import Path
@@ -25,9 +24,9 @@ from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
-from ml_stack.serve.backend import ServerFailed
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
+from ml_stack.serve.leases import lease_file
 from ml_stack.serve.ports import DEFAULT_HOST
 from ml_stack.serve.process import pid_exists
 
@@ -59,7 +58,8 @@ class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         try:
             reply = self.server.answer(json.loads(self.rfile.readline()))
-        except Exception as exc:  # noqa: BLE001 - whatever a call raises is the caller's to see
+        except (BrokerError, ServerFailed, ValueError, TypeError, KeyError, OSError,
+                RuntimeError) as exc:
             reply = {"ok": False, "error": str(exc), "kind": type(exc).__name__}
         self.wfile.write((json.dumps(reply) + "\n").encode("utf-8"))
 
@@ -189,8 +189,6 @@ def broker_for(manager: Any) -> Any:
     """The broker ``manager`` starts servers through: the machine's, over its socket, when
     the manager keeps the machine's records and starts llama.cpp the ordinary way; else one
     that runs in this process over the manager's own records."""
-    from ml_stack.serve.leases import lease_file
-
     backend = manager.backend
     if (os.environ.get(LOCAL_ENV) != "1" and type(backend) is LlamaServerBackend
             and Path(manager.state_file) == lease_file()):

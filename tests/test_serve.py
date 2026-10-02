@@ -41,8 +41,8 @@ from ml_stack.testing.fakes import (
     Served,
     fake_binary,
     fake_llama_binary,
-    record_server,
 )
+from ml_stack.testing.registry import record_server
 from tests.conftest import leased
 
 
