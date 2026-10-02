@@ -6,7 +6,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["NAMES", "Options", "Shot", "acts", "capped"]
+from ml_stack.redteam.pyrit_bridge import Outcome
+from ml_stack.redteam.report import Attempt, Report
+
+__all__ = ["NAMES", "Options", "Shot", "acts", "capped", "record"]
 
 NAMES = ("extraction", "chat", "loop", "guard", "isolation", "fleet")
 
@@ -52,3 +55,12 @@ class Shot:
     @property
     def name(self) -> str:
         return self.attack_id if self.chain == ("identity",) else f"{self.attack_id}+{self.chain[0]}"
+
+
+def record(report: Report, shot: Shot, outcome: Outcome, detail: str = "") -> None:
+    """Add the attempt ``shot`` came to, with ``detail`` when it succeeded."""
+    answer = outcome.answer
+    report.add(Attempt(shot.target, shot.attack_class, shot.name, outcome.succeeded,
+                       arm=shot.arm, attempted=answer.calls > 0, blocked=answer.blocked,
+                       seconds=outcome.seconds, error=answer.error,
+                       detail=answer.detail or (detail if outcome.succeeded else "")))

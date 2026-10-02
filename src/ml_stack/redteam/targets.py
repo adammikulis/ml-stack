@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.client import Client, ServerError, Transport
+from ml_stack.client import Client, Request, ServerError, Transport
 
 __all__ = ["Answer", "Responder", "ToolSpy", "chat_endpoint", "from_callable",
            "mcp_tool_agent"]
@@ -19,8 +19,8 @@ __all__ = ["Answer", "Responder", "ToolSpy", "chat_endpoint", "from_callable",
 @dataclass(frozen=True, slots=True)
 class Answer:
     """What a target did with a conversation: the text it replied, how many dangerous tool
-    calls it made, whether a guard stopped something, and the HTTP status when the target is
-    one."""
+    calls it made, whether a guard stopped something, the HTTP status when the target is one,
+    and whether the target failed to answer at all."""
 
     text: str = ""
     calls: int = 0
@@ -42,15 +42,17 @@ def chat_endpoint(base_url: str, *, system: str = "", token: str | None = None,
                   tools: list[dict[str, Any]] | None = None) -> Responder:
     """An OpenAI-compatible chat endpoint at ``base_url``, a llama-server or a daemon's
     ``/infer``, asked greedily. ``token`` is sent as a bearer token."""
-    client = Client(base_url, transport=Transport(api_key=token, timeout=TIMEOUT_S))
+    client = Client(base_url, request=Request(n_predict=MAX_TOKENS),
+                    transport=Transport(api_key=token, timeout=TIMEOUT_S))
 
     async def respond(messages: Messages) -> Answer:
         sent = ([{"role": "system", "content": system}] if system else []) + messages
         try:
             reply = await asyncio.to_thread(
-                client.chat, sent, tools=tools, max_tokens=MAX_TOKENS, timeout=TIMEOUT_S)
+                client.chat, sent, tools=tools, timeout=TIMEOUT_S)
         except ServerError as exc:
-            return Answer(blocked=exc.status in (401, 403), status=exc.status,
+            blocked = exc.status in (401, 403)
+            return Answer(blocked=blocked, status=exc.status, error=not blocked,
                           detail=f"{type(exc).__name__}: {exc}"[:300])
         return Answer(text=reply.content or "", calls=len(reply.tool_calls or ()), status=200)
 

@@ -9,6 +9,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack.redteam.daemon import Running
 from ml_stack.redteam.egress import local_only
 from ml_stack.redteam.evidence import Canary, Honeypot, Pages, secret_for
 from ml_stack.redteam.tools import Toolbox, dns_aliases
@@ -29,6 +30,7 @@ class Lab:
     seed: str = "redteam"
     daemon_url: str = ""
     token: str = ""
+    files: Path = Path()
     counter: int = 0
 
     def canary(self, label: str = "") -> Canary:
@@ -45,9 +47,9 @@ class Lab:
 
 @contextmanager
 def lab(*, model_url: str = "", model_name: str = "", seed: str = "redteam",
-        daemon_url: str = "", token: str = "") -> Iterator[Lab]:
+        served: Running | None = None) -> Iterator[Lab]:
     """A `Lab` for the block: servers up, aliases resolving, connections confined to this
-    machine, everything torn down at the end."""
+    machine, everything torn down at the end. ``served`` is the daemon to attack, if any."""
     with ExitStack() as stack:
         stack.enter_context(local_only())
         stack.enter_context(dns_aliases())
@@ -55,4 +57,5 @@ def lab(*, model_url: str = "", model_name: str = "", seed: str = "redteam",
         pages, honeypot = Pages(), Honeypot()
         stack.callback(pages.close)
         stack.callback(honeypot.close)
-        yield Lab(scratch, pages, honeypot, model_url, model_name, seed, daemon_url, token)
+        yield Lab(scratch, pages, honeypot, model_url, model_name, seed, *(
+            (served.url, served.token, served.files) if served else ("", "", Path())))
