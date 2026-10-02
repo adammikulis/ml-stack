@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ml_stack import home
 from ml_stack.hub import room
+from ml_stack.hub.modelfile import safetensors_header
 from ml_stack.serve.backend import (
     Lease,
     ServerBackend,
@@ -82,20 +83,13 @@ def drafter_of(draft: str | Path | None) -> str:
 MAPPED = ".ple.ple_embedding.ngram_embedding."
 
 
-MOST_HEADER = 100 << 20
-
-
 def resident_bytes(where: Path | None) -> int:
     """Bytes of the safetensors under ``where`` a load holds in memory."""
     if where is None:
         return 0
     held = 0
     for shard in where.glob("*.safetensors"):
-        with shard.open("rb") as stream:
-            size = int.from_bytes(stream.read(8), "little")
-            if size > min(MOST_HEADER, shard.stat().st_size):
-                raise ValueError(f"{shard}: a header of {size} bytes; not a safetensors file")
-            header = json.loads(stream.read(size))
+        header = safetensors_header(shard)
         held += sum(entry["data_offsets"][1] - entry["data_offsets"][0]
                     for name, entry in header.items()
                     if name != "__metadata__" and MAPPED not in name)

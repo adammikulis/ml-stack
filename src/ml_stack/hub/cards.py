@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ml_stack.hub.modelfile import Limits, NotAModelFile, scan_gguf
+
 # What a card calls a sampler setting, and what llama.cpp calls it. A card writes prose, so
 # `temperature=1.0`, `temperature: 1.0`, `"temperature": 1.0` and `--temp 1.0` all appear.
 _KNOBS = {"temperature": "temperature", "temp": "temperature", "top_p": "top_p",
@@ -36,43 +38,14 @@ def in_gguf(path: str | Path) -> dict[str, float]:
     carries `general.sampling.temp`, `.top_k` and `.top_p`; many models carry none, which is
     why the card is still read when this is empty.
     """
-    import struct
-
     want = {"temp": "temperature", "temperature": "temperature", "top_k": "top_k",
             "top_p": "top_p", "min_p": "min_p"}
-    fmt = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "?", 10: "Q",
-           11: "q", 12: "d"}
-    out: dict[str, float] = {}
     try:
-        with Path(path).expanduser().open("rb") as f:
-            if f.read(4) != b"GGUF":
-                return {}
-            struct.unpack("<I", f.read(4))
-            struct.unpack("<Q", f.read(8))                     # tensor count
-            keys = struct.unpack("<Q", f.read(8))[0]
-
-            def text() -> str:
-                return f.read(struct.unpack("<Q", f.read(8))[0]).decode("utf-8", "replace")
-
-            def value(kind: int) -> object:
-                if kind == 8:
-                    return text()
-                if kind == 9:
-                    each = struct.unpack("<I", f.read(4))[0]
-                    return [value(each) for _ in range(struct.unpack("<Q", f.read(8))[0])]
-                return struct.unpack("<" + fmt[kind],
-                                     f.read(struct.calcsize(fmt[kind])))[0]
-
-            for _ in range(keys):
-                name = text()
-                found = value(struct.unpack("<I", f.read(4))[0])
-                if name.startswith("general.sampling."):
-                    tail = name.rsplit(".", 1)[-1]
-                    if tail in want and isinstance(found, (int, float)):
-                        out[want[tail]] = float(found)
-    except Exception:  # noqa: BLE001 - a file that will not parse simply says nothing
+        got = scan_gguf(path, want=lambda key: key.startswith("general.sampling."), limits=Limits(keep_array=0))
+    except (OSError, NotAModelFile):
         return {}
-    return out
+    return {want[name.rsplit(".", 1)[-1]]: float(value) for name, value in got.values.items()
+            if name.rsplit(".", 1)[-1] in want and isinstance(value, (int, float))}
 
 
 def card(repo: str) -> str:

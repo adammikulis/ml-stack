@@ -3,13 +3,13 @@ shape and size, without reading a byte of tensor data or starting a server."""
 
 from __future__ import annotations
 
-import struct
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack.hub import pretty_name
-from ml_stack.serve.preflight import _GGUF_MAGIC, _SCALAR_FMT, shard_names
+from ml_stack.hub.modelfile import scan_gguf
+from ml_stack.serve.preflight import shard_names
 from ml_stack.units import human_bytes
 
 __all__ = ["Tensor", "render_tensors", "shard_paths", "table_bytes", "tensors_of",
@@ -85,55 +85,15 @@ def shard_paths(model: str | Path) -> list[Path]:
 
 
 def _tensors_in(path: Path) -> list[Tensor]:
-    """Every tensor one GGUF file's header names, without reading any tensor data.
-
-    `preflight.read_gguf_header` deliberately stops before the tensor table -- nothing a
-    preflight needs is in it, and walking it is the expensive half. This walks the same
-    metadata block, with the same value-kind table, only to get past it to the table that
-    answers "what is this file made *of*". Still a header read: the offsets are read, the
-    bytes they point at never are.
-    """
+    """Every tensor one GGUF file's header names, without reading any tensor data."""
     out: list[Tensor] = []
-    with Path(path).expanduser().open("rb") as f:
-        if f.read(4) != _GGUF_MAGIC:
-            raise ValueError(f"{path}: not a GGUF file (no GGUF magic at the start)")
-        struct.unpack("<I", f.read(4))                        # version -- unused here
-        (tensor_count,) = struct.unpack("<Q", f.read(8))
-        (kv_count,) = struct.unpack("<Q", f.read(8))
-
-        def text() -> str:
-            (n,) = struct.unpack("<Q", f.read(8))
-            return f.read(n).decode("utf-8", "replace")
-
-        def skip(kind: int) -> None:
-            if kind == 8:
-                text()
-                return
-            if kind == 9:
-                (item_kind,) = struct.unpack("<I", f.read(4))
-                (count,) = struct.unpack("<Q", f.read(8))
-                for _ in range(count):
-                    skip(item_kind)
-                return
-            f.read(struct.calcsize(_SCALAR_FMT[kind]))
-
-        for _ in range(kv_count):
-            text()
-            (kind,) = struct.unpack("<I", f.read(4))
-            skip(kind)
-
-        for _ in range(tensor_count):
-            name = text()
-            (dims,) = struct.unpack("<I", f.read(4))
-            shape = struct.unpack(f"<{dims}Q", f.read(8 * dims)) if dims else ()
-            (kind,) = struct.unpack("<I", f.read(4))
-            struct.unpack("<Q", f.read(8))                     # offset -- unused here
-            named, block, per_block = _GGML_TYPES.get(kind, (f"type{kind}", 1, 0))
-            count = 1
-            for dim in shape:
-                count *= dim
-            out.append(Tensor(name=name, type=named, shape=tuple(shape),
-                              bytes=count // block * per_block if block else 0))
+    for entry in scan_gguf(path, want=lambda _key: False, tensors=True).tensors:
+        named, block, per_block = _GGML_TYPES.get(entry.kind, (f"type{entry.kind}", 1, 0))
+        count = 1
+        for dim in entry.shape:
+            count *= dim
+        out.append(Tensor(name=entry.name, type=named, shape=entry.shape,
+                          bytes=count // block * per_block if block else 0))
     return out
 
 
@@ -177,7 +137,7 @@ def table_bytes(model: str | Path) -> int:
     be read. Never raises: a record is worth writing without this number."""
     try:
         return sum(one.bytes for one in tensors_of(model) if one.role == "table")
-    except (OSError, ValueError, struct.error):
+    except (OSError, ValueError):
         return 0
 
 

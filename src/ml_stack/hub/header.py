@@ -3,15 +3,10 @@
 from __future__ import annotations
 
 import re
-import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
 
-MAGIC = b"GGUF"
-
-_SCALARS = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "?",
-            10: "Q", 11: "q", 12: "d"}
+from ml_stack.hub.modelfile import ARRAY, Limits, NotAModelFile, scan_gguf
 
 FILE_TYPES = {
     0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0", 8: "Q5_0", 9: "Q5_1",
@@ -55,76 +50,28 @@ def parameters_of(label: str) -> int:
     return int(float(found.group(1)) * _UNITS[found.group(2).upper()])
 
 
-def _text(f: BinaryIO) -> str:
-    (n,) = struct.unpack("<Q", f.read(8))
-    return f.read(n).decode("utf-8", "replace")
-
-
-def _skip(f: BinaryIO, kind: int) -> None:
-    if kind == 8:
-        (n,) = struct.unpack("<Q", f.read(8))
-        f.seek(n, 1)
-    elif kind == 9:
-        (item,) = struct.unpack("<I", f.read(4))
-        (count,) = struct.unpack("<Q", f.read(8))
-        for _ in range(count):
-            _skip(f, item)
-    else:
-        f.seek(struct.calcsize("<" + _SCALARS[kind]), 1)
-
-
-def _value(f: BinaryIO, kind: int) -> object:
-    if kind == 8:
-        return _text(f)
-    code = "<" + _SCALARS[kind]
-    return struct.unpack(code, f.read(struct.calcsize(code)))[0]
-
-
-def _array(f: BinaryIO) -> list[object] | None:
-    """A short array of numbers or flags, or ``None`` after skipping any other."""
-    (item,) = struct.unpack("<I", f.read(4))
-    (count,) = struct.unpack("<Q", f.read(8))
-    if item in (8, 9) or count > 4096:
-        for _ in range(count):
-            _skip(f, item)
-        return None
-    return [_value(f, item) for _ in range(count)]
-
-
+MOST_ARRAY = 4096
+"""Longest array of numbers `meta` returns; others are skipped."""
 VOCAB = "vocab_size"
 """The key `meta` adds: how many tokens the tokenizer lists."""
 
 
 def meta(path: Path | str) -> dict[str, object] | None:
-    """Every key the header holds before its tokenizer, or ``None`` when it is not a GGUF.
+    """Every key the header holds before its tokenizer, or ``None`` when it is not a GGUF
+    or its header is not one a model file has.
 
     Scalars, strings and short numeric arrays are read; the tokenizer's arrays are the only
     large part of a header, so reading stops at the first tokenizer key, counting the tokens
     there as ``vocab_size``.
     """
-    found: dict[str, object] = {}
     try:
-        with Path(path).open("rb") as f:
-            if f.read(4) != MAGIC:
-                return None
-            f.seek(12, 1)
-            (count,) = struct.unpack("<Q", f.read(8))
-            for _ in range(count):
-                key = _text(f)
-                (kind,) = struct.unpack("<I", f.read(4))
-                if key.startswith("tokenizer."):
-                    if key == "tokenizer.ggml.tokens" and kind == 9:
-                        f.seek(4, 1)
-                        found[VOCAB] = struct.unpack("<Q", f.read(8))[0]
-                    break
-                if kind == 9:
-                    got = _array(f)
-                    if got is not None:
-                        found[key] = got
-                else:
-                    found[key] = _value(f, kind)
-    except (OSError, struct.error, KeyError):
+        got = scan_gguf(path, stop=lambda key: key.startswith("tokenizer."),
+                       limits=Limits(keep_array=MOST_ARRAY))
+    except (OSError, NotAModelFile):
         return None
+    found = {key: value for key, value in got.values.items() if value is not None}
+    if got.stopped and got.stopped[0] == "tokenizer.ggml.tokens" and got.stopped[1] == ARRAY:
+        found[VOCAB] = got.stopped[3]
     return found
 
 
