@@ -7,6 +7,7 @@ generation was running; the callers are separate Python processes sending throug
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -103,6 +104,15 @@ def worker(url: str, who: str, *, env: dict[str, str] | None = None) -> subproce
                             stderr=subprocess.PIPE)
 
 
+def together(url: str, who: str, at: float) -> subprocess.Popen:
+    """A worker that sends its request at the clock time ``at``."""
+    code = ("import sys, time\nfrom ml_stack.http import request_json\n"
+            "while time.time() < float(sys.argv[3]):\n    pass\n"
+            "request_json(sys.argv[1], payload={}, headers={'X-Who': sys.argv[2]})\n")
+    return subprocess.Popen([sys.executable, "-c", code, url, who, str(at)],
+                            env={**os.environ, "PYTHONPATH": SRC}, stderr=subprocess.PIPE)
+
+
 def overlap(windows: list[tuple[float, float, str]]) -> float:
     """The most time any two generation windows spent running at once."""
     worst = 0.0
@@ -130,6 +140,14 @@ def test_requests_from_separate_processes_to_two_servers_never_overlap(servers):
     assert time.time() - began >= 6 * HOLD_S
 
 
+def test_requests_sent_at_the_same_instant_never_overlap(servers):
+    first, second = servers(2, hold_s=0.05)
+    at = time.time() + 3.0
+    run_all([together([first.url, second.url][i % 2], str(i), at) for i in range(12)])
+    windows = first.windows + second.windows
+    assert len(windows) == 12 and overlap(windows) <= 0.0
+
+
 def test_parallel_requests_are_an_explicit_opt_out_and_do_overlap(servers):
     first, second = servers(2)
     env = {gate.ENV_PARALLEL: "1"}
@@ -139,11 +157,8 @@ def test_parallel_requests_are_an_explicit_opt_out_and_do_overlap(servers):
 
 def test_requests_are_served_in_the_order_they_arrived(servers):
     first, second = servers(2)
-    procs = []
-    for i in range(4):
-        procs.append(worker([first.url, second.url][i % 2], str(i)))
-        time.sleep(0.25)
-    run_all(procs)
+    base = time.time() + 3.0
+    run_all([together([first.url, second.url][i % 2], str(i), base + 0.3 * i) for i in range(4)])
     order = [who for _, _, who in sorted(first.windows + second.windows)]
     assert order == ["0", "1", "2", "3"]
 
@@ -243,12 +258,25 @@ def test_the_turn_is_held_until_a_streamed_answer_is_read(servers):
     from ml_stack.http import request_stream
 
     stream = request_stream(one.url, payload={}, timeout=5)
-    try:
+    with contextlib.suppress(ServerError):
         next(stream, None)
-    except ServerError:
-        pass
     stream.close()
     assert gate.snapshot() == {}
+
+
+def test_a_streamed_request_waits_for_its_turn_like_any_other(servers, monkeypatch):
+    from ml_stack.http import request_stream
+
+    (one,) = servers(1, hold_s=0.01)
+    held = holder(one.url)
+    try:
+        monkeypatch.setenv(gate.ENV_WAIT, "0.3")
+        with pytest.raises(ServerError) as why:
+            next(request_stream(one.url, payload={}, timeout=5))
+        assert why.value.status == 429 and one.windows == []
+    finally:
+        held.kill()
+        held.wait(timeout=10)
 
 
 def test_parallel_block_is_named_and_logged(servers, caplog):

@@ -26,6 +26,7 @@ from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
+from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import lease_file
 from ml_stack.serve.ports import DEFAULT_HOST
 from ml_stack.serve.process import pid_exists
@@ -83,7 +84,7 @@ class _Server(socketserver.ThreadingTCPServer):
             return {"ok": True, **self.broker.lease(ask, timeout=float(body["wait_s"])).as_dict()}
         if op == "start":
             info = self.broker.start(
-                spec_from(body["spec"]), pid=pid, label=str(body.get("label") or ""),
+                spec_from(body["spec"]), Caller(pid=pid, label=str(body.get("label") or "")),
                 timeout=body.get("timeout_s"), options=body.get("options") or {})
             return {"ok": True, **info_dict(info)}
         if op == "drop":
@@ -92,9 +93,10 @@ class _Server(socketserver.ThreadingTCPServer):
             return {"ok": True}
         if op == "escalate":
             info = self.broker.escalate(
-                spec_from(body["spec"]), add_slots=int(body.get("add_slots") or 1),
-                room=body.get("room"), timeout=body.get("timeout_s"),
-                anyway=bool(body.get("anyway")), options=body.get("options") or {})
+                spec_from(body["spec"]),
+                Growth(int(body.get("add_slots") or 1), body.get("room"), body.get("timeout_s"),
+                       bool(body.get("anyway"))),
+                Caller(pid=pid), options=body.get("options") or {})
             return {"ok": True, **info_dict(info)}
         if op == "detach":
             self.broker.detach(ServerInfo(**info_fields(body["info"])))
@@ -157,27 +159,25 @@ class RemoteBroker:
     def __init__(self, backend: LlamaServerBackend) -> None:
         self.options = {"backend": backend.options()}
 
-    def start(self, spec: ServerSpec, *, timeout: float | None = None,
-              options: dict[str, Any] | None = None, on_event: Any = None,
-              say: Any = None) -> ServerInfo:
+    def start(self, spec: ServerSpec, caller: Caller | None = None, *,
+              timeout: float | None = None, options: dict[str, Any] | None = None) -> ServerInfo:
         """A server for ``spec`` from the broker, which waits for memory to start one."""
         reply = call("start", timeout=None, label=who(), spec=spec_to_json(spec),
                      timeout_s=timeout, options={**self.options, **(options or {})})
         info = ServerInfo(**info_fields(reply))
-        if on_event is not None:
-            on_event({"event": "ready", "port": info.port, "adopted": info.adopted})
+        if caller is not None and caller.on_event is not None:
+            caller.on_event({"event": "ready", "port": info.port, "adopted": info.adopted})
         return info
 
     def drop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Let go of the lease ``info`` was granted under."""
         call("drop", info=info_dict(info), grace_s=grace_s, start=False)
 
-    def escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
-                 timeout: float | None = None, anyway: bool = False, on_event: Any = None,
-                 say: Any = None) -> ServerInfo:
-        """Grow the server on ``spec.port`` by ``add_slots`` conversations."""
-        reply = call("escalate", timeout=None, spec=spec_to_json(spec), add_slots=add_slots,
-                     room=room, timeout_s=timeout, anyway=anyway, options=dict(self.options))
+    def escalate(self, spec: ServerSpec, growth: Growth, caller: Caller | None = None) -> ServerInfo:
+        """Grow the server on ``spec.port`` as ``growth`` says."""
+        reply = call("escalate", timeout=None, spec=spec_to_json(spec),
+                     add_slots=growth.add_slots, room=growth.room, timeout_s=growth.timeout,
+                     anyway=growth.anyway, options=dict(self.options))
         return ServerInfo(**info_fields(reply))
 
     def detach(self, info: ServerInfo) -> None:

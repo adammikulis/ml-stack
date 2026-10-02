@@ -152,7 +152,7 @@ class Recording:
     def __init__(self) -> None:
         self.asked: list[tuple[str, object]] = []
 
-    def start(self, spec, **kwargs):
+    def start(self, spec, *args, **kwargs):
         self.asked.append(("start", spec))
         return ServerInfo(base_url="http://127.0.0.1:1", port=spec.port, pid=None,
                           backend="fake", lease="lease-1")
@@ -160,7 +160,7 @@ class Recording:
     def drop(self, info, **kwargs):
         self.asked.append(("drop", info))
 
-    def escalate(self, spec, **kwargs):
+    def escalate(self, spec, *args, **kwargs):
         self.asked.append(("escalate", spec))
         return ServerInfo(base_url="http://127.0.0.1:1", port=spec.port, pid=None, backend="fake")
 

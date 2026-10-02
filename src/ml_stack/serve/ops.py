@@ -645,8 +645,13 @@ def write_plist(where: Path, mb: int) -> Path:
     return where
 
 
+def adopt_unmanaged(mode: str) -> None:
+    """Set whether the broker adopts llama-servers it did not start: off, ask or auto."""
+    limits_mod.changed(adopt_unmanaged=mode)
+
+
 def limits(*, memory_size: str = "", servers: int | None = None, slots: int | None = None,
-           idle: str = "", clear: bool = False, adopt_unmanaged: str = "") -> Limits:
+           idle: str = "", clear: bool = False) -> Limits:
     """Set whatever is named, then read back what this machine allows.
 
     Every limit is off until somebody sets one. Raises `Refused` on a size or a length of
@@ -672,8 +677,6 @@ def limits(*, memory_size: str = "", servers: int | None = None, slots: int | No
     for name, value in (("servers", servers), ("slots", slots)):
         if value is not None:
             asked[name] = int(value)
-    if adopt_unmanaged:
-        asked["adopt_unmanaged"] = adopt_unmanaged
     if asked:
         limits_mod.changed(**asked)
 

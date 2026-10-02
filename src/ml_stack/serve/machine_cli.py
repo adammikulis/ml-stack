@@ -113,9 +113,10 @@ def cmd_limits(args: argparse.Namespace) -> int:
     Set nothing and it prints what is set; every limit is off until somebody sets one.
     """
     try:
+        if args.adopt_unmanaged:
+            ops.adopt_unmanaged(args.adopt_unmanaged)
         limits = ops.limits(memory_size=args.memory, servers=args.servers,
-                            slots=args.slots, idle=args.idle, clear=bool(args.clear),
-                            adopt_unmanaged=args.adopt_unmanaged)
+                            slots=args.slots, idle=args.idle, clear=bool(args.clear))
     except Refused as no:
         warn(f"error: {no.lines[0]}")
         return 2

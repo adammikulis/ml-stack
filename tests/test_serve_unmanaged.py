@@ -68,7 +68,7 @@ def test_a_llama_server_of_this_user_on_loopback_passes(served):
 
 
 @pytest.mark.parametrize(("changed", "why"), [
-    ({"ip": "0.0.0.0"}, "not loopback"),
+    ({"ip": "0.0.0.0"}, "not loopback"),  # noqa: S104 - the address a wildcard listener reports
     ({"ip": "192.168.1.20"}, "not loopback"),
     ({"uid": os.getuid() + 1, "user": "someone-else"}, "owned by someone-else"),
     ({"exe": "/usr/bin/python3"}, "not a recognised server binary"),
@@ -173,11 +173,11 @@ def lease_beside(tmp_path, served_port: int, *, model: str, roam: bool, state=No
 
 def test_by_default_a_busy_port_with_an_unmanaged_server_is_left_alone(served, tmp_path):
     fake = served()
-    manager, _, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
+    _, _, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
     info = lease()
     assert info.port != fake.port and not info.adopted
     assert recorded_servers(tmp_path / "servers.json").get(fake.port) is None
-    manager2, _, strict = lease_beside(tmp_path, fake.port, model="model.gguf", roam=False)
+    _, _, strict = lease_beside(tmp_path, fake.port, model="model.gguf", roam=False)
     with pytest.raises(ServerFailed, match="ml-stack did not start"):
         strict()
 
@@ -254,7 +254,7 @@ def test_auto_still_refuses_a_listener_that_fails_the_checks(served, tmp_path, m
     fake = served()
     monkeypatch.setenv(unmanaged.ENV, "auto")
     monkeypatch.setattr(unmanaged, "listener", listener_of(pid=1, exe="/usr/bin/python3"))
-    manager, told, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
+    _, told, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
     info = lease()
     assert info.port != fake.port
     assert any("not adopting" in line and "recognised server binary" in line for line in told)
@@ -265,7 +265,7 @@ def test_auto_does_not_adopt_a_server_serving_something_else(served, tmp_path, m
     fake = served(model="other.gguf")
     monkeypatch.setenv(unmanaged.ENV, "auto")
     monkeypatch.setattr(unmanaged, "listener", listener_of(pid=1))
-    manager, told, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
+    _, told, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
     assert lease().port != fake.port
     assert any("not adopting" in line and "model" in line for line in told)
 

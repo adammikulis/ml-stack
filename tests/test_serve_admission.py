@@ -195,6 +195,34 @@ def test_a_server_that_does_not_fit_the_ask_is_not_reused(tmp_path, backend, mac
     assert len(backend.started) == 2
 
 
+def test_another_model_is_never_reused(tmp_path, backend, machine):
+    first = manager(tmp_path, backend).lease(spec(weights(tmp_path, "a.gguf", 1)))
+    second = manager(tmp_path, backend).lease(spec(weights(tmp_path, "b.gguf", 1)))
+    assert second.port != first.port and len(backend.started) == 2
+
+
+def test_two_threads_asking_for_one_model_start_it_once(tmp_path, backend, machine):
+    """The second asks while the first is still loading: it waits for that server."""
+    started = backend.start
+
+    def slowly(*args, **kwargs):
+        time.sleep(1.0)
+        return started(*args, **kwargs)
+
+    backend.start = slowly
+    path = weights(tmp_path, "m.gguf", 1)
+    got: list[ServerInfo] = []
+    threads = [threading.Thread(target=lambda: got.append(manager(tmp_path, backend).lease(
+        spec(path)))) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+        time.sleep(0.2)
+    for thread in threads:
+        thread.join(timeout=30)
+    assert len(backend.started) == 1
+    assert len({info.port for info in got}) == 1 and sorted(i.adopted for i in got) == [False, True]
+
+
 def test_two_processes_that_do_not_fit_together_do_not_both_start(tmp_path, machine,
                                                                     monkeypatch):
     """The second process is refused while the first, which has been killed, leaves its

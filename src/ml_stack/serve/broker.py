@@ -29,7 +29,7 @@ from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
 from ml_stack.serve import unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
-from ml_stack.serve.events import Event
+from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
 from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager, Starting
 from ml_stack.serve.matching import model_matches
@@ -195,18 +195,18 @@ class Broker:
                 self.managers[key] = self.manager.with_backend(LlamaServerBackend(**wanted))
             return self.managers[key]
 
-    def start(self, spec: ServerSpec, *, pid: int | None = None, label: str = "",
-              timeout: float | None = None, options: Mapping[str, Any] | None = None,
-              on_event: Event | None = None,
-              say: Callable[[str], None] | None = None) -> ServerInfo:
-        """A server for exactly ``spec``, held for ``pid`` until `drop`. One already up that
-        serves it is shared; otherwise one is started once the machine has the memory."""
+    def start(self, spec: ServerSpec, caller: Caller | None = None, *,
+              timeout: float | None = None,
+              options: Mapping[str, Any] | None = None) -> ServerInfo:
+        """A server for exactly ``spec``, held for the caller until `drop`. One already up
+        that serves it is shared; otherwise one is started once the machine has the memory."""
+        caller = caller or Caller()
         options = dict(options or {})
         manager = self._manager_for(options)
         how = Starting(**{k: v for k, v in options.items() if k != "backend"})
-        info = manager._start_server(spec, timeout=timeout, how=how, on_event=on_event,
-                                     say=say)
-        return self._held_by(info, spec, pid or os.getpid(), label or who())
+        info = manager._start_server(spec, timeout=timeout, how=how, on_event=caller.on_event,
+                                     say=caller.say)
+        return self._held_by(info, spec, caller.pid or os.getpid(), caller.label or who())
 
     def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str) -> ServerInfo:
         lease = uuid.uuid4().hex
@@ -244,14 +244,10 @@ class Broker:
         elif not info.adopted and info.pid and self.alive(info.pid):
             self.manager._stop_server(info, grace_s=grace_s)
 
-    def escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
-                 timeout: float | None = None, anyway: bool = False,
-                 on_event: Event | None = None, say: Callable[[str], None] | None = None,
+    def escalate(self, spec: ServerSpec, growth: Growth, caller: Caller | None = None, *,
                  options: Mapping[str, Any] | None = None) -> ServerInfo:
-        """Grow the server on ``spec.port`` by ``add_slots`` conversations."""
-        info = self._manager_for(options or {})._escalate(
-            spec, add_slots=add_slots, room=room, timeout=timeout, anyway=anyway,
-            on_event=on_event, say=say)
+        """Grow the server on ``spec.port`` as ``growth`` says."""
+        info = self._manager_for(options or {})._escalate(spec, growth, caller or Caller())
         with self._cond:
             held = self.servers.get(info.port)
             if held is not None:

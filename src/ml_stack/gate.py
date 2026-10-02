@@ -1,17 +1,11 @@
 """One generation at a time per accelerator pool, across every process on this machine.
 
-Servers that ml-stack started may all be up together, but the requests sent to them wait in
-line: a request to any server in a pool runs only when every request ahead of it in that
-pool has finished. The line is a directory of ticket files under ``<state>/gate/<pool>``.
-A ticket is held with an exclusive file lock for as long as its request runs, and the
-kernel drops the lock when the process dies, so a crashed holder frees the line without
-anybody cleaning up. Tickets are ordered by the time they were taken; the oldest live one
-runs.
-
-`turn` is called from `ml_stack.http` for every generation or embedding request, so no
-caller asks for it. A URL that is not on a server in the lease registry, or is not on this
-machine, is not queued. ``ML_STACK_PARALLEL_REQUESTS=1`` or `parallel` lets requests run
-at the same time and logs that it did so.
+The line for a pool is a directory of ticket files under ``<state>/gate/<pool>``. A request
+takes a ticket named by the time it was taken and holds an exclusive lock on it while it
+runs; the oldest live ticket runs. The kernel drops the lock when a process dies, so a
+crashed holder frees the line. `ml_stack.http` calls `turn` for every generation or
+embedding request to a loopback port on the lease registry. ``ML_STACK_PARALLEL_REQUESTS=1``
+or `parallel` lets requests run at once and logs that it did.
 """
 
 from __future__ import annotations
@@ -181,13 +175,14 @@ def _describe(path: Path, name: str) -> str:
 
 
 def _take_ticket(path: Path, url: str) -> tuple[str, int]:
-    name = f"{time.time_ns():020d}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    """A new ticket, named so that it sorts after every ticket already in the line."""
     with _directory_lock(path):
+        newest = max((int(name.split("-", 1)[0]) for name in _tickets(path)), default=0)
+        name = f"{max(time.time_ns(), newest + 1):020d}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         fd = os.open(path / name, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o644)
         take(fd)
-        label = " ".join(sys.argv[:2])
         note = json.dumps({"pid": os.getpid(), "url": url, "since": time.time(),
-                           "label": label[:80]})
+                           "label": " ".join(sys.argv[:2])[:80]})
         os.write(fd, note.encode("utf-8"))
     return name, fd
 

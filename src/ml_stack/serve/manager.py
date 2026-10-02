@@ -38,7 +38,7 @@ from ml_stack.serve.escalation import (
     slots_on,
     summarise,
 )
-from ml_stack.serve.events import Event, emit
+from ml_stack.serve.events import Caller, Event, Growth, emit
 from ml_stack.serve.leases import (
     lease_file,
     merge_state,
@@ -102,6 +102,11 @@ class Starting:
     warmup_request: bool = True
     escalate: bool = False
     anyway: bool = False
+
+    def checks(self) -> dict[str, bool]:
+        """The checks a start runs, as the keyword arguments a backend takes."""
+        return {"check_flags": self.check_flags, "preflight": self.preflight,
+                "warmup_request": self.warmup_request}
 
 
 class ServerManager(Admitting):
@@ -170,8 +175,8 @@ class ServerManager(Admitting):
         :meth:`_start_server`.
         """
         how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway)
-        info = self.broker.start(spec, timeout=timeout, options=asdict(how),
-                                 on_event=on_event, say=say or self.say)
+        info = self.broker.start(spec, Caller(on_event=on_event, say=say or self.say),
+                                 timeout=timeout, options=asdict(how))
         if info.lease:
             self._leases[info.lease] = info
         return info
@@ -179,64 +184,22 @@ class ServerManager(Admitting):
     def _start_server(self, spec: ServerSpec, *, timeout: float | None = None,
                       how: Starting | None = None, on_event: Event | None = None,
                       say: Callable[[str], None] | None = None) -> ServerInfo:
-        """A healthy server for ``spec``. Starts one only if there is not one already.
-        Called by the broker and by nothing else.
+        """A healthy server for ``spec``: the one on its port, else one already up elsewhere that
+        serves it, else a new one. Called by the broker and by nothing else.
 
-        A server on the port whose record names a leasing process that has gone is an
-        orphan: one serving what was asked for is adopted and its record made this
-        process's; one serving something else is stopped before a server is started.
-        Either way ``say`` (else ``self.say``, else the log) is told.
-
-        When the port is busy with something else and this machine has the memory to hold
-        both, it is served beside it on a free port rather than refused: a small model does
-        not need the large one evicted, and making a person pick another port by hand is
-        work a machine can do. ``roam=False`` for a caller that truly needs *that* port —
-        the one that expects every consumer to meet on it.
-
-        ``escalate=True`` is for a caller that may genuinely need more than one concurrent
-        cache: when the only reason a running server does not match ``spec`` is that it
-        holds fewer slots than asked, it is grown (or, if that will not fit, split, or
-        summarised and split -- see :meth:`escalate`) rather than refused. A spec with no
-        ``slot_save_path`` is given this manager's own default so a later escalation has
-        somewhere to save a live conversation before the relaunch.
-
-        ``timeout=None`` (the default) scales with the weights on disk -- see
-        ``scaled_timeout`` -- so a caller that never thought about it still gets a timeout
-        sized for what it is actually waiting on. A caller that passes a number means it,
-        and gets exactly that instead.
-
-        Starting a server is refused with `Measuring` while another process holds the
-        bench's measuring lock; adopting one already up is not. ``anyway=True`` starts it
-        regardless.
+        A server on the port whose leasing process has gone is an orphan: one serving what
+        was asked for is adopted, one serving something else is stopped. With ``how.roam``
+        a busy port is served beside, on a free port, when the memory allows. With
+        ``how.escalate`` a server with fewer slots than asked is grown rather than
+        refused. ``timeout=None`` scales with the weights on disk. `Measuring` refuses a
+        start while another process holds the bench's measuring lock, unless ``how.anyway``.
+        ``say`` (else ``self.say``, else the log) is told of each decision.
         """
         how = how or Starting()
         roam, escalate, anyway = how.roam, how.escalate, how.anyway
-        if escalate:
-            # llama.cpp's slot-save file carries the cache's stream count, and a restore
-            # raises "n_stream mismatch" the moment that count differs from the file's --
-            # which a change in slot count always does unless every stream is one shared
-            # buffer throughout, slot count or no. A lease that may later escalate is
-            # kv_unified from its first launch, not only from the relaunch.
-            if not spec.slot_save_path:
-                spec = replace(spec, slot_save_path=str(default_slot_save_path()))
-            if not spec.kv_unified:
-                spec = replace(spec, kv_unified=True)
-
-        now = time.monotonic()
-        until = self._unavailable_until.get(spec.port, 0.0)
-        if now < until:
-            raise ServerFailed(
-                f"port {spec.port} was marked unavailable {until - now:.1f}s ago; "
-                "not retrying yet (negative cache)"
-            )
-
+        spec = self._permitted(spec, escalate)
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
-        starting = {"check_flags": how.check_flags, "preflight": how.preflight,
-                    "warmup_request": how.warmup_request}
-        refused = self._over_limit(spec)
-        if refused:
-            raise ServerFailed(refused)
 
         with self._port_lock(spec.port):
             told = say or self.say or logger.info
@@ -248,18 +211,19 @@ class ServerManager(Admitting):
                 if escalate:
                     running = self._slots_shortfall(spec)
                     if running is not None:
+                        more = (max(1, int(spec.parallel or 1))
+                                - max(1, int(running.parallel or 1)))
                         return self._escalate(
-                            running, add_slots=max(1, int(spec.parallel or 1))
-                            - max(1, int(running.parallel or 1)),
-                            timeout=resolved_timeout, anyway=anyway, on_event=on_event,
-                            say=told)
+                            running, Growth(add_slots=more, timeout=resolved_timeout,
+                                            anyway=anyway),
+                            Caller(on_event=on_event, say=told))
                 if stray is None:
                     if roam and (reused := self._reusable(spec, on_event=on_event)):
                         return reused
                     if not roam or not port_is_free(spec.port):
                         elsewhere = (self._beside(spec, timeout=resolved_timeout,
                                                   on_event=on_event, anyway=anyway,
-                                                  **starting)
+                                                  **how.checks())
                                     if roam else None)
                         if elsewhere is not None:
                             return elsewhere
@@ -280,7 +244,7 @@ class ServerManager(Admitting):
                     if roam and (reused := self._reusable(spec, on_event=on_event)):
                         return reused
                     elsewhere = (self._beside(spec, timeout=resolved_timeout,
-                                              on_event=on_event, anyway=anyway, **starting)
+                                              on_event=on_event, anyway=anyway, **how.checks())
                                  if roam else None)
                     if elsewhere is not None:
                         return elsewhere
@@ -293,7 +257,7 @@ class ServerManager(Admitting):
                 return reused
             try:
                 info = self._launch(spec, timeout=resolved_timeout, on_event=on_event,
-                                    anyway=anyway, reuse=roam, **starting)
+                                    anyway=anyway, reuse=roam, **how.checks())
             except (Measuring, admission.AdmissionRefused):
                 self._forget(spec.port)
                 raise
@@ -306,6 +270,33 @@ class ServerManager(Admitting):
             if not info.adopted:
                 self._record(spec, info)
             return info
+
+    def _permitted(self, spec: ServerSpec, escalate: bool) -> ServerSpec:
+        """``spec`` as it will be started, or `ServerFailed` when the port was just given up
+        on or a limit on this machine refuses the lease."""
+        if escalate:
+            # llama.cpp's slot-save file carries the cache's stream count, and a restore
+            # raises "n_stream mismatch" the moment that count differs from the file's --
+            # which a change in slot count always does unless every stream is one shared
+            # buffer throughout, slot count or no. A lease that may later escalate is
+            # kv_unified from its first launch, not only from the relaunch.
+            if not spec.slot_save_path:
+                spec = replace(spec, slot_save_path=str(default_slot_save_path()))
+            if not spec.kv_unified:
+                spec = replace(spec, kv_unified=True)
+
+        now = time.monotonic()
+        until = self._unavailable_until.get(spec.port, 0.0)
+        if now < until:
+            raise ServerFailed(
+                f"port {spec.port} was marked unavailable {until - now:.1f}s ago; "
+                "not retrying yet (negative cache)"
+            )
+
+        refused = self._over_limit(spec)
+        if refused:
+            raise ServerFailed(refused)
+        return spec
 
     def _launch(self, spec: ServerSpec, *, timeout: float, on_event: Event | None = None,
                 anyway: bool = False, reuse: bool = False, **starting: Any) -> ServerInfo:
@@ -429,28 +420,22 @@ class ServerManager(Admitting):
                 on_event: Event | None = None,
                 say: Callable[[str], None] | None = None) -> ServerInfo:
         """:meth:`_escalate`, asked of the broker."""
-        return self.broker.escalate(spec, add_slots=add_slots, room=room, timeout=timeout,
-                                    anyway=anyway, on_event=on_event, say=say or self.say)
+        return self.broker.escalate(spec, Growth(add_slots, room, timeout, anyway),
+                                    Caller(on_event=on_event, say=say or self.say))
 
-    def _escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
-                  timeout: float | None = None, anyway: bool = False,
-                  on_event: Event | None = None,
-                  say: Callable[[str], None] | None = None) -> ServerInfo:
-        """Grow the server on ``spec.port`` by ``add_slots`` more concurrent conversations,
-        keeping every one already live.
+    def _escalate(self, spec: ServerSpec, growth: Growth, caller: Caller) -> ServerInfo:
+        """Grow the server on ``spec.port`` by ``growth.add_slots`` conversations, keeping
+        every one already live.
 
-        ``spec`` is the settings actually running -- its ``context`` and ``parallel`` are
-        what the port is serving now, not what a caller wishes it were (:meth:`lease`'s
-        ``escalate=True`` works this out with :meth:`_slots_shortfall` before calling
-        here). Every slot with a live conversation is saved through
-        ``/slots/{id}?action=save`` before anything stops. The whole cache grows when
-        ``fit`` says the extra room is there; otherwise the existing total is split
-        across the larger slot count, and any conversation too long for what that leaves
-        it is summarised on the model itself and re-seeded in place of its cache -- which
-        is kept regardless, named in every message about that slot. Raises
-        :class:`~ml_stack.serve.escalation.EscalationRefused` only when a live
-        conversation would be dropped and summarising it did not rescue that.
+        ``spec`` is the settings the port is serving now. Each live slot is saved through
+        ``/slots/{id}?action=save`` first. The cache grows when ``fit`` says the room is
+        there, else the existing total is split across more slots, and a conversation too
+        long for its share is summarised and re-seeded. Raises `EscalationRefused` when a
+        live conversation would be dropped and summarising it did not rescue that.
         """
+        add_slots, room, timeout, anyway = (growth.add_slots, growth.room, growth.timeout,
+                                            growth.anyway)
+        on_event, say = caller.on_event, caller.say
         told = say or self.say or logger.info
         current_slots = max(1, int(spec.parallel or 1))
         new_slots = current_slots + max(1, int(add_slots))
