@@ -16,7 +16,6 @@ until it is not, however new the code is.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import os
 import platform
 import re
@@ -32,8 +31,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack import net
 from ml_stack.files import promote
-from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
+from ml_stack.http import ServerError, ServerUnreachable
+from ml_stack.httpguard import Refused
 from ml_stack.safenames import Unsafe, safe_filename, unpack
 
 from .measuring import installed_commit
@@ -149,14 +150,16 @@ def platform_key() -> str:
 def check(repo: str = REPO, *, timeout: float = TIMEOUT) -> Release:
     """Ask GitHub for the newest release."""
     try:
-        body = request_json(API.format(repo=repo), method="GET", timeout=timeout, tries=3,
-                            headers={"Accept": "application/vnd.github+json"})
+        body = net.default().json(API.format(repo=repo), net.Ask(
+            purpose="update check", tries=3, headers={"Accept": "application/vnd.github+json"}))
     except ServerUnreachable as exc:
         raise UpdateError(f"could not reach GitHub: {exc}") from None
     except ServerError as exc:
         raise UpdateError(f"could not reach GitHub: {exc.status}") from None
     except (OSError, ValueError) as exc:
         raise UpdateError(f"could not reach GitHub: {exc}") from None
+    if not isinstance(body, dict):
+        raise UpdateError("GitHub answered with something that is not a release")
     return Release(
         version=str(body.get("tag_name") or "").lstrip("v"),
         url=str(body.get("html_url") or ""),
@@ -175,14 +178,15 @@ def asset_for(release: Release, key: str = "") -> dict[str, Any] | None:
     return None
 
 
-def download(asset: dict[str, Any], into: Path | str,
-             *, on_progress: Any = None, timeout: float = 600.0) -> Path:
-    """Fetch one asset and check it against the digest GitHub reports for it; an asset with
-    no digest, or a name that is not one plain file name, is refused before anything is fetched.
+def download(asset: dict[str, Any], into: Path | str, *, on_progress: Any = None,
+             allow_unscanned: bool = False) -> Path:
+    """Fetch one asset through the net pipeline and check it against the digest GitHub reports
+    for it; an asset with no digest, or a name that is not one plain file name, is refused
+    before anything is fetched.
 
     The digest is not a signature: it proves the bytes match what that release holds, not
-    who built them. Trust here is the same as downloading it by hand -- TLS to github.com
-    and the repository name below.
+    who built them. The file is also format-checked and virus-scanned; an archive that no
+    scanner could look at is kept only with ``allow_unscanned``.
     """
     want = str(asset.get("digest") or "").removeprefix("sha256:").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", want):
@@ -194,34 +198,16 @@ def download(asset: dict[str, Any], into: Path | str,
     into = Path(into).expanduser()
     into.mkdir(parents=True, exist_ok=True)
     target = into / name
-    url = str(asset["browser_download_url"])
-    total = int(asset.get("size") or 0)
-
-    digest = hashlib.sha256()
-    done = 0
-    partial = target.with_suffix(target.suffix + ".part")
+    progress = (lambda done, total: on_progress(done, total)) if on_progress else None
     try:
-        with open_stream(url, timeout=timeout) as r, partial.open("wb") as fh:
-            while True:
-                block = r.read(CHUNK)
-                if not block:
-                    break
-                fh.write(block)
-                digest.update(block)
-                done += len(block)
-                if on_progress:
-                    on_progress(done, total)
-    except (ServerError, OSError) as exc:
-        partial.unlink(missing_ok=True)
+        net.download(str(asset["browser_download_url"]), target, net.Want(
+            sha256=want, size=int(asset.get("size") or 0), require_digest=True,
+            allow_unscanned=allow_unscanned, max_bytes=8 << 30, purpose="release download"),
+            hooks=net.Hooks(progress=progress))
+    except net.ChecksumMismatch:
+        raise UpdateError("the download does not match the digest GitHub reports for it") from None
+    except (net.Blocked, net.Truncated, ServerError, OSError, Refused) as exc:
         raise UpdateError(f"download failed: {exc}") from None
-
-    if digest.hexdigest() != want:
-        partial.unlink(missing_ok=True)
-        raise UpdateError("the download does not match the digest GitHub reports for it")
-    if total and done != total:
-        partial.unlink(missing_ok=True)
-        raise UpdateError(f"got {done} of {total} bytes")
-    promote(partial, target)
     return target
 
 

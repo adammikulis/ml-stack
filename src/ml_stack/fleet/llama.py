@@ -9,7 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ml_stack.http import ServerError, request_json
+from ml_stack import net
+from ml_stack.http import ServerError
 from ml_stack.safenames import Unsafe, unpack
 
 __all__ = ["LlamaError", "asset_for_this_machine", "cache_dir",
@@ -71,9 +72,9 @@ def latest(repo: str = REPO, *, timeout: float = TIMEOUT,
            count: int = LOOK_BACK) -> dict[str, Any]:
     """The newest release carrying a build for this machine."""
     try:
-        found = request_json(API.format(repo=repo, count=count), method="GET",
-                             timeout=timeout, tries=3,
-                             headers={"Accept": "application/vnd.github+json"})
+        found = net.default().json(API.format(repo=repo, count=count), net.Ask(
+            purpose="llama.cpp releases", tries=3,
+            headers={"Accept": "application/vnd.github+json"}))
     except (ServerError, OSError, ValueError) as exc:
         raise LlamaError(f"could not reach the llama.cpp releases: {exc}") from None
 
@@ -118,7 +119,7 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
         on_progress(f"Downloading {asset['name']}")
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            archive = download(asset, tmp, timeout=1800.0)
+            archive = download(asset, tmp)
         except UpdateError as exc:
             raise LlamaError(str(exc)) from None
         if on_progress:

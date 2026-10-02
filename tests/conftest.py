@@ -442,6 +442,17 @@ def _no_internet(monkeypatch, tmp_path):
         yield
 
 
+@pytest.fixture
+def loopback_net():
+    """The net pipeline allowed to reach 127.0.0.1 (a local test server), scanning with a clean
+    fake, for the block of one test."""
+    from ml_stack import net
+    from tests.web_site import loopback_pipeline
+
+    with net.use(loopback_pipeline()) as pipeline:
+        yield pipeline
+
+
 @pytest.fixture(autouse=True)
 def _no_machine_binary(monkeypatch):
     """No test finds the llama-server this machine happens to have installed.

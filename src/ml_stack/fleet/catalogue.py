@@ -9,7 +9,8 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
-from ml_stack.http import ServerError, request_json
+from ml_stack import net
+from ml_stack.http import ServerError
 
 from .weights import QUANTS, is_a_piece, is_beside
 
@@ -193,7 +194,7 @@ def family_of(name: str) -> str:
 
 
 def _hub(url: str, timeout: float = 25.0) -> Any:
-    return request_json(url, method="GET", timeout=timeout, tries=3)
+    return net.default().json(url, net.Ask(purpose="model hub", tries=3))
 
 
 def _params_in(name: str) -> tuple[float, float]:
