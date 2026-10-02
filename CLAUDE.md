@@ -266,8 +266,8 @@ A new worktree has no `dist/`, and one test builds a real environment out of it:
 
 ## Running the tests
 
-The suite is ~3,800 tests and about six minutes on a quiet machine, longer when several agents
-are running it at once. Run it **once, immediately before merging**, on Linux:
+The suite is ~5,600 tests, about seven CPU-minutes for the `full` tier, so four minutes of wall at
+`-n 4` beside other suites and longer the more of them are running. Run it **once, immediately before merging**, on Linux:
 
     scripts/test-on-linux tests/ -q --slow
 
