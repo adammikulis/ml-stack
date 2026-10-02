@@ -20,6 +20,7 @@ from onboard_support import FileKeyring, Recorder
 
 from ml_stack.fleet.onboard import manifest as mf, ssh
 from ml_stack.fleet.onboard.signing import SigningKeys
+from ml_stack.safenames import Unsafe
 
 WHEEL = b"PK-not-really-a-wheel" * 400
 FINGERPRINT = "SHA256:" + "A" * 43
@@ -395,3 +396,38 @@ def test_against_a_real_localhost_sshd(tmp_path, keystore, share):
     done = ssh.bootstrap_over_ssh(target, share, signed,
                                   lambda prints: os.environ.get("ML_STACK_TEST_HOSTKEY", ""))
     assert done["listen_port"]
+
+
+def test_a_manifest_naming_a_path_cannot_make_the_payload_read_outside_the_share(
+        tmp_path, keystore, share):
+    signer = mf.Signer.generate()
+    row = ssh.program_entries(share)[0]
+    evil = mf.Entry("../secret.whl", row.size, row.sha256, row.chunk_size, row.chunks, "wheel")
+    raw = signer.sign([evil], serial=1)
+    signed = ssh.Signed(raw, signer.sshsig(raw, ssh.NAMESPACE), signer.ssh_public_line() + "\n",
+                        signer.key_id)
+    with pytest.raises(Unsafe):
+        ssh.build_payload(share, signed)
+
+
+@pytest.mark.parametrize("kind,name", [("model", "big.gguf"), ("other", "notes.txt")])
+def test_the_remote_script_installs_only_wheels_and_archives_even_when_the_signature_is_good(
+        tmp_path, keystore, share, kind, name):
+    (share / name).write_bytes(b"data" * 10)
+    signer = mf.Signer.generate()
+    raw = signer.sign([signer.entry(share / name, kind=kind)], serial=1)
+    signed = ssh.Signed(raw, signer.sshsig(raw, ssh.NAMESPACE), signer.ssh_public_line() + "\n",
+                        signer.key_id)
+    refused(remote(tmp_path, unpack(tmp_path, ssh.build_payload(share, signed)), "--verify-only"),
+            "not a program file")
+
+
+def test_the_remote_script_refuses_a_name_that_is_not_plain_even_when_signed(
+        tmp_path, keystore, share):
+    (share / "has space.whl").write_bytes(b"data" * 10)
+    signer = mf.Signer.generate()
+    raw = signer.sign([signer.entry(share / "has space.whl", kind="wheel")], serial=1)
+    signed = ssh.Signed(raw, signer.sshsig(raw, ssh.NAMESPACE), signer.ssh_public_line() + "\n",
+                        signer.key_id)
+    refused(remote(tmp_path, unpack(tmp_path, ssh.build_payload(share, signed)), "--verify-only"),
+            "not a program file")

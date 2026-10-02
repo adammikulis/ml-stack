@@ -149,17 +149,22 @@ resolve.
 
 ## Adding a device (`docs/onboarding.md`)
 
-A device is added with a short code through a password-authenticated exchange (SPAKE2, P-256)
-with both certificate fingerprints in the transcript, so a wrong code and a machine in the middle
+A device is added with a short code through a password-authenticated exchange (SPAKE2 from the
+maintained `spake2` package, no group arithmetic of our own) with both certificate fingerprints
+as its identities, so a wrong code and a machine in the middle
 fail the same way, and a captured exchange gives nothing to test guesses against. The code
 exists only after the owner accepts, never appears in a notification, lives 120 seconds and
 has three tries; requests are limited per device, per address and overall, and a declined or
 failed device waits. A cluster member is fully trusted, so pairing hands over the cluster key
 unless told not to; `revoke` stops a device asking again but, while it holds the key, the
 cluster key must be changed to lock it out (not automated yet). Files from peers are checked
-against a manifest signed with the cluster's Ed25519 key, chunk by chunk, and are staged for the
-scan rather than installed. Nothing pushes software to a machine that has none: the owner
-opens an offer on it and runs a short, pinned installer. What this does not cover:
+against a manifest signed with the cluster's Ed25519 key (generated on the controller, kept in the
+OS keystore, separate from the cluster key; export, rotation and revocation need a person at a
+terminal; manifests last three days), chunk by chunk, and are staged for the scan rather than
+installed. A gated model goes only to the devices the owner marked as theirs, after their licence
+acceptance is on record; credentials never travel. Nothing pushes software to a machine that has none: the owner
+opens an offer on it and runs a short, pinned installer, or starts `bootstrap --ssh` with their own
+keys, a host key typed in full and a fixed script. What this does not cover:
 the pairing mathematics is Python integers (not constant time) and wants an independent review
 before a public release; the re-key flow, per-device credentials and SSH push are designed and
 not built.

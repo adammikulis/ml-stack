@@ -169,3 +169,13 @@ def test_the_devices_ledger_remembers_whose_device_it_is(tmp_path):
     ledger = Requests(tmp_path / "requests.json", bus=rec.bus).devices.all()
     assert {d.fingerprint[:2]: d.mine for d in ledger} == {"11": True, "22": False}
     assert (tmp_path / "devices.json").stat().st_mode & 0o077 == 0
+
+
+def test_each_device_is_served_by_its_own_standing_not_the_first_in_the_ledger(world):
+    other = pair(world.tmp, world.rec, "22" * 32, mine=False)      # first in the ledger
+    mine = pair(world.tmp, world.rec, "11" * 32, mine=True)
+    world.serve()
+    world.accept_licence()
+    assert world.fetch(mine).read_bytes() == PAYLOAD
+    with pytest.raises(transfer.Withheld):
+        world.fetch(other)

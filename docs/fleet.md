@@ -98,15 +98,16 @@ owner$   ml-stack fleet listen --for 10m          # pairing is open; nothing lis
 newbox$  ml-stack fleet nearby                    # who is open to pairing
 newbox$  ml-stack fleet pair --host 192.168.2.44  # asks; waits for the owner
 owner$   ml-stack fleet requests                  # name, host, model, address, certificate
-owner$   ml-stack fleet accept 3f9a1c20           # prints a six digit code
+owner$   ml-stack fleet accept 3f9a1c20 --mine    # (or answer the dialog) prints a six digit code
 newbox$  (type the code)                          # joins the cluster
 ```
 
-The owner is also told by a desktop notification (macOS and Linux). Accepting is not enough on
-its own: the code has to be read to the person at the new machine, and three wrong tries close
+The owner is asked by a dialog with Decline / Accept as mine / Accept as someone else's buttons
+(macOS and Linux). Accepting is not enough on its own: the code has to be read to the person at the new machine, and three wrong tries close
 the request. `listen --no-cluster` pairs without handing over the cluster key. A machine with
 **nothing installed** cannot be pushed to; `ml-stack fleet bootstrap --share DIR` offers the
-wheel on the LAN for ten minutes to somebody who opens the address on it. The design, the
+wheel on the LAN for ten minutes to somebody who opens the address on it, and `bootstrap --ssh
+user@host --share DIR` (try `--dry-run` first) installs it over your own ssh keys. The design, the
 threat model and what is not built are in `docs/onboarding.md`.
 
 ### Placing users
