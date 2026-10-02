@@ -94,15 +94,11 @@ def serve_forever(root: Path | str | None = None,
                   on_paused: str = "stop",
                   bench_home: Path | str | None = None,
                   track: str | None = None) -> None:
-    """``host`` and ``lan`` say where to listen (`bind_address`): this machine alone unless
-    a host is named, ``lan`` is set, ``setup_from_lan`` is, or the machine is in a cluster.
+    """Serve until stopped. ``host``, ``lan`` and ``setup_from_lan`` say where to listen
+    (`bind_address`); ``ui_from_lan`` lets other machines open the web interface.
 
-    ``ui_from_lan`` lets other machines open the web interface, which they sign in to over
-    plain HTTP; ``setup_from_lan`` implies it.
-
-    ``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring
-    lock; the ``bench`` beside ``root`` unless given (`fleet.measuring.bench_home`), so a
-    daemon rooted in a test's directory never consults the real home.
+    ``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring lock; the
+    ``bench`` beside ``root`` unless given (`fleet.measuring.bench_home`).
 
     ``track`` is a branch this machine follows instead of releases -- ``main`` on a machine
     you trust to run unreviewed code -- and it is remembered, so it is asked for once.

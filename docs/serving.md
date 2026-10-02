@@ -71,9 +71,21 @@ reports through the `ml_stack.serve` loggers, or through the `say=` callback `le
 `ServerManager` is a context manager: `with ServerManager() as manager:` stops every server
 it started when the block ends and leaves adopted ones running, and `manager.close()` does
 the same. A manager is safe
-to call from several threads (one lock per port); a server started by a program that is
-killed without running `close()` keeps running, is listed as orphaned by `ml-stack-serve
-status`, and is stopped or adopted by the next lease on its port.
+to call from several threads (one lock per port).
+
+A server a `ServerManager` starts stops when the program that started it ends: at exit, on
+SIGTERM, SIGINT and SIGHUP (the handler a program already had still runs first), and, when the
+program is killed outright, through a small watchdog process that stops the server's tree once
+its host is gone. Nothing is registered at import; the first server a process starts installs
+the exit hook and the handlers. `ServerManager(stop_on_exit=False)` leaves the servers running,
+and `ml-stack-serve up` does that itself, since it exits and the server is meant to stay. The
+first lease a manager makes also stops every server on the machine whose leasing process has
+gone, but only one whose record proves the pid is still that server (its start time and a
+digest of its command line). Server logs under `ML_STACK_HOME/logs` are kept to 60 files, 256 MB
+and 30 days across every port (`ML_STACK_LOG_FILES`, `ML_STACK_LOG_MB`, `ML_STACK_LOG_DAYS`;
+0 is no limit). A server is started without this process's tokens and keys in its
+environment; one that downloads weights is given the Hugging Face token the credentials
+resolve to and nothing else (`docs/credentials.md`).
 
 **One serving per port, written down once.** llama.cpp serves a model one way at a time, so
 two parts of a program that lease it differently are not two clients of one server:

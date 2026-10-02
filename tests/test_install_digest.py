@@ -33,19 +33,19 @@ def _sh(program: str, stdin: str = "") -> subprocess.CompletedProcess:
                           text=True)
 
 
-pytestmark = pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
-
-
+@pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
 def test_the_digest_belongs_to_the_asset_the_key_names():
     assert _sh('release_digest ml-stack-macos-arm64', RELEASE).stdout.strip() == "a" * 64
     assert _sh('release_digest ml-stack-linux-x86_64', RELEASE).stdout.strip() == "b" * 64
 
 
+@pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
 def test_an_asset_with_no_digest_gets_none_and_does_not_borrow_the_one_before_it():
     got = _sh('release_digest ml-stack-windows-x64', RELEASE).stdout.strip()
     assert got == "", "a digest from the neighbouring asset would pass the wrong file"
 
 
+@pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
 def test_a_file_is_checked_against_its_digest(tmp_path):
     blob = tmp_path / "pkg.zip"
     blob.write_bytes(b"the release")
@@ -56,6 +56,7 @@ def test_a_file_is_checked_against_its_digest(tmp_path):
     assert _sh(f'verify_sha256 "{blob}" {good}').returncode == 1
 
 
+@pytest.mark.skipif(SH is None, reason="needs a POSIX shell")
 def test_the_installer_refuses_a_release_that_reports_no_digest():
     text = SCRIPT.read_text()
     assert "reports no sha256" in text and "does not match the sha256" in text
