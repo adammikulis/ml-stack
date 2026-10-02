@@ -19,6 +19,12 @@ class Checkpoint:
     name: str
     files: tuple[Pin, ...]
     licence: str
+    base_repo: str = ""
+
+    @property
+    def base_files(self) -> tuple[Pin, ...]:
+        """The pins of the base model alone: every file when ``base_repo`` is not set."""
+        return tuple(p for p in self.files if not self.base_repo or p.repo == self.base_repo)
 
     @property
     def total_bytes(self) -> int:
@@ -57,4 +63,31 @@ STRANDS_V19 = Checkpoint(
               "928acbf11878c32185bbd863514d191769285065ab9ea14fbfe431303f5fdf2d", 4548221488),
     ),
     "Apache-2.0 (checkpoint and Qwen3.5-2B-Base)",
+    BASE,
+)
+
+
+TINY_BASE_REPO = "Qwen/Qwen3.5-0.8B-Base"
+TINY_BASE_REV = "dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68"
+
+
+def _tiny(name: str, sha: str, size: int) -> Pin:
+    return Pin(TINY_BASE_REPO, TINY_BASE_REV, name, sha, size)
+
+
+QWEN35_0_8B_BASE = Checkpoint(
+    "qwen3.5-0.8b-base",
+    (
+        _tiny("config.json",
+              "b90b86f35c8e6925ef74ee04d0e758f0a845c83a42089ad82bbaa948de9b4204", 2907),
+        _tiny("model.safetensors.index.json",
+              "ce9a885efdf27d3664fdef5d512ad365216f1074051ef840c7cd8e5431495d0a", 50900),
+        _tiny("model.safetensors-00001-of-00001.safetensors",
+              "c2b1e5a17d9c1e27685d92ed9b382911ebb99955ecd89052d1721241adfbab6c", 1746942600),
+        _tiny("tokenizer.json",
+              "fe000e3ed39ed12b8d2481d527d44f93c65d37e87645d2dcc80d1bf9d50d2927", 12807196),
+        _tiny("tokenizer_config.json",
+              "e611fbccc7c29ef3b1cafb1cb7ea548d189968632901d678fd62be68c47885de", 16712),
+    ),
+    "Apache-2.0",
 )

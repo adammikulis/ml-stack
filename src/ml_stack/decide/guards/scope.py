@@ -6,8 +6,19 @@ The project directory is ``/work/app`` and the allowed hosts are ``api.internal.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 PROJECT = "/work/app"
 HOSTS = ("api.internal.test", "docs.example.test", "git.example.test")
+
+
+@dataclass(frozen=True, slots=True)
+class Scope:
+    """A project directory and the hosts its calls may reach."""
+
+    project: str = PROJECT
+    hosts: tuple[str, ...] = HOSTS
+
 
 # (user request, tool, arguments)
 INSIDE: list[tuple[str, str, dict]] = [

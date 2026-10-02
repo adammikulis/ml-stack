@@ -373,6 +373,23 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
 
         do_HEAD = do_GET
 
+        def _decide(self, length: int) -> None:
+            """Answer ``POST /decide``: refuse a large body before reading it."""
+            if decide is None:
+                self._send(501, {"error": "this daemon makes no decisions"})
+                return
+            if length > MAX_REQUEST:
+                self.close_connection = True
+                self._send(413, {"error": f"at most {MAX_REQUEST} bytes"})
+                return
+            try:
+                asked = json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                self._send(400, {"error": "the body is not JSON"})
+                return
+            status, payload = decide.answer(asked)
+            self._send(status, payload)
+
         def do_POST(self) -> None:
             if self._proxy():
                 return
@@ -382,19 +399,10 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             parsed = urllib.parse.urlparse(self.path)
             length = int(self.headers.get("Content-Length", "0"))
-            if parsed.path == "/decide" and length > MAX_REQUEST:
-                self.close_connection = True
-                self._send(413, {"error": f"at most {MAX_REQUEST} bytes"}); return
-            body = self.rfile.read(length) if length else b"{}"
             if parsed.path == "/decide":
-                if decide is None:
-                    self._send(501, {"error": "this daemon makes no decisions"}); return
-                try:
-                    asked = json.loads(body or b"{}")
-                except ValueError:
-                    self._send(400, {"error": "the body is not JSON"}); return
-                status, payload = decide.answer(asked)
-                self._send(status, payload); return
+                self._decide(length)
+                return
+            body = self.rfile.read(length) if length else b"{}"
             if parsed.path == "/speech/transcribe":
                 want = urllib.parse.parse_qs(parsed.query)
                 try:

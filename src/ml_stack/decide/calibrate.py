@@ -11,7 +11,7 @@ from typing import Any
 FLOOR = 1e-12
 
 
-def _softmax(logits: Sequence[float]) -> list[float]:
+def softmax(logits: Sequence[float]) -> list[float]:
     top = max(logits)
     exps = [math.exp(x - top) for x in logits]
     total = sum(exps)
@@ -22,7 +22,7 @@ def rescale(probs: Sequence[float], temperature: float) -> list[float]:
     """``softmax(log(p) / temperature)``; above 1 flattens, below 1 sharpens."""
     if temperature <= 0 or not math.isfinite(temperature):
         raise ValueError(f"temperature must be positive and finite, got {temperature}")
-    return _softmax([math.log(max(p, FLOOR)) / temperature for p in probs])
+    return softmax([math.log(max(p, FLOOR)) / temperature for p in probs])
 
 
 def nll(rows: Sequence[Sequence[float]], labels: Sequence[int], temperature: float = 1.0) -> float:

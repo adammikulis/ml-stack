@@ -10,15 +10,17 @@ from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
 
+from ml_stack.decide import registry
 from ml_stack.decide.base import Decider, State
 from ml_stack.decide.calibrate import Calibration
 from ml_stack.decide.embed import EmbedDecider, Head, server_embedder
-from ml_stack.decide.fetch import locate
 from ml_stack.decide.logprob import LETTERS, Chat, LogprobDecider
 from ml_stack.decide.pins import STRANDS_V19
 from ml_stack.decide.pointer import PointerDecider
 from ml_stack.decide.rules import RulesDecider
-from ml_stack.decide.types import BackendUnavailable, Decision, Options, options_of
+from ml_stack.decide.sources import local_source, strands_source
+from ml_stack.decide.types import BackendUnavailable, DecideError, Decision, Options, options_of
+from ml_stack.home import expand
 from ml_stack.http import ServerError, request_json
 
 BACKENDS = ("pointer", "logprob", "embed", "rules")
@@ -33,7 +35,8 @@ class Config:
 
     ``url`` is a chat server for the logprob backend (default ``$ML_STACK_DECIDE_URL`` or
     the local llama-server port). ``embed_url`` and ``embed_head`` enable the embed backend.
-    ``rules`` enables the rules backend. ``order`` is the preference for ``auto``. A config
+    ``pointer`` names a trained decider (registered name or directory) instead of the released
+    checkpoint. ``rules`` enables the rules backend. ``order`` is the preference for ``auto``. A config
     is compared by identity: deciders built for it stay warm for as long as it is used.
     """
 
@@ -43,6 +46,7 @@ class Config:
     token: str = ""
     embed_url: str = ""
     embed_head: str = ""
+    pointer: str = ""
     calibration: Calibration | None = None
     rules: RulesDecider | None = None
     download: bool = False
@@ -62,6 +66,10 @@ def _reachable(url: str, token: str) -> str:
     return ""
 
 
+def _trained(name: str) -> Path:
+    return expand(name) if expand(name).is_dir() else registry.find(name)
+
+
 def unavailable(name: str, config: Config) -> str:
     """Why ``name`` cannot run now, or an empty string when it can."""
     if name == "pointer":
@@ -70,9 +78,11 @@ def unavailable(name: str, config: Config) -> str:
         if missing:
             return f"needs {', '.join(missing)} (pip install 'ml-stack[decide-pointer]')"
         try:
-            for pin in STRANDS_V19.files:
-                locate(pin)
-        except BackendUnavailable as exc:
+            if config.pointer:
+                local_source(_trained(config.pointer), download=False)
+            else:
+                strands_source(download=False)
+        except (BackendUnavailable, DecideError) as exc:
             return str(exc)
         return ""
     if name == "logprob":
@@ -108,7 +118,8 @@ def build(name: str, config: Config) -> Decider:
             return held[1]
         made: Decider
         if name == "pointer":
-            made = PointerDecider(download=config.download, calibration=config.calibration)
+            made = PointerDecider(_trained(config.pointer) if config.pointer else STRANDS_V19,
+                                  download=config.download, calibration=config.calibration)
         elif name == "logprob":
             made = LogprobDecider(Chat(config.chat_url, config.model, config.token),
                                   calibration=config.calibration)

@@ -113,6 +113,8 @@ ml-stack-train-run = "ml_stack.train.run:main"
 ml-stack-train-tools = "ml_stack.train.tools:main"
 # choose one of a named set of options and say how sure: ask, score, calibrate, compare
 ml-stack-decide = "ml_stack.decide_cli:main"
+# a pointer-head decision model fine-tuned from labelled cases
+ml-stack-train-decider = "ml_stack.train.decider:main"
 # what this machine can do, and what it does without being asked; --checkouts adds the
 # repositories and working state ml-stack-doctor checks on their own
 ml-stack-setup = "ml_stack.setup:main"

@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import json
 import threading
-import urllib.error
-import urllib.request
 
 import pytest
 from decide_fakes import logprob_handler
@@ -14,7 +12,7 @@ from decide_fakes import logprob_handler
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.deciding import MAX_REQUEST, Deciding
 from ml_stack.fleet.jobs import JobRunner
-from ml_stack.http import Server
+from ml_stack.http import Server, ServerError, request_bytes
 
 
 @pytest.fixture
@@ -31,13 +29,12 @@ def api(tmp_path, server):
 
     def post(body, *, token="tok", raw=None):
         data = raw if raw is not None else json.dumps(body).encode()
-        req = urllib.request.Request(f"{base}/decide", data=data, method="POST", headers={
-            "Authorization": f"Bearer {token}", "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status, json.loads(r.read())
-        except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read() or b"{}")
+            got = request_bytes(f"{base}/decide", data=data, method="POST", token=token,
+                                headers={"Content-Type": "application/json"}, timeout=10)
+        except ServerError as exc:
+            return exc.status, json.loads(exc.body or "{}")
+        return got.status, json.loads(got.body)
 
     try:
         yield post, chat, decide
@@ -104,13 +101,11 @@ def test_a_daemon_without_a_decider_answers_501(tmp_path):
     runner = JobRunner(tmp_path / "traind")
     httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, files, "tok")))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_address[1]}/decide",
-                                 data=b"{}", method="POST",
-                                 headers={"Authorization": "Bearer tok"})
     try:
-        with pytest.raises(urllib.error.HTTPError) as err:
-            urllib.request.urlopen(req, timeout=5)
-        assert err.value.code == 501
+        with pytest.raises(ServerError) as err:
+            request_bytes(f"http://127.0.0.1:{httpd.server_address[1]}/decide", data=b"{}",
+                          method="POST", token="tok", timeout=5)
+        assert err.value.status == 501
     finally:
         runner.shutdown()
         httpd.shutdown()

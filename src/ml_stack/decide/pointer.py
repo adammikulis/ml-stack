@@ -16,8 +16,8 @@ from typing import Any
 from ml_stack.decide import pointer_prompt
 from ml_stack.decide.base import Asked, BaseDecider
 from ml_stack.decide.calibrate import Calibration
-from ml_stack.decide.fetch import locate
 from ml_stack.decide.pins import STRANDS_V19, Checkpoint
+from ml_stack.decide.sources import Source, local_source, strands_source
 from ml_stack.decide.types import BackendUnavailable, DecideError
 
 MAX_TOKENS = 4096
@@ -63,7 +63,8 @@ def build_head(torch: Any, hidden: int, dim: int) -> Any:
     return Pointer()
 
 
-def load_torso(base_dir: Path, lora_dir: Path | None, dtype: str, device: str) -> Any:
+def load_torso(base_dir: Path, lora_dir: Path | None, dtype: str, device: str, *,
+               trainable: bool = False) -> Any:
     """The base model's decoder with its adapter applied, from safetensors only."""
     torch = _torch()
     import transformers
@@ -85,34 +86,37 @@ def load_torso(base_dir: Path, lora_dir: Path | None, dtype: str, device: str) -
         torso = lm.model
     if lora_dir is not None:
         from peft import PeftModel
-        torso = PeftModel.from_pretrained(torso, str(lora_dir), is_trainable=False,
+        torso = PeftModel.from_pretrained(torso, str(lora_dir), is_trainable=trainable,
                                           use_safetensors=True)
-    return torso.to(device).eval()
+    torso = torso.to(device)
+    return torso if trainable else torso.eval()
 
 
 class PointerDecider(BaseDecider):
     """Runs a pointer-head checkpoint on this machine's best device.
 
-    ``ready`` loads the files lazily on first use; nothing is fetched unless ``download``.
+    ``source`` is the pinned released checkpoint (default), another pinned `Checkpoint`, or
+    the directory a training run wrote. Files load lazily on first use; nothing is fetched
+    unless ``download`` is set.
     """
 
     name = "pointer"
 
-    def __init__(self, checkpoint: Checkpoint = STRANDS_V19, *, device: str = "auto",
-                 dtype: str = "bfloat16", download: bool = False,
-                 calibration: Calibration | None = None) -> None:
-        self.checkpoint = checkpoint
-        self.model = checkpoint.name
+    def __init__(self, source: Checkpoint | Path | str = STRANDS_V19, *, device: str = "auto",
+                 download: bool = False, calibration: Calibration | None = None) -> None:
+        self.source = source
+        self.model = source.name if isinstance(source, Checkpoint) else Path(source).name
         self.device_request = device
-        self.dtype = dtype
         self.download = download
         self.calibration = calibration
         self._lock = threading.Lock()
         self._loaded: tuple[Any, ...] | None = None
 
-    def paths(self) -> dict[str, Path]:
-        """Each pinned file's verified local path by file name."""
-        return {p.filename: locate(p, download=self.download) for p in self.checkpoint.files}
+    def resolve(self) -> Source:
+        """The verified local files."""
+        if isinstance(self.source, Checkpoint):
+            return strands_source(self.source, download=self.download)
+        return local_source(self.source, download=self.download)
 
     def load(self) -> None:
         """Load the tokenizer, torso and head if they are not loaded."""
@@ -122,31 +126,24 @@ class PointerDecider(BaseDecider):
             torch = _torch()
             from safetensors.torch import load_file
             from transformers import AutoTokenizer
-            files = self.paths()
+            files = self.resolve()
             device = device_name(self.device_request)
-            cfg = json.loads(files["hobson_config.json"].read_text())
-            if cfg.get("head_type") != "pointer":
-                raise DecideError(f"{self.model}: head_type {cfg.get('head_type')!r} is not "
-                                  "a pointer head")
-            tok = AutoTokenizer.from_pretrained(files["tokenizer.json"].parent,
-                                                local_files_only=True, trust_remote_code=False)
-            torso = load_torso(files["config.json"].parent,
-                               files["lora/adapter_config.json"].parent, self.dtype, device)
-            state = load_file(str(files["head.safetensors"]))
-            head = build_head(torch, state["q.weight"].shape[1], int(cfg["pointer_dim"]))
+            tok = AutoTokenizer.from_pretrained(files.tokenizer_dir, local_files_only=True,
+                                                trust_remote_code=False)
+            torso = load_torso(files.base_dir, files.lora_dir, files.dtype, device)
+            state = load_file(str(files.head))
+            head = build_head(torch, state["q.weight"].shape[1], files.pointer_dim)
             head.load_state_dict(state)
             head = head.to(device).float().eval()
-            temperature = float(cfg.get("temperature_by_kind", {}).get(
-                "choice", cfg.get("temperature", 1.0)))
-            self._loaded = (tok, torso, head, device, temperature)
-            self.details = {"device": device, "dtype": self.dtype}
+            self._loaded = (tok, torso, head, device, files.temperature,
+                            {"device": device, "dtype": files.dtype})
 
     def probabilities(self, asked: Asked) -> tuple[list[float], dict[str, Any]]:
         self.load()
         torch = _torch()
         if self._loaded is None:
             raise DecideError("the pointer model did not load")
-        tok, torso, head, device, temperature = self._loaded
+        tok, torso, head, device, temperature, info = self._loaded
         rendered = pointer_prompt.render(asked.question, asked.state, asked.options)
         enc = tok(rendered.text, return_offsets_mapping=True, add_special_tokens=False,
                   return_tensors="pt")
@@ -161,4 +158,4 @@ class PointerDecider(BaseDecider):
                            use_cache=False).last_hidden_state[0]
             logits = head(hidden[-1:].float(), hidden[spots].float().unsqueeze(0))[0]
             probs = torch.softmax(logits / temperature, dim=-1).tolist()
-        return probs, {"tokens": length, **getattr(self, "details", {})}
+        return probs, {"tokens": length, **info}

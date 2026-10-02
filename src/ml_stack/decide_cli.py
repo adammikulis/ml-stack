@@ -17,15 +17,17 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
-from ml_stack.decide import router
+from ml_stack.decide import registry, router
 from ml_stack.decide.calibrate import Calibration, fit
 from ml_stack.decide.cases import Case, fingerprint, read_cases, write_cases
 from ml_stack.decide.eval import Report, evaluate, score
+from ml_stack.decide.fetch import locate
 from ml_stack.decide.guards import guard_cases
 from ml_stack.decide.pins import STRANDS_V19
 from ml_stack.decide.types import DecideError, Option, options_of
 from ml_stack.files import write_json
 from ml_stack.log import say, warn
+from ml_stack.train.decider_data import Plan, guard_cases_from_tools
 from ml_stack.train.holdout import by_group
 
 __all__ = ["COMMANDS", "main"]
@@ -44,6 +46,7 @@ SERVER = [
     flag("--url", default="", help=f"chat server for logprob (default ${router.URL_ENV})"),
     flag("--model", default="", help="model name to send, where the server wants one"),
     flag("--embed-url", default="", help="embedding server for the embed backend"),
+    flag("--pointer", default="", help="a trained decider: its registered name or directory"),
     flag("--embed-head", default="", help="a trained embed head (.safetensors)"),
     flag("--calibration", default="", help="a calibration file written by `calibrate`"),
     flag("--download", action="store_true",
@@ -56,7 +59,7 @@ def _config(args: Namespace) -> router.Config:
     if args.calibration:
         cal = Calibration.from_public(json.loads(Path(args.calibration).read_text())["calibration"])
     return router.Config(backend=(args.backend or ['auto'])[0], url=args.url, model=args.model, token=os.environ.get(AUTH_ENV, ""),
-                         embed_url=args.embed_url, embed_head=args.embed_head,
+                         embed_url=args.embed_url, embed_head=args.embed_head, pointer=args.pointer,
                          calibration=cal, download=args.download)
 
 
@@ -161,6 +164,27 @@ def _export(args: Namespace) -> int:
     return 0
 
 
+def _make(args: Namespace) -> int:
+    tools = json.loads(Path(args.tools).read_text())
+    tools = tools.get("tools", tools) if isinstance(tools, dict) else tools
+    made = guard_cases_from_tools(tools, Plan(seed=args.seed, per_tool=args.per_tool))
+    say(f"wrote {write_cases(args.out, made)} synthetic cases for {len(tools)} tools to {args.out}")
+    say("their labels come from rules about each tool's name and description: read a sample "
+        "before trusting a score measured on them")
+    return 0
+
+
+def _list(args: Namespace) -> int:
+    rows = registry.listing()
+    for row in rows:
+        acc = row["metrics"].get("accuracy")
+        say(f"{row['name']:<24} {row['base']:<28} "
+            + (f"accuracy {acc:.3f}  " if acc is not None else "") + row["path"])
+    if not rows:
+        say("no trained deciders; `ml-stack-train-decider` makes one")
+    return 0
+
+
 def _check(args: Namespace) -> int:
     cases = read_cases(args.file)
     labels: dict[str, int] = {}
@@ -179,7 +203,7 @@ def _fetch(args: Namespace) -> int:
         say("nothing downloaded; add --yes to fetch and verify them")
         return 0
     for pin in ck.files:
-        say(f"  {pin.repo}/{pin.filename}  {router.locate(pin, download=True)}")
+        say(f"  {pin.repo}/{pin.filename}  {locate(pin, download=True)}")
     return 0
 
 
@@ -234,6 +258,21 @@ def bench_cmd(args: Namespace) -> int:
 def export_cmd(args: Namespace) -> int:
     """Write the built-in guard cases."""
     return _export(args)
+
+
+@COMMANDS.command("make-cases", help="synthesise guard cases from an MCP tool list", options=[
+    flag("tools", help="a JSON file: the tool list an MCP server returns"),
+    flag("--per-tool", type=int, default=8), flag("--seed", type=int, default=0),
+    option("out", required=True)])
+def make_cmd(args: Namespace) -> int:
+    """Synthesise guard cases from a tool list."""
+    return _guarded(_make, args)
+
+
+@COMMANDS.command("list", help="the trained deciders on this machine")
+def list_cmd(args: Namespace) -> int:
+    """List the registered trained deciders."""
+    return _list(args)
 
 
 @COMMANDS.command("check-cases", help="read a cases file and count its labels",
