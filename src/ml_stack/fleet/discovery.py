@@ -47,7 +47,8 @@ def default_port() -> int:
     raw = os.environ.get("ML_STACK_DISCOVERY_PORT")
     return int(raw) if raw else DEFAULT_PORT
 
-PROTOCOL = 1
+PROTOCOL = 2
+"""2 added the per-cluster salt and the certificate in a beacon. A peer speaking 1 is refused."""
 MAX_SKEW_S = 60.0
 #: The most one UDP datagram carries.
 MAX_DATAGRAM = 65507
@@ -93,19 +94,24 @@ SCRYPT_P = 1
 """~80ms and 64MB on a laptop, a second or two on a Pi. Paid once, at join time: the"""
 
 
-def _salt_for(group: str) -> bytes:
-    """Deterministic, because both machines have to derive the same key from the same"""
-    return sha256(b"ml-stack-cluster-v1:" + group.encode()).digest()
+def new_salt() -> bytes:
+    """A salt for a cluster that does not exist yet; the first machine mints it and every
+    machine that joins learns it from a beacon."""
+    return secrets.token_bytes(16)
 
 
-def key_from_passphrase(passphrase: str, *, group: str = DEFAULT_CLUSTER) -> bytes:
-    """The cluster key two machines derive from the same words."""
+def key_from_passphrase(passphrase: str, *, group: str = DEFAULT_CLUSTER,
+                        salt: bytes) -> bytes:
+    """The cluster key two machines derive from the same words and the cluster's salt."""
     passphrase = passphrase.strip()
     if len(passphrase) < MIN_PASSPHRASE:
         raise DiscoveryError(
             f"passphrase must be at least {MIN_PASSPHRASE} characters -- everyone on "
             "this network can hear the beacons and grind guesses against them offline")
-    raw = hashlib.scrypt(passphrase.encode("utf-8"), salt=_salt_for(group),
+    if len(salt) < 16:
+        raise DiscoveryError("a cluster's salt is at least 16 bytes")
+    raw = hashlib.scrypt(passphrase.encode("utf-8"),
+                         salt=sha256(b"ml-stack-cluster-v2:" + group.encode() + b":" + salt).digest(),
                          n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32,
                          maxmem=2 * 128 * SCRYPT_N * SCRYPT_R)
     return base64.urlsafe_b64encode(raw).rstrip(b"=")
@@ -122,14 +128,38 @@ def cluster_group(path: Path | str | None = None) -> str | None:
     return rows[0].group if rows else None
 
 
+@dataclass(frozen=True, slots=True)
+class Salting:
+    """Where a cluster's salt comes from: ``salt`` when it is known, else ``search_s``
+    seconds of asking the network for the salt of a cluster these words open, else a fresh
+    one (this is the first machine)."""
+
+    salt: bytes | None = None
+    search_s: float = 0.0
+
+
+SEARCH = Salting(search_s=1.5)
+"""Ask the network first: what a machine joining a cluster does."""
+
+
+def _salted(passphrase: str, group: str, how: Salting) -> tuple[bytes, bytes]:
+    salt = how.salt
+    if salt is None and how.search_s:
+        found = find_salt(passphrase, group=group, timeout_s=how.search_s)
+        salt = found[0] if found else None
+    salt = salt if salt is not None else new_salt()
+    return salt, key_from_passphrase(passphrase, group=group, salt=salt)
+
+
 def join_cluster(passphrase: str, *, group: str = DEFAULT_CLUSTER,
-                 path: Path | str | None = None, overwrite: bool = True) -> bytes:
+                 path: Path | str | None = None, overwrite: bool = True,
+                 salting: Salting = Salting()) -> bytes:  # noqa: B008
     """Join, and answer as this cluster from now on. Returns the key."""
-    key = key_from_passphrase(passphrase, group=group)
     joined = memberships(path)
     if joined and not overwrite:
         return joined[0].key
-    rows = [Membership(group=group, key=key)]
+    salt, key = _salted(passphrase, group, salting)
+    rows = [Membership(group=group, key=key, salt=base64.urlsafe_b64encode(salt).decode())]
     rows += [m for m in joined if m.group != group]
     _write_memberships(rows, path)
     return key
@@ -142,11 +172,14 @@ def check_passphrase(passphrase: str, *, group: str | None = None,
     if key is None:
         return False
     group = group if group is not None else (cluster_group(path) or DEFAULT_CLUSTER)
+    held = next((m for m in memberships(path) if m.group == group), None)
+    if held is None or not held.salt:
+        return False
     try:
-        candidate = key_from_passphrase(passphrase, group=group)
+        candidate = key_from_passphrase(passphrase, group=group, salt=held.salt_bytes())
     except DiscoveryError:
         return False
-    return hmac.compare_digest(candidate, key)
+    return hmac.compare_digest(candidate, held.key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +188,12 @@ class Membership:
 
     group: str
     key: bytes
+    salt: str = ""
+    """The cluster's salt, urlsafe base64; empty for a key that came from no passphrase."""
+
+    def salt_bytes(self) -> bytes:
+        return base64.urlsafe_b64decode(self.salt + "=" * (-len(self.salt) % 4)) \
+            if self.salt else b""
 
     def public(self) -> dict[str, Any]:
         return {"group": self.group}
@@ -180,11 +219,12 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
     for row in raw if isinstance(raw, list) else []:
         try:
             group, key = str(row["group"]), str(row["key"]).encode()
+            salt = str(row.get("salt") or "")
         except (KeyError, TypeError, AttributeError):
             continue
         if key and group not in seen:
             seen.add(group)
-            out.append(Membership(group=group, key=key))
+            out.append(Membership(group=group, key=key, salt=salt))
     return out
 
 
@@ -210,17 +250,19 @@ def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    write_json(listed, [{"group": m.group, "key": m.key.decode()} for m in rows])
+    write_json(listed, [{"group": m.group, "key": m.key.decode(), "salt": m.salt}
+                        for m in rows])
     private_file(listed)
 
 
-def join(passphrase: str, *, group: str = "", path: Path | str | None = None
-         ) -> list[Membership]:
+def join(passphrase: str, *, group: str = "", path: Path | str | None = None,
+         salting: Salting = Salting()) -> list[Membership]:  # noqa: B008
     """Add a cluster. Joining one already joined replaces its key."""
     group = group.strip() or DEFAULT_CLUSTER
-    key = key_from_passphrase(passphrase, group=group)
+    salt, key = _salted(passphrase, group, salting)
     rows = [m for m in memberships(path) if m.group != group]
-    rows.append(Membership(group=group, key=key))
+    rows.append(Membership(group=group, key=key,
+                           salt=base64.urlsafe_b64encode(salt).decode()))
     _write_memberships(rows, path)
     return rows
 
@@ -489,6 +531,8 @@ class Advertiser:
         self.undelivered = 0
         self.last_error = ""
         self._said: set[str] = set()
+        self.salt: bytes = b""
+        """The cluster's salt, told to a machine that asks to join; empty for a random key."""
 
     # -- lifecycle --
     def start(self, *, wait_s: float = 2.0) -> Advertiser:
@@ -575,6 +619,9 @@ class Advertiser:
                 continue
             except OSError:
                 break
+            if self.salt and _asks_for_salt(raw):
+                self._tell_salt(sock, raw, addr)
+                continue
             msg = _verify(self.key, raw, kind="who")
             if msg is None:
                 continue
@@ -585,6 +632,15 @@ class Advertiser:
                 self._undelivered(addr, exc, len(reply))
                 continue
             self._asked.set()
+
+    def _tell_salt(self, sock: socket.socket, raw: bytes, addr: tuple[str, int]) -> None:
+        """Answer a machine that wants to join: this cluster's salt, signed with the key the
+        salt and the right words make, so only those words recognise it."""
+        nonce = str(json.loads(raw).get("nonce", ""))[:64]
+        reply = _sign(self.key, {"v": PROTOCOL, "kind": "salt", "t": time.time(),
+                                 "nonce": nonce, "salt": base64.urlsafe_b64encode(self.salt).decode()})
+        with contextlib.suppress(OSError):
+            sock.sendto(reply, addr)
 
     def _announce_loop(self) -> None:
         while not self._stop.wait(self.interval_s):
@@ -597,6 +653,56 @@ class Advertiser:
             refused = _say(s, data, self.group, self.port)
         if len(refused) == len(_destinations(self.group, self.port)):
             self._undelivered(*refused[0], len(data))
+
+
+def _asks_for_salt(raw: bytes) -> bool:
+    try:
+        msg = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(msg, dict) and msg.get("v") == PROTOCOL and msg.get("kind") == "hello"
+
+
+def find_salt(passphrase: str, *, group: str = DEFAULT_CLUSTER, timeout_s: float = 1.5,
+              most: int = 8) -> tuple[bytes, bytes] | None:
+    """``(salt, key)`` of a cluster on this network that these words open, or None when no
+    machine answered. Raises `DiscoveryError` when machines answered and none accepts them.
+
+    Each answer is signed with the key its salt and the right words make, so a salt is
+    taken only when it checks out; an answer from a stranger is a candidate that fails.
+    """
+    nonce = secrets.token_hex(16)
+    hello = json.dumps({"v": PROTOCOL, "kind": "hello", "nonce": nonce}).encode()
+    heard: dict[str, bytes] = {}
+    group_, port = default_group(), default_port()
+    with _socket(broadcast=True, bind=("", 0)) as sock:
+        _say(sock, hello, group_, port)
+        deadline = time.time() + timeout_s
+        resent = time.time() + 0.3
+        while time.time() < deadline and len(heard) < most:
+            if time.time() >= resent:
+                _say(sock, hello, group_, port)
+                resent = time.time() + 0.3
+            sock.settimeout(max(0.01, min(deadline, resent) - time.time()))
+            try:
+                raw, _addr = sock.recvfrom(65535)
+                said = json.loads(raw)
+                salt = base64.urlsafe_b64decode(str(said["salt"]) + "==")
+            except (TimeoutError, KeyError, TypeError, ValueError):
+                continue
+            except OSError:
+                break
+            if said.get("kind") == "salt" and said.get("nonce") == nonce and len(salt) >= 16:
+                heard.setdefault(base64.urlsafe_b64encode(salt).decode(), raw)
+    for encoded, raw in heard.items():
+        salt = base64.urlsafe_b64decode(encoded + "==")
+        key = key_from_passphrase(passphrase, group=group, salt=salt)
+        if _verify(key, raw, kind="salt", nonce=nonce) is not None:
+            return salt, key
+    if heard:
+        raise DiscoveryError(f"{len(heard)} cluster(s) on this network answered and none "
+                             "accepts that passphrase")
+    return None
 
 
 def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,

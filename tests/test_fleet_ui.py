@@ -36,6 +36,19 @@ def _maybe_json(raw: bytes) -> dict:
         return {"raw": raw[:400].decode(errors="replace")}
 
 
+
+SALT = b"a-test-clusters-salt"
+
+
+@pytest.fixture(autouse=True)
+def the_cluster_already_exists(monkeypatch):
+    """The machines in these tests join a cluster whose salt every one of them is told."""
+    from ml_stack.fleet import discovery
+
+    monkeypatch.setattr(discovery, "find_salt", lambda passphrase, group="ml-stack", **_: (
+        SALT, discovery.key_from_passphrase(passphrase, group=group, salt=SALT)))
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("", 0))
@@ -245,7 +258,7 @@ class TestJoiningTwice:
         assert status == 200, body
         rows = memberships(serving.keyfile)
         assert [m.group for m in rows] == [first.group]
-        assert rows[0].key == key_from_passphrase(WORDS, group="ml-stack")
+        assert rows[0].key == key_from_passphrase(WORDS, group="ml-stack", salt=SALT)
 
 
 # -- a machine in no cluster ---------------------------------------------

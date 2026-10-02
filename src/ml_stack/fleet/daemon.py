@@ -261,8 +261,9 @@ def serve_forever(root: Path | str | None = None,
             try:
                 # Not group=: that is the multicast address every cluster shares.
                 # Clusters are told apart by the key their beacons are signed with.
-                advertisers[group] = Advertiser(beacon, member.key,
-                                                refresh=refresh).start()
+                tell = Advertiser(beacon, member.key, refresh=refresh)
+                tell.salt = member.salt_bytes()
+                advertisers[group] = tell.start()
             except DiscoveryError as exc:
                 say(f"  discovery OFF for {group}: {exc}")
 
