@@ -79,8 +79,9 @@ def test_a_removed_line_is_found(tmp_path):
     del lines[3]
     log.path.write_text("\n".join(lines) + "\n")
     result = log.verify()
-    assert not result.ok and any("does not follow" in p or "sequence" in p
-                                 for p in result.problems)
+    assert not result.ok
+    assert any("does not follow" in p for p in result.problems)
+    assert any("sequence" in p for p in result.problems)
 
 
 def test_reordered_lines_are_found(tmp_path):
@@ -89,7 +90,9 @@ def test_reordered_lines_are_found(tmp_path):
     lines = _lines(log)
     lines[1], lines[2] = lines[2], lines[1]
     log.path.write_text("\n".join(lines) + "\n")
-    assert not log.verify().ok
+    result = log.verify()
+    assert any("does not follow" in p for p in result.problems)
+    assert any("sequence" in p for p in result.problems)
 
 
 def test_a_log_cut_short_is_found(tmp_path):
@@ -104,7 +107,9 @@ def test_a_deleted_log_is_found(tmp_path):
     log = _log(tmp_path)
     _fill(log)
     log.path.unlink()
-    assert not log.verify().ok
+    result = log.verify()
+    assert any("empty" in p for p in result.problems)
+    assert any("cut off" in p for p in result.problems)
 
 
 def test_a_forged_head_is_found(tmp_path):

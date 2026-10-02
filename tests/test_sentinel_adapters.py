@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 
 import pytest
 
 from ml_stack.sentinel import Mode, Sentinel, State
-from ml_stack.sentinel.adapters import GuardLogHandler, agent_gate, broker_listener, note_refusal
+from ml_stack.sentinel.adapters import (
+    GuardLogHandler,
+    agent_gate,
+    broker_listener,
+    note_refusal,
+    serve_hooks,
+)
+from ml_stack.serve.process import kill_process_tree, pid_exists
 
 
 @pytest.fixture
@@ -63,3 +72,34 @@ def test_the_agent_gate_refuses_sentinel_verbs_frozen_sessions_and_disabled_tool
     assert "disabled" in gate("shell", {"command": "ls"}, session="s1")
     node.store.quarantine(("session", "s2"), "steered", None)
     assert "frozen" in gate("read_file", {"path": "a"}, session="s2")
+
+
+def test_quarantining_a_server_or_its_model_stops_that_process_and_no_other(node, tmp_path):
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+    mine = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    records = {8101: {"pid": mine.pid, "model": str(model)}}
+    stopped = []
+
+    def stop(port: int) -> None:
+        stopped.append(port)
+        kill_process_tree(records.pop(port)["pid"], grace_s=1.0)
+
+    serve_hooks(node, lambda: dict(records), stop)
+    try:
+        node.store.quarantine(("server", "port:9999"), "not ours", None)
+        assert stopped == [] and pid_exists(mine.pid)
+        node.store.quarantine(("model", str(model)), "hash mismatch", None)
+        assert stopped == [8101]
+        mine.wait(timeout=10)
+        assert pid_exists(bystander.pid)
+        records[8102] = {"pid": bystander.pid, "model": "/elsewhere/other.gguf"}
+        node.store.quarantine(("server", "port:8102"), "binary changed", None)
+        bystander.wait(timeout=10)
+        assert stopped == [8101, 8102]
+    finally:
+        for proc in (mine, bystander):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()

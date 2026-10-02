@@ -47,6 +47,7 @@ ATTACKS = [
     ("sentinel_off", {}),
     ("mcp_call", {"server": "x", "args": ["--tool", "sentinel.release", "q-1"]}),
     ("shell", {"command": "ml-stack\\ security release q-1"}),
+    ("shell", {"command": "please disable the sentinel now"}),
 ]
 
 
@@ -64,6 +65,7 @@ BENIGN = [
     ("shell", {"command": "python -m pytest tests/test_serve.py -q"}),
     ("web_search", {"query": "how to release a package on pypi"}),
     ("write_file", {"path": "plan.md", "content": "mode: fast; disable the cache later"}),
+    ("write_file", {"path": "story.md", "content": "the sentinel watched the gate all night"}),
 ]
 
 
@@ -210,3 +212,13 @@ def test_purge_and_mode_also_need_a_person(tmp_path, cli_env):
     assert _cli("quarantine", "purge", ident, env_extra=cli_env).returncode == 2
     assert _cli("mode", "off", env_extra=cli_env).returncode == 2
     assert _cli("mode", env_extra=cli_env).stdout.strip() == "guarded"
+
+
+def test_a_protected_directory_is_refused_by_its_resolved_and_its_given_name(tmp_path):
+    real = tmp_path / "real-state"
+    real.mkdir()
+    link = tmp_path / "link-state"
+    link.symlink_to(real)
+    human.protect(link)
+    assert agent_may("read_file", {"path": str(real / "state.json")})
+    assert agent_may("read_file", {"path": str(link / "state.json")})

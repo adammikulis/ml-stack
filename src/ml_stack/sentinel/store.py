@@ -352,7 +352,6 @@ class Store:
         name = f"{record.id}.json"
         write_text(self.root / "items" / name,
                    json.dumps({"version": 1, "id": record.id, "text": body, "redacted": True}))
-        (self.root / "items" / name).chmod(0o600)
         record.held = {"file": name, "bytes": len(data),
                        "truncated": len(clean.encode()) > len(data),
                        "sha256": hashlib.sha256(

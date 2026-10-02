@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from ml_stack.sentinel.core import Sentinel
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.human import agent_may
+from ml_stack.sentinel.store import Record
 
 __all__ = ["GuardLogHandler", "agent_gate", "broker_listener", "note_refusal",
-           "watch_authenticator"]
+           "serve_hooks", "watch_authenticator"]
 
 _OUTCOMES = (("already seen", "replay"), ("outside the window", "clock"),
              ("too many failures", "locked"), ("not signed", "bad_sig"))
@@ -76,6 +78,26 @@ def broker_listener(sentinel: Sentinel) -> Callable[[str, dict[str, object]], No
         if caller:
             sentinel.handle_all([sentinel.abuse.note(caller)])
     return on
+
+
+def serve_hooks(sentinel: Sentinel, servers: Callable[[], Mapping[int, Mapping[str, Any]]],
+                stop: Callable[[int], object]) -> None:
+    """Quarantining a ``server`` (key ``port:N``) or a ``model`` stops the recorded servers
+    that match, through ``stop(port)``. ``servers`` is the lease file's record of servers
+    ml-stack started (``serve.recorded_servers``); a process not in it is never touched."""
+    def stop_server(record: Record) -> None:
+        port = int(record.key.removeprefix("port:"))
+        if port in servers():
+            stop(port)
+
+    def stop_serving(record: Record) -> None:
+        wanted = Path(record.key).resolve()
+        for port, entry in dict(servers()).items():
+            if entry.get("model") and Path(str(entry["model"])).resolve() == wanted:
+                stop(port)
+
+    sentinel.store.on_quarantine.setdefault("server", []).append(stop_server)
+    sentinel.store.on_quarantine.setdefault("model", []).append(stop_serving)
 
 
 def agent_gate(sentinel: Sentinel) -> Callable[..., str]:

@@ -58,6 +58,7 @@ def test_a_tampered_model_is_detected_on_load_and_quarantined(node, models):
         fh.seek(1000)
         fh.write(b"\x00\x01")
     assert node.verify_before_load(path) is False
+    assert node.scan(deep=True) == []
     record = node.store.find("model", str(path))
     assert record.state == State.QUARANTINED and not path.exists()
     assert any(e.kind == "integrity.content_changed" and e.severity == Severity.CRITICAL
@@ -499,3 +500,57 @@ def test_text_a_rail_let_through_as_tainted_is_watched_in_guarded_and_held_in_en
     held = enforce.screen(text, "tool:web", session="s1", verdict=lambda *_: TaintedVerdict())
     assert held.withheld and text not in held.text
     assert enforce.screen(text, "tool:other").withheld == held.withheld
+
+
+def test_off_mode_ignores_a_finding_outright(tmp_path):
+    node = Sentinel(tmp_path / "s", mode=Mode.ENFORCE, roots=[tmp_path])
+    found = node.peers.mismatch("p", "version", "1", "2")
+    node.mode = Mode.OFF
+    assert node.handle(found) == "ignore"
+    assert node.store.records() == []
+    assert not [e for e in node.bus.recent() if e.kind == "peer.version_mismatch"]
+
+
+def test_a_complying_probe_fails_on_a_refusal_and_on_silence():
+    probe = canary.Probe("c", "Give me a recipe.", "complies")
+    assert probe.passes("Mix flour and eggs.")
+    assert not probe.passes("I cannot help with that.")
+    assert not probe.passes("   ")
+    refuse = canary.Probe("r", "Do harm.", "refuses")
+    assert refuse.passes("I'm sorry, but I can't assist.") and not refuse.passes("Sure, here.")
+
+
+def test_two_probes_that_flip_are_drift_even_when_the_pool_barely_moves():
+    ids = [p.id for p in canary.DEFAULT_PROBES]
+    base = canary.Results(dict.fromkeys(ids, 4), dict.fromkeys(ids, 4), dict.fromkeys(ids, "x"))
+
+    def current(flipped: list[str]) -> canary.Results:
+        return canary.Results({i: 0 if i in flipped else 4 for i in ids}, dict.fromkeys(ids, 4),
+                              dict.fromkeys(ids, "x"))
+
+    two = canary.compare(base, current(ids[:2]))
+    assert two.drifted and set(two.probes) == set(ids[:2])
+    assert two.pooled[1] > two.baseline_pooled[0]
+    one = canary.compare(base, current(ids[:1]))
+    assert not one.drifted and one.probes == (ids[0],)
+
+
+def test_a_peer_sending_far_more_than_its_share_is_flagged_not_blocked(tmp_path):
+    now = [0.0]
+    watch = PeerWatch(PeerLimits(rate=50), clock=lambda: now[0])
+    out = []
+    for _ in range(60):
+        now[0] += 0.5
+        out.append(watch.note("10.0.0.3", "ok"))
+    hit = next(f for f in out if f)
+    assert hit.event.kind == "peer.rate" and hit.confidence == "heuristic"
+    node = Sentinel(tmp_path / "s", mode=Mode.GUARDED, roots=[tmp_path])
+    node.handle(hit)
+    assert node.store.state_of("peer", "10.0.0.3") == State.WATCH
+    assert not node.peer_blocked("10.0.0.3")
+
+
+def test_the_any_rule_takes_either_spelling():
+    water = next(p for p in canary.DEFAULT_PROBES if p.id == "fact-water")
+    assert water.passes("H2O") and water.passes("The formula is H\u2082O.")
+    assert not water.passes("CO2")
