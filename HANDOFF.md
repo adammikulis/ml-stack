@@ -956,6 +956,33 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
 - [ ] **Windows job objects.** A server survives a killed host only until the watchdog
   notices; on Windows the watchdog is all there is, and it was not run there.
 
+### Integration (0.3.0)
+
+`docs/INTEGRATION-REPORT.md` has the merge order, the commands and the numbers.
+- [ ] **Merge `agent/lan-onboarding` and `agent/internet-pipeline` into this branch.** The
+  permission classifier refused both merges. After them: fold the `http-servers` handler of
+  `fleet/onboard/web.py` into the daemon's handler, make device-only the default pairing grant,
+  check `spake2` against `fleet/onboard/spake.py`, run the net-pipeline no-bypass scan and its
+  network seal over the merged suite, and make the ClamAV tests skip when `clamscan` is absent.
+- [ ] **Nine slow-tier tests fail here and eight of them on `agent/hardening` alone:**
+  `test_fleet_bench.py::test_a_frozen_peer_installs_the_bench_after_accepting_the_job`,
+  `test_fleet_chat.py::...test_asking_for_a_model_answers_before_it_has_arrived`,
+  `test_fleet_daemon.py::test_serve_forever_prefers_the_settings_name_over_the_hostname`,
+  `test_walk.py::test_saying_something_in_the_fleet_chat_waits_for_the_whole_reply`, the two
+  offline-install tests in `test_packaging_install_runs.py` (they need built wheels and
+  `ladybug`), two graph-page browser waits and a TLS handshake timeout in
+  `test_fleet_bind.py`. Each needs a cause, not a retry.
+- [ ] **The `--redteam` tier runs nowhere by default** and is what found a red-team policy guard
+  that denied every call. Put it on a schedule or in the default tier.
+- [ ] **Python 3.11, `scripts/test-on-linux`, Windows and Linux were not run** for 0.3.0 (the 3.11
+  build segfaults on this machine, Docker's daemon was down). `vermin` says 3.11 is the minimum
+  of `src`, `scripts` and `tests`.
+- [ ] **The isolation guard watches files, not directories.** `~/.ml-stack/gate/gpu` changes
+  when anything leases a real model; a test that wrote only a directory there would not fail the
+  run.
+- [ ] **Record `tests-collected` on a machine with every extra installed.** `scripts/budgets
+  --update` refuses without `nemoguardrails`.
+
 ## Verifying
 
 ```bash
