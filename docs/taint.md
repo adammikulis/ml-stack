@@ -14,7 +14,7 @@ entered the context, a call to a sink whose arguments are not individually vouch
 `Deny` (proven flow into a hard sink) or `Confirm` (everything else). It is on by default in
 `ml_stack.do.run` and `ml_stack.agent.Agent`, and turning it off needs a reason that is logged.
 
-Status: accepted for the core. The dual-model extractor ships as a helper; the dual-model
+Status: accepted and implemented in `src/ml_stack/taint/`. The dual-model extractor ships as a helper; the dual-model
 architecture as the default is left for later (see "Dual model").
 
 ## Information-flow model
@@ -116,7 +116,7 @@ most severe verdict.
   `Confirm` path. The prompt shows origin and preview, not the model's justification.
 - **Laundering inside the user's own text.** If the person pastes a hostile document into their
   message, its text is `user`. The application must label pasted documents
-  (`Ledger.admit(text, origin, Level.untrusted)`); the ledger cannot tell.
+  (`Ledger.admit(text, Label(Level.UNTRUSTED, origin))`); the ledger cannot tell.
 - **Reads that exfiltrate without a sink.** A tool classified `read` that sends its arguments
   somewhere (a search engine taking a query) is an egress channel in disguise. Classifying it is
   the registry's job.
@@ -179,9 +179,78 @@ branch, where the bus lives. The `ml_stack.guard` logger gets a warning for each
 ## Opting out
 
 `guard.rails(without=["taint"], because="...")` for the loops that use `ml_stack.guard`;
-`Agent(taint=False, because="...")` for the agent loop. Both need the reason, log it at warning
-level and print it, the same as every other rail.
+`Agent(..., interventions=[taint.off("...")])` for the agent loop. Both need the reason, log it at
+warning level and print it, the same as every other rail.
+
+## Control flow
+
+Argument tracking does not see *whether* a call is made, only what goes into it. A page that
+persuades the model to call `serve_down()` with no arguments, or `serve_up` with an installed
+model and an allowed port, passes every argument rule. The bound is the intent rule: for
+`exec`, `egress` and `credential` sinks at least one argument must be a value the person typed
+(or came from a validated extraction), otherwise the call is a `Confirm` even when every value
+is harmless. For `fleet`, `write` and `state` sinks it is not applied: a model that picks among
+values the operator allowed is the cost of being usable. Those three remain the measured gaps.
 
 ## Results
 
-Written from the measurements; see the end of the commit that adds them.
+Measured 2026-10-02 on this branch (`agent/taint`, on `agent/native-guard`, which holds the
+merged guard rails, decision models and agent loop). Python 3.13.5, no served model: every model
+is scripted, and a scripted model that does whatever the planted text says is the worst case, so
+these numbers measure the rails and not a model's manners. Nothing here was run against a real
+model.
+
+**Flows** (`tests/test_taint_flows.py`; 26 attacks, 24 legitimate tasks; each is a task, what the
+run read, and one privileged call; "ran" means the call executed with nobody to answer a
+question). `coarse` is the mechanism this replaces: any tool on the sensitive list asks once
+untrusted text was read.
+
+| chain | attacks that ran | legitimate tasks that asked |
+| --- | --- | --- |
+| rails, no taint tracking | 24 of 26 | 0 of 24 |
+| rails, coarse rule | 4 of 26 | 18 of 24 |
+| rails, taint tracking | 3 of 26 | 4 of 24 |
+
+The 3 that ran are the gaps above: `serve_down()` on its default port, `serve_up` of an installed
+model on an allowed port, and an enum value, each after a page told the model to. The coarse
+rule's 4 are calls to tools it does not list (a shell, a file write, a mail send) and a join
+steered by a peer message; taint tracking stops those and asks about the same legitimate tasks
+less than a quarter as often. The 4 legitimate tasks that ask are the ones where the value came
+from the model, not the person: a reference picked from search results, text the model wrote to
+say, the largest file of a repository the person named, and a path the model chose. A person who
+types the reference, or agrees to a plan that names it, is not asked.
+
+**Canary** (`python -m ml_stack.testing.canary`, scripted worst-case model, 18 attacks, 2 benign
+tasks): rails off 17 succeed; rails without taint 3 succeed (`injected-fleet-join`,
+`injected-download`, `injected-serve`); default 0 succeed; benign tasks completed 2 of 2 in
+all three. (A guard built before the scenario sets its environment variable misses that
+variable; the figure above builds the guard after.)
+
+**Red-team** (`ml_stack.redteam` pages and toolbox, scripted gullible model, indirect-web: 13
+page variants (PDF text layer not built here) times 4 goals, 52 attempts per arm, web guard off so
+only the loop's rails act; PyRIT not installed, so its scorers and converters were not used; the
+evidence is the red-team canary file and honeypot):
+
+| arm | model asked for the call | attack succeeded | call refused |
+| --- | --- | --- | --- |
+| no taint tracking | 24 | 24 | 0 |
+| taint tracking, the toy tools unclassified | 24 | 0 | 24 |
+| taint tracking, tools classified (page reader a read, note a write, report an egress) | 24 | 6 | 18 |
+
+The 6 are the `ssrf` goal: the page reader is a read, and a read that is told an address is an
+egress channel in disguise (see the limits above). Left unclassified, the same tool asks
+instead, which is the cost of an unknown tool: fail closed. The red-team's direct-injection
+attacks put the instruction in the person's own turn; taint tracking treats that as the person
+and does not stop it.
+
+**Tests and mutations.** 114 tests in `tests/test_taint*.py` on real objects: the real rails
+chained by `ml_stack.guard`, the real agent loop against a scripted llama-server on a socket, the
+real `compact`. 73 textual mutants of the core (a flipped comparison, a dropped branch, a
+constant, a removed call, one per rule): the first run killed 47 of 72 and left 25, each a rule
+no test read; tests were added for each and all 73 are killed. These are hand-picked, one per rule,
+not the repository's sampled `scripts/mutate`.
+
+**Not measured.** A served model deciding for itself (`canary.live`, the red-team against a real
+GGUF): it needs a leased model, and the machine was shared. Whether a real model launders taint
+through paraphrase more often than the scripted re-spellings in the flows is therefore unknown;
+those re-spellings are caught only because any model-made value after an untrusted read asks.
