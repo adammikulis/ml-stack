@@ -184,7 +184,8 @@ def test_results_are_truncated_and_a_hook_may_rewrite_them(served) -> None:
     result = next(e for e in collect(agent) if isinstance(e, ToolResult))
     assert result.text == "z" * 10 + "... [40 more characters cut]"
     fake = served(Turn(calls=(call("add", a=1, b=1),)), Turn(text=("ok",)))
-    hooked = Agent(Client(fake.base_url), wide, summarise=lambda n, out: f"{n}: {len(out.text)}")
+    hooked = Agent(Client(fake.base_url), wide,
+                   budget=Budget(summarise=lambda n, out: f"{n}: {len(out.text)}"))
     assert next(e for e in collect(hooked) if isinstance(e, ToolResult)).text == "add: 50"
 
 

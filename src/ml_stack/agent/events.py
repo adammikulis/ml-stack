@@ -6,8 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["Compacted", "Context", "Done", "Event", "Repair", "Text", "Thinking", "ToolCall",
-           "ToolResult"]
+__all__ = ["Compacted", "ConfirmRequest", "Context", "Denied", "Done", "Event", "Repair",
+           "Text", "Thinking", "ToolCall", "ToolResult"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,9 +74,33 @@ class Compacted:
 
 
 @dataclass(frozen=True, slots=True)
+class ConfirmRequest:
+    """A question for the person before a call runs (``id`` and ``name`` are empty for a
+    question about the model call); the agent waits for the answer."""
+
+    id: str
+    name: str
+    question: str
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"type": "confirm", "id": self.id, "name": self.name,
+                "question": self.question, "details": self.details}
+
+
+@dataclass(frozen=True, slots=True)
+class Denied:
+    """A call that was not run because an intervention or the person refused it."""
+
+    id: str
+    name: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class Done:
-    """Why the run ended (``answer``, ``max_steps``, ``max_tool_calls``, ``max_tokens`` or
-    ``repairs_exhausted``), the final text, and the counts."""
+    """Why the run ended (``answer``, ``max_steps``, ``max_tool_calls``, ``max_tokens``,
+    ``repairs_exhausted`` or ``denied``), the final text, and the counts."""
 
     reason: str
     text: str = ""
@@ -86,4 +110,5 @@ class Done:
     messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
 
-Event = Text | Thinking | ToolCall | ToolResult | Repair | Context | Compacted | Done
+Event = (Text | Thinking | ToolCall | ToolResult | Repair | Denied | ConfirmRequest
+         | Context | Compacted | Done)

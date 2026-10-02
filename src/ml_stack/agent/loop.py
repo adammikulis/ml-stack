@@ -11,15 +11,26 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ml_stack.agent.auto import AutoCompact
 from ml_stack.agent.compact import Compaction, CompactResult
-from ml_stack.agent.events import Done, Event, Repair, Text, Thinking, ToolCall, ToolResult
+from ml_stack.agent.events import (
+    Denied,
+    Done,
+    Event,
+    Repair,
+    Text,
+    Thinking,
+    ToolCall,
+    ToolResult,
+)
+from ml_stack.agent.interventions import InterventionContext
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
+from ml_stack.agent.vet import Confirmer, Verdict, Vetter
 from ml_stack.client.tokens import estimate_tokens
 from ml_stack.http import ServerError
 
@@ -34,7 +45,8 @@ class Cancelled(RuntimeError):
 class Budget:
     """What stops a run: steps (model turns), tool calls, completion tokens, and how many
     consecutive turns of nothing but rejected calls are tolerated. ``profile`` is how far the
-    tool schemas are trimmed (`ml_stack.agent.schema.PROFILES`)."""
+    tool schemas are trimmed (`ml_stack.agent.schema.PROFILES`); ``summarise`` rewrites a
+    tool result before the model sees it."""
 
     max_steps: int = 8
     max_tool_calls: int = 64
@@ -43,6 +55,7 @@ class Budget:
     parallel: int = 4
     max_result_chars: int = 4000
     profile: str = "full"
+    summarise: Summarise | None = None
 
 
 class Chats(Protocol):
@@ -62,6 +75,7 @@ class _Pending:
     name: str
     args: dict[str, Any] | None
     errors: list[str]
+    denied: str = ""
 
 
 class Agent:
@@ -69,16 +83,27 @@ class Agent:
 
     ``auto_compact`` makes a run compact its conversation before a request would overflow
     the context, and once more if the server refuses a request for being too long.
+    ``interventions`` are asked before the run, before each model call and before each tool
+    call (`ml_stack.agent.interventions`); ``confirm`` answers their `Confirm`, and without
+    it a `Confirm` is a refusal.
     """
 
     def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
-                 summarise: Summarise | None = None,
-                 auto_compact: Compaction | None = None) -> None:
+                 auto_compact: Compaction | None = None,
+                 interventions: Sequence[Any] = ()) -> None:
         self.client = client
         self.tools = tools
         self.budget = budget or Budget()
-        self.summarise = summarise
         self.auto = AutoCompact(client, auto_compact) if auto_compact else None
+        self.vet = Vetter(interventions)
+
+    @property
+    def confirm(self) -> Confirmer | None:
+        return self.vet.confirm
+
+    @confirm.setter
+    def confirm(self, handler: Confirmer | None) -> None:
+        self.vet.confirm = handler
 
     async def compact_now(self, messages: list[dict[str, Any]]) -> CompactResult:
         """Compact ``messages`` in place now, whatever the context holds."""
@@ -93,8 +118,19 @@ class Agent:
         schemas = from_mcp(await self.tools.list_tools(), self.budget.profile)
         index = index_by_name(schemas)
         spent = calls = rejected_turns = 0
+        verdict = Verdict()
+        async for event in self.vet.check("before_invocation",
+                                          (_context(messages, 0, 0),), verdict):
+            yield event
         for step in range(1, self.budget.max_steps + 1):
             reply = None
+            async for event in self.vet.check("before_model_call",
+                                              (_context(messages, step, calls),), verdict):
+                yield event
+            if verdict.denied:
+                yield Done("denied", verdict.denied, step - 1, calls, spent, messages)
+                return
+            self.vet.inject(messages)
             if self.auto:
                 for event in await self.auto.before(messages, schemas):
                     yield event
@@ -123,8 +159,11 @@ class Agent:
                 return
             calls += len(pending)
             messages.append(_assistant(text, pending))
+            async for event in self._vet(pending, messages, step, calls):
+                yield event
             for one in pending:
                 yield (Repair(one.id, one.name, one.errors) if one.errors
+                       else Denied(one.id, one.name, one.denied) if one.denied
                        else ToolCall(one.id, one.name, one.args or {}))
             answers = await self._dispatch(pending)
             for one, answer in zip(pending, answers, strict=True):
@@ -169,6 +208,19 @@ class Agent:
         finally:
             stop.set()
 
+    async def _vet(self, pending: list[_Pending], messages: list[dict[str, Any]], step: int,
+                   calls: int) -> AsyncIterator[Event]:
+        for one in pending:
+            if one.errors:
+                continue
+            verdict = Verdict()
+            call = {"id": one.id, "name": one.name, "arguments": one.args}
+            async for event in self.vet.check("before_tool_call",
+                                              (call, _context(messages, step, calls)),
+                                              verdict, ident=one.id, name=one.name):
+                yield event
+            one.denied = verdict.denied
+
     def _pending(self, reply: Any, index: dict[str, dict[str, Any]]) -> list[_Pending]:
         out = []
         for n, call in enumerate(reply.tool_calls or _calls_in_text(reply.content, index), 1):
@@ -187,6 +239,9 @@ class Agent:
         gate = asyncio.Semaphore(max(1, self.budget.parallel))
 
         async def one(call: _Pending) -> ToolOutput:
+            if call.denied:
+                return ToolOutput(json.dumps({"ok": False, "tool": call.name,
+                                              "denied": call.denied}), is_error=True)
             if call.errors:
                 return ToolOutput(json.dumps({"ok": False, "tool": call.name,
                                               "errors": call.errors,
@@ -199,11 +254,16 @@ class Agent:
         return list(await asyncio.gather(*(one(c) for c in pending)))
 
     def _shown(self, name: str, output: ToolOutput) -> str:
-        text = self.summarise(name, output) if self.summarise else output.text
+        text = self.budget.summarise(name, output) if self.budget.summarise else output.text
         limit = self.budget.max_result_chars
         if len(text) > limit:
             return f"{text[:limit]}... [{len(text) - limit} more characters cut]"
         return text
+
+
+def _context(messages: Sequence[Mapping[str, Any]], step: int, calls: int
+             ) -> InterventionContext:
+    return InterventionContext(tuple(messages), step, calls)
 
 
 def _overflowed(exc: ServerError) -> bool:
