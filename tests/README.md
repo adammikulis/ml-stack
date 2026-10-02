@@ -7,8 +7,11 @@ invented.
 
 ## Running them
 
-One command per tier, `scripts/test <tier>`; `-n N` sets the workers (default 4) and any other
-argument goes to pytest.
+One command per tier, `scripts/test <tier>`; `-n N` asks for workers (default 4) and any other
+argument goes to pytest. Each run queues for them in the machine-wide budget
+(`scripts/testslots.py`; `python scripts/testslots.py status`) and uses what it is granted, so
+run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default three
+quarters of the cores) and `DEV_TEST_SLOTS=off` switches the queue off.
 
 | tier | what runs | when |
 | --- | --- | --- |

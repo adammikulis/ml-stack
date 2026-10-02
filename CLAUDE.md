@@ -300,7 +300,12 @@ merging anything that touches packaging, the page or the fleet. `-n 0` runs one 
 failure needs a clean order; one Linux CI entry runs the whole suite that way, so a test that only
 passes beside its neighbours is caught there. Do not run the whole suite after every intermediate
 commit: the branch has not landed, and it is rebased onto a moved development branch before it does.
-Agents share the machine, so run the suite at `-n 4` or fewer and one run at a time.
+Agents share the machine, so a test run queues for workers: run `scripts/test <tier>` (or
+`scripts/test-on-linux`), never a bare `pytest -n N`. They take a lease from the machine-wide budget
+(`scripts/testslots.py`, three quarters of the cores, first come first served, directory
+`~/.cache/dev-test-slots`, shared with pcb-engine) and run with the workers granted, at most `-n`;
+`python scripts/testslots.py status` says who holds what. A red-team or other model-backed run takes a
+lease of one or two (`testslots.lease(1, label="ml-stack: redteam")`) as well as the broker's.
 
 No test calls a paid or quota-limited API or a public endpoint on its own, whatever keys or logins
 the machine holds: such a test is marked `live_api` or `live_net` and skipped unless

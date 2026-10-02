@@ -8,6 +8,9 @@
     scripts/test all       everything, slow included: what CI runs
     scripts/test heavy --junit J   rewrite tests/heavy-modules.txt from a pytest --junitxml file J
 
+Every tier queues for workers in the machine-wide budget (scripts/testslots.py) and runs with
+the number it is granted, at most ``-n``.
+
 Arguments after the tier go to pytest. ``quick`` runs the full tier in full, and says
 why, when it cannot tell what a change reaches.
 """
@@ -25,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import affected
+import testslots
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -131,10 +135,12 @@ def main() -> int:
     args, rest = parser.parse_known_args()
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
-    if args.tier == "quick":
-        return quick(args, rest)
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
-    return run(pytest_command(args.workers, *tiers[args.tier], *rest))
+    with testslots.lease(max(1, args.workers), label=f"ml-stack: {args.tier}") as got:
+        args.workers = min(args.workers, got.workers)
+        if args.tier == "quick":
+            return quick(args, rest)
+        return run(pytest_command(args.workers, *tiers[args.tier], *rest))
 
 
 if __name__ == "__main__":
