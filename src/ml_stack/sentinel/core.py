@@ -137,17 +137,20 @@ class Sentinel:
         held = self.store.find_fingerprint(fingerprint(text))
         if held is not None:
             return Screened(placeholder(held.id), held.id)
-        if verdict is not None:
-            answer = verdict(text, source)
-            if getattr(answer, "denied", False):
-                found = self.rails.denied_text(session or "none", str(getattr(answer, "rail", "")),
-                                               str(getattr(answer, "reason", "")), source, text)
-                self.handle_all(found)
-                again = self.store.find_fingerprint(fingerprint(text))
-                if again is not None:
-                    return Screened(placeholder(again.id), again.id)
-                return Screened(placeholder("unrecorded"), "unrecorded")
-        return Screened(text)
+        if verdict is None:
+            return Screened(text)
+        answer = verdict(text, source)
+        denied = bool(getattr(answer, "denied", False))
+        if not (denied or getattr(answer, "tainted", False)):
+            return Screened(text)
+        rail, reason = str(getattr(answer, "rail", "")), str(getattr(answer, "reason", ""))
+        who = session or "none"
+        self.handle_all(self.rails.denied_text(who, rail, reason, source, text) if denied
+                        else self.rails.tainted_text(who, rail, reason, text))
+        again = self.store.find_fingerprint(fingerprint(text))
+        if again is not None:
+            return Screened(placeholder(again.id), again.id)
+        return Screened(placeholder("unrecorded"), "unrecorded") if denied else Screened(text)
 
     def register_derived(self, session: str, memory_key: str) -> None:
         """Note that the memory ``memory_key`` (a summary, note, KV slot) was built from
