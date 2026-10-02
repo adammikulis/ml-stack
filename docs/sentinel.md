@@ -307,9 +307,10 @@ high-confidence finding.
 calls, 3000 peer requests with an occasional single failure and six pinned files touched and
 rewritten with the same bytes, in `enforce` mode: 0 quarantined, 0 watched. 2000 further
 screens and calls with decoys planted: 0 decoy findings. Held-text overlap against 536
-paragraphs of `docs/` after three injections were held: 0 false matches. Against the real
-guard rails, text they fence is watched in `guarded` mode and held in `enforce` mode; how
-often they fence ordinary text is theirs to report.
+paragraphs of `docs/` after three injections were held: 0 false matches. Against the real guard rails (integration branch), 651 paragraphs of `docs/` shown as web
+results in `enforce` mode: 3 held (0.5%), none of the session frozen. The rails mark every
+result from an external tool as tainted; sentinel acts only on text whose reason says it reads
+like an instruction, and five of those inside five minutes freeze the session in `enforce`.
 
 **Held text copied into a summary.** Six verbatim copies (whole, and quoted sentence) of held
 injections: 6 of 6 found. Three paraphrases: 0 of 3 found. The signal is shared six-word runs;
