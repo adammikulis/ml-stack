@@ -90,7 +90,7 @@ def is_allowed(lic: str) -> bool:
 
 def table(rows: list[tuple[str, str, str]]) -> str:
     lines = ["| Package | Version | Licence |", "|---|---|---|"]
-    lines += [f"| {n} | {v} | {lic.replace('|', '/')} |" for n, v, lic in rows]
+    lines += [f"| `{n}` | {v} | {lic.replace('|', '/')} |" for n, v, lic in rows]
     return "\n".join(lines)
 
 
