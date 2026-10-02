@@ -58,6 +58,10 @@ class SealedFile:
             os.close(fd)
         return key
 
+    def mac(self, data: bytes) -> str:
+        """An HMAC-SHA256 of ``data`` under this file's key."""
+        return hmac.new(self._key(), data, hashlib.sha256).hexdigest()
+
     def _seal(self, payload: dict[str, Any]) -> str:
         return hmac.new(self._key(), _canonical(payload), hashlib.sha256).hexdigest()
 

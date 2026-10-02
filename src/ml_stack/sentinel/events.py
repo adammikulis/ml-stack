@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -14,6 +13,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from ml_stack.files import promote
 from ml_stack.lock import only_one
 from ml_stack.sentinel.redaction import redact_value
 from ml_stack.sentinel.sealed import SealedFile
@@ -85,9 +85,9 @@ class Verified:
     head: str
 
 
-def _link(prev: str, record: Mapping[str, Any]) -> str:
+def _body(prev: str, record: Mapping[str, Any]) -> bytes:
     body = json.dumps(record, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
-    return hashlib.sha256((prev + body).encode()).hexdigest()
+    return (prev + body).encode()
 
 
 class EventLog:
@@ -122,10 +122,12 @@ class EventLog:
             if chain is None:
                 chain = Chain(0, GENESIS, GENESIS)
                 record["evidence"] = {**record["evidence"], "chain": "head failed its seal"}
+            chain = self._catch_up(chain)
             if self.path.exists() and self.path.stat().st_size > self.max_bytes:
                 chain = self._rotate(chain)
             record["seq"], record["prev"] = chain.count, chain.last
-            record["hash"] = _link(chain.last, {k: v for k, v in record.items() if k != "hash"})
+            record["hash"] = self._head.mac(
+                _body(chain.last, {k: v for k, v in record.items() if k != "hash"}))
             fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             try:
                 line = json.dumps(record, sort_keys=True, ensure_ascii=True) + "\n"
@@ -136,6 +138,19 @@ class EventLog:
                              "base": chain.base})
             if self.anchor is not None:
                 self._write_anchor(chain.count + 1, record["hash"])
+
+    def _catch_up(self, chain: Chain) -> Chain:
+        """Adopt a last record that was written but whose head update never landed."""
+        if not self.path.exists():
+            return chain
+        lines = self.path.read_text(encoding="utf-8", errors="replace").splitlines()
+        try:
+            tail = json.loads(lines[-1])
+        except (ValueError, IndexError):
+            return chain
+        if tail.get("seq") == chain.count and tail.get("prev") == chain.last:
+            return Chain(chain.count + 1, str(tail["hash"]), chain.base)
+        return chain
 
     def _write_anchor(self, count: int, last: str) -> None:
         if self.anchor is None:
@@ -160,12 +175,13 @@ class EventLog:
                     base = str(json.loads(lines[-1])["hash"])
                 except (ValueError, KeyError, TypeError):
                     base = chain.base
+            self._head.save({"count": chain.count, "last": chain.last, "base": base})
             oldest.unlink()
         for number in range(self.keep - 2, 0, -1):
             if self._numbered(number).exists():
-                self._numbered(number).rename(self._numbered(number + 1))
+                promote(self._numbered(number), self._numbered(number + 1))
         if self.keep > 1:
-            self.path.rename(self._numbered(1))
+            promote(self.path, self._numbered(1))
         return Chain(chain.count, chain.last, base)
 
     def files(self) -> list[Path]:
@@ -187,41 +203,60 @@ class EventLog:
         chain = self._chain()
         return "unreadable" if chain is None else f"{chain.count} {chain.last}"
 
+    def _records(self) -> list[tuple[str, str]]:
+        return [(f"{file.name}:{n}", line) for file in self.files()
+                for n, line in enumerate(file.read_text(encoding="utf-8").splitlines(), 1)]
+
     def verify(self, anchor: str = "") -> Verified:
         """Check every link, the sequence, the sealed head, and ``anchor`` (a ``head()``
         line kept elsewhere) when given."""
         problems: list[str] = []
+        loaded = self._head.load()
         chain = self._chain()
-        if chain is None:
+        if chain is None or loaded.status == "recovered":
             problems.append("the head file failed its seal")
-            chain = Chain(0, GENESIS, GENESIS)
-        prev, seen, first = chain.base, 0, True
-        expected = -1
-        for file in self.files():
-            for number, line in enumerate(file.read_text(encoding="utf-8").splitlines(), 1):
-                where = f"{file.name}:{number}"
-                try:
-                    record = json.loads(line)
-                    claimed = str(record.pop("hash"))
-                except (ValueError, KeyError, AttributeError):
-                    problems.append(f"{where}: not a chained record")
-                    continue
-                if record.get("prev") != prev:
-                    problems.append(f"{where}: does not follow the record before it")
-                if claimed != _link(str(record.get("prev", "")), record):
-                    problems.append(f"{where}: edited")
-                seq = record.get("seq", -1)
-                if not first and seq != expected:
-                    problems.append(f"{where}: sequence {seq}, expected {expected}")
-                first, prev, seen = False, claimed, seen + 1
-                expected = seq + 1 if isinstance(seq, int) else -1
-        if prev != chain.last:
+        chain = chain or Chain(0, GENESIS, GENESIS)
+        rows = self._records()
+        start = self._start(rows, chain.base)
+        prev, before, expected, last_seq, seen = chain.base, chain.base, -1, -1, 0
+        for where, line in rows[start:]:
+            try:
+                record = json.loads(line)
+                claimed = str(record.pop("hash"))
+            except (ValueError, KeyError, AttributeError):
+                problems.append(f"{where}: not a chained record")
+                continue
+            if record.get("prev") != prev:
+                problems.append(f"{where}: does not follow the record before it")
+            if claimed != self._head.mac(_body(str(record.get("prev", "")), record)):
+                problems.append(f"{where}: edited")
+            seq = record.get("seq", -1)
+            if seen and seq != expected:
+                problems.append(f"{where}: sequence {seq}, expected {expected}")
+            before, prev, seen = prev, claimed, seen + 1
+            last_seq = seq if isinstance(seq, int) else -1
+            expected = last_seq + 1
+        ahead = last_seq == chain.count and before == chain.last
+        if prev != chain.last and not ahead:
             problems.append("the log ends before the sealed head: records were cut off")
         if chain.count and not seen:
             problems.append("the log is empty but the head says it was not")
         if anchor and anchor.strip() != f"{chain.count} {chain.last}":
             problems.append("the head differs from the anchor")
         return Verified(not problems, tuple(problems), seen, f"{chain.count} {chain.last}")
+
+    def _start(self, rows: list[tuple[str, str]], base: str) -> int:
+        """Where checking begins: after the record whose hash is ``base`` when one is still
+        on disk (an interrupted rotation leaves older files behind), else at the start."""
+        if base == GENESIS:
+            return 0
+        for index, (_, line) in enumerate(rows):
+            try:
+                if json.loads(line).get("hash") == base:
+                    return index + 1
+            except ValueError:
+                continue
+        return 0
 
 
 class Bus:

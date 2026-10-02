@@ -89,6 +89,7 @@ class Record:
     updated: float
     history: list[dict[str, Any]] = field(default_factory=list)
     fingerprint: str = ""
+    shingles: list[str] = field(default_factory=list)
     held: dict[str, Any] | None = None
     action: dict[str, Any] | None = None
     purged: bool = False
@@ -97,7 +98,7 @@ class Record:
         return {"id": self.id, "kind": self.kind, "key": self.key, "state": self.state.value,
                 "reason": self.reason, "evidence": self.evidence, "created": self.created,
                 "updated": self.updated, "history": self.history,
-                "fingerprint": self.fingerprint, "held": self.held, "action": self.action,
+                "fingerprint": self.fingerprint, "shingles": self.shingles, "held": self.held, "action": self.action,
                 "purged": self.purged}
 
     @classmethod
@@ -106,16 +107,26 @@ class Record:
                    state=State(data["state"]), reason=data["reason"],
                    evidence=data["evidence"], created=data["created"], updated=data["updated"],
                    history=data["history"], fingerprint=data.get("fingerprint", ""),
+                   shingles=data.get("shingles", []),
                    held=data.get("held"), action=data.get("action"),
                    purged=data.get("purged", False))
 
 
 _SPACE = re.compile(r"\s+")
+_WORD = re.compile(r"\w+")
 
 
 def fingerprint(text: str) -> str:
     """A digest of ``text`` with case and runs of whitespace normalised."""
     return hashlib.sha256(_SPACE.sub(" ", text.strip().lower()).encode()).hexdigest()
+
+
+def shingles(text: str, size: int = 6, most: int = 256) -> list[str]:
+    """Short hashes of every run of ``size`` words in ``text``, at most ``most`` of them."""
+    words = _WORD.findall(text.lower())
+    grams = {hashlib.sha256(" ".join(words[i:i + size]).encode()).hexdigest()[:10]
+             for i in range(max(0, len(words) - size + 1))}
+    return sorted(grams)[:most]
 
 
 def placeholder(ident: str) -> str:
@@ -214,6 +225,20 @@ class Store:
             self._refresh()
             return next((r for r in self._records.values()
                          if r.fingerprint == digest and r.state == State.QUARANTINED), None)
+
+    def find_overlap(self, text: str, hits: int = 2) -> Record | None:
+        """The quarantined record sharing at least ``hits`` six-word runs with ``text``: a
+        copy or a summary that kept a held sentence."""
+        mine = set(shingles(text, most=100_000))
+        if not mine:
+            return None
+        with self._lock:
+            self._refresh()
+            for record in self._records.values():
+                if (record.state == State.QUARANTINED and record.shingles
+                        and len(mine & set(record.shingles)) >= min(hits, len(record.shingles))):
+                    return record
+        return None
 
     # -- moving between states -------------------------------------------------------
     def _new(self, kind: str, key: str, reason: str, evidence: dict[str, Any]) -> Record | None:
@@ -317,6 +342,7 @@ class Store:
     def _hold_text(self, record: Record, text: str) -> None:
         clean = redact(text)
         record.fingerprint = fingerprint(text)
+        record.shingles = shingles(text)
         room = self.limits.max_payload_total - self._payload_total()
         data = clean.encode("utf-8", errors="replace")[:self.limits.max_payload_bytes]
         if len(data) > room:
@@ -325,7 +351,7 @@ class Store:
         body = data.decode("utf-8", errors="ignore")
         name = f"{record.id}.json"
         write_text(self.root / "items" / name,
-                   json.dumps({"id": record.id, "text": body, "redacted": True}))
+                   json.dumps({"version": 1, "id": record.id, "text": body, "redacted": True}))
         (self.root / "items" / name).chmod(0o600)
         record.held = {"file": name, "bytes": len(data),
                        "truncated": len(clean.encode()) > len(data),

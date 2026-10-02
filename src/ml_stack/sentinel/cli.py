@@ -45,6 +45,14 @@ def status(args: argparse.Namespace) -> int:
     return _out(args, info, lambda: [f"{k}: {v}" for k, v in info.items()])
 
 
+@COMMANDS.command("chip", help="the status mark: green, yellow, red or none, with a label",
+                  options=(JSON,))
+def chip(args: argparse.Namespace) -> int:
+    """Print the status mark."""
+    mark = sentinel.default().chip()
+    return _out(args, mark, lambda: [f"{mark['verdict']}  {mark['label']}"])
+
+
 @COMMANDS.command("events", help="the most recent security events",
                   options=(JSON, flag("--limit", type=int, default=50),
                            flag("--kind", default="", help="only kinds starting with this"),

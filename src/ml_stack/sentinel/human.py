@@ -27,6 +27,7 @@ _FORBIDDEN = (
     "ml_stack_sentinel", "sentinel.release", "sentinel.purge", "sentinel/state",
 )
 _PROTECTED: set[str] = set()
+_STATE_DIR = re.compile(r"ml-stack/+sentinel")
 _VERBS = re.compile(r"\b(?:release|purge|unquarantine|disable|mode|baseline)\b")
 
 
@@ -98,7 +99,7 @@ def agent_may(tool: str, arguments: Mapping[str, Any] | None = None) -> str:
         return f"tool {tool} is a sentinel verb"
     flat = _flatten(arguments or {})
     guarded = {str(home.state("sentinel")).lower(), *_PROTECTED}
-    if any(d in flat for d in guarded) or ".ml-stack/sentinel" in flat:
+    if any(d in flat for d in guarded) or _STATE_DIR.search(flat):
         return "the call names sentinel's state directory"
     for needle in _FORBIDDEN:
         if needle in flat:

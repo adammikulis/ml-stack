@@ -12,6 +12,7 @@ from typing import Any
 
 from ml_stack.sentinel.core import Sentinel
 from ml_stack.sentinel.events import Event, Severity
+from ml_stack.sentinel.human import agent_may
 
 __all__ = ["GuardLogHandler", "agent_gate", "broker_listener", "note_refusal",
            "watch_authenticator"]
@@ -80,8 +81,6 @@ def broker_listener(sentinel: Sentinel) -> Callable[[str, dict[str, object]], No
 def agent_gate(sentinel: Sentinel) -> Callable[..., str]:
     """A check for an agent loop to call before running a tool: why the call must not
     run, or an empty string."""
-    from ml_stack.sentinel.human import agent_may
-
     def gate(tool: str, arguments: Mapping[str, Any] | None = None, *, session: str = "",
              caller: str = "") -> str:
         return agent_may(tool, arguments) or sentinel.screen_call(

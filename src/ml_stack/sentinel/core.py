@@ -21,7 +21,15 @@ from ml_stack.sentinel.policy import Mode, decide
 from ml_stack.sentinel.rails import RailWatch
 from ml_stack.sentinel.rates import Abuse, PeerWatch, ToolMix
 from ml_stack.sentinel.sealed import SealedFile
-from ml_stack.sentinel.store import Holding, State, Store, fingerprint, placeholder, sentinel_dir
+from ml_stack.sentinel.store import (
+    Holding,
+    Record,
+    State,
+    Store,
+    fingerprint,
+    placeholder,
+    sentinel_dir,
+)
 
 __all__ = ["ENV", "Screened", "Sentinel"]
 
@@ -58,6 +66,8 @@ class Sentinel:
         self.peers, self.tools, self.rails = PeerWatch(), ToolMix(), RailWatch()
         self.abuse = Abuse()
         self.last_scan = 0.0
+        self._derived: dict[str, list[str]] = {}
+        self.store.on_quarantine.setdefault("session", []).append(self._taint_derived)
         self._stop = threading.Event()
         if self.mode == Mode.OFF:
             self.bus.emit(Event("sentinel.off", Severity.WARNING, "core", "", {}, clock()))
@@ -138,6 +148,65 @@ class Sentinel:
                     return Screened(placeholder(again.id), again.id)
                 return Screened(placeholder("unrecorded"), "unrecorded")
         return Screened(text)
+
+    def register_derived(self, session: str, memory_key: str) -> None:
+        """Note that the memory ``memory_key`` (a summary, note, KV slot) was built from
+        ``session``, so freezing the session quarantines it too."""
+        self._derived.setdefault(session, []).append(memory_key)
+
+    def _taint_derived(self, record: Record) -> None:
+        for key in self._derived.pop(record.key, []):
+            self.store.quarantine(("memory", key), f"derived from frozen session {record.key}",
+                                  {"session": record.key})
+
+    def memory_trusted(self, key: str) -> bool:
+        """Whether a stored summary, note or cache may be loaded."""
+        return self.mode == Mode.OFF or not self.store.blocked("memory", key)
+
+    def screen_memory(self, key: str, text: str, *, session: str = "") -> Screened:
+        """A summary or note about to be stored or loaded. One that repeats a held
+        sentence is held in its own right and replaced by a placeholder, so it is rebuilt
+        from clean sources instead of reused."""
+        if self.mode == Mode.OFF:
+            return Screened(text)
+        if session:
+            self.register_derived(session, key)
+        if not self.memory_trusted(key):
+            held = self.store.find("memory", key)
+            return Screened(placeholder(held.id if held else "tampered"), held.id if held else "")
+        source = self.store.find_overlap(text) or self.store.find_fingerprint(fingerprint(text))
+        if source is None:
+            return Screened(text)
+        self.bus.emit(Event("memory.poisoned", Severity.WARNING, "memory", f"memory:{key}",
+                            {"copies": source.id}, self.clock()))
+        if self.mode == Mode.OBSERVE or self.dry_run:
+            return Screened(text)
+        held = self.store.quarantine(("memory", key), f"repeats held content {source.id}",
+                                     {"copies": source.id}, Holding(text=text))
+        ident = held.id if held else "unrecorded"
+        return Screened(placeholder(ident), ident)
+
+    def scrub_env(self, env: Mapping[str, str]) -> dict[str, str]:
+        """``env`` without any variable named as a suspect credential."""
+        return {k: v for k, v in env.items() if not self.credential_suspect(k)}
+
+    def mcp_allowed(self, server: str) -> bool:
+        return self.mode == Mode.OFF or not self.store.blocked("mcp_server", server)
+
+    def chip(self) -> dict[str, Any]:
+        """A status mark in the UI's verdict vocabulary (green, yellow, red, none)."""
+        info = self.status()
+        held = info["subjects"][State.QUARANTINED.value]
+        watched = info["subjects"][State.WATCH.value]
+        if self.mode == Mode.OFF:
+            verdict, label = "none", "sentinel off"
+        elif info["tampered"] or info["log_ok"] is False:
+            verdict, label = "red", "sentinel: state or log tampered"
+        elif held or watched:
+            verdict, label = "yellow", f"sentinel: {held} held, {watched} watched"
+        else:
+            verdict, label = "green", f"sentinel: {self.mode.value}, nothing held"
+        return {"verdict": verdict, "label": label, "held": held, "watched": watched}
 
     def screen_call(self, tool: str, arguments: Mapping[str, Any] | None, *,
                     session: str = "", caller: str = "") -> str:
