@@ -768,15 +768,19 @@ def pytest_addoption(parser) -> None:
     parser.addoption("--slow", action="store_true", default=False,
                      help="also run the tests marked slow (a browser, a subprocess, a "
                           "wheel build, a network timeout)")
+    parser.addoption("--redteam", action="store_true", default=False,
+                     help="also run the tests marked redteam (they need the redteam extra)")
 
 
 def pytest_collection_modifyitems(config, items) -> None:
-    """Leave the slow tests out unless --slow was asked for."""
-    if config.getoption("--slow"):
+    """Leave the slow tests out unless --slow was asked for, and the redteam tests out unless
+    --redteam was."""
+    left_out = [name for name in ("slow", "redteam") if not config.getoption(f"--{name}")]
+    if not left_out:
         return
     kept, dropped = [], []
     for item in items:
-        (dropped if "slow" in item.keywords else kept).append(item)
+        (dropped if any(item.get_closest_marker(name) for name in left_out) else kept).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept
