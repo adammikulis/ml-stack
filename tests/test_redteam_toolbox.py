@@ -58,7 +58,7 @@ def test_a_guarded_read_of_an_address_on_this_side_of_the_router_is_refused_and_
     box = stood_up.toolbox(stood_up.canary())
     for url in (f"http://127.0.0.1:{stood_up.honeypot.port}/internal/x",
                 "http://internal.example/internal/meta", "http://localhost/internal/x"):
-        with pytest.raises(ValueError, match="public internet|this machine"):
+        with pytest.raises(ValueError, match=r"public internet|this machine"):
             box.read_page(url)
     assert stood_up.honeypot.hits() == []
     assert [call.done for call in box.calls] == [False, False, False]
