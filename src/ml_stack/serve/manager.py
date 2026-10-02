@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.hub import free_memory, room as machine_room
+from ml_stack.serve import exit_guard
 from ml_stack.serve.backend import (
     Lease,
     LlamaServerBackend,
@@ -41,6 +43,7 @@ from ml_stack.serve.leases import (
     orphaned,
     reap_one,
     recorded_servers,
+    same_process,
 )
 from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
@@ -50,6 +53,7 @@ from ml_stack.serve.process import (
     measuring,
     pid_exists,
     self_or_ancestor,
+    started_at,
 )
 from ml_stack.serve.python_engines import ENGINES
 from ml_stack.serve.weights import scaled_timeout, weight_of
@@ -95,7 +99,9 @@ class ServerManager:
         backend: ServerBackend | None = None,
         *,
         state_file: Path | None = None,
+        stop_on_exit: bool = True,
     ) -> None:
+        self.stop_on_exit = stop_on_exit
         self.backend = backend or LlamaServerBackend()
         self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
@@ -387,6 +393,7 @@ class ServerManager:
         emit(on_event, "stopping", port=spec.port, pid=pid)
         if pid:
             kill_process_tree(pid)
+            exit_guard.release(pid)
         self._forget(spec.port)
 
         # kv_unified keeps the cache's stream count at 1 across the relaunch; any other
@@ -419,12 +426,14 @@ class ServerManager:
             held = info.process
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
+        exit_guard.release(info.pid)
         reap_one(held, grace_s=grace_s)
         self._forget(info.port)
 
     def detach(self, info: ServerInfo) -> None:
         """Record the server under its own pid and stop tracking it in this process."""
         self._processes.pop(info.port, None)
+        exit_guard.release(info.pid)
         entry = self._mine.pop(str(info.port), None)
         if entry is None or not info.pid:
             self._save()
@@ -441,12 +450,23 @@ class ServerManager:
             pid = entry.get("pid")
             if isinstance(pid, int) and pid_exists(pid):
                 stopped += kill_process_tree(pid, grace_s=grace_s)
+            exit_guard.release(pid)
         for held in list(self._processes.values()):
             reap_one(held, grace_s=grace_s)
         self._processes.clear()
         self._mine.clear()
         self._save()
         return stopped
+
+    def close(self) -> None:
+        """Stop every server this manager started. Servers it adopted are left running."""
+        self.stop_all()
+
+    def __enter__(self) -> ServerManager:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     # ------------------------------------------------------------------ state file
 
@@ -463,7 +483,8 @@ class ServerManager:
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
         }
         self._save()
-        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
+        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file),
+                     stop_on_exit=self.stop_on_exit)
 
     def _record(self, spec: ServerSpec, info: ServerInfo) -> None:
         self._mine[str(spec.port)] = {
@@ -475,8 +496,10 @@ class ServerManager:
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
+            "started": started_at(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
         }
+        forget_server(info.base_url)
         if info.process is not None:
             self._processes[info.port] = info.process
         self._save()
@@ -546,7 +569,17 @@ class ServerManager:
         return reclaim_port(port, recorded_pids=[recorded] if recorded else None)
 
 
-_DEFAULT = ServerManager()
+_DEFAULT: ServerManager | None = None
+_DEFAULT_LOCK = threading.Lock()
+
+
+def default_manager() -> ServerManager:
+    """The manager `serve` uses when it is not given one, built on first use."""
+    global _DEFAULT
+    with _DEFAULT_LOCK:
+        if _DEFAULT is None:
+            _DEFAULT = ServerManager()
+        return _DEFAULT
 
 
 @contextmanager
@@ -569,7 +602,7 @@ def serve(
     ``roam``, ``escalate``, ``anyway``, ``on_event`` and ``say`` go to
     :meth:`ServerManager.lease`.
     """
-    manager = manager or _DEFAULT
+    manager = manager or default_manager()
     spec = ServerSpec(
         model=model,
         port=port if port is not None else free_port(),
@@ -597,7 +630,7 @@ def stop_all_servers() -> list[int]:
         if not isinstance(entry, dict):
             continue
         pid = entry.get("pid")
-        if isinstance(pid, int) and pid_exists(pid):
+        if isinstance(pid, int) and same_process(entry):
             stopped += kill_process_tree(pid)
 
     held.unlink(missing_ok=True)

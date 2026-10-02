@@ -52,7 +52,7 @@ class _PythonEngine(ServerBackend):
         argv = self.command(spec)
         claim_port(spec, lease)
         log_path = server_log(self.name, spec.port)
-        process, base_url, load_s = launch(argv, port=spec.port, log_path=log_path,
+        process, base_url, load_s = launch(argv, lease, log_path=log_path,
                                            timeout=timeout, env=dict(os.environ))
         return ServerInfo(base_url=base_url, port=spec.port, pid=process.pid, backend=self.name,
                           log_path=log_path, load_s=load_s, process=process)

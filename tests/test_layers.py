@@ -18,9 +18,9 @@ REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("core", ("asking", "backend", "checks", "command", "contracts", "data", "entities",
+    ("core", ("asking", "backend", "checks", "command", "contracts", "credentials", "data", "entities",
               "extraction", "files", "geo",
-              "home", "http", "installed", "jobs", "jsonl", "limits", "lock", "log",
+              "home", "http", "httpguard", "installed", "jobs", "jsonl", "limits", "lock", "log",
               "markup",
               "media", "messages", "paths", "platform", "redact", "scrape", "records",
               "telemetry", "ui", "units")),
@@ -66,6 +66,8 @@ def _imports() -> dict[tuple[str, str], set[str]]:
     """Every ``ml_stack`` import in the tree, keyed by (importer, imported) package."""
     found: dict[tuple[str, str], set[str]] = {}
     for path in sorted(ROOT.rglob("*.py")):
+        if path == ROOT / "__init__.py":
+            continue
         source = _package_of_file(path)
         where = str(path.relative_to(REPO))
         for node in ast.walk(ast.parse(path.read_text(), str(path))):
@@ -87,7 +89,7 @@ def _imports() -> dict[tuple[str, str], set[str]]:
 
 
 def _packages() -> set[str]:
-    return {_package_of_file(path) for path in ROOT.rglob("*.py")}
+    return {_package_of_file(path) for path in ROOT.rglob("*.py") if path != ROOT / "__init__.py"}
 
 
 def _violations(edges: dict[tuple[str, str], set[str]]) -> set[tuple[str, str]]:

@@ -205,6 +205,17 @@ class TestProxy:
             with daemon.post(path, {}) as r:
                 assert r.status == 200, path
 
+    def test_a_path_cannot_name_another_host(self, wired):
+        """`/infer@host:port/` would read as userinfo in front of a host the caller picked."""
+        daemon, _, _ = wired
+        other = FakeLlamaServer(Served(answer="elsewhere"))
+        try:
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                daemon.post(f"/infer@127.0.0.1:{other.port}/v1/chat/completions", {})
+            assert exc.value.code == 404
+        finally:
+            other.close()
+
 
 class TestEndpoint:
     def test_it_hands_a_client_exactly_what_it_needs(self):

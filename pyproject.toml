@@ -22,7 +22,7 @@ classifiers = [
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 # ml_stack.installed reads the pins with Requirement, SpecifierSet and Version.
-dependencies = ["packaging>=22"]
+dependencies = ["packaging>=22", "psutil>=7.2.2"]
 
 # Nothing below is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
@@ -45,7 +45,6 @@ train = ["numpy>=1.24", "safetensors>=0.4"]
 # base frozen. What makes an 8B tool caller trainable on one machine, where a full
 # fine-tune of it would need ~128G of optimizer state.
 train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
-serve = ["psutil>=7.2.2"]
 # `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
 # each engine still wants
@@ -84,7 +83,7 @@ standard = ["lm-eval[ifeval]>=0.4"]
 # PyRIT: about 110 packages and 550 MB, installed in a virtualenv of its own.
 redteam = ["pyrit>=1.1,<2"]
 all = [
-    "ml-stack[train,serve,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
+    "ml-stack[train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
 ]
 
 [project.urls]
@@ -114,6 +113,8 @@ ml-stack-train-tools = "ml_stack.train.tools:main"
 # repositories and working state ml-stack-doctor checks on their own
 ml-stack-setup = "ml_stack.setup:main"
 ml-stack-doctor = "ml_stack.doctor:main"
+# tokens and keys: set, list, unset; read from a prompt or stdin, kept in a 0600 file or the keychain
+ml-stack-credentials = "ml_stack.credentials.cli:command"
 # what this machine can hear and say: transcribe a file, say a line, find the speech in it
 ml-stack-speech = "ml_stack.speech.cli:main"
 ml-stack-serve = "ml_stack.serve.cli:main"

@@ -84,6 +84,13 @@ def forget_families() -> None:
     _FAMILY_BY_URL.clear()
 
 
+def forget_server(base_url: str) -> None:
+    """Forget what was learned about the server at ``base_url``: its family and whether it
+    took a per-request draft depth."""
+    _FAMILY_BY_URL.pop(base_url, None)
+    _NO_SPECULATIVE.discard(base_url)
+
+
 class GrammarBudgetError(ServerError):
     """A grammar-constrained generation ran out of tokens mid-structure."""
 

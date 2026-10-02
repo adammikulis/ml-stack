@@ -3,7 +3,6 @@ fetched at all."""
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import socket
 import socketserver
@@ -16,6 +15,8 @@ from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from ml_stack.httpguard import Limits, Refused, resolve, split
 
 USER_AGENT = "ml-stack"
 
@@ -48,10 +49,6 @@ class Server(ThreadingHTTPServer):
         socketserver.TCPServer.server_bind(self)
         host, port = self.server_address[:2]
         self.server_name, self.server_port = str(host), int(port)
-
-
-class Refused(ValueError):
-    """A URL this module will not fetch: not http(s), or a host on this machine's side."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,21 +222,8 @@ def check(url: str) -> str:
     http(s) only, and only to a host whose every address is a public one. ``file:``,
     ``localhost``, ``127.0.0.0/8``, ``10.0.0.0/8``, ``192.168.0.0/16``, ``172.16.0.0/12``,
     link-local and the IPv6 equivalents are all refused, by what the name resolves to.
+    `ml_stack.httpguard.fetch` is the fetch that holds to this at connection time.
     """
-    parts = urllib.parse.urlsplit((url or "").strip())
-    if parts.scheme not in ("http", "https"):
-        raise Refused(f"only http(s) is read, not {parts.scheme or 'a bare path'}: {url!r}")
-    host = (parts.hostname or "").strip("[]").casefold()
-    if not host:
-        raise Refused(f"no host in {url!r}")
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-        raise Refused(f"{host} is this machine")
-    try:
-        addresses = [str(ipaddress.ip_address(host))]
-    except ValueError:
-        addresses = _addresses(host)
-    for address in addresses:
-        ip = ipaddress.ip_address(address.split("%")[0])
-        if not ip.is_global:
-            raise Refused(f"{host} resolves to {ip}, which is not on the public internet")
+    parts, host, port = split(url)
+    resolve(host, port, Limits(resolver=lambda name, _port: _addresses(name)))
     return urllib.parse.urlunsplit(parts)

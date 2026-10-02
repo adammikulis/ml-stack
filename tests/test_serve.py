@@ -204,6 +204,15 @@ class TestPorts:
         sock.close()
         assert port_is_free(port)
 
+    def test_windows_does_not_ask_to_share_the_port(self, monkeypatch):
+        asked = []
+        real = socket.socket.setsockopt
+        monkeypatch.setattr(socket.socket, "setsockopt",
+                            lambda self, *a: (asked.append(a), real(self, *a))[1])
+        monkeypatch.setattr(sys, "platform", "win32")
+        port_is_free(free_port())
+        assert (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) not in asked
+
 
 class TestProcess:
     def test_a_live_process_exists(self):
@@ -543,6 +552,51 @@ class TestDetach:
             manager.detach(info)
 
             assert manager.stop_all() == []
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+            proc.wait()
+
+
+class TestRecord:
+    def test_a_new_server_on_a_port_is_asked_about_again(self, tmp_path, binary):
+        from ml_stack.client import chat
+
+        url = "http://127.0.0.1:9105"
+        chat._FAMILY_BY_URL[url] = "stale"
+        chat._NO_SPECULATIVE.add(url)
+        manager = ServerManager(LlamaServerBackend(binary=binary),
+                                state_file=tmp_path / "servers.json")
+        manager._record(ServerSpec(model="m.gguf", port=9105),
+                        ServerInfo(base_url=url, port=9105, pid=None, backend="llama.cpp"))
+
+        assert url not in chat._FAMILY_BY_URL
+        assert url not in chat._NO_SPECULATIVE
+
+
+class TestClose:
+    def test_leaving_the_block_stops_a_server_the_manager_started(self, tmp_path, binary):
+        state = tmp_path / "servers.json"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            with ServerManager(LlamaServerBackend(binary=binary), state_file=state) as manager:
+                info = ServerInfo(base_url="http://127.0.0.1:9103", port=9103, pid=proc.pid,
+                                  backend="llama.cpp", process=proc)
+                manager._record(ServerSpec(model="m.gguf", port=9103), info)
+            assert proc.wait(timeout=10) is not None
+            assert 9103 not in recorded_servers(state)
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_a_server_the_manager_only_adopted_survives_close(self, tmp_path, binary):
+        state = tmp_path / "servers.json"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            state.write_text(json.dumps({"9104": {"port": 9104, "pid": proc.pid,
+                                                  "owner_pid": proc.pid, "model": "m.gguf"}}))
+            with ServerManager(LlamaServerBackend(binary=binary), state_file=state):
+                pass
             assert proc.poll() is None
         finally:
             proc.kill()
@@ -970,7 +1024,8 @@ class TestTheStartedProcess:
         assert os.getsid(info.pid) != os.getsid(0)
 
     def test_the_log_is_not_held_open_while_the_load_is_waited_on(self, tmp_path, monkeypatch):
-        psutil = pytest.importorskip("psutil", reason="ml-stack[serve]")
+        import psutil
+
         from ml_stack.serve import backend as backend_module
 
         real = backend_module.wait_for_health

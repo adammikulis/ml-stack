@@ -18,6 +18,7 @@ from typing import Any
 from ml_stack import home
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
+from ml_stack.serve import exit_guard
 from ml_stack.serve.binary import child_env, require_binary
 from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 
@@ -441,6 +442,7 @@ class Lease:
     port: int
     owner_pid: int
     state_file: str
+    stop_on_exit: bool = True
 
 
 class ServerBackend(ABC):
@@ -471,22 +473,27 @@ def claim_port(spec: ServerSpec, lease: Lease) -> None:
             )
 
 
-def launch(argv: list[str], *, port: int, log_path: Path, timeout: float,
+def launch(argv: list[str], lease: Lease, *, log_path: Path, timeout: float,
            env: dict[str, str]) -> tuple[Any, str, float]:
     """``(process, base_url, load seconds)`` for ``argv`` started and answering its health check.
 
-    Raises ``ServerFailed`` with the log's tail when it exits or never answers.
+    The server stops with this process when the lease says ``stop_on_exit``. Raises
+    ``ServerFailed`` with the log's tail when it exits or never answers.
     """
+    port = lease.port
     started_at = time.monotonic()
     with log_path.open("wb") as log_handle:
         process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
                                    **process_group_kwargs())
+    if lease.stop_on_exit:
+        exit_guard.protect(process.pid)
     base_url = f"http://{DEFAULT_HOST}:{port}"
     if not wait_for_health(base_url, timeout=timeout, is_alive=lambda: process.poll() is None):
         code = process.poll()
         process.terminate()
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=5.0)
+        exit_guard.release(process.pid)
         raise ServerFailed(
             f"{Path(argv[0]).name} did not become healthy on {base_url}"
             + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
@@ -793,7 +800,7 @@ class LlamaServerBackend(ServerBackend):
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
 
         process, base_url, load_s = launch(
-            argv, port=spec.port, log_path=log_path, timeout=timeout,
+            argv, lease, log_path=log_path, timeout=timeout,
             env=child_env(self.binary, extra_env or None))
 
         warmup_s = None

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 from ml_stack.client.health import reported_models
 from ml_stack.home import state
@@ -120,11 +123,21 @@ def pid_exists(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
     try:
-        import psutil
-
         return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    except Exception:
+    except psutil.AccessDenied:
+        return True
+    except psutil.Error:
         return False
+
+
+def started_at(pid: int | None) -> float | None:
+    """When ``pid`` started, in seconds since the epoch, or None when it is not running."""
+    if not pid_exists(pid):
+        return None
+    try:
+        return float(psutil.Process(pid).create_time())
+    except psutil.Error:
+        return None
 
 
 def self_or_ancestor(pid: int | None) -> bool:
@@ -133,10 +146,6 @@ def self_or_ancestor(pid: int | None) -> bool:
         return False
     if pid == os.getpid():
         return True
-    try:
-        import psutil
-    except ImportError:
-        return pid == os.getppid()
     try:
         return any(parent.pid == pid for parent in psutil.Process(os.getpid()).parents())
     except psutil.Error:
@@ -147,11 +156,9 @@ def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:
     """Terminate ``pid`` gracefully, escalating to kill after ``grace_s``."""
     if not pid_exists(pid):
         return
-    import psutil
-
     try:
         proc = psutil.Process(pid)
-    except Exception as exc:
+    except psutil.Error as exc:
         logger.debug("kill_pid(%s) lookup failed: %s", pid, exc)
         return
     try:
@@ -165,18 +172,14 @@ def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:
         pass
     except psutil.NoSuchProcess:
         return
-    try:
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
         proc.kill()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
 
 
 def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:
     """Terminate ``pid`` and every descendant, returning the pids acted on."""
     if not pid_exists(pid):
         return []
-    import psutil
-
     try:
         parent = psutil.Process(pid)
         victims = [*parent.children(recursive=True), parent]
@@ -204,10 +207,6 @@ def every_server() -> list[dict]:
     A server nobody recorded -- a Homebrew one from before the managed build, a hand start
     -- holds memory a lease cannot see.
     """
-    try:
-        import psutil
-    except ImportError:
-        return []
     out = []
     for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
         try:
@@ -272,15 +271,11 @@ def loaded_twice(servers: list[dict] | None = None) -> dict[str, list[int]]:
 
 def machine_memory() -> dict | None:
     """What the machine holds: total, used, wired, free, the llama-servers' resident total,
-    everything else's, and the five largest non-server processes -- None without psutil."""
-
-    try:
-        import psutil
-    except ImportError:
-        return None
+    everything else's, and the five largest non-server processes -- None when the machine
+    will not say."""
     try:
         vm = psutil.virtual_memory()
-    except Exception:  # noqa: BLE001
+    except (psutil.Error, OSError):
         return None
     servers = 0
     rest: list[tuple[int, str]] = []

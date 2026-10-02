@@ -63,6 +63,18 @@ with serve("model.gguf", port=8899) as server:
 `serve` adopts a healthy server that is already running rather than starting a second one,
 and leaves an adopted server alone on exit. It only stops what it started.
 
+**Embedding it in another program.** Importing `ml_stack.serve`, `ml_stack.client` or
+`ml_stack.fleet` prints nothing, opens no socket and writes no file. State goes under
+`ML_STACK_HOME` (default `~/.ml-stack`) and the cache under `ML_STACK_CACHE`; set both
+before the first call to keep everything inside a directory the program owns. `ServerManager`
+reports through the `ml_stack.serve` loggers, or through the `say=` callback `lease` takes. A
+`ServerManager` is a context manager: `with ServerManager() as manager:` stops every server
+it started when the block ends and leaves adopted ones running, and `manager.close()` does
+the same. A manager is safe
+to call from several threads (one lock per port); a server started by a program that is
+killed without running `close()` keeps running, is listed as orphaned by `ml-stack-serve
+status`, and is stopped or adopted by the next lease on its port.
+
 **One serving per port, written down once.** llama.cpp serves a model one way at a time, so
 two parts of a program that lease it differently are not two clients of one server:
 whichever leases second finds a mismatch, stops the first and loads the weights again. A
