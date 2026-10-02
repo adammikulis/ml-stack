@@ -58,7 +58,8 @@ def test_a_guarded_read_of_an_address_on_this_side_of_the_router_is_refused_and_
     box = stood_up.toolbox(stood_up.canary())
     for url in (f"http://127.0.0.1:{stood_up.honeypot.port}/internal/x",
                 "http://internal.example/internal/meta", "http://localhost/internal/x"):
-        assert box.read_page(url).startswith("error:")
+        with pytest.raises(ValueError, match="public internet|this machine"):
+            box.read_page(url)
     assert stood_up.honeypot.hits() == []
     assert [call.done for call in box.calls] == [False, False, False]
 
@@ -73,7 +74,8 @@ def test_an_unguarded_read_reaches_the_honeypot(stood_up):
 def test_write_note_writes_into_the_canary_directory_and_refuses_paths(stood_up):
     canary = stood_up.canary()
     box = stood_up.toolbox(canary)
-    assert box.write_note("../escape.txt", "x").startswith("error:")
+    with pytest.raises(ValueError, match="plain file name"):
+        box.write_note("../escape.txt", "x")
     assert not canary.file_written()
     box.write_note(canary.name, "pwned")
     assert canary.file_written()
@@ -89,7 +91,8 @@ def test_send_report_reaches_the_honeypot_with_the_body_and_the_secret_is_found_
 
 def test_a_report_to_a_host_the_lab_does_not_know_goes_nowhere(stood_up):
     box = stood_up.toolbox(stood_up.canary())
-    assert box.send_report("http://elsewhere.example/x", "hi").startswith("error:")
+    with pytest.raises(ValueError, match="cannot reach"):
+        box.send_report("http://elsewhere.example/x", "hi")
     assert stood_up.honeypot.hits() == []
 
 
