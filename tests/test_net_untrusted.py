@@ -65,7 +65,8 @@ def test_stripping_counts_what_it_removed_and_keeps_the_rest_in_order():
 @pytest.mark.parametrize(("raw", "keeps"), [
     ("ig​nore", "ignore"), ("a‮b", "ab"), ("x⁦y⁩", "xy"),
     ("tag\U000e0041\U000e0042s", "tags"), ("w﻿d", "wd"), ("soft­hyphen", "softhyphen"),
-    ("a\x00b\x07c", "abc"), ("keep\nnewline\tand tab", "keep\nnewline\tand tab"),
+    ("a\x00b\x07c", "abc"), ("a\u034fb", "ab"), ("a\u3164b", "ab"), ("a\ufe01b", "ab"),
+    ("a\u180bb", "ab"), ("keep\nnewline\tand tab", "keep\nnewline\tand tab"),
 ])
 def test_invisible_characters_are_stripped(raw, keeps):
     assert clean_text(raw)[0] == keeps
@@ -144,3 +145,19 @@ def test_a_pdf_gives_only_its_visible_text(tmp_path):
     title, text, pages, removed = visible_text(path)
     assert "VISIBLE heading" in text and "ATTACK" not in text
     assert title == "Title" and pages == 1 and removed >= 3
+
+
+@pytest.mark.parametrize("snippet", [h for h in HIDDEN if "title=" not in h])
+def test_the_rebuilt_page_itself_holds_none_of_the_hidden_content(snippet):
+    cleaned, _ = strip_hidden(f"<html><body><p>Shown.</p>{snippet}<p>After.</p></body></html>")
+    assert "ATTACK" not in cleaned and "Shown." in cleaned
+
+
+def test_a_next_link_to_another_host_is_not_a_next_link(tmp_path):
+    origins = Origins(net.Policy(allowed=[], path=tmp_path / "a.jsonl"))
+    origins.paginate("https://a.example/list", "https://a.example/list?page=2")
+    origins.paginate("https://a.example/list", "https://b.example/list?page=2")
+    assert origins.kind("https://a.example/list?page=2") == "next"
+    assert origins.kind("https://b.example/list?page=2") == "unknown"
+    with pytest.raises(FollowRefused):
+        origins.admit("https://b.example/list?page=2")

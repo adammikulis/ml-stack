@@ -3,6 +3,7 @@ redirects, limits, scanning and the quarantine of whatever fails."""
 
 import hashlib
 import io
+import struct
 import tarfile
 import zipfile
 from pathlib import Path
@@ -454,3 +455,67 @@ def test_stale_partial_files_are_swept(tmp_path):
     from ml_stack.net.download import sweep
 
     assert sweep() == 1 and fresh.exists() and not part.exists()
+
+
+def test_a_server_that_resumes_at_the_wrong_offset_is_not_trusted(tmp_path, site, pipe):
+    body = gguf_bytes(extra=100_000)
+    route = site.add("/m.gguf", body, headers={"ETag": '"v1"'}, ranges=True, cut_at=30_000)
+    with pytest.raises(net.Truncated):
+        pull(pipe, site, "/m.gguf", tmp_path / "m.gguf")
+    route.cut_at, route.shift = None, 7
+    with pytest.raises(net.Truncated, match="another offset"):
+        pull(pipe, site, "/m.gguf", tmp_path / "m.gguf")
+    assert not list(staging_dir().glob("*.part"))
+    route.shift = 0
+    pull(pipe, site, "/m.gguf", tmp_path / "m.gguf", net.Want(sha256=SHA(body)))
+    assert (tmp_path / "m.gguf").read_bytes() == body
+
+
+def test_a_file_of_another_size_than_the_manifest_lists_is_held(tmp_path, site, pipe):
+    body = gguf_bytes(extra=1000)
+    site.add("/m.gguf", body)
+    with pytest.raises(net.Blocked, match="expected 5"):
+        pull(pipe, site, "/m.gguf", tmp_path / "m.gguf", net.Want(size=5))
+    assert not (tmp_path / "m.gguf").exists()
+    assert pull(pipe, site, "/m.gguf", tmp_path / "m.gguf", net.Want(size=len(body)))
+
+
+def test_a_set_cookie_header_is_never_kept_in_the_record(tmp_path, site, pipe):
+    site.add("/m.gguf", gguf_bytes(), headers={"Set-Cookie": "session=secret", "ETag": '"v"',
+                                               "Server": "test"})
+    done = pull(pipe, site, "/m.gguf", tmp_path / "m.gguf")
+    assert "set-cookie" not in done.headers and "secret" not in str(done.headers)
+    assert done.headers["etag"] == '"v"' and done.headers["server"] == "test"
+
+
+def test_other_ways_a_file_can_be_the_wrong_thing(tmp_path, site, pipe):
+    garbage = b"XXXX" + struct.pack("<IQQ", 3, 0, 0) + b"\0" * 40
+    site.add("/wrong-magic.gguf", garbage)
+    site.add("/future.gguf", b"GGUF" + struct.pack("<IQQ", 99, 0, 0) + b"\0" * 40)
+    site.add("/prog.dat", b"\x7fELF\x02\x01\x01" + b"\0" * 64)
+    site.add("/note.pdf", b"just some text, no header, and %%EOF\n")
+    both = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
+    site.add("/page.pdf", both, headers={"Content-Type": "text/html; charset=utf-8"})
+    for name, why in (("wrong-magic.gguf", "no GGUF magic"), ("future.gguf", "version 99"),
+                      ("prog.dat", "native executable"), ("note.pdf", "no %PDF- header"),
+                      ("page.pdf", "served as text/html")):
+        with pytest.raises(net.Blocked, match=why):
+            pull(pipe, site, "/" + name, tmp_path / name)
+        assert not (tmp_path / name).exists()
+
+
+def test_overlapping_safetensors_tensors_are_refused(tmp_path, site, pipe):
+    site.add("/o.safetensors", safetensors_bytes(
+        {"a": ("F32", [4], 0, 16), "b": ("F32", [4], 8, 24)}, data=24))
+    with pytest.raises(net.Blocked, match="overlap"):
+        pull(pipe, site, "/o.safetensors", tmp_path / "o.safetensors")
+
+
+def test_an_archive_over_the_entry_or_size_limit_is_refused(tmp_path):
+    from ml_stack.net.sniff import audit_archive
+
+    path = tmp_path / "many.zip"
+    path.write_bytes(_zip({f"f{n}": b"x" * 10 for n in range(6)}))
+    assert audit_archive(path) == []
+    assert any("entries" in p for p in audit_archive(path, max_entries=3))
+    assert any("unpacks to" in p for p in audit_archive(path, max_bytes=30))

@@ -243,3 +243,11 @@ def test_search_filters_by_size_quantisation_owner_and_gating(server):
     assert hub.search("gated", hub.Filters(gated=False)) == []
     assert [r.id for r in hub.search("gated")] == ["maker/gated-GGUF"]
     assert hub.search("gated", hub.Filters(files=False))[0].files == ()
+
+
+def test_a_pull_pins_each_file_to_the_size_and_digest_the_listing_gives():
+    one = remote.RemoteFile("UD/a-Q4_K_M.gguf", 1000, "ab" * 32)
+    want = pulling._want(one, "tok")
+    assert (want.sha256, want.size, want.token, want.kind) == ("ab" * 32, 1000, "tok", "gguf")
+    assert 1000 <= want.max_bytes < 1000 + 2 * pulling.MARGIN
+    assert pulling._want(remote.RemoteFile("README.md", 5), "").kind == ""

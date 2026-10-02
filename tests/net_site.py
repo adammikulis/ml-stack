@@ -25,6 +25,7 @@ class Route:
     headers: dict[str, str] = field(default_factory=dict)
     cut_at: int | None = None
     ranges: bool = False
+    shift: int = 0
     drip_s: float = 0.0
     endless: bool = False
     seen: list[dict[str, str]] = field(default_factory=list)
@@ -81,7 +82,7 @@ class Site:
             if not h.headers.get("If-Range") or h.headers.get("If-Range") == tag:
                 start = int(wanted[6:].split("-")[0])
                 status = 206
-                headers["Content-Range"] = f"bytes {start}-{len(body) - 1}/{len(body)}"
+                headers["Content-Range"] = f"bytes {start + route.shift}-{len(body) - 1}/{len(body)}"
                 body = body[start:]
         h.send_response(status)
         for name, value in headers.items():

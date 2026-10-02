@@ -116,3 +116,32 @@ class TestBuildingItForReal:
                               "import ml_stack.train, numpy; print('ok')"],
                              capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr[-300:]
+
+
+
+class TestFetchingPython:
+    def _release(self, monkeypatch, tmp_path, assets):
+        import json
+
+        from ml_stack.fleet import environment as mod
+        from tests.net_site import Site
+
+        env = Environment(tmp_path)
+        listed = [{**a, "name": f"cpython-{mod.PYTHON}.1{env._asset_name()}.tar.gz"} for a in assets]
+        site = Site()
+        site.__enter__()
+        site.add("/release", json.dumps({"assets": listed}).encode(),
+                 headers={"Content-Type": "application/json"})
+        monkeypatch.setattr(mod, "STANDALONE", site.base + "/release")
+        return env, site
+
+    def test_a_build_with_no_digest_is_refused_before_it_is_downloaded(
+            self, monkeypatch, tmp_path, loopback_net):
+        env, site = self._release(monkeypatch, tmp_path, [
+            {"browser_download_url": "http://127.0.0.1:1/python.tar.gz", "size": 10}])
+        try:
+            with pytest.raises(OSError, match="SHA-256"):
+                env.fetch_python()
+        finally:
+            site.__exit__(None, None, None)
+        assert env.standalone_python() is None
