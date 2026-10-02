@@ -213,7 +213,7 @@ line and updating the head leaves a log that verifies and is adopted by the next
 What it does not do: stop someone with the key and write access from rewriting the whole
 log and head together; only an anchor kept elsewhere catches that.
 
-Subscribers (`bus.subscribe(fn)`) get every event. pcb-engine subscribes there.
+Subscribers (`bus.subscribe(fn)`) get every event; a program that embeds ml-stack subscribes there.
 
 ## Honeytokens
 
