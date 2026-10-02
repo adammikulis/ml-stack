@@ -147,11 +147,7 @@ def _unpack(archive: Path, into: Path) -> None:
         return
     with tarfile.open(archive) as tf:
         _check(tf.getnames())
-        # 3.14 filters by default; asking for it keeps older versions the same.
-        try:
-            tf.extractall(into, filter="data")
-        except TypeError:
-            tf.extractall(into)
+        tf.extractall(into, filter="data")
 
 
 def _check(names: list[str]) -> None:
