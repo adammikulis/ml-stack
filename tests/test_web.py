@@ -365,9 +365,9 @@ def names(pairs):
     return [schema["function"]["name"] for schema, _ in pairs]
 
 
-def test_two_tools_for_a_text_model_and_three_for_one_that_sees():
-    assert names(tools()) == ["web_search", "web_read"]
-    assert names(tools(vision=True)) == ["web_search", "web_read", "web_look"]
+def test_the_tools_for_a_text_model_and_for_one_that_sees():
+    assert names(tools()) == ["web_search", "web_read", "web_download"]
+    assert names(tools(vision=True)) == ["web_search", "web_read", "web_look", "web_download"]
     for schema, callable_ in tools(vision=True):
         assert callable(callable_) and schema["type"] == "function"
         assert schema["function"]["parameters"]["required"]
@@ -416,7 +416,7 @@ def test_the_search_tool_says_nothing_matched_rather_than_returning_a_list():
 def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     fetch = fetching({"https://quenlow.example/about": PAGE})
-    (_, _), (_, reading) = tools(fetch=fetch, browse=no_browser)
+    (_, _), (_, reading), _ = tools(fetch=fetch, browse=no_browser)
     assert reading({"url": "http://127.0.0.1/"})["none"].startswith("could not read")
     assert "none" in reading({"url": "https://quenlow.example/missing"})
     got = reading({"url": "https://quenlow.example/about"})
@@ -425,13 +425,13 @@ def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns):
 
 def test_the_read_tool_passes_rendered_through(public_dns):
     page = StubPage(PAGE)
-    (_, _), (_, reading) = tools(fetch=fetching({}), browse=browsing(page))
+    (_, _), (_, reading), _ = tools(fetch=fetching({}), browse=browsing(page))
     got = reading({"url": "https://quenlow.example/", "rendered": True})
     assert got["rendered"] is True and page.visited == ["https://quenlow.example/"]
 
 
 def test_the_look_tool_says_no_browser_without_one(public_dns):
-    (_, _), (_, _), (_, looking) = tools(browse=no_browser, vision=True)
+    (_, _), (_, _), (_, looking), _ = tools(browse=no_browser, vision=True)
     got = looking({"url": "https://quenlow.example/"})
     assert got == {"none": "no browser: playwright is not installed"}
     assert looking({"url": "http://localhost/"})["none"].startswith("could not look at")
@@ -440,7 +440,7 @@ def test_the_look_tool_says_no_browser_without_one(public_dns):
 def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     page = StubPage(PAGE, images=[])
-    (_, _), (_, _), (_, looking) = tools(browse=browsing(page), vision=True)
+    (_, _), (_, _), (_, looking), _ = tools(browse=browsing(page), vision=True)
     got = looking({"url": "https://quenlow.example/"})
     assert got["_images"] == [PNG] and got["title"] == "About the Quenlow works"
 
