@@ -91,15 +91,14 @@ def daemon(tmp_path):
 
 
 @pytest.fixture(scope="session")
-def browser():
-    sync_api = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
-    with sync_api.sync_playwright() as p:
-        try:
-            b = p.chromium.launch(headless=True)
-        except Exception as exc:                       # noqa: BLE001
-            pytest.skip(f"chromium did not launch: {exc}")
-        yield b
-        b.close()
+def browser(request):
+    pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    try:
+        b = request.getfixturevalue("playwright").chromium.launch(headless=True)
+    except Exception as exc:                           # noqa: BLE001
+        pytest.skip(f"chromium did not launch: {exc}")
+    yield b
+    b.close()
 
 
 @pytest.fixture

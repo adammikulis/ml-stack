@@ -114,7 +114,7 @@ class MlStepper extends MlElement {
     const reach = Math.max(at, ...this.completed, 0);
     this.bar.replaceChildren(...steps.map((st, i) => {
       const cls = i === at ? "current" : this.completed.has(i) || i < at ? "done" : "";
-      const go = i <= reach && i !== at && !this.busy;
+      const go = i <= reach && i !== at && !this.busy && this.controls !== "none";
       const b = h("button", { type: "button", "data-i": i, disabled: !go && i !== at,
         "aria-current": i === at ? "step" : null,
         "aria-label": `Step ${i + 1} of ${steps.length}: ${st.title ?? st.id}`,
