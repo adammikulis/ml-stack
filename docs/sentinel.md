@@ -296,6 +296,12 @@ slip of ten points in the pass rate is invisible to it, and so is any change the
 not exercise. At 3 runs per probe no single probe has the power to be named; the pooled
 interval does the work.
 
+**Tool mix.** The first version (20 calls of baseline, windows of 20, distance 0.6) raised two
+false alarms across seven sessions of steady random use; simulation put its rate at about 0.2%
+of windows for a fresh baseline and higher for an unlucky one. The defaults are now 50, 30
+and 0.5: 0 alarms in 4000 simulated windows and in 20 sessions of 600 calls, and an unseen tool
+filling a window is flagged every time. It remains a watch-only signal.
+
 **Peers.** A request replayed three times: the peer is quarantined at the third and its next
 valid request is refused (against the real `Authenticator`). 35 forged signatures from one
 address: quarantined; an honest address sending 50 valid requests meanwhile: untouched.

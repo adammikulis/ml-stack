@@ -1,5 +1,5 @@
 """Sentinel on benign traces: real documents, steady peers, ordinary file churn. Nothing here
-may be quarantined, and nothing may be watched except the single-failure cases named."""
+may be quarantined or watched."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_a_day_of_ordinary_use_quarantines_nothing_even_in_enforce_mode(node, tm
     print(f"benign day: {screened} screened, {calls} tool calls, {handled} peer requests, "
           f"{len(held)} quarantined, {len(watched)} watched")
     assert held == []
-    assert {r.kind for r in watched} <= {"peer"} and len(watched) <= 3
+    assert watched == []
     assert node.status()["log_ok"] is True
 
 
