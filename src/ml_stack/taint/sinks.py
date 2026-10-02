@@ -108,10 +108,12 @@ def ml_stack_tools() -> Sinks:
     reads = ("models_find", "models_files", "ollama_models", "speech_transcribe", "fleet_peers")
     local = ("serve_status", "bench_status", "bench_history", "bench_show", "setup_look",
              "speech_providers", "doctor", "decide", "models_on_disk",
-             "jobs_status", "jobs_wait", "plan", "done")
+             "jobs_status", "jobs_wait")
     sinks = Sinks().with_reads(reads).with_reads(local, result="local")
     return sinks.with_(
-        ask_user=Sink(Capability.READ, result="user"),
+        ask_user=Sink(Capability.READ, other=Arg(inert=True), result="user"),
+        plan=Sink(Capability.READ, other=Arg(inert=True), result="local"),
+        done=Sink(Capability.READ, other=Arg(inert=True), result="local"),
         serve_up=Sink(Capability.FLEET, {
             "model": Arg(registry="models"), "port": _port(),
             "context": Arg(low=0, high=1_048_576), "parallel": Arg(low=1, high=64),

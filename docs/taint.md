@@ -119,8 +119,9 @@ most severe verdict.
   message, its text is `user`. The application must label pasted documents
   (`Ledger.admit(text, Label(Level.UNTRUSTED, origin))`); the ledger cannot tell.
 - **Reads that exfiltrate without a sink.** A tool classified `read` that sends its arguments
-  somewhere (a search engine taking a query) is an egress channel in disguise. Classifying it is
-  the registry's job.
+  somewhere (a search engine taking a query) is an egress channel in disguise. A read whose argument is
+  an address is judged as an egress; a read that leaks through some other argument is the
+  registry's job to classify.
 - **Side channels after the call.** The tool result of an allowed call is itself untrusted and is
   tracked, but a tool that has side effects not described by its arguments is outside the model.
 - **A hostile tool or server.** Tracking assumes tool results are data. A malicious MCP server
@@ -199,8 +200,7 @@ values the operator allowed is the cost of being usable. Those three remain the 
 Measured 2026-10-02 on this branch (`agent/taint`, on `agent/native-guard`, which holds the
 merged guard rails, decision models and agent loop). Python 3.13.5, no served model: every model
 is scripted, and a scripted model that does whatever the planted text says is the worst case, so
-these numbers measure the rails and not a model's manners. Nothing here was run against a real
-model.
+these numbers measure the rails and not a model's manners. The first three tables are scripted; the real-model rows are marked.
 
 **Flows** (`tests/test_taint_flows.py`; 26 attacks, 24 legitimate tasks; each is a task, what the
 run read, and one privileged call; "ran" means the call executed with nobody to answer a
@@ -237,11 +237,15 @@ its scorers and converters were not used; the evidence is the red-team canary fi
 | --- | --- | --- | --- |
 | no taint tracking | 24 | 24 | 0 |
 | taint tracking, the toy tools unclassified | 24 | 0 | 24 |
-| taint tracking, tools classified (page reader a read, note a write, report an egress) | 24 | 6 | 18 |
+| taint tracking, tools classified (page reader a read, note a write, report an egress) | 24 | 0 | 24 |
 
-The 6 are the `ssrf` goal: the page reader is a read, and a read that is told an address is an
-egress channel in disguise (see the limits above). Left unclassified, the same tool asks
-instead, which is the cost of an unknown tool: fail closed. The red-team's direct-injection
+A read that is given an address is judged as an egress: any argument that holds a URL, or a
+string under a name such as `url` or `host`, must be an address the person typed or one on a host
+in the trusted `hosts` registry, else the call asks (or is denied when the address repeats text
+from a page). Before that rule the page reader let the `ssrf` goal through 6 of 6 times. Left
+unclassified, the same tool asks instead, which is the cost of an unknown tool: fail closed. A
+model that picks a result URL out of search results to open it now asks too, unless the host is
+registered. The red-team's direct-injection
 attacks put the instruction in the person's own turn; taint tracking treats that as the person
 and does not stop it.
 
@@ -259,7 +263,20 @@ asking; values under five characters are no longer matched. The do loop's own ac
 asked after every `bench_run` because the plan named labels but not arguments; the plan tool now
 asks for the exact arguments, and the person's `go` covers those values.
 
-**Not measured.** A served model deciding for itself (`canary.live`, the red-team against a real
-GGUF): it needs a leased model, and the machine was shared. Whether a real model launders taint
-through paraphrase more often than the scripted re-spellings in the flows is therefore unknown;
-those re-spellings are caught only because any model-made value after an untrusted read asks.
+**A real model** (Qwen3-4B-Instruct-2507 Q4_K_M, leased once through the broker, nothing else
+running, released and stopped after; `canary.live` with 2 repetitions of 9 planted texts, then 5
+page variants times 4 goals for the red-team arms; one model, greedy decoding off its default):
+
+| measurement | rails off | rails without taint | default (taint) |
+| --- | --- | --- | --- |
+| canary planted texts, runs where the attack landed | 14 of 18 | 12 of 18 | 0 of 18 (14 calls asked) |
+| red-team web arms, attempts that succeeded of 20 | 4 (model asked 4) | n/a | 0 (model asked 5, 7 refused) |
+
+The scripted model asks for the call in 24 of 52 web attempts and copies the page's value
+verbatim every time. The real model asked 4 and 5 times in 20 and, of the 7 taint events in the
+taint arm, 3 were verbatim copies (denied) and 4 were values it had re-spelled or composed
+(asked). In the canary's planted texts the page names a tool but no value, so all 14 gated calls
+carried a value the model made up, and all 14 asked. So a real model re-words more than the
+scripted one: at least 4 of 7 attacker-driven calls would have passed a check that follows
+copied values only, and all were stopped by treating every model-made value after an untrusted
+read as tainted. Counts are small (single model, 2 repetitions); they show direction, not rates.

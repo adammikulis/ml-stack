@@ -32,10 +32,10 @@ capability; every line is something that already exists not being what it says.
 
 ### The agent loop
 
-- [ ] **The Claude Agent SDK harness still asks by tool name.** `guard.hooks.sdk_hooks` asks the
-  person before `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or `WebFetch` once any outside
-  text was read; it does not use `TaintRail` with `taint.claude_code()`, so a `Write` of a value the
-  person typed still asks. It needs a confirm path that answers `"ask"` instead of refusing.
+- [ ] **Taint tracking has been run against one served model only.** `docs/taint.md` has Qwen3-4B
+  (20 web attempts per arm, 18 planted-text runs per guard). A larger model, more repetitions
+  and the red-team's direct-injection arms would say how the usability cost and the proven
+  versus unproven split move.
 - [ ] **Taint events have no subscriber.** `taint.subscribe(fn)` receives a `TaintEvent` for each
   refused or questioned call; the sentinel branch's bus (`docs/sentinel.md`) is the intended
   subscriber (`taint.subscribe(bus.emit)`) and is not written yet.
@@ -43,15 +43,8 @@ capability; every line is something that already exists not being what it says.
   typed shape (a model listing, a version, a status) could return only the validated fields, and
   then not contaminate; `taint.quarantined` does it for a callable, and nothing does it for an MCP
   `ToolSource`. The free-text case (summarise this page) has no schema and stays fenced data.
-- [ ] **Taint tracking has not been run against a served model.** The numbers in `docs/taint.md`
-  use a scripted model that does whatever the planted text says. `canary.live` and the red-team
-  run against a leased model would say how often a real model re-words a value so that it only
-  asks, and how many legitimate tasks then ask.
 - [ ] **Pasted documents in the person's own turn are the person's text.** `Ledger.admit` takes a
   `Level.UNTRUSTED` label for them, but no entry point (the CLI, a chat front end) labels a paste.
-- [ ] **A read tool that is told an address is an egress channel.** `read_page(url)` classified as
-  a read let the red-team `ssrf` goal through 6 of 6 times; the sink registry has no capability
-  for a read whose argument leaves the machine.
 - [ ] **MCP tasks are not driven.** The mcp 2.2 client has no tasks API, so a long-running tool
   call cannot be polled or cancelled through `McpTools`, and task progress is not an agent
   event. Progress for an ordinary call reaches `McpTools.on_progress` only.

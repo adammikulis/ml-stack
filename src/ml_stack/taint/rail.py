@@ -79,6 +79,7 @@ class TaintRail(Base):
         arguments = call.arguments
         if not ledger.contaminated or arguments is None:
             return Proceed()
+        needs_intent = sink.capability in HARD
         if sink.capability == Capability.READ:
             arguments = addresses(arguments)
             sink = Sink(Capability.EGRESS, sink.args, sink.other, sink.result)
@@ -90,7 +91,7 @@ class TaintRail(Base):
         hard = sink.capability in HARD
         if hard and any(f.status == "proven" for f in unsafe):
             return self._refuse(call, sink.capability, unsafe, ledger, deny=True)
-        if unsafe or (hard and not any(f.why in INTENT for f in found)):
+        if unsafe or (needs_intent and not any(f.why in INTENT for f in found)):
             return self._refuse(call, sink.capability, unsafe, ledger, deny=False)
         return Proceed()
 
