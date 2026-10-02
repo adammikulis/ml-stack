@@ -37,14 +37,15 @@ def _host(tmp_path, *, before="", after="", finish="time.sleep(120)"):
 
 def _gone(pid, *, within=15.0):
     deadline = time.monotonic() + within
-    while time.monotonic() < deadline:
+    while True:
         try:
             if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
                 return True
         except psutil.NoSuchProcess:
             return True
-        time.sleep(0.1)
-    return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 @pytest.fixture
@@ -63,7 +64,7 @@ def test_a_server_stops_when_the_host_exits(tmp_path, hosts):
     host, child = _host(tmp_path, finish="pass")
     hosts.append((host, child))
     host.wait(timeout=20)
-    assert _gone(child)
+    assert _gone(child, within=0.2), "stopped by the host itself, not by the watchdog"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signals are POSIX")
@@ -73,7 +74,7 @@ def test_a_server_stops_when_the_host_is_terminated(tmp_path, hosts):
     host.send_signal(signal.SIGTERM)
     host.wait(timeout=20)
     assert host.returncode == -signal.SIGTERM, "the host still dies of the signal"
-    assert _gone(child)
+    assert _gone(child, within=0.2), "stopped by the handler, not by the watchdog"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="signals are POSIX")
