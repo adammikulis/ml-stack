@@ -46,6 +46,15 @@ class RailWatch:
         """A rail marked the session's context as carrying outside instructions."""
         return [finding("guard.tainted", Severity.NOTICE, ("session", session), HEURISTIC, {"rail": rail, "reason": reason})]
 
+    def tainted_text(self, session: str, rail: str, reason: str, text: str) -> list[Finding]:
+        """A rail let ``text`` through marked as carrying outside instructions: the session
+        is watched, and the text is held where the mode lets heuristics act."""
+        digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+        return [*self.tainted(session, rail, reason),
+                finding("guard.tainted_text", Severity.NOTICE, ("message", f"{session}:{digest}"),
+                        HEURISTIC, {"rail": rail, "reason": reason, "bytes": len(text)},
+                        text=text)]
+
     def noted(self, session: str, rail: str, action: str, reason: str, source: str,
               ) -> list[Finding]:
         """A rail's logged verdict, without the text: a denial is counted, a modify marks the
