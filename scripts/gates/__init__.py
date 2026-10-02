@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import shutil
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from types import ModuleType
+
+from ._util import remembered, tree_fingerprint
 
 
 @dataclass(frozen=True)
@@ -58,10 +62,35 @@ def unrunnable() -> dict[str, str]:
     return {c.NAME: r for c in checkers() if (r := skipped(c))}
 
 
+def findings(checker: ModuleType, root: Path) -> list[Finding]:
+    """One checker's findings over the tree at root, in path order.
+
+    The tree this package sits in is remembered by content, with the version of each
+    external tool a checker may call, so an unchanged tree is not scanned twice.
+    """
+    def scan() -> list[list]:
+        found = sorted(checker.find(root), key=lambda f: (f.path, f.line, f.detail))
+        return [[f.path, f.line, f.detail] for f in found]
+
+    if root.resolve() != Path(__file__).resolve().parents[2]:
+        return [Finding(*row) for row in scan()]
+    tools = ",".join(f"{t}={_stamp(t)}" for t in ("ruff", "pyright"))
+    return [Finding(*row) for row in remembered(root, checker.NAME, scan, tools,
+                                                 repo_fingerprint())]
+
+
+@cache
+def repo_fingerprint() -> str:
+    """The fingerprint of the tree this package sits in, taken once per process."""
+    return tree_fingerprint(Path(__file__).resolve().parents[2])
+
+
+def _stamp(tool: str) -> str:
+    """Where a tool is and when it was installed, empty when it is absent."""
+    path = shutil.which(tool)
+    return "" if path is None else f"{path}@{Path(path).resolve().stat().st_mtime_ns}"
+
+
 def run(root: Path) -> dict[str, list[Finding]]:
     """Every runnable checker's findings over the tree at root, keyed by metric name."""
-    return {
-        c.NAME: sorted(c.find(root), key=lambda f: (f.path, f.line, f.detail))
-        for c in checkers()
-        if not skipped(c)
-    }
+    return {c.NAME: findings(c, root) for c in checkers() if not skipped(c)}

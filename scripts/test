@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Run the test suite one tier at a time.
+
+    scripts/test fast      the default tier without the modules marked heavy
+    scripts/test quick     only the tests a change reaches (needs pytest-testmon)
+    scripts/test default   everything not marked slow
+    scripts/test full      everything, slow included: what CI runs
+    scripts/test slow      only the tests marked slow
+
+Arguments after the tier go to pytest. ``quick`` runs the default tier in full, and says
+why, when it cannot tell what a change reaches.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import affected
+
+ROOT = Path(__file__).resolve().parent.parent
+BASE = "0.2dev"
+SAFE = ("src/ml_stack/", "tests/test_", "docs/", "scripts/gates/", "scripts/affected.py")
+DATAFILE = ".testmondata"
+FAST = ["-m", "not slow and not heavy"]
+DEFAULT = ["-m", "not slow"]
+
+
+def pytest_command(workers: int, *rest: str) -> list[str]:
+    """The pytest invocation every tier shares."""
+    return [sys.executable, "-m", "pytest", "-q", "-n", str(workers), *rest]
+
+
+def run(command: list[str], env: dict[str, str] | None = None) -> int:
+    """Run a command in the repo, returning its exit status."""
+    print("+", " ".join(command), flush=True)
+    return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
+
+
+def testmon_env() -> dict[str, str]:
+    """The environment a testmon run uses, with its data file inside this checkout."""
+    return {**os.environ, "TESTMON_DATAFILE": str(ROOT / DATAFILE)}
+
+
+def testmon_missing() -> bool:
+    """Whether pytest-testmon cannot be imported by the interpreter the tests run on."""
+    return importlib.util.find_spec("testmon") is None
+
+
+def clean(status: int) -> int:
+    """A pytest exit status with "no tests were selected" counted as success."""
+    return 0 if status == 5 else status
+
+
+def reasons_for_everything(changed: list[str], deleted: frozenset[str]) -> list[str]:
+    """Why a change cannot be narrowed, empty when it can."""
+    out = [f"{p}: not source, test or doc" for p in changed
+           if not p.startswith(SAFE) and Path(p).name not in affected.INERT]
+    out += [f"{p}: deleted" for p in changed if p in deleted and p.endswith(".py")]
+    out += [f"{p}: shared by every test" for p in changed if p in affected.EVERYTHING]
+    return out
+
+
+def quick(args: argparse.Namespace, rest: list[str]) -> int:
+    """Run the tests a change reaches: testmon's recorded map, plus the import graph."""
+    tier = [] if args.slow else DEFAULT
+    try:
+        changed, deleted = affected.changed_since(ROOT, args.base)
+    except (RuntimeError, IndexError) as exc:
+        print(f"quick: cannot diff against {args.base} ({exc}); running the default tier")
+        return run(pytest_command(args.workers, *tier, *rest))
+    if not changed:
+        print(f"quick: nothing differs from {args.base}; running nothing")
+        return 0
+    why = reasons_for_everything(changed, deleted)
+    if testmon_missing():
+        why = ["pytest-testmon is not installed (pip install -e '.[test]')", *why]
+    elif not (ROOT / DATAFILE).exists():
+        why = [f"no {DATAFILE} in this checkout yet; this run records it", *why]
+    if why:
+        for line in why[:8]:
+            print(f"quick: {line}")
+        print("quick: running the default tier in full")
+        record = [] if testmon_missing() else ["--testmon-noselect"]
+        return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env())
+    picked = affected.select(ROOT, changed, deleted)
+    if args.explain:
+        for test, reasons in sorted(picked.why.items()):
+            print(f"quick: {test}  <- {'; '.join(sorted(set(reasons))[:3])}")
+    direct = sorted(picked.files)
+    status = 0
+    if direct:
+        print(f"quick: {len(direct)} test file(s) within {affected.DEPTH} imports of a change")
+        status = clean(run(pytest_command(min(args.workers, len(direct)), "--testmon-noselect",
+                                          *tier, *direct, *rest), testmon_env()))
+    print("quick: every other test whose recorded execution touches a changed line")
+    return max(status, clean(run(pytest_command(args.workers, "--testmon", *tier, *rest),
+                                 testmon_env())))
+
+
+def main() -> int:
+    """Parse the tier and run it."""
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("tier", choices=["fast", "quick", "default", "full", "slow"])
+    parser.add_argument("-n", "--workers", type=int, default=4)
+    parser.add_argument("--base", default=BASE, help="branch quick diffs against")
+    parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
+    parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
+    args, rest = parser.parse_known_args()
+    if args.tier == "quick":
+        return quick(args, rest)
+    tiers = {"fast": FAST, "default": DEFAULT, "full": ["--slow"], "slow": ["--slow", "-m", "slow"]}
+    return run(pytest_command(args.workers, *tiers[args.tier], *rest))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

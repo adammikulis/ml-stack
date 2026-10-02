@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -17,14 +18,24 @@ import gates  # noqa: E402
 from gates import _pins  # noqa: E402
 
 BUDGETS = REPO / "budgets.json"
-FOUND = gates.run(REPO)
+
+
+BY_NAME = {checker.NAME: checker for checker in gates.checkers()}
+
+
+@cache
+def found(name: str) -> list[gates.Finding]:
+    """One checker's findings over this tree, computed by the first test that asks."""
+    return gates.findings(BY_NAME[name], REPO)
+
+
 HELD: dict = json.loads(BUDGETS.read_text(encoding="utf-8"))
 RECORDED: dict[str, int] = {k: v for k, v in HELD.items() if isinstance(v, int)}
 ALLOWED: dict[str, int] = {**RECORDED, **dict.fromkeys(gates.hard(), 0)}
 
 
 def _sites(name: str) -> str:
-    return "\n".join(f"    {f.path}:{f.line}  {f.detail}" for f in FOUND[name][:10])
+    return "\n".join(f"    {f.path}:{f.line}  {f.detail}" for f in found(name)[:10])
 
 
 def _runnable(checker) -> None:
@@ -38,7 +49,7 @@ def test_metric_is_within_its_budget(checker) -> None:
     _runnable(checker)
     name = checker.NAME
     budget = ALLOWED[name]
-    actual = len(FOUND[name])
+    actual = len(found(name))
     owner = checker.OWNER or "no owner yet"
     allowance = "none allowed" if name in gates.hard() else f"{budget} allowed"
     assert actual <= budget, (
@@ -53,7 +64,7 @@ def test_budget_matches_the_tree(checker) -> None:
     _runnable(checker)
     name = checker.NAME
     budget = ALLOWED[name]
-    actual = len(FOUND[name])
+    actual = len(found(name))
     assert actual >= budget, (
         f"{name}: {actual} sites but {budget} allowed -- the budget is stale. "
         f"Run scripts/budgets --update so the number can only fall from here."
