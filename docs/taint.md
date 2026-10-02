@@ -229,9 +229,9 @@ all three. (A guard built before the scenario sets its environment variable miss
 variable; the figure above builds the guard after.)
 
 **Red-team** (`ml_stack.redteam` pages and toolbox, scripted gullible model, indirect-web: 13
-page variants (PDF text layer not built here) times 4 goals, 52 attempts per arm, web guard off so
-only the loop's rails act; PyRIT not installed, so its scorers and converters were not used; the
-evidence is the red-team canary file and honeypot):
+page variants (PDF text layer not built here) times 4 goals, 52 attempts per arm; the agent loop
+with no other rail and the web guard off, so only taint tracking differs; PyRIT not installed, so
+its scorers and converters were not used; the evidence is the red-team canary file and honeypot):
 
 | arm | model asked for the call | attack succeeded | call refused |
 | --- | --- | --- | --- |
@@ -245,12 +245,19 @@ instead, which is the cost of an unknown tool: fail closed. The red-team's direc
 attacks put the instruction in the person's own turn; taint tracking treats that as the person
 and does not stop it.
 
-**Tests and mutations.** 114 tests in `tests/test_taint*.py` on real objects: the real rails
+**Tests and mutations.** 115 tests in `tests/test_taint*.py` on real objects: the real rails
 chained by `ml_stack.guard`, the real agent loop against a scripted llama-server on a socket, the
-real `compact`. 73 textual mutants of the core (a flipped comparison, a dropped branch, a
+real `compact`. 72 textual mutants of the core (a flipped comparison, a dropped branch, a
 constant, a removed call, one per rule): the first run killed 47 of 72 and left 25, each a rule
-no test read; tests were added for each and all 73 are killed. These are hand-picked, one per rule,
-not the repository's sampled `scripts/mutate`.
+no test read; tests were added for each, and the final run kills all 71 that still apply (one
+mutant names code that was removed). These are hand-picked, one per rule, not the repository's
+sampled `scripts/mutate`.
+
+**Cost found while measuring.** Matching any value of three characters against tool output made
+the plain word `run` in a benchmark call a "proven" copy of a log path, which refuses instead of
+asking; values under five characters are no longer matched. The do loop's own acceptance flow
+asked after every `bench_run` because the plan named labels but not arguments; the plan tool now
+asks for the exact arguments, and the person's `go` covers those values.
 
 **Not measured.** A served model deciding for itself (`canary.live`, the red-team against a real
 GGUF): it needs a leased model, and the machine was shared. Whether a real model launders taint
