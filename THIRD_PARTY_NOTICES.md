@@ -39,7 +39,7 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `click` | 8.5.0 | BSD-3-Clause |
 | `contourpy` | 1.4.0 | BSD-3-Clause |
 | `courlan` | 1.4.0 | Apache-2.0 |
-| `cycler` | 0.12.1 | BSD License |
+| `cycler` | 0.12.1 | BSD |
 | `dateparser` | 1.4.3 | BSD-3-Clause |
 | `ddgs` | 9.16.0 | MIT |
 | `filelock` | 4.0.9 | MIT |
@@ -53,14 +53,14 @@ Closure of the base requirements and the `store`, `hub`, `web`, `plot`, `graph`,
 | `huggingface_hub` | 2.1.1 | Apache-2.0 |
 | `idna` | 3.20 | BSD-3-Clause |
 | `jusText` | 3.0.2 | The BSD 2-Clause License |
-| `kiwisolver` | 1.5.1 | BSD License |
+| `kiwisolver` | 1.5.1 | BSD |
 | `ladybug` | 0.20.4 | MIT |
 | `lxml` | 6.1.3 | BSD-3-Clause |
 | `matplotlib` | 3.11.2 | Python Software Foundation License |
 | `numpy` | 2.5.3 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
 | `packaging` | 26.3 | Apache-2.0 OR BSD-2-Clause |
 | `pillow` | 12.3.0 | MIT-CMU |
-| `primp` | 2.0.1 | MIT License |
+| `primp` | 2.0.1 | MIT |
 | `psutil` | 7.2.2 | BSD-3-Clause |
 | `pyparsing` | 3.3.3 | MIT |
 | `python-dateutil` | 2.9.0.post0 | Dual License |
