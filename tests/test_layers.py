@@ -29,8 +29,8 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
     ("machine", ("doctor", "fleet", "serve", "setup")),
-    ("tools", ("agent", "bench", "claude", "cli", "decide_cli", "do", "draft", "guard", "harness",
-               "mcp",
+    ("tools", ("agent", "bench", "claude", "cli", "datasheet", "decide_cli", "do", "draft", "guard",
+               "harness", "mcp",
                "surface", "testing", "train", "walk", "web")),
     ("dev", ("redteam",)),
 )
