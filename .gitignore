@@ -17,3 +17,9 @@ node_modules/
 *.spec.bak
 tests/support/vendor/
 tests/_generated_*/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.claude/settings.local.json
