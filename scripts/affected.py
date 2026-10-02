@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PACKAGE_ROOTS = (("src", "ml_stack"), ("scripts", "gates"))
+SCRIPT_TABLE = re.compile(r'''\[["']project["']\]\[["']scripts["']\]''')
 DOTTED = re.compile(r"\b((?:ml_stack|gates|tests)(?:\.\w+)+|ml_stack|gates)\b")
 INERT = {"CHANGELOG.md", "HANDOFF.md", "README.md", "LICENSE", "NOTICE", "CLAUDE.md",
          "AGENTS.md", "release-please-config.json", "version.txt"}
@@ -157,6 +158,19 @@ def test_files(root: Path) -> list[str]:
     return sorted(p.relative_to(root).as_posix() for p in (root / "tests").glob("test_*.py"))
 
 
+def dynamic_tests(root: Path, tests: list[str]) -> list[str]:
+    """Test files that import a module chosen at run time or read the console-script table."""
+    out = []
+    for rel in tests:
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        if SCRIPT_TABLE.search(text) or any(
+                isinstance(n, ast.Call) and ast.unparse(n.func).endswith(("import_module", "__import__"))
+                and n.args and not isinstance(n.args[0], ast.Constant)
+                for n in ast.walk(ast.parse(text))):
+            out.append(rel)
+    return out
+
+
 def mentioning(root: Path, rel: str, tests: list[str]) -> list[str]:
     """Test files whose text contains the changed path or its base name."""
     needles = {rel, Path(rel).name}
@@ -200,6 +214,9 @@ def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset()
                 out.add(t, f"{rel} named in the test")
             if not said:
                 out.unmapped.append(rel)
+    if any(Path(c).parts[:2] == ("src", "ml_stack") for c in changed):
+        for rel in dynamic_tests(root, tests):
+            out.add(rel, "imports a module chosen at run time")
     if out.files:
         for guard in GUARDS:
             if f"tests/{guard}" in tests:

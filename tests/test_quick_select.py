@@ -30,6 +30,9 @@ FILES = {
     "tests/test_delta.py": "def test_run(): ...\n\n\nARGS = ['-m', 'ml_stack.delta']\n",
     "tests/test_leaf.py": "from ml_stack.pack import leaf\n\n\ndef test_v():\n    assert leaf.VALUE\n",
     "tests/test_conftest_guard.py": "def test_nothing(): ...\n",
+    "tests/test_dynamic.py": "import importlib\n\n\ndef test_each(name='x'):\n    importlib.import_module(name)\n",
+    "tests/test_table.py": "import tomllib\nSCRIPTS = tomllib.loads('')['project']['scripts']\n",
+    "tests/test_literal.py": "import importlib\n\n\ndef test_one():\n    importlib.import_module('json')\n",
     "tests/conftest.py": "",
     "docs/notes.md": "notes\n",
     "README.md": "hello\n",
@@ -62,8 +65,16 @@ def test_a_lazy_import_inside_a_function_counts_and_the_walk_stops_at_the_depth(
     assert "tests/test_gamma.py" in chosen(toy, "src/ml_stack/alpha.py", depth=3)
 
 
+def test_a_test_that_imports_by_a_computed_name_or_reads_the_script_table_follows_any_source_change(
+        toy) -> None:
+    got = chosen(toy, "src/ml_stack/delta.py")
+    assert {"tests/test_dynamic.py", "tests/test_table.py"} <= got
+    assert "tests/test_literal.py" not in got
+    assert "tests/test_dynamic.py" not in chosen(toy, "docs/notes.md")
+
+
 def test_a_module_named_only_in_a_string_selects_the_test_that_names_it(toy) -> None:
-    assert chosen(toy, "src/ml_stack/delta.py") == {"tests/test_delta.py"}
+    assert "tests/test_delta.py" in chosen(toy, "src/ml_stack/delta.py")
 
 
 def test_a_change_selects_nothing_it_cannot_reach(toy) -> None:
@@ -71,7 +82,7 @@ def test_a_change_selects_nothing_it_cannot_reach(toy) -> None:
 
 
 def test_a_data_file_selects_the_tests_of_its_package(toy) -> None:
-    assert chosen(toy, "src/ml_stack/pack/table.json") == {"tests/test_leaf.py"}
+    assert "tests/test_leaf.py" in chosen(toy, "src/ml_stack/pack/table.json")
 
 
 def test_a_changed_test_selects_itself(toy) -> None:
