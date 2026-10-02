@@ -448,6 +448,16 @@ class ServerManager:
         self._save()
         return stopped
 
+    def close(self) -> None:
+        """Stop every server this manager started. Servers it adopted are left running."""
+        self.stop_all()
+
+    def __enter__(self) -> ServerManager:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------------ state file
 
     def _pending(self, spec: ServerSpec) -> Lease:

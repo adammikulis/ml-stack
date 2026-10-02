@@ -549,6 +549,35 @@ class TestDetach:
             proc.wait()
 
 
+class TestClose:
+    def test_leaving_the_block_stops_a_server_the_manager_started(self, tmp_path, binary):
+        state = tmp_path / "servers.json"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            with ServerManager(LlamaServerBackend(binary=binary), state_file=state) as manager:
+                info = ServerInfo(base_url="http://127.0.0.1:9103", port=9103, pid=proc.pid,
+                                  backend="llama.cpp", process=proc)
+                manager._record(ServerSpec(model="m.gguf", port=9103), info)
+            assert proc.wait(timeout=10) is not None
+            assert 9103 not in recorded_servers(state)
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_a_server_the_manager_only_adopted_survives_close(self, tmp_path, binary):
+        state = tmp_path / "servers.json"
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            state.write_text(json.dumps({"9104": {"port": 9104, "pid": proc.pid,
+                                                  "owner_pid": proc.pid, "model": "m.gguf"}}))
+            with ServerManager(LlamaServerBackend(binary=binary), state_file=state):
+                pass
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+            proc.wait()
+
+
 def test_tail_reports_a_missing_log_rather_than_raising(tmp_path):
     """A start failure with no tail is unactionable, and the tail itself must never be
     the thing that raises."""
