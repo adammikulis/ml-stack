@@ -292,7 +292,7 @@ install; mDNS.
 | Signed manifest (Ed25519), chunked and resumable multi-peer download, scan hook | built, two server processes on loopback, with pinned TLS |
 | Bootstrap offer, pinned installer | built; installer run as a separate process; `curl --pinnedpubkey` checked against the real `curl` |
 | CLI (`nearby listen pair requests accept decline revoke bootstrap share fetch`, all `--json`) | built; end-to-end tests across separate processes: listen, pair, accept, fetch with a gated file refused, share refusing unsigned requests, a stale manifest refused |
-| Sentinel events | emitted for each step (list below); adapter documented, not wired into sentinel here |
+| Sentinel events | emitted for each step (list below); the adapter below was run against the real sentinel on a throwaway merge of `agent/sentinel-integ` (126 onboarding tests green there); it is not wired into sentinel's own package |
 | SSH push, QR, mDNS, Windows toast, re-key, per-device credentials, web panel, hashed dependencies | designed only |
 
 Events (all on `onboard.events.BUS`; `Event(kind, severity, subject, evidence)`):
