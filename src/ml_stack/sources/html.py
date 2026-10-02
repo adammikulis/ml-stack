@@ -223,6 +223,9 @@ def _without(element: ET.Element, *, skip: tuple[str, ...]) -> str:
     return "\n\n".join(p for p in paragraphs if p)
 
 
+MOST_XML_BYTES = 256 << 20
+
+
 def read_xml(source: str | Path, *, url: str = "", marks: Marks | None = None) -> Document:
     """An XML document's sections as a `Document` of one `Chapter`.
 
@@ -236,7 +239,10 @@ def read_xml(source: str | Path, *, url: str = "", marks: Marks | None = None) -
     section_tag, id_attr = marks.section_tag, marks.id_attr
     number_tag, title_tag = marks.number_tag, marks.title_tag
     raw, path = _xml_bytes(source)
-    root = ET.fromstring(raw)
+    if len(raw) > MOST_XML_BYTES or re.search(rb"<!\s*(DOCTYPE|ENTITY)", raw, re.IGNORECASE):
+        raise ValueError("refusing XML that declares a DOCTYPE or an entity, or is over "
+                         f"{MOST_XML_BYTES} bytes")
+    root = ET.fromstring(raw)  # noqa: S314 - no DTD or entity can reach this
     title = _xml_title(root)
     doc = Document(path=path or url, title=title or url or "untitled", how="markup", url=url)
     chapter = Chapter(number="", title=doc.title)

@@ -5,13 +5,12 @@ from __future__ import annotations
 import platform
 import shutil
 import sys
-import tarfile
 import tempfile
-import zipfile
 from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, request_json
+from ml_stack.safenames import Unsafe, unpack
 
 __all__ = ["LlamaError", "asset_for_this_machine", "cache_dir",
            "ensure_server", "find_server"]
@@ -139,21 +138,10 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
 
 def _unpack(archive: Path, into: Path) -> None:
     """Extract a .zip or a .tar.gz, refusing one that writes outside ``into``."""
-    into.mkdir(parents=True, exist_ok=True)
-    if archive.name.lower().endswith(".zip"):
-        with zipfile.ZipFile(archive) as zf:
-            _check(zf.namelist())
-            zf.extractall(into)
-        return
-    with tarfile.open(archive) as tf:
-        _check(tf.getnames())
-        tf.extractall(into, filter="data")
-
-
-def _check(names: list[str]) -> None:
-    for member in names:
-        if member.startswith("/") or ".." in Path(member).parts:
-            raise LlamaError("refusing an archive that escapes its directory")
+    try:
+        unpack(archive, into)
+    except Unsafe as exc:
+        raise LlamaError(f"refusing {archive.name}: {exc}") from None
 
 
 def _install(source: Path, vendor: Path) -> None:
