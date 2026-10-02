@@ -51,15 +51,9 @@ def located(model: str | Path) -> Path | None:
     where = home.expand(text)
     if where.is_dir():
         return where
-    try:
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.errors import LocalEntryNotFoundError
-    except ImportError:
-        return None
-    try:
-        return Path(snapshot_download(text, local_files_only=True))
-    except (LocalEntryNotFoundError, ValueError, OSError):
-        return None
+    from ml_stack import hub
+
+    return hub.held_snapshot(text)
 
 
 def drafter_of(draft: str | Path | None) -> str:

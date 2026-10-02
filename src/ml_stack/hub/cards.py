@@ -77,9 +77,9 @@ def in_gguf(path: str | Path) -> dict[str, float]:
 
 def card(repo: str) -> str:
     """The repository's README, which is where a publisher writes down what it wants."""
-    from huggingface_hub import hf_hub_download
+    from ml_stack.hub import remote
 
-    return Path(hf_hub_download(repo, "README.md")).read_text(errors="replace")
+    return remote.text_file(repo, "README.md")
 
 
 def advice(text: str) -> dict[str, float]:

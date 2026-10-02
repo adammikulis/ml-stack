@@ -69,17 +69,12 @@ def draft_note(repo: str) -> str:
     """
     if repo in _DRAFT_NOTES:
         return _DRAFT_NOTES[repo]
-    try:
-        from huggingface_hub import hf_hub_download
-    except ImportError:
-        # the note is a courtesy; a head is still chosen without the hub package, and the
-        # choice must not raise where it used to be swallowed into "no head"
-        return ""
+    from ml_stack.hub import remote
 
     text = ""
     for name in ("MTP/README.md", "README.md"):
         try:
-            text = Path(hf_hub_download(repo, name)).read_text(errors="replace")
+            text = remote.text_file(repo, name)
             break
         except Exception:  # noqa: BLE001 - no README there, or the repo is not there at all
             continue

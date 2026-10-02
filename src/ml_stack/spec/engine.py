@@ -45,9 +45,9 @@ def weights(name: str | Path) -> Path:
     where = home.expand(name)
     if where.exists():
         return where
-    from huggingface_hub import snapshot_download
+    from ml_stack import hub
 
-    return Path(snapshot_download(str(name)))
+    return hub.snapshot(str(name))
 
 
 def external_ple(path: Path) -> Path:

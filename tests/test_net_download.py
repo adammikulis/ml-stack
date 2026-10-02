@@ -91,6 +91,7 @@ def test_nothing_reaches_the_final_path_before_the_checks_pass(tmp_path, site, p
             return super().scan(path)
 
     pipe.scanners = [Looks()]
+    pipe.scan_policy = ScanPolicy(scan_models=True)
     pull(pipe, site, "/m.gguf", where)
     assert seen == [False] and where.exists()
 
@@ -225,7 +226,12 @@ def test_unscanned_models_are_kept_with_a_warning_and_unscanned_archives_are_not
     site.add("/a.zip", _zip({"x": b"y"}))
     pipe.scanners = []
     kept = pull(pipe, site, "/m.gguf", tmp_path / "m.gguf")
-    assert kept.scan.startswith("scanned: no scanner available")
+    assert kept.scan.startswith("scan skipped: model weights")
+    pipe.scan_policy = ScanPolicy(scan_models=True)
+    asked = pull(pipe, site, "/m.gguf", tmp_path / "m2.gguf")
+    assert asked.scan.startswith("scanned: no scanner available")
+    assert "weights cannot be judged" in asked.scan
+    pipe.scan_policy = ScanPolicy()
     with pytest.raises(net.Blocked, match="not kept unscanned"):
         pull(pipe, site, "/a.zip", tmp_path / "a.zip")
     allowed = pull(pipe, site, "/a.zip", tmp_path / "a.zip", net.Want(allow_unscanned=True))

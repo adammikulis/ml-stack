@@ -419,6 +419,30 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_internet(monkeypatch, tmp_path):
+    """Every fetch goes through a pipeline that cannot leave this machine.
+
+    The default pipeline admits no host, so a test that reaches for the internet gets a
+    refusal naming the host. A test that serves from a local server installs its own with
+    ``net.use``; ``HF_ENDPOINT`` and the host variables are cleared so a shell cannot steer one.
+    """
+    from ml_stack import net
+    from ml_stack.httpguard import Refused, Limits
+
+    for name in ("HF_ENDPOINT", "ML_STACK_NET_ALLOW_HOSTS", "ML_STACK_FETCH_ALLOW_HOSTS",
+                 "ML_STACK_NET_UNSCANNED", "ML_STACK_NET_SCAN_MODELS", "ML_STACK_NET_HASH_LOOKUP"):
+        monkeypatch.delenv(name, raising=False)
+
+    def nowhere(host, port):
+        raise Refused(f"tests do not reach the internet: {host}")
+
+    sealed = net.Pipeline(policy=net.Policy(allowed=[], path=tmp_path / "net-approvals.jsonl"),
+                          limits=Limits(resolver=nowhere), scanners=[])
+    with net.use(sealed):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _no_machine_binary(monkeypatch):
     """No test finds the llama-server this machine happens to have installed.
 

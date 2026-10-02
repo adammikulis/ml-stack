@@ -792,20 +792,16 @@ class TestBuildFlag:
 
 
 class TestModelsFetch:
-    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys, tmp_path):
-        import huggingface_hub
+    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys):
+        import struct
 
         import ml_stack.hub as hub
+        from ml_stack.testing.fakehub import fake_hub
 
-        monkeypatch.setattr(hub, "files", lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000)])
-
-        def fake_download(repo_id, filename, **kw):
-            target = tmp_path / filename
-            target.write_bytes(b"x" * 10)
-            return str(target)
-
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
-        assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
+        body = b"GGUF" + struct.pack("<IQQ", 3, 0, 0) + b"\0" * 40
+        with fake_hub({"maker/thing-GGUF": {"thing-Q4_K_M.gguf": body}}) as server:
+            monkeypatch.setenv("HF_ENDPOINT", server.url)
+            assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
         assert "thing-Q4_K_M.gguf" in capsys.readouterr().out
 
 

@@ -28,7 +28,7 @@ MARGIN = 256 * 1024 * 1024
 """Free space left over after a download."""
 
 __all__ = ["CancelToken", "Cancelled", "ChecksumMismatch", "GatedRepo", "NotEnoughSpace",
-           "NotFound", "Progress", "plan", "pull"]
+           "NotFound", "Progress", "held_snapshot", "plan", "pull", "snapshot"]
 
 
 class Cancelled(Exception):
@@ -227,6 +227,12 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
     """
     parsed, chosen = plan(ref)
     folder = destination(dest, parsed)
+    _bring(parsed, chosen, folder, on_progress, cancel)
+    return folder / chosen[0].path
+
+
+def _bring(parsed: remote.Ref, chosen: list[RemoteFile], folder: Path,
+           on_progress: Report | None, cancel: CancelToken | None) -> None:
     _space(folder, sum(_remaining(parsed, folder / f.path, f) for f in chosen))
     meter = _Meter(parsed.text, sum(f.size for f in chosen), len(chosen), on_progress)
     for index, one in enumerate(chosen):
@@ -238,4 +244,31 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
                 _fetch(parsed, one, final, meter, cancel)
         meter.base += one.size
         meter.send("done" if index == len(chosen) - 1 else "downloading", one, 0, force=True)
-    return folder / chosen[0].path
+
+
+PICKLES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".msgpack", ".npy", ".npz")
+
+
+def snapshot(repo: str, revision: str = "main", on_progress: Report | None = None,
+             cancel: CancelToken | None = None) -> Path:
+    """Every file of ``repo`` but its pickle-based weights, in ``<store>/models/owner/repo``;
+    returns that folder. For a repository that holds safetensors."""
+    parsed = remote.Ref(repo, "", "", revision)
+    chosen = [f for f in remote.listing(repo, revision)
+              if not f.path.lower().endswith(PICKLES) and not f.name.startswith(".git")]
+    if not chosen:
+        raise NotFound(f"{repo} has no files")
+    folder = destination(None, parsed)
+    _bring(parsed, chosen, folder, on_progress, cancel)
+    return folder
+
+
+def held_snapshot(repo: str) -> Path | None:
+    """The folder `snapshot` made for ``repo``, or the newest Hugging Face cache snapshot of
+    it, when either is on this machine; nothing is fetched."""
+    ours = home.state("models", *repo.split("/")[:2])
+    if ours.is_dir() and any(ours.iterdir()):
+        return ours
+    snaps = hub.hub_cache() / ("models--" + repo.replace("/", "--")) / "snapshots"
+    found = sorted((d for d in snaps.glob("*") if d.is_dir()), key=lambda d: d.stat().st_mtime)
+    return found[-1] if found else None

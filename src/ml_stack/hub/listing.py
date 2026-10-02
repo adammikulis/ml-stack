@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack import hub
+from ml_stack.hub import remote
 from ml_stack.hub.naming import _SHARD, _precision
+from ml_stack.hub.transfer import pull
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -34,16 +36,14 @@ def find(query: str, *, prefer: tuple[str, ...] = PREFER, gguf: bool = True,
     is usually somebody's uncensored remix rather than the release. Ranking by publisher
     fixes that without pretending to know which repo is "official".
     """
-    from huggingface_hub import HfApi
-
     seen: dict[str, Found] = {}
     for term in (query, f"{query} GGUF") if gguf else (query,):
-        for model in HfApi().list_models(search=term, limit=100):
-            name = str(model.id)
+        for model in remote.models(term, 100):
+            name = str(model["id"])
             if gguf and "gguf" not in name.lower():
                 continue
-            seen[name] = Found(repo=name, downloads=int(model.downloads or 0),
-                               likes=int(getattr(model, "likes", 0) or 0))
+            seen[name] = Found(repo=name, downloads=int(model.get("downloads") or 0),
+                               likes=int(model.get("likes") or 0))
 
     def rank(one: Found) -> tuple[int, int]:
         owner = one.owner.lower()
@@ -59,13 +59,8 @@ def files(repo: str, *, ending: str = ".gguf") -> list[tuple[str, int]]:
     A GGUF repo holds one file per quantisation and sometimes a projector or a draft beside
     them; which one you want is a judgement about memory, and needs the sizes to make.
     """
-    from huggingface_hub import HfApi
-
-    out = []
-    for info in HfApi().model_info(repo, files_metadata=True).siblings or ():
-        name = str(info.rfilename)
-        if name.lower().endswith(ending):
-            out.append((name, int(getattr(info, "size", 0) or 0)))
+    out = [(one.path, one.size) for one in remote.listing(repo)
+           if one.path.lower().endswith(ending)]
     # Weights first, largest first, and the small things that travel with them last: a
     # listing sorted the other way buries the model itself under vision projectors and
     # draft heads, which is what happened the first time this was used in anger.
@@ -158,39 +153,23 @@ def build_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str,
 
 
 def fetch(reference: str) -> Path:
-    """Download an `hf:` reference into the Hub cache, without serving it.
-
-    The same cache llama-server's own `-hf` download fills, and `on_disk()` reads back -- so a
-    prefetch here and a lease afterward see the same file, and a benchmark that preflights
-    a model before timing it never pays for the download inside the timed window.
+    """Download an `hf:` reference into ml-stack's model store, without serving it.
 
     A sharded model's *every* shard comes down, not only the one named: the file given is
     one member of a build, and a server started against a partial download fails at the far
     end of the load complaining about a missing shard.
     """
-    from huggingface_hub import hf_hub_download
-
+    from ml_stack import home
     from ml_stack.serve.backend import ServerSpec
 
     parts = ServerSpec.hf_parts(reference)
     if parts is None or not parts[1]:
         raise ValueError(f"{reference!r} should look like hf:owner/repo/file.gguf")
     repo, name = parts
-
-    stem = name.split("/")[0] if "/" in name else _SHARD.sub("", name.rsplit("/", 1)[-1])
-    listing = [n for n, _size in hub.files(repo)]
-    members = [n for n in listing
-               if (n.split("/")[0] if "/" in n
-                   else _SHARD.sub("", n.rsplit("/", 1)[-1])) == stem]
-    if name not in members:
-        held = [n for n in listing if not hub.aside(n)]
-        raise ValueError(f"{repo} has no {name}; it holds "
-                         + (", ".join(held) if held else "no model file"))
-
-    wanted: Path | None = None
-    last: Path | None = None
-    for member in members:
-        last = Path(hf_hub_download(repo, member))
-        if member == name:
-            wanted = last
-    return wanted or last
+    try:
+        pull(f"hf:{repo}/{name}")
+    except remote.NotFound as exc:
+        raise ValueError(str(exc)) from exc
+    except remote.RemoteError as exc:
+        raise OSError(str(exc)) from exc
+    return home.state("models", *repo.split("/")) / name
