@@ -49,7 +49,7 @@ jobs:
           python -m pip install cyclonedx-bom
           python -m venv "$RUNNER_TEMP/sbom-env"
           wheel=$(find dist -name 'ml_stack-*.whl' -print -quit)
-          "$RUNNER_TEMP/sbom-env/bin/pip" install "${wheel}[store,hub,web,plot,graph,serve]"
+          "$RUNNER_TEMP/sbom-env/bin/pip" install "${wheel}[store,hub,web,plot,graph]"
           cyclonedx-py environment "$RUNNER_TEMP/sbom-env" --output-format JSON --output-file sbom.cdx.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

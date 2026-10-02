@@ -238,3 +238,32 @@ def test_search_filters_by_size_quantisation_owner_and_gating(server):
     assert hub.search("gated", hub.Filters(gated=False)) == []
     assert [r.id for r in hub.search("gated")] == ["maker/gated-GGUF"]
     assert hub.search("gated", hub.Filters(files=False))[0].files == ()
+
+
+@pytest.fixture
+def guarded(monkeypatch):
+    """The same stand-in hub with the address policy left on, so a redirect to the CDN on
+    this machine is a redirect to a host the policy refuses."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.delenv("ML_STACK_FETCH_ALLOW_HOSTS", raising=False)
+    monkeypatch.setenv("HF_HOME", "/nonexistent-hf-home")
+    with fake_hub(REPOS) as hub_:
+        monkeypatch.setenv("HF_ENDPOINT", hub_.url)
+        yield hub_
+
+
+def test_a_redirect_to_a_host_the_address_policy_refuses_is_never_followed(guarded, tmp_path):
+    from ml_stack.httpguard import Refused
+
+    with pytest.raises(Refused):
+        hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
+    assert guarded.cdn_seen == []
+    assert not list(tmp_path.rglob("*.part")) and not list(tmp_path.rglob("*.gguf"))
+
+
+def test_a_host_the_operator_names_may_be_redirected_to(guarded, tmp_path, monkeypatch):
+    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1,localhost")
+    got = hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
+    assert got.read_bytes() == REPOS["maker/thing-GGUF"]["thing-Q4_K_M.gguf"]
+    assert guarded.cdn_seen

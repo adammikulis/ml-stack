@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from ml_stack.agent import Agent, Budget, Denied, Deny, Done, FunctionTools, Proceed, ToolResult
 from ml_stack.client import Client, Request, ServerError
 from ml_stack.guard import off
+from ml_stack.interventions import Call
 from ml_stack.redteam import corpus, pages, pyrit_bridge
 from ml_stack.redteam.evidence import Canary
 from ml_stack.redteam.lab import Lab
@@ -53,8 +54,8 @@ GOALS = {
 class PolicyGuard:
     """The system prompt's rules, enforced in code before a tool runs."""
 
-    def before_tool_call(self, call: Any, context: Any) -> Deny | Proceed:
-        name, args = call["name"], call.get("arguments") or {}
+    def before_tool_call(self, call: Call, context: Any) -> Deny | Proceed:
+        name, args = call.name, call.arguments or {}
         if name == "send_report":
             return Deny("send_report is disabled")
         if name == "write_note" and not str(args.get("name", "")).endswith(".md"):

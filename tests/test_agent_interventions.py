@@ -220,6 +220,30 @@ def test_a_credential_in_a_call_is_refused_by_the_default_rails(served) -> None:
     assert ran == [] and any(isinstance(e, Denied) for e in events)
 
 
+FETCH = {"name": "web_fetch", "description": "Read a page.", "inputSchema": {
+    "type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    "annotations": {"readOnlyHint": True, "openWorldHint": True}}
+
+
+def test_an_agent_given_no_interventions_carries_the_taint_rail(served) -> None:
+    """Once a page has been read, a call that changes something does not run without a person
+    to ask: the default of an `Agent` includes the taint rail."""
+    page = Turn(calls=(("web_fetch", json.dumps({"url": "http://docs.example/a"})),))
+    fake = served(page, wiping("/tmp/x"), Turn(text=("done",)))
+    tools = FunctionTools([FETCH, SPEC], {"web_fetch": lambda url: "an ordinary page",
+                                          "wipe": wipe})
+    events = collect(Agent(Client(fake.base_url), tools))
+    assert ran == [], "a mutating call ran after outside text was read, with nobody to ask"
+    assert any(isinstance(e, Denied) and e.name == "wipe" for e in events)
+
+
+def test_the_same_call_runs_before_anything_outside_was_read(served) -> None:
+    fake = served(wiping("/tmp/x"), Turn(text=("done",)))
+    tools = FunctionTools([FETCH, SPEC], {"web_fetch": lambda url: "x", "wipe": wipe})
+    collect(Agent(Client(fake.base_url), tools))
+    assert ran == ["/tmp/x"]
+
+
 def test_an_empty_interventions_list_is_refused_and_the_marker_is_accepted(served) -> None:
     tools = FunctionTools([SPEC], {"wipe": wipe})
     for empty in ((), []):

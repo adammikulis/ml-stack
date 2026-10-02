@@ -1,9 +1,11 @@
 # Security
 
 What ml-stack trusts, what it exposes, and what each kind of attacker can do. Reviewed
-2026-10-02, branch `agent/hardening`; the fix for each finding is the commit named in the
-table. Other documents: `docs/credentials.md` (tokens and keys), `docs/fleet.md` (the
-daemon), `docs/serving.md` (model servers).
+2026-10-02 on `agent/hardening` and carried onto the 0.3.0 integration branch; the fix for each
+finding is the commit named in the table. Other documents: `docs/credentials.md` (tokens and
+keys), `docs/fleet.md` (the daemon), `docs/serving.md` and `docs/serve-admission.md` (model
+servers and the broker), `docs/guardrails.md` and `docs/taint.md` (the agent's rails),
+`docs/sentinel.md` (what watches for all of it).
 
 ## The model
 
@@ -70,6 +72,17 @@ matches. The digest proves the bytes are what GitHub holds, not who built them.
 
 These apply to every consumer of the library without a switch.
 
+- A model server is started, reused and talked to through the machine's broker and nothing
+  else (`ServerManager.lease` goes to the broker; `tests/test_serve_no_bypass.py` reads the
+  source for any other way a process, a connection or the private start is reached). The broker
+  admits a server only when the machine has the memory for it and queues generation requests
+  one at a time per pool.
+- An `Agent` runs with the built-in rails (tool policy, secrets, untrusted-text fencing, taint)
+  and the model tier unless the caller passes `interventions=guard.off(because=...)`, which is
+  logged. An empty list is refused.
+- A GGUF or safetensors header is read by one bounded reader (`ml_stack.hub.modelfile`): every
+  count and length is checked against the file's size, and a header is held to a pair cap, an
+  item budget, a nesting depth, a dimension cap and a time budget.
 - A server a `ServerManager` starts stops with the process that started it, including when that
   process is killed outright (`stop_on_exit`, a watchdog process, an orphan sweep on the next
   lease that stops only a server whose record proves its pid).
@@ -129,6 +142,7 @@ at that commit.
 | 27 | Low | `serve/preflight.py:87`, `serve/mlx_tree.py:92` | A model file whose header declares a string, an array or a pair count of 2^40 made the preflight allocate or loop on it | `35846af` |
 | 28 | Medium | `fleet/daemon.py`, `fleet/api.py` | Anyone on the segment read and altered peer-to-peer bodies (jobs, files, replies) | `d6ea366` |
 | 29 | Medium | `fleet/discovery.py:_salt_for` | The passphrase salt was a hash of the cluster name, so a table precomputed for `ml-stack` fit every cluster of that name | `518a855` per-cluster random salt, protocol 2 |
+| 30 | Medium | `hub/header.py`, `hub/cards.py`, `serve/tensors.py` | Three more GGUF readers walked the counts and lengths a file claimed: a 2^60-byte string raised `MemoryError`, a 2^50-item or deeply nested array looped for as long as it liked, and a model list hung on one hostile file | integration: one reader, `hub/modelfile.py` |
 
 `ruff --select S` (bandit) over `src`: 84 findings at `agent/audit`; the `ruff-security` budget
 now stands lower by the sites fixed (S104, S202, S314, S310, S107, the sampling `S311`s) and the
@@ -164,7 +178,10 @@ These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-
   keychain do not reach a download there.
 - **Windows:** the mode and ownership checks on credential files do not apply, `icacls` is
   best effort, and the exit watchdog was not run on Windows.
-- **`scripts/test-on-linux` was not run** for this pass.
+- **`scripts/test-on-linux`** needs Docker's daemon; `docs/INTEGRATION-REPORT.md` says whether it
+  ran for the 0.3.0 integration.
+- **`agent/lan-onboarding` and `agent/internet-pipeline`** are separate branches, not part of this
+  document until they land.
 
 ## Sentinel
 
