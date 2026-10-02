@@ -129,7 +129,7 @@ def _stream_to(pipe: Pipeline, url: str, part: Path, want: Want,
                hooks: Hooks) -> httpguard.Streaming:
     """Append the body to ``part``; the shown answer (without its chunks) is returned."""
     sent, offset = _resume_headers(part, want)
-    sent = bearer(url, {**want.headers, **sent}, want.token)
+    sent = bearer(url, {**want.headers, **sent}, want.token, pipe.plain())
     limits = pipe.limited(want.purpose, admit=want.admit,
                           max_bytes=max(1, want.max_bytes - offset), deadline_s=want.deadline_s)
     with httpguard.stream(url, headers=sent, limits=limits) as shown:

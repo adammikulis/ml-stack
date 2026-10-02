@@ -22,9 +22,10 @@ ALLOWED: tuple[str, ...] = (
     "huggingface.co", "*.huggingface.co", "hf.co", "*.hf.co",
     "github.com", "api.github.com", "objects.githubusercontent.com",
     "release-assets.githubusercontent.com", "raw.githubusercontent.com",
-    "codeload.github.com",
+    "codeload.github.com", "nominatim.openstreetmap.org",
 )
-"""Hosts every download may use without asking: the model hub and the project's release host."""
+"""Hosts that need no approval: the model hub, GitHub's release hosts and the geocoder. The
+host of ``$HF_ENDPOINT`` and those in ``$ML_STACK_NET_ALLOW_HOSTS`` count as listed too."""
 
 ENV = "ML_STACK_NET_ALLOW_HOSTS"
 
@@ -77,7 +78,9 @@ class Policy:
         return self.path or approvals_path()
 
     def _extra(self) -> tuple[str, ...]:
-        return tuple(p.strip().lower() for p in os.environ.get(ENV, "").split(",") if p.strip())
+        named = tuple(p.strip().lower() for p in os.environ.get(ENV, "").split(",") if p.strip())
+        mirror = host_of(os.environ.get("HF_ENDPOINT", ""))
+        return (*named, mirror) if mirror else named
 
     def approvals(self) -> list[Approval]:
         """Every approval on record, oldest first."""

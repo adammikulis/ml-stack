@@ -93,7 +93,11 @@ class Pipeline:
         """``url``'s answer. `Refused` for a host the policy does not admit, a private
         address at any hop, a downgrade, or a body over the limit."""
         limits = self._limits(ask)
-        return httpguard.fetch(url, headers=bearer(url, ask.headers, ask.token), limits=limits)
+        return httpguard.fetch(url, headers=bearer(url, ask.headers, ask.token, self.plain()), limits=limits)
+
+    def plain(self) -> frozenset[str]:
+        """Hosts a token may be sent to without TLS: those named as private-network hosts."""
+        return self.limits.allow_hosts | httpguard.allowed_hosts()
 
     def _limits(self, ask: Ask) -> Limits:
         changes = {"max_bytes": ask.max_bytes} if ask.max_bytes else {}
@@ -103,7 +107,7 @@ class Pipeline:
     def open(self, url: str, ask: Ask = ASK) -> Iterator[Reply]:
         """An answer to read in pieces. A status of 400 or more is `http.ServerError`
         (retried ``tries`` times for 429 and 5xx)."""
-        limits, sent, tries = self._limits(ask), bearer(url, ask.headers, ask.token), max(1, ask.tries)
+        limits, sent, tries = self._limits(ask), bearer(url, ask.headers, ask.token, self.plain()), max(1, ask.tries)
         for attempt in range(tries):
             with httpguard.stream(url, headers=sent, limits=limits) as shown:
                 if shown.status < 400:
@@ -129,11 +133,14 @@ class Pipeline:
             raise http.ServerError(f"{http.shown(url)} returned non-JSON") from exc
 
 
-def bearer(url: str, headers: dict[str, str] | None, token: str) -> dict[str, str]:
-    """``headers`` with ``token`` as a bearer credential; `Refused` unless the URL is https."""
+def bearer(url: str, headers: dict[str, str] | None, token: str,
+           plain: frozenset[str] = frozenset()) -> dict[str, str]:
+    """``headers`` with ``token`` as a bearer credential; `Refused` unless the URL is https or
+    its host is one of ``plain`` (a mirror on this network the person named)."""
     sent = dict(headers or {})
     if token:
-        if urllib.parse.urlsplit(url).scheme != "https":
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "https" and (parts.hostname or "") not in plain:
             raise Refused("a token is sent over https only")
         sent["Authorization"] = f"Bearer {token}"
     return sent

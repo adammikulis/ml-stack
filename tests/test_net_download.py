@@ -375,11 +375,19 @@ def test_credentials_and_cookies_do_not_cross_hosts(tmp_path, site):
     assert "cookie" not in target.seen[-1] and "authorization" not in target.seen[-1]
 
 
-def test_a_token_is_never_sent_over_plain_http(tmp_path, site, pipe):
-    route = site.add("/m.gguf", gguf_bytes())
+def test_a_token_is_never_sent_over_plain_http_to_the_internet(tmp_path, pipe):
+    pipe.policy = net.Policy(allowed=["example.org"], path=tmp_path / "a.jsonl")
     with pytest.raises(Refused, match="https only"):
-        pull(pipe, site, "/m.gguf", tmp_path / "m.gguf", net.Want(token="secret"))
-    assert route.seen == []
+        net.download("http://example.org/m.gguf", tmp_path / "m.gguf", net.Want(token="secret"),
+                     pipe)
+    with pytest.raises(Refused, match="https only"):
+        pipe.get("http://example.org/x", net.Ask(token="secret"))
+
+
+def test_a_token_goes_to_a_private_mirror_the_person_named(tmp_path, site, pipe):
+    route = site.add("/m.gguf", gguf_bytes())
+    pull(pipe, site, "/m.gguf", tmp_path / "m.gguf", net.Want(token="secret"))
+    assert route.seen[0]["authorization"] == "Bearer secret"
 
 
 def test_a_name_that_escapes_is_refused(tmp_path, site, pipe):
