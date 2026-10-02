@@ -123,11 +123,10 @@ def test_a_page_cannot_downgrade_a_typed_url_and_an_approval_opens_a_host(tmp_pa
     assert origins.admit("https://p.example/y") == "allow-listed"
 
 
-pymupdf = pytest.importorskip("pymupdf")
-
-
 def test_a_pdf_gives_only_its_visible_text(tmp_path):
     from ml_stack.net.pdftext import visible_text
+
+    pymupdf = pytest.importorskip("pymupdf")
 
     doc = pymupdf.open()
     page = doc.new_page()

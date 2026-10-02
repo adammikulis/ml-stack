@@ -10,6 +10,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
+from ml_stack import files, home
+
 __all__ = ["Outcome", "ScanPolicy", "ScanResult", "Scanner", "Summary", "category", "scan_file",
            "summarise"]
 
@@ -120,8 +122,6 @@ class ScanPolicy:
     @classmethod
     def load(cls) -> ScanPolicy:
         """The policy a person saved with `save`, with the environment applied over it."""
-        from ml_stack import files, home
-
         saved = files.read_json(home.state("net", "scan-policy.json"), {})
         base = cls(**{k: v for k, v in saved.items()
                       if k in ("executable", "archive", "model", "data", "scan_models")
@@ -130,8 +130,6 @@ class ScanPolicy:
 
     def save(self) -> None:
         """Keep this policy for every later run."""
-        from ml_stack import files, home
-
         files.write_json(home.state("net", "scan-policy.json"),
                          files.versioned(asdict(self), 1))
 
@@ -166,6 +164,7 @@ class ScanPolicy:
             return True, summary.line
         action = "allow" if allow_unscanned else self.action(kind)
         if action == "refuse":
-            return False, f"{summary.line}; {category(kind)} files are not kept unscanned"
+            return False, (f"{summary.line}; {category(kind)} files are not kept unscanned "
+                           f"(install ClamAV, or `ml-stack-security scan-policy {category(kind)} warn`)")
         return True, summary.line + ("; weights cannot be judged by a virus scanner"
                                      if category(kind) == "model" else "")

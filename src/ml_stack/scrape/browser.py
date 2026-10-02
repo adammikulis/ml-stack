@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ml_stack.net import browserguard
 from ml_stack.platform import applescript_quote
 
 
@@ -103,8 +104,6 @@ def _paged(play: Any, window: Window) -> Iterator[Any]:
             args=window.args(), accept_downloads=not window.guarded,
             viewport={"width": window.width, "height": window.height})
     if window.guarded:
-        from ml_stack.net import browserguard
-
         browserguard.install(context)
     context.set_default_timeout(window.timeout_ms)
     page = context.pages[0] if context.pages else context.new_page()

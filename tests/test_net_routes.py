@@ -5,7 +5,6 @@ import struct
 import pytest
 
 from ml_stack import hub, web
-from ml_stack.net.untrusted import Origins
 from ml_stack.scrape.polite import Polite
 from ml_stack.testing.fakehub import fake_hub
 from tests.web_site import allow_all, serving
@@ -46,13 +45,12 @@ def test_a_page_comes_back_cleaned_fenced_and_labelled_untrusted(lan):
     assert got["hidden_removed"] >= 4
 
 
-def test_a_link_inside_a_fetched_page_is_not_followed_by_the_agent(lan):
+def test_a_link_inside_a_fetched_page_is_not_followed_by_the_agent(lan, origins):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     lan.page("/kilns", HOSTILE.replace(
         "</body>", "<p>Read http://evil.example/steal for details about the works.</p></body>"))
-    origins = Origins()
     origins.typed(f"{lan.base}/kilns")
-    (_, _), (_, reading), _ = web.tools(origins=origins)
+    (_, _), (_, reading), _ = web.tools()
     first = reading({"url": f"{lan.base}/kilns"})
     assert first["untrusted"] is True
     again = reading({"url": "http://evil.example/steal"})
@@ -60,15 +58,14 @@ def test_a_link_inside_a_fetched_page_is_not_followed_by_the_agent(lan):
     assert origins.kind("http://evil.example/steal") == "page"
 
 
-def test_pagination_stays_on_the_page_the_agent_was_allowed_to_read(lan):
+def test_pagination_stays_on_the_page_the_agent_was_allowed_to_read(lan, origins):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     body = ("<html><title>List</title><body><p>" + "Rows of parts. " * 40 + "</p>"
             '<a rel="next" href="/list?page=2">Next</a></body></html>')
     lan.page("/list", body)
     lan.page("/list?page=2", body.replace("Rows", "More rows"))
-    origins = Origins()
     origins.typed(f"{lan.base}/list")
-    (_, _), (_, reading), _ = web.tools(origins=origins)
+    (_, _), (_, reading), _ = web.tools()
     first = reading({"url": f"{lan.base}/list"})
     second = reading({"url": first["next"]})
     assert "none" not in second and "More rows" in second["text"]
@@ -77,9 +74,8 @@ def test_pagination_stays_on_the_page_the_agent_was_allowed_to_read(lan):
 def test_a_search_result_may_be_read_and_an_invented_address_may_not(lan):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     lan.page("/found", HOSTILE)
-    origins = Origins()
     pairs = web.tools(engine=lambda q, n: [{"title": "t", "url": f"{lan.base}/found",
-                                            "snippet": "s​nip"}], origins=origins)
+                                            "snippet": "s​nip"}])
     (_, searching), (_, reading), _ = pairs
     rows = searching({"query": "kilns"})
     assert rows[0]["snippet"] == "snip"

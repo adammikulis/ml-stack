@@ -18,6 +18,7 @@ from typing import Any
 from ml_stack import net
 from ml_stack.files import promote
 from ml_stack.http import ServerError
+from ml_stack.httpguard import Refused
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
@@ -153,12 +154,15 @@ class Environment:
 
         base = Path(self.root).expanduser() / "python"
         base.parent.mkdir(parents=True, exist_ok=True)
-        from ml_stack.fleet.updates import UpdateError, download
-
+        asset = assets[0]
+        digest = str(asset.get("digest") or "").removeprefix("sha256:")
         with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "python.tar.gz"
             try:
-                archive = download(assets[0], Path(tmp))
-            except UpdateError as exc:
+                net.download(asset["browser_download_url"], archive, net.Want(
+                    sha256=digest, require_digest=True, size=int(asset.get("size") or 0),
+                    max_bytes=2 << 30, purpose="python download"))
+            except (net.Blocked, net.Truncated, ServerError, Refused) as exc:
                 raise OSError(f"could not download Python: {exc}") from None
             if on_progress:
                 on_progress("Unpacking Python")

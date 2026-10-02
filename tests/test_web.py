@@ -14,7 +14,6 @@ import os
 import pytest
 
 from ml_stack import http, net, web
-from ml_stack.net.untrusted import Origins
 from ml_stack.scrape.browser import BrowserUnavailable
 from ml_stack.web import (
     ENGINES,
@@ -55,13 +54,6 @@ def public_dns(monkeypatch):
 def inner(text):
     """What lies between the untrusted-content fences."""
     return text.split("\n", 1)[1].rsplit("\n", 1)[0]
-
-
-def typed(*urls):
-    """Origins that know these addresses as ones a person typed."""
-    origins = Origins()
-    origins.typed(" ".join(urls))
-    return origins
 
 
 def fetching(pages):
@@ -423,38 +415,38 @@ def test_the_search_tool_says_nothing_matched_rather_than_returning_a_list():
         {"title": "t", "url": "https://tessyn.example/", "snippet": "s"}]
 
 
-def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns):
+def test_the_read_tool_turns_a_refusal_and_a_failure_into_none(public_dns, origins):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     fetch = fetching({"https://quenlow.example/about": PAGE})
-    (_, _), (_, reading), _ = tools(fetch=fetch, browse=no_browser, origins=typed(
-        "http://127.0.0.1/", "https://quenlow.example/missing", "https://quenlow.example/about"))
+    origins.typed("http://127.0.0.1/ https://quenlow.example/missing https://quenlow.example/about")
+    (_, _), (_, reading), _ = tools(fetch=fetch, browse=no_browser)
     assert reading({"url": "http://127.0.0.1/"})["none"].startswith("could not read")
     assert "none" in reading({"url": "https://quenlow.example/missing"})
     got = reading({"url": "https://quenlow.example/about"})
     assert got["title"] == "About the Quenlow works" and got["rendered"] is False
 
 
-def test_the_read_tool_passes_rendered_through(public_dns):
+def test_the_read_tool_passes_rendered_through(public_dns, origins):
     page = StubPage(PAGE)
-    (_, _), (_, reading), _ = tools(fetch=fetching({}), browse=browsing(page),
-                                    origins=typed("https://quenlow.example/"))
+    origins.typed("https://quenlow.example/")
+    (_, _), (_, reading), _ = tools(fetch=fetching({}), browse=browsing(page))
     got = reading({"url": "https://quenlow.example/", "rendered": True})
     assert got["rendered"] is True and page.visited == ["https://quenlow.example/"]
 
 
-def test_the_look_tool_says_no_browser_without_one(public_dns):
-    (_, _), (_, _), (_, looking), _ = tools(browse=no_browser, vision=True, origins=typed(
-        "https://quenlow.example/", "http://localhost/"))
+def test_the_look_tool_says_no_browser_without_one(public_dns, origins):
+    origins.typed("https://quenlow.example/ http://localhost/")
+    (_, _), (_, _), (_, looking), _ = tools(browse=no_browser, vision=True)
     got = looking({"url": "https://quenlow.example/"})
     assert got == {"none": "no browser: playwright is not installed"}
     assert looking({"url": "http://localhost/"})["none"].startswith("could not look at")
 
 
-def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns):
+def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns, origins):
     pytest.importorskip("trafilatura", reason="ml-stack[web] reads this")
     page = StubPage(PAGE, images=[])
-    (_, _), (_, _), (_, looking), _ = tools(browse=browsing(page), vision=True,
-                                            origins=typed("https://quenlow.example/"))
+    origins.typed("https://quenlow.example/")
+    (_, _), (_, _), (_, looking), _ = tools(browse=browsing(page), vision=True)
     got = looking({"url": "https://quenlow.example/"})
     assert got["_images"] == [PNG] and got["title"] == "About the Quenlow works"
 

@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 
 from ml_stack import home
+from ml_stack.httpguard import Refused
+from ml_stack.net import git as netgit
 
 CONVERTER_NAME = "convert_hf_to_gguf.py"
 
@@ -75,9 +77,6 @@ def ensure_converter(*, ref: str = "master") -> Path:
     """Locate the converter, shallow-cloning llama.cpp into the cache if it is absent."""
     if found := find_converter():
         return found
-
-    from ml_stack.httpguard import Refused
-    from ml_stack.net import git as netgit
 
     source = llama_cpp_src()
     source.parent.mkdir(parents=True, exist_ok=True)

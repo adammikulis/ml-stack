@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ml_stack.files import sha256_file
 from ml_stack.net.scan import Outcome, Scanner, ScanResult
 
 __all__ = ["ClamAV", "HashLookup", "MacNotice", "WindowsDefender", "default_scanners"]
@@ -194,8 +195,6 @@ class HashLookup:
 
 
 def _sha256(path: Path) -> str:
-    from ml_stack.files import sha256_file
-
     return sha256_file(path)
 
 

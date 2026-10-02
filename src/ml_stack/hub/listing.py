@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack import hub
+from ml_stack import home, hub
 from ml_stack.hub import remote
 from ml_stack.hub.naming import _SHARD, _precision
 from ml_stack.hub.transfer import pull
@@ -159,7 +159,6 @@ def fetch(reference: str) -> Path:
     one member of a build, and a server started against a partial download fails at the far
     end of the load complaining about a missing shard.
     """
-    from ml_stack import home
     from ml_stack.serve.backend import ServerSpec
 
     parts = ServerSpec.hf_parts(reference)

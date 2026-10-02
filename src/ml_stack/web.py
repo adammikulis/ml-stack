@@ -275,12 +275,11 @@ def _readable(html: str, url: str) -> tuple[str, str, int]:
     return untrusted.clean_text(title)[0], text, removed
 
 
-def _labelled(out: dict[str, Any], text: str, url: str, removed: int,
-              origins: untrusted.Origins | None = None) -> dict[str, Any]:
+def _labelled(out: dict[str, Any], text: str, url: str, removed: int) -> dict[str, Any]:
     """``out`` with its text cleaned, fenced and marked untrusted; the URLs in it are noted
     as found in fetched content."""
     item = untrusted.untrusted(text, url, next(_SERIAL), html_removed=removed)
-    (origins or untrusted.shared()).page(item.text)
+    untrusted.shared().page(item.text)
     out.update(text=item.fenced(), untrusted=True, origin=item.origin)
     if item.removed:
         out["hidden_removed"] = item.removed
@@ -288,8 +287,7 @@ def _labelled(out: dict[str, Any], text: str, url: str, removed: int,
 
 
 def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = None,
-         rendered: bool = False, browse: Callable[[], Any] | None = None,
-         origins: untrusted.Origins | None = None) -> dict[str, Any]:
+         rendered: bool = False, browse: Callable[[], Any] | None = None) -> dict[str, Any]:
     """One page as text: ``{"url", "title", "text", "rendered"}``, ``"truncated": True`` when cut.
 
     ``fetch`` is ``url -> html`` (tests pass one; the default is trafilatura's fetcher, or
@@ -297,12 +295,11 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
     built; a plain fetch that comes back with fewer than ``THIN`` characters of text falls
     through to that on its own, and back to the plain result when there is no browser.
     ``browse`` is the browser to use, as ``ml_stack.scrape.browser.browser`` gives one.
-    ``origins`` records the URLs found in the text. Refuses anything ``check`` refuses,
-    before fetching.
+    Refuses anything ``check`` refuses, before fetching.
     """
     url = check(url)
     if urllib.parse.urlsplit(url).path.lower().endswith(".pdf"):
-        return _read_pdf(url, limit, origins)
+        return _read_pdf(url, limit)
     fetch = fetch or _fetch
     browse = browse or _browse
     title, text, plain_error, was_rendered, html, hidden = "", "", None, False, "", 0
@@ -331,11 +328,11 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
         out["truncated"] = True
     if ahead := next_link(html, url, guess=False):
         out["next"] = ahead
-        (origins or untrusted.shared()).paginate(url, ahead)
-    return _labelled(out, text, url, hidden, origins)
+        untrusted.shared().paginate(url, ahead)
+    return _labelled(out, text, url, hidden)
 
 
-def _read_pdf(url: str, limit: int, origins: untrusted.Origins | None = None) -> dict[str, Any]:
+def _read_pdf(url: str, limit: int) -> dict[str, Any]:
     """A PDF as text: downloaded into ``downloads_dir()``, with the file's path and hash."""
     got = download(url, downloads_dir(), polite=politeness())
     title, text, pages, hidden = pdftext.visible_text(got.path, limit=limit + 1)
@@ -344,7 +341,7 @@ def _read_pdf(url: str, limit: int, origins: untrusted.Origins | None = None) ->
                            "pdf": str(got.path), "pages": pages, "sha256": got.sha256}
     if truncated:
         out["truncated"] = True
-    return _labelled(out, text, url, hidden, origins)
+    return _labelled(out, text, url, hidden)
 
 
 def fetch_file(url: str, kind: str = "pdf", *, licence: str = "") -> Download:
@@ -365,7 +362,7 @@ _IMAGES_JS = """() => Array.from(document.images).map(i => ({
 
 def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None = None,
          fetch_bytes: Callable[[str], bytes] | None = None,
-         most: int = MOST_IMAGES, origins: untrusted.Origins | None = None) -> dict[str, Any]:
+         most: int = MOST_IMAGES) -> dict[str, Any]:
     """A page as a vision model sees it.
 
     ``{"url", "title", "text", "_images": [png, ...]}`` — a full-page screenshot first,
@@ -406,7 +403,7 @@ def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None 
         with contextlib.suppress(Exception):  # a picture that will not come is not the answer
             images.append(bytes(fetch_bytes(src)))
     return _labelled({"url": url, "title": title, "text": text, "_images": images}, text, url,
-                     hidden, origins)
+                     hidden)
 
 
 # --- the tools ----------------------------------------------------------------------------
@@ -533,22 +530,21 @@ def _schema(name: str) -> dict[str, Any]:
 def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = None,
           browse: Callable[[], Any] | None = None,
           fetch_bytes: Callable[[str], bytes] | None = None,
-          vision: bool = False,
-          origins: untrusted.Origins | None = None) -> list[tuple[dict[str, Any], Any]]:
+          vision: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The web as ``(schema, callable)`` pairs, to pass to ``converse`` beside ``tools_for``.
 
-    ``web_search``, ``web_read`` and ``web_download`` always; ``web_look`` only with ``vision=True``, because a
-    model that cannot see gains nothing from a screenshot and pays for the description.
-    ``engine``, ``fetch``, ``browse`` and ``fetch_bytes`` are the seams ``search``, ``read``
-    and ``look`` take, for a test or a project with its own transport. Each callable takes
+    ``web_search``, ``web_read`` and ``web_download`` always; ``web_look`` only with
+    ``vision=True``. ``engine``, ``fetch``, ``browse`` and ``fetch_bytes`` are the seams
+    ``search``, ``read`` and ``look`` take, for a test or a project with its own transport.
+    Each callable takes
     the parsed arguments mapping and never raises: what went wrong comes back as
-    ``{"none": reason}``, which a model reads as "move on", where an exception ends the turn.
+    ``{"none": reason}``, which a model reads as "move on".
 
-    ``origins`` records where each URL was seen: a URL a search returned or a person typed is
-    fetched, one that only fetched content mentioned is fetched only on an allow-listed or
-    approved host. Everything read comes back marked ``untrusted`` and fenced.
+    A URL a search returned or a person typed is fetched; one that only fetched content
+    mentioned only on an allow-listed or approved host (`ml_stack.net.untrusted.Origins`).
+    Everything read comes back marked ``untrusted`` and fenced.
     """
-    seen = origins or untrusted.shared()
+    seen = untrusted.shared()
 
     def searching(args: Mapping[str, Any]) -> Any:
         query = str(args.get("query") or "").strip()
@@ -566,15 +562,14 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
         try:
             seen.admit(str(args.get("url") or ""))
             return read(str(args.get("url") or ""), fetch=fetch, browse=browse,
-                        rendered=bool(args.get("rendered")), origins=seen)
+                        rendered=bool(args.get("rendered")))
         except Exception as exc:
             return {"none": f"could not read {args.get('url')!r}: {exc}"}
 
     def looking(args: Mapping[str, Any]) -> Any:
         try:
             seen.admit(str(args.get("url") or ""))
-            return look(str(args.get("url") or ""), browse=browse, fetch_bytes=fetch_bytes,
-                        origins=seen)
+            return look(str(args.get("url") or ""), browse=browse, fetch_bytes=fetch_bytes)
         except ImportError as exc:
             return {"none": f"no browser: {exc}"}
         except Exception as exc:

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ml_stack.httpguard import Refused
 from ml_stack.net import policy as hosts, provenance
+from ml_stack.net.hold import staging_dir
 
 __all__ = ["NETWORK", "GitFailed", "clone", "environment", "guarded", "head", "run"]
 
@@ -77,8 +78,6 @@ def run(args: Sequence[str], *, cwd: Path | None = None, url: str = "",
         protocols: str = "https") -> subprocess.CompletedProcess[str]:
     """``git *args``; a network command needs ``url`` (or an ``origin`` in ``cwd``) the policy
     admits. `GitFailed` when git exits non-zero."""
-    from ml_stack.net.hold import staging_dir
-
     if args and args[0] in NETWORK:
         target = url or _origin(cwd)
         guarded(target, policy, protocols)

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
-from ml_stack import home
+from ml_stack import files, home, sentinel as package
+from ml_stack.sentinel.store import Holding
 
 __all__ = ["Hold", "SentinelHold", "rejected_dir", "staging_dir"]
 
@@ -46,9 +46,6 @@ class SentinelHold:
 
     def hold(self, path: Path, reason: str, evidence: dict[str, Any]) -> str:
         try:
-            from ml_stack import sentinel as package
-            from ml_stack.sentinel.store import Holding
-
             sentinel = self._sentinel or package.default()
             key = str(evidence.get("sha256") or path.name)
             record = sentinel.store.quarantine(("artifact", f"download:{key}"), reason, evidence,
@@ -59,6 +56,6 @@ class SentinelHold:
             logger.warning("sentinel could not quarantine %s: %s", path.name, exc)
         if path.exists():
             target = rejected_dir() / f"{path.name}.rejected"
-            shutil.move(str(path), target)
+            files.promote(path, target)
             return str(target)
         return ""

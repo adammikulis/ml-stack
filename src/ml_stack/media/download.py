@@ -58,14 +58,13 @@ def fetch(
     url: str,
     target: Path | str,
     *,
-    name: str | None = None,
     on_progress: ProgressFn | None = None,
     expect_sha256: str | None = None,
     expect_bytes: int | None = None,
 ) -> Path:
     """Download ``url`` to ``target`` through the net pipeline, returning the path. Idempotent."""
     target = Path(target).expanduser()
-    label = name or target.name
+    label = target.name
 
     if target.exists() and target.stat().st_size > 0:
         if expect_sha256 or expect_bytes:

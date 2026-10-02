@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files, http, httpguard
+from ml_stack import files, http, httpguard, sentinel
 from ml_stack.httpguard import Refused, TooLarge
 from ml_stack.net import provenance, sniff
 from ml_stack.net.hold import staging_dir
@@ -26,6 +26,7 @@ from ml_stack.net.pipeline import Pipeline, bearer, default
 from ml_stack.net.policy import host_of
 from ml_stack.net.scan import Outcome
 from ml_stack.safenames import safe_filename
+from ml_stack.sentinel.events import Event, Severity
 
 __all__ = ["Blocked", "Cancel", "ChecksumMismatch", "Hooks", "NoDigest", "Progress", "Truncated", "Want", "download", "staged_part",
            "sweep"]
@@ -113,9 +114,6 @@ def staged_part(url: str, dest: Path | str) -> Path:
 
 def _event(kind: str, severity: str, subject: str, evidence: dict[str, Any]) -> None:
     try:
-        from ml_stack import sentinel
-        from ml_stack.sentinel.events import Event, Severity
-
         bus = sentinel.default().bus
         bus.emit(Event(kind, Severity.parse(severity), "net", subject, evidence, time.time()))
     except (OSError, ImportError, ValueError) as exc:
@@ -231,13 +229,13 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
     part = staged_part(url, final)
     shown = _stream_to(pipe, url, part, want, hooks)
     staged = part.with_name(f"{key}__{name}")
-    part.replace(staged)
+    files.promote(part, staged)
     _meta(part).unlink(missing_ok=True)
     if want.rename is not None:
         name = safe_filename(want.rename(shown.url, shown.headers))
         final = final.with_name(name)
         renamed = staged.with_name(f"{key}__{name}")
-        staged.replace(renamed)
+        files.promote(staged, renamed)
         staged = renamed
     if hooks.phase:
         hooks.phase("verifying")

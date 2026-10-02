@@ -15,6 +15,7 @@ from pathlib import Path
 from ml_stack import home, http, net
 from ml_stack.httpguard import Refused
 from ml_stack.hub.naming import _SHARD, QUANT, aside
+from ml_stack.net.untrusted import clean_text
 
 DEFAULT_ENDPOINT = "https://huggingface.co"
 
@@ -267,8 +268,6 @@ MOST_TEXT = 1 << 20
 def text_file(repo: str, path: str, revision: str = "main") -> str:
     """A small text file of a repository (its README), cleaned of invisible characters and
     cut at one MiB. It is the publisher's text and is untrusted. `NotFound` when absent."""
-    from ml_stack.net.untrusted import clean_text
-
     rev = urllib.parse.quote(revision, safe="")
     url = f"{endpoint()}/{repo}/resolve/{rev}/{urllib.parse.quote(path)}"
     try:

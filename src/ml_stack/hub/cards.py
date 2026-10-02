@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ml_stack.hub.remote import text_file
+
 # What a card calls a sampler setting, and what llama.cpp calls it. A card writes prose, so
 # `temperature=1.0`, `temperature: 1.0`, `"temperature": 1.0` and `--temp 1.0` all appear.
 _KNOBS = {"temperature": "temperature", "temp": "temperature", "top_p": "top_p",
@@ -77,9 +79,7 @@ def in_gguf(path: str | Path) -> dict[str, float]:
 
 def card(repo: str) -> str:
     """The repository's README, which is where a publisher writes down what it wants."""
-    from ml_stack.hub import remote
-
-    return remote.text_file(repo, "README.md")
+    return text_file(repo, "README.md")
 
 
 def advice(text: str) -> dict[str, float]:

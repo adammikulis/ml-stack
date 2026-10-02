@@ -427,7 +427,7 @@ def _no_internet(monkeypatch, tmp_path):
     ``net.use``; ``HF_ENDPOINT`` and the host variables are cleared so a shell cannot steer one.
     """
     from ml_stack import net
-    from ml_stack.httpguard import Refused, Limits
+    from ml_stack.httpguard import Limits, Refused
 
     for name in ("HF_ENDPOINT", "ML_STACK_NET_ALLOW_HOSTS", "ML_STACK_FETCH_ALLOW_HOSTS",
                  "ML_STACK_NET_UNSCANNED", "ML_STACK_NET_SCAN_MODELS", "ML_STACK_NET_HASH_LOOKUP"):
@@ -440,6 +440,16 @@ def _no_internet(monkeypatch, tmp_path):
                           limits=Limits(resolver=nowhere), scanners=[])
     with net.use(sealed):
         yield
+
+
+@pytest.fixture(autouse=True)
+def origins():
+    """A fresh record of where each URL a web tool may fetch was seen, for one test."""
+    from ml_stack.net import untrusted
+    from ml_stack.net.policy import default
+
+    with untrusted.using(untrusted.Origins(default())) as fresh:
+        yield fresh
 
 
 @pytest.fixture

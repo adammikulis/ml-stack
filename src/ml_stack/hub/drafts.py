@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ml_stack import home, hub
 from ml_stack.hub.naming import DRAFT_KINDS
+from ml_stack.hub.remote import text_file
 from ml_stack.units import human_bytes
 
 DRAFT_DEPTH = 4
@@ -69,12 +70,10 @@ def draft_note(repo: str) -> str:
     """
     if repo in _DRAFT_NOTES:
         return _DRAFT_NOTES[repo]
-    from ml_stack.hub import remote
-
     text = ""
     for name in ("MTP/README.md", "README.md"):
         try:
-            text = remote.text_file(repo, name)
+            text = text_file(repo, name)
             break
         except Exception:  # noqa: BLE001 - no README there, or the repo is not there at all
             continue

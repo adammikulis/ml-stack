@@ -852,11 +852,10 @@ def fetched(ref: str | Path, what: str) -> str | Path:
     if not parts:
         return ref
     from ml_stack.hub import fetch, pull
-    from ml_stack.hub.remote import RemoteError
 
     try:
         return str(fetch(str(ref)) if parts[1] else pull(str(ref)))
-    except (ValueError, OSError, RemoteError) as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         raise ServerFailed(f"could not fetch the {what} {ref}: {exc}") from exc
 
 

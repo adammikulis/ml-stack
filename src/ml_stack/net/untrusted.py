@@ -4,19 +4,22 @@ fetched page cannot send the agent somewhere by itself."""
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import re
 import threading
 import unicodedata
 import urllib.parse
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from html import escape
 from html.parser import HTMLParser
 
 from ml_stack.httpguard import Refused
-from ml_stack.net.policy import Policy, host_of
+from ml_stack.net.policy import Policy, default, host_of
 
 __all__ = ["FollowRefused", "Origins", "Untrusted", "clean_text", "fence", "shared",
-           "strip_hidden", "untrusted"]
+           "strip_hidden", "untrusted", "using"]
 
 VOID = frozenset({"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "embed",
                   "source", "track", "wbr"})
@@ -163,17 +166,28 @@ def untrusted(text: str, url: str, serial: int = 1, *, html_removed: int = 0) ->
 
 
 _SHARED: Origins | None = None
+_CURRENT: contextvars.ContextVar[Origins | None] = contextvars.ContextVar("origins", default=None)
 
 
 def shared() -> Origins:
-    """The origins every web tool in this process consults; an agent loop notes what the
-    person types here with `Origins.typed`."""
+    """The origins every web tool consults: the one `using` installed in this context, else
+    the process's own. An agent loop notes what the person types here with `Origins.typed`."""
     global _SHARED
+    if (current := _CURRENT.get()) is not None:
+        return current
     if _SHARED is None:
-        from ml_stack.net.policy import default
-
         _SHARED = Origins(default())
     return _SHARED
+
+
+@contextlib.contextmanager
+def using(origins: Origins) -> Iterator[Origins]:
+    """Make ``origins`` the one `shared` answers with, for the block."""
+    token = _CURRENT.set(origins)
+    try:
+        yield origins
+    finally:
+        _CURRENT.reset(token)
 
 
 class FollowRefused(Refused):
