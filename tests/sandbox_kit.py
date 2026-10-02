@@ -45,9 +45,9 @@ def runtime_reads() -> list[str]:
     return sorted(found)
 
 
-def policy(*, read: list[Path | str] = (), write: list[Path | str] = (), net: Net | None = None,
+def policy(*, read: list[Path | str] = (), write: list[Path | str] = (), net: Net | None = None,  # noqa: PLR0913
            env: dict[str, str] | None = None, limits: Limits | None = None,
-           exec_: list[str] = (), python: bool = False,  # noqa: PLR0913
+           exec_: list[str] = (), python: bool = False,
            name: str = "test") -> Policy:
     """A policy that reads ``read``, writes ``write`` and runs the system tools; with
     ``python`` it also runs this interpreter."""

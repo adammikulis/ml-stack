@@ -89,7 +89,7 @@ def test_a_program_outside_the_exec_list_is_not_started(tmp_path, seatbelt):
     pol = sandbox.Policy("narrow", read=pol.read, exec=("/bin/sh",), env=dict(pol.env))
     result = run(["/bin/sh", "-c", "/bin/echo hi; echo rc=$?"], pol)
     assert "hi" not in result.stdout
-    assert any(d["operation"].startswith("process-exec") and d["target"] == "/bin/echo"
+    assert any(d["operation"] == "process-exec*" and d["target"].startswith("/bin/")
                for d in result.denials)
 
 

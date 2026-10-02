@@ -124,6 +124,17 @@ def _kill_group(pid: int) -> None:
         os.killpg(pid, signal.SIGKILL)
 
 
+def _wait(proc: subprocess.Popen[bytes], deadline: float | None, *captures: _Capture) -> bool:
+    """Wait for ``proc`` to exit, or for the deadline or an output cap; True on the deadline."""
+    while proc.poll() is None:
+        if deadline is not None and time.time() >= deadline:
+            return True
+        if any(c.over for c in captures):
+            return False
+        time.sleep(0.01)
+    return False
+
+
 def run(argv: Sequence[str], policy: Policy, *,  # noqa: PLR0913 - one keyword per choice
         unsandboxed: AllowUnsandboxed | None = None,
         cwd: str | os.PathLike[str] | None = None, stdin: bytes | None = None,
@@ -163,14 +174,7 @@ def run(argv: Sequence[str], policy: Policy, *,  # noqa: PLR0913 - one keyword p
             proc.stdin.write(stdin)
             proc.stdin.close()
     deadline = None if limits.wall_seconds is None else began + limits.wall_seconds
-    timed_out = False
-    while proc.poll() is None:
-        if deadline is not None and time.time() >= deadline:
-            timed_out = True
-            break
-        if out.over or err.over:
-            break
-        time.sleep(0.01)
+    timed_out = _wait(proc, deadline, out, err)
     capped = out.over or err.over
     if timed_out or capped:
         _kill_group(proc.pid)

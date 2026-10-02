@@ -75,14 +75,14 @@ def test_every_layer_is_offloaded_to_the_gpu_inside_the_profile(real, tmp_path):
     port = free_port()
     policy = replace(policies.model_server(binary, model.parent, gpu=True),
                      read=(*policies.model_server(binary, model.parent).read,
-                           os.path.dirname(os.path.realpath(model))))
+                           str(Path(os.path.realpath(model)).parent)))
     argv, _tag, _chosen = sandbox.wrapped(
         [str(binary), "-m", str(model), "--host", "127.0.0.1", "--port", str(port), "-ngl", "99",
          "-c", "512", "--no-warmup", "-lv", "4"], policy)
     log = tmp_path / "server.log"
     with log.open("wb") as sink:
         process = subprocess.Popen(argv, stdout=sink, stderr=subprocess.STDOUT, env=dict(policy.env),
-                                   cwd=os.path.dirname(os.path.realpath(binary)),
+                                   cwd=str(Path(os.path.realpath(binary)).parent),
                                    start_new_session=True)
     try:
         assert wait_for_health(f"http://127.0.0.1:{port}", timeout=120,
