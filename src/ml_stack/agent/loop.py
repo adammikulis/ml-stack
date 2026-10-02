@@ -12,15 +12,18 @@ import asyncio
 import json
 import threading
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
+from ml_stack.agent.auto import AutoCompact
+from ml_stack.agent.compact import Compaction, CompactResult
+from ml_stack.agent.events import Done, Event, Repair, Text, Thinking, ToolCall, ToolResult
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
 from ml_stack.client.tokens import estimate_tokens
+from ml_stack.http import ServerError
 
-__all__ = ["Agent", "Budget", "Cancelled", "Done", "Event", "Repair", "Text", "Thinking",
-           "ToolCall", "ToolResult"]
+__all__ = ["Agent", "Budget", "Cancelled"]
 
 
 class Cancelled(RuntimeError):
@@ -40,56 +43,6 @@ class Budget:
     parallel: int = 4
     max_result_chars: int = 4000
     profile: str = "full"
-
-
-@dataclass(frozen=True, slots=True)
-class Text:
-    delta: str
-
-
-@dataclass(frozen=True, slots=True)
-class Thinking:
-    delta: str
-
-
-@dataclass(frozen=True, slots=True)
-class ToolCall:
-    id: str
-    name: str
-    arguments: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
-class ToolResult:
-    id: str
-    name: str
-    text: str
-    is_error: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class Repair:
-    """A call that was not dispatched, and what the model is told is wrong with it."""
-
-    id: str
-    name: str
-    errors: list[str]
-
-
-@dataclass(frozen=True, slots=True)
-class Done:
-    """Why the run ended (``answer``, ``max_steps``, ``max_tool_calls``, ``max_tokens`` or
-    ``repairs_exhausted``), the final text, and the counts."""
-
-    reason: str
-    text: str = ""
-    steps: int = 0
-    tool_calls: int = 0
-    tokens: int = 0
-    messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
-
-
-Event = Text | Thinking | ToolCall | ToolResult | Repair | Done
 
 
 class Chats(Protocol):
@@ -112,31 +65,52 @@ class _Pending:
 
 
 class Agent:
-    """A model, a tool source, and the budget a run is held to."""
+    """A model, a tool source, and the budget a run is held to.
 
-    def __init__(self, client: Chats, tools: ToolSource, *, system: str = "",
-                 budget: Budget | None = None,
-                 summarise: Summarise | None = None) -> None:
+    ``auto_compact`` makes a run compact its conversation before a request would overflow
+    the context, and once more if the server refuses a request for being too long.
+    """
+
+    def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
+                 summarise: Summarise | None = None,
+                 auto_compact: Compaction | None = None) -> None:
         self.client = client
         self.tools = tools
-        self.system = system
         self.budget = budget or Budget()
         self.summarise = summarise
+        self.auto = AutoCompact(client, auto_compact) if auto_compact else None
+
+    async def compact_now(self, messages: list[dict[str, Any]]) -> CompactResult:
+        """Compact ``messages`` in place now, whatever the context holds."""
+        schemas = from_mcp(await self.tools.list_tools(), self.budget.profile)
+        auto = self.auto or AutoCompact(self.client, Compaction())
+        return await auto.compact(messages, schemas)
 
     async def run(self, task: str | list[dict[str, Any]]) -> AsyncIterator[Event]:
         """Events for one task; a message list is continued in place. Stopping the
         iteration early, or cancelling the task driving it, stops the model's stream."""
-        messages = self._start(task)
+        messages = [{"role": "user", "content": task}] if isinstance(task, str) else task
         schemas = from_mcp(await self.tools.list_tools(), self.budget.profile)
         index = index_by_name(schemas)
         spent = calls = rejected_turns = 0
         for step in range(1, self.budget.max_steps + 1):
             reply = None
-            async for piece in self._ask(messages, schemas):
-                if isinstance(piece, (Text, Thinking)):
-                    yield piece
-                else:
-                    reply = piece
+            if self.auto:
+                for event in await self.auto.before(messages, schemas):
+                    yield event
+            for attempt in (0, 1):
+                try:
+                    async for piece in self._ask(messages, schemas):
+                        if isinstance(piece, (Text, Thinking)):
+                            yield piece
+                        else:
+                            reply = piece
+                    break
+                except ServerError as exc:
+                    if attempt or not self.auto or not _overflowed(exc):
+                        raise
+                    for event in await self.auto.before(messages, schemas, force=True):
+                        yield event
             spent += _completion_tokens(reply)
             pending = self._pending(reply, index)
             text = reply.content or ""
@@ -165,13 +139,6 @@ class Agent:
                 yield Done("max_tokens", text, step, calls, spent, messages)
                 return
         yield Done("max_steps", "", self.budget.max_steps, calls, spent, messages)
-
-    def _start(self, task: str | list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if isinstance(task, str):
-            task = [{"role": "user", "content": task}]
-        if self.system and not (task and task[0].get("role") == "system"):
-            task.insert(0, {"role": "system", "content": self.system})
-        return task
 
     async def _ask(self, messages: list[dict[str, Any]], schemas: list[dict[str, Any]]
                    ) -> AsyncIterator[Text | Thinking | Any]:
@@ -237,6 +204,13 @@ class Agent:
         if len(text) > limit:
             return f"{text[:limit]}... [{len(text) - limit} more characters cut]"
         return text
+
+
+def _overflowed(exc: ServerError) -> bool:
+    """Whether the server refused a request for being longer than its context."""
+    said = f"{exc} {exc.body}".lower()
+    return exc.status == 400 and ("exceed" in said or "context size" in said
+                                  or "n_ctx" in said)
 
 
 def _assistant(text: str, pending: list[_Pending]) -> dict[str, Any]:

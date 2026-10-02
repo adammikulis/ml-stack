@@ -20,7 +20,7 @@ from ml_stack import mcp as server
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
             "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
             "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor",
-            "speech_providers", "speech_transcribe", "speech_say"}
+            "speech_providers", "speech_transcribe", "speech_say", "conversation_compact"}
 
 
 def rpc(ident, method, **params):
@@ -173,6 +173,27 @@ class TestTheTools:
         assert header[0] == "argv: fetch hf:pellard/larch/larch.gguf"
         said = next(line for line in header if line.startswith("command:"))
         assert "ml_stack.hub fetch" in said
+
+
+class TestTheCompactTool:
+    def test_it_fits_a_chat_file_to_a_budget_and_rewrites_it(self, tmp_path):
+        chat = [{"role": "system", "content": "s"}, {"role": "user", "content": "go"}]
+        for n in range(5):
+            chat += [{"role": "assistant", "content": None, "tool_calls": [
+                         {"id": f"c{n}", "type": "function",
+                          "function": {"name": "look", "arguments": json.dumps({"q": n})}}]},
+                     {"role": "tool", "tool_call_id": f"c{n}", "name": "look",
+                      "content": "word " * 400}]
+        chat.append({"role": "user", "content": "now"})
+        path = tmp_path / "chat.json"
+        path.write_text(json.dumps(chat))
+        out = said(drive(rpc(1, "tools/call", name="conversation_compact",
+                             arguments={"path": str(path), "budget": 1200, "keep_last": 1, "write": True}))[0])
+        assert out["strategy"] == "elide+truncate" and out["written"]
+        assert out["tokens_after"] <= 1200 < out["tokens_before"]
+        rewritten = json.loads(path.read_text())
+        assert rewritten[0] == chat[0] and rewritten[-1] == chat[-1]
+        assert len(rewritten) < len(chat)
 
 
 class TestTheSpeechTools:

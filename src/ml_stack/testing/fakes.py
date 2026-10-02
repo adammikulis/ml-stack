@@ -665,7 +665,8 @@ def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
             raw = self.rfile.read(length) if length else b""
             fake.requests.append(("POST", self.path, raw))
             body = json_body(raw)
-            if body.get("stream") and self.path.split("?")[0].endswith("/chat/completions"):
+            if (body.get("stream") and self.path.split("?")[0].endswith("/chat/completions")
+                    and fake.refused(self.path) is None):
                 self._stream(fake.frames(body))
                 return
             self._answer(*fake.post(self.path, body))

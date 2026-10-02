@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
+from ml_stack.agent import Compaction, Counter, Spill, Transcript, compact, model_summarizer
+from ml_stack.client import Client
 from ml_stack.home import state
 from ml_stack.log import say
 
@@ -365,6 +367,25 @@ def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     return [_plain(f) for f in look_checkouts(repositories(list(repos)) if repos else None)]
 
 
+def conversation_compact(path: str, budget: int, keep_last: int = 6, url: str = "",
+                         write: bool = False) -> dict[str, Any]:
+    """Fit the chat messages in a JSON file to ``budget`` tokens: long tool results cut,
+    repeated calls dropped, the oldest messages summarised by the model at ``url`` (removed
+    outright when there is none). ``write`` replaces the file; removed text is kept under
+    ``~/.ml-stack/compaction``."""
+    messages = json.loads(Path(path).read_text(encoding="utf-8"))
+    client = Client(url) if url else None
+    fitted = compact(messages, budget=budget, count=Counter(client), using=Compaction(
+        keep_last=keep_last, summarize=bool(url),
+        summarizer=model_summarizer(client) if client else None,
+        spill=Spill(Transcript())))
+    if write and fitted.strategy_used != "none":
+        Path(path).write_text(json.dumps(fitted.messages, indent=2), encoding="utf-8")
+    return {"strategy": fitted.strategy_used, "dropped": fitted.dropped_count,
+            "tokens_before": fitted.tokens_before, "tokens_after": fitted.tokens_after,
+            "notes": list(fitted.notes), "written": write and fitted.strategy_used != "none"}
+
+
 TOOLS: list[Tool] = [
     Tool("serve_status", "What is serving on this machine, and what a lease would do.",
          serve_status),
@@ -393,6 +414,9 @@ TOOLS: list[Tool] = [
          setup_look),
     Tool("doctor", "The checkouts, the bench store and the managed llama.cpp, checked.",
          doctor),
+    Tool("conversation_compact", "Fit a chat's messages to a token budget: cut long tool "
+                                 "results, drop repeated calls, summarise the oldest.",
+         conversation_compact),
     Tool("speech_providers", "Every speech engine here: recognition, synthesis, voice "
                              "activity.", speech_providers),
     Tool("speech_transcribe", "An audio file as text, with the times of each segment.",

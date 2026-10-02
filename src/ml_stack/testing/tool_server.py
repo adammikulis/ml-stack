@@ -28,12 +28,14 @@ class _Seen:
 
 class ToolCallingServer(FakeLlamaServer):
     """Replies to each chat completion with the next `Turn`; ``bodies`` is every request's
-    JSON. After the script is spent it answers ``"done"``."""
+    JSON. After the script is spent it answers ``"done"``. The next ``overflow`` chat
+    requests are refused as longer than the context, the way llama-server refuses them."""
 
-    def __init__(self, turns: list[Turn], *, port: int = 0) -> None:
-        super().__init__(Served(), port=port)
+    def __init__(self, turns: list[Turn], *, context: int = 32768, port: int = 0) -> None:
+        super().__init__(Served(context=context), port=port)
         self.turns = list(turns)
         self.seen = _Seen()
+        self.overflow = 0
 
     @property
     def bodies(self) -> list[dict[str, Any]]:
@@ -49,9 +51,21 @@ class ToolCallingServer(FakeLlamaServer):
                  "function": {"name": name, "arguments": arguments}}
                 for n, (name, arguments) in enumerate(turn.calls)]
 
+    def refused(self, path: str) -> tuple[int, str, bytes] | None:
+        if self.overflow and path.partition("?")[0] == "/v1/chat/completions":
+            return _json({"error": {"code": 400, "type": "exceed_context_size_error",
+                                    "message": "the request exceeds the available context "
+                                               "size, try increasing it"}}, status=400)
+        return super().refused(path)
+
     def post(self, path: str, body: dict[str, Any]) -> tuple[int, str, bytes]:
         if path.partition("?")[0] != "/v1/chat/completions":
             return super().post(path, body)
+        said = self.refused(path)
+        if said is not None:
+            self.overflow = max(0, self.overflow - 1)
+            self.seen.bodies.append(body)
+            return said
         turn = self._next(body)
         message: dict[str, Any] = {"role": "assistant", "content": "".join(turn.text) or None}
         if turn.calls:
