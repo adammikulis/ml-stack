@@ -112,7 +112,7 @@ def make(kind: str = "company", size: str = "small", seed: int = 0) -> World:
     if size not in SIZES:
         raise ValueError(f"size must be one of {', '.join(SIZES)}, not {size!r}")
     n = SIZES[size]
-    b = _Build(random.Random(f"{kind}/{size}/{seed}"))
+    b = _Build(random.Random(f"{kind}/{size}/{seed}"))  # noqa: S311 - a sample, not a secret
     offices = _offices(b, {"small": 3, "medium": 6}.get(size, 12))
     made = BUILDERS[kind](b, n, offices)
     org = made["organisation"]

@@ -766,6 +766,39 @@ worth taking, in this order:
   facts the fleet app's cluster view already shows, in a terminal. Worth it only if a
   headless machine wants one.
 
+### Security (ml-stack issue #18)
+
+What the 2026-10 hardening pass left open; `docs/security.md` has the model and the findings.
+- [ ] **Nothing on the fleet's wire is encrypted.** Requests are signed (authentic, intact,
+  not replayable) but bodies and replies are readable by anyone on the segment, and a reply is
+  not signed. Design: a self-signed certificate per daemon, its SHA-256 fingerprint carried in
+  the beacon (which is already MAC'd with the cluster key) so a peer pins it without a
+  certificate authority, served with `ssl.SSLContext` and pinned by `http.build_request`. The
+  stdlib cannot mint a certificate; it needs `openssl` on the PATH or the `cryptography`
+  package, and a rotation story.
+- [ ] **The passphrase-derived key is shared and its salt is fixed per cluster name.**
+  `discovery._salt_for` hashes the cluster name, so two clusters named `ml-stack` share a salt
+  and a precomputed table covers both. A random per-cluster salt would be minted by the first
+  machine and carried in its beacon; a joiner would try each candidate salt against the
+  beacon's MAC. Until then the defence is a 12 character minimum and `ml-stack-peers init`.
+- [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**
+  `ml_stack.httpguard.fetch` pins the checked address for the connection and checks every
+  redirect; the page reader and the browser (a redirect or a sub-request inside Playwright
+  reaches a private address unchecked) should use it, or a `page.route` that applies
+  `httpguard.resolve`. Another branch owns `web.py`.
+- [ ] **`hub/` calls `huggingface_hub` without `token=`.** `credentials.get("HF_TOKEN")` is the
+  resolver; `listing.py`, `cards.py`, `drafts.py`, `spec/engine.py` and `mlx_tree.py` should
+  pass it so `ML_STACK_CREDENTIALS_FILE` and the keychain reach a download.
+- [ ] **37 `except ...: pass` sites report as S110 and S112** (device probes, memory
+  readings, the accelerator reports in `train/accelerator.py`). Each should name the
+  exception it expects and log the rest at debug.
+- [ ] **`fleet/api.py` `do_GET` and `_route_post` are 99 and 115 statements.** Splitting each
+  route into a method is what clears PLR0915 there.
+- [ ] **`scripts/test-on-linux` was not run for this pass,** and CI's `pip install` lines are
+  unpinned and unhashed (there is no lockfile to audit with `pip-audit` or `osv-scanner`).
+- [ ] **Windows job objects.** A server survives a killed host only until the watchdog
+  notices; on Windows the watchdog is all there is, and it was not run there.
+
 ## Verifying
 
 ```bash

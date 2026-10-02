@@ -249,7 +249,7 @@ def synthesise(tools: Any, *, prompts: Mapping[str, Sequence[str]] | None = None
     if not schemas:
         raise ValueError("no tools to synthesise from")
     by_name = {_fn(s)["name"]: s for s in schemas}
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - a sample, not a secret
     examples = examples_in(schemas, prompts)
 
     rows: list[dict[str, Any]] = []

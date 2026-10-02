@@ -15,6 +15,7 @@ from ml_stack.files import promote
 from ml_stack.fleet import updates as gh_updates
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say
+from ml_stack.safenames import Unsafe, unpack
 from ml_stack.serve.binary import is_windows
 from ml_stack.serve.build_paths import BuildFailed, builds_dir, named_dest, slug
 from ml_stack.serve.build_platform import (
@@ -86,22 +87,10 @@ def _cudart_companion(asset_name: str, assets: dict[str, dict]) -> dict | None:
 
 
 def _extract(archive: Path, into: Path) -> None:
-    if archive.name.endswith(".zip"):
-        import zipfile
-
-        with zipfile.ZipFile(archive) as zf:
-            for member in zf.namelist():
-                if member.startswith("/") or ".." in Path(member).parts:
-                    raise BuildFailed(f"refusing an archive entry named {member!r}")
-            zf.extractall(into)
-    else:
-        import tarfile
-
-        with tarfile.open(archive) as tf:
-            for member in tf.getmembers():
-                if member.name.startswith("/") or ".." in Path(member.name).parts:
-                    raise BuildFailed(f"refusing an archive entry named {member.name!r}")
-            tf.extractall(into, filter="data")
+    try:
+        unpack(archive, into)
+    except Unsafe as exc:
+        raise BuildFailed(f"refusing the archive {archive.name}: {exc}") from None
 
 
 def _release_install(dest: Path, archive: Path, *, extra: Path | None = None) -> Path:

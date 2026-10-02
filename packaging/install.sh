@@ -80,6 +80,25 @@ esac
 [ "$OS" = linux ] && ARCH=x86_64
 KEY="ml-stack-$OS-$ARCH"
 
+# -- what was downloaded -------------------------------------------------------
+# The sha256 GitHub reports for the release asset whose download URL contains $1, read from
+# the release JSON on stdin; empty when there is none.
+release_digest() {
+  tr ',' '\n' | awk -v key="$1" '
+    /"name"/ { d = "" }
+    /"digest"/ { d = $0; sub(/.*"sha256:/, "", d); sub(/".*/, "", d) }
+    /browser_download_url/ && index($0, key) { print d; exit }'
+}
+
+# Succeeds when the file $1 has the sha256 $2.
+verify_sha256() {
+  if have sha256sum; then got=$(sha256sum "$1" | cut -d' ' -f1)
+  elif have shasum; then got=$(shasum -a 256 "$1" | cut -d' ' -f1)
+  else die "this needs sha256sum or shasum to check the download"
+  fi
+  [ "$got" = "$2" ]
+}
+
 # -- python -------------------------------------------------------------------
 # Say how to get one; never install a system Python behind somebody's back.
 find_python() {
@@ -108,8 +127,15 @@ install_app() {
       | tr ',' '\n' | grep 'browser_download_url' | grep "$KEY" \
       | sed -n 's/.*"\(https[^"]*\)".*/\1/p' | head -1)
     [ -n "${URL:-}" ] || die "release ${TAG:-latest} has no download for $KEY"
+    DIGEST=$(printf '%s' "$JSON" | release_digest "$KEY")
+    case "$DIGEST" in
+      [0-9a-f]*) [ "${#DIGEST}" -eq 64 ] || DIGEST="" ;;
+      *) DIGEST="" ;;
+    esac
+    [ -n "$DIGEST" ] || die "release ${TAG:-latest} reports no sha256 for $KEY, so it cannot be checked"
     say "downloading $TAG"
     curl -fL# -o "$TMP/pkg.zip" "$URL" || die "download failed"
+    verify_sha256 "$TMP/pkg.zip" "$DIGEST" || die "the download does not match the sha256 GitHub reports for it"
   fi
   have unzip || die "this needs unzip"
   unzip -q "$TMP/pkg.zip" -d "$TMP/out" || die "the download could not be unpacked"

@@ -424,7 +424,7 @@ def questions(world: World, n: int = 40, rng: random.Random | None = None, *,
     unknown = sorted(set(wanted) - set(KINDS))
     if unknown:
         raise ValueError(f"unknown question kind(s) {unknown}; known: {', '.join(KINDS)}")
-    rng = rng or random.Random(f"questions/{world.seed}/{world.size}")
+    rng = rng or random.Random(f"questions/{world.seed}/{world.size}")  # noqa: S311 - a sample, not a secret
     buckets = _buckets(_Truth(world.graph), rng)
     taken: list[dict[str, Any]] = []
     seen: set[str] = set()

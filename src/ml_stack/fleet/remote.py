@@ -236,10 +236,9 @@ class Peer:
                     break
                 digest.update(chunk)
                 last = fh.tell() >= total
-                headers = {
-                    "Content-Range": f"bytes {sent}-{sent+len(chunk)-1}/{total}",
-                    "X-ML-Stack-Complete": "1" if last else "0",
-                }
+                headers = {"X-ML-Stack-Complete": "1" if last else "0"}
+                if chunk:
+                    headers["Content-Range"] = f"bytes {sent}-{sent+len(chunk)-1}/{total}"
                 if last:
                     headers[DIGEST_HEADER] = digest.hexdigest()
                 _, body, _ = self._request("PUT", f"/files/{remote}", data=chunk,

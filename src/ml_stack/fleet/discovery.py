@@ -19,7 +19,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import home, macauth
 from ml_stack.files import write_json
 from ml_stack.log import warn
 from ml_stack.platform import private_file
@@ -54,7 +54,6 @@ MAX_DATAGRAM = 65507
 #: What a beacon body may take. macOS refuses a datagram over ``net.inet.udp.maxdgram``
 #: -- 9216 by default -- with EMSGSIZE, well below what IP allows.
 BEACON_BUDGET = 8000
-_TOKEN_INFO = b"ml-stack-traind-api-token-v1"
 
 
 class DiscoveryError(RuntimeError):
@@ -84,8 +83,9 @@ def create_cluster_key(path: Path | str | None = None, *,
 
 
 # -- joining by password -------------------------------------------------
-MIN_PASSPHRASE = 5
-"""Shortest passphrase accepted. Low, because a refusal people work around by typing"""
+MIN_PASSPHRASE = 12
+"""Shortest passphrase accepted. A beacon is signed with the key it derives, so anyone on
+the network can test guesses against one offline; `ml-stack-peers init` mints a random key."""
 
 SCRYPT_N = 1 << 16
 SCRYPT_R = 8
@@ -244,9 +244,8 @@ def load_cluster_key(path: Path | str | None = None) -> bytes | None:
 
 
 def derive_token(key: bytes) -> str:
-    """The traind bearer token both ends compute independently."""
-    mac = hmac.new(key, _TOKEN_INFO, sha256).digest()
-    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+    """The secret requests are signed with, which both ends compute independently."""
+    return macauth.derive(key)
 
 
 # -- the wire ------------------------------------------------------------

@@ -15,9 +15,11 @@ until it is not, however new the code is.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +34,7 @@ from typing import Any
 
 from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
+from ml_stack.safenames import Unsafe, safe_filename, unpack
 
 from .measuring import installed_commit
 
@@ -108,11 +111,10 @@ def _parse(version: str) -> tuple[int, ...]:
 
 def current_version() -> str:
     """The running version, or empty when there is no way to tell."""
-    try:
-        from importlib.metadata import version
+    from importlib.metadata import PackageNotFoundError, version
+
+    with contextlib.suppress(PackageNotFoundError, LookupError):
         return version("ml-stack")
-    except Exception:                                 # noqa: BLE001
-        pass
     told = os.environ.get("ML_STACK_VERSION", "").strip()
     if told:
         return told
@@ -175,15 +177,23 @@ def asset_for(release: Release, key: str = "") -> dict[str, Any] | None:
 
 def download(asset: dict[str, Any], into: Path | str,
              *, on_progress: Any = None, timeout: float = 600.0) -> Path:
-    """Fetch one asset and check it against the digest GitHub reports for it.
+    """Fetch one asset and check it against the digest GitHub reports for it; an asset with
+    no digest, or a name that is not one plain file name, is refused before anything is fetched.
 
     The digest is not a signature: it proves the bytes match what that release holds, not
     who built them. Trust here is the same as downloading it by hand -- TLS to github.com
     and the repository name below.
     """
+    want = str(asset.get("digest") or "").removeprefix("sha256:").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", want):
+        raise UpdateError(f"{asset.get('name')!r} comes with no sha256 digest to check it against")
+    try:
+        name = safe_filename(str(asset["name"]))
+    except Unsafe as exc:
+        raise UpdateError(f"the asset's name is not a usable file name: {exc}") from None
     into = Path(into).expanduser()
     into.mkdir(parents=True, exist_ok=True)
-    target = into / str(asset["name"])
+    target = into / name
     url = str(asset["browser_download_url"])
     total = int(asset.get("size") or 0)
 
@@ -205,8 +215,7 @@ def download(asset: dict[str, Any], into: Path | str,
         partial.unlink(missing_ok=True)
         raise UpdateError(f"download failed: {exc}") from None
 
-    want = str(asset.get("digest") or "").removeprefix("sha256:").strip().lower()
-    if want and digest.hexdigest() != want:
+    if digest.hexdigest() != want:
         partial.unlink(missing_ok=True)
         raise UpdateError("the download does not match the digest GitHub reports for it")
     if total and done != total:
@@ -229,11 +238,10 @@ def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
 
     staging = Path(tempfile.mkdtemp(prefix="ml-stack-update-", dir=str(target.parent)))
     try:
-        with zipfile.ZipFile(archive) as zf:
-            for member in zf.namelist():
-                if member.startswith("/") or ".." in Path(member).parts:
-                    raise UpdateError(f"refusing an archive entry named {member!r}")
-            zf.extractall(staging)
+        try:
+            unpack(archive, staging)
+        except (Unsafe, zipfile.BadZipFile) as exc:
+            raise UpdateError(f"refusing the download: {exc}") from None
         found = _pick(staging, target.name)
         if found is None:
             raise UpdateError(f"the download has no {target.name} in it")
@@ -335,9 +343,9 @@ def relaunch(*, delay_s: float = 1.5, stop: bool = True) -> bool:
 
 
 # -- what an update must never walk over ------------------------------------------------
-def in_the_way(*, jobs: "Callable[[], bool] | None" = None,
-               measuring: "Callable[[], bool] | None" = None,
-               leases: "Callable[[], bool] | None" = None) -> str:
+def in_the_way(*, jobs: Callable[[], bool] | None = None,
+               measuring: Callable[[], bool] | None = None,
+               leases: Callable[[], bool] | None = None) -> str:
     """Why an update has to wait, or "" when nothing is in its way.
 
     Three things, and any one of them is enough: a training job, a benchmark measuring
@@ -360,7 +368,7 @@ def in_the_way(*, jobs: "Callable[[], bool] | None" = None,
     return ""
 
 
-def quiet(**checks: "Callable[[], bool] | None") -> "Callable[[], bool]":
+def quiet(**checks: Callable[[], bool] | None) -> Callable[[], bool]:
     """`in_the_way` as the ``idle`` gate `watch` and `track` take."""
     return lambda: not in_the_way(**checks)
 
@@ -379,7 +387,7 @@ def note(**fields: Any) -> None:
     LAST.update(fields)
 
 
-def commit_age_s(commit: str = "", checkout: "Path | None" = None) -> float:
+def commit_age_s(commit: str = "", checkout: Path | None = None) -> float:
     """How old the commit this machine runs is, in seconds; 0 when there is no telling.
 
     Cached on the sha, because the beacon rebuilds its report every ten seconds and the
@@ -457,19 +465,19 @@ class Pulled:
                 "diverged": self.diverged, "error": self.error}
 
 
-def checkout_here() -> "Path | None":
+def checkout_here() -> Path | None:
     """The git working tree this package is imported from, or None for a plain install."""
     from ml_stack.paths import repo_root
 
     return repo_root(Path(__file__).resolve().parent)
 
 
-def git_in(checkout: "Path | str") -> Git:
+def git_in(checkout: Path | str) -> Git:
     """The real git, rooted in ``checkout``. Output is stdout and stderr together, because
     what a failed pull says is on stderr and the report has to carry it."""
     where = str(Path(checkout).expanduser())
 
-    def run(args: Any) -> "tuple[int, str]":
+    def run(args: Any) -> tuple[int, str]:
         try:
             done = subprocess.run(["git", "-C", where, *[str(a) for a in args]],
                                   capture_output=True, text=True, timeout=GIT_TIMEOUT)
@@ -480,7 +488,7 @@ def git_in(checkout: "Path | str") -> Git:
     return run
 
 
-def pip_install(checkout: "Path | str") -> "tuple[int, str]":
+def pip_install(checkout: Path | str) -> tuple[int, str]:
     """``pip install -e .`` in the checkout, with the interpreter that is running."""
     try:
         done = subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."],
@@ -500,10 +508,25 @@ def _same(a: str, b: str) -> bool:
     return n >= 7 and a[:n] == b[:n]
 
 
-def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
+REMOTE = re.compile(r"(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[A-Za-z0-9._/~-]+"
+                    r"|ssh://[A-Za-z0-9_.@-]+(:[0-9]{1,5})?/[A-Za-z0-9._/~-]+"
+                    r"|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9._/~-]+)")
+BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+
+
+def check_remote(repo_url: str, branch: str) -> None:
+    """`UpdateError` unless ``repo_url`` is an https or ssh git address and ``branch`` a
+    branch name: neither may start with a dash or name a transport that runs a program."""
+    if not REMOTE.fullmatch(repo_url) or ".." in repo_url:
+        raise UpdateError(f"{repo_url!r} is not an https or ssh git address")
+    if not BRANCH.fullmatch(branch) or ".." in branch or branch.endswith((".lock", "/")):
+        raise UpdateError(f"{branch!r} is not a branch name")
+
+
+def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
                git: Git | None = None,
-               pip: "Callable[[Path], tuple[int, str]]" = pip_install,
-               restart: "Callable[[], Any] | None" = None) -> Pulled:
+               pip: Callable[[Path], tuple[int, str]] = pip_install,
+               restart: Callable[[], Any] | None = None) -> Pulled:
     """One look at ``branch``: fast-forward onto it if it moved, and restart on the new code.
 
     Never a merge. A checkout holding commits the branch does not have is *reported and
@@ -520,7 +543,11 @@ def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
     run = git if git is not None else git_in(checkout)
     bring_back = restart if restart is not None else restart_after_update
 
-    rc, out = run(["ls-remote", repo_url, branch])
+    try:
+        check_remote(repo_url, branch)
+    except UpdateError as exc:
+        return Pulled(branch, error=str(exc))
+    rc, out = run(["ls-remote", "--", repo_url, branch])
     head = out.split()[0] if rc == 0 and out.split() else ""
     if rc != 0 or not head:
         return Pulled(branch, error=f"could not read {branch} on {repo_url}: "
@@ -534,7 +561,7 @@ def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
     if _same(local, head):
         return Pulled(branch, was=local, now=local, remote=head)
 
-    rc, out = run(["fetch", repo_url, branch])
+    rc, out = run(["fetch", "--", repo_url, branch])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head,
                       error=f"could not fetch {branch}: {out}")
@@ -551,7 +578,7 @@ def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
     # than a wasted minute.
     needs_install = rc != 0 or any(Path(f).name in INSTALL_TRIGGERS for f in moved)
 
-    rc, out = run(["pull", "--ff-only", repo_url, branch])
+    rc, out = run(["pull", "--ff-only", "--", repo_url, branch])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head,
                       error=f"git pull --ff-only failed, so this machine keeps the code "
@@ -572,12 +599,12 @@ def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
                   restarted=str(bring_back() or ""))
 
 
-def track(repo_url: str, branch: str, install_dir: "Path | str", *,
+def track(repo_url: str, branch: str, install_dir: Path | str, *,
           interval: float = EVERY_S, first_after_s: float = 30.0,
-          idle: "Callable[[], bool]" = lambda: True,
+          idle: Callable[[], bool] = lambda: True,
           git: Git | None = None,
-          pip: "Callable[[Path], tuple[int, str]]" = pip_install,
-          restart: "Callable[[], Any] | None" = None,
+          pip: Callable[[Path], tuple[int, str]] = pip_install,
+          restart: Callable[[], Any] | None = None,
           rounds: int = 0) -> threading.Thread:
     """Follow ``branch`` on a timer, on a machine that is a checkout with an editable install.
 
@@ -647,9 +674,9 @@ def apply_if_newer() -> dict[str, Any]:
     return {"ok": True, "installed": True, "version": release.version}
 
 
-def watch(*, wanted: "Callable[[], bool]", idle: "Callable[[], bool]",
+def watch(*, wanted: Callable[[], bool], idle: Callable[[], bool],
           every_s: float = 24 * 3600, first_after_s: float = 300.0,
-          restart: "Callable[[], Any] | None" = None,
+          restart: Callable[[], Any] | None = None,
           rounds: int = 0) -> threading.Thread:
     """Check for a newer release on a timer, and put it on when nothing is running.
 

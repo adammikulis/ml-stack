@@ -22,6 +22,12 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+@pytest.fixture(autouse=True)
+def loopback_is_the_internet(monkeypatch):
+    """These tests download from a server on this machine, which has to be named."""
+    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1")
+
+
 @pytest.fixture
 def store(tmp_path):
     d = tmp_path / "models"
@@ -966,3 +972,41 @@ class TestTheResumeStamp:
         stamp.write_text(json.dumps({"version": STAMP_VERSION + 1, "url": "http://x/y.gguf",
                                      "validator": "abc"}))
         assert _read_stamp(stamp) == {}
+
+
+class TestWhereADownloadMayComeFrom:
+    def test_a_source_on_this_machine_or_its_network_is_refused_unless_named(
+            self, store, monkeypatch):
+        monkeypatch.delenv("ML_STACK_FETCH_ALLOW_HOSTS")
+        for source in ("http://127.0.0.1:9/m.gguf", "http://169.254.169.254/latest/m.gguf",
+                       "http://localhost/m.gguf", "http://192.168.1.9/m.gguf",
+                       "http://[::1]/m.gguf"):
+            with pytest.raises(ModelError, match="not on the public internet|this machine"):
+                store.ensure("m.gguf", source=source)
+        assert not list(store.store.glob("*"))
+
+    @pytest.mark.parametrize("name", ["../escape.gguf", "a/../../escape.gguf", "nul.gguf",
+                                      "con", "x\x00.gguf", "bad|name.gguf"])
+    def test_a_file_name_that_is_not_one_plain_name_is_refused(self, store, name):
+        with pytest.raises(ModelError):
+            store.ensure(name, source="http://127.0.0.1:9/whatever.gguf")
+        assert not list(store.store.glob("*"))
+
+    def test_a_redirect_to_a_private_address_is_refused(self, store):
+        class Redirecting(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", "http://169.254.169.254/latest/meta-data/")
+                self.end_headers()
+
+        srv = Server(("127.0.0.1", free_port()), Redirecting)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with pytest.raises(ModelError, match="169.254.169.254"):
+                store.ensure("far.gguf", source=f"http://127.0.0.1:{srv.server_address[1]}/f")
+        finally:
+            srv.shutdown()
+        assert not list(store.store.glob("*"))

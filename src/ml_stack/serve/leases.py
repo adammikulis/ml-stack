@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
-from ml_stack.serve.process import pid_exists
+from ml_stack.serve.process import cmdline_digest, pid_exists, started_at
 
 __all__ = ["already_up", "lease_file", "merge_state", "orphaned", "reap_one",
-           "recorded_servers"]
+           "recorded_servers", "same_process"]
+
+START_TOLERANCE_S = 2.0
 
 
 def lease_file() -> Path:
@@ -41,11 +43,31 @@ def reap_one(held: Any, *, grace_s: float) -> None:
         held.wait(timeout=grace_s)
 
 
-def orphaned(entry: dict) -> bool:
+def same_process(entry: dict, *, strict: bool = False) -> bool:
+    """Whether the process now holding a record's pid is the server the record was written
+    for: it started when the record says and runs the command line the record hashed.
+
+    A recorded start time or command line that no longer matches is a different process.
+    One the record does not hold is not checked, unless ``strict``, which refuses a record
+    that cannot prove both."""
+    pid = entry.get("pid")
+    if not isinstance(pid, int) or not pid_exists(pid):
+        return False
+    recorded, digest = entry.get("started"), entry.get("cmdline")
+    if strict and not (isinstance(recorded, (int, float)) and isinstance(digest, str)):
+        return False
+    if isinstance(recorded, (int, float)):
+        now = started_at(pid)
+        if now is None or abs(now - recorded) > START_TOLERANCE_S:
+            return False
+    return not isinstance(digest, str) or cmdline_digest(pid) == digest
+
+
+def orphaned(entry: dict, *, strict: bool = False) -> bool:
     """Whether a record's server is running on after the process that leased it has gone."""
     owner, pid = entry.get("owner_pid"), entry.get("pid")
     return (isinstance(owner, int) and isinstance(pid, int) and owner != pid
-            and not pid_exists(owner) and pid_exists(pid))
+            and not pid_exists(owner) and same_process(entry, strict=strict))
 
 
 def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict | None:

@@ -60,7 +60,7 @@ MODEL_VARS = ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_MODEL", "ANTHROPIC_DEFAULT_O
               "ANTHROPIC_DEFAULT_FABLE_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL")
 
 
-def environment(base_url: str, alias: str, *, token: str = "local", offline: bool = True,
+def environment(base_url: str, alias: str, *, token: str = "local", offline: bool = True,  # noqa: S107 - the local server checks nothing
                 context: int = 0,
                 base: Mapping[str, str] | None = None) -> dict[str, str]:
     """The process environment Claude Code runs with, over ``base`` (the caller's own)."""

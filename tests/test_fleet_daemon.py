@@ -1068,3 +1068,22 @@ class TestSpeechOverTheNetwork:
         client, *_ = daemon
         with pytest.raises(PeerError, match="503"):
             client.transcribe(self.a_clip())
+
+
+def test_a_job_does_not_inherit_the_daemons_tokens_and_keys(daemon, monkeypatch):
+    client, *_ = daemon
+    monkeypatch.setenv("SOME_SERVICE_API_KEY", "daemon-secret")
+    monkeypatch.setenv("ORDINARY_SETTING", "kept")
+    job = client.submit([sys.executable, "-c",
+                         "import os; print(os.environ.get('SOME_SERVICE_API_KEY'),"
+                         " os.environ.get('ORDINARY_SETTING'))"])
+    client.wait(job["id"], poll_s=0.2, timeout_s=30)
+    assert "None kept" in client.log(job["id"])
+
+
+def test_a_job_gets_the_environment_its_submitter_names(daemon):
+    client, *_ = daemon
+    job = client.submit([sys.executable, "-c", "import os; print(os.environ['FROM_THE_PEER'])"],
+                        env={"FROM_THE_PEER": "asked-for"})
+    client.wait(job["id"], poll_s=0.2, timeout_s=30)
+    assert "asked-for" in client.log(job["id"])

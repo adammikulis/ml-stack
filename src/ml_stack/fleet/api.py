@@ -6,6 +6,7 @@ The ``/ui/*`` paths are handed to `fleet.routes` through the `fleet.ui.UI` it wa
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import secrets
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import promote
+from ml_stack.macauth import Authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
@@ -31,10 +33,19 @@ from .files import (
     DIGEST_HEADER,
     FILE_CHUNK,
     Fetcher,
-    byte_range,
     file_digest,
     remember_digest,
     safe_relpath,
+)
+from .framing import (
+    MOST_BODY,
+    MOST_UPLOAD,
+    Limited,
+    Malformed,
+    addressed_to_this_machine,
+    content_range,
+    read_body,
+    requested_range,
 )
 from .jobs import DaemonError, JobRunner
 from .measuring import BenchHost, Job as BenchJob, Refused
@@ -45,6 +56,12 @@ from .weights import ModelError
 
 INFER_CHUNK = 1 << 13
 INFER_TIMEOUT = 600.0
+READ_ONLY = ("/slots", "/props", "/metrics", "/models", "/health")
+"""Model-server paths the proxy only reads: a write to ``/slots`` saves or erases a cache."""
+PROXIED = re.compile(r"/(v1/[A-Za-z0-9/_.-]*|completions?|chat/completions|tokenize|detokenize|"
+                     r"embeddings?|infill|apply-template|props|health|models|metrics|slots)"
+                     r"(\?[^\s#]*)?")
+"""The paths of a model server the proxy passes on; nothing else, and no way up out of them."""
 
 
 @dataclass
@@ -71,6 +88,13 @@ class Daemon:
     tokens: Callable[[], set[str]] | None = None
     bench: BenchHost | None = None
     hosting: Hosting | None = None
+    ui_from_lan: bool = False
+    """Whether the web interface answers other machines. Off: it answers this one alone."""
+
+
+def _count(text: str, fallback: int, most: int = 1_000_000) -> int:
+    """A query parameter as a whole number in ``0..most``; ``fallback`` for anything else."""
+    return min(int(text), most) if text.isdigit() and len(text) < 12 else fallback
 
 
 def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
@@ -80,8 +104,16 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
     on_paused, schedule_path, serving = daemon.on_paused, daemon.schedule_path, daemon.serving
     models, cluster_key_path, tokens = daemon.models, daemon.cluster_key_path, daemon.tokens
     bench, hosting = daemon.bench, daemon.hosting
+    ui_from_lan = daemon.ui_from_lan
 
-    class Handler(BaseHTTPRequestHandler):
+    def secrets_now() -> set[str]:
+        """Every secret this machine answers to, read at request time."""
+        own = token() if callable(token) else token
+        return {one for one in (own, *(tokens() if tokens else ())) if one}
+
+    authenticator = Authenticator(secrets_now)
+
+    class Handler(Limited, BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
         def log_message(self, fmt: str, *args: Any) -> None:  # quieter
@@ -95,17 +127,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def _name(self) -> str:
             """This machine's name, read at request time."""
             return name() if callable(name) else name
-
-        def _authed(self) -> bool:
-            got = self.headers.get("Authorization", "")
-            if not got.startswith("Bearer "):
-                return False
-            offered = got[7:]
-            # A machine in several clusters answers to each of them.
-            for good in {self._token(), *(tokens() if tokens else ())}:
-                if good and secrets.compare_digest(offered, good):
-                    return True
-            return False
 
         def _send(self, code: int, payload: Any, *, raw: bytes | None = None,
                   headers: dict[str, str] | None = None,
@@ -156,26 +177,49 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                         return
                     remaining -= len(chunk)
 
-        def _guard(self) -> bool:
-            if not self._authed():
-                self._send(401, {"error": "bad or missing bearer token"})
-                return False
-            return True
+        def _guard(self, body: bytes | None = None) -> bool:
+            """Whether this request is signed by a secret this machine answers to; the
+            answer is sent when it is not. ``body`` is what the request carried."""
+            verdict = authenticator.check(self.command, self.path, self.headers, body,
+                                          self.client_address[0])
+            if verdict.ok:
+                return True
+            if verdict.locked:
+                self._send(429, {"error": verdict.reason}, headers={"Retry-After": "60"})
+            else:
+                self._send(401, {"error": verdict.reason})
+            return False
+
+        def _body(self, most: int = MOST_BODY) -> bytes | None:
+            """The request body, or None once a refusal for it has been sent."""
+            try:
+                return read_body(self, most)
+            except Malformed as bad:
+                self.close_connection = True
+                self._send(bad.status, {"error": bad.message})
+                return None
 
         # -- routes --
 
         # -- inference proxy --
-        def _proxy(self) -> bool:
+        def _proxy(self, body: bytes | None) -> bool:
             """Forward /infer/* to a model server on this machine's loopback.
 
             The model server stays on 127.0.0.1. This route is the only LAN-exposed
             one, and it already requires the bearer token.
             """
-            if serving is None or not self.path.startswith("/infer"):
+            if serving is None or not (self.path == "/infer" or self.path.startswith(
+                    ("/infer/", "/infer?"))):
                 return False
-            if not self._guard():
+            if not self._guard(body):
                 return True
             rest = self.path[len("/infer"):] or "/"
+            rest = "/" + rest if rest.startswith("?") else rest
+            route = rest.split("?")[0]
+            if (not PROXIED.fullmatch(rest) or ".." in route.split("/")
+                    or (route.startswith(READ_ONLY) and self.command not in ("GET", "HEAD"))):
+                self._send(403, {"error": "that path is not one the proxy passes on"})
+                return True
             parsed = urllib.parse.urlparse(rest)
             model = urllib.parse.parse_qs(parsed.query).get("ml_stack_model", [""])[0]
             port = serving.port_for(model)
@@ -183,16 +227,14 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 self._send(503, {"error": "no model server is running on this machine"})
                 return True
 
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length) if length else None
             upstream = urllib.request.Request(
-                f"http://127.0.0.1:{port}{rest}", data=body, method=self.command)
+                f"http://127.0.0.1:{port}{rest}", data=body or None, method=self.command)
             for name, value in self.headers.items():
                 if name.lower() in ("authorization", "host", "content-length",
                                     "connection", "x-ml-stack-ui"):
                     continue
                 upstream.add_header(name, value)
-            if body is not None:
+            if body:
                 upstream.add_header("Content-Length", str(len(body)))
 
             try:
@@ -235,6 +277,11 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def _ui(self) -> bool:
             if ui is None or not self.path.startswith("/ui"):
                 return False
+            if not ui_from_lan and not addressed_to_this_machine("localhost",
+                                                                 self.client_address[0]):
+                self._send(403, {"error": "the web interface answers this machine only; "
+                                          "start the daemon with --ui-from-lan to open it"})
+                return True
             return ui_routes(ui, self)
 
         def do_GET(self) -> None:
@@ -242,12 +289,20 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 self.send_response(204)
                 self.end_headers()
                 return
-            if self._proxy():
+            if self._proxy(None):
                 return
             if self._ui():
                 return
             parsed = urllib.parse.urlparse(self.path)
             path, q = parsed.path, urllib.parse.parse_qs(parsed.query)
+            here = addressed_to_this_machine(self.headers.get("Host", ""),
+                                             self.client_address[0])
+            if path == "/health" and "Authorization" not in self.headers and not here:
+                self._send(200, {"ok": True})
+                return
+            if not (path == "/health" and here and "Authorization" not in self.headers) \
+                    and not self._guard():
+                return
             if path == "/health":
                 status = runner.status()
                 sched = schedule.public() if schedule is not None else None
@@ -258,76 +313,90 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                  **({"serving": serving.public()} if serving is not None
                                     else {})})
                 return
-            if not self._guard():
-                return
             if path == "/models":
                 if models is None:
-                    self._send(501, {"error": "no model store on this daemon"}); return
+                    self._send(501, {"error": "no model store on this daemon"})
+                    return
                 self._send(200, {"models": [m.public() for m in models.all()],
                                  "free_gb": models.free_gb(),
                                  "store": str(models.store)})
                 return
             if path.startswith("/models/"):
                 if models is None:
-                    self._send(501, {"error": "no model store on this daemon"}); return
+                    self._send(501, {"error": "no model store on this daemon"})
+                    return
                 wanted = urllib.parse.unquote(path[len("/models/"):])
                 found = models.find(wanted) or models.find_draft(wanted)
                 if found is None:
-                    self._send(404, {"error": f"no model called {wanted!r}"}); return
-                self._send_file(found.path, *byte_range(self.headers.get("Range", "")))
+                    self._send(404, {"error": f"no model called {wanted!r}"})
+                    return
+                try:
+                    start, end = requested_range(self.headers.get("Range", ""))
+                except Malformed as bad:
+                    self._send(bad.status, {"error": bad.message})
+                    return
+                self._send_file(found.path, start, end)
                 return
             if path == "/availability":
                 if schedule is None:
-                    self._send(501, {"error": "no schedule on this daemon"}); return
-                self._send(200, schedule.public()); return
+                    self._send(501, {"error": "no schedule on this daemon"})
+                    return
+                self._send(200, schedule.public())
+                return
             if path == "/jobs":
                 self._send(200, {"jobs": runner.snapshot()})
                 return
             if path == "/speech/providers":
-                self._send(200, speech.providers()); return
+                self._send(200, speech.providers())
+                return
             if path == "/bench":
                 if bench is None:
-                    self._send(501, {"error": "this daemon takes no bench jobs"}); return
+                    self._send(501, {"error": "this daemon takes no bench jobs"})
+                    return
                 self._send(200, {"ok": True, "name": self._name(), **bench.report(),
                                  "jobs": bench.snapshot()})
                 return
             if path == "/bench/export":
                 if bench is None:
-                    self._send(501, {"error": "this daemon takes no bench jobs"}); return
+                    self._send(501, {"error": "this daemon takes no bench jobs"})
+                    return
                 try:
                     out = bench.export(since=q.get("since", [""])[0],
                                        job=q.get("job", [""])[0],
                                        full=q.get("full", ["0"])[0] not in ("", "0"),
                                        anyway=q.get("anyway", ["0"])[0] not in ("", "0"))
                 except DaemonError as e:
-                    self._send(400, {"error": str(e)}); return
+                    self._send(400, {"error": str(e)})
+                    return
                 self._send(200, {**out, "host": self._name()})
                 return
             m = re.match(r"^/jobs/([^/]+)(/log|/metrics)?$", path)
             if m:
                 job = runner.jobs.get(m.group(1))
                 if job is None:
-                    self._send(404, {"error": "unknown job"}); return
+                    self._send(404, {"error": "unknown job"})
+                    return
                 kind = m.group(2)
                 if kind is None:
-                    self._send(200, job.public()); return
+                    self._send(200, job.public())
+                    return
                 if kind == "/log":
-                    n = int(q.get("tail", ["200"])[0])
+                    n = _count(q.get("tail", ["200"])[0], 200)
                     p = runner.log_path(job.id)
                     text = ""
                     if p.exists():
                         text = "".join(p.read_text(errors="replace").splitlines(True)[-n:])
-                    self._send(200, {"log": text}); return
-                since = int(q.get("since", ["0"])[0])
+                    self._send(200, {"log": text})
+                    return
+                since = _count(q.get("since", ["0"])[0], 0)
                 mp = runner.job_dir(job.id) / "metrics.jsonl"
                 rows: list[Any] = []
                 if mp.exists():
                     for line in mp.read_text(errors="replace").splitlines()[since:]:
-                        try:
+                        with contextlib.suppress(json.JSONDecodeError):
                             rows.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-                self._send(200, {"metrics": rows, "next": since + len(rows)}); return
+                self._send(200, {"metrics": rows, "next": since + len(rows)})
+                return
             m = re.match(r"^/fetch/([^/]+)$", path)
             if m:
                 if fetcher is None:
@@ -335,8 +404,10 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 fetch = fetcher.fetches.get(m.group(1))
                 if fetch is None:
-                    self._send(404, {"error": "unknown fetch"}); return
-                self._send(200, fetch.public()); return
+                    self._send(404, {"error": "unknown fetch"})
+                    return
+                self._send(200, fetch.public())
+                return
             if path == "/fetch":
                 if fetcher is None:
                     self._send(501, {"error": "peer-to-peer fetch is not enabled"})
@@ -349,22 +420,16 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 try:
                     target = safe_relpath(files_root, path[len("/files/"):])
                 except DaemonError as e:
-                    self._send(400, {"error": str(e)}); return
+                    self._send(400, {"error": str(e)})
+                    return
                 if not target.is_file():
-                    self._send(404, {"error": "not found"}); return
-                start, end = 0, None
-                rng = self.headers.get("Range", "")
-                if rng.startswith("bytes="):
-                    spec = rng.split("=", 1)[1].split(",")[0].strip()
-                    head, _, tail = spec.partition("-")
-                    if not head:
-                        self._send(400, {"error": "suffix ranges not supported"})
-                        return
-                    try:
-                        start = int(head)
-                        end = int(tail) if tail else None
-                    except ValueError:
-                        self._send(400, {"error": f"bad Range: {rng!r}"}); return
+                    self._send(404, {"error": "not found"})
+                    return
+                try:
+                    start, end = requested_range(self.headers.get("Range", ""))
+                except Malformed as bad:
+                    self._send(bad.status, {"error": bad.message})
+                    return
                 self._send_file(target, start, end)
                 return
             self._send(404, {"error": "no such route"})
@@ -372,15 +437,30 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         do_HEAD = do_GET
 
         def do_POST(self) -> None:
-            if self._proxy():
-                return
             if self._ui():
                 return
-            if not self._guard():
+            body = self._body()
+            if body is None or self._proxy(body):
                 return
+            if not self._guard(body):
+                return
+            try:
+                self._route_post(body or b"{}")
+            except Malformed as bad:
+                self._send(bad.status, {"error": bad.message})
+
+        def _object(self, body: bytes) -> dict[str, Any]:
+            """The JSON object a request body holds; `Malformed` for anything else."""
+            try:
+                got = json.loads(body or b"{}")
+            except ValueError:
+                raise Malformed(400, "the body is not JSON") from None
+            if not isinstance(got, dict):
+                raise Malformed(400, "the body is not a JSON object")
+            return got
+
+        def _route_post(self, body: bytes) -> None:
             parsed = urllib.parse.urlparse(self.path)
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length) if length else b"{}"
             if parsed.path == "/speech/transcribe":
                 want = urllib.parse.parse_qs(parsed.query)
                 try:
@@ -388,11 +468,13 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                        provider=want.get("provider", [""])[0] or None,
                                        language=want.get("language", [""])[0] or None)
                 except ProviderError as e:
-                    self._send(503, {"error": str(e)}); return
-                self._send(200, as_json(heard)); return
+                    self._send(503, {"error": str(e)})
+                    return
+                self._send(200, as_json(heard))
+                return
             if parsed.path == "/jobs":
                 try:
-                    req = json.loads(body or b"{}")
+                    req = self._object(body)
                     argv = req.get("argv")
                     if isinstance(argv, str):
                         argv = shlex.split(argv)
@@ -403,36 +485,46 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                         req.get("cwd") or str(files_root),
                                         req.get("env"))
                 except (DaemonError, ValueError) as e:
-                    self._send(400, {"error": str(e)}); return
-                self._send(201, job.public()); return
+                    self._send(400, {"error": str(e)})
+                    return
+                self._send(201, job.public())
+                return
             if parsed.path == "/bench":
                 if bench is None:
-                    self._send(501, {"error": "this daemon takes no bench jobs"}); return
+                    self._send(501, {"error": "this daemon takes no bench jobs"})
+                    return
                 try:
-                    job = bench.submit(BenchJob.from_request(json.loads(body or b"{}")))
+                    job = bench.submit(BenchJob.from_request(self._object(body)))
                 except Refused as e:
                     # 409: the job is well-formed and this peer will not run it now --
                     # its code, its lock or its memory says so, and `refused` says which
-                    self._send(409, {"error": str(e), "refused": e.kind}); return
+                    self._send(409, {"error": str(e), "refused": e.kind})
+                    return
                 except (DaemonError, ValueError) as e:
-                    self._send(400, {"error": str(e)}); return
-                self._send(201, job.public()); return
+                    self._send(400, {"error": str(e)})
+                    return
+                self._send(201, job.public())
+                return
             if parsed.path == "/models/get":
                 if models is None:
-                    self._send(501, {"error": "no model store on this daemon"}); return
-                req = json.loads(body or b"{}")
+                    self._send(501, {"error": "no model store on this daemon"})
+                    return
+                req = self._object(body)
                 try:
                     got = models.ensure(str(req.get("name") or ""),
                                         source=str(req.get("source") or ""),
                                         key=load_cluster_key(cluster_key_path),
                                         autodownload=bool(req.get("autodownload", True)))
                 except (ModelError, ValueError) as e:
-                    self._send(400, {"error": str(e)}); return
-                self._send(200, got.public()); return
+                    self._send(400, {"error": str(e)})
+                    return
+                self._send(200, got.public())
+                return
             if parsed.path == "/availability":
                 if schedule is None:
-                    self._send(501, {"error": "no schedule on this daemon"}); return
-                req = json.loads(body or b"{}")
+                    self._send(501, {"error": "no schedule on this daemon"})
+                    return
+                req = self._object(body)
                 action = str(req.get("action") or "")
                 try:
                     if action == "pause":
@@ -458,16 +550,18 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     else:
                         raise DaemonError(f"unknown action {action!r}")
                 except (DaemonError, ValueError, PermissionError) as e:
-                    self._send(400, {"error": str(e)}); return
+                    self._send(400, {"error": str(e)})
+                    return
                 if schedule_path is not None:
                     schedule.save(schedule_path)
-                self._send(200, schedule.public()); return
+                self._send(200, schedule.public())
+                return
             if parsed.path == "/fetch":
                 if fetcher is None:
                     self._send(501, {"error": "peer-to-peer fetch is not enabled"})
                     return
                 try:
-                    req = json.loads(body or b"{}")
+                    req = self._object(body)
                     if "from_url" in req or "url" in req or "token" in req:
                         self._send(400, {"error": "name the source peer, not a URL: a "
                                                   "route that fetches any URL it is "
@@ -481,43 +575,55 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                           to=str(req.get("to") or relpath),
                                           sha256=str(req.get("sha256") or ""))
                 except (DaemonError, ValueError) as e:
-                    self._send(400, {"error": str(e)}); return
-                self._send(202, fetch.public()); return
+                    self._send(400, {"error": str(e)})
+                    return
+                self._send(202, fetch.public())
+                return
             if parsed.path == "/serve":
                 if hosting is None or models is None:
-                    self._send(501, {"error": "this daemon serves no models"}); return
+                    self._send(501, {"error": "this daemon serves no models"})
+                    return
                 try:
-                    req = json.loads(body or b"{}")
+                    req = self._object(body)
                     wanted = str(req.get("model") or "")
                     context = int(req.get("context") or 8192)
                     parallel = max(1, int(req.get("parallel") or 1))
                 except (TypeError, ValueError) as e:
-                    self._send(400, {"error": str(e)}); return
+                    self._send(400, {"error": str(e)})
+                    return
                 if not wanted:
-                    self._send(400, {"error": "name the model"}); return
+                    self._send(400, {"error": "name the model"})
+                    return
                 found = models.find(wanted)
                 if found is None:
                     self._send(404, {"error": f"no model called {wanted!r} on this "
-                                              f"machine"}); return
+                                              f"machine"})
+                    return
                 running = hosting.already(found.name)
                 if running is not None:
-                    self._send(200, running.public()); return
+                    self._send(200, running.public())
+                    return
                 try:
                     served = hosting.start(found.path, name=found.name, context=context,
                                            parallel=parallel,
                                            room=int(report().get("room_bytes") or 0))
                 except NoRoom as e:
-                    self._send(409, {"error": str(e), "refused": "room"}); return
+                    self._send(409, {"error": str(e), "refused": "room"})
+                    return
                 except (OSError, RuntimeError, ValueError) as e:
-                    self._send(502, {"error": str(e)}); return
-                self._send(201, served.public()); return
+                    self._send(502, {"error": str(e)})
+                    return
+                self._send(201, served.public())
+                return
             m = re.match(r"^/jobs/([^/]+)/stop$", parsed.path)
             if m:
                 try:
                     job = runner.stop(m.group(1))
                 except DaemonError as e:
-                    self._send(404, {"error": str(e)}); return
-                self._send(200, job.public()); return
+                    self._send(404, {"error": str(e)})
+                    return
+                self._send(200, job.public())
+                return
             self._send(404, {"error": "no such route"})
 
         def do_DELETE(self) -> None:
@@ -528,21 +634,23 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def do_PUT(self) -> None:
             if self._ui():
                 return
-            if not self._guard():
+            body = self._body(MOST_UPLOAD)
+            if body is None or not self._guard(body):
                 return
             parsed = urllib.parse.urlparse(self.path)
             if not parsed.path.startswith("/files/"):
-                self._send(404, {"error": "no such route"}); return
+                self._send(404, {"error": "no such route"})
+                return
             try:
                 target = safe_relpath(files_root, parsed.path[len("/files/"):])
+                offset, _ = content_range(self.headers.get("Content-Range", ""), len(body))
             except DaemonError as e:
-                self._send(400, {"error": str(e)}); return
+                self._send(400, {"error": str(e)})
+                return
+            except Malformed as bad:
+                self._send(bad.status, {"error": bad.message})
+                return
             target.parent.mkdir(parents=True, exist_ok=True)
-            length = int(self.headers.get("Content-Length", "0"))
-            cr = self.headers.get("Content-Range", "")
-            offset = 0
-            if cr.startswith("bytes "):
-                offset = int(cr.split(" ", 1)[1].split("-")[0])
             partial = target.with_suffix(target.suffix + ".part")
             held = partial.stat().st_size if partial.exists() else 0
             if offset > held:
@@ -554,13 +662,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             with partial.open(mode) as fh:
                 if offset:
                     fh.seek(offset)
-                remaining = length
-                while remaining > 0:
-                    chunk = self.rfile.read(min(1 << 20, remaining))
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    remaining -= len(chunk)
+                fh.write(body)
             if self.headers.get("X-ML-Stack-Complete", "1") == "1":
                 want = self.headers.get(DIGEST_HEADER, "").strip().lower()
                 got = file_digest(partial) if want else ""
