@@ -88,6 +88,8 @@ class Daemon:
     tokens: Callable[[], set[str]] | None = None
     bench: BenchHost | None = None
     hosting: Hosting | None = None
+    ui_from_lan: bool = False
+    """Whether the web interface answers other machines. Off: it answers this one alone."""
 
 
 def _count(text: str, fallback: int, most: int = 1_000_000) -> int:
@@ -102,6 +104,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
     on_paused, schedule_path, serving = daemon.on_paused, daemon.schedule_path, daemon.serving
     models, cluster_key_path, tokens = daemon.models, daemon.cluster_key_path, daemon.tokens
     bench, hosting = daemon.bench, daemon.hosting
+    ui_from_lan = daemon.ui_from_lan
 
     def secrets_now() -> set[str]:
         """Every secret this machine answers to, read at request time."""
@@ -274,6 +277,11 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def _ui(self) -> bool:
             if ui is None or not self.path.startswith("/ui"):
                 return False
+            if not ui_from_lan and not addressed_to_this_machine("localhost",
+                                                                 self.client_address[0]):
+                self._send(403, {"error": "the web interface answers this machine only; "
+                                          "start the daemon with --ui-from-lan to open it"})
+                return True
             return ui_routes(ui, self)
 
         def do_GET(self) -> None:

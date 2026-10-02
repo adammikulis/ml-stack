@@ -113,7 +113,7 @@ def current_version() -> str:
     """The running version, or empty when there is no way to tell."""
     from importlib.metadata import PackageNotFoundError, version
 
-    with contextlib.suppress(PackageNotFoundError):
+    with contextlib.suppress(PackageNotFoundError, LookupError):
         return version("ml-stack")
     told = os.environ.get("ML_STACK_VERSION", "").strip()
     if told:

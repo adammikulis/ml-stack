@@ -83,7 +83,7 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
 
 def serve_forever(root: Path | str | None = None,
                   host: str | None = None, port: int = DEFAULT_PORT, *,
-                  lan: bool = False,
+                  lan: bool = False, ui_from_lan: bool = False,
                   name: str = "", announce: bool = True,
                   cluster_key_path: Path | str | None = None,
                   device_report: Callable[[], dict[str, Any]] | None = None,
@@ -96,6 +96,9 @@ def serve_forever(root: Path | str | None = None,
                   track: str | None = None) -> None:
     """``host`` and ``lan`` say where to listen (`bind_address`): this machine alone unless
     a host is named, ``lan`` is set, ``setup_from_lan`` is, or the machine is in a cluster.
+
+    ``ui_from_lan`` lets other machines open the web interface, which they sign in to over
+    plain HTTP; ``setup_from_lan`` implies it.
 
     ``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring
     lock; the ``bench`` beside ``root`` unless given (`fleet.measuring.bench_home`), so a
@@ -204,7 +207,8 @@ def serve_forever(root: Path | str | None = None,
         ui=interface, schedule=schedule, on_paused=on_paused,
         schedule_path=schedule_path, serving=serving, models=models,
         cluster_key_path=cluster_key_path, tokens=every_token,
-        bench=bench_host[0], hosting=hosting))
+        bench=bench_host[0], hosting=hosting,
+        ui_from_lan=ui_from_lan or setup_from_lan))
     listening = [bind_address(host, lan=lan or setup_from_lan, joined=key is not None)]
     httpd = LimitedServer((listening[0], port), handler)
     widen = threading.Event()
@@ -429,6 +433,9 @@ def main(argv: list[str] | None = None) -> int:
                          "interface when --lan is given or this machine is in a cluster)")
     ap.add_argument("--lan", action="store_true",
                     help="listen on every interface so other machines can reach this one")
+    ap.add_argument("--ui-from-lan", action="store_true",
+                    help="let other machines open the web interface. It signs in with the "
+                         "passphrase over plain HTTP, so only on a network you trust")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--name", default="",
                     help="how this box identifies itself to peers "
@@ -498,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
                 out.update(probe() or {})
         return out
 
-    serve_forever(a.root, a.host, a.port, name=a.name, lan=a.lan,
+    serve_forever(a.root, a.host, a.port, name=a.name, lan=a.lan, ui_from_lan=a.ui_from_lan,
                   announce=not a.no_announce, cluster_key_path=a.cluster_key,
                   slots=a.slots, device_report=report if probes else None,
                   labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),

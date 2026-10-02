@@ -65,7 +65,7 @@ class Serving:
             ("0.0.0.0", self.port),
             make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
-                         cluster_key_path=self.keyfile,
+                         cluster_key_path=self.keyfile, ui_from_lan=True,
                          schedule_path=(root / "availability.json") if schedule else None)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 

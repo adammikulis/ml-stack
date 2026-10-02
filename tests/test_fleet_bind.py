@@ -66,3 +66,49 @@ def test_a_daemon_started_with_no_flags_cannot_be_reached_from_the_lan(tmp_path,
     finally:
         proc.terminate()
         proc.wait(timeout=20)
+
+
+def _ui_daemon(tmp_path, *, ui_from_lan):
+    import threading
+
+    from ml_stack.fleet.api import Daemon, make_handler
+    from ml_stack.fleet.daemon import load_or_create_token
+    from ml_stack.fleet.framing import LimitedServer
+    from ml_stack.fleet.jobs import JobRunner
+    from ml_stack.fleet.ui import UI
+
+    root = tmp_path / "traind"
+    (root / "files").mkdir(parents=True)
+    runner = JobRunner(root)
+    handler = make_handler(Daemon(runner, root / "files", load_or_create_token(root),
+                                  ui=UI(name="box", cluster_key_path=tmp_path / "k"),
+                                  ui_from_lan=ui_from_lan))
+    httpd = LimitedServer((ALL_INTERFACES, 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, runner
+
+
+def _status(address, port):
+    import http.client
+
+    conn = http.client.HTTPConnection(address, port, timeout=5)
+    conn.request("GET", "/ui/", headers={"X-ML-Stack-UI": "1"})
+    got = conn.getresponse().status
+    conn.close()
+    return got
+
+
+@pytest.mark.parametrize("ui_from_lan, from_the_lan", [(False, 403), (True, 200)])
+def test_the_web_interface_answers_other_machines_only_when_told_to(tmp_path, ui_from_lan,
+                                                                    from_the_lan):
+    lan_address = primary_ip()
+    if lan_address.startswith("127."):
+        pytest.skip("this machine has no address other than loopback")
+    httpd, runner = _ui_daemon(tmp_path, ui_from_lan=ui_from_lan)
+    try:
+        assert _status("127.0.0.1", httpd.server_port) == 200
+        assert _status(lan_address, httpd.server_port) == from_the_lan
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
