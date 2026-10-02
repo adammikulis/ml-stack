@@ -29,6 +29,7 @@ from . import autostart, updates as updating
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
+from .deciding import Deciding
 from .device import device_report as default_report, resolve_report, stdlib_device_report
 from .discovery import (
     Advertiser,
@@ -192,7 +193,8 @@ def serve_forever(root: Path | str | None = None,
                                     ui=interface, schedule=schedule, on_paused=on_paused,
                                     schedule_path=schedule_path, serving=serving, models=models,
                                     cluster_key_path=cluster_key_path, tokens=every_token,
-                                    bench=bench_host[0], hosting=hosting)))
+                                    bench=bench_host[0], hosting=hosting,
+                                    decide=Deciding(serving))))
     # Keeping this machine current, in one of two modes and never in both. Either way the
     # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
     nothing_running = updating.quiet(

@@ -52,6 +52,11 @@ serve = ["psutil>=7.2.2"]
 speech = ["faster-whisper>=1.2.1", "piper-tts>=1.8.0"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
+# `ml-stack-decide`: the embed backend's head
+decide = ["numpy>=1.24", "safetensors>=0.4"]
+# the pointer backend runs a released checkpoint on torch; its files are downloaded only on request
+decide-pointer = ["ml-stack[decide]", "torch>=2.14", "transformers>=5.17", "peft>=0.21.0",
+                  "huggingface_hub>=1.32"]
 # an embedded property graph: one file on disk, native Cypher, no server.
 # tests/test_graph_engine_contract.py is what a bump is measured against
 store = ["ladybug>=0.20.4,<0.21"]
@@ -112,6 +117,10 @@ ml-stack-mcp = "ml_stack.mcp:main"
 ml-stack-train-run = "ml_stack.train.run:main"
 # a project's tools -> synthetic conversations -> a fine-tuned caller -> a GGUF
 ml-stack-train-tools = "ml_stack.train.tools:main"
+# choose one of a named set of options and say how sure: ask, score, calibrate, compare
+ml-stack-decide = "ml_stack.decide_cli:main"
+# a pointer-head decision model fine-tuned from labelled cases
+ml-stack-train-decider = "ml_stack.train.decider:main"
 # what this machine can do, and what it does without being asked; --checkouts adds the
 # repositories and working state ml-stack-doctor checks on their own
 ml-stack-setup = "ml_stack.setup:main"
@@ -215,6 +224,10 @@ combine-as-imports = true
     "S107",
     "S108",  # /tmp paths in fixtures
     "S311",  # a seeded generator makes a fixture repeat
+]
+"src/ml_stack/decide/guards/*.py" = [
+    "S104",  # the benchmark's tool calls are the dangerous strings it labels
+    "S108",
 ]
 "scripts/hooks/**" = [
     "BLE001",  # a guard that fails must let the command through, not block on its own error

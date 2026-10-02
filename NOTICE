@@ -43,3 +43,16 @@ SGLang's srt/models/dflash.py (https://github.com/sgl-project/sglang, Apache-2.0
 mlx-lm -- https://github.com/ml-explore/mlx-lm
 src/ml_stack/spec/ drives mlx-lm's qwen3_5 model, cache and gated-delta code, and ports
 the verification passes over them. Under the MIT license, copyright (c) 2023 Apple Inc.
+
+------------------------------------------------------------------------------------------
+Strands Decider -- https://github.com/strands-labs/strands-decider
+src/ml_stack/decide/pointer.py and pointer_prompt.py re-implement the architecture its
+documentation describes: a language-model torso without its output head, scored by a
+pointer readout that compares the hidden state at an `<answer>` marker with the hidden state
+at the end of each option's line, and the prompt layout the released checkpoint was trained
+on (the layout has to match for the checkpoint to answer). No source file of that project is
+copied. The code and the checkpoint `StrandsAgents/strands-decider-2B-hobson-v19` are
+published under the Apache License, Version 2.0, and are downloaded by the user on request,
+not redistributed here; the checkpoint is a LoRA adapter on `Qwen/Qwen3.5-2B-Base`, also
+Apache-2.0. docs/decision-models.md lists the licences of the code, the weights, the base
+model and the training data.

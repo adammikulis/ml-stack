@@ -726,6 +726,35 @@ Capabilities that do not exist yet.
   nothing yet sends a new session to a free slot on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
 
+### Decision models
+
+- [ ] **The tool loop does not call interventions yet.** `ml_stack.interventions.guard_tool_call(call,
+  context, execute, interventions, confirm=...)` is the step; `Agent.run` in the tool-loop
+  branch should build a `Call` and a `Context` from its messages, run it in place of its own
+  dispatch, and take `interventions=[...]`. `tests/test_decide_guard.py` drives it the way a
+  loop would.
+- [ ] **Trained deciders are not in model discovery.** `ml_stack.decide.registry` records them
+  by name under the state root; `hub.discover` (model-discovery branch) should list a directory
+  holding `decider.json` as a model of format `decider`.
+- [ ] **The pointer backend takes the GPU without a lease.** `PointerDecider` loads onto MPS or
+  CUDA directly, so it can run beside a served model; it should ask `ml_stack.serve` for a lease
+  and release it when `/decide` has been idle.
+- [ ] **The pointer backend is slow on Apple silicon at guard-prompt length.** 200 to 450 ms
+  median for 300 to 600 tokens: transformers runs the Gated DeltaNet layers in a PyTorch
+  reference loop. A Metal chunk kernel, or one forward over the shared state for the three
+  guard questions, is the fix; neither exists here.
+- [ ] **No per-process memory figures.** The decision-models document has latency, accuracy,
+  Brier and ECE but only the pointer model's device memory (3.7 GB); measure resident memory
+  of each llama-server and the embedding server with the `ps` of the pid `ml-stack-serve up`
+  prints.
+- [ ] **The guard benchmark has one author.** 412 cases written and checked by one person;
+  a second reviewer, and cases from a project other than the one the templates came from, are
+  what would make an accuracy figure mean more than "on these templates". `make-cases` output
+  is rule-labelled and has never been read in bulk.
+- [ ] **A Qwen3.5-4B Q4_K_M server returns non-finite logits** on llama.cpp build 10816 (the
+  first token is `@` with null log-probabilities). Check against a newer build.
+- [ ] **MLX does not train a decider.** `ml-stack-train-decider` is PyTorch only.
+
 ### Speech
 - [ ] **Nothing streams.** `StreamingASR` in `speech/protocols.py` is a protocol no
   provider implements, and `POST /speech/transcribe` takes one whole file. A push-to-talk

@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
+from ml_stack.decide import router
 from ml_stack.home import state
 from ml_stack.log import say
 
@@ -357,6 +358,19 @@ def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict
             "sample_rate": spoken.sample_rate, "voice": spoken.voice}
 
 
+def decide(question: str, options: list[str], state_text: str = "", backend: str = "auto",
+           url: str = "", abstain_below: float = -1.0) -> dict[str, Any]:
+    """Choose one of ``options`` (``NAME`` or ``NAME=description``) for ``question`` about
+    ``state_text`` and say how sure (``ml-stack-decide ask``); ``backend`` is ``auto``,
+    ``logprob``, ``pointer``, ``embed`` or ``rules``, ``url`` the chat server for logprob,
+    and a positive ``abstain_below`` flags answers under that probability."""
+    named = {n.strip(): d.strip() for n, _, d in (o.partition("=") for o in options)}
+    got = router.decide(question, state_text, named,
+                        abstain_below=abstain_below if abstain_below > 0 else None,
+                        config=router.shared(backend, url))
+    return got.public()
+
+
 def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
@@ -398,6 +412,8 @@ TOOLS: list[Tool] = [
     Tool("speech_transcribe", "An audio file as text, with the times of each segment.",
          speech_transcribe),
     Tool("speech_say", "Speak text into a WAV file.", speech_say),
+    Tool("decide", "Choose one of a named set of options and report a probability for each.",
+         decide),
 ]
 _BY_NAME = {t.name: t for t in TOOLS}
 
