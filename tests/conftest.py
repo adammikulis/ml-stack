@@ -646,6 +646,8 @@ def _real_home(tmp_path_factory):
         mp.setenv("PYTHONUSERBASE", site.getuserbase())
         mp.setenv("PLAYWRIGHT_BROWSERS_PATH",
                   os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(browsers / "ms-playwright"))
+        # matplotlib rebuilds its font list in an empty HOME, once per worker
+        mp.setenv("MPLCONFIGDIR", os.environ.get("MPLCONFIGDIR") or str(browsers / "matplotlib"))
         mp.setenv("HOME", str(away))
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))

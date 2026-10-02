@@ -8,6 +8,7 @@ down runs in a child process, so a crash is a red test rather than a dead worker
 from __future__ import annotations
 
 import random
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -125,6 +126,21 @@ def _seeded(path: str, nodes: int = 2060, edges: int = 2100) -> None:
     db.close()
 
 
+@pytest.fixture(scope="module")
+def seeded_store(tmp_path_factory) -> Path:
+    """The seeded store, written once; each test copies it before changing anything."""
+    path = tmp_path_factory.mktemp("seed") / "seed.lbug"
+    _seeded(str(path))
+    return path
+
+
+def _copy_of(seed: Path, destination: Path) -> str:
+    """A private copy of ``seed`` (the store file and any sidecar) at ``destination``."""
+    for sidecar in seed.parent.glob(seed.name + "*"):
+        shutil.copy2(sidecar, destination.with_name(destination.name + sidecar.name[len(seed.name):]))
+    return str(destination)
+
+
 def _write(path: str, *statements: tuple[str, dict]) -> None:
     db = lb.Database(path)
     conn = lb.Connection(db)
@@ -152,18 +168,16 @@ def _agree(path: str) -> tuple[int, int]:
     ("MATCH (s:Entity {id: 'N5'}), (o:Entity {id: 'N6'}) MERGE (s)-[r:RELATES {edge_id: 'M1'}]->(o) "
      "SET r.predicate = 'merged', r.evidence = $ev, r.weight = 2.0", {"ev": "merged evidence " * 5}),
 ], ids=["detach-delete", "delete-rels", "set-one", "unwind-set", "merge-set"])
-def test_every_relation_reads_the_same_from_both_ends_after_a_write(tmp_path, change):
+def test_every_relation_reads_the_same_from_both_ends_after_a_write(tmp_path, seeded_store, change):
     """`CypherStore.census` counts relations that do not; a sound engine leaves none."""
-    path = str(tmp_path / "both.lbug")
-    _seeded(path)
+    path = _copy_of(seeded_store, tmp_path / "both.lbug")
     _write(path, change)
     held, disagreeing = _agree(path)
     assert held > 2000 and disagreeing == 0, f"{disagreeing} of {held} relations read differently backwards"
 
 
-def test_relations_deleted_and_written_again_read_the_same_from_both_ends(tmp_path):
-    path = str(tmp_path / "again.lbug")
-    _seeded(path)
+def test_relations_deleted_and_written_again_read_the_same_from_both_ends(tmp_path, seeded_store):
+    path = _copy_of(seeded_store, tmp_path / "again.lbug")
     gone = [f"E{i}" for i in range(1, 2100, 4)]
     again = [{"e": e, "p": "again", "ev": f"written again {e} " * 6} for e in gone]
     _write(path,

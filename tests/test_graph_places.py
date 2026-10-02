@@ -17,6 +17,12 @@ WHERE = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84), "Oslo": (59.91, 10.75),
          "Kyoto": (35.01, 135.77)}
 
 
+@pytest.fixture(autouse=True)
+def _no_pause(monkeypatch):
+    """Nobody here asks Nominatim, so there is no rate limit to wait out between places."""
+    monkeypatch.setattr("ml_stack.geo.PAUSE", 0)
+
+
 def a_lookup(asked: list[str] | None = None):
     def lookup(place, **_kwargs):
         if asked is not None:

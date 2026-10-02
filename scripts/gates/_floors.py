@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
+import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from ._util import dotted, parse, python_files
@@ -60,8 +63,39 @@ def skip(root: Path) -> str:
             "count is a floor only where every extra the suite reads is installed")
 
 
+def fingerprint(root: Path) -> str:
+    """A hash of every file collection reads, the interpreter, and which guard modules import."""
+    digest = hashlib.sha256(f"{sys.version}\0{sys.executable}".encode())
+    digest.update(",".join(f"{name}={installed(name)}" for name in guards(root)).encode())
+    for base in ("src", "tests", "scripts", "pyproject.toml"):
+        place = root / base
+        for path in sorted([place] if place.is_file() else place.rglob("*") if place.is_dir() else []):
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                digest.update(path.relative_to(root).as_posix().encode())
+                digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def collect(root: Path) -> tuple[int, int]:
-    """How many tests pytest collects under root, and how many modules failed to."""
+    """How many tests pytest collects under root, and how many modules failed to.
+
+    A tree whose files are byte-identical to one already counted gets the same answer back
+    from the temporary directory instead of being collected again.
+    """
+    kept = Path(tempfile.gettempdir()) / "ml-stack-collect" / f"{fingerprint(root)}.json"
+    try:
+        said = json.loads(kept.read_text(encoding="utf-8"))
+        return int(said[0]), int(said[1])
+    except (OSError, ValueError, IndexError, TypeError):
+        pass
+    counted = collect_fresh(root)
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text(json.dumps(counted), encoding="utf-8")
+    return counted
+
+
+def collect_fresh(root: Path) -> tuple[int, int]:
+    """Collect under root with pytest, whatever was counted before."""
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [str(root / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
     done = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",

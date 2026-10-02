@@ -21,14 +21,17 @@ from ml_stack.files import read_json, write_json
 from ml_stack.http import request_json
 from ml_stack.log import say
 
-__all__ = ["CACHE_VERSION", "LANGUAGE", "SHORTHAND", "URL", "USER_AGENT", "best", "expand",
-           "geocode_all", "lookup"]
+__all__ = ["CACHE_VERSION", "LANGUAGE", "PAUSE", "SHORTHAND", "URL", "USER_AGENT", "best",
+           "expand", "geocode_all", "lookup"]
 
 URL = "https://nominatim.openstreetmap.org/search"
 
 # Nominatim's usage policy asks that a client say who it is; a project passes its own,
 # with a way to reach whoever runs it, rather than shipping under this one
 USER_AGENT = "ml-stack/geo (https://github.com/adammikulis/ml-stack)"
+
+# seconds between two Nominatim requests; its usage policy allows one a second
+PAUSE = 1.1
 
 # bump when best() changes its mind about what a query means, so cached answers are re-asked
 CACHE_VERSION = 5
@@ -113,7 +116,7 @@ def lookup(place: str, *, user_agent: str = USER_AGENT, url: str = URL, timeout:
 
 
 def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_AGENT,
-                url: str = URL, sleep: float = 1.1, log: Callable[[str], None] = say,
+                url: str = URL, sleep: float | None = None, log: Callable[[str], None] = say,
                 shorthand: Mapping[str, str] | None = None,
                 ask: Callable[..., dict[str, Any] | None] = lookup) -> dict[str, Any]:
     """Every place in ``places``, from the cache at ``cache_path`` or Nominatim.
@@ -121,7 +124,8 @@ def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_A
     The cache is a JSON mapping of place -> :func:`lookup` result (None when nothing was
     found, so it is not asked again), written after each answer so a run cut short keeps
     what it got. A cache from an older :data:`CACHE_VERSION` is discarded whole. ``sleep``
-    is the pause between requests; Nominatim allows one per second. ``ask`` is what answers
+    is the pause between requests, :data:`PAUSE` seconds unless given; Nominatim allows one
+    per second. ``ask`` is what answers
     one place, :func:`lookup` unless a caller has its own.
     """
     cache: dict[str, Any] = read_json(cache_path, {})
@@ -137,5 +141,5 @@ def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_A
         log(f"geocoded {place!r} -> {cache[place]}")
         write_json(cache_path, cache)
         if i < len(pending) - 1:
-            time.sleep(sleep)
+            time.sleep(PAUSE if sleep is None else sleep)
     return cache
