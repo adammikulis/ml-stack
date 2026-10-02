@@ -67,7 +67,8 @@ class Limits:
     """What a fetch may spend: bytes, redirects, and time (``timeout`` per socket wait,
     ``deadline_s`` for the whole). ``allow_hosts`` names hosts, by name or address, that may
     be private because the caller means to reach them (a peer on the LAN); a redirect to any
-    other host is checked as usual. ``resolver`` answers for DNS."""
+    other host is checked as usual. ``resolver`` answers for DNS. ``vet`` is called with every
+    URL before it is connected to, the first and each redirect target, and raises to refuse."""
 
     max_bytes: int = MOST_BYTES
     max_redirects: int = MOST_REDIRECTS
@@ -76,6 +77,7 @@ class Limits:
     allow_hosts: frozenset[str] = frozenset()
     resolver: Resolver | None = None
     context: ssl.SSLContext | None = None
+    vet: Callable[[str], None] | None = None
 
 
 DEFAULT = Limits()
@@ -242,6 +244,8 @@ def _hop(url: str, method: str, data: bytes | None, headers: dict[str, str],
          trip: Trip) -> tuple[http.client.HTTPResponse, _Pinned, urllib.parse.SplitResult]:
     limits = trip.limits
     parts, host, port = split(url)
+    if limits.vet is not None:
+        limits.vet(url)
     addresses = resolve(host, port, limits)
     tls = (limits.context or ssl.create_default_context()) if parts.scheme == "https" else None
     last: OSError | None = None
@@ -269,6 +273,8 @@ def _open(url: str, method: str, data: bytes | None, sent: dict[str, str], trip:
         conn.close()
         seen.append(url)
         nxt = urllib.parse.urljoin(url, location)
+        if parts.scheme == "https" and urllib.parse.urlsplit(nxt).scheme != "https":
+            raise Refused("a redirect from https to plain http is refused")
         if urllib.parse.urlsplit(nxt).netloc.lower() != parts.netloc.lower():
             sent = {k: v for k, v in sent.items() if k.lower() not in SECRET_HEADERS}
         if response.status == 303 or (response.status in (301, 302)
@@ -326,6 +332,7 @@ class Streaming:
     status: int
     headers: dict[str, str]
     chunks: Iterator[bytes]
+    redirects: tuple[str, ...] = ()
 
 
 @contextmanager
@@ -337,11 +344,11 @@ def stream(url: str, *, headers: dict[str, str] | None = None,
     The body is asked for uncompressed, so a byte range means bytes of the file.
     """
     trip = Trip.begin(limits)
-    response, conn, final, _ = _open(url, "GET", None, _request(headers, "identity"), trip)
+    response, conn, final, seen = _open(url, "GET", None, _request(headers, "identity"), trip)
     try:
         yield Streaming(final, response.status,
                         {k.lower(): v for k, v in response.getheaders()},
-                        _body(response, trip))
+                        _body(response, trip), seen)
     finally:
         conn.close()
 
