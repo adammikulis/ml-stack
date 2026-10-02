@@ -18,7 +18,7 @@ from ml_stack.redteam.scenarios.loop import COLLECT, GOALS, INTERNAL, responder
 from ml_stack.redteam.targets import Answer, Responder
 
 TARGET = "compaction"
-BUDGET = 400
+BUDGET = 4000
 PAGE = ("Widget calibration is done in three steps: measure the reference block, apply the "
         "offset to the working gauges, then file the results with the batch number. ")
 
