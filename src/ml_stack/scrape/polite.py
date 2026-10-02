@@ -81,7 +81,8 @@ class Polite:
                         url, headers={"User-Agent": self.user_agent, "Accept": accept},
                         timeout=self.timeout_s, guard=self.guard,
                         retry=Retry(tries=self.tries, backoff=self.backoff_s,
-                                    on_status=RETRY_STATUS)) as reply:
+                                    on_status=RETRY_STATUS,
+                                    when_unreachable=False)) as reply:
                     yield reply
             finally:
                 self._last[host] = self.clock()
