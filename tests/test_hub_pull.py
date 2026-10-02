@@ -92,6 +92,15 @@ def test_a_cut_connection_resumes_from_the_bytes_on_disk(server, tmp_path):
     assert ranges and ranges[0].startswith("bytes=") and int(ranges[0][6:-1]) > 0
 
 
+def test_a_server_that_ignores_the_range_request_restarts_the_file(server, tmp_path):
+    server.cut_after = MIB + 5
+    with pytest.raises(OSError):
+        hub.pull("hf:maker/thing-GGUF/thing-Q8_0.gguf", tmp_path)
+    server.ignore_range = True
+    got = hub.pull("hf:maker/thing-GGUF/thing-Q8_0.gguf", tmp_path)
+    assert got.read_bytes() == REPOS["maker/thing-GGUF"]["thing-Q8_0.gguf"]
+
+
 def test_a_cancel_leaves_the_partial_file_and_the_next_pull_continues(server, tmp_path):
     token = pulling.CancelToken()
     count = []

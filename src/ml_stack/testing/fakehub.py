@@ -27,7 +27,7 @@ class FakeHub:
     """The hub and its CDN. ``gated`` repositories answer 401 without the bearer ``token``.
 
     ``cut_after`` closes the connection after that many body bytes the first time a file is
-    read; ``corrupt`` names paths whose served bytes differ from the listed sha256;
+    read; ``ignore_range`` answers a range request with the whole file; ``corrupt`` names paths whose served bytes differ from the listed sha256;
     ``redirect`` sends file reads through the CDN socket. ``hub_seen`` and ``cdn_seen`` are
     ``(method, path, range, authorization)`` for every request.
     """
@@ -37,6 +37,7 @@ class FakeHub:
         self.repos, self.gated, self.redirect = repos, gated, redirect
         self.token = secrets.token_hex(8)
         self.cut_after: int | None = None
+        self.ignore_range = False
         self.corrupt: set[str] = set()
         self.downloads: dict[str, int] = {}
         self.hub_seen: list[tuple[str, str, str, str]] = []
@@ -131,7 +132,7 @@ class FakeHub:
             def _body(self, repo: str, name: str) -> None:
                 whole = hub._served(repo, name)
                 start = 0
-                asked = self.headers.get("Range") or ""
+                asked = "" if hub.ignore_range else self.headers.get("Range") or ""
                 if asked.startswith("bytes="):
                     start = int(asked[6:].split("-")[0] or 0)
                 if start >= len(whole) and start:
