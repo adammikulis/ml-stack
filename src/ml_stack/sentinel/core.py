@@ -15,7 +15,7 @@ from ml_stack.sentinel.canary import Baseline, Results
 from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
 from ml_stack.sentinel.findings import Finding
 from ml_stack.sentinel.honey import Honey
-from ml_stack.sentinel.human import HumanGrant
+from ml_stack.sentinel.human import HumanGrant, protect
 from ml_stack.sentinel.integrity import Manifest, check_file
 from ml_stack.sentinel.policy import Mode, decide
 from ml_stack.sentinel.rails import RailWatch
@@ -46,6 +46,7 @@ class Sentinel:
                  clock: Callable[[], float] = time.time) -> None:
         self.root = Path(root) if root is not None else sentinel_dir()
         self.clock = clock
+        protect(self.root)
         self.bus = Bus(EventLog(self.root / "events.log", anchor=self.root / "anchor.log"))
         self.store = Store(self.root, self.bus, roots=roots, clock=clock)
         self._config = SealedFile(self.root / "config.json")

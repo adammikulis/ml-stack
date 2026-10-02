@@ -85,6 +85,10 @@ DEFAULT_PROBES: tuple[Probe, ...] = (
 )
 
 
+PROBE_Z = 1.96
+"""Interval width for one probe; the pooled interval uses `wilson`'s default."""
+
+
 def wilson(passes: int, runs: int, z: float = 2.58) -> tuple[float, float]:
     """The Wilson score interval for ``passes`` of ``runs`` (default z is about 99%)."""
     if runs <= 0:
@@ -137,8 +141,8 @@ def compare(baseline: Results, current: Results, *, probe_votes: int = 2) -> Dri
     for ident, runs in current.runs.items():
         if ident not in baseline.runs:
             continue
-        b_low, b_high = wilson(baseline.passes[ident], baseline.runs[ident])
-        c_low, c_high = wilson(current.passes[ident], runs)
+        b_low, b_high = wilson(baseline.passes[ident], baseline.runs[ident], PROBE_Z)
+        c_low, c_high = wilson(current.passes[ident], runs, PROBE_Z)
         if c_high < b_low or c_low > b_high:
             moved.append(ident)
     shared = [i for i in current.runs if i in baseline.runs]

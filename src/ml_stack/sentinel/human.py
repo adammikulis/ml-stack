@@ -9,11 +9,12 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ml_stack import home
 
-__all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint"]
+__all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "protect"]
 
 AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 """Environment variables whose presence means an agent started this process."""
@@ -25,6 +26,7 @@ _FORBIDDEN = (
     "ml-stack security", "ml-stack-security", "ml_stack.sentinel", "ml_stack/sentinel",
     "ml_stack_sentinel", "sentinel.release", "sentinel.purge", "sentinel/state",
 )
+_PROTECTED: set[str] = set()
 _VERBS = re.compile(r"\b(?:release|purge|unquarantine|disable|mode|baseline)\b")
 
 
@@ -72,12 +74,18 @@ def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,
     return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
 
 
+def protect(directory: Path | str) -> None:
+    """Add a directory that `agent_may` refuses to let any tool call name."""
+    _PROTECTED.add(str(Path(directory).resolve()).lower())
+    _PROTECTED.add(str(Path(directory)).lower())
+
+
 def _flatten(value: Any) -> str:
     try:
         text = json.dumps(value, ensure_ascii=True, default=str)
     except (TypeError, ValueError):
         text = str(value)
-    text = text.replace("\\\\", "/").replace("\\", "").replace('"', " ").replace("'", " ")
+    text = text.replace("\\", "").replace('"', " ").replace("'", " ")
     return re.sub(r"\s+", " ", text).lower()
 
 
@@ -89,8 +97,8 @@ def agent_may(tool: str, arguments: Mapping[str, Any] | None = None) -> str:
     if "sentinel" in name or name.startswith("security_") or name == "security":
         return f"tool {tool} is a sentinel verb"
     flat = _flatten(arguments or {})
-    state_dir = str(home.state("sentinel")).lower()
-    if state_dir in flat or ".ml-stack/sentinel" in flat:
+    guarded = {str(home.state("sentinel")).lower(), *_PROTECTED}
+    if any(d in flat for d in guarded) or ".ml-stack/sentinel" in flat:
         return "the call names sentinel's state directory"
     for needle in _FORBIDDEN:
         if needle in flat:

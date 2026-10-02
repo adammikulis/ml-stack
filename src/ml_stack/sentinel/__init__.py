@@ -20,19 +20,20 @@ from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
 from ml_stack.sentinel.findings import HEURISTIC, HIGH, Finding
 from ml_stack.sentinel.human import HumanGrant, HumanRequired, agent_may, mint
 from ml_stack.sentinel.policy import Mode
-from ml_stack.sentinel.store import KINDS, Limits, Record, State, Store
+from ml_stack.sentinel.store import KINDS, Limits, Record, State, Store, sentinel_dir
 
 __all__ = ["ENV", "HEURISTIC", "HIGH", "KINDS", "Bus", "Event", "EventLog", "Finding",
            "HumanGrant", "HumanRequired", "Limits", "Mode", "Record", "Screened", "Sentinel",
            "Severity", "State", "Store", "agent_may", "default", "mint"]
 
 _LOCK = threading.Lock()
-_DEFAULT: list[Sentinel] = []
+_DEFAULT: dict[str, Sentinel] = {}
 
 
 def default() -> Sentinel:
-    """The sentinel of this machine, built on first use."""
+    """The sentinel of the state root in force now, built on first use."""
     with _LOCK:
-        if not _DEFAULT:
-            _DEFAULT.append(Sentinel())
-        return _DEFAULT[0]
+        where = str(sentinel_dir())
+        if where not in _DEFAULT:
+            _DEFAULT[where] = Sentinel()
+        return _DEFAULT[where]
