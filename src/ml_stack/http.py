@@ -16,6 +16,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from ml_stack import macauth
 from ml_stack.httpguard import Limits, Refused, resolve, split
 
 USER_AGENT = "ml-stack"
@@ -102,15 +103,22 @@ def json_body(raw: bytes) -> dict[str, Any]:
 def build_request(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None,
                   token: str = "") -> urllib.request.Request:
-    """A request carrying the caller's headers, a user agent and a bearer token."""
+    """A request carrying the caller's headers, a user agent and its credential.
+
+    A ``token`` (or ``Authorization: Bearer`` header) that is a fleet MAC secret signs the
+    request instead of being sent; any other token is sent as a bearer token.
+    """
     sent = {"User-Agent": USER_AGENT}
     sent.update(headers or {})
-    if token:
+    verb = method or ("POST" if data is not None else "GET")
+    secret = token if token.startswith(macauth.PREFIX) else macauth.unwrap(
+        sent.get("Authorization", ""))
+    if secret:
+        sent.pop("Authorization", None)
+        sent.update(macauth.sign(secret, verb, url, data))
+    elif token:
         sent["Authorization"] = f"Bearer {token}"
-    return urllib.request.Request(
-        url, data=data,
-        method=method or ("POST" if data is not None else "GET"),
-        headers=sent)
+    return urllib.request.Request(url, data=data, method=verb, headers=sent)
 
 
 def open_stream(url: str, *, data: bytes | None = None, method: str | None = None,

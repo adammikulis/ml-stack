@@ -18,11 +18,11 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
-from ml_stack.http import Server
+from ml_stack import home, macauth
+from ml_stack.files import write_text
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
-from ml_stack.platform import on_quit, private_file
+from ml_stack.platform import on_quit
 from ml_stack.speech import service as speech
 
 from . import autostart, updates as updating
@@ -41,6 +41,7 @@ from .discovery import (
 )
 from .environment import Environment
 from .files import Fetcher
+from .framing import LimitedServer
 from .jobs import JobRunner
 from .join import default_root
 from .measuring import BenchHost, bench_home as bench_home_beside
@@ -51,29 +52,38 @@ from .settings import Settings
 from .ui import UI
 
 DEFAULT_PORT = 8770
+LOOPBACK = "127.0.0.1"
+ALL_INTERFACES = "0.0.0.0"  # noqa: S104 - what LAN mode means
+
+
+def bind_address(host: str | None, *, lan: bool, joined: bool) -> str:
+    """Where the daemon listens: ``host`` if one was named, the LAN when ``lan`` or this
+    machine is in a cluster, else this machine only."""
+    if host:
+        return host
+    return ALL_INTERFACES if lan or joined else LOOPBACK
 
 
 def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
-    """The bearer token: derived from the cluster key, or random and local."""
+    """The secret requests are signed with: derived from the cluster key, or random and local.
+
+    Kept in ``token`` beside the daemon's files, mode 0600."""
     p = root / "token"
     if cluster_key is not None:
         tok = derive_token(cluster_key)
-        root.mkdir(parents=True, exist_ok=True)
-        if not p.exists() or p.read_text().strip() != tok:
-            p.write_text(tok)
-        private_file(p)
-        return tok
-    if p.exists():
+    elif p.exists() and p.read_text().strip().startswith(macauth.PREFIX):
         return p.read_text().strip()
+    else:
+        tok = macauth.PREFIX + secrets.token_urlsafe(32)
     root.mkdir(parents=True, exist_ok=True)
-    tok = secrets.token_urlsafe(24)
-    p.write_text(tok)
-    p.chmod(0o600)
+    if not p.exists() or p.read_text().strip() != tok:
+        write_text(p, tok)
     return tok
 
 
 def serve_forever(root: Path | str | None = None,
-                  host: str = "0.0.0.0", port: int = DEFAULT_PORT, *,
+                  host: str | None = None, port: int = DEFAULT_PORT, *,
+                  lan: bool = False,
                   name: str = "", announce: bool = True,
                   cluster_key_path: Path | str | None = None,
                   device_report: Callable[[], dict[str, Any]] | None = None,
@@ -84,7 +94,10 @@ def serve_forever(root: Path | str | None = None,
                   on_paused: str = "stop",
                   bench_home: Path | str | None = None,
                   track: str | None = None) -> None:
-    """``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring
+    """``host`` and ``lan`` say where to listen (`bind_address`): this machine alone unless
+    a host is named, ``lan`` is set, ``setup_from_lan`` is, or the machine is in a cluster.
+
+    ``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring
     lock; the ``bench`` beside ``root`` unless given (`fleet.measuring.bench_home`), so a
     daemon rooted in a test's directory never consults the real home.
 
@@ -185,14 +198,16 @@ def serve_forever(root: Path | str | None = None,
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
 
-    httpd = Server((host, port),
-                                make_handler(Daemon(
-                                    runner, files_root, lambda: live_token[0],
-                                    name=lambda: live_name[0], report=report, fetcher=fetcher,
-                                    ui=interface, schedule=schedule, on_paused=on_paused,
-                                    schedule_path=schedule_path, serving=serving, models=models,
-                                    cluster_key_path=cluster_key_path, tokens=every_token,
-                                    bench=bench_host[0], hosting=hosting)))
+    handler = make_handler(Daemon(
+        runner, files_root, lambda: live_token[0],
+        name=lambda: live_name[0], report=report, fetcher=fetcher,
+        ui=interface, schedule=schedule, on_paused=on_paused,
+        schedule_path=schedule_path, serving=serving, models=models,
+        cluster_key_path=cluster_key_path, tokens=every_token,
+        bench=bench_host[0], hosting=hosting))
+    listening = [bind_address(host, lan=lan or setup_from_lan, joined=key is not None)]
+    httpd = LimitedServer((listening[0], port), handler)
+    widen = threading.Event()
     # Keeping this machine current, in one of two modes and never in both. Either way the
     # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
     nothing_running = updating.quiet(
@@ -271,9 +286,16 @@ def serve_forever(root: Path | str | None = None,
             one.beacon.name = called
         return called
 
+    def joined_a_cluster() -> None:
+        """Announce, and listen on the network now that peers are meant to reach this."""
+        start_announcing()
+        if not host and listening[0] == LOOPBACK:
+            widen.set()
+            httpd.shutdown()
+
     if interface is not None:
         interface.rename = rename
-        interface.on_join = start_announcing
+        interface.on_join = joined_a_cluster
         interface.runner = runner
         interface.schedule = schedule
         interface.settings = settings
@@ -290,7 +312,8 @@ def serve_forever(root: Path | str | None = None,
 
     if announce:
         start_announcing()
-    say(f"ml-stack traind on http://{host}:{port}")
+    say(f"ml-stack traind on http://{listening[0]}:{port}"
+        + ("" if listening[0] != LOOPBACK else "  (this machine only; --lan opens it)"))
     say(f"  name  {name}")
     say(f"  root  {root}")
     say(f"  bench {measuring_home}")
@@ -317,14 +340,14 @@ def serve_forever(root: Path | str | None = None,
         say(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
             "this makes every job slower.")
     if interface is not None:
-        shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
+        shown = LOOPBACK if listening[0] in (ALL_INTERFACES, "") else listening[0]
         say(f"  open   http://{shown}:{port}/ui/")
         if key is None:
             say("  this machine has not joined a cluster yet -- open the address "
                 "above ON THIS MACHINE to set it up")
             if setup_token:
                 say(f"  setup from the LAN with this one-time code: {setup_token}")
-    say("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
+    say("  EVERY MACHINE IN THIS CLUSTER CAN RUN COMMANDS HERE. Trusted LAN only.", flush=True)
 
     def _quit(signum: int, _frame: Any) -> None:
         # SIGTERM (launchd, systemd, kill) and on Windows SIGBREAK take the same exit as
@@ -345,7 +368,15 @@ def serve_forever(root: Path | str | None = None,
         say(f"  reclaiming a server unused for {idle_s:.0f}s")
         reclaiming.enter_context(watching(older_than=idle_s, say=print))
     try:
-        httpd.serve_forever()
+        while True:
+            httpd.serve_forever()
+            if not widen.is_set():
+                break
+            widen.clear()
+            httpd.server_close()
+            listening[0] = ALL_INTERFACES
+            httpd = LimitedServer((ALL_INTERFACES, port), handler)
+            say(f"  joined a cluster: now listening on http://{ALL_INTERFACES}:{port}")
     except KeyboardInterrupt:
         pass
     finally:
@@ -393,7 +424,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="where this machine's ml-stack-bench keeps its measuring lock "
                          "(default: the 'bench' beside --root). "
                          "While that lock is held, queued training waits.")
-    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--host", default=None,
+                    help="the address to listen on (default: this machine only, or every "
+                         "interface when --lan is given or this machine is in a cluster)")
+    ap.add_argument("--lan", action="store_true",
+                    help="listen on every interface so other machines can reach this one")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--name", default="",
                     help="how this box identifies itself to peers "
@@ -463,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
                 out.update(probe() or {})
         return out
 
-    serve_forever(a.root, a.host, a.port, name=a.name,
+    serve_forever(a.root, a.host, a.port, name=a.name, lan=a.lan,
                   announce=not a.no_announce, cluster_key_path=a.cluster_key,
                   slots=a.slots, device_report=report if probes else None,
                   labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),

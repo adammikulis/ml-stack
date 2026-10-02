@@ -15,7 +15,7 @@ from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Endpoint, Serving, answers
-from ml_stack.http import Server
+from ml_stack.http import Server, build_request
 from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 
@@ -39,12 +39,10 @@ class Running:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def post(self, path, body=None, token=None, stream=False):
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}{path}",
-            data=json.dumps(body or {}).encode(), method="POST")
-        req.add_header("Content-Type", "application/json")
-        if token is not False:
-            req.add_header("Authorization", f"Bearer {token or self.token}")
+        req = build_request(
+            f"http://127.0.0.1:{self.port}{path}", data=json.dumps(body or {}).encode(),
+            method="POST", headers={"Content-Type": "application/json"},
+            token="" if token is False else (token or self.token))
         return urllib.request.urlopen(req, timeout=30)
 
     def close(self):

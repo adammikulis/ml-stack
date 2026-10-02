@@ -380,10 +380,11 @@ class TestAnsweringToSeveralClusters:
         import urllib.error
         import urllib.request
 
-        # /health answers anyone: it is how a peer checks a machine is alive. /jobs
-        # is behind the bearer token, which is what this is about.
-        req = urllib.request.Request(f"{base}/jobs")
-        req.add_header("Authorization", f"Bearer {token}")
+        # /health answers anyone with whether the daemon is there. /jobs wants a request
+        # signed with the cluster's secret, which is what this is about.
+        from ml_stack.http import build_request
+
+        req = build_request(f"{base}/jobs", token=token)
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
                 return r.status
