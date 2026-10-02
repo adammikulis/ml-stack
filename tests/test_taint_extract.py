@@ -96,6 +96,14 @@ def test_a_schema_that_allows_free_text_or_unbounded_numbers_is_refused(schema):
         check_schema(schema)
 
 
+def test_a_boolean_is_not_a_number_even_when_one_is_in_range():
+    schema = {"type": "object", "properties": {"n": {"type": "integer", "minimum": 0,
+                                                     "maximum": 16}}}
+    assert validate({"n": 1}, schema) == {"n": 1}
+    with pytest.raises(ExtractionError):
+        validate({"n": True}, schema)
+
+
 def test_validate_checks_a_given_object():
     assert validate({"model": "a.gguf"}, SCHEMA) == {"model": "a.gguf"}
     with pytest.raises(ExtractionError):
