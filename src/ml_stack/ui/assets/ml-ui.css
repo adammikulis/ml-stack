@@ -1,0 +1,68 @@
+/* ml-ui tokens. Load this beside ml-ui.js; override any --ml-* variable to theme. */
+:root {
+  color-scheme: dark light;
+  --ml-bg: #0b0f14;
+  --ml-surface: #111823;
+  --ml-sunken: #080c11;
+  --ml-line: #26323f;
+  --ml-line-strong: #5d7186;
+  --ml-text: #e6edf5;
+  --ml-muted: #8698ad;
+  --ml-accent: #35d6c3;
+  --ml-accent-ink: #35d6c3;
+  --ml-accent-dim: #1d7a70;
+  --ml-on-accent: #04120f;
+  --ml-green: #4ad07f;
+  --ml-yellow: #f2b544;
+  --ml-red: #f2685c;
+  --ml-green-ink: #4ad07f;
+  --ml-yellow-ink: #f2b544;
+  --ml-red-ink: #f2685c;
+  --ml-series-1: #35d6c3;
+  --ml-series-2: #5b8dd6;
+  --ml-series-3: #c58af9;
+  --ml-series-4: #e08b4c;
+  --ml-series-5: #9aa7f5;
+  --ml-series-6: #d97fb0;
+  --ml-focus: #8fb8ff;
+  --ml-radius: 10px;
+  --ml-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  --ml-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ml-shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ml-bg: #f6f8fa; --ml-surface: #ffffff; --ml-sunken: #eceff3;
+    --ml-line: #dde3ea; --ml-line-strong: #7b8896;
+    --ml-text: #10161d; --ml-muted: #566574;
+    --ml-accent: #0b7468; --ml-accent-ink: #0b7468; --ml-accent-dim: #bfe9e3;
+    --ml-on-accent: #ffffff;
+    --ml-green: #198a4a; --ml-yellow: #b57600; --ml-red: #d6402f;
+    --ml-green-ink: #136a3a; --ml-yellow-ink: #765000; --ml-red-ink: #ad2417;
+    --ml-series-1: #0b7468; --ml-series-2: #3a6fc4; --ml-series-3: #8a4fd0;
+    --ml-series-4: #c25f1d; --ml-series-5: #5b66d6; --ml-series-6: #b8447f;
+    --ml-focus: #1a5fd0;
+    --ml-shadow: 0 1px 2px rgba(16,22,29,.06), 0 8px 24px -14px rgba(16,22,29,.25);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ml-bg: #f6f8fa; --ml-surface: #ffffff; --ml-sunken: #eceff3;
+  --ml-line: #dde3ea; --ml-line-strong: #7b8896;
+  --ml-text: #10161d; --ml-muted: #566574;
+  --ml-accent: #0b7468; --ml-accent-ink: #0b7468; --ml-accent-dim: #bfe9e3;
+  --ml-on-accent: #ffffff;
+  --ml-green: #198a4a; --ml-yellow: #b57600; --ml-red: #d6402f;
+  --ml-green-ink: #136a3a; --ml-yellow-ink: #765000; --ml-red-ink: #ad2417;
+  --ml-series-1: #0b7468; --ml-series-2: #3a6fc4; --ml-series-3: #8a4fd0;
+  --ml-series-4: #c25f1d; --ml-series-5: #5b66d6; --ml-series-6: #b8447f;
+  --ml-focus: #1a5fd0;
+  --ml-shadow: 0 1px 2px rgba(16,22,29,.06), 0 8px 24px -14px rgba(16,22,29,.25);
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* An element that is defined late is laid out as a block meanwhile. */
+ml-meter, ml-progress, ml-stepper, ml-table, ml-select, ml-slider, ml-toggle, ml-path,
+ml-toaster { display: block; }
+ml-chip, ml-sparkline { display: inline-block; }
+ml-sheet:not([open]) { display: none; }
