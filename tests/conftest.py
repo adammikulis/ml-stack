@@ -455,7 +455,27 @@ _GUARDED_PORTS = range(8080, 8100)
 """Where a stray model server would collide with one already serving."""
 
 
+def _testmon_ignores_scripts_without_a_suffix() -> None:
+    """Keep pytest-testmon from recording scripts such as ``scripts/budgets``.
+
+    A few tests import those in-process, and testmon raises on a covered file with no suffix.
+    """
+    try:
+        from testmon.testmon_core import TestmonData
+    except ImportError:
+        return
+    recorded = TestmonData.get_tests_fingerprints
+
+    def get_tests_fingerprints(self, nodes_files_lines, reports):
+        suffixed = {test: {name: lines for name, lines in files.items() if "." in Path(name).name}
+                    for test, files in nodes_files_lines.items()}
+        return recorded(self, suffixed, reports)
+
+    TestmonData.get_tests_fingerprints = get_tests_fingerprints
+
+
 def pytest_configure(config):
+    _testmon_ignores_scripts_without_a_suffix()
     config.addinivalue_line(
         "markers",
         "real_port: exempt from _no_real_ports -- binds or connects to a real port on "

@@ -281,17 +281,26 @@ the targeted form and `--single` adds `-n 0`. The first run builds a venv in a d
 after which the container costs a couple of seconds; `--help` covers the docker credential
 helper. Run the macOS suite as well; the app ships for both.
 
-While you are working, run the tests that touch what you changed -- seconds, not minutes:
+While you are working, run `scripts/test quick`: the tests your change reaches (the diff against
+the development branch plus the working tree), usually seconds. The first `quick` in a checkout
+runs the whole `full` tier to record which test runs which function (`.testmondata`, ignored by
+git); it also runs `full`, and says why, when a change touches `pyproject.toml`, `tests/conftest.py`,
+a non-Python file or a deleted module. The other tiers, each `scripts/test <tier>` with `-n N` for
+workers:
 
-    PYTHONPATH=src python3 -m pytest tests/test_<what_you_touched>.py -q -n 4
+    scripts/test fast    not slow, not heavy (tests/heavy-modules.txt)
+    scripts/test full    not slow: what bare pytest runs
+    scripts/test slow    only the tests marked slow
+    scripts/test all     everything, as CI runs it (--slow)
 
-The tests marked `slow` — a browser, a subprocess, a wheel build, a network timeout — are left
-out unless you ask for them with `--slow`. CI runs with `--slow`, so a change only they catch
-still fails there; run `--slow` yourself before merging anything that touches packaging, the
-page or the fleet. `-n 0` runs them in one process when a failure needs a clean order; one
-Linux CI entry runs the whole suite that way, so a test that only passes beside its neighbours
-is caught there. Re-running the whole suite after every intermediate commit buys nothing: the
-branch has not landed, and it is rebased onto a moved development branch before it does.
+`tests/README.md` has what each tier leaves out and how `quick` chooses. The tests marked `slow`
+-- a browser, a subprocess, a wheel build, a network timeout -- are left out unless you ask for
+them; CI runs `all`, so a change only they catch still fails there. Run `slow` yourself before
+merging anything that touches packaging, the page or the fleet. `-n 0` runs one process when a
+failure needs a clean order; one Linux CI entry runs the whole suite that way, so a test that only
+passes beside its neighbours is caught there. Do not run the whole suite after every intermediate
+commit: the branch has not landed, and it is rebased onto a moved development branch before it does.
+Agents share the machine, so run the suite at `-n 4` or fewer and one run at a time.
 
 ### Commit before you mutate
 
