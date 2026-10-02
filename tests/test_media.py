@@ -132,6 +132,7 @@ class TestImage:
             probe_png([])
 
 
+@pytest.mark.usefixtures("loopback_net")
 class TestDownload:
     def _serve(self, server, body: bytes, *, honour_range: bool = True):
         def handler(method: str, path: str, _body: bytes):
@@ -143,10 +144,10 @@ class TestDownload:
     def test_fetches_and_verifies(self, server, tmp_path):
         body = b"weights" * 1000
         instance = self._serve(server, body)
-        target = tmp_path / "model.gguf"
+        target = tmp_path / "model.dat"
 
         result = fetch(
-            f"{instance.base_url}/model.gguf",
+            f"{instance.base_url}/model.dat",
             target,
             expect_sha256=hashlib.sha256(body).hexdigest(),
             expect_bytes=len(body),
@@ -158,7 +159,7 @@ class TestDownload:
         network."""
         body = b"x" * 256
         instance = self._serve(server, body)
-        target = tmp_path / "asset.bin"
+        target = tmp_path / "asset.dat"
 
         fetch(f"{instance.base_url}/a", target)
         first = len(instance.requests)
@@ -169,24 +170,24 @@ class TestDownload:
         """The failure this prevents: a truncated file that a later run mistakes for a
         complete one, and that only fails at model-load time."""
         instance = self._serve(server, b"truncated")
-        target = tmp_path / "model.gguf"
+        target = tmp_path / "model.dat"
 
         with pytest.raises(DownloadError, match="sha256"):
             fetch(f"{instance.base_url}/m", target, expect_sha256="00" * 32)
 
         assert not target.exists()
-        assert not target.with_suffix(".gguf.part").exists()
+        assert not target.with_suffix(".dat.part").exists()
 
     def test_wrong_size_is_rejected(self, server, tmp_path):
         instance = self._serve(server, b"12345")
         with pytest.raises(DownloadError, match="bytes"):
-            fetch(f"{instance.base_url}/m", tmp_path / "m.bin", expect_bytes=999)
+            fetch(f"{instance.base_url}/m", tmp_path / "m.dat", expect_bytes=999)
 
     def test_nothing_is_left_in_place_until_verified(self, server, tmp_path):
         """The atomic .part -> replace: a killed process never leaves a half-file at the
         real path."""
         instance = self._serve(server, b"partial content here")
-        target = tmp_path / "sub" / "dir" / "m.bin"
+        target = tmp_path / "sub" / "dir" / "m.dat"
 
         with pytest.raises(DownloadError):
             fetch(f"{instance.base_url}/m", target, expect_bytes=99999)
@@ -197,7 +198,7 @@ class TestDownload:
         instance = self._serve(server, body)
         seen: list = []
 
-        fetch(f"{instance.base_url}/big", tmp_path / "big.bin", on_progress=seen.append)
+        fetch(f"{instance.base_url}/big", tmp_path / "big.dat", on_progress=seen.append)
 
         assert seen, "no progress was reported"
         assert seen[-1].downloaded == len(body)
@@ -210,13 +211,24 @@ class TestDownload:
         body = b"complete-body-" * 100
         instance = self._serve(server, body)
 
-        target = tmp_path / "m.bin"
-        partial = target.with_suffix(".bin.part")
+        target = tmp_path / "m.dat"
+        from ml_stack.net.download import staged_part
+
+        partial = staged_part(f"{instance.base_url}/m", target)
         partial.write_bytes(b"STALE-PREFIX")
 
-        result = fetch(f"{instance.base_url}/m", target, resume=True)
+        result = fetch(f"{instance.base_url}/m", target)
         assert result.read_bytes() == body, "appended to a stale partial file"
 
     def test_unreachable_host_raises_download_error(self, tmp_path):
         with pytest.raises(DownloadError, match="cannot fetch"):
-            fetch("http://127.0.0.1:1/nope", tmp_path / "x.bin", timeout=1.0)
+            fetch("http://127.0.0.1:1/nope", tmp_path / "x.dat")
+
+
+class TestDownloadRefusesWhatItIsNot:
+    @pytest.mark.usefixtures("loopback_net")
+    def test_bytes_that_are_not_the_format_the_name_claims_are_set_aside(self, server, tmp_path):
+        instance = server(lambda method, path, body: (200, b"weights" * 100))
+        with pytest.raises(DownloadError, match="GGUF"):
+            fetch(f"{instance.base_url}/model.gguf", tmp_path / "model.gguf")
+        assert not (tmp_path / "model.gguf").exists()
