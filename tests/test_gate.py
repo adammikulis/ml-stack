@@ -308,3 +308,43 @@ def test_parallel_block_is_named_and_logged(servers, caplog):
     finally:
         held.kill()
         held.wait(timeout=10)
+
+
+def test_the_benchmarks_that_measure_streams_in_flight_together_send_them_in_parallel(
+        servers, monkeypatch):
+    from ml_stack.bench import speed
+    from ml_stack.client import Client
+
+    (one,) = servers(1, hold_s=0.01)
+    held = holder(one.url)
+    try:
+        monkeypatch.setenv(gate.ENV_WAIT, "0.3")
+        client = Client(f"http://127.0.0.1:{one.port}")
+        assert speed._abreast(client, "hello", 4)["error"] == ""
+        assert "for its turn" in speed._one(client, "hello", generate=4)["error"], (
+            "the same request outside the benchmark waits in line")
+    finally:
+        held.kill()
+        held.wait(timeout=10)
+
+
+def test_conversations_measured_in_flight_together_are_sent_in_parallel(servers, monkeypatch):
+    from ml_stack.bench.measure import concurrent
+    from ml_stack.client import Client
+
+    (one,) = servers(1, hold_s=0.01)
+    held = holder(one.url)
+    client = Client(f"http://127.0.0.1:{one.port}")
+
+    def ask(question, counting, **_):
+        counting.chat([{"role": "user", "content": question}])
+        return {"content": "ok"}
+
+    try:
+        monkeypatch.setenv(gate.ENV_WAIT, "0.3")
+        rows, _ = concurrent(ask, [{"q": "a?"}, {"q": "b?"}], conversations=2, turns=1,
+                             label="x", client=client)
+        assert [row.error for row in rows] == ["", ""]
+    finally:
+        held.kill()
+        held.wait(timeout=10)

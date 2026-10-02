@@ -169,7 +169,7 @@ def _describe(path: Path, name: str) -> str:
         info = json.loads((path / name).read_text(encoding="utf-8"))
         since = time.time() - float(info.get("since") or time.time())
         return (f"pid {info.get('pid')} ({info.get('label') or 'unnamed'}) for "
-                f"{since:.0f}s on {info.get('url')}")
+                f"{since:.1f}s on {info.get('url')}")
     except (OSError, ValueError, TypeError):
         return "another process"
 
@@ -235,7 +235,7 @@ def turn(url: str, *, wait_s: float | None = None) -> Iterator[None]:
             waited = time.monotonic() - began
             if waited >= allowance:
                 raise QueueTimeout(
-                    f"waited {waited:.0f}s for its turn on the {pool} pool; {len(ahead)} "
+                    f"waited {waited:.1f}s for its turn on the {pool} pool; {len(ahead)} "
                     f"request(s) ahead, the front is {_describe(path, ahead[0])}. "
                     f"{ENV_WAIT} sets how long to wait; {ENV_PARALLEL}=1 sends in parallel")
             time.sleep(_POLL_S[min(step, len(_POLL_S) - 1)])

@@ -8,8 +8,8 @@
   "file-locks": 0,
   "home-paths": 0,
   "http-servers": 2,
-  "local-imports": 453,
-  "long-docstrings": 83,
+  "local-imports": 452,
+  "long-docstrings": 81,
   "long-functions": 10,
   "module-skips": 31,
   "mutation-survivors": 0,
@@ -25,7 +25,7 @@
   "urlopen-calls": 2,
   "wide-signatures": 33,
   "floors-only-rise": {
-    "tests-collected": 5574
+    "tests-collected": 5637
   },
   "ratchet": {
     "date": "2026-09-18",

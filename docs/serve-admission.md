@@ -118,8 +118,9 @@ turn until the stream is read to the end or closed. Servers that are not on the 
 (including unmanaged ones that were not adopted) are not queued.
 
 Parallel requests are the one escape hatch, and it is named: `ML_STACK_PARALLEL_REQUESTS=1`
-for the process, or `with gate.parallel("bench sweep"):` for a block. The first use of each
-name logs a warning.
+for the process, or `with gate.parallel("bench sweep"):` for a block of one thread. The first
+use of each name logs a warning. The benchmarks that measure streams in flight together
+(`bench.speed.cell`, `bench.measure.concurrent`) name themselves and send in parallel.
 
 `ml-stack-serve queue` (and `Broker.snapshot()["requests"]`) lists each pool's line of requests.
 
