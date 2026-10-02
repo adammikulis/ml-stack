@@ -217,6 +217,33 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
     raise last
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def head_once(url: str, *, headers: dict[str, str] | None = None, token: str = "",
+              timeout: float = 30.0) -> Reply:
+    """A HEAD request whose redirect is returned, not followed.
+
+    A caller that sends a bearer token to a host which redirects to another one (a model
+    hub handing out a signed CDN address) reads the ``Location`` here and asks the second
+    host without the token.
+    """
+    request = build_request(url, method="HEAD", headers=headers, token=token)
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return Reply(int(response.status), b"", response.headers)
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            return Reply(exc.code, b"", exc.headers)
+        raise ServerError(f"{url} -> HTTP {exc.code}", status=exc.code,
+                          headers=exc.headers) from exc
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+        raise ServerUnreachable(f"cannot reach {url} ({exc})") from exc
+
+
 def request_bytes(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None, token: str = "",
                   timeout: float = 180.0, retry: Retry = ONCE) -> Reply:

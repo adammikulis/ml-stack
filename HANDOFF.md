@@ -191,6 +191,27 @@ across `src/`.
   only place that holds it, and record which kept runs stop being comparable. Whoever takes
   it should check `bench.serve.served` and `serve/preflight.py` first.
 
+- [ ] **`hub.find`, `hub.files`, `hub.fetch`, `hub.card` and the draft lookups still go
+  through `huggingface_hub`.** `hub.remote` (listing, search) and `hub.pull` do the same over
+  plain HTTP with resume, checksums and progress. Move the first group onto the second so
+  `ml-stack-models find|files|fetch` work without the `hub` extra and put files in the
+  store `discover()` reads first, and so `hub.fetch` stops being a second download path.
+- [ ] **Folders for LM Studio, GPT4All, Jan, ModelScope and KaggleHub, and every Linux and
+  Windows folder in `hub.places`, follow each tool's documentation.** Only the Hugging Face
+  cache, llama.cpp's cache and Ollama were read off installs, all on macOS. Run
+  `ml-stack-models where` on a machine with each tool and set `verified` in `hub/places.py`.
+- [ ] **The memory estimate is measured only with flash attention on, on Apple silicon.**
+  Flash attention off, a draft model, partial offload, CUDA, ROCm and Windows are formulas
+  with no load log behind them, and `hub.probe`'s `nvidia-smi` and `rocm-smi` readers have
+  only been run on sample output. Each needs a machine with that hardware and the table in
+  `docs/model-discovery.md` extended.
+- [ ] **`suggest_model` ranks by parameters and quantisation, not by a score.** The model
+  ranking in `docs/model-ranking.md` and `data/profiles.json` are per workload and per model
+  family; feed them in so "recommended for this machine" follows a measurement.
+- [ ] **Pulls read `HF_TOKEN` and the login file by hand and fetch with `ml_stack.http`.**
+  When `ml_stack.credentials` and the guarded fetch land (`agent/hardening`), read the token
+  through the first and route the redirect target through the second.
+
 ### The shared fakes
 
 - [ ] **Eighteen tests monkeypatch `serve()` with a `fake_serve` of their own.** Each takes

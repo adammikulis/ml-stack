@@ -17,7 +17,7 @@ from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
-from ml_stack.hub import free_memory, room as machine_room
+from ml_stack.hub import free_memory, installed_for, room as machine_room
 from ml_stack.serve import exit_guard
 from ml_stack.serve.backend import (
     Lease,
@@ -92,6 +92,19 @@ STATE_LOCK_TIMEOUT_S = 30.0
 BESIDE_HEADROOM = 0.8
 
 
+def reusing_installed(spec: ServerSpec) -> ServerSpec:
+    """``spec`` with each ``hf:owner/repo/file`` model, projector and draft that is already
+    installed -- from the Hub cache, llama.cpp's cache, LM Studio or Ollama -- replaced by
+    the file, so it is not downloaded again."""
+    changes: dict[str, str] = {}
+    for field in ("model", "mmproj", "draft"):
+        value = getattr(spec, field)
+        found = installed_for(value) if isinstance(value, str) and value.startswith("hf:") else None
+        if found:
+            changes[field] = str(found.path)
+    return replace(spec, **changes) if changes else spec
+
+
 class ServerManager:
     """Leases model servers, one per (model, port), shared across this machine."""
 
@@ -160,6 +173,7 @@ class ServerManager:
         bench's measuring lock; adopting one already up is not. ``anyway=True`` starts it
         regardless.
         """
+        spec = reusing_installed(spec)
         if escalate:
             # llama.cpp's slot-save file carries the cache's stream count, and a restore
             # raises "n_stream mismatch" the moment that count differs from the file's --

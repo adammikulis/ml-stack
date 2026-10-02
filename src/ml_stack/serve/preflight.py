@@ -404,7 +404,7 @@ def _sliding_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
 
 
 def _kv_estimate_bytes(meta: dict[str, object], context: int,
-                       cache_type_k: str, cache_type_v: str) -> int:
+                       cache_type_k: str, cache_type_v: str, batch: int = 0) -> int:
     """``sum over the layers that hold one of n_kv_heads * head_dim * span * bytes`` -- 0
     when the GGUF does not carry the keys this needs, which is a real answer, not a failure
     to read. Never raises: an estimate that cannot be made is unknown, and a preflight that
@@ -478,7 +478,8 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
             if recurrent[il] or il >= holds_kv:
                 continue
             swa = sliding[il] and window > 0
-            span = min(context, window) if swa else context
+            held = -(-(window + batch) // 256) * 256 if batch else window
+            span = min(context, held) if swa else context
             k_dim = key_swa[il] if swa else key_dim[il]
             v_dim = value_swa[il] if swa else value_dim[il]
             total += kv_heads[il] * (k_dim * bytes_k + v_dim * bytes_v) * span * caches
