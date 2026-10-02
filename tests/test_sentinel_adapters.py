@@ -31,13 +31,15 @@ def test_guard_warnings_become_findings_for_the_session(node):
     try:
         for _ in range(5):
             logger.warning("%s: %s %s (%s)", "untrusted", "deny", "injection", "tool:web")
-        logger.warning("%s: %s %s (%s)", "untrusted", "modify", "wrapped", "tool:web")
+        logger.warning("%s: %s %s (%s)", "untrusted", "modify",
+                       "fenced as data; reads like an instruction (override)", "tool:web")
+        logger.warning("%s: %s %s (%s)", "untrusted", "modify", "fenced as data", "tool:web")
         logger.debug("%s: %s %s (%s)", "x", "allow", "", "person")
     finally:
         logger.removeHandler(handler)
     kinds = [e.kind for e in node.bus.recent(kind="guard.")]
     assert kinds.count("guard.denied") == 5 and "guard.repeated_denials" in kinds
-    assert "guard.tainted" in kinds
+    assert kinds.count("guard.tainted") == 1
     assert node.session_frozen("s1")
 
 

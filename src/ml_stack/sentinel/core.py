@@ -18,7 +18,7 @@ from ml_stack.sentinel.honey import Honey
 from ml_stack.sentinel.human import HumanGrant, protect
 from ml_stack.sentinel.integrity import Manifest, check_file
 from ml_stack.sentinel.policy import Mode, decide
-from ml_stack.sentinel.rails import RailWatch
+from ml_stack.sentinel.rails import RailWatch, reads_like_instruction
 from ml_stack.sentinel.rates import Abuse, PeerWatch, ToolMix
 from ml_stack.sentinel.sealed import SealedFile
 from ml_stack.sentinel.store import (
@@ -141,9 +141,9 @@ class Sentinel:
             return Screened(text)
         answer = verdict(text, source)
         denied = bool(getattr(answer, "denied", False))
-        if not (denied or getattr(answer, "tainted", False)):
-            return Screened(text)
         rail, reason = str(getattr(answer, "rail", "")), str(getattr(answer, "reason", ""))
+        if not (denied or (getattr(answer, "tainted", False) and reads_like_instruction(reason))):
+            return Screened(text)
         who = session or "none"
         self.handle_all(self.rails.denied_text(who, rail, reason, source, text) if denied
                         else self.rails.tainted_text(who, rail, reason, text))
