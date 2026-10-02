@@ -33,7 +33,8 @@ def small_gguf(account: Path) -> Path | None:
         return Path(named)
     found = [p for root in (account / ".cache" / "huggingface" / "hub", account / ".cache")
              if root.is_dir() for p in root.rglob("*.gguf")
-             if "vocab" not in p.name and "mmproj" not in p.name and 0 < p.stat().st_size < LIMIT]
+             if "vocab" not in p.name and "mmproj" not in p.name and "-of-" not in p.name
+             and 0 < p.stat().st_size < LIMIT]
     return min(found, key=lambda p: p.stat().st_size) if found else None
 
 
