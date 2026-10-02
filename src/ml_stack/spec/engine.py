@@ -19,7 +19,7 @@ from mlx_lm.utils import load_tokenizer
 from mlx_vlm.models.qwen4_exp.ple_storage import PLE_MARKER, prepare_external_ple_model
 from mlx_vlm.utils import load_model
 
-from ml_stack import home
+from ml_stack import home, hub
 from ml_stack.spec import LAYOUTS
 from ml_stack.spec.accept import Rule
 from ml_stack.spec.cost import load_curve
@@ -45,8 +45,6 @@ def weights(name: str | Path) -> Path:
     where = home.expand(name)
     if where.exists():
         return where
-    from ml_stack import hub
-
     return hub.snapshot(str(name))
 
 

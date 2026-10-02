@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import home, hub
 from ml_stack.hub import room
 from ml_stack.serve.backend import (
     Lease,
@@ -51,8 +51,6 @@ def located(model: str | Path) -> Path | None:
     where = home.expand(text)
     if where.is_dir():
         return where
-    from ml_stack import hub
-
     return hub.held_snapshot(text)
 
 

@@ -535,14 +535,10 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
 
     ``web_search``, ``web_read`` and ``web_download`` always; ``web_look`` only with
     ``vision=True``. ``engine``, ``fetch``, ``browse`` and ``fetch_bytes`` are the seams
-    ``search``, ``read`` and ``look`` take, for a test or a project with its own transport.
-    Each callable takes
-    the parsed arguments mapping and never raises: what went wrong comes back as
-    ``{"none": reason}``, which a model reads as "move on".
-
-    A URL a search returned or a person typed is fetched; one that only fetched content
-    mentioned only on an allow-listed or approved host (`ml_stack.net.untrusted.Origins`).
-    Everything read comes back marked ``untrusted`` and fenced.
+    ``search``, ``read`` and ``look`` take. Each callable takes the parsed arguments and never
+    raises: what went wrong comes back as ``{"none": reason}``. A URL a search returned or a
+    person typed is fetched; one only fetched content mentioned needs an allow-listed or
+    approved host (`ml_stack.net.untrusted.Origins`). Results are marked ``untrusted``.
     """
     seen = untrusted.shared()
 
