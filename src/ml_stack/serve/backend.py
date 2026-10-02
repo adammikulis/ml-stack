@@ -20,6 +20,8 @@ from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
 from ml_stack.serve import exit_guard
 from ml_stack.serve.binary import child_env, require_binary
+from ml_stack.serve.leases import recorded_servers
+from ml_stack.serve.logs import prune
 from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 
 logger = logging.getLogger(__name__)
@@ -41,11 +43,13 @@ def logs_of(name: str, port: int) -> list[Path]:
 
 
 def server_log(name: str, port: int) -> Path:
-    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`."""
+    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`
+    and, across every port, past the count, size and age `ml_stack.serve.logs.limits` allows."""
     logs = log_dir()
-    logs.mkdir(parents=True, exist_ok=True)
+    logs.mkdir(parents=True, exist_ok=True, mode=0o700)
     for old in logs_of(name, port)[:-(LOGS_KEPT - 1) or None]:
         old.unlink(missing_ok=True)
+    prune(logs, [Path(str(one["log"])) for one in recorded_servers().values() if one.get("log")])
     return logs / f"{name}-{port}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 
 

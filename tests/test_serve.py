@@ -1127,7 +1127,7 @@ def test_every_start_writes_its_own_log_under_the_home_and_the_oldest_go(tmp_pat
         one = home.state("logs") / f"llama-server-8080-20260101-00000{n}-1.log"
         one.parent.mkdir(parents=True, exist_ok=True)
         one.write_text(f"run {n}\n")
-        os.utime(one, (1_000_000 + n, 1_000_000 + n))
+        os.utime(one, (time.time() - 100 + n, time.time() - 100 + n))
         older.append(one)
     beside = home.state("logs") / "llama-server-8081-20260101-000000-1.log"
     beside.write_text("another port\n")
