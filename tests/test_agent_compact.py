@@ -401,9 +401,10 @@ def test_a_conversation_waiting_on_a_tool_result_is_not_compacted(served, tmp_pa
 
     fake = served(context=500)
     auto = AutoCompact(Client(fake.base_url), Compaction(keep_last=2, summarizer=summarizer))
-    waiting = conversation(turns=4, size=200)[:-2] + [
-        {"role": "assistant", "content": None, "tool_calls": [
-            {"id": "open", "type": "function", "function": {"name": "look", "arguments": "{}"}}]}]
+    waiting = [*conversation(turns=4, size=200)[:-2],
+               {"role": "assistant", "content": None, "tool_calls": [
+                   {"id": "open", "type": "function",
+                    "function": {"name": "look", "arguments": "{}"}}]}]
     before = list(waiting)
     events = asyncio.run(auto.before(waiting, []))
     assert [type(e) for e in events] == [Context] and events[0].fraction > 0.8

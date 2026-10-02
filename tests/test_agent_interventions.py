@@ -26,11 +26,11 @@ from ml_stack.testing.tool_server import ToolCallingServer, Turn
 
 SPEC = {"name": "wipe", "description": "Delete a path.", "inputSchema": {
     "type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}
-RAN: list[str] = []
+ran: list[str] = []
 
 
 def wipe(path: str) -> str:
-    RAN.append(path)
+    ran.append(path)
     return f"wiped {path}"
 
 
@@ -77,7 +77,7 @@ def served():
 
 @pytest.fixture(autouse=True)
 def nothing_ran():
-    RAN.clear()
+    ran.clear()
 
 
 def agent_for(fake, *hooks) -> Agent:
@@ -99,7 +99,7 @@ def wiping(path: str = "/tmp/x") -> Turn:
 def test_a_call_nothing_objects_to_runs(served) -> None:
     rule = Rule()
     events = collect(agent_for(served(wiping(), Turn(text=("ok",))), rule))
-    assert RAN == ["/tmp/x"]
+    assert ran == ["/tmp/x"]
     assert [type(e) for e in events] == [ToolCall, ToolResult, type(events[2]), Done]
     assert rule.seen[0] == ("invocation", 1)
     assert ("tool", "wipe", {"path": "/tmp/x"}, 1) in rule.seen
@@ -108,7 +108,7 @@ def test_a_call_nothing_objects_to_runs(served) -> None:
 def test_a_denied_call_is_not_run_and_the_model_is_told_why(served) -> None:
     fake = served(wiping("/"), Turn(text=("I will not.",)))
     events = collect(agent_for(fake, Rule(tool=Deny("never the root"))))
-    assert RAN == []
+    assert ran == []
     assert any(e == Denied("call_0", "wipe", "never the root") for e in events)
     told = json.loads(fake.bodies[1]["messages"][-1]["content"])
     assert told == {"ok": False, "tool": "wipe", "denied": "never the root"}
@@ -118,7 +118,7 @@ def test_a_denied_call_is_not_run_and_the_model_is_told_why(served) -> None:
 def test_the_first_denial_stops_the_later_hooks(served) -> None:
     later = Rule()
     collect(agent_for(served(wiping(), Turn(text=("ok",))), Rule(tool=Deny("no")), later))
-    assert RAN == [] and not [s for s in later.seen if s[0] == "tool"]
+    assert ran == [] and not [s for s in later.seen if s[0] == "tool"]
 
 
 def test_a_hook_that_raises_refuses(served) -> None:
@@ -127,14 +127,14 @@ def test_a_hook_that_raises_refuses(served) -> None:
 
     fake = served(wiping(), Turn(text=("ok",)))
     events = collect(agent_for(fake, Rule(tool=boom)))
-    assert RAN == []
+    assert ran == []
     denied = next(e for e in events if isinstance(e, Denied))
     assert "raised RuntimeError: detector down" in denied.reason
 
 
 def test_a_hook_that_answers_nonsense_refuses(served) -> None:
     events = collect(agent_for(served(wiping(), Turn(text=("ok",))), Rule(tool="yes")))
-    assert RAN == [] and any(isinstance(e, Denied) for e in events)
+    assert ran == [] and any(isinstance(e, Denied) for e in events)
 
 
 def test_a_confirm_without_a_handler_is_a_refusal(served) -> None:
@@ -143,7 +143,7 @@ def test_a_confirm_without_a_handler_is_a_refusal(served) -> None:
     ask = next(e for e in events if isinstance(e, ConfirmRequest))
     assert ask.as_dict() == {"type": "confirm", "id": "call_0", "name": "wipe",
                              "question": "Delete /tmp/x?", "details": {"path": "/tmp/x"}}
-    assert RAN == []
+    assert ran == []
     assert next(e for e in events if isinstance(e, Denied)).reason.startswith(
         "the person declined")
 
@@ -161,14 +161,14 @@ def test_a_confirm_waits_for_the_person(served, approve) -> None:
     agent.confirm = person
     events = collect(agent)
     assert asked == [("Delete?", "wipe")]
-    assert RAN == (["/tmp/x"] if approve else [])
-    assert events.index(next(e for e in events if isinstance(e, ConfirmRequest))) < len(events)
+    assert ran == (["/tmp/x"] if approve else [])
+    assert sum(isinstance(e, ConfirmRequest) for e in events) == 1
 
 
 def test_guidance_rides_on_the_next_model_turn(served) -> None:
     fake = served(wiping(), Turn(text=("careful then",)))
     collect(agent_for(fake, Rule(tool=Guide("That path is shared; ask first."))))
-    assert RAN == ["/tmp/x"]
+    assert ran == ["/tmp/x"]
     last = fake.bodies[1]["messages"][-1]
     assert last["role"] == "user" and last["content"] == (
         "[Guidance]\nThat path is shared; ask first.")
@@ -202,4 +202,4 @@ def test_an_async_hook_is_awaited(served) -> None:
             return Deny("slow no")
 
     events = collect(agent_for(served(wiping(), Turn(text=("ok",))), Late()))
-    assert RAN == [] and any(isinstance(e, Denied) and e.reason == "slow no" for e in events)
+    assert ran == [] and any(isinstance(e, Denied) and e.reason == "slow no" for e in events)
