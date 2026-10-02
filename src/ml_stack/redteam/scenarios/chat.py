@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from ml_stack.redteam import corpus, pyrit_bridge
 from ml_stack.redteam.lab import Lab
-from ml_stack.redteam.report import Attempt, Report
-from ml_stack.redteam.scenarios import Options, Shot, capped
+from ml_stack.redteam.report import Report
+from ml_stack.redteam.scenarios import Options, Shot, capped, record
 from ml_stack.redteam.targets import chat_endpoint
 
 TARGET = "chat"
@@ -50,6 +50,4 @@ async def _one(lab: Lab, report: Report, route: tuple[str, str | None], shot: Sh
     outcome = await pyrit_bridge.fire(responder, shot.prompt,
                                       evidence=lambda a: canary.said(a.text),
                                       converters=shot.chain, name=TARGET)
-    report.add(Attempt(TARGET, shot.attack_class, shot.name, outcome.succeeded, arm=shot.arm,
-                       seconds=outcome.seconds,
-                       detail=outcome.answer.detail or "the key is in the reply"))
+    record(report, shot, outcome, "the key is in the reply")

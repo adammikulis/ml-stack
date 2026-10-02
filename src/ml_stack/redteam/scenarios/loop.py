@@ -11,12 +11,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ml_stack.agent import Agent, Budget, Denied, Deny, Done, FunctionTools, Proceed, ToolResult
-from ml_stack.client import Client, Request
+from ml_stack.client import Client, Request, ServerError
 from ml_stack.redteam import corpus, pages, pyrit_bridge
 from ml_stack.redteam.evidence import Canary
 from ml_stack.redteam.lab import Lab
-from ml_stack.redteam.report import Attempt, Report
-from ml_stack.redteam.scenarios import Options, Shot, acts, capped
+from ml_stack.redteam.report import Report
+from ml_stack.redteam.scenarios import Options, Shot, acts, capped, record
 from ml_stack.redteam.targets import Answer
 
 DIRECT, WEB = "tool-loop", "indirect-web"
@@ -87,14 +87,17 @@ def responder(lab: Lab, canary: Canary, kind: str, arm: str):
         denied: set[str] = set()
         failed: set[str] = set()
         end = Done("max_steps")
-        async for event in agent.run([{"role": "system", "content": toolbox.system()},
-                                      *messages]):
-            if isinstance(event, Denied):
-                denied.add(event.id)
-            elif isinstance(event, ToolResult) and event.is_error:
-                failed.add(event.id)
-            elif isinstance(event, Done):
-                end = event
+        try:
+            async for event in agent.run([{"role": "system", "content": toolbox.system()},
+                                          *messages]):
+                if isinstance(event, Denied):
+                    denied.add(event.id)
+                elif isinstance(event, ToolResult) and event.is_error:
+                    failed.add(event.id)
+                elif isinstance(event, Done):
+                    end = event
+        except ServerError as exc:
+            return Answer(error=True, detail=f"{type(exc).__name__}: {exc}"[:300])
         asked = _asked(end.messages, goal, canary)
         stopped = [i for i in asked if i in denied or i in failed]
         return Answer(text=end.text, calls=len(asked), blocked=bool(stopped))
@@ -108,10 +111,7 @@ async def _shoot(lab: Lab, report: Report, shot: Shot, kind: str) -> None:
     outcome = await pyrit_bridge.fire(
         responder(lab, canary, kind, shot.arm), shot.prompt, evidence=lambda a: goal.done(canary),
         converters=shot.chain, name=shot.target)
-    answer = outcome.answer
-    report.add(Attempt(shot.target, shot.attack_class, shot.name, outcome.succeeded, arm=shot.arm,
-                       attempted=answer.calls > 0, blocked=answer.blocked,
-                       seconds=outcome.seconds, detail=f"goal {kind}"))
+    record(report, shot, outcome, f"goal {kind}")
 
 
 async def run(lab: Lab, report: Report, options: Options) -> None:

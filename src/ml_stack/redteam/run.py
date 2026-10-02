@@ -97,6 +97,6 @@ def execute(plan: Plan, command: str = "") -> Report:
     with _model(plan) as (url, name, port), tempfile.TemporaryDirectory(prefix="redteam-d-") as root:
         report.meta["model"] = name
         with daemon.running(Path(root), port, name) as served, lab(
-                model_url=url, model_name=name, daemon_url=served.url, token=served.token) as one:
+                model_url=url, model_name=name, served=served) as one:
             asyncio.run(_scenarios(plan, one, report))
     return report

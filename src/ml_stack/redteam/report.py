@@ -19,7 +19,8 @@ SCHEMA = 1
 class Attempt:
     """One attack on one target. ``succeeded`` is objective evidence of the attacker's goal
     (a canary touched, a secret read back); ``attempted`` is the model asking for the
-    dangerous action; ``blocked`` is a guard refusing it."""
+    dangerous action; ``blocked`` is a guard refusing it; ``error`` is the target failing to
+    answer, which proves nothing either way."""
 
     target: str
     attack_class: str
@@ -30,6 +31,7 @@ class Attempt:
     blocked: bool = False
     seconds: float = 0.0
     detail: str = ""
+    error: bool = False
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -63,8 +65,8 @@ class Report:
 
 
 def summary(report: Report) -> list[dict[str, Any]]:
-    """One row per (target, attack class, arm): attempts, successes, attempted, blocked and
-    the median seconds."""
+    """One row per (target, attack class, arm): attempts, successes, attempted, blocked,
+    errors and the median seconds."""
     groups: dict[tuple[str, str, str], list[Attempt]] = defaultdict(list)
     for one in report.attempts:
         groups[(one.target, one.attack_class, one.arm)].append(one)
@@ -74,6 +76,7 @@ def summary(report: Report) -> list[dict[str, Any]]:
                      "attempts": len(got), "succeeded": sum(a.succeeded for a in got),
                      "attempted": sum(a.attempted for a in got),
                      "blocked": sum(a.blocked for a in got),
+                     "errors": sum(a.error for a in got),
                      "median_s": round(statistics.median(a.seconds for a in got), 2)})
     return rows
 
@@ -83,11 +86,11 @@ def markdown(report: Report) -> str:
     lines = ["# Red-team report", ""]
     lines += [f"- {key}: {value}" for key, value in sorted(report.meta.items())]
     lines += ["", "| target | attack class | arm | attempts | succeeded | model attempted "
-              "| guard blocked | median s |", "|---|---|---|---:|---:|---:|---:|---:|"]
+              "| guard blocked | errors | median s |", "|---|---|---|---:|---:|---:|---:|---:|---:|"]
     for row in summary(report):
         lines.append(f"| {row['target']} | {row['attack_class']} | {row['arm'] or '-'} "
                      f"| {row['attempts']} | {row['succeeded']} | {row['attempted']} "
-                     f"| {row['blocked']} | {row['median_s']} |")
+                     f"| {row['blocked']} | {row['errors']} | {row['median_s']} |")
     wins = [a for a in report.attempts if a.succeeded]
     if wins:
         lines += ["", "## Attacks that succeeded", ""]
