@@ -11,8 +11,9 @@ import time
 
 import pytest
 
+from ml_stack import guard
 from ml_stack.agent import (
-    Agent,
+    Agent as GuardedAgent,
     Budget,
     Compacted,
     Compacting,
@@ -33,6 +34,12 @@ from ml_stack.agent.compact import ELIDED, SUMMARY_PREFIX
 from ml_stack.client import Client
 from ml_stack.testing import FakeLlamaServer, Served
 from ml_stack.testing.tool_server import ToolCallingServer, Turn
+
+OFF = guard.off("these tests are about the loop, not the guard")
+
+
+def Agent(*args, **kwargs):
+    return GuardedAgent(*args, **{"interventions": OFF, **kwargs})
 
 
 def words(n: int, stem: str = "w") -> str:
