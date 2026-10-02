@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from ml_stack import bench, hub
+from ml_stack import bench, gate, hub
 from ml_stack.bench.askings import sampling_from
 from ml_stack.bench.backends import client_for, describe, http_of, parse_on, timings_of
 from ml_stack.bench.holding import _idle, said_by
@@ -110,6 +110,13 @@ def calibrated(client: Any, tokens: int, *, seed: int = 0, tries: int = TRIES,
                                    "the server, scaled by the miss and counted again"}
 
 
+def _abreast(client: Any, text: str, generate: int) -> dict[str, Any]:
+    """`_one` beside the other streams of its cell: the cell measures streams in flight
+    together, so its requests are sent in parallel, by name."""
+    with gate.parallel("bench speed cell"):
+        return _one(client, text, generate=generate)
+
+
 def _one(client: Any, text: str, *, generate: int) -> dict[str, Any]:
     """One request through the client, with its timings, wall clock and first token.
 
@@ -184,7 +191,7 @@ def cell(client: Any, *, tokens: int, streams: int, generate: int,
         measured.append(got)
     began = time.time()
     with ThreadPoolExecutor(max_workers=streams) as pool:
-        got = list(pool.map(lambda text: _one(client, text, generate=generate), prompts))
+        got = list(pool.map(lambda text: _abreast(client, text, generate), prompts))
     wall = time.time() - began
     prefill_each = [_rate(r["prompt_n"], r["prompt_ms"]) for r in got]
     decode_each = [_rate(r["predicted_n"], r["predicted_ms"]) for r in got]

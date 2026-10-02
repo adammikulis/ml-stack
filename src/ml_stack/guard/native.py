@@ -21,7 +21,7 @@ from ml_stack.decide.base import Many, State
 from ml_stack.decide.guard import Policy, ToolCallGuard
 from ml_stack.decide.logprob import Chat, LogprobDecider
 from ml_stack.decide.types import DecideError, Decision, Options
-from ml_stack.guard.judge import Judge, TextScreen
+from ml_stack.guard.judge import SYSTEM, Judge, TextScreen
 from ml_stack.guard.policy import SENSITIVE
 from ml_stack.interventions import Base, Call, Context, Proceed, Verdict
 
@@ -40,6 +40,7 @@ CANDIDATES = (
 )
 """Instruction models whose answer to a one-letter question read from log-probabilities has been
 measured (`docs/guardrails.md`, `docs/decision-models.md`), smallest first."""
+CHECKS = ("destructive", "grounded", "requested")
 PURPOSE = "guard"
 CONTEXT = 4096
 COOLDOWN_S = 60.0
@@ -80,24 +81,29 @@ class Leased(Many):
         self.lease_timeout, self.request_timeout = lease_timeout, request_timeout
         self.cooldown = cooldown
         self.clock: Callable[[], float] = time.monotonic
-        self.inner: LogprobDecider | None = None
+        self.inner: dict[str, LogprobDecider] = {}
         self.grant: Any = None
         self.down_until = 0.0
         self._lock = threading.Lock()
 
-    def _ready(self) -> LogprobDecider:
+    def _ready(self, system: str = "") -> LogprobDecider:
         with self._lock:
-            if self.inner is not None:
-                return self.inner
+            if system in self.inner:
+                return self.inner[system]
             if self.clock() < self.down_until:
                 raise DecideError("the guard's model is not available; retrying later")
             try:
-                url = self.url or self._lease()
+                url = self.url or (str(self.grant.base_url) if self.grant else self._lease())
             except Exception as exc:
                 self.down_until = self.clock() + self.cooldown
                 raise DecideError(f"no server for the guard's model: {exc}") from exc
-            self.inner = LogprobDecider(Chat(url=url, timeout=self.request_timeout))
-            return self.inner
+            chat = Chat(url=url, timeout=self.request_timeout, **({"system": system} if system else {}))
+            self.inner[system] = LogprobDecider(chat)
+            return self.inner[system]
+
+    def asking(self, system: str) -> _View:
+        """A view of this lease that asks with ``system`` as the system prompt."""
+        return _View(self, system)
 
     def _lease(self) -> str:
         from ml_stack.serve import broker_wire
@@ -119,7 +125,7 @@ class Leased(Many):
     def close(self) -> None:
         """Release the lease, if one is held."""
         with self._lock:
-            grant, self.grant, self.inner = self.grant, None, None
+            grant, self.grant, self.inner = self.grant, None, {}
         if grant is not None:
             from ml_stack.serve import broker_wire
 
@@ -127,6 +133,26 @@ class Leased(Many):
                 broker_wire.release(grant.lease)
             except Exception as exc:  # noqa: BLE001 - the broker reaps leases of ended processes
                 logger.debug("guard lease not released: %s", exc)
+
+
+class _View(Many):
+    """`Leased.asking`: the same lease, a different system prompt."""
+
+    name = "leased"
+
+    def __init__(self, parent: Leased, system: str) -> None:
+        self.parent, self.system = parent, system
+
+    def decide(self, question: str, state: State, options: Options, *,
+               descriptions: Mapping[str, str] | None = None,
+               abstain_below: float | None = None) -> Decision:
+        """`LogprobDecider.decide` on the parent's server."""
+        return self.parent._ready(self.system).decide(
+            question, state, options, descriptions=descriptions, abstain_below=abstain_below)
+
+    def close(self) -> None:
+        """Release the parent's lease."""
+        self.parent.close()
 
 
 @dataclass
@@ -172,6 +198,8 @@ def screen(*, decider: Any = None, judge: Judge | None = None,
                             "rails stand alone")
                 return []
             decider = Leased(model=path)
-    judge = judge or Judge(decider)
-    call_guard = ToolCallGuard(judge.decider, policy=policy or Policy())
+    if judge is None:
+        judge = Judge(decider.asking(SYSTEM) if isinstance(decider, Leased) else decider)
+    call_guard = ToolCallGuard(decider if decider is not None else judge.decider,
+                               policy=policy or Policy(), checks=CHECKS)
     return [TextScreen(judge), CallScreen(call_guard, impactful)]

@@ -35,13 +35,14 @@ from ml_stack.serve import (
     tail,
     wait_until_free,
 )
-from ml_stack.serve.leases import orphaned
+from ml_stack.serve.leases import lease_file, orphaned
 from ml_stack.testing.fakes import (
     FakeLlamaServer,
     Served,
     fake_binary,
     fake_llama_binary,
 )
+from ml_stack.testing.registry import record_server
 from tests.conftest import leased
 
 
@@ -325,7 +326,9 @@ class TestModelMatches:
 
 
 class TestAdoption:
-    def _manager(self, tmp_path, binary):
+    def _manager(self, tmp_path, binary, instance=None, model="model.gguf"):
+        if instance is not None:
+            record_server(tmp_path / "servers.json", instance.port, model=model)
         return ServerManager(
             LlamaServerBackend(binary=binary),
             state_file=tmp_path / "servers.json",
@@ -337,7 +340,7 @@ class TestAdoption:
 
     def test_a_matching_server_is_adopted(self, server, tmp_path, binary):
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "model.gguf"}]}))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
         assert info is not None and info.adopted
@@ -346,7 +349,7 @@ class TestAdoption:
         """'Something answers on this port' and 'it serves what I asked for' are
         different facts. Adopting on the first silently benchmarks the wrong weights."""
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "some-other.gguf"}]}))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed, match="model: asked for 'model.gguf'"):
             manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
@@ -371,7 +374,7 @@ class TestAdoption:
         the Q4_K_M and reports only its repository must not be handed out for the F16 --
         that mismatch served @@@@@@@@ from the wrong weights."""
         instance = server(self._repo_handler("/models/gpt-oss-20b-Q4_K_M.gguf"))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed, match="model:"):
             manager.adopt(ServerSpec(
@@ -382,7 +385,7 @@ class TestAdoption:
         """The same repository, asked for the exact file /props says is loaded, is
         shared rather than loaded a second time."""
         instance = server(self._repo_handler("/models/gpt-oss-20b-Q4_K_M.gguf"))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(
             model="hf:unsloth/gpt-oss-20b-GGUF/gpt-oss-20b-Q4_K_M.gguf", port=instance.port))
@@ -391,7 +394,7 @@ class TestAdoption:
     def test_release_leaves_an_adopted_server_running(self, server, tmp_path, binary):
         """Terminate only what you launched."""
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "model.gguf"}]}))
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
         manager.release(info)
@@ -609,7 +612,9 @@ class TestShapeMismatch:
 class TestAdoptingTheWrongShape:
     """The right model in the wrong shape is still the wrong server."""
 
-    def _manager(self, tmp_path, binary):
+    def _manager(self, tmp_path, binary, instance=None):
+        if instance is not None:
+            record_server(tmp_path / "servers.json", instance.port, model="a-model.gguf")
         return ServerManager(
             LlamaServerBackend(binary=binary),
             state_file=tmp_path / "servers.json",
@@ -618,7 +623,7 @@ class TestAdoptingTheWrongShape:
     def test_a_running_server_with_too_few_slots_is_refused(
             self, serving, tmp_path, binary):
         instance = serving("a-model.gguf", context=4096, slots=1)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed, match="slots: asked for 4, serving 1"):
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
@@ -628,7 +633,7 @@ class TestAdoptingTheWrongShape:
             self, serving, tmp_path, binary):
         """A caller that asked for 32k and gets 4k has its prompts truncated instead."""
         instance = serving("a-model.gguf", context=4096, slots=1)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         with pytest.raises(ServerFailed,
                            match="context: asked for 32768 per slot, serving 4096"):
@@ -638,7 +643,7 @@ class TestAdoptingTheWrongShape:
     def test_context_is_compared_one_slot_at_a_time(self, serving, tmp_path, binary):
         """llama-server splits --ctx-size across -np, and reports one slot's share."""
         instance = serving("a-model.gguf", context=32768, slots=2)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         adopted = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                            context=65536, parallel=2))
@@ -650,7 +655,7 @@ class TestAdoptingTheWrongShape:
 
     def test_the_shape_that_was_asked_for_is_adopted(self, serving, tmp_path, binary):
         instance = serving("a-model.gguf", context=4096, slots=1)
-        manager = self._manager(tmp_path, binary)
+        manager = self._manager(tmp_path, binary, instance)
 
         info = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                         context=4096, parallel=1))
@@ -663,6 +668,7 @@ class TestAdoptingTheWrongShape:
         monkeypatch.setattr(mod, "is_healthy", lambda *a, **k: True)
         monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
         monkeypatch.setattr(mod, "serving_params", lambda *a, **k: None)
+        record_server(lease_file(), 8099, model="a-model.gguf")
         assert ServerManager().adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=4))
 
 
@@ -747,7 +753,7 @@ class TestServingBeside:
     def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, serving, tmp_path):
         instance = serving("somethingelse.gguf")
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="different settings"):
+        with pytest.raises(ServerFailed, match="ml-stack did not start"):
             held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
 
     def test_it_refuses_when_the_machine_has_no_room(self, serving, tmp_path, monkeypatch):
@@ -757,7 +763,7 @@ class TestServingBeside:
         instance = serving("somethingelse.gguf")
         monkeypatch.setattr("ml_stack.serve.manager.free_memory", lambda: 1024)
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="different settings"):
+        with pytest.raises(ServerFailed, match="ml-stack did not start"):
             held.lease(ServerSpec(model=big, port=instance.port))
 
 

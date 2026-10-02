@@ -15,7 +15,7 @@ from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.slot_count` -- so
 # anything patchable is looked up there at call time, never bound here at import.
-from ml_stack import bench
+from ml_stack import bench, gate
 from ml_stack.bench.counting import PER_QUESTION, Counting, wants_trace
 from ml_stack.bench.holding import _Peak, watching
 from ml_stack.bench.score import Row, prefix_kept, unread_named
@@ -190,6 +190,10 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
     traced = wants_trace(conversations * turns, trace)
 
     def one_conversation(c: int) -> list[Row]:
+        with gate.parallel("bench concurrent conversations"):
+            return in_flight(c)
+
+    def in_flight(c: int) -> list[Row]:
         prior: list[dict[str, str]] = []
         rows: list[Row] = []
         for t, question in enumerate(chains[c]):

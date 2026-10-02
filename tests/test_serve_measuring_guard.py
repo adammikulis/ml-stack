@@ -11,6 +11,7 @@ import time
 import pytest
 
 from ml_stack.serve import Measuring, ServerInfo, ServerManager, ServerSpec, free_port
+from ml_stack.testing.registry import record_server
 
 
 class _Backend:
@@ -98,11 +99,13 @@ def test_the_measurement_adopts_the_server_it_is_serving_with(tmp_path, stranger
     _measuring(stranger, ["ask", "--model", "m.gguf"])
     backend = _Backend()
     manager = ServerManager(backend=backend, state_file=tmp_path / "servers.json")
+    spec = _spec()
+    record_server(tmp_path / "servers.json", spec.port, model="m.gguf")
     monkeypatch.setattr("ml_stack.serve.manager.is_healthy", lambda *a, **k: True)
     monkeypatch.setattr("ml_stack.serve.manager.reported_models", lambda *a, **k: ["m.gguf"])
     monkeypatch.setattr("ml_stack.serve.manager.serving_params", lambda *a, **k: None)
 
-    info = manager.lease(_spec(), roam=False, timeout=1.0)
+    info = manager.lease(spec, roam=False, timeout=1.0)
     assert info.adopted, "a server already up costs the measurement no memory"
     assert backend.started == []
 

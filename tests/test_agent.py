@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack import guard
 from ml_stack.agent import (
-    Agent,
+    Agent as GuardedAgent,
     Budget,
     Done,
     FunctionTools,
@@ -34,6 +35,12 @@ SERVER = Path(__file__).with_name("toy_mcp_server.py")
 ADD = {"name": "add", "description": "Add.", "inputSchema": {
     "type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
     "required": ["a", "b"]}}
+
+OFF = guard.off("these tests are about the loop, not the guard")
+
+
+def Agent(*args, **kwargs):
+    return GuardedAgent(*args, **{"interventions": OFF, **kwargs})
 
 
 def add(a: int, b: int) -> int:

@@ -301,3 +301,25 @@ def machine_memory() -> dict | None:
             "wired": int(getattr(vm, "wired", 0) or 0), "free": int(vm.available),
             "servers": servers, "others": sum(r for r, _ in rest),
             "largest": [f"{name} {human_bytes(r)}" for r, name in rest[:5]]}
+
+
+def listener(port: int) -> dict[str, Any] | None:
+    """The process listening on ``port``: its pid, address, owner and executable. ``None``
+    when no process this user can inspect listens there."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    for proc in psutil.process_iter():
+        try:
+            for conn in proc.net_connections(kind="inet"):
+                if (conn.status == psutil.CONN_LISTEN and conn.laddr
+                        and conn.laddr.port == port):
+                    uids = proc.uids() if hasattr(proc, "uids") else None
+                    return {"pid": proc.pid, "ip": conn.laddr.ip,
+                            "uid": uids.real if uids else None,
+                            "user": proc.username(), "exe": proc.exe(),
+                            "rss": int(proc.memory_info().rss)}
+        except (psutil.Error, OSError):
+            continue
+    return None

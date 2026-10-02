@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
-from ml_stack import log
 from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
 from ml_stack.taint.events import TaintEvent, emit
 from ml_stack.taint.judge import INTENT, Finding, Registries, judge, schema_for
@@ -16,27 +13,7 @@ from ml_stack.taint.labels import Label, Level
 from ml_stack.taint.ledger import Ledger, ledger_of
 from ml_stack.taint.sinks import HARD, Capability, Sinks, ml_stack_tools, sinks_from_mcp
 
-__all__ = ["TaintOff", "TaintRail", "off"]
-
-logger = logging.getLogger("ml_stack.guard")
-logger.addHandler(logging.NullHandler())
-
-
-@dataclass(frozen=True, slots=True)
-class TaintOff:
-    """Put in an agent's interventions, leaves taint tracking out of that agent."""
-
-    because: str
-
-
-def off(because: str) -> TaintOff:
-    """A `TaintOff` for ``because``, which is logged and printed; a blank reason raises."""
-    if not because.strip():
-        raise ValueError("turning taint tracking off needs a because=")
-    message = f"guard: taint turned off: {because.strip()}"
-    logger.warning(message)
-    log.warn(message)
-    return TaintOff(because.strip())
+__all__ = ["TaintRail"]
 
 
 class TaintRail(Base):

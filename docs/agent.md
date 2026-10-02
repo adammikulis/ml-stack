@@ -58,14 +58,20 @@ them first.
 ## Interventions
 
 `Agent(interventions=[hook, ...])`: each hook may define `before_invocation(context)`,
-`before_model_call(context)` and `before_tool_call(call, context)`, returning `Proceed()`,
-`Deny(reason)`, `Confirm(question, details)` or `Guide(message)`.
+`before_model_call(context)`, `before_tool_call(call, context)` and `after_tool_call(call, result,
+context)`, returning `Proceed()`, `Deny(reason)`, `Confirm(question, details)`, `Guide(message)` or
+`Rewrite(text, tainted=...)`. These are the types of `ml_stack.interventions`, the one mechanism
+the guard's rails, a decision model's tool-call check (`ml_stack.decide.guard`) and the
+`ml_stack.do` loop share; `docs/guardrails.md` lists the rails.
 
 - `Deny` on a tool call is answered to the model as a tool error carrying the reason; on a model
-  call or the invocation it ends the run with `Done("denied")`.
-- `Confirm` yields a `ConfirmRequest` and waits for `agent.confirm(decision, call)`, a function or
+  call or the invocation it ends the run with `Done("denied")`; on a tool result it replaces the
+  result with a withheld notice.
+- `Confirm` yields a `ConfirmRequest` and waits for `agent.confirm(question, call)`, a function or
   coroutine function returning whether the person agrees. With no handler it refuses.
 - `Guide` puts the message in the next user turn.
+- `Rewrite` on a tool result replaces what the model reads; one marked `tainted` makes
+  `Context.tainted` true for the rest of the run, which the tool-policy rail reads.
 - A hook that raises, or returns anything else, refuses.
 
 ## Slot caches

@@ -29,6 +29,7 @@ from ml_stack.serve import cli, ops
 from ml_stack.serve.backend import ServerInfo, ServerSpec
 from ml_stack.serve.ports import free_port
 from ml_stack.testing import FakeLlamaServer, FakePreflight, Served
+from ml_stack.testing.registry import record_server
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 
@@ -42,15 +43,18 @@ def state(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def serving():
-    """llama-servers on real sockets, closed at the end of the test."""
+def serving(state):
+    """llama-servers on real sockets, recorded in the lease file as this machine's own
+    unless ``recorded=False``, closed at the end of the test."""
     started: list[FakeLlamaServer] = []
 
-    def start(**held) -> FakeLlamaServer:
+    def start(*, recorded: bool = True, **held) -> FakeLlamaServer:
         held.setdefault("model", f"/models/{MODEL}")
         held.setdefault("context", 4096)
         fake = FakeLlamaServer(Served(**held))
         started.append(fake)
+        if recorded:
+            record_server(state, fake.port, model=MODEL)
         return fake
 
     yield start
@@ -161,7 +165,7 @@ class TestStatus:
         assert f"held by process {os.getpid()}" in capsys.readouterr().out
 
     def test_an_unrecorded_server_says_down_will_not_touch_it(self, serving, state, capsys):
-        instance = serving()
+        instance = serving(recorded=False)
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         assert "none on record" in capsys.readouterr().out
 
@@ -260,7 +264,7 @@ class TestUp:
 
 class TestDown:
     def test_it_refuses_a_server_this_machine_has_no_record_of(self, serving, state, capsys):
-        instance = serving()
+        instance = serving(recorded=False)
         assert cli.main(["down", "--port", str(instance.port)]) == 2
 
         err = capsys.readouterr().err
@@ -946,7 +950,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     assert f"      cache  {aside}  (4M)" in out, "under no root: the file's own directory"
     lines = out.splitlines()
     assert lines[lines.index(next(line for line in lines if ":8081" in line)) + 1].startswith(
-        "    foreign"), "a model whose directory is not there gets no cache line"
+        "    unmanaged"), "a model whose directory is not there gets no cache line"
     assert "1 not leased" in out and "python3" not in out
     assert "pid 14  defunct" in out, "a zombie is named as such and not counted as a stray"
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [])
@@ -961,7 +965,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
     kills one it did not start; `ports.reclaim_port`)."""
     from ml_stack.serve import cli, ops
 
-    instance = serving(model="/models/foreign-model.gguf")
+    instance = serving(model="/models/foreign-model.gguf", recorded=False)
     instance.refuse["/props"] = 404
     monkeypatch.setattr(ops, "server_pids_on_port", lambda port: [9911] if port == instance.port
                         else [])
@@ -969,7 +973,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, mon
     assert cli.main(["status", "--port", str(instance.port)]) == 0
     out = capsys.readouterr().out
     assert instance.base_url in out
-    assert "foreign -- pid 9911, not started by ml-stack; left alone" in out
+    assert "unmanaged -- pid 9911, not started by ml-stack; reported and left alone" in out
     assert "not reported" not in out, "a foreign server is not judged for adopting"
 
     assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0

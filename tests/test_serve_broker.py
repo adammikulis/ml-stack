@@ -182,30 +182,58 @@ def test_a_held_server_is_not_stopped_on_request_and_a_foreign_one_never(
             broker.adopt()
             time.sleep(0.2)
         assert port in broker.servers and broker.servers[port].ours is False
+        assert broker.servers[port].unmanaged
         assert broker.stop(port)["stopped"] is False
-        shared = broker.lease(ask(models[1], a.pid, purpose="embed"), timeout=10)
-        assert shared.port == port and shared.shared
+        own = broker.lease(ask(models[1], a.pid, purpose="embed"), timeout=10)
+        assert own.port != port and not own.shared, "an unmanaged server is not leased from"
         assert foreign.poll() is None
     finally:
         foreign.kill()
         foreign.wait(timeout=10)
 
 
-def test_a_server_started_outside_the_broker_is_shared_not_loaded_twice(
-        broker, models, holders, llama_binary):
+def _outside(llama_binary, model):
     from ml_stack.client import is_healthy
     from ml_stack.serve.ports import free_port
 
     port = free_port()
-    foreign = subprocess.Popen([str(llama_binary), "--port", str(port), "-m", models[0]])
+    foreign = subprocess.Popen([str(llama_binary), "--port", str(port), "-m", model])
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not is_healthy(f"http://127.0.0.1:{port}"):
+        time.sleep(0.2)
+    return port, foreign
+
+
+def test_a_server_started_outside_the_broker_is_listed_and_not_leased_from(
+        broker, models, holders, llama_binary):
+    port, foreign = _outside(llama_binary, models[0])
     try:
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline and not is_healthy(f"http://127.0.0.1:{port}"):
-            time.sleep(0.2)
         broker.scan = lambda: [s for s in every_server() if s["pid"] == foreign.pid]
-        grant = broker.lease(ask(models[0], holders().pid), timeout=10)
+        grant = broker.lease(ask(models[0], holders().pid), timeout=30)
+        assert grant.port != port and not grant.shared
+        assert broker.servers[port].unmanaged
+        assert [s["port"] for s in broker.snapshot()["servers"] if s["unmanaged"]] == [port]
+    finally:
+        foreign.kill()
+        foreign.wait(timeout=10)
+
+
+def test_an_unmanaged_server_is_shared_when_adoption_is_on_and_it_passes_the_checks(
+        broker, models, holders, llama_binary, monkeypatch):
+    from ml_stack.serve import unmanaged
+
+    port, foreign = _outside(llama_binary, models[0])
+    monkeypatch.setenv(unmanaged.ENV, "auto")
+    monkeypatch.setattr(unmanaged, "listener", lambda p: {
+        "pid": foreign.pid, "ip": "127.0.0.1", "uid": os.getuid(), "user": "x",
+        "exe": "/opt/llama/llama-server", "rss": 123})
+    try:
+        broker.scan = lambda: [s for s in every_server() if s["pid"] == foreign.pid]
+        grant = broker.lease(ask(models[0], holders().pid), timeout=30)
         assert grant.port == port and grant.shared
-        assert list(broker.servers) == [port]
+        assert broker.servers[port].ours is False and not broker.servers[port].unmanaged
+        broker.release(grant.lease)
+        assert broker.reap() == [] and foreign.poll() is None, "adopted servers are never stopped"
     finally:
         foreign.kill()
         foreign.wait(timeout=10)
@@ -279,7 +307,7 @@ def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, hold
     """The card being measured is a holder like any other: the lease waits for it."""
     from ml_stack.serve.manager import Measuring
 
-    started = broker.manager.lease
+    started = broker.manager._start_server
     refusals = {"left": 2}
 
     def measuring_first(spec, **kwargs):
@@ -288,7 +316,7 @@ def test_a_lease_waits_out_a_measurement_instead_of_failing(broker, models, hold
             raise Measuring("the card is being measured by ml-stack-bench (pid 1)")
         return started(spec, **kwargs)
 
-    broker.manager.lease = measuring_first
+    broker.manager._start_server = measuring_first
     grant = broker.lease(ask(models[0], holders().pid), timeout=30)
     assert refusals["left"] == 0
     assert grant.model == models[0] and not grant.shared

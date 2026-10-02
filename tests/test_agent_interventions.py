@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from ml_stack import guard
 from ml_stack.agent import (
     Agent,
     Confirm,
@@ -82,7 +83,7 @@ def nothing_ran():
 
 def agent_for(fake, *hooks) -> Agent:
     return Agent(Client(fake.base_url), FunctionTools([SPEC], {"wipe": wipe}),
-                 interventions=hooks)
+                 interventions=list(hooks) or guard.off("these tests are about the hooks"))
 
 
 def collect(agent: Agent, task: str = "clean up") -> list:
@@ -203,3 +204,27 @@ def test_an_async_hook_is_awaited(served) -> None:
 
     events = collect(agent_for(served(wiping(), Turn(text=("ok",))), Late()))
     assert ran == [] and any(isinstance(e, Denied) and e.reason == "slow no" for e in events)
+
+
+def test_an_agent_given_no_interventions_runs_the_builtin_rails(served) -> None:
+    fake = served(wiping(), Turn(text=("ok",)))
+    collect(Agent(Client(fake.base_url), FunctionTools([SPEC], {"wipe": wipe})))
+    told = fake.bodies[1]["messages"][-1]["content"]
+    assert told.startswith("<untrusted") and "wiped /tmp/x" in told
+
+
+def test_a_credential_in_a_call_is_refused_by_the_default_rails(served) -> None:
+    token = "hf_" + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"
+    fake = served(wiping(f"/tmp/{token}"), Turn(text=("ok",)))
+    events = collect(Agent(Client(fake.base_url), FunctionTools([SPEC], {"wipe": wipe})))
+    assert ran == [] and any(isinstance(e, Denied) for e in events)
+
+
+def test_an_empty_interventions_list_is_refused_and_the_marker_is_accepted(served) -> None:
+    tools = FunctionTools([SPEC], {"wipe": wipe})
+    for empty in ((), []):
+        with pytest.raises(ValueError, match=r"guard\.off"):
+            Agent(Client("http://127.0.0.1:9"), tools, interventions=empty)
+    fake = served(wiping(), Turn(text=("ok",)))
+    collect(Agent(Client(fake.base_url), tools, interventions=guard.off("a test of the marker")))
+    assert not fake.bodies[1]["messages"][-1]["content"].startswith("<untrusted")

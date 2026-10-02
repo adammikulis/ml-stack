@@ -32,17 +32,17 @@ from ml_stack.agent.events import (
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
 from ml_stack.client.tokens import estimate_tokens
+from ml_stack.guard import Unguarded, default, native, start
 from ml_stack.http import ServerError
 from ml_stack.interventions import (
     Asker,
     Call,
     Confirm,
-    Context as RunContext,
     Gate,
     Run,
     Screened,
 )
-from ml_stack.taint import TaintOff, TaintRail
+from ml_stack.taint import TaintRail
 
 __all__ = ["Agent", "Budget", "Cancelled"]
 
@@ -98,35 +98,52 @@ class Agent:
 
     ``auto_compact`` makes a run compact its conversation before a request would overflow
     the context, and once more if the server refuses a request for being too long.
-    ``interventions`` are asked before the run, before each model call and before each tool
-    call and after each tool result (`ml_stack.interventions`); ``confirm`` answers their
-    `Confirm`, and without it a `Confirm` is a refusal. A `TaintRail` is added to
-    ``interventions`` unless one is there; ``taint.off(because)`` in ``interventions`` leaves it
-    out.
+    ``interventions`` (`ml_stack.interventions`) are asked before the run, before each model
+    call, before each tool call and after each tool result. With none given they are the built-in
+    rails of `ml_stack.guard` and, when a local model can be leased for it, the model tier. A
+    list replaces them, so ``[*guard.default(), mine]`` keeps them; running without any says so
+    with ``interventions=guard.off(because=...)``, which is logged, and any other empty list is
+    refused. ``confirm`` answers a `Confirm`, and without it a `Confirm` is a refusal.
     """
 
     def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
                  auto_compact: Compaction | None = None,
-                 interventions: Sequence[Any] = ()) -> None:
+                 interventions: Sequence[Any] | None = None) -> None:
+        if interventions is not None and not interventions \
+                and not isinstance(interventions, Unguarded):
+            raise ValueError("an empty interventions list turns the guard off silently; "
+                             "use interventions=guard.off(because=...)")
+        self._screen: list[Any] | None = None
         self.client = client
         self.tools = tools
         self.budget = budget or Budget()
         self.auto = AutoCompact(client, auto_compact) if auto_compact else None
-        self.interventions = [one for one in interventions if not isinstance(one, TaintOff)]
-        if len(self.interventions) == len(interventions) and not any(
-                isinstance(one, TaintRail) for one in self.interventions):
-            self.interventions.append(TaintRail())
+        self.interventions = None if interventions is None else list(interventions)
         self.confirm: Asker | None = None
         self._asked: asyncio.Queue[Event] = asyncio.Queue()
         if hasattr(tools, "on_elicit"):
             tools.on_elicit = self._elicited
 
-    def _learned(self, listed: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """``listed``, after the taint rails have taken their sinks from its annotations."""
-        for one in self.interventions:
+    def _items(self, listed: list[dict[str, Any]]) -> list[Any]:
+        """The interventions of one run: those given, or fresh built-in rails and the model tier,
+        with the taint rails given the sinks the tools' annotations in ``listed`` describe."""
+        if self.interventions is not None:
+            items = list(self.interventions)
+        else:
+            if self._screen is None:
+                self._screen = native.screen()
+            items = default(screen=self._screen)
+        for one in items:
             if isinstance(one, TaintRail):
                 one.learn(listed)
-        return listed
+        return items
+
+    def close(self) -> None:
+        """Release the model tier's lease, when this agent made one."""
+        for one in self._screen or ():
+            close = getattr(one, "close", None)
+            if close is not None:
+                close()
 
     async def compact_now(self, messages: list[dict[str, Any]]) -> CompactResult:
         """Compact ``messages`` in place now, whatever the context holds."""
@@ -138,12 +155,12 @@ class Agent:
         """Events for one task; a message list is continued in place. Stopping the
         iteration early, or cancelling the task driving it, stops the model's stream."""
         messages = [{"role": "user", "content": task}] if isinstance(task, str) else task
-        schemas = from_mcp(self._learned(await self.tools.list_tools()), self.budget.profile)
+        schemas = from_mcp(listed := await self.tools.list_tools(), self.budget.profile)
         index = index_by_name(schemas)
         spent = calls = rejected_turns = 0
-        run = Run(self.interventions, context=RunContext(
-            task=_task_of(messages), messages=messages, tools=schemas), confirm=self.confirm,
-            notify=self._notify)
+        run = start(self._items(listed), offered=schemas, task=_task_of(messages),
+                    confirm=self.confirm, notify=self._notify)
+        run.context.messages = messages
         refused = _Refusal()
         async for event in self._decide(run, "before_invocation", refused):
             yield event

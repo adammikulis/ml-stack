@@ -55,14 +55,25 @@ capability; every line is something that already exists not being what it says.
 - [ ] **MCP tasks are not driven.** The mcp 2.2 client has no tasks API, so a long-running tool
   call cannot be polled or cancelled through `McpTools`, and task progress is not an agent
   event. Progress for an ordinary call reaches `McpTools.on_progress` only.
-- [ ] **`ml_stack.agent.interventions` holds a local copy of the decision types.** When
-  `ml_stack.interventions` lands, its hooks take a `Call` dataclass (name, arguments, id) and a
-  `Context` (task, messages, tools, trusted, notes) where the loop passes a dict and an
-  `InterventionContext`; the four verdict types match. Build `Call` and `Context` in
-  `agent/loop.py`, import the verdicts from it, and delete the local module.
 - [ ] **No tool-calling base-versus-tuned comparison in one command.** `ml-stack-train-tools eval`
   scores one served model; comparing a base and a tuned model means running it against each
   server and diffing the JSON.
+
+### Serving: one broker, one request at a time per pool
+- [ ] **Run `tests/test_serve_real_llama.py` on a card with nothing else on it** (`pytest
+  --slow tests/test_serve_real_llama.py`). It leases a real llama-server through the
+  broker, sends two requests from separate processes and checks the line of requests and
+  the stop on release; it skips while any other llama-server runs, so it has not run
+  against a real server yet.
+- [ ] **The machine's broker does not deliver `on_event` or `say` to its caller.** Over
+  its socket `RemoteBroker.start` answers once, and the caller is told only that the
+  server is ready. A load's progress (`loading`, `restoring`, a memory wait) belongs
+  streamed back as lines.
+- [ ] **One `gpu` pool.** A machine with several CUDA devices queues all their requests
+  in one line; `ServerSpec` has no device to put a server in a pool of its own.
+- [ ] **`adopt_unmanaged = ask` has no prompt.** `ServerManager.confirm` is the hook; no
+  command sets it, so `ask` adopts nothing from the CLI. vLLM, SGLang and MLX servers
+  started by hand are not found at all, only `llama-server`.
 
 ### Getting it onto a machine that is not this one
 
@@ -210,6 +221,35 @@ across `src/`.
   `Serving`, `slot` and `held` in `graph/serve.py`. The first goes when the profile store
   moves below `graph`; the other two are a page and a request handler leasing a server,
   which is what the machine layer is for.
+
+### Red-teaming
+
+`python -m ml_stack.redteam` and `docs/redteam.md` exist; what is missing from them:
+
+- [ ] **Re-run `docs/redteam/baseline-2026-10-02.json` after each of agent, decide, hardening and
+  model-discovery lands.** `python -m ml_stack.redteam run --against docs/redteam/baseline-2026-10-02.json`
+  needs an installed GGUF and `pip install -e ".[redteam]"` in its own virtualenv. The kept baseline
+  was measured on `0.2dev` merged with `agent/port-pcbe` and `agent/hardening` (see the baseline's
+  header); the `loop` and `compaction` scenarios import `ml_stack.agent`, so
+  `.github/workflows/redteam.yml` runs only `extraction,chat,fleet` until it is on the
+  development branch -- add `loop,compaction` to its `--scenarios` then.
+- [ ] **The guard benchmark is not written.** The brief's precision/recall of tool-call guards on
+  injected against benign calls needs a `guard` scenario: labelled tool-call contexts built from
+  `styles.json`, the pages and the PyRIT converters, each guard asked `before_tool_call`, recall and
+  false-positive rate reported per guard. `scenarios/loop.py:PolicyGuard` is the reference guard to
+  start from. `ml_stack.decide.guard.ToolCallGuard` uses its own `ml_stack.interventions` (`Call`,
+  `Context`, `Verdict`), not `ml_stack.agent.interventions`; one of the two has to go before the
+  benchmark can take both.
+- [ ] **Multi-turn attacks and a judge are not wired.** PyRIT's `CrescendoAttack`, `PAIRAttack` and
+  `RedTeamingAttack` need an adversarial chat target and a scorer that is not a canary; the local
+  model could play both (`pyrit_bridge.ResponderTarget` wraps any `Responder`), with its scores
+  reported as noisy. Every scorer today is objective evidence.
+- [ ] **The findings in `docs/redteam/findings.md` marked open have an owner and no fix.** Each
+  names the file, a reproducing `python -m ml_stack.redteam run --scenarios ...` line and the
+  test that should go red when it is fixed.
+- [ ] **Check the `redteam` extra on Python 3.11, 3.12 and 3.14 by installing it.** PyRIT 1.1.0
+  declares `>=3.10,<3.15` and `uv pip compile` resolves it for all three; only 3.13 was installed
+  and run.
 
 ### Finding a model
 
@@ -762,11 +802,6 @@ Capabilities that do not exist yet.
 
 ### Decision models
 
-- [ ] **The tool loop does not call interventions yet.** `ml_stack.interventions.guard_tool_call(call,
-  context, execute, interventions, confirm=...)` is the step; `Agent.run` in the tool-loop
-  branch should build a `Call` and a `Context` from its messages, run it in place of its own
-  dispatch, and take `interventions=[...]`. `tests/test_decide_guard.py` drives it the way a
-  loop would.
 - [ ] **Trained deciders are not in model discovery.** `ml_stack.decide.registry` records them
   by name under the state root; `hub.discover` (model-discovery branch) should list a directory
   holding `decider.json` as a model of format `decider`.

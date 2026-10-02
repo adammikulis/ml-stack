@@ -25,12 +25,16 @@ from ml_stack.guard.untrusted import NOTICE, UntrustedRail
 from ml_stack.interventions import Call, Confirm, Context, Run
 from ml_stack.taint import TaintRail
 
-__all__ = ["BUILTIN", "NOTICE", "default", "off", "parse_call", "rails", "start"]
+__all__ = ["BUILTIN", "NOTICE", "Unguarded", "default", "off", "parse_call", "rails", "start"]
 
 logger = logging.getLogger("ml_stack.guard")
 logger.addHandler(logging.NullHandler())
 
 BUILTIN = ("untrusted", "secrets", "tool-policy", "taint")
+
+
+class Unguarded(list):  # type: ignore[type-arg]
+    """The empty list `off` returns: the marker that a loop is meant to run without rails."""
 
 
 def rails(*, without: Iterable[str] = (), because: str = "",
@@ -60,9 +64,10 @@ def default(extra: Sequence[Any] = (), *, screen: Sequence[Any] = (),
     return [*rails(registries=registries), *screen, *extra]
 
 
-def off(because: str) -> list[Any]:
-    """No rails at all; needs a ``because`` and is logged and printed."""
-    return rails(without=BUILTIN, because=because)
+def off(because: str) -> Unguarded:
+    """No rails at all; needs a ``because`` and is logged and printed. It is the only empty
+    list an `Agent` accepts as its ``rails``."""
+    return Unguarded(rails(without=BUILTIN, because=because))
 
 
 def start(items: Sequence[Any], *, offered: Sequence[Mapping[str, Any]] = (), task: str = "",

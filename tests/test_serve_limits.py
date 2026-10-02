@@ -344,3 +344,13 @@ def test_the_reclaim_command_takes_its_default_from_the_limits(capsys, monkeypat
     assert cli.main(["reclaim", "--settle", "0"]) == 0
     assert asked["older_than"] == 300.0
     assert "reclaimed port 8100" in capsys.readouterr().out
+
+
+def test_the_adoption_setting_is_set_from_the_command_line_and_read_back(capsys):
+    from ml_stack.serve import cli, unmanaged
+
+    assert cli.main(["limits", "--adopt-unmanaged", "auto"]) == 0
+    assert "adopt    unmanaged servers: auto" in capsys.readouterr().out
+    assert unmanaged.mode() == "auto"
+    assert cli.main(["limits", "--clear"]) == 0
+    assert unmanaged.mode() == "off"
