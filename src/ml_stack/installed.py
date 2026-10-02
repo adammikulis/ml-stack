@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version as installed_version
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -74,6 +75,14 @@ def missing() -> list[Capability]:
     return [c for c, here in standard() if not here]
 
 
+def _applies(marker: str, extra: str) -> bool:
+    """Whether a requirement's environment marker holds on this interpreter."""
+    try:
+        return Marker(marker.strip()).evaluate({"extra": extra})
+    except InvalidMarker:
+        return True
+
+
 def declared(distribution: str = "ml-stack") -> dict[str, list[str]]:
     """The extras of an installed distribution, read from its own metadata.
 
@@ -84,7 +93,7 @@ def declared(distribution: str = "ml-stack") -> dict[str, list[str]]:
     for line in requires(distribution) or []:
         requirement, _, marker = line.partition(";")
         named = _FOR_EXTRA.search(marker)
-        if named:
+        if named and _applies(marker, named.group(1)):
             out.setdefault(named.group(1), []).append(requirement.strip())
     return out
 
@@ -103,6 +112,8 @@ def unmet(extras_of: dict[str, list[str]]) -> list[tuple[str, str, str, str]]:
             except InvalidRequirement:
                 continue
             if canonicalize_name(want.name) == "ml-stack":
+                continue
+            if want.marker is not None and not want.marker.evaluate({"extra": extra}):
                 continue
             try:
                 have = installed_version(want.name)

@@ -2,10 +2,10 @@
 
 import errno
 import json
+from pathlib import Path
 
 import pytest
 
-from ml_stack import files as files_module
 from ml_stack.files import (
     UNVERSIONED,
     CrossDevice,
@@ -90,7 +90,7 @@ def test_a_move_across_filesystems_says_so_rather_than_copying(tmp_path, monkeyp
     def elsewhere(_source, _target):
         raise OSError(errno.EXDEV, "Cross-device link")
 
-    monkeypatch.setattr(files_module.os, "replace", elsewhere)
+    monkeypatch.setattr(Path, "replace", elsewhere)
     (tmp_path / "cache").mkdir()
     with pytest.raises(CrossDevice, match="different filesystems"):
         promote(tmp_path / "cache", tmp_path / "shared")
