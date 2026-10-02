@@ -38,6 +38,7 @@ def add(sub: argparse._SubParsersAction) -> None:
     lst = make("list", "every model installed on this machine")
     lst.add_argument("--format", action="append", choices=hub.FORMATS)
     lst.add_argument("--source", action="append", help="only this tool's folders")
+    lst.add_argument("--kind", choices=hub.KINDS, help="only models of this kind")
     lst.add_argument("--all", action="store_true", help="include projectors and draft heads")
     make("where", "the folders searched and what each holds")
     make("info", "one installed model in full", arg="model")
@@ -76,11 +77,11 @@ def _table(rows: list[list[str]], head: list[str]) -> None:
 
 def _list(args: argparse.Namespace) -> int:
     found = hub.discover(formats=args.format or hub.FORMATS, include=args.source,
-                         companions=args.all)
-    rows = [[m.name[:40], human_bytes(m.size_bytes), m.quantization, m.format, m.source,
+                         companions=args.all, kind=args.kind)
+    rows = [[m.name[:40], m.kind, human_bytes(m.size_bytes), m.quantization, m.format, m.source,
              "" if m.is_complete else "incomplete", m.id[:60]] for m in found]
     return _emit(args, [m.as_dict() for m in found], lambda: (
-        _table(rows, ["NAME", "SIZE", "QUANT", "FORMAT", "SOURCE", "", "ID"]),
+        _table(rows, ["NAME", "KIND", "SIZE", "QUANT", "FORMAT", "SOURCE", "", "ID"]),
         say(f"\n{len(found)} models, {human_bytes(sum(m.size_bytes for m in found))}")))
 
 

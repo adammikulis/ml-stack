@@ -41,6 +41,16 @@ def listing() -> list[dict[str, Any]]:
     return [r for r in rows if isinstance(r, dict) and (Path(r.get("path", "")) / CONFIG).is_file()]
 
 
+def local_bases(root: Path) -> list[Path]:
+    """The local base-model directories a registered decider's config names (none when it
+    is pinned to a Hub revision)."""
+    try:
+        base = json.loads((root / CONFIG).read_text()).get("base", {})
+        return [expand(base["path"]).resolve()] if "path" in base else []
+    except (OSError, ValueError, TypeError, AttributeError):
+        return []
+
+
 def find(name: str) -> Path:
     """The directory registered as ``name``."""
     for row in listing():
