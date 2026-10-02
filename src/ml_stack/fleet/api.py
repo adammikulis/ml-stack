@@ -171,7 +171,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             The model server stays on 127.0.0.1. This route is the only LAN-exposed
             one, and it already requires the bearer token.
             """
-            if serving is None or not self.path.startswith("/infer"):
+            if serving is None or not (self.path == "/infer" or self.path.startswith(
+                    ("/infer/", "/infer?"))):
                 return False
             if not self._guard():
                 return True
