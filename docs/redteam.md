@@ -17,7 +17,7 @@ PyRIT is about 110 packages and 550 MB (Azure SDKs, `transformers`, `datasets`, 
 python -m venv .venv-redteam && .venv-redteam/bin/pip install -e ".[redteam]" pytest
 .venv-redteam/bin/python -m ml_stack.redteam run --out redteam-report      # needs an installed GGUF
 .venv-redteam/bin/python -m ml_stack.redteam run --model stub --limit 3     # no model at all
-.venv-redteam/bin/python -m ml_stack.redteam run --against docs/redteam/baseline.json
+.venv-redteam/bin/python -m ml_stack.redteam run --against docs/redteam/baseline-2026-10-02.json
 .venv-redteam/bin/python -m ml_stack.redteam compare old.json new.json
 .venv-redteam/bin/python -m ml_stack.redteam corpus                        # hashes of the seeds
 ```

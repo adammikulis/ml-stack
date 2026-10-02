@@ -181,8 +181,8 @@ across `src/`.
 
 `python -m ml_stack.redteam` and `docs/redteam.md` exist; what is missing from them:
 
-- [ ] **Re-run `docs/redteam/baseline.json` after each of agent, decide, hardening and
-  model-discovery lands.** `python -m ml_stack.redteam run --against docs/redteam/baseline.json`
+- [ ] **Re-run `docs/redteam/baseline-2026-10-02.json` after each of agent, decide, hardening and
+  model-discovery lands.** `python -m ml_stack.redteam run --against docs/redteam/baseline-2026-10-02.json`
   needs an installed GGUF and `pip install -e ".[redteam]"` in its own virtualenv. The kept baseline
   was measured on `0.2dev` merged with `agent/port-pcbe` and `agent/hardening` (see the baseline's
   header); the `loop` and `compaction` scenarios import `ml_stack.agent`, so
