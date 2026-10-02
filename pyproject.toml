@@ -81,7 +81,7 @@ mcp = ["mcp>=2.2,<3"]
 standard = ["lm-eval[ifeval]>=0.4"]
 # `python -m ml_stack.redteam`: attacks on this library's own model-facing surfaces, sent through
 # PyRIT: about 110 packages and 550 MB, installed in a virtualenv of its own.
-redteam = ["pyrit>=1.1,<2"]
+redteam = ["ml-stack[web,pdf]", "pyrit>=1.1,<2"]
 all = [
     "ml-stack[train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
 ]
