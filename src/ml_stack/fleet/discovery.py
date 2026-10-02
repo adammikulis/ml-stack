@@ -83,8 +83,9 @@ def create_cluster_key(path: Path | str | None = None, *,
 
 
 # -- joining by password -------------------------------------------------
-MIN_PASSPHRASE = 5
-"""Shortest passphrase accepted. Low, because a refusal people work around by typing"""
+MIN_PASSPHRASE = 12
+"""Shortest passphrase accepted. A beacon is signed with the key it derives, so anyone on
+the network can test guesses against one offline; `ml-stack-peers init` mints a random key."""
 
 SCRYPT_N = 1 << 16
 SCRYPT_R = 8

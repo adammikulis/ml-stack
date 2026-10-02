@@ -891,3 +891,12 @@ class TestBelongingToSeveralClusters:
         clusters_path(anchor).parent.mkdir(parents=True, exist_ok=True)
         clusters_path(anchor).write_text("{not json")
         assert memberships(anchor) == []
+
+
+def test_a_passphrase_too_short_to_stand_up_to_guessing_is_refused(tmp_path):
+    from ml_stack.fleet.discovery import MIN_PASSPHRASE, DiscoveryError, join_cluster
+
+    assert MIN_PASSPHRASE >= 12
+    with pytest.raises(DiscoveryError, match="at least"):
+        join_cluster("a" * (MIN_PASSPHRASE - 1), path=tmp_path / "k")
+    join_cluster("a" * MIN_PASSPHRASE, path=tmp_path / "k")
