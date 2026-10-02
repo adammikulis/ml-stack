@@ -28,6 +28,7 @@ from ml_stack.guard.verdict import Rail, ToolCall, Verdict, allow
 __all__ = ["BUILTIN", "NOTICE", "Guard", "Rail", "ToolCall", "Verdict", "rails"]
 
 logger = logging.getLogger("ml_stack.guard")
+logger.addHandler(logging.NullHandler())
 
 BUILTIN = ("untrusted", "secrets", "tool-policy")
 

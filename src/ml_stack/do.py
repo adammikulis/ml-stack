@@ -28,7 +28,7 @@ from typing import Any, TextIO
 
 from ml_stack import hub, mcp
 from ml_stack.client import ollama
-from ml_stack.guard import Guard
+from ml_stack.guard import NOTICE, Guard
 from ml_stack.guard.loop import parse_call
 from ml_stack.guard.verdict import ToolCall, Verdict
 from ml_stack.log import say
@@ -73,7 +73,7 @@ YES = ("The person passed --yes: plan prints the steps and does not ask go. Stil
 
 def system_for(yes: bool = False) -> str:
     """The system prompt, with what the person passed on the command line."""
-    return SYSTEM + ("\n\n" + YES if yes else "")
+    return SYSTEM + "\n\n" + NOTICE + ("\n\n" + YES if yes else "")
 
 
 NUDGE = ("You replied in words and called nothing. If the task is finished, call done with "

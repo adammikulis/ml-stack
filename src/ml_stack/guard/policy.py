@@ -22,7 +22,7 @@ SENSITIVE = frozenset({
 """Tools that start processes, write files or download. Once text from outside the person is in
 the context they run only when the person says so."""
 
-URL = re.compile(r"(?i)\b(?:https?|ftp|wss?)://[^\s\"'<>)\]]+")
+URL = re.compile(r"(?i)\b(?:https?|ftp|wss?)://[^\s\"'<>)]+")
 SENSITIVE_PATH = re.compile(
     r"(?i)(?:^|[\s\"'=:/\\~])(?:\.ssh|\.aws|\.gnupg|\.netrc|\.pypirc|\.git-credentials|\.docker/config"
     r"|id_rsa|id_ed25519|\.env(?:\.\w+)?|authorized_keys|known_hosts)(?:$|[\s\"'/\\])"
@@ -131,7 +131,10 @@ class ToolPolicyRail:
 
     def _foreign_host(self, text: str) -> str:
         for url in URL.findall(text):
-            host = (urlsplit(url).hostname or "").lower()
+            try:
+                host = (urlsplit(url).hostname or "").lower()
+            except ValueError:
+                return url[:60]
             if host and host not in self.allow_hosts and not _loopback(host):
                 return host
         return ""
