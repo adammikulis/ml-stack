@@ -30,8 +30,8 @@ class ClamAV:
     name = "clamav"
 
     def __init__(self, *, clamscan: str | None = None, clamdscan: str | None = None) -> None:
-        self.clamscan = clamscan or shutil.which("clamscan")
-        self.clamdscan = clamdscan or shutil.which("clamdscan")
+        self.clamscan = shutil.which("clamscan") if clamscan is None else clamscan
+        self.clamdscan = shutil.which("clamdscan") if clamdscan is None else clamdscan
 
     def available(self) -> bool:
         return bool(self.clamscan or self.clamdscan)

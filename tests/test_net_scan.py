@@ -143,7 +143,7 @@ def test_a_daemon_error_with_no_fallback_is_an_error(tmp_path):
     f = tmp_path / "f"
     f.write_text("x")
     down = tool(tmp_path, "clamdscan", 'echo "ERROR: Could not connect" >&2; exit 2')
-    assert ClamAV(clamscan=None, clamdscan=down).scan(f).outcome == Outcome.ERROR
+    assert ClamAV(clamscan="", clamdscan=down).scan(f).outcome == Outcome.ERROR
 
 
 def test_a_stale_signature_database_is_a_warning(tmp_path):

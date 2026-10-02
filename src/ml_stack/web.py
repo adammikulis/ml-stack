@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import itertools
 import json
 import os
 import urllib.parse
@@ -41,13 +42,14 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_stack import net
 from ml_stack.home import cache, state
-from ml_stack.http import Refused, Retry, ServerError, check, open_stream
+from ml_stack.http import Refused, ServerError, check
 from ml_stack.markup import cut, extract
+from ml_stack.net import pdftext, untrusted
 from ml_stack.scrape.crawl import next_link
 from ml_stack.scrape.download import KINDS, LICENCE, Download, Wanted, as_dict, download
 from ml_stack.scrape.polite import Polite
-from ml_stack.sources import datasheet
 
 Engine = Callable[..., list[dict[str, Any]]]
 """``(query, limit) -> [{"title", "url", "snippet"}, ...]``; may raise SearchUnavailable.
@@ -125,7 +127,8 @@ def searxng_engine(query: str, limit: int, page: int = 1) -> list[dict[str, Any]
     url = f"{base}/search?" + urllib.parse.urlencode(
         {"q": query, "format": "json", **({"pageno": page} if page > 1 else {})})
     try:
-        body = _http(url, accept="application/json")
+        host = urllib.parse.urlsplit(url).hostname or ""
+        body = _http(url, accept="application/json", private=(host,))
         payload = json.loads(body.decode("utf-8", "replace"))
     except (ServerError, OSError, ValueError) as exc:
         raise SearchUnavailable(f"searxng at {base}: {exc}") from exc
@@ -196,39 +199,29 @@ def search_pages(query: str, *, pages: int = 3, limit: int = 8, engine: Engine |
 # --- fetching -------------------------------------------------------------------------------
 
 
-def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES,
-          guard: Callable[[str], str] | None = None) -> bytes:
-    """One GET with a size cap and no refusal: for a search backend, which is often on
-    this side of the router. Pages a model chose go through ``_get``."""
-    with open_stream(url, headers={"User-Agent": USER_AGENT, "Accept": accept},
-                     timeout=TIMEOUT_S,
-                     retry=Retry(tries=3, when_unreachable=False), guard=guard) as reply:
+def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES, private: tuple[str, ...] = (),
+          admit: bool = False) -> bytes:
+    """One GET through the net pipeline with a size cap; ``private`` names a host on this
+    network that a search backend lives on."""
+    ask = net.Ask(purpose="web", admit=admit, tries=3, max_bytes=most, private=private,
+                  headers={"User-Agent": USER_AGENT, "Accept": accept})
+    with net.default().open(url, ask) as reply:
         return reply.read(most)
 
 
 def _get(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
-    """One GET, with a size cap, after ``check``."""
-    return _http(check(url), accept=accept, most=most, guard=check)
+    """One GET of a page a model chose, with a size cap."""
+    return _http(url, accept=accept, most=most)
 
 
 def _fetch(url: str) -> str:
-    """A page's HTML: trafilatura's fetcher when installed, urllib when not."""
-    url = check(url)
-    try:
-        import trafilatura
-    except ImportError:
-        trafilatura = None
-    if trafilatura is not None:
-        html = trafilatura.fetch_url(url)
-        if html:
-            return html
-        # trafilatura swallows the reason; urllib will say what it was
+    """A page's HTML."""
     body = _get(url, accept="text/html,application/xhtml+xml,*/*;q=0.5")
     return body.decode("utf-8", "replace")
 
 
 def _fetch_bytes(url: str) -> bytes:
-    """A picture's bytes, after the same check as a page."""
+    """A picture's bytes, through the same pipeline as a page."""
     return _get(url, accept="image/*")
 
 
@@ -242,12 +235,55 @@ def _browse() -> Any:
     return browser(Window(profile=profile_dir()))
 
 
+# Removes every element a reader could not see: not displayed, hidden, transparent, smaller than
+# a point, off the page, or the same colour as what is behind it.
+_UNSEEN_JS = """() => {
+  const back = (el) => { for (let n = el; n; n = n.parentElement) {
+    const c = getComputedStyle(n).backgroundColor;
+    if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c; } return 'rgb(255, 255, 255)'; };
+  const gone = [];
+  for (const el of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+    const own = Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim());
+    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse'
+        || parseFloat(cs.opacity) < 0.05 || (own && parseFloat(cs.fontSize) < 2)
+        || (own && (r.right < 0 || r.bottom < 0 || r.left > 100000 || r.top > 100000))
+        || (own && r.width < 1 && r.height < 1) || (own && cs.color === back(el))) gone.push(el);
+  }
+  gone.forEach(e => e.remove());
+  return gone.length;
+}"""
+
+
 def _rendered(url: str, browse: Callable[[], Any]) -> str:
-    """The HTML a browser ends up with, scripts run, after the refusal check."""
+    """The HTML a browser ends up with, scripts run and unseen elements removed, after the
+    refusal check."""
     url = check(url)
     with browse() as page:
         page.goto(url, wait_until="load")
+        page.evaluate(_UNSEEN_JS)
         return str(page.content())
+
+
+_SERIAL = itertools.count(1)
+
+
+def _readable(html: str, url: str) -> tuple[str, str, int]:
+    """``(title, text, removed)`` of a page with its hidden content taken out first."""
+    cleaned, removed = untrusted.strip_hidden(html)
+    title, text = extract(cleaned, url)
+    return untrusted.clean_text(title)[0], text, removed
+
+
+def _labelled(out: dict[str, Any], text: str, url: str, removed: int) -> dict[str, Any]:
+    """``out`` with its text cleaned, fenced and marked untrusted; the URLs in it are noted
+    as found in fetched content."""
+    item = untrusted.untrusted(text, url, next(_SERIAL), html_removed=removed)
+    untrusted.shared().page(item.text)
+    out.update(text=item.fenced(), untrusted=True, origin=item.origin)
+    if item.removed:
+        out["hidden_removed"] = item.removed
+    return out
 
 
 def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = None,
@@ -266,11 +302,11 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
         return _read_pdf(url, limit)
     fetch = fetch or _fetch
     browse = browse or _browse
-    title, text, plain_error, was_rendered, html = "", "", None, False, ""
+    title, text, plain_error, was_rendered, html, hidden = "", "", None, False, "", 0
     if not rendered:
         try:
             html = fetch(url)
-            title, text = extract(html, url)
+            title, text, hidden = _readable(html, url)
         except Exception as exc:  # a 403 to a bot is the commonest reason to render instead
             plain_error = exc
     if rendered or len(text) < THIN:
@@ -281,9 +317,9 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
                 raise plain_error from exc
             # no browser, or it failed: the plain read is what there is
         else:
-            r_title, r_text = extract(html, url)
+            r_title, r_text, r_hidden = _readable(html, url)
             if r_text or not text:
-                title, text, was_rendered = r_title or title, r_text, True
+                title, text, was_rendered, hidden = r_title or title, r_text, True, r_hidden
     elif plain_error is not None:
         raise plain_error
     text, truncated = cut(text, limit)
@@ -292,19 +328,20 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
         out["truncated"] = True
     if ahead := next_link(html, url, guess=False):
         out["next"] = ahead
-    return out
+        untrusted.shared().paginate(url, ahead)
+    return _labelled(out, text, url, hidden)
 
 
 def _read_pdf(url: str, limit: int) -> dict[str, Any]:
     """A PDF as text: downloaded into ``downloads_dir()``, with the file's path and hash."""
     got = download(url, downloads_dir(), polite=politeness())
-    title, text, pages = datasheet.text(got.path, limit=limit + 1)
+    title, text, pages, hidden = pdftext.visible_text(got.path, limit=limit + 1)
     text, truncated = cut(text, limit)
     out: dict[str, Any] = {"url": url, "title": title, "text": text, "rendered": False,
                            "pdf": str(got.path), "pages": pages, "sha256": got.sha256}
     if truncated:
         out["truncated"] = True
-    return out
+    return _labelled(out, text, url, hidden)
 
 
 def fetch_file(url: str, kind: str = "pdf", *, licence: str = "") -> Download:
@@ -343,7 +380,7 @@ def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None 
         html = str(page.content())
         shot = bytes(page.screenshot(full_page=True))
         found = page.evaluate(_IMAGES_JS) or []
-    title, text = extract(html, url)
+    title, text, hidden = _readable(html, url)
     text, _ = cut(text, limit)
     candidates = []
     for item in found:
@@ -365,7 +402,8 @@ def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None 
         taken.add(src)
         with contextlib.suppress(Exception):  # a picture that will not come is not the answer
             images.append(bytes(fetch_bytes(src)))
-    return {"url": url, "title": title, "text": text, "_images": images}
+    return _labelled({"url": url, "title": title, "text": text, "_images": images}, text, url,
+                     hidden)
 
 
 # --- the tools ----------------------------------------------------------------------------
@@ -492,7 +530,8 @@ def _schema(name: str) -> dict[str, Any]:
 def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = None,
           browse: Callable[[], Any] | None = None,
           fetch_bytes: Callable[[str], bytes] | None = None,
-          vision: bool = False) -> list[tuple[dict[str, Any], Any]]:
+          vision: bool = False,
+          origins: untrusted.Origins | None = None) -> list[tuple[dict[str, Any], Any]]:
     """The web as ``(schema, callable)`` pairs, to pass to ``converse`` beside ``tools_for``.
 
     ``web_search``, ``web_read`` and ``web_download`` always; ``web_look`` only with ``vision=True``, because a
@@ -501,7 +540,13 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
     and ``look`` take, for a test or a project with its own transport. Each callable takes
     the parsed arguments mapping and never raises: what went wrong comes back as
     ``{"none": reason}``, which a model reads as "move on", where an exception ends the turn.
+
+    ``origins`` records where each URL was seen: a URL a search returned or a person typed is
+    fetched, one that only fetched content mentioned is fetched only on an allow-listed or
+    approved host. Everything read comes back marked ``untrusted`` and fenced.
     """
+    seen = origins or untrusted.shared()
+
     def searching(args: Mapping[str, Any]) -> Any:
         query = str(args.get("query") or "").strip()
         if not query:
@@ -510,11 +555,13 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
             rows = search(query, engine=engine, page=max(1, int(args.get("page") or 1)))
         except Exception as exc:
             return {"none": f"search unavailable: {exc}"}
+        seen.search(rows)
         return rows or {"none": f"Nothing on the web matched {query!r}. Try fewer or "
                                 "different words, or answer with what you already have."}
 
     def reading(args: Mapping[str, Any]) -> Any:
         try:
+            seen.admit(str(args.get("url") or ""))
             return read(str(args.get("url") or ""), fetch=fetch, browse=browse,
                         rendered=bool(args.get("rendered")))
         except Exception as exc:
@@ -522,6 +569,7 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
 
     def looking(args: Mapping[str, Any]) -> Any:
         try:
+            seen.admit(str(args.get("url") or ""))
             return look(str(args.get("url") or ""), browse=browse, fetch_bytes=fetch_bytes)
         except ImportError as exc:
             return {"none": f"no browser: {exc}"}
@@ -534,6 +582,9 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
 
     def downloading(args: Mapping[str, Any]) -> Any:
         try:
+            if str(args.get("kind") or "pdf") not in KINDS:
+                raise ValueError(f"kind must be one of {', '.join(sorted(KINDS))}")
+            seen.admit(str(args.get("url") or ""))
             return as_dict(fetch_file(str(args.get("url") or ""), str(args.get("kind") or "pdf")))
         except (OSError, ValueError, RuntimeError, ImportError) as exc:
             return {"none": f"could not download {args.get('url')!r}: {exc}"}

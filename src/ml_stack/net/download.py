@@ -59,7 +59,9 @@ class Truncated(Refused):
 @dataclass(frozen=True, slots=True)
 class Want:
     """What a download must be: its ``kind`` (from the name when empty), the ``sha256`` it is
-    pinned to, whether a digest is ``require_digest``, and how an unscanned file is treated."""
+    pinned to, whether a digest is ``require_digest``, and how an unscanned file is treated.
+    ``verify(path, headers)`` returns why a staged file is not acceptable, or ''. ``rename(final_url,
+    headers)`` picks the file name once the answer is known."""
 
     kind: str = ""
     sha256: str = ""
@@ -73,6 +75,8 @@ class Want:
     purpose: str = "download"
     resume: bool = True
     admit: bool = True
+    verify: Callable[[Path, dict[str, str]], str] | None = None
+    rename: Callable[[str, dict[str, str]], str] | None = None
 
 
 class Cancel:
@@ -218,6 +222,12 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
     staged = part.with_name(f"{key}__{name}")
     part.replace(staged)
     _meta(part).unlink(missing_ok=True)
+    if want.rename is not None:
+        name = safe_filename(want.rename(shown.url, shown.headers))
+        final = final.with_name(name)
+        renamed = staged.with_name(f"{key}__{name}")
+        staged.replace(renamed)
+        staged = renamed
     digest, size = files.sha256_file(staged), staged.stat().st_size
     served = shown.headers.get("content-type", "")
     note = provenance.Provenance(
@@ -230,6 +240,8 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
         raise _reject(pipe, staged, note, "sha256 differs from the pinned one", ChecksumMismatch)
     if want.size and size != want.size:
         raise _reject(pipe, staged, note, f"{size} bytes, expected {want.size}")
+    if want.verify is not None and (problem := want.verify(staged, shown.headers)):
+        raise _reject(pipe, staged, note, problem)
     verdict = sniff.sniff(staged, want.kind or sniff.expected_kind(name), content_type=served)
     if not verdict.ok:
         raise _reject(pipe, staged, note, "; ".join(verdict.problems))

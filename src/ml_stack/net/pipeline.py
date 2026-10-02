@@ -10,10 +10,12 @@ from HTTPS to HTTP is refused.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from ml_stack import http, httpguard
 from ml_stack.httpguard import Fetched, Limits, Refused
@@ -32,7 +34,8 @@ RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 @dataclass(frozen=True, slots=True)
 class Ask:
     """How one request is made: its ``purpose`` (named in a refusal), extra ``headers``, a bearer
-    ``token`` (https only), whether the host policy applies (``admit``), retries and a size cap."""
+    ``token`` (https only), whether the host policy applies (``admit``), retries, a size cap and ``private`` hosts the person named that may be on this
+    network."""
 
     purpose: str = "fetch"
     headers: dict[str, str] = field(default_factory=dict)
@@ -41,16 +44,35 @@ class Ask:
     tries: int = 1
     backoff: float = 0.5
     max_bytes: int = 0
+    private: tuple[str, ...] = ()
 
 
 ASK = Ask()
+
+
+class Headers(dict[str, str]):
+    """Response headers looked up whatever the case of the name."""
+
+    def get(self, name: str, default: Any = None) -> Any:  # type: ignore[override]
+        return super().get(name.lower(), default)
+
+    def __getitem__(self, name: str) -> str:
+        return super().__getitem__(name.lower())
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and super().__contains__(name.lower())
+
+    def get_content_charset(self) -> str | None:
+        """The charset of the content type, or None."""
+        match = re.search(r"charset=([\w.-]+)", self.get("content-type", ""), re.IGNORECASE)
+        return match.group(1) if match else None
 
 
 class Reply:
     """An open answer: ``status``, ``headers`` (names lower-cased), ``geturl()`` and ``read``."""
 
     def __init__(self, shown: httpguard.Streaming) -> None:
-        self.status, self.headers, self.url = shown.status, shown.headers, shown.url
+        self.status, self.headers, self.url = shown.status, Headers(shown.headers), shown.url
         self.redirects = shown.redirects
         self._chunks, self._buffer = shown.chunks, b""
 
@@ -100,7 +122,9 @@ class Pipeline:
         return self.limits.allow_hosts | httpguard.allowed_hosts()
 
     def _limits(self, ask: Ask) -> Limits:
-        changes = {"max_bytes": ask.max_bytes} if ask.max_bytes else {}
+        changes: dict[str, object] = {"max_bytes": ask.max_bytes} if ask.max_bytes else {}
+        if ask.private:
+            changes["allow_hosts"] = self.limits.allow_hosts | frozenset(ask.private)
         return self.limited(ask.purpose, admit=ask.admit, **changes)
 
     @contextlib.contextmanager

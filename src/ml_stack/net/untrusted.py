@@ -15,8 +15,8 @@ from html.parser import HTMLParser
 from ml_stack.httpguard import Refused
 from ml_stack.net.policy import Policy, host_of
 
-__all__ = ["FollowRefused", "Origins", "Untrusted", "clean_text", "fence", "strip_hidden",
-           "untrusted"]
+__all__ = ["FollowRefused", "Origins", "Untrusted", "clean_text", "fence", "shared",
+           "strip_hidden", "untrusted"]
 
 VOID = frozenset({"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "embed",
                   "source", "track", "wbr"})
@@ -162,6 +162,20 @@ def untrusted(text: str, url: str, serial: int = 1, *, html_removed: int = 0) ->
     return Untrusted(clean, f"web:{host_of(url) or 'unknown'}#{serial}", url, removed + html_removed)
 
 
+_SHARED: Origins | None = None
+
+
+def shared() -> Origins:
+    """The origins every web tool in this process consults; an agent loop notes what the
+    person types here with `Origins.typed`."""
+    global _SHARED
+    if _SHARED is None:
+        from ml_stack.net.policy import default
+
+        _SHARED = Origins(default())
+    return _SHARED
+
+
 class FollowRefused(Refused):
     """A URL that only fetched content mentioned, on a host nobody trusts."""
 
@@ -181,7 +195,7 @@ class Origins:
     def _note(self, url: str, kind: str) -> None:
         key = url.strip().rstrip(".,;")
         with self._lock:
-            if len(self.seen) < MOST_URLS and self.seen.get(key) != "typed":
+            if len(self.seen) < MOST_URLS and self.seen.get(key) not in ("typed", "search"):
                 self.seen[key] = kind
 
     def typed(self, text: str) -> None:
@@ -199,6 +213,11 @@ class Origins:
         for url in self.URL.findall(text or ""):
             self._note(url, "page")
 
+    def paginate(self, page_url: str, next_url: str) -> None:
+        """Record a "next page" link of a page already read, when it is on the same host."""
+        if host_of(page_url) and host_of(page_url) == host_of(next_url):
+            self._note(next_url, "next")
+
     def kind(self, url: str) -> str:
         """`typed`, `search`, `page` or `unknown` for ``url``."""
         return self.seen.get(url.strip(), "unknown")
@@ -206,7 +225,7 @@ class Origins:
     def admit(self, url: str) -> str:
         """The origin kind of ``url`` when it may be fetched; `FollowRefused` otherwise."""
         kind = self.kind(url)
-        if kind in ("typed", "search"):
+        if kind in ("typed", "search", "next"):
             return kind
         host = host_of(url)
         if host and self.policy is not None and (self.policy.listed(host)

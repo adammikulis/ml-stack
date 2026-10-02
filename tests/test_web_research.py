@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from ml_stack import web
+from ml_stack.net.untrusted import Origins
 from ml_stack.scrape.polite import Polite
 from tests.web_site import allow_all, serving
 
@@ -96,11 +97,23 @@ def test_a_page_with_a_next_link_says_where_it_goes(lan):
 
 def test_the_download_tool_returns_the_record(lan):
     lan.file("/m.step", b"ISO-10303-21;\nHEADER;", "application/octet-stream")
-    (_, _), (_, _), (_, downloading) = web.tools()
+    origins = Origins()
+    origins.typed(f"{lan.base}/m.step")
+    (_, _), (_, _), (_, downloading) = web.tools(origins=origins)
     got = downloading({"url": f"{lan.base}/m.step", "kind": "step"})
     assert got["size"] == 21 and got["sha256"] and got["path"].endswith("_m.step")
     lan.file("/n.step", b"ISO-10303-21;\nHEADER;", "application/octet-stream")
+    origins.typed(f"{lan.base}/n.step")
     assert downloading({"url": f"{lan.base}/n.step"})["none"].startswith("could not download")
+
+
+def test_the_download_tool_refuses_an_address_only_fetched_content_mentioned(lan):
+    lan.file("/m.step", b"ISO-10303-21;\nHEADER;", "application/octet-stream")
+    origins = Origins()
+    origins.page(f"see {lan.base}/m.step")
+    (_, _), (_, _), (_, downloading) = web.tools(origins=origins)
+    got = downloading({"url": f"{lan.base}/m.step", "kind": "step"})
+    assert "fetched content" in got["none"] and lan.hits == []
 
 
 def test_the_download_tool_names_the_kinds_it_knows():
