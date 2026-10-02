@@ -3,6 +3,7 @@ the server honours Range and If-Range so resumption is real."""
 
 from __future__ import annotations
 
+import ssl
 import struct
 import threading
 import time
@@ -32,8 +33,9 @@ class Route:
 class Site:
     """A server on an ephemeral loopback port with a table of routes."""
 
-    def __init__(self) -> None:
+    def __init__(self, tls: ssl.SSLContext | None = None) -> None:
         self.routes: dict[str, Route] = {}
+        self.secure = tls is not None
         site = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -51,12 +53,14 @@ class Site:
                 site.answer(self, route)
 
         self.server = Server(("127.0.0.1", 0), Handler)
+        if tls is not None:
+            self.server.socket = tls.wrap_socket(self.server.socket, server_side=True)
         self.port = self.server.server_port
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
 
     @property
     def base(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
+        return f"{'https' if self.secure else 'http'}://127.0.0.1:{self.port}"
 
     def add(self, path: str, body: bytes = b"", **options: object) -> Route:
         headers = options.pop("headers", {})
