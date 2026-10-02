@@ -4,6 +4,7 @@ files directory, and the proxy in front of the model."""
 
 from __future__ import annotations
 
+import re
 import socket
 import time
 from dataclasses import dataclass
@@ -56,7 +57,16 @@ def raw(url: str, request: bytes, wait: float = LOOK) -> Reply:
 
 def _status(chunks: bytes) -> int:
     line = chunks.partition(b"\r\n")[0].split()
-    return int(line[1]) if len(line) > 1 and line[1].isdigit() else 0
+    if len(line) > 1 and line[1].isdigit():
+        return int(line[1])
+    said = re.search(rb"Error code: (\d+)", chunks)
+    return int(said.group(1)) if said else 0
+
+
+def broke(got: Reply) -> bool:
+    """Whether the daemon failed on a request: an error of its own, nothing back, or a hang."""
+    return got.hung or (got.status >= 500 and got.status != 501) or (
+        got.status == 0 and not got.body)
 
 
 def get(path: str, *headers: str, method: str = "GET") -> bytes:
@@ -126,7 +136,7 @@ def run_malformed(lab: Lab, report: Report, options: Options) -> None:
         for label, body in bodies.items():
             got = raw(lab.daemon_url, post(path, body, auth))
             _add(report, "malformed-request", f"POST{path}:{label}",
-                 got.status >= 500 or got.status == 0 or got.hung, got)
+                 broke(got), got)
     for label, request in {
         "length-not-a-number": post("/availability", b"{}", auth, length=0).replace(
             b"Content-Length: 0", b"Content-Length: abc"),
@@ -139,8 +149,7 @@ def run_malformed(lab: Lab, report: Report, options: Options) -> None:
         "bad-version": b"GET /health HTTP/9.9\r\n\r\n",
     }.items():
         got = raw(lab.daemon_url, request)
-        _add(report, "malformed-request", label, got.status >= 500 or got.status == 0 or got.hung,
-             got)
+        _add(report, "malformed-request", label, broke(got), got)
 
 
 def run_oversized(lab: Lab, report: Report, options: Options) -> None:
