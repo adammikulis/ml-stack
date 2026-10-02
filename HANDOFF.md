@@ -302,6 +302,50 @@ across `src/`.
   milliseconds and advertises `tts` and `vad`. Both go away if the probe runs somewhere
   that is not the daemon's own process.
 
+### The test suite
+
+Part of the public "Integration pass" issue: the suite is the thing every agent reruns before a
+merge, so what it costs is what the pass costs.
+
+- [ ] **The red-team runs do not use the verdict cache yet.** `ml_stack.testing.verdicts` has the
+  cache (key: model-file hash, attack id, guard or prompt version, source of the modules the
+  attack touches; a failing verdict is never served), `sample` (seeded tenth plus every class
+  touching a changed file) and `Limits` (few tokens, thinking off, `cache_prompt`, the canary as a
+  stop string). `ml_stack.redteam` lives on `agent/redteam` and is not on this branch, so nothing
+  calls them. After that branch lands: wrap each scenario's `execute` in `verdicts.run`, add
+  `--no-cache` and `--quick` (the sample) to the red-team command and keep the full sweep as the
+  nightly and release command, declare each scenario's `surfaces`, and send `Limits.body(...)` with
+  every request. Then measure per-attack and total wall time with and without the cache against a
+  real model through the broker, serially, and check the cached verdicts equal an uncached full
+  run on a sample; none of that has been measured, only the scripted Bash-guard layer (20
+  attacks: 1.3 s uncached, 0.00 s on a warm cache).
+- [ ] **Tests that assert a wall-clock bound fail on a loaded machine.** `test_serve.py` (a
+  negative-cache lease under 0.5 s), `test_fleet_join.py` (`peer_pause` with no cluster under
+  1 s), `test_client.py` (a dead process polled under 2 s), `test_fleet_bench.py` (a preparing
+  handle under 2 s, an install slower than 4 s), `test_bench_selfcheck.py` (under 10 s),
+  `test_fleet_work.py` (under 10 s), `test_ingest.py` (a 300-unit fold under 20 s). Each wants the
+  clock handed in, or a count of polls or calls in place of seconds.
+- [ ] **`scripts/test fast` has not been timed on a quiet machine.** The target is under 30 s at
+  `-n 4`; it was measured only beside other suites (load 90 to 270), where it took 143 CPU
+  seconds. Time it alone, and re-run `scripts/test heavy --junit j.xml` if it is over.
+- [ ] **`scripts/test quick` reruns everything when the installed packages change.** pytest-testmon
+  records the package list in `.testmondata`, so any `pip install` in the shared interpreter
+  makes the next `quick` a full run, and each new worktree pays one full run to record its map.
+  Seeding a new worktree's map from the last one, or ignoring the packages that change often
+  (`testmon_ignore_dependencies`), would stop that.
+- [ ] **`scripts/verify-quick` has not finished a pass over all sixteen modules.** The first pass
+  found one miss (`ml_stack.claude.main`, reached only through `tests/test_cli_help.py`'s computed
+  import), which `affected.dynamic_tests` now covers; the pass after the fix covered fewer modules
+  than the first. Run `scripts/verify-quick` over `serve`, `client`, `harness`, `claude`, `hub`,
+  `fleet`, `http`, `ui`, `train` and `units` in a throwaway worktree.
+- [ ] **Two slow tests fail under load and pass alone.** `test_fleet_daemon.py::
+  test_the_default_is_still_one_job_at_a_time` and `test_fleet_discovery.py::
+  test_peers_ls_reports_the_running_daemon` (a fixture error) failed in a `--slow -n 2` run of
+  the fleet files beside other suites (load 40 to 100) and passed alone. Both wait on a real
+  daemon with a fixed deadline; they want a deadline that scales or a readiness probe. The rest of
+  the slow tier has not been run under `_no_public_network`, which refuses a connection or name
+  lookup beyond the LAN in every test.
+
 ## Measurements
 
 Each needs the GPU and Adam's call. Estimate before it runs, smoke it before it is
