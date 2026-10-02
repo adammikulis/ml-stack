@@ -1,26 +1,60 @@
 # The test suite
 
-About three thousand tests in a little over two minutes on every core. Nothing here serves a
-model, touches a GPU, reaches the Hub, or reads anything under `~/.ml-stack`, `~/.cache` or a
-real home directory — see *Nothing reads the machine* below for how that is enforced rather
-than remembered. Every person, company, place and model file is invented.
+Nothing here serves a model, touches a GPU, reaches the Hub, or reads anything under
+`~/.ml-stack`, `~/.cache` or a real home directory — see *Nothing reads the machine* below for
+how that is enforced rather than remembered. Every person, company, place and model file is
+invented.
 
 ## Running them
 
+One command per tier, `scripts/test <tier>`; `-n N` sets the workers (default 4) and any other
+argument goes to pytest.
+
+| tier | what runs | when |
+| --- | --- | --- |
+| `quick` | the tests the change reaches (below) | after every edit |
+| `fast` | every test not marked `slow` or `heavy`, and not the four that import mlx while collecting | before a commit |
+| `full` | every test not marked `slow` | what bare `pytest` runs; before reporting |
+| `slow` | only the tests marked `slow` | after touching packaging, the page or the fleet |
+| `all` | everything, `--slow` included | what CI runs; before a merge |
+
 ```sh
-pytest                      # everything, on every core (`-n auto` is in pyproject.toml)
-pytest -n 4                 # while a bench has the GPU: four workers, not sixteen
-pytest -m "not slow"        # the fast subset -- no browser, no subprocess, no network wait
-pytest -n 0                 # one process, in file order, when a failure needs a clean order
-pytest -n 0 -p no:randomly  # the same, with any ordering plugin disabled
+scripts/test quick --explain      # which file selected which test file
+scripts/test fast -n 2            # while a bench has the GPU
+pytest -n 0                       # one process, in file order, when a failure needs a clean order
 pytest --durations=0 --durations-min=1.8    # what is costing the wall clock
 ```
 
 `-n 4` is the one to use while a measurement is running: a full `-n auto` run competes with
 the bench for cores and both get slower, and a bench's wall clock is the thing being measured.
 
-The default run has no `-m` filter, so `pytest` alone still runs every test including the slow
-ones. `-m "not slow"` is a convenience for the inner loop, not the suite of record.
+### How `quick` chooses
+
+It diffs the working tree against the merge-base with `0.2dev` (`--base` to change it), then
+takes the union of two selections:
+
+- **pytest-testmon** records, per test, the functions it executed, in `.testmondata` (ignored
+  by git, one per checkout). The first `quick` in a checkout runs the whole full tier to
+  record it; after that testmon reruns the tests that executed a changed function, and the
+  ones that failed last time.
+- **The import graph** (`scripts/affected.py`): every test file within two imports of a
+  changed module, counting imports inside functions and a module named in a string
+  (`-m ml_stack.x`, `import_module`). It exists for what testmon cannot see, such as code that
+  only a child process runs. `--explain` prints each file and what selected it.
+
+It runs the full tier, and says why, when the change touches `pyproject.toml`,
+`tests/conftest.py`, `budgets.json`, a file that is not source, a test or prose, a deleted
+module, or when pytest-testmon is not installed (`pip install -e '.[test]'`).
+
+`quick` adds the cheap tree-wide checks (`test_layers`, `test_wiring`, the conftest and isolation
+guards) to every selection and leaves out the slow ones (`test_budgets`, `test_gates_*`,
+`test_no_data_files`): the pre-commit hook runs the budgets, and `full` and `all` run all
+of them. `tests/test_quick_select.py` pins the selection rules.
+
+### `heavy`
+
+`tests/heavy-modules.txt` lists the modules that cost the most; `conftest.py` marks them
+`heavy`. `scripts/test heavy --junit j.xml` rewrites the list from a `--junitxml` run.
 
 ## What is slow, and why
 

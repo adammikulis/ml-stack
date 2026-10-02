@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Run the test suite one tier at a time.
 
-    scripts/test fast      the default tier without the modules marked heavy
     scripts/test quick     only the tests a change reaches (needs pytest-testmon)
-    scripts/test default   everything not marked slow
-    scripts/test full      everything, slow included: what CI runs
+    scripts/test fast      every test not marked slow or heavy
+    scripts/test full      every test not marked slow
     scripts/test slow      only the tests marked slow
+    scripts/test all       everything, slow included: what CI runs
     scripts/test heavy --junit J   rewrite tests/heavy-modules.txt from a pytest --junitxml file J
 
-Arguments after the tier go to pytest. ``quick`` runs the default tier in full, and says
+Arguments after the tier go to pytest. ``quick`` runs the full tier in full, and says
 why, when it cannot tell what a change reaches.
 """
 
@@ -34,7 +34,7 @@ FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
     "test_spec_decode.py", "test_spec_qwen4.py", "test_spec_qwen4_load.py", "test_spec_serve.py"))]
 CASE = re.compile(r'<testcase classname="([^"]+)" name="[^"]*" time="([^"]+)"')
 HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
-DEFAULT = ["-m", "not slow"]
+FULL = ["-m", "not slow"]
 
 
 def pytest_command(workers: int, *rest: str) -> list[str]:
@@ -74,11 +74,11 @@ def reasons_for_everything(changed: list[str], deleted: frozenset[str]) -> list[
 
 def quick(args: argparse.Namespace, rest: list[str]) -> int:
     """Run the tests a change reaches: testmon's recorded map, plus the import graph."""
-    tier = [] if args.slow else DEFAULT
+    tier = [] if args.slow else FULL
     try:
         changed, deleted = affected.changed_since(ROOT, args.base)
     except (RuntimeError, IndexError) as exc:
-        print(f"quick: cannot diff against {args.base} ({exc}); running the default tier")
+        print(f"quick: cannot diff against {args.base} ({exc}); running the full tier")
         return run(pytest_command(args.workers, *tier, *rest))
     if not changed:
         print(f"quick: nothing differs from {args.base}; running nothing")
@@ -91,7 +91,7 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
     if why:
         for line in why[:8]:
             print(f"quick: {line}")
-        print("quick: running the default tier in full")
+        print("quick: running the full tier")
         record = [] if testmon_missing() else ["--testmon-noselect"]
         return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env())
     picked = affected.select(ROOT, changed, deleted)
@@ -126,7 +126,7 @@ def main() -> int:
     """Parse the tier and run it."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tier", choices=["fast", "quick", "default", "full", "slow", "heavy"])
+    parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy"])
     parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
     parser.add_argument("-n", "--workers", type=int, default=4)
@@ -138,7 +138,7 @@ def main() -> int:
         return heavy(args.junit, args.over)
     if args.tier == "quick":
         return quick(args, rest)
-    tiers = {"fast": FAST, "default": DEFAULT, "full": ["--slow"], "slow": ["--slow", "-m", "slow"]}
+    tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
     return run(pytest_command(args.workers, *tiers[args.tier], *rest))
 
 
