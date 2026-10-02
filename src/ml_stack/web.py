@@ -33,19 +33,25 @@ returns the plain text and ``web_look`` says there is no browser.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import os
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack.home import state
+from ml_stack.home import cache, state
 from ml_stack.http import Refused, Retry, ServerError, check, open_stream
 from ml_stack.markup import cut, extract
+from ml_stack.scrape.crawl import next_link
+from ml_stack.scrape.download import KINDS, LICENCE, Download, Wanted, as_dict, download
+from ml_stack.scrape.polite import Polite
+from ml_stack.sources import datasheet
 
-Engine = Callable[[str, int], list[dict[str, Any]]]
-"""``(query, limit) -> [{"title", "url", "snippet"}, ...]``; may raise SearchUnavailable."""
+Engine = Callable[..., list[dict[str, Any]]]
+"""``(query, limit) -> [{"title", "url", "snippet"}, ...]``; may raise SearchUnavailable.
+An engine that can page also takes ``page`` (1-based) as a third argument."""
 
 INSTALL = "pip install 'ml-stack[web]'"
 # what a plain fetch has to come back with before it counts as having read the page:
@@ -69,10 +75,23 @@ class SearchUnavailable(RuntimeError):
     """The search engine would not answer: rate-limited, timed out, offline, or missing."""
 
 
+def downloads_dir() -> Path:
+    """Where ``fetch_file`` and PDF reads keep what they download."""
+    return cache("web", "downloads")
+
+
+def politeness() -> Polite:
+    """Request manners for what this module fetches itself: ``MLSTACK_ROBOTS=off`` stops
+    consulting robots.txt, ``MLSTACK_MIN_INTERVAL`` sets the seconds between requests to a host."""
+    gap = os.environ.get("MLSTACK_MIN_INTERVAL") or "1.0"
+    return Polite(robots=(os.environ.get("MLSTACK_ROBOTS") or "on").lower() != "off",
+                  min_interval_s=float(gap))
+
+
 # --- search -------------------------------------------------------------------------------
 
 
-def ddgs_engine(query: str, limit: int) -> list[dict[str, Any]]:
+def ddgs_engine(query: str, limit: int, page: int = 1) -> list[dict[str, Any]]:
     """Search through ``ddgs`` — keyless, several engines behind one call.
 
     ``DDGS_BACKEND`` picks the engines (``auto`` by default, or a comma list such as
@@ -86,14 +105,15 @@ def ddgs_engine(query: str, limit: int) -> list[dict[str, Any]]:
         raise ImportError(f"ddgs is not installed: {INSTALL}") from exc
     backend = os.environ.get("DDGS_BACKEND") or "auto"
     try:
-        rows = DDGS().text(query, max_results=limit, backend=backend)
+        rows = DDGS().text(query, max_results=limit, backend=backend,
+                             **({"page": page} if page > 1 else {}))
     except DDGSException as exc:
         raise SearchUnavailable(f"{type(exc).__name__}: {exc}") from exc
     return [{"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")}
             for r in rows]
 
 
-def searxng_engine(query: str, limit: int) -> list[dict[str, Any]]:
+def searxng_engine(query: str, limit: int, page: int = 1) -> list[dict[str, Any]]:
     """Search a SearXNG instance at ``SEARXNG_URL`` through its ``/search?format=json``.
 
     Self-hosted, so nobody rate-limits it but its owner; the JSON format has to be enabled
@@ -102,7 +122,8 @@ def searxng_engine(query: str, limit: int) -> list[dict[str, Any]]:
     base = (os.environ.get("SEARXNG_URL") or "").rstrip("/")
     if not base:
         raise SearchUnavailable("SEARXNG_URL is not set")
-    url = f"{base}/search?" + urllib.parse.urlencode({"q": query, "format": "json"})
+    url = f"{base}/search?" + urllib.parse.urlencode(
+        {"q": query, "format": "json", **({"pageno": page} if page > 1 else {})})
     try:
         body = _http(url, accept="application/json")
         payload = json.loads(body.decode("utf-8", "replace"))
@@ -116,12 +137,14 @@ def searxng_engine(query: str, limit: int) -> list[dict[str, Any]]:
 ENGINES: dict[str, Engine] = {"ddgs": ddgs_engine, "searxng": searxng_engine}
 
 
-def search(query: str, *, limit: int = 8, engine: Engine | None = None) -> list[dict[str, Any]]:
+def search(query: str, *, limit: int = 8, engine: Engine | None = None, page: int = 1
+           ) -> list[dict[str, Any]]:
     """Pages about ``query``: ``[{"title", "url", "snippet"}, ...]``, at most ``limit``.
 
     ``engine`` is ``(query, limit) -> rows``; when None, ``ENGINES[MLSTACK_SEARCH]`` with
-    ``ddgs`` the default. A blank query finds nothing. Raises ``SearchUnavailable`` when
-    the engine would not answer, and ``ImportError`` when it is not installed.
+    ``ddgs`` the default. ``page`` (1-based) asks for a later page of results, which needs an
+    engine that takes it. A blank query finds nothing. Raises ``SearchUnavailable`` when the
+    engine would not answer, and ``ImportError`` when it is not installed.
     """
     wanted = " ".join((query or "").split())
     if not wanted:
@@ -133,9 +156,12 @@ def search(query: str, *, limit: int = 8, engine: Engine | None = None) -> list[
         except KeyError:
             raise SearchUnavailable(
                 f"MLSTACK_SEARCH={name!r} is not one of {', '.join(sorted(ENGINES))}") from None
+    if page > 1 and "page" not in inspect.signature(engine).parameters:
+        raise SearchUnavailable("this search engine does not take a page number")
+    rows = engine(wanted, limit, page) if page > 1 else engine(wanted, limit)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for row in engine(wanted, limit):
+    for row in rows:
         url = str(row.get("url") or "").strip()
         if not url or url in seen:
             continue
@@ -148,21 +174,41 @@ def search(query: str, *, limit: int = 8, engine: Engine | None = None) -> list[
     return out
 
 
+def search_pages(query: str, *, pages: int = 3, limit: int = 8, engine: Engine | None = None
+                 ) -> Iterator[list[dict[str, Any]]]:
+    """Results page by page, each without the URLs an earlier page gave, until ``pages`` or a
+    page with nothing new. A later page the engine will not give ends the stream quietly."""
+    seen: set[str] = set()
+    for number in range(1, pages + 1):
+        try:
+            rows = search(query, limit=limit, engine=engine, page=number)
+        except SearchUnavailable:
+            if number == 1:
+                raise
+            return
+        fresh = [r for r in rows if r["url"] not in seen]
+        seen.update(r["url"] for r in fresh)
+        if not fresh:
+            return
+        yield fresh
+
+
 # --- fetching -------------------------------------------------------------------------------
 
 
-def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
+def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES,
+          guard: Callable[[str], str] | None = None) -> bytes:
     """One GET with a size cap and no refusal: for a search backend, which is often on
     this side of the router. Pages a model chose go through ``_get``."""
     with open_stream(url, headers={"User-Agent": USER_AGENT, "Accept": accept},
                      timeout=TIMEOUT_S,
-                     retry=Retry(tries=3, when_unreachable=False)) as reply:
+                     retry=Retry(tries=3, when_unreachable=False), guard=guard) as reply:
         return reply.read(most)
 
 
 def _get(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
     """One GET, with a size cap, after ``check``."""
-    return _http(check(url), accept=accept, most=most)
+    return _http(check(url), accept=accept, most=most, guard=check)
 
 
 def _fetch(url: str) -> str:
@@ -216,12 +262,15 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
     Refuses anything ``check`` refuses, before fetching.
     """
     url = check(url)
+    if urllib.parse.urlsplit(url).path.lower().endswith(".pdf"):
+        return _read_pdf(url, limit)
     fetch = fetch or _fetch
     browse = browse or _browse
-    title, text, plain_error, was_rendered = "", "", None, False
+    title, text, plain_error, was_rendered, html = "", "", None, False, ""
     if not rendered:
         try:
-            title, text = extract(fetch(url), url)
+            html = fetch(url)
+            title, text = extract(html, url)
         except Exception as exc:  # a 403 to a bot is the commonest reason to render instead
             plain_error = exc
     if rendered or len(text) < THIN:
@@ -241,7 +290,30 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
     out: dict[str, Any] = {"url": url, "title": title, "text": text, "rendered": was_rendered}
     if truncated:
         out["truncated"] = True
+    if ahead := next_link(html, url, guess=False):
+        out["next"] = ahead
     return out
+
+
+def _read_pdf(url: str, limit: int) -> dict[str, Any]:
+    """A PDF as text: downloaded into ``downloads_dir()``, with the file's path and hash."""
+    got = download(url, downloads_dir(), polite=politeness())
+    title, text, pages = datasheet.text(got.path, limit=limit + 1)
+    text, truncated = cut(text, limit)
+    out: dict[str, Any] = {"url": url, "title": title, "text": text, "rendered": False,
+                           "pdf": str(got.path), "pages": pages, "sha256": got.sha256}
+    if truncated:
+        out["truncated"] = True
+    return out
+
+
+def fetch_file(url: str, kind: str = "pdf", *, licence: str = "") -> Download:
+    """Download ``url`` into ``downloads_dir()``; ``kind`` is a key of ``scrape.download.KINDS``
+    (pdf, zip, step, kicad, png, jpeg). See ``scrape.download.download`` for what it raises."""
+    if kind not in KINDS:
+        raise ValueError(f"kind must be one of {', '.join(sorted(KINDS))}, not {kind!r}")
+    wanted = Wanted(accept=tuple(sorted(KINDS[kind][0])), licence=licence or LICENCE)
+    return download(url, downloads_dir(), wanted, politeness())
 
 
 # Every <img> with a rendered size, largest first, for the page to answer in one round trip.
@@ -319,7 +391,10 @@ SCHEMAS: list[dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string",
                       "description": "what to search for, as a few words, e.g. "
-                                     "\"Quenlow Robotics\""}},
+                                     "\"Quenlow Robotics\""},
+            "page": {"type": "integer",
+                     "description": "1 for the first results, 2 for the next, and so on; "
+                                    "only when the first page did not hold the answer"}},
             "required": ["query"]}}},
     {"type": "function", "function": {
         "name": "web_read",
@@ -341,6 +416,24 @@ SCHEMAS: list[dict[str, Any]] = [
             "rendered": {"type": "boolean",
                          "description": "open it in a browser and read what the scripts "
                                         "built; only when a plain read came back thin"}},
+            "required": ["url"]}}},
+    {"type": "function", "function": {
+        "name": "web_download",
+        "description": "Download a file from a link and keep it on disk, with a record of "
+                       "where it came from. Returns the path, the final address, the hash and "
+                       "the size. Use it for a datasheet, a 3D model or a footprint a search "
+                       "or a page pointed to. Examples: a search returned https://quenlow."
+                       "example/ds/arm7.pdf → web_download(url=\"https://quenlow.example/ds/"
+                       "arm7.pdf\"); a page links https://pellard.example/models/kiln.step → "
+                       "web_download(url=\"https://pellard.example/models/kiln.step\", "
+                       "kind=\"step\"). A file whose type or first bytes do not match what "
+                       "was asked for is refused, as is anything a site's robots.txt rules "
+                       "out. To read a PDF rather than keep it, use web_read.",
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string", "description": "the file's address, exactly as given"},
+            "kind": {"type": "string",
+                     "description": "what the file should be: pdf (the default), step, zip, "
+                                    "kicad, png or jpeg"}},
             "required": ["url"]}}},
     {"type": "function", "function": {
         "name": "web_look",
@@ -376,6 +469,11 @@ PROMPTS: dict[str, tuple[str, ...]] = {
         "what does this link say?",
         "open the first result and summarise it",
     ),
+    "web_download": (
+        "download that datasheet",
+        "save the pdf from that link",
+        "fetch the step file for this part",
+    ),
     "web_look": (
         "what does their site look like?",
         "read the chart on that page",
@@ -397,7 +495,7 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
           vision: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The web as ``(schema, callable)`` pairs, to pass to ``converse`` beside ``tools_for``.
 
-    ``web_search`` and ``web_read`` always; ``web_look`` only with ``vision=True``, because a
+    ``web_search``, ``web_read`` and ``web_download`` always; ``web_look`` only with ``vision=True``, because a
     model that cannot see gains nothing from a screenshot and pays for the description.
     ``engine``, ``fetch``, ``browse`` and ``fetch_bytes`` are the seams ``search``, ``read``
     and ``look`` take, for a test or a project with its own transport. Each callable takes
@@ -409,7 +507,7 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
         if not query:
             return {"none": "nothing to search for: pass a query"}
         try:
-            rows = search(query, engine=engine)
+            rows = search(query, engine=engine, page=max(1, int(args.get("page") or 1)))
         except Exception as exc:
             return {"none": f"search unavailable: {exc}"}
         return rows or {"none": f"Nothing on the web matched {query!r}. Try fewer or "
@@ -434,11 +532,19 @@ def tools(*, engine: Engine | None = None, fetch: Callable[[str], str] | None = 
                 f"could not look at {args.get('url')!r}"
             return {"none": f"{why}: {exc}"}
 
+    def downloading(args: Mapping[str, Any]) -> Any:
+        try:
+            return as_dict(fetch_file(str(args.get("url") or ""), str(args.get("kind") or "pdf")))
+        except (OSError, ValueError, RuntimeError, ImportError) as exc:
+            return {"none": f"could not download {args.get('url')!r}: {exc}"}
+
     pairs = [(_schema("web_search"), searching), (_schema("web_read"), reading)]
     if vision:
         pairs.append((_schema("web_look"), looking))
+    pairs.append((_schema("web_download"), downloading))
     return pairs
 
 
 __all__ = ["ENGINES", "PROMPTS", "SCHEMAS", "Refused", "SearchUnavailable", "check", "cut",
-           "ddgs_engine", "extract", "look", "read", "search", "searxng_engine", "tools"]
+           "ddgs_engine", "downloads_dir", "extract", "fetch_file", "look", "politeness", "read",
+           "search", "search_pages", "searxng_engine", "tools"]
