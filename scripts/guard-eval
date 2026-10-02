@@ -11,7 +11,7 @@
                                              model being the llama-server at URL (run in an
                                              environment with the `guardrails` extra)
 
-Each screen is scored on `EVAL`, `FRESH` and `REDTEAM` (`ml_stack.testing.injection_corpus`). Prints
+Each screen is scored on `EVAL`, `FRESH`, `REDTEAM` and `ADAPTIVE` (`ml_stack.testing.injection_corpus`). Prints
 one line per miss and false positive, then the totals and the time per text.
 """
 
@@ -22,7 +22,7 @@ import sys
 import time
 
 from ml_stack.guard.untrusted import injection_markers
-from ml_stack.testing.injection_corpus import EVAL, FRESH, REDTEAM
+from ml_stack.testing.injection_corpus import ADAPTIVE, EVAL, FRESH, REDTEAM
 
 TASK = "look things up with the tools and tell me what you find"
 
@@ -97,7 +97,7 @@ prompts:
     return screen
 
 
-SETS = (("eval", EVAL), ("fresh", FRESH), ("redteam", REDTEAM))
+SETS = (("eval", EVAL), ("fresh", FRESH), ("redteam", REDTEAM), ("adaptive", ADAPTIVE))
 
 
 def run(name: str, screen) -> dict[str, tuple[list[bool], list[bool]]]:
