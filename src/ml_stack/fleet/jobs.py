@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.credentials import child_environment
 from ml_stack.log import say
 from ml_stack.platform import process_group_kwargs, stop_gently, stop_pid
 
@@ -252,7 +253,7 @@ class JobRunner:
     def _run_one(self, job: Job) -> None:
         log = self.log_path(job.id)
         log.parent.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, **job.env, "PYTHONUNBUFFERED": "1",
+        env = {**child_environment(), **job.env, "PYTHONUNBUFFERED": "1",
                "ML_STACK_JOB_ID": job.id,
                "ML_STACK_JOB_DIR": str(self.job_dir(job.id)),
                "ML_STACK_FILES_ROOT": str(self.files_root),

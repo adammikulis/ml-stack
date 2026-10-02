@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from ml_stack.http import request_bytes
 from ml_stack.redteam import daemon
 from ml_stack.redteam.evidence import Honeypot
 from ml_stack.redteam.lab import lab as make_lab
@@ -13,9 +14,9 @@ from ml_stack.redteam.report import Report
 from ml_stack.redteam.scenarios import Options, fleet
 
 
-@pytest.fixture(scope="module")
-def served(tmp_path_factory):
-    with daemon.running(tmp_path_factory.mktemp("daemon")) as running, make_lab(
+@pytest.fixture
+def served(tmp_path):
+    with daemon.running(tmp_path) as running, make_lab(
             served=running) as one:
         yield one
 
@@ -33,7 +34,7 @@ def test_no_protected_route_answers_without_the_right_token(served):
 
 
 def test_a_correct_token_does_open_a_protected_route(served):
-    got = fleet.raw(served.daemon_url, fleet.get("/jobs", f"Authorization: Bearer {served.token}"))
+    got = request_bytes(f"{served.daemon_url}/jobs", token=served.token, timeout=10)
     assert got.status == 200
 
 

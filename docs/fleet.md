@@ -156,6 +156,19 @@ so a machine that does not hold it hears nothing and is heard by nobody. There i
 discovery mechanism: `ml-stack-peers ls`, the app's Cluster view and `ml-stack-fleet status`
 all read the same beacons.
 
+**Who can reach it.** A daemon listens on this machine alone until it joins a cluster (or
+`--lan`, `--host ADDRESS` or `--setup-from-lan` says otherwise); joining from the app's page
+makes it listen on the network from that moment. Every request to it is signed with
+HMAC-SHA256 over the method, target, `Host`, body, a timestamp and a nonce, keyed by a secret
+derived from the cluster key, so the secret never crosses the wire; a request is refused
+outside a two minute window or if its nonce was seen, and an address that fails ten times in a
+minute is locked out for a minute. An unsigned `/health` from another machine says only that
+a daemon is there. The web interface answers this machine only unless `--ui-from-lan` is
+given, because it signs in with the passphrase over plain HTTP. A passphrase is at least 12
+characters; `ml-stack-peers init` makes a random key instead. Nothing is encrypted in
+transit: the signature gives authenticity, integrity and replay protection, not secrecy,
+so a cluster belongs on a network you trust (`docs/security.md`).
+
 The app's Cluster view has the same Join button, and a "Run across the fleet" form that
 builds `ml-stack-bench sweep --fleet --serve MODEL ...` from the models the peers hold,
 starts it detached, and shows `status` and `history` beside it.

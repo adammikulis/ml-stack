@@ -306,3 +306,93 @@ class TestComingBackOnTheNewCode:
         monkeypatch.setattr(autostart, "restart",
                             lambda **k: pytest.fail("it asked the service to restart too"))
         assert updates.restart_after_update() == "relaunched"
+
+
+class TestWhatIsFetchedAndFrom:
+    @pytest.mark.parametrize("url", [
+        "--upload-pack=touch /tmp/x", "-oProxyCommand=id", "ext::sh -c id", "fd::17",
+        "file:///etc", "/local/path", "http://github.com/a/b", "https://exa mple.com/a",
+        "https://github.com/../x", "", "git://github.com/a/b",
+    ])
+    def test_a_remote_that_is_not_an_https_or_ssh_address_is_never_handed_to_git(
+            self, tmp_path, url):
+        git = _git()
+        got = updates.track_once(url, "main", tmp_path, git=git, restart=lambda: "x")
+        assert got.error and not git.calls
+
+    @pytest.mark.parametrize("branch", ["--force", "-x", "a..b", "x.lock", "a b", "a;b", "",
+                                        "a/", "$(id)"])
+    def test_a_branch_that_is_not_a_branch_name_is_never_handed_to_git(self, tmp_path, branch):
+        git = _git()
+        got = updates.track_once(REPO, branch, tmp_path, git=git, restart=lambda: "x")
+        assert got.error and not git.calls
+
+    def test_what_git_is_given_is_separated_from_its_options(self, tmp_path):
+        git = _git()
+        updates.track_once(REPO, "main", tmp_path, git=git, restart=lambda: "x")
+        for call in git.calls:
+            if call[0] in ("ls-remote", "fetch", "pull"):
+                assert "--" in call and call.index("--") < call.index(REPO), call
+
+    def test_an_asset_with_no_digest_is_refused_before_anything_is_fetched(self, tmp_path):
+        asset = {"name": "app.zip", "browser_download_url": "http://127.0.0.1:9/app.zip",
+                 "size": 3}
+        with pytest.raises(updates.UpdateError, match="digest"):
+            updates.download(asset, tmp_path)
+        assert not list(tmp_path.iterdir())
+
+    @pytest.mark.parametrize("name", ["../app.zip", "/etc/cron.d/x", "a/b.zip", "nul.zip",
+                                      "..", ""])
+    def test_an_asset_name_that_is_not_one_plain_file_name_is_refused(self, tmp_path, name):
+        asset = {"name": name, "browser_download_url": "http://127.0.0.1:9/x",
+                 "digest": "sha256:" + "0" * 64}
+        with pytest.raises(updates.UpdateError, match="file name"):
+            updates.download(asset, tmp_path / "in")
+        assert not (tmp_path.parent / "app.zip").exists()
+
+    def test_a_download_that_does_not_match_its_digest_is_discarded(self, tmp_path):
+        import hashlib
+        import http.server
+        import threading
+
+        body = b"payload"
+
+        class Serves(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        from ml_stack.http import Server
+
+        srv = Server(("127.0.0.1", 0), Serves)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{srv.server_address[1]}/app.zip"
+            good = {"name": "app.zip", "browser_download_url": url, "size": len(body),
+                    "digest": "sha256:" + hashlib.sha256(body).hexdigest()}
+            assert updates.download(good, tmp_path / "ok").read_bytes() == body
+            bad = {**good, "digest": "sha256:" + "0" * 64}
+            with pytest.raises(updates.UpdateError, match="does not match"):
+                updates.download(bad, tmp_path / "bad")
+            assert not list((tmp_path / "bad").iterdir())
+        finally:
+            srv.shutdown()
+
+    def test_a_release_zip_that_would_write_outside_the_install_is_refused(self, tmp_path):
+        import zipfile
+
+        archive = tmp_path / "evil.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("ml-stack", "fine")
+            zf.writestr("../../escaped", "bad")
+        target = tmp_path / "app" / "ml-stack"
+        target.parent.mkdir()
+        target.write_text("old")
+        with pytest.raises(updates.UpdateError, match="refusing"):
+            updates.install(archive, app_path=target)
+        assert target.read_text() == "old" and not (tmp_path / "escaped").exists()

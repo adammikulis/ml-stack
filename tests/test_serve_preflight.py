@@ -464,6 +464,7 @@ class TestStartRunsPreflight:
             leased(LlamaServerBackend(binary=binary), spec, timeout=1.0)
 
     def test_preflight_can_be_turned_off(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
         import ml_stack.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})
@@ -727,3 +728,58 @@ class TestTheDraftsOwnCacheEstimate:
         spec = ServerSpec(model="m.gguf", draft=str(whole), context=4096)
         assert preflight.draft_kv_estimate_bytes(spec) == \
             8 * 2 * (128 * 2 + 128 * 2) * 4096
+
+
+class TestAHeaderThatLies:
+    """A model file from somewhere else is read for its metadata before anything loads it."""
+
+    @staticmethod
+    def gguf(tmp_path, body: bytes, kv_count: int = 1):
+        import struct
+
+        path = tmp_path / "bad.gguf"
+        path.write_bytes(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0)
+                         + struct.pack("<Q", kv_count) + body)
+        return path
+
+    def test_a_string_longer_than_the_file_is_refused_not_allocated(self, tmp_path):
+        import struct
+
+        from ml_stack.serve.preflight import read_gguf_header
+
+        path = self.gguf(tmp_path, struct.pack("<Q", 2**40) + b"key")
+        with pytest.raises(ValueError, match="more than the file holds"):
+            read_gguf_header(path)
+
+    def test_an_array_that_claims_more_items_than_the_file_has_bytes_is_refused(self, tmp_path):
+        import struct
+
+        from ml_stack.serve.preflight import read_gguf_header
+
+        name = struct.pack("<Q", 1) + b"k"
+        body = name + struct.pack("<I", 9) + struct.pack("<I", 4) + struct.pack("<Q", 2**62)
+        with pytest.raises(ValueError, match="more than the file holds"):
+            read_gguf_header(self.gguf(tmp_path, body))
+
+    def test_a_pair_count_no_model_has_is_refused(self, tmp_path):
+        from ml_stack.serve.preflight import read_gguf_header
+
+        with pytest.raises(ValueError, match="metadata pairs"):
+            read_gguf_header(self.gguf(tmp_path, b"", kv_count=2**60))
+
+    def test_an_honest_header_is_still_read(self, tmp_path):
+        import struct
+
+        from ml_stack.serve.preflight import read_gguf_header
+
+        body = (struct.pack("<Q", 3) + b"abc" + struct.pack("<I", 4) + struct.pack("<I", 7)
+                + struct.pack("<Q", 1) + b"k" + struct.pack("<I", 8) + struct.pack("<Q", 2)
+                + b"hi")
+        assert read_gguf_header(self.gguf(tmp_path, body, kv_count=2)) == {"abc": 7, "k": "hi"}
+
+    def test_a_safetensors_header_longer_than_the_file_is_refused(self, tmp_path):
+        from ml_stack.serve.mlx_tree import resident_bytes
+
+        (tmp_path / "w.safetensors").write_bytes((2**50).to_bytes(8, "little") + b"{}")
+        with pytest.raises(ValueError, match="not a safetensors file"):
+            resident_bytes(tmp_path)

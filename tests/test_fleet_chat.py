@@ -19,7 +19,7 @@ from test_fleet_ui import WORDS, Serving as UIServing
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.chat import find, targets
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import join_cluster
+from ml_stack.fleet.discovery import Salting, join_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Serving
 from ml_stack.http import Server
@@ -30,6 +30,19 @@ PIECES = ["Hel", "lo", " there"]
 
 def tmp_path_of(ui):
     return ui.files.parent
+
+
+
+SALT = b"a-test-clusters-salt"
+
+
+@pytest.fixture(autouse=True)
+def the_cluster_already_exists(monkeypatch):
+    """The machines in these tests join a cluster whose salt every one of them is told."""
+    from ml_stack.fleet import discovery
+
+    monkeypatch.setattr(discovery, "find_salt", lambda passphrase, group="ml-stack", **_: (
+        SALT, discovery.key_from_passphrase(passphrase, group=group, salt=SALT)))
 
 
 def _free_port() -> int:
@@ -54,7 +67,7 @@ def host(tmp_path, model_server):
     root = tmp_path / "host"
     files = root / "files"
     files.mkdir(parents=True)
-    key = join_cluster(WORDS, group="home", path=tmp_path / "host.key")
+    key = join_cluster(WORDS, group="home", path=tmp_path / "host.key", salting=Salting(SALT))
     token = load_or_create_token(root, key)
     serving = Serving(root / "serving.json")
     serving.register(model_server, ["qwen3-4b.gguf"])
@@ -109,7 +122,7 @@ class TestChattingThroughTheInterface:
     def bare(self, tmp_path, host):
         """A machine that installed nothing: no model store, nothing serving."""
         ui = UIServing(tmp_path / "bare", name="laptop")
-        join_cluster(WORDS, group="home", path=ui.keyfile)
+        join_cluster(WORDS, group="home", path=ui.keyfile, salting=Salting(SALT))
         ui.call("/ui/setup/join", method="POST",
                 body={"passphrase": WORDS, "group": "home"})
         _, _, headers = ui.call("/ui/session", method="POST",
@@ -380,10 +393,11 @@ class TestAnsweringToSeveralClusters:
         import urllib.error
         import urllib.request
 
-        # /health answers anyone: it is how a peer checks a machine is alive. /jobs
-        # is behind the bearer token, which is what this is about.
-        req = urllib.request.Request(f"{base}/jobs")
-        req.add_header("Authorization", f"Bearer {token}")
+        # /health answers anyone with whether the daemon is there. /jobs wants a request
+        # signed with the cluster's secret, which is what this is about.
+        from ml_stack.http import build_request
+
+        req = build_request(f"{base}/jobs", token=token)
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
                 return r.status

@@ -3,8 +3,8 @@ fetched at all."""
 
 from __future__ import annotations
 
-import ipaddress
 import json
+import re
 import socket
 import socketserver
 import ssl
@@ -19,7 +19,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate
+from ml_stack import gate, macauth
+from ml_stack.httpguard import Limits, Refused, resolve, split
 
 USER_AGENT = "ml-stack"
 
@@ -54,10 +55,6 @@ class Server(ThreadingHTTPServer):
         self.server_name, self.server_port = str(host), int(port)
 
 
-class Refused(ValueError):
-    """A URL this module will not fetch: not http(s), or a host on this machine's side."""
-
-
 @dataclass(frozen=True, slots=True)
 class Retry:
     """How many attempts a request gets, and what it retries."""
@@ -84,8 +81,23 @@ def trust(cafile: str | Path | None) -> None:
     _TRUSTED = ssl.create_default_context(cafile=str(cafile)) if cafile else None
 
 
+_PINNED: dict[str, ssl.SSLContext] = {}
+
+
+def pin(netloc: str, context: ssl.SSLContext | None) -> None:
+    """Talk to ``host:port`` over HTTPS with ``context``, which trusts that machine's one
+    certificate; None forgets it. A host that is not pinned is verified against the usual
+    authorities, which a self-signed certificate does not satisfy."""
+    if context is None:
+        _PINNED.pop(netloc.lower(), None)
+    else:
+        _PINNED[netloc.lower()] = context
+
+
 def _https_context(url: str) -> ssl.SSLContext | None:
-    return _TRUSTED if url.lower().startswith("https://") else None
+    if not url.lower().startswith("https://"):
+        return None
+    return _PINNED.get(urllib.parse.urlsplit(url).netloc.lower(), _TRUSTED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,24 +118,49 @@ def json_body(raw: bytes) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
+SENSITIVE = re.compile(r"token|key|secret|passw|auth|sig|credential|session", re.IGNORECASE)
+
+
+def shown(url: str) -> str:
+    """``url`` as it may appear in a message or a log: no user or password, and no value in a
+    query parameter whose name says it is a secret."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname or ""
+    netloc = f"[{host}]" if ":" in host else host
+    netloc += f":{parts.port}" if parts.port else ""
+    query = urllib.parse.urlencode(
+        [(k, "***" if SENSITIVE.search(k) else v)
+         for k, v in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)], safe="*")
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, query, ""))
+
+
 def build_request(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None,
                   token: str = "") -> urllib.request.Request:
-    """A request carrying the caller's headers, a user agent and a bearer token."""
+    """A request carrying the caller's headers, a user agent and its credential.
+
+    A ``token`` (or ``Authorization: Bearer`` header) that is a fleet MAC secret signs the
+    request instead of being sent; any other token is sent as a bearer token.
+    """
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        raise ServerError(f"only http(s) is fetched, not {shown(url)}")
     sent = {"User-Agent": USER_AGENT}
     sent.update(headers or {})
-    if token:
+    verb = method or ("POST" if data is not None else "GET")
+    secret = token if token.startswith(macauth.PREFIX) else macauth.unwrap(
+        sent.get("Authorization", ""))
+    if secret:
+        sent.pop("Authorization", None)
+        sent.update(macauth.sign(secret, verb, url, data))
+    elif token:
         sent["Authorization"] = f"Bearer {token}"
-    return urllib.request.Request(
-        url, data=data,
-        method=method or ("POST" if data is not None else "GET"),
-        headers=sent)
+    return urllib.request.Request(url, data=data, method=verb, headers=sent)  # noqa: S310 - http(s) only
 
 
 def open_stream(url: str, *, data: bytes | None = None, method: str | None = None,
                 headers: dict[str, str] | None = None, token: str = "",
                 timeout: float = 180.0, retry: Retry = ONCE) -> Any:
-    """The open response for ``url``, for a caller that reads the body itself."""
+    """The open response for ``url``, for a caller that reads the body itself; only http(s)."""
     delay = retry.backoff
     tries = max(1, retry.tries)
     last: ServerError | None = None
@@ -136,13 +173,13 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
 
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:500]
-            last = ServerError(f"{url} -> HTTP {exc.code}: {detail}", status=exc.code,
+            last = ServerError(f"{shown(url)} -> HTTP {exc.code}: {detail}", status=exc.code,
                                body=detail, headers=exc.headers)
             if exc.code not in retry.on_status:
                 raise last from exc
 
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
-            last = ServerUnreachable(f"cannot reach {url} ({exc})")
+            last = ServerUnreachable(f"cannot reach {shown(url)} ({exc})")
             if not retry.when_unreachable:
                 raise last from exc
 
@@ -151,7 +188,7 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
             delay = min(delay * 1.5, 2.0)
 
     if last is None:
-        raise ServerError(f"{url}: no attempt was made")
+        raise ServerError(f"{shown(url)}: no attempt was made")
     raise last
 
 
@@ -192,7 +229,7 @@ def request_json(url: str, *, payload: dict[str, Any] | None = None,
     try:
         return json.loads(body) if body else None
     except json.JSONDecodeError as exc:
-        raise ServerError(f"{url} returned non-JSON: {exc}") from exc
+        raise ServerError(f"{shown(url)} returned non-JSON: {exc}") from exc
 
 
 def request_stream(url: str, *, payload: dict[str, Any], timeout: float = 180.0,
@@ -218,10 +255,10 @@ def request_stream(url: str, *, payload: dict[str, Any], timeout: float = 180.0,
                 if isinstance(event, dict) and "error" in event and "choices" not in event:
                     said = event["error"]
                     said = said.get("message", said) if isinstance(said, dict) else said
-                    raise ServerError(f"{url} -> error mid-stream: {said}", body=body)
+                    raise ServerError(f"{shown(url)} -> error mid-stream: {said}", body=body)
                 yield event
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
-        raise ServerUnreachable(f"cannot reach {url} ({exc})") from exc
+        raise ServerUnreachable(f"cannot reach {shown(url)} ({exc})") from exc
 
 
 # --- what may be fetched -------------------------------------------------------------------
@@ -241,21 +278,8 @@ def check(url: str) -> str:
     http(s) only, and only to a host whose every address is a public one. ``file:``,
     ``localhost``, ``127.0.0.0/8``, ``10.0.0.0/8``, ``192.168.0.0/16``, ``172.16.0.0/12``,
     link-local and the IPv6 equivalents are all refused, by what the name resolves to.
+    `ml_stack.httpguard.fetch` is the fetch that holds to this at connection time.
     """
-    parts = urllib.parse.urlsplit((url or "").strip())
-    if parts.scheme not in ("http", "https"):
-        raise Refused(f"only http(s) is read, not {parts.scheme or 'a bare path'}: {url!r}")
-    host = (parts.hostname or "").strip("[]").casefold()
-    if not host:
-        raise Refused(f"no host in {url!r}")
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-        raise Refused(f"{host} is this machine")
-    try:
-        addresses = [str(ipaddress.ip_address(host))]
-    except ValueError:
-        addresses = _addresses(host)
-    for address in addresses:
-        ip = ipaddress.ip_address(address.split("%")[0])
-        if not ip.is_global:
-            raise Refused(f"{host} resolves to {ip}, which is not on the public internet")
+    parts, host, port = split(url)
+    resolve(host, port, Limits(resolver=lambda name, _port: _addresses(name)))
     return urllib.parse.urlunsplit(parts)

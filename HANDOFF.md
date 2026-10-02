@@ -857,6 +857,37 @@ worth taking, in this order:
   facts the fleet app's cluster view already shows, in a terminal. Worth it only if a
   headless machine wants one.
 
+### Security (ml-stack issue #18)
+
+What the 2026-10 hardening pass left open; `docs/security.md` has the model and the findings.
+- [ ] **A daemon's certificate is renewed only when it starts.** `tls.identity` makes a new
+  one when under 30 days of the 90 are left, but a daemon that runs longer than 60 days
+  keeps serving the old one until it restarts. Renewing in place means rebuilding the
+  `SSLContext` the server holds and re-announcing the new certificate; peers re-pin from the
+  next beacon.
+- [ ] **A reply is not signed.** Inside TLS this is moot for a peer that pinned the
+  certificate; a daemon run with `ML_STACK_FLEET_TLS=off` still sends replies anyone on the
+  segment can forge.
+- [ ] **A cluster joined before protocol 2 cannot onboard a machine by passphrase** (it has
+  no salt to tell). Each machine of it must join again; `ml-stack-peers setup` does that.
+- [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**
+  `ml_stack.httpguard.fetch` pins the checked address for the connection and checks every
+  redirect; the page reader and the browser (a redirect or a sub-request inside Playwright
+  reaches a private address unchecked) should use it, or a `page.route` that applies
+  `httpguard.resolve`. Another branch owns `web.py`.
+- [ ] **`hub/` calls `huggingface_hub` without `token=`.** `credentials.get("HF_TOKEN")` is the
+  resolver; `listing.py`, `cards.py`, `drafts.py`, `spec/engine.py` and `mlx_tree.py` should
+  pass it so `ML_STACK_CREDENTIALS_FILE` and the keychain reach a download.
+- [ ] **37 `except ...: pass` sites report as S110 and S112** (device probes, memory
+  readings, the accelerator reports in `train/accelerator.py`). Each should name the
+  exception it expects and log the rest at debug.
+- [ ] **`fleet/api.py` `do_GET` and `_route_post` are 99 and 115 statements.** Splitting each
+  route into a method is what clears PLR0915 there.
+- [ ] **`scripts/test-on-linux` was not run for this pass,** and CI's `pip install` lines are
+  unpinned and unhashed (there is no lockfile to audit with `pip-audit` or `osv-scanner`).
+- [ ] **Windows job objects.** A server survives a killed host only until the watchdog
+  notices; on Windows the watchdog is all there is, and it was not run there.
+
 ## Verifying
 
 ```bash

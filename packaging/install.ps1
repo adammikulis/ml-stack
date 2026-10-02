@@ -126,7 +126,14 @@ function Install-App {
             $asset = $release.assets | Where-Object { $_.name -like "*$key*" } | Select-Object -First 1
             if (-not $asset) { throw "release $($release.tag_name) has no download for $key" }
             Write-Host "Downloading $($release.tag_name)..."
+            $want = ([string]$asset.digest) -replace '^sha256:', ''
+            if ($want -notmatch '^[0-9a-fA-F]{64}$') {
+                throw "release $($release.tag_name) reports no sha256 for $key, so it cannot be checked"
+            }
             Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+            if ((Get-FileHash -Algorithm SHA256 -Path $zip).Hash -ne $want.ToUpper()) {
+                throw "the download does not match the sha256 GitHub reports for it"
+            }
         }
         Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp "out") -Force
 

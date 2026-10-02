@@ -174,12 +174,12 @@ def _recorded() -> dict[int, dict]:
 def _stop(port: int, entry: Mapping[str, Any]) -> bool:
     """Stop the server on ``port``. True when a process was ended."""
     from ml_stack.platform import stop_pid
-    from ml_stack.serve.manager import _DEFAULT
+    from ml_stack.serve.manager import default_manager
 
     pid = entry.get("pid")
     if isinstance(pid, int) and pid > 0:
         stop_pid(pid)
-    return _DEFAULT.reclaim(int(port)) or isinstance(pid, int)
+    return default_manager().reclaim(int(port)) or isinstance(pid, int)
 
 
 def reclaim_idle(*, older_than: float, idleness: Idleness | None = None,

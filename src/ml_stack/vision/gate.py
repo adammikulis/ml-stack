@@ -50,7 +50,7 @@ class VisionGate:
 
     def build_probe(self, *, size: int = 256) -> tuple[bytes, tuple[str, ...]]:
         """A probe image and the colours in it, in order."""
-        rng = random.Random(self.seed) if self.seed is not None else random.Random()
+        rng = random.Random(self.seed) if self.seed is not None else random.Random()  # noqa: S311 - a sample, not a secret
         names = rng.sample(sorted(PALETTE), k=min(self.bands, len(PALETTE)))
         colours = [PALETTE[n][0] for n in names]
         return probe_png(colours, size=size), tuple(names)

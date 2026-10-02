@@ -381,3 +381,15 @@ def test_a_source_is_re_read_under_the_slug_it_was_read_under(tmp_path):
     record.save()
 
     assert sources_for(out)(wanted[0].id) == wanted[0].text
+
+
+@pytest.mark.parametrize("bomb", [
+    '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;">]>'
+    '<doc><section id="1">&b;</section></doc>',
+    '<!doctype x><doc/>',
+    '<doc><!ENTITY e "x"></doc>',
+    '<!DOCTYPE x SYSTEM "file:///etc/passwd"><doc/>',
+])
+def test_xml_that_declares_a_doctype_or_an_entity_is_refused(bomb):
+    with pytest.raises(ValueError, match="DOCTYPE or an entity"):
+        html.read_xml(bomb)

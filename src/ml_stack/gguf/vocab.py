@@ -43,7 +43,6 @@ def set_metadata(
     """Copy ``src`` to ``dst``, overriding the metadata keys in ``values``."""
     try:
         import numpy as np
-
         from gguf import GGUFReader, GGUFValueType, GGUFWriter
     except ImportError as exc:  # pragma: no cover
         raise VocabPatchError("the `gguf` and `numpy` packages are required") from exc

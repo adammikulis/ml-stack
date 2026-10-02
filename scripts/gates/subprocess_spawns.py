@@ -14,6 +14,7 @@ OWNS = (
     "src/ml_stack/platform.py",
     "src/ml_stack/jobs.py",
     "src/ml_stack/serve/backend.py",
+    "src/ml_stack/serve/exit_guard.py",
 )
 
 

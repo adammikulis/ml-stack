@@ -15,10 +15,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import credentials, home
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
+from ml_stack.serve import exit_guard
 from ml_stack.serve.binary import child_env, require_binary
+from ml_stack.serve.leases import recorded_servers
+from ml_stack.serve.logs import prune
 from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 
 logger = logging.getLogger(__name__)
@@ -40,11 +43,13 @@ def logs_of(name: str, port: int) -> list[Path]:
 
 
 def server_log(name: str, port: int) -> Path:
-    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`."""
+    """A new log path for ``name`` starting on ``port``, removing the oldest past `LOGS_KEPT`
+    and, across every port, past the count, size and age `ml_stack.serve.logs.limits` allows."""
     logs = log_dir()
-    logs.mkdir(parents=True, exist_ok=True)
+    logs.mkdir(parents=True, exist_ok=True, mode=0o700)
     for old in logs_of(name, port)[:-(LOGS_KEPT - 1) or None]:
         old.unlink(missing_ok=True)
+    prune(logs, [Path(str(one["log"])) for one in recorded_servers().values() if one.get("log")])
     return logs / f"{name}-{port}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 
 
@@ -443,6 +448,7 @@ class Lease:
     port: int
     owner_pid: int
     state_file: str
+    stop_on_exit: bool = True
 
 
 class ServerBackend(ABC):
@@ -473,22 +479,27 @@ def claim_port(spec: ServerSpec, lease: Lease) -> None:
             )
 
 
-def launch(argv: list[str], *, port: int, log_path: Path, timeout: float,
+def launch(argv: list[str], lease: Lease, *, log_path: Path, timeout: float,
            env: dict[str, str]) -> tuple[Any, str, float]:
     """``(process, base_url, load seconds)`` for ``argv`` started and answering its health check.
 
-    Raises ``ServerFailed`` with the log's tail when it exits or never answers.
+    The server stops with this process when the lease says ``stop_on_exit``. Raises
+    ``ServerFailed`` with the log's tail when it exits or never answers.
     """
+    port = lease.port
     started_at = time.monotonic()
     with log_path.open("wb") as log_handle:
         process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
                                    **process_group_kwargs())
+    if lease.stop_on_exit:
+        exit_guard.protect(process.pid)
     base_url = f"http://{DEFAULT_HOST}:{port}"
     if not wait_for_health(base_url, timeout=timeout, is_alive=lambda: process.poll() is None):
         code = process.poll()
         process.terminate()
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=5.0)
+        exit_guard.release(process.pid)
         raise ServerFailed(
             f"{Path(argv[0]).name} did not become healthy on {base_url}"
             + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
@@ -799,9 +810,13 @@ class LlamaServerBackend(ServerBackend):
             # once at startup. Without it, escalate()'s summariser has a token count and
             # nothing to summarise.
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
+        if spec.is_hf_ref or ServerSpec.hf_parts(spec.draft or ""):
+            token = credentials.get("HF_TOKEN")
+            if token:
+                extra_env["HF_TOKEN"] = str(token)
 
         process, base_url, load_s = launch(
-            argv, port=spec.port, log_path=log_path, timeout=timeout,
+            argv, lease, log_path=log_path, timeout=timeout,
             env=child_env(self.binary, extra_env or None))
 
         warmup_s = None

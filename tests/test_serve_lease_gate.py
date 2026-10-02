@@ -190,3 +190,22 @@ def test_a_lease_leaves_a_server_another_live_process_holds(tmp_path):
         if held.poll() is None:
             held.kill()
         held.wait()
+
+
+def test_a_pid_reused_by_another_process_is_not_a_server_to_stop(tmp_path, monkeypatch):
+    from ml_stack.serve.leases import orphaned
+    from ml_stack.serve.manager import stop_all_servers
+
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path))
+    stranger = _sleeper()
+    try:
+        entry = {"port": 9111, "pid": stranger.pid, "owner_pid": 999_999_998,
+                 "backend": "fake", "model": "fine.gguf", "started": 1.0}
+        (tmp_path / "servers.json").write_text(json.dumps({"9111": entry}))
+
+        assert not orphaned(entry)
+        assert stop_all_servers() == []
+        assert stranger.poll() is None
+    finally:
+        stranger.kill()
+        stranger.wait()

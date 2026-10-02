@@ -61,6 +61,11 @@ def is_windows() -> bool:
     return _platform.system() == "Windows"
 
 
+def applescript_quote(text: str) -> str:
+    """``text`` safe inside an AppleScript string literal."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 # -- starting and stopping a child -----------------------------------------------------
 def process_group_kwargs() -> dict[str, Any]:
     """The ``Popen`` keywords that put a child in a process group of its own.

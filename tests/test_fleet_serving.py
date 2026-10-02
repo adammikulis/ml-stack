@@ -15,7 +15,7 @@ from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Endpoint, Serving, answers
-from ml_stack.http import Server
+from ml_stack.http import Server, build_request
 from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 
@@ -39,12 +39,10 @@ class Running:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def post(self, path, body=None, token=None, stream=False):
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}{path}",
-            data=json.dumps(body or {}).encode(), method="POST")
-        req.add_header("Content-Type", "application/json")
-        if token is not False:
-            req.add_header("Authorization", f"Bearer {token or self.token}")
+        req = build_request(
+            f"http://127.0.0.1:{self.port}{path}", data=json.dumps(body or {}).encode(),
+            method="POST", headers={"Content-Type": "application/json"},
+            token="" if token is False else (token or self.token))
         return urllib.request.urlopen(req, timeout=30)
 
     def close(self):
@@ -204,6 +202,35 @@ class TestProxy:
                      "/infer/embedding"):
             with daemon.post(path, {}) as r:
                 assert r.status == 200, path
+
+    @pytest.mark.parametrize("path", [
+        "/infer/v1/../props", "/infer/v1/%2e%2e/slots", "/infer/admin", "/infer/", "/infer",
+        "/infer//etc/passwd", "/infer/v1/x%20y", "/infer/slots/0?action=erase",
+        "/infer/props", "/infer/models",
+    ])
+    def test_a_path_that_is_not_the_model_servers_to_give_is_refused(self, wired, path):
+        daemon, _, _ = wired
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            daemon.post(path, {})
+        assert exc.value.code == 403, path
+
+    def test_the_caches_and_properties_of_the_model_server_are_read_not_written(self, wired):
+        daemon, _, _ = wired
+        for path in ("/infer/slots", "/infer/props"):
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                daemon.post(path, {})
+            assert exc.value.code == 403, path
+
+    def test_a_path_cannot_name_another_host(self, wired):
+        """`/infer@host:port/` would read as userinfo in front of a host the caller picked."""
+        daemon, _, _ = wired
+        other = FakeLlamaServer(Served(answer="elsewhere"))
+        try:
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                daemon.post(f"/infer@127.0.0.1:{other.port}/v1/chat/completions", {})
+            assert exc.value.code == 404
+        finally:
+            other.close()
 
 
 class TestEndpoint:

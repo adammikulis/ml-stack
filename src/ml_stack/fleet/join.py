@@ -34,6 +34,7 @@ from ml_stack.units import human_bytes
 
 from .discovery import (
     DEFAULT_CLUSTER,
+    SEARCH,
     Beacon,
     DiscoveryError,
     default_port,
@@ -473,7 +474,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
         if running is not None:
             (enrol or (lambda words, g: _enrol_via_daemon(port, words, g)))(passphrase, group)
         else:
-            join_cluster(passphrase, group=group, path=cluster_key_path)
+            join_cluster(passphrase, group=group, path=cluster_key_path, salting=SEARCH)
         say(f"joined cluster '{group}'")
     elif not in_cluster(cluster_key_path):
         raise JoinError("this machine is in no cluster and no passphrase was given -- "

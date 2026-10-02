@@ -10,6 +10,7 @@ import pytest
 from decide_fakes import logprob_handler
 
 from ml_stack.fleet.api import Daemon, make_handler
+from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.deciding import MAX_REQUEST, Deciding
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.http import Server, ServerError, request_bytes
@@ -23,11 +24,12 @@ def api(tmp_path, server):
     files.mkdir()
     runner = JobRunner(tmp_path / "traind")
     decide = Deciding(config=router.Config(url=chat.base_url))
-    httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, files, "tok", decide=decide)))
+    good = load_or_create_token(tmp_path / "root")
+    httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, files, good, decide=decide)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
 
-    def post(body, *, token="tok", raw=None):
+    def post(body, *, token=good, raw=None):
         data = raw if raw is not None else json.dumps(body).encode()
         try:
             got = request_bytes(f"{base}/decide", data=data, method="POST", token=token,
@@ -99,12 +101,13 @@ def test_a_daemon_without_a_decider_answers_501(tmp_path):
     files = tmp_path / "files"
     files.mkdir()
     runner = JobRunner(tmp_path / "traind")
-    httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, files, "tok")))
+    good = load_or_create_token(tmp_path / "root")
+    httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, files, good)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         with pytest.raises(ServerError) as err:
             request_bytes(f"http://127.0.0.1:{httpd.server_address[1]}/decide", data=b"{}",
-                          method="POST", token="tok", timeout=5)
+                          method="POST", token=good, timeout=5)
         assert err.value.status == 501
     finally:
         runner.shutdown()

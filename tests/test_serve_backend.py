@@ -457,6 +457,7 @@ class TestResolvedContext:
 
 class TestLaunchRefusal:
     def test_it_refuses_before_anything_is_started(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
         """A refusal that comes after the load costs the load. Nothing may be started."""
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
@@ -500,6 +501,7 @@ class TestLaunchRefusal:
         assert not issubclass(UnknownFlag, ServerFailed)
 
     def test_the_check_can_be_skipped_for_a_stand_in_binary(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("ml_stack.hub.machine_room", lambda: 1 << 40)
         reached: list[str] = []
 
         def popen(argv, *a, **k):

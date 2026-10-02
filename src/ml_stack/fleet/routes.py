@@ -727,7 +727,7 @@ class ClusterRoutes:
         return True
 
     def _clusters(self) -> bool:
-        from .discovery import join, leave, memberships
+        from .discovery import SEARCH, join, leave, memberships
         ui = self.ui
         if self.method == "GET":
             self.send(200, {"clusters": [m.public() for m in
@@ -738,7 +738,7 @@ class ClusterRoutes:
             words = str(req.get("passphrase") or "")
             group = str(req.get("group") or "").strip() or "ml-stack"
             try:
-                rows = join(words, group=group, path=ui.cluster_key_path)
+                rows = join(words, group=group, path=ui.cluster_key_path, salting=SEARCH)
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True

@@ -25,8 +25,8 @@
 | `ml_stack.backend` | One array API over MLX and PyTorch, so math is written once |
 | `ml_stack.testing` | Cross-backend numerical parity harness, behind `ml-stack-train-run parity`, and the fakes the suite shares |
 
-Everything above ships in one package. The extras carry what a module needs beyond the
-standard library: `[claude] [train] [train-lora] [serve] [gguf] [graph] [store]
+Everything above ships in one package. Its dependencies are `packaging` and `psutil`; the
+extras carry what a module needs beyond them: `[claude] [train] [train-lora] [gguf] [graph] [store]
 [scrape] [web] [hub] [vision] [pdf] [viz] [plot] [testing] [telemetry] [mcp] [standard]
 [privacy] [arrays] [test]`, plus `[torch]` and `[mlx]`, and `[all]`.
 

@@ -323,21 +323,14 @@ def _alive(pid: int) -> bool:
     """Whether ``pid`` is still doing something -- a zombie is not."""
     if not pid or pid <= 0:
         return False
-    try:
-        import psutil
+    import psutil
 
-        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
-    except ImportError:
-        pass
-    except psutil.Error:  # gone, or not ours to ask about
-        return False
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.AccessDenied:
         return True
-    return True
+    except psutil.Error:
+        return False
 
 
 def ended_badly(log: Path, *, lines: int = 60) -> str:

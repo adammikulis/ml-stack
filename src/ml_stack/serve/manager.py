@@ -14,12 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.hub import free_memory, room as machine_room
 from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
-from ml_stack.serve import admission, unmanaged
+from ml_stack.serve import admission, exit_guard, unmanaged
 from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
@@ -45,15 +46,18 @@ from ml_stack.serve.leases import (
     orphaned,
     reap_one,
     recorded_servers,
+    same_process,
 )
 from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import (
+    cmdline_digest,
     kill_process_tree,
     measuring,
     pid_exists,
     self_or_ancestor,
+    started_at,
 )
 from ml_stack.serve.python_engines import ENGINES
 from ml_stack.serve.weights import scaled_timeout, weight_of
@@ -118,7 +122,9 @@ class ServerManager(Admitting):
         *,
         state_file: Path | None = None,
         broker: Any = None,
+        stop_on_exit: bool = True,
     ) -> None:
+        self.stop_on_exit = stop_on_exit
         self.backend = backend or LlamaServerBackend()
         self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
@@ -131,6 +137,7 @@ class ServerManager(Admitting):
         self._lock = threading.Lock()
         self._port_locks: dict[int, threading.Lock] = {}
         self._unavailable_until: dict[int, float] = {}
+        self._swept = False
 
     def backend_for(self, spec: ServerSpec) -> ServerBackend:
         """The backend that serves ``spec``: the engine it names, tree decoding for MLX
@@ -146,7 +153,8 @@ class ServerManager(Admitting):
 
     def with_backend(self, backend: ServerBackend) -> ServerManager:
         """A manager over ``backend`` that shares this one's records and processes."""
-        other = ServerManager(backend, state_file=self.state_file, broker=self._broker)
+        other = ServerManager(backend, state_file=self.state_file, broker=self._broker,
+                              stop_on_exit=self.stop_on_exit)
         other._mine, other._processes = self._mine, self._processes
         other._lock, other._port_locks = self._lock, self._port_locks
         other.tree = self.tree
@@ -201,8 +209,9 @@ class ServerManager(Admitting):
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
 
+        told = say or self.say or logger.info
+        self._sweep_orphans(spec.port, told)
         with self._port_lock(spec.port):
-            told = say or self.say or logger.info
             entry = self._load().get(str(spec.port))
             stray = entry if isinstance(entry, dict) and orphaned(entry) else None
             try:
@@ -347,6 +356,20 @@ class ServerManager(Admitting):
         return replace(spec, parallel=params.total_slots,
                        context=params.n_ctx * params.total_slots)
 
+    def _sweep_orphans(self, keep: int, say: Callable[[str], None]) -> None:
+        """Once per manager, stop every server on this machine whose leasing process has gone,
+        except the one on ``keep``, which the lease about to run adopts or replaces. Only a
+        record that proves its pid still belongs to the server (start time and command
+        line) is acted on."""
+        with self._lock:
+            if self._swept:
+                return
+            self._swept = True
+        for port, entry in recorded_servers(self.state_file).items():
+            if port != keep and orphaned(entry, strict=True):
+                with self._port_lock(port):
+                    self._stop_orphan(port, entry, say=say, why="swept before a new start")
+
     def _stop_orphan(self, port: int, entry: dict, *, say: Callable[[str], None],
                      why: str) -> None:
         """Stop the orphaned server recorded on ``port`` and drop its record."""
@@ -468,6 +491,7 @@ class ServerManager(Admitting):
         emit(on_event, "stopping", port=spec.port, pid=pid)
         if pid:
             kill_process_tree(pid)
+            exit_guard.release(pid)
         self._forget(spec.port)
 
         # kv_unified keeps the cache's stream count at 1 across the relaunch; any other
@@ -509,6 +533,7 @@ class ServerManager(Admitting):
             held = info.process
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
+        exit_guard.release(info.pid)
         reap_one(held, grace_s=grace_s)
         self._forget(info.port)
 
@@ -519,6 +544,7 @@ class ServerManager(Admitting):
     def _detach(self, info: ServerInfo) -> None:
         """Record the server under its own pid and stop tracking it in this process."""
         self._processes.pop(info.port, None)
+        exit_guard.release(info.pid)
         entry = self._mine.pop(str(info.port), None)
         if entry is None or not info.pid:
             self._save()
@@ -539,12 +565,23 @@ class ServerManager(Admitting):
             pid = entry.get("pid")
             if isinstance(pid, int) and pid_exists(pid):
                 stopped += kill_process_tree(pid, grace_s=grace_s)
+            exit_guard.release(pid)
         for held in list(self._processes.values()):
             reap_one(held, grace_s=grace_s)
         self._processes.clear()
         self._mine.clear()
         self._save()
         return stopped
+
+    def close(self) -> None:
+        """Stop every server this manager started. Servers it adopted are left running."""
+        self.stop_all()
+
+    def __enter__(self) -> ServerManager:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     # ------------------------------------------------------------------ state file
 
@@ -564,7 +601,8 @@ class ServerManager(Admitting):
             "context": int(spec.context), "parallel": int(spec.parallel or 1),
         }
         self._save()
-        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
+        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file),
+                     stop_on_exit=self.stop_on_exit)
 
     def _record(self, spec: ServerSpec, info: ServerInfo) -> None:
         self._mine[str(spec.port)] = {
@@ -582,8 +620,11 @@ class ServerManager(Admitting):
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
+            "started": started_at(info.pid),
+            "cmdline": cmdline_digest(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
         }
+        forget_server(info.base_url)
         if info.process is not None:
             self._processes[info.port] = info.process
         self._save()
@@ -649,7 +690,17 @@ class ServerManager(Admitting):
         return reclaim_port(port, recorded_pids=[recorded] if recorded else None)
 
 
-_DEFAULT = ServerManager()
+_DEFAULT: ServerManager | None = None
+_DEFAULT_LOCK = threading.Lock()
+
+
+def default_manager() -> ServerManager:
+    """The manager `serve` uses when it is not given one, built on first use."""
+    global _DEFAULT
+    with _DEFAULT_LOCK:
+        if _DEFAULT is None:
+            _DEFAULT = ServerManager()
+        return _DEFAULT
 
 
 @contextmanager
@@ -672,7 +723,7 @@ def serve(
     ``roam``, ``escalate``, ``anyway``, ``on_event`` and ``say`` go to
     :meth:`ServerManager.lease`.
     """
-    manager = manager or _DEFAULT
+    manager = manager or default_manager()
     spec = ServerSpec(
         model=model,
         port=port if port is not None else free_port(),
@@ -704,7 +755,7 @@ def stop_all_servers() -> list[int]:
             kept[key] = entry
             continue
         pid = entry.get("pid")
-        if isinstance(pid, int) and pid_exists(pid):
+        if isinstance(pid, int) and same_process(entry):
             stopped += kill_process_tree(pid)
 
     if kept:

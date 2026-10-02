@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from typing import Any
 from ml_stack import home
 from ml_stack.files import promote
 from ml_stack.log import say, warn
+from ml_stack.platform import applescript_quote
 
 from .launch import last_screen
 
@@ -105,8 +107,8 @@ def _mac_path(mode: str) -> Path:
 def _ask_and_run(command: str, prompt: str) -> tuple[bool, str]:
     """Run a privileged command through the OS's own password dialog."""
     if sys.platform == "darwin":
-        script = (f'do shell script "{command}" with administrator privileges '
-                  f'with prompt "{prompt}"')
+        script = (f'do shell script "{applescript_quote(command)}" with administrator '
+                  f'privileges with prompt "{applescript_quote(prompt)}"')
         argv = ["osascript", "-e", script]
     elif sys.platform.startswith("linux") and shutil.which("pkexec"):
         argv = ["pkexec", "sh", "-c", command]
@@ -134,9 +136,8 @@ def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     body = plistlib.dumps(plist)
 
     if mode == "boot":
-        staged = log_dir / f"{LABEL}.plist"
-        staged.write_bytes(body)
-        command = f"cp '{staged}' '{path}' && launchctl load -w '{path}'"
+        command = (f"printf %s {shlex.quote(body.decode())} > {shlex.quote(str(path))} && "
+                   f"launchctl load -w {shlex.quote(str(path))}")
         ok, why = _ask_and_run(command, "ml-stack needs permission to start at boot")
         if ok:
             return Autostart(mode, installed=True, path=path)
@@ -179,11 +180,9 @@ def _unit(argv: list[str], mode: str) -> str:
 def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     body = _unit(argv, mode)
     if mode == "boot":
-        staged = log_dir / f"{SERVICE}.service"
-        staged.write_text(body)
         target = Path("/etc/systemd/system") / f"{SERVICE}.service"
-        command = (f"cp '{staged}' '{target}' && systemctl daemon-reload && "
-                   f"systemctl enable --now {SERVICE}")
+        command = (f"printf %s {shlex.quote(body)} > {shlex.quote(str(target))} && "
+                   f"systemctl daemon-reload && systemctl enable --now {SERVICE}")
         ok, why = _ask_and_run(command, "ml-stack needs permission to start at boot")
         if ok:
             return Autostart(mode, installed=True, path=target)

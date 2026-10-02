@@ -14,6 +14,7 @@ from ml_stack.http import Server, ServerError, open_stream
 
 from . import pausing
 from .discovery import (
+    SEARCH,
     DiscoveryError,
     check_passphrase,
     cluster_group,
@@ -209,7 +210,7 @@ class UI:
             raise DiscoveryError("busy deriving another key; try again in a moment")
         try:
             join_cluster(passphrase, group=group or "ml-stack",
-                         path=self.cluster_key_path)
+                         path=self.cluster_key_path, salting=SEARCH)
         finally:
             self.throttle.release()
         self.throttle.succeeded(source)
@@ -321,11 +322,11 @@ class UI:
     def join_fleet(self, *, passphrase: str = "", group: str = "", persist: bool = False,
                    name: str = "") -> dict[str, Any]:
         """The Join button: `join.join_machine`, with this daemon as the one already up."""
-        from .discovery import join as join_cluster
+        from .discovery import SEARCH, join as join_cluster
         from .join import join_machine
 
         def enrol(words: str, named: str) -> None:
-            join_cluster(words, group=named, path=self.cluster_key_path)
+            join_cluster(words, group=named, path=self.cluster_key_path, salting=SEARCH)
             self.rejoined()
 
         said: list[str] = []
