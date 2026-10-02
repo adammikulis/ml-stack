@@ -78,6 +78,9 @@ def classifier_screen():
 
 def nemo_screen(url: str):
     """A screen that asks NeMo Guardrails' self-check input rail, answered by the model at URL."""
+    from ml_stack.guard.nemo import quiet
+
+    quiet()
     from nemoguardrails import LLMRails, RailsConfig
     from nemoguardrails.rails.llm.options import RailStatus, RailType
 

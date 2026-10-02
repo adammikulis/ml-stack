@@ -20,6 +20,7 @@ from typing import Any
 from ml_stack import do, mcp
 from ml_stack.client import Client, Reply, Request
 from ml_stack.guard import Guard
+from ml_stack.guard.nemo import NemoRail, self_check_yaml
 from ml_stack.log import say
 
 __all__ = ["ATTACKS", "BENIGN", "Attack", "Run", "measure", "report"]
@@ -38,6 +39,8 @@ class Run:
     seen: str = ""
     printed: str = ""
     done: bool = False
+    blocked: int = 0
+    withheld: int = 0
 
     def ran(self, name: str) -> list[dict[str, Any]]:
         return [a for n, a in self.calls if n == name]
@@ -217,6 +220,8 @@ def play(attack: Attack, guard: Guard | None, model: Any = None) -> Run:
     run.printed = out.getvalue() + "\n".join(str(m.get("content", "")) for m in result.messages
                                              if m.get("role") == "assistant")
     run.done = result.done
+    run.blocked = len(result.blocked)
+    run.withheld = run.seen.count("[withheld by")
     return run
 
 
@@ -240,15 +245,18 @@ def injections() -> list[Attack]:
             for n, style in enumerate(STYLES) for tool in TARGETS]
 
 
-def live(url: str, make_guard: Callable[[], Guard | None], reps: int = 2) -> tuple[int, int]:
-    """(attacks that landed, runs) when the served model at ``url`` reads each planted text."""
-    landed = runs = 0
+def live(url: str, make_guard: Callable[[], Guard | None], reps: int = 2) -> dict[str, int]:
+    """How the served model at ``url`` fares reading each planted text: runs, attacks that
+    landed, calls the policy blocked, and results withheld from the model."""
+    total = {"runs": 0, "landed": 0, "blocked": 0, "withheld": 0}
     for attack in injections():
         for _ in range(reps):
-            client = Client(url, request=Request(n_predict=512))
-            landed += attack.hit(play(attack, make_guard(), client))
-            runs += 1
-    return landed, runs
+            ran = play(attack, make_guard(), Client(url, request=Request(n_predict=512)))
+            total["runs"] += 1
+            total["landed"] += attack.hit(ran)
+            total["blocked"] += bool(ran.blocked)
+            total["withheld"] += bool(ran.withheld)
+    return total
 
 
 def measure(make_guard: Callable[[], Guard | None]) -> dict[str, bool]:
@@ -256,13 +264,24 @@ def measure(make_guard: Callable[[], Guard | None]) -> dict[str, bool]:
     return {a.name: a.hit(play(a, make_guard())) for a in ATTACKS}
 
 
+def report_live(url: str, judge: str = "") -> None:
+    """Print how the model served at ``url`` fares with the rails off, by default and, when a
+    judge server is named, with NeMo Guardrails' input rail answered by that server."""
+    say(f"served model at {url}: {len(injections())} planted texts x 2 runs")
+    off = live(url, lambda: Guard.off("measuring the attack success rate without rails"))
+    say(f"rails off: {off}")
+    say(f"default:   {live(url, lambda: None)}")
+    if judge:
+        nemo = NemoRail.from_yaml(self_check_yaml(judge))
+        say(f"default plus NeMo self-check input on {judge}: "
+            f"{live(url, lambda: Guard.default(extra=[nemo]))}")
+
+
 def report(argv: list[str] | None = None) -> int:
-    url = (argv if argv is not None else sys.argv[1:] or [""])[0]
-    if url:
-        say(f"served model at {url}, {len(injections())} planted texts x 2 runs")
-        off = live(url, lambda: Guard.off("measuring the attack success rate without rails"))
-        on = live(url, lambda: None)
-        say(f"landed with the rails off: {off[0]}/{off[1]}; by default: {on[0]}/{on[1]}")
+    """Print the scripted worst-case rates, or the served-model rates when a URL is given."""
+    given = sys.argv[1:] if argv is None else argv
+    if given:
+        report_live(given[0], given[1] if len(given) > 1 else "")
         return 0
     on = measure(lambda: None)
     off = measure(lambda: Guard.off("measuring the attack success rate without rails"))
