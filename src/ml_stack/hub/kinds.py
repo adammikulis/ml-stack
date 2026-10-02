@@ -12,6 +12,8 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from ml_stack.decide import registry
+
 CHAT = "chat"
 EMBEDDING = "embedding"
 VISION = "vision"
@@ -41,8 +43,6 @@ def says_decision(*words: str) -> bool:
 
 def registered_paths() -> list[Path]:
     """The directories of every registered decider, and the local base models they sit on."""
-    from ml_stack.decide import registry  # lazy: decide sits above the hub
-
     out: list[Path] = []
     for row in registry.listing():
         root = Path(row["path"])
