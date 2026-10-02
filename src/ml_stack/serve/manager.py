@@ -49,6 +49,7 @@ from ml_stack.serve.matching import model_matches, serving_mismatch
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import (
+    cmdline_digest,
     kill_process_tree,
     measuring,
     pid_exists,
@@ -111,6 +112,7 @@ class ServerManager:
         self._lock = threading.Lock()
         self._port_locks: dict[int, threading.Lock] = {}
         self._unavailable_until: dict[int, float] = {}
+        self._swept = False
 
     def backend_for(self, spec: ServerSpec) -> ServerBackend:
         """The backend that serves ``spec``: the engine it names, tree decoding for MLX
@@ -185,8 +187,9 @@ class ServerManager:
         if refused:
             raise ServerFailed(refused)
 
+        told = say or self.say or logger.info
+        self._sweep_orphans(spec.port, told)
         with self._port_lock(spec.port):
-            told = say or self.say or logger.info
             entry = self._load().get(str(spec.port))
             stray = entry if isinstance(entry, dict) and orphaned(entry) else None
             try:
@@ -277,6 +280,20 @@ class ServerManager:
             return None
         return replace(spec, parallel=params.total_slots,
                        context=params.n_ctx * params.total_slots)
+
+    def _sweep_orphans(self, keep: int, say: Callable[[str], None]) -> None:
+        """Once per manager, stop every server on this machine whose leasing process has gone,
+        except the one on ``keep``, which the lease about to run adopts or replaces. Only a
+        record that proves its pid still belongs to the server (start time and command
+        line) is acted on."""
+        with self._lock:
+            if self._swept:
+                return
+            self._swept = True
+        for port, entry in recorded_servers(self.state_file).items():
+            if port != keep and orphaned(entry, strict=True):
+                with self._port_lock(port):
+                    self._stop_orphan(port, entry, say=say, why="swept before a new start")
 
     def _stop_orphan(self, port: int, entry: dict, *, say: Callable[[str], None],
                      why: str) -> None:
@@ -497,6 +514,7 @@ class ServerManager:
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
             "started": started_at(info.pid),
+            "cmdline": cmdline_digest(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
         }
         forget_server(info.base_url)
