@@ -19,7 +19,7 @@ from ml_stack.taint.extract import ExtractionError, check_schema, extract, quara
 from ml_stack.taint.judge import Finding, judge
 from ml_stack.taint.labels import Label, Labelled, Level, join
 from ml_stack.taint.ledger import SUMMARY_PREFIX, Ledger, ledger_of
-from ml_stack.taint.rail import TaintRail, turn_off
+from ml_stack.taint.rail import TaintOff, TaintRail, off
 from ml_stack.taint.sinks import (
     HARD,
     Arg,
@@ -46,6 +46,7 @@ __all__ = [
     "Sink",
     "Sinks",
     "TaintEvent",
+    "TaintOff",
     "TaintRail",
     "check_schema",
     "claude_code",
@@ -55,9 +56,9 @@ __all__ = [
     "judge",
     "ledger_of",
     "ml_stack_tools",
+    "off",
     "quarantined",
     "sinks_from_mcp",
     "subscribe",
-    "turn_off",
     "validate",
 ]

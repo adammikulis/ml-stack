@@ -9,6 +9,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ml_stack.interventions import HOOK_FAILURES
+
 __all__ = ["TaintEvent", "emit", "subscribe"]
 
 logger = logging.getLogger("ml_stack.guard")
@@ -53,5 +55,5 @@ def emit(event: TaintEvent) -> None:
     for fn in listeners:
         try:
             fn(event)
-        except Exception:
+        except HOOK_FAILURES:
             logger.exception("taint subscriber %r failed", fn)
