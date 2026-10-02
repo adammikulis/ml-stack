@@ -19,6 +19,7 @@ from typing import Any
 
 from ml_stack import do, guard as rails, mcp
 from ml_stack.client import Client, Reply, Request
+from ml_stack.guard.native import Leased, screen
 from ml_stack.guard.nemo import NemoRail, self_check_yaml
 from ml_stack.log import say
 
@@ -272,8 +273,6 @@ def report_live(url: str, judge: str = "") -> None:
     """Print how the model served at ``url`` fares with the rails off, with the built-in rails
     alone, with the native judge on that same server and, when a judge server is named, with
     NeMo Guardrails' input rail answered by that server."""
-    from ml_stack.guard.native import Leased, screen
-
     say(f"served model at {url}: {len(injections())} planted texts x 2 runs")
     off = live(url, lambda: rails.off("measuring the attack success rate without rails"))
     say(f"rails off: {off}")

@@ -10,9 +10,9 @@ person, collects `Guide` messages and tracks whether text from outside the perso
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import inspect
 import logging
-import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -434,21 +434,8 @@ def _sync(coro: Awaitable[Any]) -> Any:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)  # type: ignore[arg-type]
-    box: list[tuple[bool, Any]] = []
-
-    def go() -> None:
-        try:
-            box.append((True, asyncio.run(coro)))  # type: ignore[arg-type]
-        except BaseException as exc:  # noqa: BLE001 - carried to the caller
-            box.append((False, exc))
-
-    thread = threading.Thread(target=go)
-    thread.start()
-    thread.join()
-    ok, value = box[0]
-    if not ok:
-        raise value
-    return value
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()  # type: ignore[arg-type]
 
 
 async def guard_tool_call(call: Call, context: Context, execute: Callable[[Call], Any],

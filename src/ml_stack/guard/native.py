@@ -21,9 +21,11 @@ from ml_stack.decide.base import Many, State
 from ml_stack.decide.guard import Policy, ToolCallGuard
 from ml_stack.decide.logprob import Chat, LogprobDecider
 from ml_stack.decide.types import DecideError, Decision, Options
+from ml_stack.fleet.sizing import estimate
 from ml_stack.guard.judge import SYSTEM, Judge, TextScreen
 from ml_stack.guard.policy import SENSITIVE
 from ml_stack.interventions import Base, Call, Context, Proceed, Verdict
+from ml_stack.serve import broker_wire
 
 __all__ = ["CANDIDATES", "ENV", "CallScreen", "Leased", "pick_model", "screen"]
 
@@ -42,6 +44,7 @@ CANDIDATES = (
 measured (`docs/guardrails.md`, `docs/decision-models.md`), smallest first."""
 CHECKS = ("destructive", "grounded", "requested")
 PURPOSE = "guard"
+FAILED = (RuntimeError, OSError, ValueError)
 CONTEXT = 4096
 COOLDOWN_S = 60.0
 
@@ -51,8 +54,6 @@ def pick_model(candidates: Sequence[str] = CANDIDATES, *,
                size: Callable[[str], int] | None = None) -> str:
     """The first of ``candidates`` whose file is on this machine and fits in the free memory
     (unknown room fits), as a path; empty when none does."""
-    from ml_stack.fleet.sizing import estimate
-
     sizer = size or (lambda path: estimate(path, context=CONTEXT, draft=""))
     free = room()
     for name in candidates:
@@ -94,7 +95,7 @@ class Leased(Many):
                 raise DecideError("the guard's model is not available; retrying later")
             try:
                 url = self.url or (str(self.grant.base_url) if self.grant else self._lease())
-            except Exception as exc:
+            except FAILED as exc:
                 self.down_until = self.clock() + self.cooldown
                 raise DecideError(f"no server for the guard's model: {exc}") from exc
             chat = Chat(url=url, timeout=self.request_timeout, **({"system": system} if system else {}))
@@ -106,8 +107,6 @@ class Leased(Many):
         return _View(self, system)
 
     def _lease(self) -> str:
-        from ml_stack.serve import broker_wire
-
         model = self.model or pick_model()
         if not model:
             raise DecideError("no installed model can serve as the guard's judge")
@@ -127,11 +126,9 @@ class Leased(Many):
         with self._lock:
             grant, self.grant, self.inner = self.grant, None, {}
         if grant is not None:
-            from ml_stack.serve import broker_wire
-
             try:
                 broker_wire.release(grant.lease)
-            except Exception as exc:  # noqa: BLE001 - the broker reaps leases of ended processes
+            except FAILED as exc:
                 logger.debug("guard lease not released: %s", exc)
 
 
