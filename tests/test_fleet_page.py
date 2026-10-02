@@ -35,6 +35,17 @@ def sample_fits():
     ]
 
 
+@pytest.fixture(autouse=True)
+def no_release_lookup(monkeypatch):
+    """The settings view asks the daemon for the newest release; a test does not ask GitHub."""
+    from ml_stack.fleet import updates
+
+    def offline(*args, **kwargs):
+        raise updates.UpdateError("no network in tests")
+
+    monkeypatch.setattr(updates, "check", offline)
+
+
 @pytest.fixture(scope="session")
 def browser(playwright):
     try:

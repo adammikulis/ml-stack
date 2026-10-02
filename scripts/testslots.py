@@ -13,7 +13,14 @@ Protocol (stdlib only, so other repos can carry an identical copy and share the 
     (its owner died) and is removed by whoever notices.
   * `mutex.lock` serialises decisions. Only the OLDEST waiting slot may be granted (no starvation); it gets
     min(want, budget - granted_total) workers once that is >= minimum.
-  * budget = $DEV_TEST_BUDGET, else 3/4 of the cores (the rest is left for kicad-cli, Chrome and model servers).
+  * budget = $DEV_TEST_BUDGET, else LOAD-AWARE: 3/4 of the cores normally, up to all the cores while the 1-minute load
+    average is under 3/4 of the cores (the machine is idle: use it), down to half of the base while it is over twice the
+    cores (it is already saturated: back off). Thresholds: $DEV_TEST_LOAD_LOW / $DEV_TEST_LOAD_HIGH (multiples of cores).
+    The cap is re-evaluated every time a waiting run is considered; running leases are never shrunk.
+  * HEAVY LANES: a few tests spawn multi-threaded tools (one `kicad-cli` DRC can use 8 cores). Those tests wrap
+    themselves in `heavy_lane()`: at most $DEV_TEST_HEAVY_LANES (default cores/4, min 2) of them run at the same time
+    machine-wide, across all runs. A lane is a leaf resource (a test holding one waits for nothing else), so it cannot
+    deadlock; after $DEV_TEST_LANE_WAIT_S (default 600) a test runs anyway and says so.
   * $DEV_TEST_WAIT_S bounds the wait (default 3600 s); $DEV_TEST_SLOTS=off disables the queue (explicit, logged).
 
 CLI:  python scripts/testslots.py status
@@ -40,11 +47,38 @@ def slots_dir() -> Path:
     return d
 
 
+def _cores() -> int:
+    return os.cpu_count() or 4
+
+
+def base_budget(cores: int | None = None) -> int:
+    return max(2, (cores or _cores()) * 3 // 4)
+
+
+def cap_for(load1: float | None, cores: int | None = None, low: float | None = None, high: float | None = None) -> int:
+    """The worker cap for a given 1-minute load average (pure, so it can be tested)."""
+    cores = cores or _cores()
+    low = low if low is not None else float(os.environ.get("DEV_TEST_LOAD_LOW", "0.75"))
+    high = high if high is not None else float(os.environ.get("DEV_TEST_LOAD_HIGH", "2.0"))
+    base = base_budget(cores)
+    if load1 is None:
+        return base
+    if load1 < low * cores:
+        return max(base, cores)
+    if load1 > high * cores:
+        return max(2, base // 2)
+    return base
+
+
 def budget() -> int:
     raw = os.environ.get("DEV_TEST_BUDGET")
     if raw and raw.isdigit() and int(raw) > 0:
         return int(raw)
-    return max(2, (os.cpu_count() or 4) * 3 // 4)
+    try:
+        load1 = os.getloadavg()[0]
+    except (OSError, AttributeError):
+        load1 = None
+    return cap_for(load1)
 
 
 @dataclass
@@ -103,7 +137,7 @@ def status() -> dict:
     with _mutex(d):
         slots = _read(d)
     running = [s for s in slots if s.granted > 0]
-    return {"budget": budget(), "in_use": sum(s.granted for s in running),
+    return {"budget": budget(), "base": base_budget(), "in_use": sum(s.granted for s in running),
             "running": [s.data for s in running], "waiting": [s.data for s in slots if s.granted == 0]}
 
 
@@ -162,6 +196,50 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
         os.close(fd)
 
 
+def _lane_count() -> int:
+    raw = os.environ.get("DEV_TEST_HEAVY_LANES")
+    if raw and raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return max(2, _cores() // 4)
+
+
+@contextlib.contextmanager
+def heavy_lane(label: str = "heavy test", say=lambda m: print(m, file=sys.stderr, flush=True)) -> Iterator[None]:
+    """Hold one of the machine-wide HEAVY lanes while a test that spawns a multi-threaded tool runs."""
+    if os.environ.get("DEV_TEST_SLOTS", "").lower() == "off":
+        yield
+        return
+    d = slots_dir()
+    n = _lane_count()
+    deadline = time.time() + float(os.environ.get("DEV_TEST_LANE_WAIT_S", "600"))
+    fd = -1
+    noted = False
+    while fd < 0:
+        for i in range(n):
+            f = os.open(d / f"heavy-{i}.lane", os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                os.close(f)
+                continue
+            fd = f
+            break
+        if fd >= 0:
+            break
+        if time.time() > deadline:
+            say(f"testslots: no heavy lane free after the wait limit; running {label} anyway")
+            break
+        if not noted:
+            noted = True
+            say(f"testslots: {label} waits for one of {n} heavy lanes")
+        time.sleep(0.2)
+    try:
+        yield
+    finally:
+        if fd >= 0:
+            os.close(fd)                                  # closing releases the flock
+
+
 def _run_command(argv: list[str]) -> int:
     import argparse
     import subprocess
@@ -187,7 +265,12 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         return 2
     st = status()
-    print(f"budget {st['budget']} workers, {st['in_use']} in use")
+    try:
+        load = f"{os.getloadavg()[0]:.1f}"
+    except (OSError, AttributeError):
+        load = "?"
+    print(f"budget {st['budget']} workers (base {st['base']}; load {load} on {_cores()} cores), {st['in_use']} in use, "
+          f"{_lane_count()} heavy lane(s)")
     for s in st["running"]:
         print(f"  running  {s['granted']:>2}  pid {s['pid']:<7} {s['label']}")
     for s in st["waiting"]:

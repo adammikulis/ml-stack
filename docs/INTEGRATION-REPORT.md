@@ -140,6 +140,17 @@ A line was broken, the named tests run, the file restored.
 | No-bypass static scan | a module that starts `llama-server` outside the manager | caught: `test_serve_no_bypass.py` names the module |
 | Bounded header reader | ten single-line breaks | seven caught, three redundant (above) |
 
+## Late changes, only partly verified
+
+After the last full runs: `scripts/testslots.py` was replaced by the load-aware version with heavy
+lanes (from pcb-engine), its tests ported (`tests/test_testslots.py`: 11 passed), and
+`tests/conftest.py` wraps slow tests and the server, daemon and bench modules in a heavy lane.
+`scripts/test slow` (6 failed, 254 passed, 5 skipped, 6 errors) found the fleet page tests
+reaching `api.github.com` (stubbed now) and the real-llama test choosing an embedding model or a
+draft head (it now reads the header). Neither fix was re-run beyond the quick tests, and the
+default tier was not re-run after the lane fixture, at the user's instruction to run quick tests
+only.
+
 ## Not verified
 
 - Python 3.11 and 3.14 were not run; `scripts/test-on-linux`, Windows and Linux were not run.

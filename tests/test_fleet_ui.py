@@ -41,6 +41,17 @@ SALT = b"a-test-clusters-salt"
 
 
 @pytest.fixture(autouse=True)
+def no_release_lookup(monkeypatch):
+    """The settings view asks the daemon for the newest release; a test does not ask GitHub."""
+    from ml_stack.fleet import updates
+
+    def offline(*args, **kwargs):
+        raise updates.UpdateError("no network in tests")
+
+    monkeypatch.setattr(updates, "check", offline)
+
+
+@pytest.fixture(autouse=True)
 def the_cluster_already_exists(monkeypatch):
     """The machines in these tests join a cluster whose salt every one of them is told."""
     from ml_stack.fleet import discovery

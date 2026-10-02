@@ -71,6 +71,33 @@ from ml_stack.testing.fakes import (  # noqa: E402
     fake_binary as fake_binary,
 )
 
+import testslots  # noqa: E402  (``scripts`` is on the path above)
+
+os.environ.setdefault("DEV_TEST_SLOTS_DIR", str(testslots.slots_dir()))
+"""The machine-wide slot directory, fixed before the session moves ``HOME`` so every worker and
+every run shares one set of heavy lanes."""
+
+LANE_FILES = frozenset({
+    "test_serve_real_llama", "test_sentinel_real_model", "test_serve_broker",
+    "test_serve_three_callers", "test_spec_serve", "test_fleet_daemon", "test_fleet_bind",
+    "test_fleet_join", "test_fleet_bench", "test_graph_bench", "test_graph_bench_animate",
+    "test_graph_store_scale",
+})
+"""Test modules that start a model server, a broker or a daemon process, or run a benchmark;
+they hold one of the machine's heavy lanes while each test runs, as do the slow tests (a
+browser, a subprocess, a wheel build)."""
+
+
+@pytest.fixture(autouse=True)
+def _heavy_lane(request):
+    node = request.node
+    if node.get_closest_marker("slow") or Path(str(node.fspath)).stem in LANE_FILES:
+        with testslots.heavy_lane(node.nodeid):
+            yield
+    else:
+        yield
+
+
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""
 

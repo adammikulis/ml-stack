@@ -19,12 +19,19 @@ import pytest
 
 from ml_stack import gate
 from ml_stack.client import Client
+from ml_stack.hub import header
 from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
 from ml_stack.serve.process import every_server, pid_exists
 
 pytestmark = pytest.mark.slow
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 LIMIT = 4 * 1024 ** 3
+
+
+def generates(path: Path) -> bool:
+    """Whether the file's header names a model that writes text, not an embedder or a draft head."""
+    architecture = str((header.meta(path) or {}).get("general.architecture", ""))
+    return bool(architecture) and "bert" not in architecture and "assistant" not in architecture
 
 
 def small_gguf(account: Path) -> Path | None:
@@ -34,7 +41,7 @@ def small_gguf(account: Path) -> Path | None:
     found = [p for root in (account / ".cache" / "huggingface" / "hub", account / ".cache")
              if root.is_dir() for p in root.rglob("*.gguf")
              if "vocab" not in p.name and "mmproj" not in p.name and "-of-" not in p.name
-             and 0 < p.stat().st_size < LIMIT]
+             and "mtp" not in p.name.lower() and 0 < p.stat().st_size < LIMIT and generates(p)]
     return min(found, key=lambda p: p.stat().st_size) if found else None
 
 

@@ -127,3 +127,65 @@ def test_the_run_command_queues_and_hands_the_granted_workers_to_the_command(tmp
     bad = subprocess.run([sys.executable, str(SCRIPT), "run", "--want", "1", "--", sys.executable, "-c", "raise SystemExit(7)"],
                          env=_env(tmp_path, 8), capture_output=True, text=True, timeout=60)
     assert bad.returncode == 7                                   # the command's exit status is passed through
+
+
+def _load():
+    spec = importlib.util.spec_from_file_location("testslots", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["testslots"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_cap_follows_the_load_average():
+    m = _load()
+    # 16 cores: base 12; an idle machine may use all 16; a saturated one backs off to half the base
+    assert m.cap_for(None, cores=16) == 12
+    assert m.cap_for(2.0, cores=16) == 16
+    assert m.cap_for(11.9, cores=16) == 16                    # just under 0.75 * cores
+    assert m.cap_for(12.0, cores=16) == 12
+    assert m.cap_for(31.9, cores=16) == 12                    # just under 2 * cores
+    assert m.cap_for(32.1, cores=16) == 6
+    assert m.cap_for(500.0, cores=4) == 2 and m.cap_for(0.1, cores=4) == 4   # a floor on small machines
+
+
+def test_a_pinned_budget_ignores_the_load(monkeypatch):
+    m = _load()
+    monkeypatch.setenv("DEV_TEST_BUDGET", "5")
+    assert m.budget() == 5
+
+
+HEAVY_CHILD = r'''
+import importlib.util, json, sys, time
+spec = importlib.util.spec_from_file_location("testslots", sys.argv[1]); m = importlib.util.module_from_spec(spec); sys.modules["testslots"] = m; spec.loader.exec_module(m)
+log = sys.argv[2]
+with m.heavy_lane("t", say=lambda s: None):
+    t0 = time.time(); time.sleep(float(sys.argv[3]))
+    with open(log, "a") as f:
+        f.write(json.dumps({"start": t0, "end": time.time()}) + "\n")
+'''
+
+
+def test_heavy_lanes_limit_concurrent_heavy_work_across_processes(tmp_path):
+    env = {**_env(tmp_path, 8), "DEV_TEST_HEAVY_LANES": "2"}
+    procs = [subprocess.Popen([sys.executable, "-c", HEAVY_CHILD, str(SCRIPT), str(tmp_path / "lanes.jsonl"), "0.6"],
+                              env=env) for _ in range(6)]
+    assert all(p.wait(timeout=60) == 0 for p in procs)
+    recs = [json.loads(x) for x in (tmp_path / "lanes.jsonl").read_text().splitlines()]
+    assert len(recs) == 6
+    for r in recs:
+        assert sum(1 for o in recs if o["start"] <= r["start"] + 1e-3 < o["end"]) <= 2, recs
+
+
+def test_a_killed_heavy_test_frees_its_lane(tmp_path):
+    env = {**_env(tmp_path, 8), "DEV_TEST_HEAVY_LANES": "1"}
+    holder = subprocess.Popen([sys.executable, "-c", HEAVY_CHILD, str(SCRIPT), str(tmp_path / "lanes.jsonl"), "60"],
+                              env=env)
+    time.sleep(1.0)
+    waiter = subprocess.Popen([sys.executable, "-c", HEAVY_CHILD, str(SCRIPT), str(tmp_path / "lanes.jsonl"), "0.1"],
+                              env=env)
+    time.sleep(1.0)
+    assert waiter.poll() is None
+    holder.send_signal(signal.SIGKILL)
+    assert waiter.wait(timeout=30) == 0
+    holder.wait(timeout=10)
