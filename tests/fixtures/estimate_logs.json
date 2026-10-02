@@ -1,0 +1,239 @@
+[
+ {
+  "model": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+  "file_bytes": 2497280448,
+  "meta": {
+   "general.architecture": "qwen3",
+   "general.type": "model",
+   "general.name": "Qwen3 4B Instruct 2507",
+   "general.version": "2507",
+   "general.finetune": "Instruct",
+   "general.basename": "Qwen3",
+   "general.size_label": "4B",
+   "general.license": "apache-2.0",
+   "general.license.link": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/main/LICENSE",
+   "qwen3.block_count": 36,
+   "qwen3.context_length": 262144,
+   "qwen3.embedding_length": 2560,
+   "qwen3.feed_forward_length": 9728,
+   "qwen3.attention.head_count": 32,
+   "qwen3.attention.head_count_kv": 8,
+   "qwen3.rope.freq_base": 5000000.0,
+   "qwen3.attention.layer_norm_rms_epsilon": 9.999999974752427e-07,
+   "qwen3.attention.key_length": 128,
+   "qwen3.attention.value_length": 128
+  },
+  "runs": [
+   {
+    "context": 2048,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 27\nI load: token to piece cache size = 0.9311 MB\nI load_tensors:   CPU_Mapped model buffer size =   304.28 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2375.91 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 2048\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (2048) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.58 MiB\nI llama_kv_cache:       MTL0 KV buffer size =   153.00 MiB\nI llama_kv_cache: size =  153.00 MiB (  2048 cells,  36 layers,  1/1 seqs), K (q8_0):   76.50 MiB, V (q8_0):   76.50 MiB\nI sched_reserve:       MTL0 compute buffer size =    77.09 MiB\nI sched_reserve:        CPU compute buffer size =    12.09 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 2048 tokens, 8589934592 est)"
+   },
+   {
+    "context": 8192,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 27\nI load: token to piece cache size = 0.9311 MB\nI load_tensors:   CPU_Mapped model buffer size =   304.28 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2375.91 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 8192\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.58 MiB\nI llama_kv_cache:       MTL0 KV buffer size =   612.00 MiB\nI llama_kv_cache: size =  612.00 MiB (  8192 cells,  36 layers,  1/1 seqs), K (q8_0):  306.00 MiB, V (q8_0):  306.00 MiB\nI sched_reserve:       MTL0 compute buffer size =    83.09 MiB\nI sched_reserve:        CPU compute buffer size =    18.09 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 8192 tokens, 8589934592 est)"
+   },
+   {
+    "context": 8192,
+    "kv": "f16",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 27\nI load: token to piece cache size = 0.9311 MB\nI load_tensors:   CPU_Mapped model buffer size =   304.28 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2375.91 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 8192\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.58 MiB\nI llama_kv_cache:       MTL0 KV buffer size =  1152.00 MiB\nI llama_kv_cache: size = 1152.00 MiB (  8192 cells,  36 layers,  1/1 seqs), K (f16):  576.00 MiB, V (f16):  576.00 MiB\nI sched_reserve:       MTL0 compute buffer size =    96.33 MiB\nI sched_reserve:        CPU compute buffer size =    18.01 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 8192 tokens, 8589934592 est)"
+   },
+   {
+    "context": 32768,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 27\nI load: token to piece cache size = 0.9311 MB\nI load_tensors:   CPU_Mapped model buffer size =   304.28 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2375.91 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 32768\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (32768) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.58 MiB\nI llama_kv_cache:       MTL0 KV buffer size =  2448.00 MiB\nI llama_kv_cache: size = 2448.00 MiB ( 32768 cells,  36 layers,  1/1 seqs), K (q8_0): 1224.00 MiB, V (q8_0): 1224.00 MiB\nI sched_reserve:       MTL0 compute buffer size =   201.68 MiB\nI sched_reserve:        CPU compute buffer size =    42.09 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 32768 tokens, 8589934592 est)"
+   }
+  ]
+ },
+ {
+  "model": "Qwen3.5-0.8B-Q4_K_M.gguf",
+  "file_bytes": 532517120,
+  "meta": {
+   "general.architecture": "qwen35",
+   "general.type": "model",
+   "general.name": "Qwen3.5-0.8B",
+   "general.basename": "Qwen3.5-0.8B",
+   "general.quantized_by": "Unsloth",
+   "general.size_label": "0.8B",
+   "general.license": "apache-2.0",
+   "general.license.link": "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/main/LICENSE",
+   "general.repo_url": "https://huggingface.co/unsloth",
+   "general.base_model.count": 1,
+   "general.base_model.0.name": "Qwen3.5 0.8B",
+   "general.base_model.0.organization": "Qwen",
+   "general.base_model.0.repo_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
+   "qwen35.block_count": 24,
+   "qwen35.context_length": 262144,
+   "qwen35.embedding_length": 1024,
+   "qwen35.feed_forward_length": 3584,
+   "qwen35.attention.head_count": 8,
+   "qwen35.attention.head_count_kv": 2,
+   "qwen35.rope.dimension_sections": [
+    11,
+    11,
+    10,
+    0
+   ],
+   "qwen35.rope.freq_base": 10000000.0,
+   "qwen35.attention.layer_norm_rms_epsilon": 9.999999974752427e-07,
+   "qwen35.attention.key_length": 256,
+   "qwen35.attention.value_length": 256,
+   "qwen35.ssm.conv_kernel": 4,
+   "qwen35.ssm.state_size": 128,
+   "qwen35.ssm.group_count": 16,
+   "qwen35.ssm.time_step_rank": 16,
+   "qwen35.ssm.inner_size": 2048,
+   "qwen35.full_attention_interval": 4,
+   "qwen35.rope.dimension_count": 64
+  },
+  "runs": [
+   {
+    "context": 2048,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI print_info: file size   = 497.39 MiB (5.55 BPW) \nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 33\nI load: token to piece cache size = 1.7581 MB\nI load_tensors:   CPU_Mapped model buffer size =   198.93 MiB\nI load_tensors:  MTL0_Mapped model buffer size =   497.39 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 2048\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (2048) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.95 MiB\nI llama_kv_cache:       MTL0 KV buffer size =    12.75 MiB\nI llama_kv_cache: size =   12.75 MiB (  2048 cells,   6 layers,  1/1 seqs), K (q8_0):    6.38 MiB, V (q8_0):    6.38 MiB\nI llama_memory_recurrent:       MTL0 RS buffer size =    19.27 MiB\nI llama_memory_recurrent: size =   19.27 MiB (     1 cells,  24 layers,  1 seqs  0 rs_seq), R (f32):    1.27 MiB, S (f32):   18.00 MiB, P (f32):    0.00 MiB\nI sched_reserve:       MTL0 compute buffer size =    42.48 MiB\nI sched_reserve:        CPU compute buffer size =     6.28 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 2048 tokens, 8589934592 est)"
+   },
+   {
+    "context": 8192,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI print_info: file size   = 497.39 MiB (5.55 BPW) \nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 33\nI load: token to piece cache size = 1.7581 MB\nI load_tensors:   CPU_Mapped model buffer size =   198.93 MiB\nI load_tensors:  MTL0_Mapped model buffer size =   497.39 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 8192\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.95 MiB\nI llama_kv_cache:       MTL0 KV buffer size =    51.00 MiB\nI llama_kv_cache: size =   51.00 MiB (  8192 cells,   6 layers,  1/1 seqs), K (q8_0):   25.50 MiB, V (q8_0):   25.50 MiB\nI llama_memory_recurrent:       MTL0 RS buffer size =    19.27 MiB\nI llama_memory_recurrent: size =   19.27 MiB (     1 cells,  24 layers,  1 seqs  0 rs_seq), R (f32):    1.27 MiB, S (f32):   18.00 MiB, P (f32):    0.00 MiB\nI sched_reserve:       MTL0 compute buffer size =    58.54 MiB\nI sched_reserve:        CPU compute buffer size =    12.28 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 8192 tokens, 8589934592 est)"
+   },
+   {
+    "context": 8192,
+    "kv": "f16",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI print_info: file size   = 497.39 MiB (5.55 BPW) \nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 33\nI load: token to piece cache size = 1.7581 MB\nI load_tensors:   CPU_Mapped model buffer size =   198.93 MiB\nI load_tensors:  MTL0_Mapped model buffer size =   497.39 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 8192\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (8192) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.95 MiB\nI llama_kv_cache:       MTL0 KV buffer size =    96.00 MiB\nI llama_kv_cache: size =   96.00 MiB (  8192 cells,   6 layers,  1/1 seqs), K (f16):   48.00 MiB, V (f16):   48.00 MiB\nI llama_memory_recurrent:       MTL0 RS buffer size =    19.27 MiB\nI llama_memory_recurrent: size =   19.27 MiB (     1 cells,  24 layers,  1 seqs  0 rs_seq), R (f32):    1.27 MiB, S (f32):   18.00 MiB, P (f32):    0.00 MiB\nI sched_reserve:       MTL0 compute buffer size =    54.40 MiB\nI sched_reserve:        CPU compute buffer size =    12.02 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 8192 tokens, 8589934592 est)"
+   },
+   {
+    "context": 32768,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI print_info: file size   = 497.39 MiB (5.55 BPW) \nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 33\nI load: token to piece cache size = 1.7581 MB\nI load_tensors:   CPU_Mapped model buffer size =   198.93 MiB\nI load_tensors:  MTL0_Mapped model buffer size =   497.39 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 32768\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (32768) < n_ctx_train (262144) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     0.95 MiB\nI llama_kv_cache:       MTL0 KV buffer size =   204.00 MiB\nI llama_kv_cache: size =  204.00 MiB ( 32768 cells,   6 layers,  1/1 seqs), K (q8_0):  102.00 MiB, V (q8_0):  102.00 MiB\nI llama_memory_recurrent:       MTL0 RS buffer size =    19.27 MiB\nI llama_memory_recurrent: size =   19.27 MiB (     1 cells,  24 layers,  1 seqs  0 rs_seq), R (f32):    1.27 MiB, S (f32):   18.00 MiB, P (f32):    0.00 MiB\nI sched_reserve:       MTL0 compute buffer size =   130.56 MiB\nI sched_reserve:        CPU compute buffer size =    36.28 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 32768 tokens, 8589934592 est)"
+   }
+  ]
+ },
+ {
+  "model": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+  "file_bytes": 2620370976,
+  "meta": {
+   "general.architecture": "gemma4",
+   "general.type": "model",
+   "general.sampling.top_k": 64,
+   "general.sampling.top_p": 0.949999988079071,
+   "general.sampling.temp": 1.0,
+   "general.size_label": "4.6B",
+   "gemma4.block_count": 35,
+   "gemma4.context_length": 131072,
+   "gemma4.embedding_length": 1536,
+   "gemma4.feed_forward_length": [
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    6144,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288,
+    12288
+   ],
+   "gemma4.attention.head_count": 8,
+   "gemma4.attention.head_count_kv": 1,
+   "gemma4.rope.freq_base": 1000000.0,
+   "gemma4.rope.freq_base_swa": 10000.0,
+   "gemma4.attention.layer_norm_rms_epsilon": 9.999999974752427e-07,
+   "gemma4.attention.key_length": 512,
+   "gemma4.attention.value_length": 512,
+   "gemma4.final_logit_softcapping": 30.0,
+   "gemma4.attention.sliding_window": 512,
+   "gemma4.attention.shared_kv_layers": 20,
+   "gemma4.embedding_length_per_layer_input": 256,
+   "gemma4.attention.sliding_window_pattern": [
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+    true,
+    false
+   ],
+   "gemma4.attention.key_length_swa": 256,
+   "gemma4.attention.value_length_swa": 256,
+   "gemma4.rope.dimension_count": 512,
+   "gemma4.rope.dimension_count_swa": 256
+  },
+  "runs": [
+   {
+    "context": 2048,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 24\nI load: token to piece cache size = 1.9445 MB\nI load_tensors:   CPU_Mapped model buffer size =  1476.00 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2483.90 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 2048\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (2048) < n_ctx_train (131072) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     1.00 MiB\nI llama_kv_cache_iswa: creating non-SWA KV cache, size = 2048 cells\nI llama_kv_cache:       MTL0 KV buffer size =     6.38 MiB\nI llama_kv_cache: size =    6.38 MiB (  2048 cells,   3 layers,  1/1 seqs), K (q8_0):    3.19 MiB, V (q8_0):    3.19 MiB\nI llama_kv_cache_iswa: creating     SWA KV cache, size = 1024 cells\nI llama_kv_cache:       MTL0 KV buffer size =     6.38 MiB\nI llama_kv_cache: size =    6.38 MiB (  1024 cells,  12 layers,  1/1 seqs), K (q8_0):    3.19 MiB, V (q8_0):    3.19 MiB\nI sched_reserve:       MTL0 compute buffer size =    99.80 MiB\nI sched_reserve:        CPU compute buffer size =    27.80 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 2048 tokens, 8589934592 est)"
+   },
+   {
+    "context": 8192,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 24\nI load: token to piece cache size = 1.9445 MB\nI load_tensors:   CPU_Mapped model buffer size =  1476.00 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2483.90 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 8192\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (8192) < n_ctx_train (131072) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     1.00 MiB\nI llama_kv_cache_iswa: creating non-SWA KV cache, size = 8192 cells\nI llama_kv_cache:       MTL0 KV buffer size =    25.50 MiB\nI llama_kv_cache: size =   25.50 MiB (  8192 cells,   3 layers,  1/1 seqs), K (q8_0):   12.75 MiB, V (q8_0):   12.75 MiB\nI llama_kv_cache_iswa: creating     SWA KV cache, size = 1024 cells\nI llama_kv_cache:       MTL0 KV buffer size =     6.38 MiB\nI llama_kv_cache: size =    6.38 MiB (  1024 cells,  12 layers,  1/1 seqs), K (q8_0):    3.19 MiB, V (q8_0):    3.19 MiB\nI sched_reserve:       MTL0 compute buffer size =   105.80 MiB\nI sched_reserve:        CPU compute buffer size =    33.80 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB"
+   },
+   {
+    "context": 8192,
+    "kv": "f16",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 24\nI load: token to piece cache size = 1.9445 MB\nI load_tensors:   CPU_Mapped model buffer size =  1476.00 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2483.90 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 8192\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (8192) < n_ctx_train (131072) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     1.00 MiB\nI llama_kv_cache_iswa: creating non-SWA KV cache, size = 8192 cells\nI llama_kv_cache:       MTL0 KV buffer size =    48.00 MiB\nI llama_kv_cache: size =   48.00 MiB (  8192 cells,   3 layers,  1/1 seqs), K (f16):   24.00 MiB, V (f16):   24.00 MiB\nI llama_kv_cache_iswa: creating     SWA KV cache, size = 1024 cells\nI llama_kv_cache:       MTL0 KV buffer size =    12.00 MiB\nI llama_kv_cache: size =   12.00 MiB (  1024 cells,  12 layers,  1/1 seqs), K (f16):    6.00 MiB, V (f16):    6.00 MiB\nI sched_reserve:       MTL0 compute buffer size =   104.52 MiB\nI sched_reserve:        CPU compute buffer size =    32.52 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 8192 tokens, 8589934592 est)"
+   },
+   {
+    "context": 32768,
+    "kv": "q8_0",
+    "log": "I common_memory_breakdown_print: | memory breakdown [MiB]  |  total     free    self   model   context   compute    unaccounted |\nI llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nI llama_prepare_model_devices: using device MTL0 (Apple M4 Max) (unknown id) - 110100 MiB free\nI load: special tokens cache size = 24\nI load: token to piece cache size = 1.9445 MB\nI load_tensors:   CPU_Mapped model buffer size =  1476.00 MiB\nI load_tensors:  MTL0_Mapped model buffer size =  2483.90 MiB\nI llama_context: n_seq_max             = 1\nI llama_context: n_ctx_seq             = 32768\nI llama_context: n_ubatch              = 512\nI llama_context: flash_attn            = enabled\nI llama_context: n_ctx_seq (32768) < n_ctx_train (131072) -- the full capacity of the model will not be utilized\nI llama_context:        CPU  output buffer size =     1.00 MiB\nI llama_kv_cache_iswa: creating non-SWA KV cache, size = 32768 cells\nI llama_kv_cache:       MTL0 KV buffer size =   102.00 MiB\nI llama_kv_cache: size =  102.00 MiB ( 32768 cells,   3 layers,  1/1 seqs), K (q8_0):   51.00 MiB, V (q8_0):   51.00 MiB\nI llama_kv_cache_iswa: creating     SWA KV cache, size = 1024 cells\nI llama_kv_cache:       MTL0 KV buffer size =     6.38 MiB\nI llama_kv_cache: size =    6.38 MiB (  1024 cells,  12 layers,  1/1 seqs), K (q8_0):    3.19 MiB, V (q8_0):    3.19 MiB\nI sched_reserve:       MTL0 compute buffer size =   154.08 MiB\nI sched_reserve:        CPU compute buffer size =    57.80 MiB\nI srv    load_model: prompt cache is enabled, size limit: 8192 MiB\nI srv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 32768 tokens, 8589934592 est)"
+   }
+  ]
+ }
+]

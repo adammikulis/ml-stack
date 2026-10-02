@@ -17,7 +17,7 @@ from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
-from ml_stack.hub import free_memory, room as machine_room
+from ml_stack.hub import free_memory, installed_for, room as machine_room
 from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
 from ml_stack.serve import admission, exit_guard, unmanaged
@@ -113,6 +113,19 @@ class Starting:
                 "warmup_request": self.warmup_request}
 
 
+def reusing_installed(spec: ServerSpec) -> ServerSpec:
+    """``spec`` with each ``hf:owner/repo/file`` model, projector and draft that is already
+    installed -- from the Hub cache, llama.cpp's cache, LM Studio or Ollama -- replaced by
+    the file, so it is not downloaded again."""
+    changes: dict[str, str] = {}
+    for field in ("model", "mmproj", "draft"):
+        value = getattr(spec, field)
+        found = installed_for(value) if isinstance(value, str) and value.startswith("hf:") else None
+        if found:
+            changes[field] = str(found.path)
+    return replace(spec, **changes) if changes else spec
+
+
 class ServerManager(Admitting):
     """Leases model servers, one per (model, port), shared across this machine."""
 
@@ -182,6 +195,7 @@ class ServerManager(Admitting):
         with the machine's broker. The rest of the arguments are those of
         :meth:`_start_server`.
         """
+        spec = reusing_installed(spec)
         how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway)
         info = self.broker.start(spec, Caller(on_event=on_event, say=say or self.say),
                                  timeout=timeout, options=asdict(how))
@@ -283,6 +297,7 @@ class ServerManager(Admitting):
     def _permitted(self, spec: ServerSpec, escalate: bool) -> ServerSpec:
         """``spec`` as it will be started, or `ServerFailed` when the port was just given up
         on or a limit on this machine refuses the lease."""
+        spec = reusing_installed(spec)
         if escalate:
             # llama.cpp's slot-save file carries the cache's stream count, and a restore
             # raises "n_stream mismatch" the moment that count differs from the file's --
