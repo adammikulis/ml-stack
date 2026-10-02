@@ -65,7 +65,7 @@ irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/instal
 Do the same on every machine you want to work with, typing the same passphrase. They find
 each other on their own.
 
-**If you write Python**, it runs on 3.12 and 3.13 and pulls in nothing heavy, so the machine you
+**If you write Python**, it runs on 3.10 to 3.14 and pulls in nothing heavy, so the machine you
 drive from needs no CUDA, no MLX and no training stack:
 
 ```

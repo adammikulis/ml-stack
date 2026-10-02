@@ -1,8 +1,10 @@
 """The interpreter the app runs on, and the range the library supports.
 
 The two installers, the Linux container, the release workflow and
-`ml_stack.fleet.environment` name one interpreter, `PYTHON`. `pyproject.toml` and the CI test
-matrix name the range the library is imported under: `PYTHON` and the release before it.
+`ml_stack.fleet.environment` name one interpreter, `PYTHON`: the app builds its own
+environment and chooses it. `pyproject.toml` and the CI test matrix name the range the
+library is imported under, which is every release the suite runs on. A release newer than the
+newest tested one is run as an experiment that may fail.
 """
 
 from __future__ import annotations
@@ -22,17 +24,18 @@ SH = (REPO / "packaging" / "install.sh").read_text(encoding="utf-8")
 PS1 = (REPO / "packaging" / "install.ps1").read_text(encoding="utf-8")
 RUNNER = (REPO / "scripts" / "test-on-linux").read_text(encoding="utf-8")
 MAJOR, MINOR = (int(part) for part in PYTHON.split("."))
-OLDEST = f"{MAJOR}.{MINOR - 1}"
-SUPPORTED = {OLDEST, PYTHON}
+OLDEST = "3.10"
+NEWEST = "3.14"
+SUPPORTED = {f"3.{minor}" for minor in range(int(OLDEST.split(".")[1]), int(NEWEST.split(".")[1]) + 1)}
 
 
 def workflow(name: str) -> dict:
     return yaml.safe_load((REPO / ".github/workflows" / name).read_text(encoding="utf-8"))
 
 
-def test_requires_python_is_bounded_to_the_releases_tested():
-    """An unbounded ceiling installs on the next release, which nothing here runs."""
-    assert PYPROJECT["project"]["requires-python"] == f">={OLDEST},<{MAJOR}.{MINOR + 1}"
+def test_requires_python_starts_at_the_oldest_release_tested_and_has_no_ceiling():
+    assert PYPROJECT["project"]["requires-python"] == f">={OLDEST}"
+    assert PYTHON in SUPPORTED
 
 
 def test_one_classifier_per_supported_python():
@@ -42,7 +45,7 @@ def test_one_classifier_per_supported_python():
 
 
 def test_ruff_targets_the_oldest_supported_release():
-    assert PYPROJECT["tool"]["ruff"]["target-version"] == f"py{MAJOR}{MINOR - 1}"
+    assert PYPROJECT["tool"]["ruff"]["target-version"] == "py" + OLDEST.replace(".", "")
 
 
 def test_the_shell_installer_looks_for_that_python_and_no_other():
@@ -67,7 +70,10 @@ def test_neither_installer_offers_to_run_on_something_older(script):
 def test_the_ci_test_matrix_runs_every_supported_python_and_other_jobs_the_app_python():
     ci = workflow("ci.yml")
     entries = ci["jobs"]["test"]["strategy"]["matrix"]["include"]
-    assert {e["python"] for e in entries} == SUPPORTED
+    assert {e["python"] for e in entries if not e.get("experimental")} == SUPPORTED
+    experimental = {e["python"] for e in entries if e.get("experimental")}
+    assert experimental == {f"3.{int(NEWEST.split('.')[1]) + 1}"}
+    assert ci["jobs"]["test"]["continue-on-error"] == "${{ matrix.experimental || false }}"
     pinned = [str(step.get("with", {}).get("python-version", ""))
               for name, job in ci["jobs"].items() if name != "test" for step in job["steps"]]
     assert {v for v in pinned if v and not v.startswith("${{")} == {PYTHON}

@@ -10,12 +10,15 @@ import platform
 import shutil
 import subprocess
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 
 _GIB = 1024**3
 
 
-class Vendor(StrEnum):
+class Vendor(str, Enum):
+    __str__ = str.__str__
+    __format__ = str.__format__
+
     APPLE = "apple"
     NVIDIA = "nvidia"
     AMD = "amd"

@@ -50,9 +50,24 @@ jobs:
             python: "3.13"
             pytest: -n 0
           - os: ubuntu-latest
+            python: "3.10"
+            pytest: --slow
+          - os: ubuntu-latest
+            python: "3.11"
+            pytest: --slow
+          - os: ubuntu-latest
             python: "3.12"
             pytest: --slow
+          - os: ubuntu-latest
+            python: "3.14"
+            pytest: --slow
+          # a pre-release: a red here is reported and does not fail the run
+          - os: ubuntu-latest
+            python: "3.15"
+            pytest: --slow
+            experimental: true
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental || false }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +76,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          allow-prereleases: ${{ matrix.experimental || false }}
           cache: pip
           cache-dependency-path: pyproject.toml
 
