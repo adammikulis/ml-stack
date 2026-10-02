@@ -125,6 +125,20 @@ def test_the_pins_are_read_from_the_installed_distributions_own_metadata():
     assert set(installed.declared()) >= {c.extra for c in installed.STANDARD}
 
 
+def test_a_requirement_whose_marker_excludes_this_interpreter_is_not_unmet():
+    assert installed.unmet({"x": ['pytest>=999; python_version < "3.0"']}) == []
+    assert [row[1] for row in installed.unmet({"x": ['pytest>=999; python_version >= "3.0"']})] == [
+        "pytest"]
+
+
+def test_a_pin_whose_marker_excludes_this_interpreter_is_not_declared(monkeypatch):
+    monkeypatch.setattr(installed, "requires", lambda _name: [
+        'old>=1; python_version < "3.0" and extra == "plot"',
+        'new>=1; python_version >= "3.0" and extra == "plot"',
+    ])
+    assert installed.declared() == {"plot": ["new>=1"]}
+
+
 def test_the_store_says_which_macos_it_needs_when_this_one_is_older(monkeypatch):
     monkeypatch.setattr(installed.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(installed.platform, "mac_ver", lambda: ("14.7.1", ("", "", ""), "arm64"))
