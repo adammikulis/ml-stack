@@ -45,6 +45,14 @@ from ml_stack.serve.serving import (
     projector_for,
     slot,
 )
+from ml_stack.serve.slotdump import (
+    SlotDump,
+    SlotGuardRefused,
+    restore_all,
+    restore_slot,
+    save_all,
+    save_slot,
+)
 
 __all__ = [
     "DEFAULT_HOST",
@@ -60,6 +68,8 @@ __all__ = [
     "ServerManager",
     "ServerSpec",
     "Serving",
+    "SlotDump",
+    "SlotGuardRefused",
     "Talking",
     "child_env",
     "draft_for",
@@ -78,6 +88,10 @@ __all__ = [
     "reclaim_port",
     "recorded_servers",
     "require_binary",
+    "restore_all",
+    "restore_slot",
+    "save_all",
+    "save_slot",
     "serve",
     "server_pids_on_port",
     "serving_mismatch",

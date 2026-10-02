@@ -8,8 +8,16 @@ from typing import Any, Protocol
 
 from ml_stack.train.checkpoint import CheckpointError, assert_exact_restore
 
-__all__ = ["Step", "TorchStep", "MLXStep", "step_for",
-           "tied_names", "state_once", "load_state_once", "load_mlx_state"]
+__all__ = [
+    "MLXStep",
+    "Step",
+    "TorchStep",
+    "load_mlx_state",
+    "load_state_once",
+    "state_once",
+    "step_for",
+    "tied_names",
+]
 
 Batch = Any
 Loss = Callable[[Any, Batch], Any]

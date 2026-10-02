@@ -2,7 +2,7 @@
 
 Every subcommand parses its arguments and prints; the work is in `ml_stack.serve.ops`, and
 each command group's own parsing lives beside it: `status_cli`, `lifecycle_cli` (up, down,
-escalate, build), `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim),
+escalate, build), `slots_cli`, `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim),
 `broker_cli` (broker, queue).
 """
 
@@ -15,6 +15,7 @@ from ml_stack.serve import (
     lifecycle_cli,
     machine_cli,
     profile_cli,
+    slots_cli,
     status_cli,
 )
 
@@ -70,6 +71,12 @@ COMMANDS.add(
     "escalate", lifecycle_cli.cmd_escalate,
     help="grow the slots a running server holds, keeping every live conversation",
     options=lifecycle_cli.OPTIONS_ESCALATE)
+
+COMMANDS.add(
+    "slots", slots_cli.cmd_slots,
+    help="save a running server's slot caches to disk, or restore them; a dump from a "
+         "different model, context, slot count or build is refused",
+    options=slots_cli.OPTIONS)
 
 COMMANDS.add(
     "build", lifecycle_cli.cmd_build,

@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import hub, mcp
+from ml_stack.agent import Compacted, Compacting, Compaction
+from ml_stack.agent.schema import parse_arguments
 from ml_stack.client import ollama
 from ml_stack.log import say
 
@@ -579,12 +581,7 @@ def run(task: str, client: Any, *,
         for call in calls:
             fn = call.get("function") or {}
             name = str(fn.get("name") or "")
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
+            args = parse_arguments(fn.get("arguments"))[0] or {}
             if name not in OWN:
                 person.say(f"-> {name}({_compact(args)})")
             do = run_by.get(name)
@@ -699,7 +696,19 @@ def parser() -> argparse.ArgumentParser:
                     help="the ceiling on one reply (default: %(default)s)")
     ap.add_argument("--timeout", type=float, default=900.0,
                     help="seconds to wait for one reply (default: %(default)s)")
+    ap.add_argument("--auto-compact", action="store_true",
+                    help="summarise the oldest part of the conversation when it fills 80%% of "
+                         "the model's context, down to half of it; what was removed is kept in "
+                         "~/.ml-stack/compaction")
+    ap.add_argument("--context-size", type=int, default=0, metavar="TOKENS",
+                    help="the context --auto-compact measures against (default: ask the server)")
     return ap
+
+
+def _show_compaction(event: Any, out: TextIO) -> None:
+    if isinstance(event, Compacted):
+        out.write(f"(compacted {event.dropped} messages: {event.before:.0%} -> "
+                  f"{event.after:.0%} of the context)\n")
 
 
 def _print_offer(tools: Sequence[tuple[dict[str, Any], Any]], out: TextIO) -> None:
@@ -735,6 +744,9 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
         stdout.write(f"no --model given: {record.model}, the best measured on this machine "
                      f"({record.right:.0%} F1 over {record.questions} questions)\n")
     client = client_for(args)
+    if args.auto_compact:
+        client = Compacting(client, Compaction(context_size=args.context_size or None),
+                            on_event=lambda e: _show_compaction(e, stdout))
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_for(args.yes)}]
     if args.task:
         got = run(args.task, client, tools=tools, stdin=stdin, stdout=stdout, yes=args.yes,
