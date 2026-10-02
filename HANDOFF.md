@@ -487,11 +487,6 @@ directory. What it does not do yet:
   made and when `scratch-ls` runs, not on each write.
 - [ ] **Embedding search over notes** through the graph store; keyword search through
   `graph.search.lexical` is what exists.
-- [ ] **Direct imports of `guard` and `sentinel`** once those branches land: the adapters
-  import them by name and fall back to the workspace's own checks; they were run by hand
-  against the branches, and need a test that runs against the real modules.
-- [ ] **`Tool.hints` for the older MCP tools**: the new field defaults every tool but the
-  workspace's to a write; `agent/native-guard` carries a table that sets them.
 
 ## Measurements
 

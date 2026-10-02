@@ -60,19 +60,21 @@ and a convenience second.
    Per-sender rate limit, body and subject caps, inbox cap and retention are in `limits.json`.
 7. Text is screened before it reaches a model: injection and authority-claim patterns put a
    message or note into quarantine; the recipient sees a placeholder with the quarantine id.
-   Only a `human` token releases it, and a released item is still delivered fenced. When
-   `ml_stack.guard` and `ml_stack.sentinel` are installed the same text is also run through the
-   guard's patterns and held in the sentinel's quarantine; without them the local checks stand.
+   Quarantine is on by default and cannot be switched off; only a `human` token releases an
+   item, and a released item is still delivered fenced. The same text is also run through
+   `ml_stack.guard`'s secret and injection patterns (imported directly) and held in the
+   sentinel's quarantine (`ml_stack.sentinel`); the workspace's own checks run in addition.
 8. All logs are hash-chained JSONL (`prev` and `hash` per row, sequence numbers, fsync on each
-   append). `ml-stack workspace audit verify` reports the first broken row, and accepts the
-   head printed by `audit head` as an external anchor to catch truncation of the tail.
+   append). `ml-stack-workspace audit-verify` reports the first broken row, and accepts the
+   head printed by `audit-head` as an external anchor to catch truncation of the tail.
 9. The service cannot interrupt a running model turn. Delivery happens when an agent next reads.
    `watch --once --timeout N` blocks until something arrives and exits, so a lead that starts it
    as a background command is woken by its exit.
 
 ### Decisions
 
-* **No daemon.** The core is a library over a state directory plus a CLI and MCP tools. Callers
+* **No daemon for 0.3.0.** A hostile process of the same user is documented as not defended
+  (see "What this does not do"). The core is a library over a state directory plus a CLI and MCP tools. Callers
   are processes of one user on one machine, so a socket would add a listener and signed requests
   without adding a boundary: the token never crosses a wire. A loopback daemon with `macauth`
   signed requests is the next step if agents ever need to run as another user or in a sandbox.
@@ -82,6 +84,8 @@ and a convenience second.
 * **Token hash, not shared key.** A shared MAC key in a file would let any agent that can read
   it sign as anyone. Hashed per-agent secrets mean an agent can only be the identity whose
   secret it was given.
+* **Flat command names.** One command per verb (`notes-add`, `scratch-new`, `audit-verify`),
+  no nested sub-commands, so an allow-list or a permission rule can name each exactly.
 * **Notes run commands only from an allow-list.** A note's re-derive command is untrusted text.
   `note verify` runs it only when its program and leading arguments match an entry in the
   owner's `limits.json` `verify_allow`, with no shell, a scrubbed environment and a timeout.
@@ -147,14 +151,13 @@ CLI with `--json`, the MCP tools and their annotations, and the read-only test-s
 Mutation check of the guards: 60 mutations applied one at a time to a copy of the tree, 50
 caught. Survivors: `chain-no-fsync` (a crash-durability property a test cannot observe without
 killing the machine), `chain-no-prev-check` and `chain-no-seq-check` (the hash covers `prev`
-and a skipped sequence number changes it, so each check is covered by the other),
-`name-allows-reserved`, `note-kind-unchecked`, `quarantine-text-any`, `secrets-workspace-token`,
-`markers-rule-promotion`, `denylist-comments` and `neutralise-fence-tags` (no test pins them;
-tests to add). The remaining mutations in the list were not run.
+and a skipped sequence number changes it, so each check is covered by the other): all
+three are acknowledged as unobservable and left alone. The other seven survivors (`name-allows-reserved`,
+`note-kind-unchecked`, `quarantine-text-any`, `secrets-workspace-token`, `markers-rule-promotion`,
+`denylist-comments`, `neutralise-fence-tags`) are pinned by `tests/test_workspace_rules.py`, each
+confirmed to fail when its mutation is applied. The remaining mutations in the list were not run.
 
-Run by hand, not in the suite: the adapters against the real `sentinel` and `guard` modules of
-`agent/sentinel` and `agent/native-guard` (the item was held in the sentinel store and the
-guard's patterns were unioned in). The MCP SDK transport was not exercised: the installed `mcp`
-is 2.x and the SDK path in `ml_stack.mcp` targets 1.x.
+The adapters run against the real `sentinel` store and `guard` patterns in the suite
+(`tests/test_workspace_surface.py`, no stand-ins). The MCP SDK transport was not exercised here.
 
 Left out: see "The agent workspace" in `HANDOFF.md`.
