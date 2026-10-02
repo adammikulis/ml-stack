@@ -18,7 +18,7 @@ from typing import Any
 from ml_stack import credentials, home
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
-from ml_stack.serve import exit_guard
+from ml_stack.serve import confined as confinement, exit_guard
 from ml_stack.serve.binary import child_env, require_binary
 from ml_stack.serve.leases import recorded_servers
 from ml_stack.serve.logs import prune
@@ -480,7 +480,7 @@ def claim_port(spec: ServerSpec, lease: Lease) -> None:
 
 
 def launch(argv: list[str], lease: Lease, *, log_path: Path, timeout: float,
-           env: dict[str, str]) -> tuple[Any, str, float]:
+           env: dict[str, str], cwd: str | None = None) -> tuple[Any, str, float]:
     """``(process, base_url, load seconds)`` for ``argv`` started and answering its health check.
 
     The server stops with this process when the lease says ``stop_on_exit``. Raises
@@ -490,7 +490,7 @@ def launch(argv: list[str], lease: Lease, *, log_path: Path, timeout: float,
     started_at = time.monotonic()
     with log_path.open("wb") as log_handle:
         process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
-                                   **process_group_kwargs())
+                                   cwd=cwd, **process_group_kwargs())
     if lease.stop_on_exit:
         exit_guard.protect(process.pid)
     base_url = f"http://{DEFAULT_HOST}:{port}"
@@ -521,7 +521,9 @@ class LlamaServerBackend(ServerBackend):
         vendor_dir: Path | None = None,
         build: str | None = None,
         quiet: bool = True,
+        sandboxed: bool | None = None,
     ) -> None:
+        self.sandboxed = sandboxed
         self._explicit = binary
         self._vendor_dir = vendor_dir
         self._build = build
@@ -531,7 +533,7 @@ class LlamaServerBackend(ServerBackend):
         """The arguments that make another backend like this one, for the broker to rebuild."""
         return {k: str(v) if isinstance(v, Path) else v for k, v in {
             "binary": self._explicit, "vendor_dir": self._vendor_dir, "build": self._build,
-            "quiet": self.quiet}.items() if v is not None}
+            "quiet": self.quiet, "sandboxed": self.sandboxed}.items() if v is not None}
 
     @property
     def binary(self) -> Path:
@@ -815,9 +817,18 @@ class LlamaServerBackend(ServerBackend):
             if token:
                 extra_env["HF_TOKEN"] = str(token)
 
-        process, base_url, load_s = launch(
-            argv, lease, log_path=log_path, timeout=timeout,
-            env=child_env(self.binary, extra_env or None))
+        env = child_env(self.binary, extra_env or None)
+        confined = None
+        if confinement.wanted(self.sandboxed):
+            confined = confinement.confine(
+                argv, env, self.binary, writable=[spec.slot_save_path] if spec.slot_save_path else [])
+            argv, env = confined.argv, confined.env
+        try:
+            process, base_url, load_s = launch(argv, lease, log_path=log_path, timeout=timeout,
+                                               env=env, cwd=confined.cwd if confined else None)
+        except ServerFailed as failure:
+            refused = confined.refusals() if confined else ""
+            raise ServerFailed(f"{failure}\n{refused}" if refused else str(failure)) from failure
 
         warmup_s = None
         if starting.get("warmup_request", True):

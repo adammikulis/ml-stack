@@ -22,7 +22,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "entities", "extraction", "files", "gate", "geo",
               "home", "http", "httpguard", "installed", "interventions", "jobs", "jsonl", "limits",
               "lock", "log", "macauth",
-              "markup",
+              "markup", "sandbox",
               "media", "messages", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
               "records",
               "taint", "telemetry", "ui", "units")),

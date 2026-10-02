@@ -29,6 +29,7 @@ from ml_stack.agent import (
 )
 from ml_stack.client import Client
 from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from tests.sandbox_kit import no_sandbox_here
 
 sys.path.insert(0, str(Path(__file__).parent))
 SERVER = Path(__file__).with_name("toy_mcp_server.py")
@@ -256,7 +257,8 @@ def test_tools_from_an_mcp_server_over_stdio(served) -> None:
                   Turn(text=("done",)))
 
     async def go() -> list:
-        async with McpTools.stdio(sys.executable, [str(SERVER)]) as tools:
+        async with McpTools.stdio(sys.executable, [str(SERVER)], reads=[str(SERVER.parent)],
+                                  unsandboxed=no_sandbox_here()) as tools:
             listed = {t["name"] for t in await tools.list_tools()}
             failed = await tools.call("fail", {})
             assert listed == {"add", "shout", "fail"} and failed.is_error

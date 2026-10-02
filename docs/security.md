@@ -102,6 +102,10 @@ These apply to every consumer of the library without a switch.
 - Archives unpack through `safenames.unpack`; a remote file name goes through
   `safenames.safe_filename`.
 - Child processes (model servers, a peer's job) do not inherit tokens and keys.
+- An MCP server started over stdio runs under the sandbox (`ml_stack.sandbox`): it reads the
+  interpreter and the project, writes a scratch directory, reaches loopback only and sees only
+  the environment it was given. With no sandbox available it is not started unless the caller
+  passes `AllowUnsandboxed(reason)`, which is logged and sent to the sentinel.
 - A credential is read through `ml_stack.credentials`, from a file only its owner can read.
 - State, token and credential files are written atomically with mode `0600`.
 - Server logs are bounded in count, size and age.
@@ -212,3 +216,23 @@ Release, purge and mode changes need a person at a terminal; the check against a
 strings and on the environment, and code running as the owner can bypass all of it. In
 `observe` mode nothing is acted on; in `guarded` (the default) only the high-confidence
 signals above act; `enforce` also acts on thresholds.
+
+## Sandbox
+
+`ml_stack.sandbox` confines a command to a deny-by-default policy (`docs/sandbox.md`): files it
+may read and write, programs it may start, loopback or named ports or no network, an explicit
+environment, and time, CPU, file-size and output limits. It is the second layer behind the
+guard's rails and the taint rule: a command the guard allowed still cannot read a credential file
+outside its allow-list, write outside its scratch directory or open a connection.
+
+- **Where:** the shell tool (`ml_stack.sandbox.tools.SandboxedBash`), MCP servers started by
+  `McpTools.stdio`, Claude Code's Bash tool in `ml_stack.harness`, and a model server when
+  `ML_STACK_SANDBOX_SERVE=1` or `LlamaServerBackend(sandboxed=True)`.
+- **Fail closed:** with no sandbox the command is not run. `AllowUnsandboxed(reason)` is the only
+  way around it and is logged on every use.
+- **Events:** a refusal is `sandbox.denied` on the sentinel bus (warning), with the operation and
+  path; `sandbox.unavailable` and `sandbox.unsandboxed` are warnings too.
+- **macOS uses `sandbox-exec`, which Apple has deprecated.** This is a recorded exception
+  (`docs/sandbox.md`), confined to `sandbox/seatbelt.py`; GPU workloads have no replacement yet.
+- **Linux** (bubblewrap) is built and checked by its argument list only.
+- `ml-stack security sandbox status|test` shows the backend and runs the guarantees.

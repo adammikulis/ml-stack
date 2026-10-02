@@ -12,6 +12,8 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from ml_stack.agent.confined import Options, confine
+
 __all__ = ["FunctionTools", "McpAuthError", "McpTools", "ToolOutput", "ToolSource"]
 
 
@@ -111,6 +113,7 @@ class McpTools:
         self._label = label
         self._client: Any = None
         self._secrets: list[str] = []
+        self._cleanups: list[Callable[[], None]] = []
         self._refused = 0
         self.on_elicit: Elicit | None = None
         self.on_progress: Progress | None = None
@@ -119,14 +122,23 @@ class McpTools:
         return f"McpTools({self._label})"
 
     @classmethod
-    def stdio(cls, command: str, args: Sequence[str] = (),
-              env: Mapping[str, str] | None = None) -> McpTools:
-        """A server spawned as ``command args`` and spoken to over its stdin and stdout."""
+    def stdio(cls, command: str, args: Sequence[str] = (),  # noqa: PLR0913
+              env: Mapping[str, str] | None = None, *, policy: Any = None,
+              project: str | None = None, reads: Sequence[str] = (),
+              unsandboxed: Any = None) -> McpTools:
+        """A server spawned as ``command args`` under the sandbox and spoken to over its stdin
+        and stdout. ``policy`` (a `sandbox.Policy`) replaces the default ``mcp_server`` policy:
+        the interpreter, ``project`` and ``reads`` readable, a scratch directory writable,
+        loopback only, and ``env`` as the whole environment. With no sandbox available the server
+        is not started unless ``unsandboxed`` is a `sandbox.AllowUnsandboxed`."""
         def transport(owner: McpTools) -> Any:
             from mcp import StdioServerParameters
 
-            return StdioServerParameters(command=command, args=list(args),
-                                         env=dict(env) if env else None)
+            launch = confine(command, args, env, Options(policy, project, tuple(reads),
+                                                         unsandboxed))
+            owner._cleanups.append(launch.cleanup)
+            return StdioServerParameters(command=launch.command, args=launch.args,
+                                         env=launch.env)
 
         return cls(transport, command)
 
@@ -192,11 +204,17 @@ class McpTools:
             opened = True
         finally:
             if not opened:
+                while self._cleanups:
+                    self._cleanups.pop()()
                 self._raise_if_refused()
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        await self._client.__aexit__(*exc)
+        try:
+            await self._client.__aexit__(*exc)
+        finally:
+            while self._cleanups:
+                self._cleanups.pop()()
 
     async def list_tools(self) -> list[dict[str, Any]]:
         done = False

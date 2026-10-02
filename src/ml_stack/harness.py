@@ -36,6 +36,13 @@ from ml_stack.log import say
 __all__ = ["Answer", "Harness", "Usage", "main", "session"]
 
 
+def confined_bash() -> dict[str, Any]:
+    """Claude Code's own sandbox for the Bash tool: on, no command may opt out of it, nothing
+    runs unconfined when it cannot start, and every command still passes the guard's rails."""
+    return {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+            "autoAllowBashIfSandboxed": False, "network": {"allowedDomains": []}}
+
+
 def sdk() -> Any:
     """The SDK module, or a plain sentence about the extra that installs it."""
     try:
@@ -97,6 +104,7 @@ class Harness:
                  for event in {*ours, *theirs}}
         return sdk().ClaudeAgentOptions(model=self.alias, **{
             **merged, "max_turns": merged.get("max_turns") or MAX_TURNS, "hooks": hooks,
+            "sandbox": merged.get("sandbox") or confined_bash(),
             "env": {**self.env, **dict(over.get("env") or {})}})
 
     async def stream(self, prompt: str, **over: Any) -> AsyncIterator[Any]:
