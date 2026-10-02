@@ -70,7 +70,7 @@ def seal_file(path: Path, raw: bytes, passphrase: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as out:
-        json.dump({"schema_version": SCHEMA_VERSION, "kdf": "scrypt", "n": SCRYPT_N,
+        json.dump({"version": SCHEMA_VERSION, "kdf": "scrypt", "n": SCRYPT_N,
                    "salt": base64.b64encode(salt).decode(),
                    "nonce": base64.b64encode(nonce).decode(),
                    "ciphertext": base64.b64encode(box).decode()}, out)
