@@ -64,6 +64,8 @@ def _imports() -> dict[tuple[str, str], set[str]]:
     """Every ``ml_stack`` import in the tree, keyed by (importer, imported) package."""
     found: dict[tuple[str, str], set[str]] = {}
     for path in sorted(ROOT.rglob("*.py")):
+        if path == ROOT / "__init__.py":
+            continue
         source = _package_of_file(path)
         where = str(path.relative_to(REPO))
         for node in ast.walk(ast.parse(path.read_text(), str(path))):
@@ -85,7 +87,7 @@ def _imports() -> dict[tuple[str, str], set[str]]:
 
 
 def _packages() -> set[str]:
-    return {_package_of_file(path) for path in ROOT.rglob("*.py")}
+    return {_package_of_file(path) for path in ROOT.rglob("*.py") if path != ROOT / "__init__.py"}
 
 
 def _violations(edges: dict[tuple[str, str], set[str]]) -> set[tuple[str, str]]:
