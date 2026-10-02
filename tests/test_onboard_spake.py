@@ -7,9 +7,10 @@ from ml_stack.fleet.onboard import spake
 CTX = b"ctx"
 
 
-def run(code_a="123456", code_b="123456", fp_a="aa", fp_b="bb", seen_a="bb", seen_b="aa"):
-    a = spake.start_initiator(code_a, context=CTX, mine=fp_a, theirs=seen_a)
-    b = spake.start_responder(code_b, context=CTX, mine=fp_b, theirs=seen_b)
+def run(code_a="123456", code_b="123456", seen=("bb", "aa")):
+    """Both ends run; ``seen`` is the certificate each believes the other presents."""
+    a = spake.start_initiator(code_a, context=CTX, mine="aa", theirs=seen[0])
+    b = spake.start_responder(code_b, context=CTX, mine="bb", theirs=seen[1])
     a.receive(b.message)
     b.receive(a.message)
     return a, b
@@ -37,9 +38,9 @@ def test_wrong_code_fails_both_ways():
 
 
 def test_a_different_certificate_on_either_leg_fails_even_with_the_right_code():
-    a, b = run(seen_a="mitm")           # the asker saw another certificate than B's own
+    a, b = run(seen=("mitm", "aa"))           # the asker saw another certificate than B's own
     assert not b.check(a.confirmation())
-    a, b = run(seen_b="mitm")           # the accepter was told another asker identity
+    a, b = run(seen=("bb", "mitm"))           # the accepter was told another asker identity
     assert not b.check(a.confirmation())
 
 
@@ -73,3 +74,12 @@ def test_the_payload_tag_binds_the_payload_to_the_exchange():
     assert not a.open(b"grant", "0" * 64)
     other_a, _ = run()
     assert not other_a.open(b"grant", tag)
+
+
+def test_a_message_that_cancels_the_blinding_is_refused_not_crashed_on():
+    """Someone who knows the code can send the one message that makes the shared point the
+    point at infinity; the other end refuses it instead of failing on it."""
+    b = spake.start_responder("123456", context=CTX, mine="bb", theirs="aa")
+    w = spake.word_from_code("123456", CTX)
+    with pytest.raises(spake.Bad, match="degenerate"):
+        b.receive(spake.encode(spake.multiply(w, spake.M)))

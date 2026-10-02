@@ -1,22 +1,12 @@
-"""Files from peers: served in ranges, fetched in chunks from several machines at once, every
-chunk checked against a signed manifest before it is kept.
+"""Files from peers: served in ranges, fetched in chunks from several machines at once.
 
-A peer is a source of bytes and nothing more. What it says about the file (its size, its
-digest, how it is cut up) is taken from the manifest that verified under the pinned key, and
-whatever the peer sends is accepted only if it hashes to the digest listed for that chunk. A
-peer that sends a wrong chunk is not retried for that chunk and is dropped after a second;
-the chunk is fetched from another peer. The finished file is hashed whole once more before it
-is moved to the staging directory -- it is *staged*, not installed: the caller's scan and
-quarantine step (``on_staged``) decides whether it is used.
-
-Resumable: the chunks already verified are listed beside the partial file, and on the next
-run each of them is hashed again from disk before it is trusted, so a partial file damaged
-between runs costs a re-fetch of the damaged chunks and nothing worse.
-
-Disk: the whole file's size plus a reserve must fit before a byte is requested.
-
-Licences: an entry marked ``shareable: false`` (a gated model, say) is never asked of a peer
-and never served to one; `NotShareable` names where its own ``source`` says to get it.
+A peer is a source of bytes and nothing more. Size, digest and chunking come from the
+manifest that verified under the pinned key; a chunk is kept only if it hashes to the digest
+listed for it, a peer that sends a wrong one is dropped, and the finished file is hashed whole
+before it is moved to staging (not installed: the caller's scan and quarantine step,
+``on_staged``, decides). Resumable: chunks verified earlier are hashed again from disk before
+they are trusted. The whole file plus a reserve must fit on disk before a byte is asked for.
+A file marked ``shareable: false`` is never asked of a peer and never served to one.
 """
 
 from __future__ import annotations
@@ -30,25 +20,27 @@ import shutil
 import ssl
 import threading
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
 from ml_stack import macauth
 from ml_stack.files import promote, sha256_file, write_json
 from ml_stack.fleet import tls
-from ml_stack.fleet.framing import Limited, LimitedServer, Malformed, requested_range
+from ml_stack.fleet.framing import Malformed, requested_range
 from ml_stack.safenames import Unsafe, safe_filename, safe_join
 
 from .events import BUS, Bus
 from .manifest import Entry, Manifest
+from .web import Call, Listener, Reply, json_reply
 
-__all__ = ["Downloader", "NotShareable", "PeerSource", "ShareServer", "TransferError"]
+__all__ = ["Downloader", "NotShareable", "PeerSource", "Settings", "Share", "ShareServer",
+           "TransferError", "fetch_manifest", "mac_gate"]
 
 API = "/onboard/v1"
 RESERVE = 1 << 30
+SEND_PIECE = 1 << 20
 
 
 class TransferError(RuntimeError):
@@ -65,35 +57,83 @@ class NotShareable(TransferError):
 
 
 # -- serving -----------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class Share:
+    """What a server offers: the files under ``root`` and the signed manifest that lists them."""
+
+    root: Path
+    manifest_raw: bytes
+    manifest: Manifest
+
+
+def mac_gate(auth: macauth.Authenticator) -> Callable[[str, str, Any, str], bool]:
+    """The fleet's own authentication as the gate a `ShareServer` asks."""
+    def gate(method: str, target: str, headers: Any, who: str) -> bool:
+        return auth.check(method, target, headers, None, who).ok
+    return gate
+
+
+def file_stream(path: Path, start: int, length: int) -> Iterator[bytes]:
+    """``length`` bytes of ``path`` from ``start``, a piece at a time."""
+    with path.open("rb") as fh:
+        fh.seek(start)
+        left = length
+        while left > 0:
+            piece = fh.read(min(SEND_PIECE, left))
+            if not piece:
+                return
+            left -= len(piece)
+            yield piece
+
+
+def serve_file(share: Share, name: str, range_header: str, bus: Bus, who: str) -> Reply:
+    """The reply for one ranged GET of ``name``: 206 with the span, or why not."""
+    try:
+        entry = share.manifest.entry(safe_filename(name))
+    except (KeyError, Unsafe):
+        return json_reply(404, {"error": "no such file"})
+    if not entry.shareable:
+        bus.emit("onboard.transfer.unshareable_asked", "notice", "", file=entry.name, peer=who)
+        return json_reply(403, {"error": "this file may not be shared"})
+    try:
+        path = safe_join(share.root, entry.name)
+        if not path.is_file() or path.stat().st_size != entry.size:
+            raise OSError
+        start, end = requested_range(range_header)
+    except (Unsafe, OSError):
+        return json_reply(404, {"error": "the file is not here"})
+    except Malformed as bad:
+        return json_reply(bad.status, {"error": bad.message})
+    last = entry.size - 1 if end is None else min(end, entry.size - 1)
+    if start >= entry.size or last - start + 1 > entry.chunk_size:
+        return Reply(416, b'{"error":"range not satisfiable"}',
+                     {"Content-Range": f"bytes */{entry.size}"}, "application/json")
+    length = last - start + 1
+    return Reply(206, headers={"Content-Range": f"bytes {start}-{last}/{entry.size}"},
+                 stream=file_stream(path, start, length), length=length)
+
+
 class ShareServer:
-    """Serves the manifest and the shareable files in it from ``root`` to authenticated peers.
+    """Serves the manifest and the shareable files in it to peers that pass ``authenticate``
+    ``(method, target, headers, client) -> bool``; the fleet's is `mac_gate`."""
 
-    ``authenticate(method, target, headers, who)`` answers whether a request may proceed;
-    the fleet's own is `macauth.Authenticator` over the cluster secret (see `mac_gate`)."""
-
-    def __init__(self, root: Path, manifest_raw: bytes, manifest: Manifest, *,
-                 authenticate: Callable[[str, str, Any, str], bool], ident: tls.Identity | None,
-                 host: str = "127.0.0.1", port: int = 0, bus: Bus = BUS) -> None:
-        self.root, self.manifest_raw, self.manifest = Path(root), manifest_raw, manifest
-        self.authenticate, self.bus = authenticate, bus
-        self.served = 0
-        self.httpd = LimitedServer((host, port), _share_handler(self),
-                                   tls=tls.server_context(ident) if ident else None)
-        self._thread: threading.Thread | None = None
+    def __init__(self, share: Share, *, authenticate: Callable[[str, str, Any, str], bool],
+                 ident: tls.Identity | None, address: tuple[str, int] = ("127.0.0.1", 0),
+                 bus: Bus = BUS) -> None:
+        self.share, self.authenticate, self.bus = share, authenticate, bus
+        self.listener = Listener(self.dispatch, address,
+                                 tls.server_context(ident) if ident else None)
 
     @property
     def port(self) -> int:
-        return int(self.httpd.server_address[1])
+        return self.listener.port
 
     def start(self) -> ShareServer:
-        self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True,
-                                        name="onboard-share")
-        self._thread.start()
+        self.listener.start()
         return self
 
     def stop(self) -> None:
-        self.httpd.shutdown()
-        self.httpd.server_close()
+        self.listener.stop()
 
     def __enter__(self) -> ShareServer:
         return self.start()
@@ -101,80 +141,17 @@ class ShareServer:
     def __exit__(self, *exc: object) -> None:
         self.stop()
 
-
-def mac_gate(auth: macauth.Authenticator) -> Callable[[str, str, Any, str], bool]:
-    def gate(method: str, target: str, headers: Any, who: str) -> bool:
-        return auth.check(method, target, headers, None, who).ok
-    return gate
-
-
-def _share_handler(server: ShareServer) -> type[BaseHTTPRequestHandler]:
-    class Handler(Limited, BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *_args: object) -> None:
-            return
-
-        def _say(self, status: int, body: bytes = b"", headers: dict[str, str] | None = None
-                 ) -> None:
-            self.send_response(status)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Content-Type", "application/octet-stream")
-            for key, value in (headers or {}).items():
-                self.send_header(key, value)
-            self.end_headers()
-            if body and self.command != "HEAD":
-                self.wfile.write(body)
-
-        def do_GET(self) -> None:
-            who = self.client_address[0]
-            if not server.authenticate("GET", self.path, self.headers, who):
-                self._say(401, b'{"error":"not signed"}')
-                return
-            if self.path == f"{API}/manifest":
-                self._say(200, server.manifest_raw)
-                return
-            prefix = f"{API}/files/"
-            if not self.path.startswith(prefix):
-                self._say(404, b'{"error":"no such path"}')
-                return
-            self._file(urllib.parse.unquote(self.path[len(prefix):].split("?")[0]), who)
-
-        def _file(self, name: str, who: str) -> None:
-            try:
-                entry = server.manifest.entry(safe_filename(name))
-            except (KeyError, Unsafe):
-                self._say(404, b'{"error":"no such file"}')
-                return
-            if not entry.shareable:
-                server.bus.emit("onboard.transfer.unshareable_asked", "notice", "",
-                                file=entry.name, peer=who)
-                self._say(403, b'{"error":"this file may not be shared"}')
-                return
-            try:
-                path = safe_join(server.root, entry.name)
-                if not path.is_file() or path.stat().st_size != entry.size:
-                    raise OSError
-                start, end = requested_range(self.headers.get("Range", ""))
-            except (Unsafe, OSError):
-                self._say(404, b'{"error":"the file is not here"}')
-                return
-            except Malformed as bad:
-                self._say(bad.status, json.dumps({"error": bad.message}).encode())
-                return
-            last = entry.size - 1 if end is None else min(end, entry.size - 1)
-            if start >= entry.size or last - start + 1 > entry.chunk_size * 4:
-                self._say(416, b'{"error":"range not satisfiable"}',
-                          {"Content-Range": f"bytes */{entry.size}"})
-                return
-            with path.open("rb") as fh:
-                fh.seek(start)
-                data = fh.read(last - start + 1)
-            server.served += len(data)
-            self._say(206, data, {"Content-Range": f"bytes {start}-{start + len(data) - 1}/"
-                                                   f"{entry.size}"})
-
-    return Handler
+    def dispatch(self, call: Call) -> Reply:
+        if call.method != "GET" or not self.authenticate(call.method, call.path, call.headers,
+                                                          call.client):
+            return json_reply(401, {"error": "not signed"})
+        if call.path == f"{API}/manifest":
+            return Reply(200, self.share.manifest_raw, content_type="application/json")
+        prefix = f"{API}/files/"
+        if not call.path.startswith(prefix):
+            return json_reply(404, {"error": "no such path"})
+        name = urllib.parse.unquote(call.path[len(prefix):].split("?")[0])
+        return serve_file(self.share, name, call.headers.get("Range", ""), self.bus, call.client)
 
 
 # -- fetching ----------------------------------------------------------------------------
@@ -194,19 +171,54 @@ class PeerSource:
     banned: bool = field(default=False, repr=False)
 
 
+def _disk_free(path: Path) -> int:
+    return shutil.disk_usage(path).free
+
+
+@dataclass(slots=True)
+class Settings:
+    """How a `Downloader` behaves."""
+
+    reserve: int = RESERVE
+    """Bytes that must stay free beyond the file."""
+    workers: int = 4
+    strikes: int = 2
+    """Wrong answers from one peer before it is dropped."""
+    timeout: float = 20.0
+    free: Callable[[Path], int] = _disk_free
+    bus: Bus = BUS
+
+
+def fetch_manifest(peer: PeerSource, timeout: float = 20.0) -> bytes:
+    """The signed manifest a peer serves, as bytes; the caller verifies it."""
+    url = f"{peer.base_url}{API}/manifest"
+    parts = urllib.parse.urlsplit(url)
+    headers = macauth.sign(peer.secret, "GET", url, None) if peer.secret else {}
+    conn = http.client.HTTPSConnection(parts.hostname or "", parts.port, timeout=timeout,
+                                       context=peer.context) if parts.scheme == "https" \
+        else http.client.HTTPConnection(parts.hostname or "", parts.port, timeout=timeout)
+    try:
+        conn.request("GET", parts.path, headers=headers)
+        response = conn.getresponse()
+        if response.status != 200:
+            raise TransferError(f"{peer.name or peer.base_url} answered {response.status} "
+                                "for the manifest")
+        return response.read(8 * 1024 * 1024 + 1)
+    finally:
+        with contextlib.suppress(OSError):
+            conn.close()
+
+
 class Downloader:
     def __init__(self, manifest: Manifest, peers: list[PeerSource], staging: Path, *,
-                 reserve: int = RESERVE, workers: int = 4, strikes: int = 2,
-                 on_staged: Callable[[Path, Entry], None] | None = None, bus: Bus = BUS,
-                 timeout: float = 20.0, free: Callable[[Path], int] | None = None) -> None:
+                 settings: Settings | None = None,
+                 on_staged: Callable[[Path, Entry], None] | None = None) -> None:
         self.manifest, self.peers, self.staging = manifest, list(peers), Path(staging)
-        self.reserve, self.workers, self.strikes = reserve, max(1, workers), strikes
-        self.on_staged, self.bus, self.timeout = on_staged, bus, timeout
-        self._free = free or (lambda p: shutil.disk_usage(p).free)
+        self.cfg = settings or Settings()
+        self.bus, self.on_staged = self.cfg.bus, on_staged
         self._lock = threading.Lock()
         self.fetched_from: dict[str, int] = {}
 
-    # -- one file --
     def download(self, name: str) -> Path:
         """Fetch ``name`` into the staging directory; returns its path."""
         entry = self.manifest.entry(safe_filename(name))
@@ -216,16 +228,39 @@ class Downloader:
             raise TransferError("no peer to fetch from")
         self.staging.mkdir(parents=True, exist_ok=True, mode=0o700)
         part, state = self.staging / f"{entry.name}.part", self.staging / f"{entry.name}.part.json"
-        target = self.staging / entry.name
         done = self._resume(entry, part, state)
-        need = (len(entry.chunks) - len(done)) * entry.chunk_size
-        free = self._free(self.staging)
-        if free < min(need, entry.size) + self.reserve:
-            raise TransferError(f"{entry.name} needs about {entry.size >> 20} MiB and "
-                                f"{self.reserve >> 20} MiB of reserve; {free >> 20} MiB is free")
+        self._room(entry, len(done))
         if not part.exists():
             with part.open("wb") as fh:
                 fh.truncate(entry.size)
+        failure = self._fetch(entry, part, state, done)
+        if failure:
+            raise TransferError(failure)
+        if len(done) != len(entry.chunks):
+            raise TransferError(f"{entry.name}: {len(entry.chunks) - len(done)} chunks missing")
+        if sha256_file(part) != entry.sha256:
+            self.bus.emit("onboard.transfer.bad_file", "critical", "", file=entry.name)
+            part.unlink(missing_ok=True)
+            state.unlink(missing_ok=True)
+            raise TransferError(f"{entry.name} does not hash to the manifest's digest")
+        target = promote(part, self.staging / entry.name)
+        state.unlink(missing_ok=True)
+        self.bus.emit("onboard.transfer.staged", "info", "", file=entry.name, size=entry.size)
+        if self.on_staged is not None:
+            self.on_staged(target, entry)
+        return target
+
+    def _room(self, entry: Entry, have: int) -> None:
+        need = (len(entry.chunks) - have) * entry.chunk_size
+        free = self.cfg.free(self.staging)
+        if free < min(need, entry.size) + self.cfg.reserve:
+            raise TransferError(f"{entry.name} needs about {entry.size >> 20} MiB and "
+                                f"{self.cfg.reserve >> 20} MiB of reserve; {free >> 20} MiB "
+                                "is free")
+
+    def _fetch(self, entry: Entry, part: Path, state: Path, done: set[int]) -> str:
+        """Fetch every chunk not in ``done`` with several workers; returns why it stopped, or
+        an empty string."""
         todo: queue.Queue[int] = queue.Queue()
         for index in range(len(entry.chunks)):
             if index not in done:
@@ -248,33 +283,19 @@ class Downloader:
                         fh.seek(index * entry.chunk_size)
                         fh.write(data)
                     done.add(index)
-                    self.fetched_from[peer.name or peer.base_url] = \
-                        self.fetched_from.get(peer.name or peer.base_url, 0) + len(data)
+                    who = peer.name or peer.base_url
+                    self.fetched_from[who] = self.fetched_from.get(who, 0) + len(data)
                     if len(done) % 16 == 0:
                         self._remember(entry, state, done)
 
         threads = [threading.Thread(target=work, daemon=True)
-                   for _ in range(min(self.workers, max(1, todo.qsize())))]
+                   for _ in range(min(self.cfg.workers, max(1, todo.qsize())))]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
         self._remember(entry, state, done)
-        if failure:
-            raise TransferError(failure[0])
-        if len(done) != len(entry.chunks):
-            raise TransferError(f"{entry.name}: {len(entry.chunks) - len(done)} chunks missing")
-        if sha256_file(part) != entry.sha256:
-            self.bus.emit("onboard.transfer.bad_file", "critical", "", file=entry.name)
-            part.unlink(missing_ok=True)
-            state.unlink(missing_ok=True)
-            raise TransferError(f"{entry.name} does not hash to the manifest's digest")
-        promote(part, target)
-        state.unlink(missing_ok=True)
-        self.bus.emit("onboard.transfer.staged", "info", "", file=entry.name, size=entry.size)
-        if self.on_staged is not None:
-            self.on_staged(target, entry)
-        return target
+        return failure[0] if failure else ""
 
     def _remember(self, entry: Entry, state: Path, done: set[int]) -> None:
         write_json(state, {"schema_version": 1, "sha256": entry.sha256, "done": sorted(done)},
@@ -332,7 +353,7 @@ class Downloader:
             peer.strikes += 1
             if hard:
                 peer.lies += 1
-            if (peer.lies >= self.strikes or peer.strikes >= 3 * self.strikes) \
+            if (peer.lies >= self.cfg.strikes or peer.strikes >= 3 * self.cfg.strikes) \
                     and not peer.banned:
                 peer.banned = True
                 self.bus.emit("onboard.transfer.peer_dropped", "warning", "",
@@ -346,16 +367,17 @@ class Downloader:
             headers.update(macauth.sign(peer.secret, "GET", url, None))
         if parts.scheme == "https":
             conn: http.client.HTTPConnection = http.client.HTTPSConnection(
-                parts.hostname or "", parts.port, timeout=self.timeout, context=peer.context)
+                parts.hostname or "", parts.port, timeout=self.cfg.timeout, context=peer.context)
         else:
             conn = http.client.HTTPConnection(parts.hostname or "", parts.port,
-                                              timeout=self.timeout)
+                                              timeout=self.cfg.timeout)
         try:
             conn.request("GET", parts.path, headers=headers)
             response = conn.getresponse()
             if response.status != 206:
                 raise TransferError(f"answered {response.status}")
-            if response.getheader("Content-Range") != f"bytes {start}-{start + want - 1}/{entry.size}":
+            if response.getheader("Content-Range") != \
+                    f"bytes {start}-{start + want - 1}/{entry.size}":
                 raise TransferError("answered a different range than asked")
             data = response.read(want + 1)
         finally:

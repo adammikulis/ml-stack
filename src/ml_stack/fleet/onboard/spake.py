@@ -1,24 +1,13 @@
-"""SPAKE2 over NIST P-256: two machines that share a short code, and nothing else, agree on a
-key without either sending anything a listener can test guesses against.
+"""SPAKE2 over NIST P-256: two machines that share a short code agree on a key, and nothing
+sent lets a listener test guesses at the code offline.
 
-Why a PAKE and not a MAC over the code: a six digit code is twenty bits. A confirmation
-`HMAC(code, transcript)` that crosses the wire lets a listener (or a machine playing the
-other end) try all million codes offline in a second. In a PAKE the only thing that proves
-knowledge of the code is the confirmation of the *other* party, which a side sends only
-after the first one has been verified, so each guess costs the guesser one conversation with
-a person watching at one end (see `requests.py` for how few are allowed).
-
-This is SPAKE2 (Abdalla & Pointcheval) with the blinding points `M` and `N` derived by
-hashing a fixed label to the curve, so nobody knows their discrete logarithm. It is not
-byte-compatible with RFC 9382, and nothing outside this package needs it to be. The
-identities of the two ends are the SHA-256 fingerprints of the certificates they present, put
-in the transcript: a machine in the middle that terminates TLS on both sides presents
-different certificates on each, the transcripts differ, and the confirmations fail.
-
-Not constant time: this is Python integer arithmetic. The protocol is interactive, one guess
-per conversation and rate-limited, which bounds what a timing observer collects, and that is
-accepted (docs/onboarding.md, "Out of scope"). The curve constants are checked against the
-`cryptography` package in the tests.
+A confirmation like HMAC(code, transcript) on the wire would let anyone try all million six
+digit codes in a second. Here a side's confirmation is sent only after the other's has
+verified, so each guess costs one conversation. M and N are hashed to the curve, so nobody
+knows their discrete logarithm; this is not byte-compatible with RFC 9382 and need not be.
+The two ends are identified by certificate fingerprints in the transcript, so a relay that
+terminates TLS on both sides fails the confirmation. Not constant time (Python integers):
+one guess per conversation, rate-limited, bounds what a timer collects. See docs/onboarding.md.
 """
 
 from __future__ import annotations
@@ -28,8 +17,16 @@ import hmac
 import secrets
 from dataclasses import dataclass
 
-__all__ = ["Bad", "Party", "Session", "encode", "decode", "start_initiator", "start_responder",
-           "word_from_code"]
+__all__ = [
+    "Bad",
+    "Party",
+    "Session",
+    "decode",
+    "encode",
+    "start_initiator",
+    "start_responder",
+    "word_from_code",
+]
 
 P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
 N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
@@ -157,11 +154,11 @@ class Session:
     first (`confirmation`), checked by the responder with `check`, and only then the
     responder's."""
 
-    def __init__(self, role: str, secret: int, word: int, message: Point, context: bytes,
-                 me: Party, peer: Party) -> None:
-        self.role, self._x, self._w = role, secret, word
+    def __init__(self, role: str, scalars: tuple[int, int], message: Point, context: bytes,
+                 ends: tuple[Party, Party]) -> None:
+        self.role, (self._x, self._w) = role, scalars    # the secret and the code's scalar
         self.message_point = message
-        self._context, self.me, self.peer = context, me, peer
+        self._context, (self.me, self.peer) = context, ends
         self._tt: bytes | None = None
         self._keys: dict[str, bytes] = {}
 
@@ -214,7 +211,7 @@ def _start(role: str, code: str, context: bytes, me: Party, peer: Party) -> Sess
     x = secrets.randbelow(N - 1) + 1
     blind = M if role == "A" else NN
     message = _add(multiply(x, G), multiply(word, blind))
-    return Session(role, x, word, message, context, me, peer)
+    return Session(role, (x, word), message, context, (me, peer))
 
 
 def start_initiator(code: str, *, context: bytes, mine: str, theirs: str) -> Session:

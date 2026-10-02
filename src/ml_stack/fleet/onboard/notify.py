@@ -1,20 +1,11 @@
 """Telling the owner that a machine wants to join, in the way their desktop shows things.
 
-What a notification can and cannot do, honestly: a desktop notification from a command-line
-program can say something and cannot carry an Accept button (macOS needs a signed app bundle
-for `UNUserNotificationCenter` actions, Windows needs a registered app id for toast
-activation, `notify-send` has actions only on some servers and no way to hear the answer). So
-the notification tells the owner who is asking and the exact command to answer; the answer is
-given in the terminal (`ml-stack fleet accept ID`) or the web interface. That is the design,
-not a stand-in for one.
-
-What goes in a notification is text from a stranger (a hostname the asking machine chose), so
-it is cleaned to one short printable line and is handed to the operating system as an
-argument, never spliced into a script: an AppleScript string, a shell line or a PowerShell
-here-string built from a hostname is code execution on the owner's desktop.
-
-The pairing code is never in a notification: it exists only after the owner says yes, and is
-shown to them where they said it.
+A notification from a command-line program cannot carry an Accept button (macOS needs a signed
+app bundle, Windows a registered app id, notify-send has no portable answer), so it says who
+is asking and the command to answer with; the answer is given in the terminal or the web
+interface. The text is from a stranger, so it is cleaned to one short printable line and
+handed to the operating system as an argument, never spliced into a script. The pairing code
+is never in a notification: it exists only after the owner says yes.
 """
 
 from __future__ import annotations
@@ -65,7 +56,7 @@ def compose(request: Request) -> tuple[str, str]:
 
 def _run(argv: Sequence[str]) -> int:
     try:
-        return subprocess.run(list(argv), capture_output=True, timeout=10,  # noqa: S603
+        return subprocess.run(list(argv), capture_output=True, timeout=10,
                               check=False).returncode
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("notification command failed: %s", type(exc).__name__)

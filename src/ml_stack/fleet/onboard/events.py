@@ -1,10 +1,9 @@
 """What onboarding reports about itself: one record per step, for a person and for sentinel.
 
-Every step that matters to somebody watching for an attack -- a request arriving, being
-accepted, declined, expiring, a wrong code, a lock, a replay, a chunk that fails its hash --
-is an `Event` handed to every subscriber. The default subscriber logs it; a sentinel, when
-the process has one, subscribes with `forward_to_sentinel`. Nothing here imports sentinel
-until that is asked for, so the two packages stay apart.
+Every step an attacker's presence would show in (a request, an accept, a decline, an expiry, a
+wrong code, a lock, a replay, a chunk that fails its hash) is an `Event` handed to every
+subscriber and logged. Sentinel subscribes with a small adapter on its side (docs/onboarding.md
+shows it); nothing here imports sentinel.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["BUS", "SEVERITIES", "Bus", "Event", "forward_to_sentinel"]
+__all__ = ["BUS", "SEVERITIES", "Bus", "Event"]
 
 logger = logging.getLogger("ml_stack.fleet.onboard")
 logger.addHandler(logging.NullHandler())
@@ -68,7 +67,8 @@ class Bus:
         for fn in listeners:
             try:
                 fn(event)
-            except Exception:  # a subscriber must not stop a pairing  # noqa: BLE001
+            except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+                # a subscriber must not stop a pairing
                 logger.exception("onboard subscriber failed")
         return event
 
@@ -80,14 +80,3 @@ class Bus:
 BUS = Bus()
 """The process-wide bus; the servers and clients here emit to it unless given another."""
 
-
-def forward_to_sentinel(sentinel: Any, bus: Bus = BUS) -> Callable[[], None]:
-    """Pass this bus's events to ``sentinel.bus`` as sentinel events; returns the call that
-    stops. Imports ``ml_stack.sentinel`` here, not at module load."""
-    from ml_stack.sentinel.events import Event as SentinelEvent
-    from ml_stack.sentinel.events import Severity
-
-    def pass_on(event: Event) -> None:
-        sentinel.bus.emit(SentinelEvent(event.kind, Severity.parse(event.severity), "onboard",
-                                        event.subject, event.evidence, event.ts))
-    return bus.subscribe(pass_on)

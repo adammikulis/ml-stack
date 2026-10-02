@@ -82,3 +82,12 @@ def test_real_osascript_treats_arguments_after_double_dash_as_data():
     done = subprocess.run(["osascript", "-e", script, "--", hostile, "-e evil"],
                           capture_output=True, text=True, timeout=30, check=False)
     assert done.returncode == 0 and done.stdout.strip() == hostile + "|-e evil"
+
+
+def test_the_notification_cleans_text_again_even_for_a_request_built_by_hand():
+    from ml_stack.fleet.onboard.requests import Request
+    r = Request("a" * 32, "pi\n\x1b[31mACCEPT\u202e", "h\x07", "m\n", "10.0.0.5", FP, "ab" * 16, 0.0)
+    title, body = notify.compose(r)
+    for text in (title, body):
+        assert "\n" not in text and "\x1b" not in text and "\u202e" not in text
+        assert "\x07" not in text

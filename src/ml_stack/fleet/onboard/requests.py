@@ -1,23 +1,12 @@
-"""The join request: a stranger's ask, the owner's answer, and the limits that keep the ask
-from becoming a nuisance or a way in.
+"""The join request: a stranger's ask, the owner's answer, and the limits around the ask.
 
-States: ``pending`` (nobody has answered) -> ``accepted`` (a person said yes; the code exists
-and counts down) -> ``paired``; or -> ``declined``, ``expired`` or ``failed`` (too many
-wrong codes). The store is a file, so the process that listens for requests and the command
-a person types (`accept`, `decline`) are different processes that see one state.
-
-What the limits are for, each one a test in ``tests/test_onboard_requests.py``:
-
-* one active request per certificate fingerprint and per source address: a device that asks
-  twice does not make two notifications;
-* a window per source address and a ceiling on pending requests overall: a machine that
-  hammers the port is refused, quietly, after the first few, so it cannot flood a person's
-  notifications;
-* a declined fingerprint waits before it may ask again, and three declines in a row block it
-  for an hour;
-* a request that nobody answers expires; a code that nobody types expires sooner;
-* three tries at the code, then the request is dead and the fingerprint waits;
-* a revoked device cannot ask again until the owner un-revokes it.
+States: pending -> accepted (a person said yes; the code exists and counts down) -> paired,
+or declined, expired, failed (too many wrong codes). The store is a file, so the process that
+listens and the command a person types (accept, decline) see one state. Limits, each a test:
+one active request per fingerprint and per address; a window per address and a ceiling on
+pending requests; a declined fingerprint waits, three declines in a row block it an hour; an
+unanswered request expires, an untyped code sooner; three tries at the code; a revoked device
+cannot ask again until the owner allows it.
 """
 
 from __future__ import annotations
@@ -265,15 +254,18 @@ class Requests:
     def _transaction(self) -> Any:
         return only_one(self.path.with_suffix(".lock"), announce=lambda _m: None)
 
-    def _expire(self, ledger: _Ledger) -> None:
-        now, lim = self.clock(), self.limits
+    def _expire(self, ledger: _Ledger) -> bool:
+        """Close requests whose time has run out; whether any was."""
+        now, lim, changed = self.clock(), self.limits, False
         for r in ledger.requests:
             late = (r.state is State.PENDING and now - r.created > lim.pending_ttl_s) or \
                    (r.state is State.ACCEPTED and now > r.code_expires)
             if late:
                 r.state, r.code, r.decided = State.EXPIRED, "", now
+                changed = True
                 self.bus.emit("onboard.request.expired", "info", f"request:{r.id}",
                               fingerprint=r.fingerprint[:16], address=r.address)
+        return changed
 
     # -- the asking side --
     def submit(self, info: dict[str, Any], address: str) -> Request:
@@ -326,15 +318,15 @@ class Requests:
     def get(self, request_id: str) -> Request | None:
         with self._lock, self._transaction():
             ledger = self._load()
-            self._expire(ledger)
-            self._save(ledger)
+            if self._expire(ledger):
+                self._save(ledger)
             return next((r for r in ledger.requests if r.id == request_id), None)
 
     def pending(self) -> list[Request]:
         with self._lock, self._transaction():
             ledger = self._load()
-            self._expire(ledger)
-            self._save(ledger)
+            if self._expire(ledger):
+                self._save(ledger)
             return [r for r in ledger.requests if r.state in ACTIVE]
 
     def find(self, prefix: str) -> Request:

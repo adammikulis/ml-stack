@@ -47,6 +47,7 @@ from .discovery import (
     named_apart,
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
+from .onboard.cli import COMMANDS as ONBOARD_COMMANDS, add_commands, run as run_onboarding
 from .pausing import (
     Answer,
     Fanout,
@@ -873,15 +874,12 @@ def main(argv: list[str] | None = None) -> int:
     leave_p.add_argument("--keep-running", action="store_true",
                          help="leave the daemon up, just stop answering as a peer")
 
-    from .onboard.cli import COMMANDS as ONBOARD
-    from .onboard.cli import add_commands
-    from .onboard.cli import run as run_onboard
 
     add_commands(sub)
     args = ap.parse_args(argv)
-    if args.cmd in ONBOARD:
+    if args.cmd in ONBOARD_COMMANDS:
         try:
-            return run_onboard(args)
+            return run_onboarding(args)
         except (OSError, SystemExit) as exc:
             warn(f"error: {exc}")
             return 2

@@ -1,23 +1,13 @@
 """The signed list of what a cluster hands to a new machine.
 
-A manifest names files (the ml-stack wheel, a source archive, model files) with their sizes,
-SHA-256 digests and per-chunk digests, and says which may be handed on to other machines. It
-is signed with an Ed25519 key that belongs to the cluster; a new machine learns the matching
-public key during pairing (`Grant.signing_key`) or from the bootstrap offer, and from then on
-accepts file lists only if they verify under it.
-
-Why a signature when the transport is already authenticated TLS: because the bytes may come
-from any peer, a cache or a USB stick. The signature is what lets a file travel through a
-machine that is not trusted to be honest. It is checked before any chunk is requested, and
-every chunk is checked against the digests it lists.
-
-The signer signs only what it has verified itself: the controller checks a wheel against the
-digest the package index or release page publishes (`httpguard`), and a model file through the
-guarded download pipeline and the scan/quarantine staging, before listing it. A signature
-therefore says "the cluster's controller vouches for these bytes", not "these bytes are safe".
-
-Key handling is in docs/onboarding.md ("Signing keys"). Needs the ``cryptography`` package
-(extra ``fleet-tls``), which the pinned TLS already requires.
+A manifest names files (the wheel, a source archive, model files) with sizes, SHA-256
+digests and per-chunk digests, and says which may be handed on to other machines. It is
+signed with an Ed25519 key that belongs to the cluster; a new machine learns the public key
+during pairing and from then on accepts file lists only if they verify under it. The
+signature is what lets a file travel through a machine that is not trusted to be honest. The
+signer lists only what it has checked itself (a wheel against the index's digest, a model
+through the guarded download and scan), so a signature says "the controller vouches for these
+bytes", not "these bytes are safe". Key handling: docs/onboarding.md. Needs ``cryptography``.
 """
 
 from __future__ import annotations
@@ -29,15 +19,24 @@ import math
 import os
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ml_stack.safenames import Unsafe, safe_filename
 
-__all__ = ["Entry", "Manifest", "ManifestError", "Signer", "SCHEMA_VERSION", "chunk_digests",
-           "key_fingerprint", "load_signer", "verify"]
+__all__ = [
+    "SCHEMA_VERSION",
+    "Entry",
+    "Manifest",
+    "ManifestError",
+    "Signer",
+    "chunk_digests",
+    "key_fingerprint",
+    "load_signer",
+    "verify",
+]
 
 SCHEMA_VERSION = 1
 MIN_CHUNK = 64 * 1024
@@ -173,11 +172,12 @@ class Signer:
         with os.fdopen(fd, "wb") as out:
             out.write(base64.b64encode(raw))
 
-    def entry(self, path: Path, *, kind: str = "other", shareable: bool = True,
-              licence: str = "", source: str = "", chunk_size: int = DEFAULT_CHUNK) -> Entry:
+    def entry(self, path: Path, *, chunk_size: int = DEFAULT_CHUNK, **terms: Any) -> Entry:
+        """The entry for the file at ``path``; ``terms`` are `Entry`'s ``kind``,
+        ``shareable``, ``licence`` and ``source``."""
         whole, parts = chunk_digests(path, chunk_size)
         return Entry(safe_filename(path.name), path.stat().st_size, whole, chunk_size, parts,
-                     kind, shareable, licence, source)
+                     **terms)
 
     def sign(self, entries: Iterable[Entry], *, serial: int, valid_s: float = 7 * 86400,
              now: float | None = None) -> bytes:
@@ -232,11 +232,9 @@ def verify(raw: bytes, pinned: bytes, *, now: float | None = None, min_serial: i
                             f"({min_serial})")
     rows = body.get("entries")
     if not isinstance(rows, list) or len(rows) > MOST_ENTRIES:
-        raise ManifestError("entries are a list of at most %d" % MOST_ENTRIES)
+        raise ManifestError(f"entries are a list of at most {MOST_ENTRIES}")
     entries = tuple(Entry.from_json(r) for r in rows)
     if len({e.name for e in entries}) != len(entries):
         raise ManifestError("two entries have one name")
     return Manifest(int(serial), float(issued), float(expires), str(body["key_id"]), entries)
 
-
-Verifier = Callable[[bytes], Manifest]

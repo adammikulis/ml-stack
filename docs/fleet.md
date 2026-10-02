@@ -88,6 +88,27 @@ current and when it last looked. A fleet half on one commit and half on another 
 thing those two columns exist to make visible -- `harrowgate` above is six days behind and
 following nothing, which is a machine somebody has to visit.
 
+### Adding a machine that is next to you
+
+When the passphrase is not to hand, or the machine is a phone-sized job away, a machine that
+already runs ml-stack can take another in with a short code instead:
+
+```
+owner$   ml-stack fleet listen --for 10m          # pairing is open; nothing listens otherwise
+newbox$  ml-stack fleet nearby                    # who is open to pairing
+newbox$  ml-stack fleet pair --host 192.168.2.44  # asks; waits for the owner
+owner$   ml-stack fleet requests                  # name, host, model, address, certificate
+owner$   ml-stack fleet accept 3f9a1c20           # prints a six digit code
+newbox$  (type the code)                          # joins the cluster
+```
+
+The owner is also told by a desktop notification (macOS and Linux). Accepting is not enough on
+its own: the code has to be read to the person at the new machine, and three wrong tries close
+the request. `listen --no-cluster` pairs without handing over the cluster key. A machine with
+**nothing installed** cannot be pushed to; `ml-stack fleet bootstrap --share DIR` offers the
+wheel on the LAN for ten minutes to somebody who opens the address on it. The design, the
+threat model and what is not built are in `docs/onboarding.md`.
+
 ### Placing users
 
 `plan` says which model each peer should serve, and with how many slots, for a number of

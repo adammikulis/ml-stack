@@ -13,6 +13,7 @@ from ml_stack.fleet import tls
 from ml_stack.fleet.framing import Limited, LimitedServer
 from ml_stack.fleet.onboard.pairing import (
     API,
+    Hooks,
     PairError,
     PairingClient,
     PairingServer,
@@ -27,8 +28,8 @@ def world(tmp_path):
     acceptor, joiner = identity(tmp_path, "acceptor"), identity(tmp_path, "joiner")
     rq = requests(tmp_path, rec, Clock())
     told = []
-    server = PairingServer(rq, acceptor, grant=lambda r: grant_for(acceptor),
-                           notify=told.append, port=0, bus=rec.bus).start()
+    server = PairingServer(rq, acceptor, Hooks(lambda r: grant_for(acceptor), told.append),
+                           address=("127.0.0.1", 0), bus=rec.bus).start()
     yield type("World", (), {"rq": rq, "rec": rec, "server": server, "acceptor": acceptor,
                              "joiner": joiner, "told": told})
     server.stop()
@@ -145,8 +146,8 @@ def test_a_notifier_that_breaks_does_not_lose_the_request(tmp_path):
     def broken(_):
         raise RuntimeError("no display")
 
-    with PairingServer(rq, acceptor, grant=lambda r: grant_for(acceptor), notify=broken,
-                       port=0, bus=rec.bus) as server:
+    with PairingServer(rq, acceptor, Hooks(lambda r: grant_for(acceptor), broken),
+                       address=("127.0.0.1", 0), bus=rec.bus) as server:
         c = PairingClient("127.0.0.1", server.port, fingerprint=joiner.fingerprint)
         request_id = ask(c)
     assert rq.get(request_id).state is State.PENDING
@@ -191,7 +192,7 @@ def test_a_peer_cannot_be_swapped_for_another_mid_conversation(world, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     with PairingServer(requests(elsewhere, Recorder()), other,
-                       grant=lambda r: grant_for(other), port=0) as impostor:
+                       Hooks(lambda r: grant_for(other)), address=("127.0.0.1", 0)) as impostor:
         c.port = impostor.port          # same client object, the machine behind the port changed
         with pytest.raises(PairError, match="different certificate"):
             c.state()
@@ -268,3 +269,88 @@ def test_unrewritten_relay_is_caught_before_any_code_is_asked_for(world, tmp_pat
     finally:
         relay.stop()
 
+
+
+class Bluffer(PairingServer):
+    """A listener that hands out a grant without having proved it knew the code."""
+
+    def confirm(self, request_id, confirmation):
+        answer = super().confirm(request_id, confirmation)
+        return {**answer, "confirmation": "0" * 64}
+
+
+def test_the_asker_refuses_a_grant_from_a_machine_that_did_not_prove_the_code(tmp_path):
+    rec = Recorder()
+    acceptor, joiner = identity(tmp_path, "a"), identity(tmp_path, "j")
+    rq = requests(tmp_path, rec, Clock())
+    with Bluffer(rq, acceptor, Hooks(lambda r: grant_for(acceptor)),
+                 address=("127.0.0.1", 0), bus=rec.bus) as server:
+        c = PairingClient("127.0.0.1", server.port, fingerprint=joiner.fingerprint)
+        code = rq.accept(ask(c)).code
+        with pytest.raises(PairError, match="did not prove"):
+            c.finish(code)
+
+
+def _open_exchange(c, world, request_id, code, *, context=None):
+    """The asker's side of one exchange, by hand: returns the session after the server's reply."""
+    from ml_stack.fleet.onboard import spake
+    from ml_stack.fleet.onboard.pairing import context_for
+    session = spake.start_initiator(code, context=context or context_for(request_id, c.nonce),
+                                    mine=world.joiner.fingerprint,
+                                    theirs=world.acceptor.fingerprint)
+    status, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": session.message})
+    if status == 200:
+        session.receive(body["message"])
+    return status, session
+
+
+def test_an_asker_who_opens_exchanges_and_never_confirms_runs_out_of_tries(world):
+    c = client(world)
+    request_id = ask(c)
+    code = world.rq.accept(request_id).code
+    statuses = [_open_exchange(c, world, request_id, code)[0] for _ in range(4)]
+    assert statuses == [200, 200, 200, 429]
+    assert world.rq.get(request_id).state is State.FAILED
+
+
+def test_a_malformed_message_costs_a_try_and_the_third_closes_the_request(world):
+    c = client(world)
+    request_id = ask(c)
+    world.rq.accept(request_id)
+    for _ in range(3):
+        status, _ = c._call("POST", f"{API}/{request_id}/exchange", {"message": "04" + "11" * 64})
+        assert status == 400
+    assert world.rq.get(request_id).state is State.FAILED
+    assert len(world.rec.of("onboard.pair.wrong_code")) == 3
+
+
+def test_a_wrong_confirmation_cannot_be_retried_on_the_same_exchange(world):
+    """If it could, one exchange would allow a million guesses at the code without another
+    try being spent."""
+    c = client(world)
+    request_id = ask(c)
+    code = world.rq.accept(request_id).code
+    _, session = _open_exchange(c, world, request_id, code)
+    status, _ = c._call("POST", f"{API}/{request_id}/confirm", {"confirmation": "0" * 64})
+    assert status == 403
+    status, _ = c._call("POST", f"{API}/{request_id}/confirm",
+                        {"confirmation": session.confirmation()})      # the right one, too late
+    assert status == 409
+    assert world.rq.devices.all() == []
+
+
+class BadTag(PairingServer):
+    def confirm(self, request_id, confirmation):
+        return {**super().confirm(request_id, confirmation), "tag": "0" * 64}
+
+
+def test_the_asker_refuses_a_grant_whose_tag_is_not_the_exchanges(tmp_path):
+    rec = Recorder()
+    acceptor, joiner = identity(tmp_path, "a"), identity(tmp_path, "j")
+    rq = requests(tmp_path, rec, Clock())
+    with BadTag(rq, acceptor, Hooks(lambda r: grant_for(acceptor)),
+                address=("127.0.0.1", 0), bus=rec.bus) as server:
+        c = PairingClient("127.0.0.1", server.port, fingerprint=joiner.fingerprint)
+        code = rq.accept(ask(c)).code
+        with pytest.raises(PairError, match="tag"):
+            c.finish(code)

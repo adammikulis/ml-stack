@@ -31,6 +31,8 @@ in the cluster. The passphrase is all that stands between the LAN and that, so i
 | Discovery beacons, UDP 8771, multicast `239.255.77.70`, TTL 1 | sent once a cluster is joined | the LAN segment |
 | llama-server and other model servers | `127.0.0.1`, a random port | this machine; the daemon's `/infer` passes signed requests on to a fixed set of model-server paths |
 | `ml-stack-graph` page | `127.0.0.1` | this machine |
+| Pairing listener, TCP 8772, announcements UDP 8773 | off; only while `ml-stack fleet listen` runs | anyone on the LAN can send a request; nothing is given until the owner accepts and the code is typed. TLS only; plain HTTP is refused. `docs/onboarding.md` |
+| Bootstrap offer, an HTTPS port chosen at the time | off; only while `ml-stack fleet bootstrap` runs, for ten minutes | whoever has the unguessable address; program files only |
 
 A beacon carries the machine's name, port, device report and an HMAC-SHA256 under the cluster
 key. It never carries the passphrase, the cluster key or the request secret. It does let
@@ -144,6 +146,23 @@ resolve.
 - Constant-time comparison is used for every secret compare (`hmac.compare_digest`).
 - Workflows: no `pull_request_target`; the one expression put in a `run:` is a commit SHA;
   `workflow_dispatch` inputs go through `env:`.
+
+## Adding a device (`docs/onboarding.md`)
+
+A device is added with a short code through a password-authenticated exchange (SPAKE2, P-256)
+with both certificate fingerprints in the transcript, so a wrong code and a machine in the middle
+fail the same way, and a captured exchange gives nothing to test guesses against. The code
+exists only after the owner accepts, never appears in a notification, lives 120 seconds and
+has three tries; requests are limited per device, per address and overall, and a declined or
+failed device waits. A cluster member is fully trusted, so pairing hands over the cluster key
+unless told not to; `revoke` stops a device asking again but, while it holds the key, the
+cluster key must be changed to lock it out (not automated yet). Files from peers are checked
+against a manifest signed with the cluster's Ed25519 key, chunk by chunk, and are staged for the
+scan rather than installed. Nothing pushes software to a machine that has none: the owner
+opens an offer on it and runs a short, pinned installer. What this does not cover:
+the pairing mathematics is Python integers (not constant time) and wants an independent review
+before a public release; the re-key flow, per-device credentials and SSH push are designed and
+not built.
 
 ## Open
 

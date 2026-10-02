@@ -17,8 +17,8 @@ def say(**more):
 
 def test_an_announcement_is_heard_by_a_browser_through_the_in_memory_transport():
     hub = near.MemoryHub()
-    a = near.Announcer(hub.endpoint("10.0.0.7"), name="kitchen-pi", hostname="kitchen.local",
-                       model="Linux", port=8772, fingerprint=FP)
+    a = near.Announcer(hub.endpoint("10.0.0.7"),
+                       near.Presence("kitchen-pi", "kitchen.local", "Linux", 8772, FP))
     browser = near.Browser(hub.endpoint("10.0.0.2"))
     a.announce()
     found = browser.listen(0.2)
@@ -32,8 +32,8 @@ def test_announcement_over_real_udp_sockets_on_loopback():
     sender = near.UdpTransport(bind="127.0.0.1", port=0,
                                destinations=[("127.0.0.1", listener.port)])
     try:
-        a = near.Announcer(sender, name="den-mac", hostname="den", model="Darwin arm64",
-                           port=8772, fingerprint=FP, interval_s=0.05).start()
+        a = near.Announcer(sender, near.Presence("den-mac", "den", "Darwin arm64", 8772, FP),
+                           interval_s=0.05).start()
         found = near.Browser(listener).listen(0.5)
         a.stop()
         assert found and found[0].name == "den-mac" and found[0].address == "127.0.0.1"
@@ -58,7 +58,7 @@ def test_anything_that_is_not_a_well_formed_announcement_is_dropped():
                 say(port=True), say(port="8772"), say(fingerprint="zz"),
                 say(fingerprint=FP.upper()), b"x" * 5000, say(name="n" * 5000)):
         liar.send(bad)
-    assert browser.listen(0.2) == [] or all(len(n.name) <= 64 for n in browser.current())
+    assert browser.listen(0.2) == []
 
 
 def test_names_are_cleaned_before_they_reach_a_terminal():
@@ -74,7 +74,7 @@ def test_the_list_is_capped_per_source_and_overall_and_entries_age_out():
     clock, rec = Clock(), Recorder()
     hub = near.MemoryHub()
     flood = hub.endpoint("10.0.0.66")
-    browser = near.Browser(hub.endpoint("10.0.0.2"), ttl_s=30, most=6, per_source=4,
+    browser = near.Browser(hub.endpoint("10.0.0.2"), near.Bounds(ttl_s=30, most=6, per_source=4),
                            bus=rec.bus, clock=clock)
     for i in range(10):
         flood.send(say(fingerprint=f"{i:064x}"))

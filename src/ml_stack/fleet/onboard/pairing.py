@@ -1,23 +1,13 @@
 """Pairing over the wire: the accepting machine's listener and the asking machine's client.
 
-The conversation, all over TLS to the accepting machine's self-signed certificate:
-
-1. ``POST /onboard/v1/requests`` -- "this is who I am" (name, hostname, model, the
-   fingerprint of the certificate my own daemon will serve). Answered 202 with an id. The
-   owner is told; nothing secret exists yet.
-2. ``GET /onboard/v1/requests/<id>`` -- poll until the owner has said yes. Only then does a
-   code exist, on the owner's screen, and the asking machine's person types it in.
-3. ``POST .../exchange`` and ``POST .../confirm`` -- SPAKE2 (`spake.py`) with both
-   certificate fingerprints in the transcript. A wrong code, or a machine in the middle
-   presenting its own certificate, fails the confirmation. The accepting side reveals nothing
-   until the asking side's confirmation checks out, and each exchange spends one of three
-   tries.
-4. The reply to a good confirmation carries the accepting side's own confirmation and the
-   grant (see `Grant`), tagged under the exchange key.
-
-The TLS handshake here is deliberately unverified: the asking machine has nothing to verify
-the certificate against yet. What authenticates it is step 3, which binds the fingerprint
-that was actually presented to the code only the two people know.
+All over TLS to the accepting machine's self-signed certificate: ``POST /onboard/v1/requests``
+(who I am; the owner is told), ``GET .../<id>`` (poll until the owner says yes, which is when
+a code first exists, on the owner's screen), then ``POST .../exchange`` and ``.../confirm``
+(SPAKE2 with both certificate fingerprints in the transcript, three tries). The TLS handshake
+is deliberately unverified, since the asker has nothing to check it against yet; what
+authenticates the certificate is the exchange, which binds the one actually presented to the
+code only the two people know. The accepting side reveals nothing until the asker's
+confirmation checks out. Design and threat model: docs/onboarding.md.
 """
 
 from __future__ import annotations
@@ -33,18 +23,18 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from ml_stack import macauth
 from ml_stack.fleet import tls
-from ml_stack.fleet.framing import Limited, LimitedServer, Malformed, read_body
+from ml_stack.fleet.framing import Malformed
 
 from . import spake
 from .events import BUS, Bus
 from .requests import Refused, Request, Requests, State
+from .web import Call, Listener, Reply, json_reply
 
-__all__ = ["DEFAULT_PORT", "Grant", "PairError", "PairingClient", "PairingServer",
+__all__ = ["DEFAULT_PORT", "Grant", "Hooks", "PairError", "PairingClient", "PairingServer",
            "context_for", "fingerprint_of"]
 
 DEFAULT_PORT = 8772
@@ -97,34 +87,36 @@ class Grant:
                       ("group", "key", "salt", "certificate", "signing_key")})
 
 
+@dataclass(slots=True)
+class Hooks:
+    """What the owner's side supplies: the grant for an accepted request, and how to tell
+    the owner of a new one (a notifier that raises is reported and the request kept)."""
+
+    grant: Callable[[Request], Grant]
+    notify: Callable[[Request], None] | None = None
+
+
 class PairingServer:
     """The listener a machine runs while the owner has pairing open."""
 
-    def __init__(self, requests: Requests, ident: tls.Identity, *,
-                 grant: Callable[[Request], Grant], notify: Callable[[Request], None] | None = None,
-                 host: str = "127.0.0.1", port: int = DEFAULT_PORT, bus: Bus = BUS,
-                 clock: Callable[[], float] = time.monotonic) -> None:
-        self.requests, self.ident, self.grant, self.notify = requests, ident, grant, notify
-        self.bus = bus
-        self.lockout = macauth.Lockout(failures=20, window_s=60.0, lock_s=120.0, clock=clock)
+    def __init__(self, requests: Requests, ident: tls.Identity, hooks: Hooks, *,
+                 address: tuple[str, int] = ("127.0.0.1", DEFAULT_PORT), bus: Bus = BUS) -> None:
+        self.requests, self.ident, self.hooks, self.bus = requests, ident, hooks, bus
+        self.lockout = macauth.Lockout(failures=20, window_s=60.0, lock_s=120.0)
         self._sessions: dict[str, spake.Session] = {}
         self._lock = threading.Lock()
-        self.httpd = LimitedServer((host, port), _handler(self), tls=tls.server_context(ident))
-        self._thread: threading.Thread | None = None
+        self.listener = Listener(self.dispatch, address, tls.server_context(ident))
 
     @property
     def port(self) -> int:
-        return int(self.httpd.server_address[1])
+        return self.listener.port
 
     def start(self) -> PairingServer:
-        self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True,
-                                        name="onboard-pairing")
-        self._thread.start()
+        self.listener.start()
         return self
 
     def stop(self) -> None:
-        self.httpd.shutdown()
-        self.httpd.server_close()
+        self.listener.stop()
 
     def __enter__(self) -> PairingServer:
         return self.start()
@@ -132,7 +124,55 @@ class PairingServer:
     def __exit__(self, *exc: object) -> None:
         self.stop()
 
-    # -- what the handler asks of the server --
+    # -- routes --
+    def dispatch(self, call: Call) -> Reply:
+        if not call.secure:
+            return json_reply(403, {"error": "pairing needs TLS"})
+        if self.lockout.locked(call.client):
+            return json_reply(429, {"error": "too many bad requests from this address"})
+        try:
+            status, body = self._route(call)
+        except Refused as why:
+            if why.status in (400, 404, 409):
+                self.lockout.failed(call.client)
+            return json_reply(why.status, {"error": why.reason})
+        except (Malformed, ValueError) as bad:
+            self.lockout.failed(call.client)
+            return json_reply(getattr(bad, "status", 400), {"error": getattr(
+                bad, "message", "the body is not JSON")})
+        return json_reply(status, body)
+
+    def _route(self, call: Call) -> tuple[int, dict[str, Any]]:
+        path = call.path.split("?")[0].rstrip("/")
+        if call.method == "POST" and path == API:
+            return 202, self.submit(call.json(MOST_BODY), call.client)
+        tail = path[len(API) + 1:] if path.startswith(API + "/") else ""
+        request_id, _, action = tail.partition("/")
+        if not ID.fullmatch(request_id):
+            raise Refused(404, "no such request")
+        if call.method == "GET" and not action:
+            request = self.requests.get(request_id)
+            if request is None:
+                raise Refused(404, "no such request")
+            return 200, {"state": request.state.value}
+        if call.method == "POST" and action == "exchange":
+            return 200, {"message": self.exchange(request_id,
+                                                  str(call.json(MOST_BODY).get("message")))}
+        if call.method == "POST" and action == "confirm":
+            return 200, self.confirm(request_id, str(call.json(MOST_BODY).get("confirmation")))
+        raise Refused(404, "no such request")
+
+    def submit(self, info: dict[str, Any], client: str) -> dict[str, Any]:
+        request = self.requests.submit(info, client)
+        if self.hooks.notify is not None:
+            try:
+                self.hooks.notify(request)
+            except (OSError, RuntimeError, ValueError):   # a broken toast must not drop the ask
+                self.bus.emit("onboard.notify.failed", "notice", f"request:{request.id}")
+        return {"id": request.id, "state": request.state.value,
+                "server": self.ident.fingerprint,
+                "expires_in": self.requests.limits.pending_ttl_s}
+
     def exchange(self, request_id: str, message: str) -> str:
         request = self.requests.take_attempt(request_id)
         try:
@@ -161,96 +201,11 @@ class PairingServer:
             left = self.requests.wrong(request_id)
             raise Refused(403, f"wrong code; {left} tries left" if left else
                           "wrong code; the request is closed")
-        grant = self.grant(request)
+        grant = self.hooks.grant(request)
         payload = grant.encode()
         self.requests.paired(request_id, shared_cluster_key=bool(grant.key))
         return {"confirmation": session.confirmation(),
                 "grant": base64.b64encode(payload).decode(), "tag": session.seal(payload)}
-
-
-def _handler(server: PairingServer) -> type[BaseHTTPRequestHandler]:
-    class Handler(Limited, BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *_args: object) -> None:
-            return
-
-        def _reply(self, status: int, body: dict[str, Any]) -> None:
-            raw = json.dumps(body).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(raw)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(raw)
-
-        def _json(self) -> dict[str, Any]:
-            data = json.loads(read_body(self, MOST_BODY) or b"{}")
-            if not isinstance(data, dict):
-                raise Malformed(400, "the body is a JSON object")
-            return data
-
-        def _route(self, method: str) -> None:
-            who = self.client_address[0]
-            if not isinstance(self.connection, ssl.SSLSocket):
-                self._reply(403, {"error": "pairing needs TLS"})
-                return
-            if server.lockout.locked(who):
-                self._reply(429, {"error": "too many bad requests from this address"})
-                return
-            parts = self.path.split("?")[0].rstrip("/")
-            try:
-                status, body = self._dispatch(method, parts, who)
-            except Refused as why:
-                if why.status in (400, 404, 409):
-                    server.lockout.failed(who)
-                self._reply(why.status, {"error": why.reason})
-                return
-            except Malformed as bad:
-                server.lockout.failed(who)
-                self._reply(bad.status, {"error": bad.message})
-                return
-            except (ValueError, json.JSONDecodeError):
-                server.lockout.failed(who)
-                self._reply(400, {"error": "the body is not JSON"})
-                return
-            self._reply(status, body)
-
-        def _dispatch(self, method: str, path: str, who: str) -> tuple[int, dict[str, Any]]:
-            if method == "POST" and path == API:
-                request = server.requests.submit(self._json(), who)
-                if server.notify is not None:
-                    try:
-                        server.notify(request)
-                    except Exception:  # noqa: BLE001  # a broken toast must not drop the ask
-                        server.bus.emit("onboard.notify.failed", "notice",
-                                        f"request:{request.id}")
-                return 202, {"id": request.id, "state": request.state.value,
-                             "server": server.ident.fingerprint,
-                             "expires_in": server.requests.limits.pending_ttl_s}
-            tail = path[len(API) + 1:] if path.startswith(API + "/") else ""
-            request_id, _, action = tail.partition("/")
-            if not ID.fullmatch(request_id):
-                raise Refused(404, "no such request")
-            if method == "GET" and not action:
-                request = server.requests.get(request_id)
-                if request is None:
-                    raise Refused(404, "no such request")
-                return 200, {"state": request.state.value}
-            if method == "POST" and action == "exchange":
-                message = self._json().get("message")
-                return 200, {"message": server.exchange(request_id, str(message))}
-            if method == "POST" and action == "confirm":
-                return 200, server.confirm(request_id, str(self._json().get("confirmation")))
-            raise Refused(404, "no such request")
-
-        def do_GET(self) -> None:
-            self._route("GET")
-
-        def do_POST(self) -> None:
-            self._route("POST")
-
-    return Handler
 
 
 def unverified_context() -> ssl.SSLContext:
@@ -259,7 +214,7 @@ def unverified_context() -> ssl.SSLContext:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE  # noqa: S504
+    ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 

@@ -1,17 +1,11 @@
 """Finding machines that are willing to be paired with, before there is any trust.
 
-A machine with pairing open announces itself: name, hostname, model, the port of its pairing
-listener and the SHA-256 fingerprint of its certificate. Nothing in an announcement is
-authenticated -- the machine asking has no key yet -- so it is treated as a hint and nothing
-more: the address is the datagram's source, never a claimed one; every string is cleaned; the
-list is bounded and entries age out. A forged announcement can put a wrong name in the list;
-it cannot get anyone paired, because pairing is decided by the code and the certificate the
-exchange binds (`pairing.py`).
-
-The wire is a `Transport`. `UdpTransport` is the real one (multicast and broadcast, both
-stdlib); `MemoryHub` stands in for it in tests that need no network at all. An mDNS/DNS-SD
-transport (the `zeroconf` package) fits the same two methods; see docs/onboarding.md for why
-the stdlib transport is the default.
+A machine with pairing open announces its name, model, pairing port and certificate
+fingerprint. Nothing in it is authenticated, so it is a hint: the address is the datagram's
+source, strings are cleaned, the list is bounded and ages out. A forged announcement can put a
+wrong name in the list; it cannot get anyone paired, because the code and the certificate the
+exchange binds decide that. The wire is a `Transport`: `UdpTransport` (stdlib multicast and
+broadcast) or `MemoryHub` for tests; an mDNS transport fits the same two methods.
 """
 
 from __future__ import annotations
@@ -31,8 +25,16 @@ from typing import Protocol
 from .events import BUS, Bus
 from .requests import clean
 
-__all__ = ["Announcer", "Browser", "MemoryHub", "Nearby", "Transport", "UdpTransport",
-           "DEFAULT_GROUP", "DEFAULT_PORT"]
+__all__ = [
+    "DEFAULT_GROUP",
+    "DEFAULT_PORT",
+    "Announcer",
+    "Browser",
+    "MemoryHub",
+    "Nearby",
+    "Transport",
+    "UdpTransport",
+]
 
 DEFAULT_GROUP = "239.255.77.70"
 DEFAULT_PORT = 8773
@@ -93,14 +95,24 @@ def decode(data: bytes, source: str, now: float) -> Nearby | None:
                   fingerprint=fingerprint, seen=now)
 
 
+@dataclass(frozen=True, slots=True)
+class Presence:
+    """What a machine says about itself when it announces."""
+
+    name: str
+    hostname: str
+    model: str
+    port: int
+    fingerprint: str
+
+
 class Announcer:
     """Says "I will pair" every ``interval_s`` seconds until stopped."""
 
-    def __init__(self, transport: Transport, *, name: str, hostname: str, model: str, port: int,
-                 fingerprint: str, interval_s: float = 5.0) -> None:
+    def __init__(self, transport: Transport, who: Presence, interval_s: float = 5.0) -> None:
         self.transport, self.interval_s = transport, interval_s
-        self.data = encode(name=name, hostname=hostname, model=model, port=port,
-                           fingerprint=fingerprint)
+        self.data = encode(name=who.name, hostname=who.hostname, model=who.model,
+                           port=who.port, fingerprint=who.fingerprint)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -123,13 +135,22 @@ class Announcer:
             self._thread.join(timeout=2.0)
 
 
+@dataclass(frozen=True, slots=True)
+class Bounds:
+    ttl_s: float = 30.0
+    most: int = 64
+    per_source: int = 4
+
+
 class Browser:
     """The list of machines heard, bounded and aging."""
 
-    def __init__(self, transport: Transport, *, ttl_s: float = 30.0, most: int = 64,
-                 per_source: int = 4, ignore: frozenset[str] = frozenset(), bus: Bus = BUS,
+    def __init__(self, transport: Transport, bounds: Bounds | None = None, *,
+                 ignore: frozenset[str] = frozenset(), bus: Bus = BUS,
                  clock: Callable[[], float] = time.monotonic) -> None:
-        self.transport, self.ttl_s, self.most, self.per_source = transport, ttl_s, most, per_source
+        self.transport = transport
+        bounds = bounds or Bounds()
+        self.ttl_s, self.most, self.per_source = bounds.ttl_s, bounds.most, bounds.per_source
         self.ignore, self.bus, self.clock = ignore, bus, clock
         self._found: dict[str, Nearby] = {}
 
