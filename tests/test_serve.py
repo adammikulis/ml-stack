@@ -558,6 +558,22 @@ class TestDetach:
             proc.wait()
 
 
+class TestRecord:
+    def test_a_new_server_on_a_port_is_asked_about_again(self, tmp_path, binary):
+        from ml_stack.client import chat
+
+        url = "http://127.0.0.1:9105"
+        chat._FAMILY_BY_URL[url] = "stale"
+        chat._NO_SPECULATIVE.add(url)
+        manager = ServerManager(LlamaServerBackend(binary=binary),
+                                state_file=tmp_path / "servers.json")
+        manager._record(ServerSpec(model="m.gguf", port=9105),
+                        ServerInfo(base_url=url, port=9105, pid=None, backend="llama.cpp"))
+
+        assert url not in chat._FAMILY_BY_URL
+        assert url not in chat._NO_SPECULATIVE
+
+
 class TestClose:
     def test_leaving_the_block_stops_a_server_the_manager_started(self, tmp_path, binary):
         state = tmp_path / "servers.json"

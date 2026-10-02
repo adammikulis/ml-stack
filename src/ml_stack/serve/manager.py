@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.client.chat import forget_server
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.hub import free_memory, room as machine_room
@@ -490,6 +491,7 @@ class ServerManager:
             "started": started_at(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
         }
+        forget_server(info.base_url)
         if info.process is not None:
             self._processes[info.port] = info.process
         self._save()
