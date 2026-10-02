@@ -116,7 +116,7 @@ ml-stack-serve = "ml_stack.serve.cli:main"
 # what a change to the asking costs, and whether it was worth it
 ml-stack-bench = "ml_stack.bench.run:main"
 # find a model newer than anything the assistant remembers, and print how to serve it
-ml-stack-models = "ml_stack.hub:main"
+ml-stack-models = "ml_stack.serve.models_cli:run"
 ml-stack-store = "ml_stack.graph.store_cli:main"
 # an invented organised group -- company, community, university, open-source, nonprofit --
 # as a graph with people who could talk, and questions about it with known answers

@@ -97,7 +97,7 @@ def test_the_breakdown_adds_up_to_the_total():
     assert {"Weights", "KV cache", "Compute buffers", "Vision projector",
             "Draft model"} <= set(got.breakdown)
     row = got.as_dict()
-    assert row["breakdown"][0] == {"name": "Weights", "bytes": 3 * GIB}
+    assert row["breakdown"][0] == {"label": "Weights", "value": 3 * GIB}
 
 
 def test_a_header_without_cache_keys_is_marked_approximate():
@@ -130,18 +130,38 @@ def est_for(used: float, budget: int = 10 * GIB) -> est.Estimate:
                            "cpu_bytes": int(used * budget)})
 
 
-def test_verdict_is_green_to_seventy_percent_then_yellow_then_red():
+def test_verdict_is_green_below_80_percent_yellow_to_95_then_red():
     machine = MachineMemory(100 * GIB, 12 * GIB, False, 0, (), "Linux")
     reserve = 2 * GIB
     rate = lambda share: est.verdict(est_for(share), machine, reserve)  # noqa: E731
-    assert [rate(0.5), rate(0.7), rate(0.71), rate(1.0), rate(1.01)] == [
-        "green", "green", "yellow", "yellow", "red"]
+    assert [rate(0.5), rate(0.79), rate(0.8), rate(0.94), rate(0.95), rate(1.2)] == [
+        "green", "green", "yellow", "yellow", "red", "red"]
+
+
+def test_the_thresholds_are_the_ones_the_meters_use():
+    shipped = Path(est.__file__).parents[1] / "ui" / "assets" / "verdict.json"
+    if not shipped.is_file():
+        pytest.skip("ml_stack.ui has no verdict.json in this tree")
+    said = json.loads(shipped.read_text())
+    assert (said["yellow_at"], said["red_at"]) == (est.YELLOW_AT, est.RED_AT)
+
+
+def test_a_meter_per_pool_carries_segments_capacity_and_the_same_verdict():
+    machine = MachineMemory(100 * GIB, 12 * GIB, False, 0, (), "Linux")
+    got = est.estimate_meta(dense(), 6 * GIB, est.Setup(context=8192, flash_attn=True))
+    (bar,) = est.meters(got, machine, 2 * GIB)
+    assert bar.capacity_bytes == 10 * GIB and bar.used_bytes == got.total_bytes
+    assert sum(s["value"] for s in bar.segments) == pytest.approx(got.total_bytes, abs=8)
+    assert {"label", "value"} == set(bar.segments[0])
+    assert bar.verdict == est.verdict(got, machine, 2 * GIB)
+    two = est.meters(est.estimate_meta(dense(), 6 * GIB, est.Setup(n_gpu_layers=16)),
+                     CARD_24, 2 * GIB)
+    assert [m.pool for m in two] == ["GPU memory", "RAM"]
 
 
 def test_the_default_reserve_is_two_gib_or_a_tenth_of_ram():
     assert est.reserve_default(LAPTOP_8) == 2 * GIB
-    assert est.reserve_default(UNIFIED_64) == 6.4 * GIB // 1 or est.reserve_default(
-        UNIFIED_64) == 64 * GIB // 10
+    assert est.reserve_default(UNIFIED_64) == 64 * GIB // 10
 
 
 def test_an_unknown_machine_has_no_verdict():
@@ -282,7 +302,7 @@ def test_models_are_ranked_larger_first_when_they_fit():
             Candidate("embed-Q8", 1 * GIB, 300_000_000, "Q8_0", "bert", 512)]
     ranked = suggest_model(fits, UNIFIED_16)
     assert [r.candidate.name for r in ranked] == ["mid-Q4", "tiny-Q4", "huge-Q4"]
-    assert [r.verdict for r in ranked][0] == "green" and ranked[-1].verdict == "red"
+    assert next(r.verdict for r in ranked) == "green" and ranked[-1].verdict == "red"
 
 
 def test_fast_prefers_the_smaller_model_that_is_still_useful():
@@ -328,3 +348,8 @@ def test_rocm_smi_json_is_read_in_bytes():
     (card,) = amd_gpus(text)
     assert (card.total_bytes, card.free_bytes, card.vendor) == (17163091968, 17163090968, "amd")
     assert amd_gpus("not json") == ()
+
+
+def test_a_context_past_the_trained_length_is_noted():
+    got = est.estimate_meta(dense(train=4096), GIB, est.Setup(context=8192, flash_attn=True))
+    assert any("past the 4096" in n for n in got.notes)

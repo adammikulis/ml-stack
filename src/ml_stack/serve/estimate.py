@@ -1,16 +1,13 @@
 """What serving a model will cost in memory, from its GGUF header and file sizes.
 
 ``estimate`` answers in bytes for one choice of context, slots, cache types and offload;
-``verdict`` rates an estimate against a machine as green, yellow or red; ``max_context``
-finds the longest context that stays at or under a verdict.
+``verdict`` rates it green, yellow or red against a machine; ``max_context`` finds the longest
+context that holds a rating. Weights and the KV cache are read off the header and match what
+llama.cpp allocates; the compute buffer is an empirical fit, a few percent of the total.
 
-Weights and the KV cache are read off the header and match what llama.cpp allocates (see
-`tests/fixtures/estimate_logs`). The compute buffer is an empirical fit, a few percent of
-the total.
-
-A q8_0 cache stores 34 bytes per 32 values (1.0625 bytes), about half of f16, and is
-near-lossless for chat and tool use; q4_0 saves more and loses quality. llama.cpp allows a
-quantised V cache only with flash attention, so without it V stays f16.
+A q8_0 cache stores 34 bytes per 32 values, about half of f16, and is near-lossless for chat
+and tool use; q4_0 saves more and loses quality. llama.cpp allows a quantised V cache only
+with flash attention, so without it V stays f16.
 """
 
 from __future__ import annotations
@@ -26,7 +23,7 @@ from ml_stack.hub import header
 from ml_stack.hub.probe import MachineMemory
 from ml_stack.serve.preflight import _kv_estimate_bytes, _recurrent_layers
 
-__all__ = ["DEFAULT_KV", "Estimate", "Setup", "estimate", "estimate_meta", "max_context", "verdict"]
+__all__ = ["DEFAULT_KV", "Estimate", "Meter", "Setup", "estimate", "estimate_meta", "max_context", "meters", "rating", "verdict"]
 
 DEFAULT_KV = "q8_0"
 """The KV cache type assumed unless one is asked for."""
@@ -39,8 +36,10 @@ of ``30 MiB + 20 MiB`` per GiB of weights, held between 32 and 160 MiB."""
 MMPROJ_FACTOR = 1.5
 """A projector's worst-case memory over its file size (784 MiB file, 1165 MiB estimated)."""
 
-GREEN_AT = 0.70
-"""A placement is green while it uses at most this share of the memory it goes in."""
+YELLOW_AT = 0.80
+RED_AT = 0.95
+"""A placement turns yellow at this share of the memory it goes in, and red at this one;
+`ml_stack.ui.verdict` holds the same two numbers for the bars that draw it."""
 
 HIGH_ATTENTION_HEADS = (64, 80, 96, 112, 128, 192, 256, 512)
 
@@ -98,9 +97,9 @@ class Estimate:
     notes: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
-        """JSON-ready; ``breakdown`` is a list of ``{name, bytes}`` in drawing order."""
+        """JSON-ready; ``breakdown`` is a list of ``{label, value}`` bytes in drawing order."""
         row = {f: getattr(self, f) for f in self.__slots__ if f != "breakdown"}
-        row["breakdown"] = [{"name": k, "bytes": v} for k, v in self.breakdown.items()]
+        row["breakdown"] = [{"label": k, "value": v} for k, v in self.breakdown.items()]
         row["notes"] = list(self.notes)
         return row
 
@@ -190,6 +189,9 @@ def estimate_meta(found: Mapping[str, object], weights_bytes: int,
     kv = _kv_estimate_bytes(dict(found), total_ctx, k, v, use.batch)
     state = recurrent_state_bytes(found) * slots
     arch, n_layer = _layers(found)
+    trained = int(found.get(f"{arch}.context_length") or 0)  # type: ignore[call-overload]
+    if trained and use.context > trained:
+        notes.append(f"context {use.context} is past the {trained} the model was trained on")
     if not kv and not state:
         notes.append("the header lacks the keys for a cache size; the cache is not counted")
     if found.get(f"{arch}.expert_count"):
@@ -216,8 +218,7 @@ def estimate_meta(found: Mapping[str, object], weights_bytes: int,
     return Estimate(int(weights_bytes), kv, compute, projector, int(use.draft_bytes), state,
                     total, gpu, total - gpu, use.context, slots,
                     f"{k}/{v}" if k != v else k, flash, use.n_gpu_layers,
-                    int(found.get(f"{arch}.context_length") or 0),  # type: ignore[call-overload]
-                    parts, _confidence(found, kv, parts, partial, flash), tuple(notes))
+                    trained, parts, _confidence(found, kv, parts, partial, flash), tuple(notes))
 
 
 @functools.lru_cache(maxsize=64)
@@ -311,19 +312,56 @@ def headroom(est: Estimate, machine: MachineMemory, reserve_bytes: int | None = 
 
 
 def verdict(est: Estimate, machine: MachineMemory, reserve_bytes: int | None = None) -> str:
-    """``green`` up to 70% of the memory it goes in, ``yellow`` while it still fits,
-    ``red`` when it does not, ``none`` when the machine's memory is unknown.
+    """``green`` below 80% of the memory it goes in, ``yellow`` from 80% to 95%, ``red`` from
+    95% or when it does not fit, ``none`` when the machine's memory is unknown.
 
     The memory is the unified working-set limit on Apple silicon, a card's free VRAM for
     the GPU part, and available RAM less ``reserve_bytes`` (default `reserve_default`) for
-    the CPU part. The fullest part decides.
+    the CPU part, so 95% of it is the real limit. The fullest part decides.
     """
     if not (machine.available_ram or machine.vram_free):
         return "none"
-    _, _, used = headroom(est, machine, reserve_bytes)
-    if used <= GREEN_AT:
-        return "green"
-    return "yellow" if used <= 1.0 else "red"
+    return rating(headroom(est, machine, reserve_bytes)[2])
+
+
+def rating(share: float) -> str:
+    """The verdict for a share of capacity used."""
+    if share >= RED_AT:
+        return "red"
+    return "yellow" if share >= YELLOW_AT else "green"
+
+
+@dataclass(frozen=True, slots=True)
+class Meter:
+    """One pool of memory as a bar: ``segments`` are ``{label, value}`` in bytes, in the
+    shape `<ml-meter>` takes, drawn against ``capacity_bytes``."""
+
+    pool: str
+    capacity_bytes: int
+    used_bytes: int
+    verdict: str
+    segments: tuple[dict[str, object], ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {"pool": self.pool, "capacity_bytes": self.capacity_bytes,
+                "used_bytes": self.used_bytes, "verdict": self.verdict,
+                "segments": list(self.segments)}
+
+
+def meters(est: Estimate, machine: MachineMemory, reserve_bytes: int | None = None
+           ) -> list[Meter]:
+    """A `Meter` for each pool the estimate lands in. A pool shows each part of the
+    breakdown in proportion to the share of the total that sits in it."""
+    reserve = reserve_default(machine) if reserve_bytes is None else reserve_bytes
+    out = []
+    for name, need, budget in _pools(est, machine, reserve):
+        share = need / est.total_bytes if est.total_bytes else 0.0
+        parts = tuple({"label": label, "value": int(size * share)}
+                      for label, size in est.breakdown.items() if size)
+        used = need / budget if budget > 0 else math.inf
+        out.append(Meter(name, max(budget, 0), need, rating(used) if budget > 0 else "red",
+                         parts))
+    return out
 
 
 ORDER = {"green": 0, "yellow": 1, "red": 2, "none": 3}

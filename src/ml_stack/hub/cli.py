@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from ml_stack import hub
 from ml_stack.hub.naming import _SHARD
@@ -41,13 +43,13 @@ def _head_lines(repo: str) -> list[str]:
     return out
 
 
-def _parser() -> argparse.ArgumentParser:
-    """``ml-stack-models``' parser: find, files, card, fetch, layout."""
+def _parser(extend: Callable[[Any], None] | None = None) -> argparse.ArgumentParser:
+    """``ml-stack-models``' parser: find, files, card, fetch, layout, and what ``extend``
+    adds to its subcommands."""
     ap = argparse.ArgumentParser(
         prog="ml-stack-models",
         description="Find a model that is newer than anything you remember, and serve it.")
-    sub = ap.add_subparsers(dest="cmd", required=True,
-                            metavar="{find,files,card,fetch,layout}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
 
     look = sub.add_parser("find", help="repositories matching some words")
     look.add_argument("words", nargs="+", help="e.g. gemma-4 E4B")
@@ -79,6 +81,8 @@ def _parser() -> argparse.ArgumentParser:
     shape.add_argument("model", help="a path, an hf: reference already fetched, or a file "
                                      "name copied from `files`")
     shape.add_argument("--json", action="store_true", help="the same as JSON")
+    if extend:
+        extend(sub)
     return ap
 
 
@@ -192,11 +196,13 @@ def _files(args) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    """``ml-stack-models`` -- find a model on the Hub and print how to serve it."""
-    args = _parser().parse_args(argv)
+def main(argv: list[str] | None = None, extend: Callable[[Any], None] | None = None,
+         more: dict[str, Callable[[Any], int]] | None = None) -> int:
+    """``ml-stack-models`` -- find a model on the Hub and print how to serve it. ``extend``
+    adds subcommands to the parser and ``more`` maps each to its function."""
+    args = _parser(extend).parse_args(argv)
     ran = {"layout": _layout, "find": _find, "card": _card, "fetch": _fetch,
-           "files": _files}[args.cmd]
+           "files": _files, **(more or {})}[args.cmd]
     try:
         return ran(args)
     except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine

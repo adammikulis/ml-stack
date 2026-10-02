@@ -7,18 +7,21 @@ Both are deterministic: the same header, sizes and machine give the same answer.
 
 from __future__ import annotations
 
+import contextlib
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ml_stack import hub
+from ml_stack.hub import remote
 from ml_stack.hub.discover import ModelInfo
 from ml_stack.hub.probe import MachineMemory, machine_memory
 from ml_stack.serve import estimate as est
 from ml_stack.units import human_bytes
 
-__all__ = ["Candidate", "Choice", "Option", "Suggestion", "Want", "suggest", "suggest_meta",
-           "suggest_model"]
+__all__ = ["Candidate", "Choice", "Option", "Recommendation", "Suggestion", "Want",
+           "recommend", "suggest", "suggest_meta", "suggest_model"]
 
 GOALS = {
     "agent": (32768, 8192),
@@ -75,6 +78,19 @@ class Suggestion:
         """The settings as an `estimate.Setup`."""
         return est.Setup(self.context, self.parallel, self.n_gpu_layers, self.kv_cache_type,
                          self.flash_attn, self.batch)
+
+    def lease(self) -> dict[str, object]:
+        """The keyword arguments of `ServerSpec` (and `serve`) for these settings, model
+        aside: ``-c`` is every slot's context added up, ``-ctk``/``-ctv`` come from the
+        cache type, and a batch other than 512 is ``-ub``."""
+        k, v = est.split_kv(self.kv_cache_type)
+        out: dict[str, object] = {
+            "context": self.context * self.parallel, "parallel": self.parallel,
+            "n_gpu_layers": self.n_gpu_layers, "cache_type_k": k, "cache_type_v": v,
+            "flash_attn": self.flash_attn}
+        if self.batch != 512:
+            out["extra_args"] = ("-ub", str(self.batch))
+        return out
 
     def as_dict(self) -> dict[str, object]:
         return {"context": self.context, "parallel": self.parallel,
@@ -349,3 +365,48 @@ def suggest_model(candidates: Iterable[Candidate | ModelInfo],
                              est.ORDER[r.verdict], -r.score, r.candidate.name))
     return rows
 
+
+
+@dataclass(frozen=True, slots=True)
+class Recommendation:
+    """A model worth using on this machine, installed or still to download."""
+
+    choice: Choice
+    installed: bool
+    ref: str
+
+
+_PARAMS = re.compile(r"(\d+(?:\.\d+)?)\s*[Bb](?![a-z])")
+_ACTIVE = re.compile(r"-A\d+(?:\.\d+)?B", re.IGNORECASE)
+
+
+def download_candidates(repos: Iterable[remote.Repo]) -> list[Candidate]:
+    """One `Candidate` per build of each repository, sized from the listing."""
+    out = []
+    for repo in repos:
+        found = _PARAMS.search(repo.id.split("/")[-1])
+        params = int(float(found.group(1)) * 1e9) if found else 0
+        moe = "moe" if _ACTIVE.search(repo.id) else ""
+        for build, size, _shards, quant in repo.builds():
+            first = next(f for f in repo.files if f.build == build)
+            out.append(Candidate(f"{repo.id} {build}", size, params, quant, moe, 0,
+                                 f"hf:{repo.id}/{first.path}"))
+    return out
+
+
+def recommend(machine: MachineMemory | None = None, goal: str = "agent", *, query: str = "",
+              limit: int = 8) -> list[Recommendation]:
+    """Installed models, and with ``query`` the GGUF builds the Hub offers for it, ranked
+    for ``goal`` on ``machine`` and cut to ``limit``. Ranking is `suggest_model`'s; the
+    search is skipped when the Hub cannot be reached."""
+    machine = machine or machine_memory()
+    installed = hub.discover(formats=("gguf",))
+    pool: list[Candidate | ModelInfo] = list(installed)
+    owned = {m.id for m in installed}
+    if query:
+        with contextlib.suppress(remote.RemoteError, OSError):
+            pool += [c for c in download_candidates(remote.search(query, remote.Filters(limit=6)))
+                     if c.ref not in owned]
+    rows = suggest_model(pool, machine, goal)
+    return [Recommendation(r, r.candidate.ref in owned, r.candidate.ref)
+            for r in rows if r.verdict != "none"][:limit]
