@@ -227,8 +227,15 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
     host = pipe.policy.admit(url, want.purpose) if want.admit else host_of(url)
     key = _key(url, final)
     part = staged_part(url, final)
-    shown = _stream_to(pipe, url, part, want, hooks)
+    try:
+        shown = _stream_to(pipe, url, part, want, hooks)
+    except TooLarge:
+        part.unlink(missing_ok=True)
+        _meta(part).unlink(missing_ok=True)
+        raise
     staged = part.with_name(f"{key}__{name}")
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    part.chmod(0o644)
     files.promote(part, staged)
     _meta(part).unlink(missing_ok=True)
     if want.rename is not None:

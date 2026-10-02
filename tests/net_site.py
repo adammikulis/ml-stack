@@ -90,10 +90,11 @@ class Site:
             h.send_header("Content-Type", "application/octet-stream")
             h.end_headers()
             try:
-                while True:
+                for _ in range(1024):
                     h.wfile.write(b"\0" * 65536)
             except OSError:
                 return
+            return
         h.send_header("Content-Length", str(len(body)))
         h.end_headers()
         sent = body if route.cut_at is None else body[:route.cut_at]

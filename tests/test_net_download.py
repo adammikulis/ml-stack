@@ -279,11 +279,12 @@ def test_a_resumed_file_that_changed_on_the_server_fails_its_hash(tmp_path, site
         pull(pipe, site, "/m.gguf", tmp_path / "m.gguf", net.Want(sha256=SHA(new)[:-1] + "0"))
 
 
-def test_an_endless_body_stops_at_the_cap(tmp_path, site, pipe):
+def test_an_endless_body_stops_at_the_cap_and_leaves_nothing_behind(tmp_path, site, pipe):
     site.add("/forever.gguf", endless=True)
     with pytest.raises(TooLarge):
         pull(pipe, site, "/forever.gguf", tmp_path / "f.gguf", net.Want(max_bytes=500_000))
     assert not (tmp_path / "f.gguf").exists()
+    assert not list(staging_dir().glob("*.part*"))
 
 
 def test_a_declared_size_over_the_cap_is_refused_before_the_body(tmp_path, site, pipe):
@@ -317,6 +318,29 @@ def test_an_approval_can_lapse(tmp_path):
     assert policy.approved("a.example")
     clock[0] += 61
     assert not policy.approved("a.example")
+
+
+def test_the_policy_is_asked_again_at_every_redirect_hop(tmp_path, site):
+    answers = {"first.test": ["127.0.0.1"], "second.test": ["127.0.0.1"]}
+    pipe = net.Pipeline(
+        policy=net.Policy(allowed=["first.test"], path=tmp_path / "a.jsonl"),
+        limits=Limits(allow_hosts=frozenset({"first.test", "second.test"}),
+                      resolver=lambda host, port: answers[host], timeout=2.0, deadline_s=6.0),
+        scanners=[])
+    target = site.add("/m.gguf", gguf_bytes())
+    site.redirect("/go", f"http://second.test:{site.port}/m.gguf")
+    with pytest.raises(net.NeedsApproval) as caught:
+        net.download(f"http://first.test:{site.port}/go", tmp_path / "m.gguf", None, pipe)
+    assert caught.value.host == "second.test" and target.seen == []
+    pipe.policy.approve("second.test", by="person")
+    net.download(f"http://first.test:{site.port}/go", tmp_path / "m.gguf", None, pipe)
+    assert (tmp_path / "m.gguf").is_file()
+
+
+def test_a_kept_file_can_be_read_by_other_programs(tmp_path, site, pipe):
+    site.add("/m.gguf", gguf_bytes())
+    pull(pipe, site, "/m.gguf", tmp_path / "m.gguf")
+    assert (tmp_path / "m.gguf").stat().st_mode & 0o044 == 0o044
 
 
 def test_a_redirect_to_a_host_the_policy_does_not_admit_is_refused(tmp_path, site, pipe):
