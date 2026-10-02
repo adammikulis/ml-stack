@@ -89,7 +89,7 @@ def sample_messages(messages: Sequence[Mapping[str, Any]], n: int, *,
     everything = [dict(m) for m in messages]
     if n <= 0 or n >= len(everything):
         return everything
-    rng = random.Random(f"extract/{seed}")
+    rng = random.Random(f"extract/{seed}")  # noqa: S311 - a sample, not a secret
     grouped: dict[str, list[dict[str, Any]]] = {}
     for m in everything:
         grouped.setdefault(_stratum(m), []).append(m)

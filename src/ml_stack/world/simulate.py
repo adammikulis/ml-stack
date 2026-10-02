@@ -555,7 +555,7 @@ def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,
     world = World(graph=dict(graph), people=people, personas=dict(personas),
                   calendar=list(read_json(world_dir / "calendar.json", []) or []),
                   seed=seed, size=str(said.get("size") or "small"), kind=kind)
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - a sample, not a secret
     if not world.calendar:
         world.calendar = calendar(world, days, rng)
     out_dir.mkdir(parents=True, exist_ok=True)

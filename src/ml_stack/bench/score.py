@@ -277,7 +277,7 @@ def bands(rows: Sequence[Mapping[str, Any]], *, draws: int = BOOTSTRAP,
         return got
     import random
 
-    rand = random.Random(seed)
+    rand = random.Random(seed)  # noqa: S311 - a sample, not a secret
     means: tuple[list[float], ...] = ([], [], [], [])
     pool = range(n)
     for _ in range(draws):

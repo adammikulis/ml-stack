@@ -59,7 +59,7 @@ def by_group[T](
             "support a held-out set."
         )
 
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - a sample, not a secret
     shuffled = list(unique)
     rng.shuffle(shuffled)
     held = set(shuffled[: max(1, int(len(unique) * fraction))])
@@ -78,7 +78,7 @@ def stratified[T](rows: Sequence[T], labels: Sequence[Any], fraction: float = 0.
             f"{len(rows)} rows but {len(labels)} labels; they must line up")
     import random
 
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - a sample, not a secret
     buckets: dict[Any, list[int]] = {}
     for i, label in enumerate(labels):
         buckets.setdefault(label, []).append(i)

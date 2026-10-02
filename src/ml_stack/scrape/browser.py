@@ -175,6 +175,6 @@ def pace(least_s: float = 0.0, most_s: float = 0.0) -> float:
     """
     if most_s <= 0:
         return 0.0
-    spent = random.uniform(max(0.0, least_s), most_s)
+    spent = random.uniform(max(0.0, least_s), most_s)  # noqa: S311 - a sample, not a secret
     time.sleep(spent)
     return spent
