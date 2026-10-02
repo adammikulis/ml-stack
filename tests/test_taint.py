@@ -6,12 +6,24 @@ against a scripted llama-server on a socket, the real compaction.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 
 import pytest
-from taint_session import EVIL, PAGE, SCHEMAS, Session
+from taint_session import (
+    EVIL,
+    PAGE,
+    RAN,
+    SCHEMAS,
+    Session,
+    agent_for,
+    calls,
+    drive,
+    nothing_ran_fixture,  # noqa: F401
+    served_fixture,  # noqa: F401
+    shell,
+    tool,
+)
 
 from ml_stack import guard as g, taint
 from ml_stack.agent import (
@@ -34,7 +46,7 @@ from ml_stack.taint import (
     Sink,
     TaintRail,
 )
-from ml_stack.testing.tool_server import ToolCallingServer, Turn
+from ml_stack.testing.tool_server import Turn
 
 # -- ledger -----------------------------------------------------------------------------
 
@@ -361,72 +373,6 @@ def test_turning_taint_off_needs_a_reason_and_is_logged(caplog, capsys):
 
 
 # -- the agent loop ------------------------------------------------------------------------
-
-def tool(name: str, props: dict | None = None, **notes) -> dict:
-    spec = {"name": name, "description": name, "inputSchema": {
-        "type": "object", "properties": props or {}}}
-    if notes:
-        spec["annotations"] = notes
-    return spec
-
-
-RAN: list[tuple[str, dict]] = []
-
-
-def fetch_page(url: str = "") -> str:
-    return PAGE
-
-
-def shell(cmd: str = "") -> str:
-    RAN.append(("shell", {"cmd": cmd}))
-    return "ran"
-
-
-def write_file(path: str = "", content: str = "") -> str:
-    RAN.append(("write_file", {"path": path, "content": content}))
-    return "written"
-
-
-def agent_for(fake, **kw) -> Agent:
-    specs = [tool("fetch_page", {"url": {"type": "string"}}, readOnlyHint=True),
-             tool("shell", {"cmd": {"type": "string"}}),
-             tool("write_file", {"path": {"type": "string"}, "content": {"type": "string"}})]
-    tools = FunctionTools(specs, {"fetch_page": fetch_page, "shell": shell,
-                                  "write_file": write_file})
-    return Agent(Client(fake.base_url), tools, **kw)
-
-
-def drive(agent: Agent, task: str, confirm=None) -> list:
-    agent.confirm = confirm
-
-    async def go() -> list:
-        return [e async for e in agent.run(task)]
-
-    return asyncio.run(go())
-
-
-@pytest.fixture
-def served():
-    started: list[ToolCallingServer] = []
-
-    def start(*turns: Turn) -> ToolCallingServer:
-        fake = ToolCallingServer(list(turns))
-        started.append(fake)
-        return fake
-
-    yield start
-    for fake in started:
-        fake.close()
-
-
-@pytest.fixture(autouse=True)
-def nothing_ran():
-    RAN.clear()
-
-
-def calls(*pairs: tuple[str, dict]) -> Turn:
-    return Turn(calls=tuple((name, json.dumps(args)) for name, args in pairs))
-
 
 def test_the_agent_loop_blocks_an_injected_page_by_default(served):
     fake = served(calls(("fetch_page", {"url": "http://x"})),

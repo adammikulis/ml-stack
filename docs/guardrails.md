@@ -19,10 +19,10 @@ The built-in rails need no extra and make no network call:
   schema (types, required, no unknown keys, enums, a bool is not an integer), no string over 8192
   characters or with control characters, no `..` path climb, no credential file (`.ssh`, `.aws`,
   `.env`, `id_rsa`, `/etc/passwd`...), no URL whose host is not loopback; at most 200 calls per
-  run, 120 per minute, the same call at most 10 times. A tool that starts processes, writes files or
-  downloads (`serve_up`, `models_fetch`, `fleet_join`, `speech_say`, `bench_*`...) runs after text
-  from outside the person has been read only when the person confirms: a "go" on a `plan` that
-  names the tool confirms it, otherwise the loop asks.
+  run, 120 per minute, the same call at most 10 times.
+- `taint`: once text from outside the person has been read, a call to a tool that can change
+  something runs only when each argument is vouched for or the person confirms; see
+  `docs/taint.md`.
 - `secrets`: tokens, keys, private keys, JWTs, `Bearer` values, URL passwords, `key=value`
   assignments and the value of every environment variable named like a credential are replaced by
   `[REDACTED:kind]` in tool results, model words and everything printed; a call whose arguments
