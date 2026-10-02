@@ -37,6 +37,15 @@ def _walk(place: places.Place) -> list[Path]:
     return out
 
 
+def standard(roots: Sequence[Path | str] | None = None) -> list[places.Place]:
+    """The folders to search as `Place` rows: ``roots`` when given, else `default_roots`;
+    a folder `places` knows keeps its tool's label and layout."""
+    known = {p.path: p for p in places.places(state=home.home())}
+    named = list(roots) if roots is not None else hub.default_roots(home.home())
+    return [known.get(Path(r)) or places.Place("extra", "auto", Path(r), True, 8)
+            for r in named]
+
+
 def weight_paths(roots: Sequence[Path] | None = None) -> list[Path]:
     """Every weight file under ``roots`` (the model roots by default), in root order.
 
@@ -44,12 +53,8 @@ def weight_paths(roots: Sequence[Path] | None = None) -> list[Path]:
     the blob it points at, and a caller reading a size ``stat()``s through it. An Ollama
     folder answers with the blob each manifest names.
     """
-    known = {p.path: p for p in places.places(state=home.home())}
-    named = list(roots) if roots is not None else hub.default_roots(home.home())
-    where = [known.get(Path(r)) or places.Place("extra", "auto", Path(r), True, 8)
-             for r in named]
     out: list[Path] = []
-    for place in where:
+    for place in standard(roots):
         if not place.path.is_dir():
             continue
         if scan.detect(place.path) == "ollama":
@@ -132,7 +137,19 @@ def located(name: str | Path, *, roots: Sequence[Path] | None = None, loose: boo
     needle = wanted.lower()
     # weights before the projectors and heads that travel with them
     ranked = sorted(every, key=lambda p: hub.aside(p.name))
-    return next((p for p in ranked if needle in p.name.lower()), None) if loose else None
+    named = next((p for p in ranked if needle in p.name.lower()), None) if loose else None
+    return named or _installed_as(wanted, roots, loose, min_size)
+
+
+def _installed_as(wanted: str, roots: Sequence[Path] | None, loose: bool,
+                  min_size: int) -> Path | None:
+    """The file an installed model's own name stands for (``llama3:latest`` in Ollama)."""
+    pool = [m for m in hub.discover(standard(roots), formats=("gguf",))
+            if m.is_complete and _big_enough(m.path, min_size)]
+    exact = hub.installed_find(wanted, pool)
+    narrowed = exact if loose else [m for m in exact if wanted.lower() in (
+        m.id.lower(), m.name.lower(), f"ollama:{wanted.lower()}")]
+    return narrowed[0].path if narrowed else None
 
 
 def repo_of(model: str | Path) -> str:

@@ -103,4 +103,4 @@ def test_a_folder_named_twice_is_listed_once():
 def test_unverified_layouts_are_marked():
     marked = {p.label for p in places.places(env={}, where="Linux", home=HOME, state=STATE)
               if not p.verified}
-    assert marked == {"jan", "kagglehub"}
+    assert marked == {"jan", "kagglehub", "lmstudio", "gpt4all", "modelscope"}

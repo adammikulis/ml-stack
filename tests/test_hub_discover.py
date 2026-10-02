@@ -13,7 +13,10 @@ from ml_stack import hub
 from ml_stack.hub import header, places, scan
 
 META = {"general.architecture": "llama", "general.name": "Tiny", "general.size_label": "7B",
-        "general.file_type": 15, "llama.context_length": 4096, "llama.block_count": 32}
+        "general.file_type": 15, "llama.context_length": 4096, "llama.block_count": 32,
+        "llama.embedding_length": 4096, "llama.attention.head_count": 32,
+        "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
+        "llama.attention.value_length": 128}
 
 
 def model(path: Path, extra: dict | None = None, pad: int = 0) -> Path:
@@ -41,7 +44,7 @@ def hf_repo(cache: Path, repo: str, files: dict[str, int], rev: str = "abc123") 
 
 
 def ollama(root: Path, name: str, tag: str, *, projector: bool = False,
-           host: str = "registry.ollama.ai", ns: str = "library") -> Path:
+           where: str = "registry.ollama.ai/library") -> Path:
     blob = root / "blobs" / f"sha256-{name}{tag}"
     model(blob, {"general.name": name}, 100)
     layers = [{"mediaType": "application/vnd.ollama.image.model",
@@ -51,7 +54,7 @@ def ollama(root: Path, name: str, tag: str, *, projector: bool = False,
         model(side, {"general.name": "proj"})
         layers.append({"mediaType": "application/vnd.ollama.image.projector",
                        "digest": f"sha256:proj{name}", "size": side.stat().st_size})
-    manifest = root / "manifests" / host / ns / name / tag
+    manifest = root / "manifests" / where / name / tag
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(json.dumps({"schemaVersion": 2, "layers": layers}))
     return blob
@@ -110,8 +113,8 @@ def test_a_snapshot_link_to_nothing_is_not_a_model(tmp_path):
 
 def test_ollama_manifests_resolve_to_their_blobs_and_readable_names(tmp_path):
     ollama(tmp_path, "llama3", "latest", projector=True)
-    ollama(tmp_path, "mine", "7b", ns="someone")
-    ollama(tmp_path, "far", "1", host="example.com", ns="library")
+    ollama(tmp_path, "mine", "7b", where="registry.ollama.ai/someone")
+    ollama(tmp_path, "far", "1", where="example.com/library")
     got = {m.name: m for m in hub.discover([tmp_path])}
     assert set(got) == {"llama3:latest", "someone/mine:7b", "example.com/far:1"}
     first = got["llama3:latest"]

@@ -17,7 +17,7 @@ from ml_stack.hub.naming import aside
 from ml_stack.hub.places import Place
 
 PARTIAL = (".incomplete", ".part", ".partial", ".downloading", ".downloadinprogress",
-           ".crdownload", ".tmp", ".lock")
+           ".crdownload")
 """Suffixes of a download that is still arriving."""
 
 SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".cache", "blobs", ".locks"})
@@ -116,7 +116,7 @@ def _etag_repo(path: Path) -> tuple[str, str]:
 def _repo_hint(place: Place, rel: tuple[str, ...], path: Path) -> tuple[str, str]:
     if place.label == "llama.cpp":
         return _etag_repo(path)
-    if place.label == "lmstudio" and len(rel) == 3:
+    if place.label in ("lmstudio", "ml-stack") and len(rel) == 3:
         return f"{rel[0]}/{rel[1]}", rel[2]
     if place.label == "modelscope" and "models" in rel and len(rel) > rel.index("models") + 3:
         at = rel.index("models")

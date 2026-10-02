@@ -14,10 +14,10 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from ml_stack import files, home
+from ml_stack import files, home, hub
 from ml_stack.hub import header
 from ml_stack.hub.naming import QUANT, _precision, base_words, pretty_name
-from ml_stack.hub.places import Place, places
+from ml_stack.hub.places import Place
 from ml_stack.hub.scan import Entry, scan
 
 FORMATS = ("gguf", "safetensors", "mlx")
@@ -101,7 +101,7 @@ class _Headers:
 
 def _as_places(roots: Iterable[Path | str | Place] | None) -> list[Place]:
     if roots is None:
-        return places()
+        return hub.standard()
     return [r if isinstance(r, Place) else Place("extra", "auto", home.expand(r), True, 8)
             for r in roots]
 
@@ -274,7 +274,8 @@ def installed_for(ref: str, installed: list[ModelInfo] | None = None) -> ModelIn
     if len(parts) < 3:
         return None
     repo, name = "/".join(parts[:2]), parts[-1].lower()
-    pool = installed if installed is not None else discover(formats=("gguf",))
+    pool = installed if installed is not None else discover(formats=("gguf",),
+                                                            companions=True)
     for m in pool:
         same_file = m.filename.lower() == name or _stem(m.filename).lower() == _stem(name)
         if m.is_complete and m.repo.lower() == repo.lower() and same_file:

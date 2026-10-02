@@ -3,8 +3,7 @@
 A row names the tool, how its folder is laid out, the environment variables that move it
 and its default folders per system. ``places`` turns the table into the folders this
 machine has, in search order. ``verified`` is True where the layout was read off a real
-install or the tool's source; the rest are best-effort and `docs/model-discovery.md` says
-which.
+install; the rest follow the tool's documentation and `docs/model-discovery.md` says which.
 """
 
 from __future__ import annotations
@@ -66,13 +65,13 @@ SPECS: tuple[Spec, ...] = (
         "Linux": ("{xdg_cache}/llama.cpp", "{home}/.cache/llama.cpp"),
         "Windows": ("{local}/llama.cpp", "{home}/.cache/llama.cpp"),
     }, depth=2),
-    Spec("lmstudio", "flat", True, (), _LMSTUDIO),
+    Spec("lmstudio", "flat", False, (), _LMSTUDIO),
     Spec("ollama", "ollama", True, (("OLLAMA_MODELS", ""),), {
         "Darwin": ("{home}/.ollama/models",),
         "Linux": ("{home}/.ollama/models", "/usr/share/ollama/.ollama/models"),
         "Windows": ("{home}/.ollama/models",),
     }),
-    Spec("gpt4all", "flat", True, (), {
+    Spec("gpt4all", "flat", False, (), {
         "Darwin": ("{support}/nomic.ai/GPT4All",),
         "Linux": ("{home}/.local/share/nomic.ai/GPT4All",),
         "Windows": ("{local}/nomic.ai/GPT4All",),
@@ -85,7 +84,7 @@ SPECS: tuple[Spec, ...] = (
         "Windows": ("{home}/jan/models", "{appdata}/Jan/data/models",
                     "{appdata}/Jan/data/llamacpp/models"),
     }, depth=3),
-    Spec("modelscope", "flat", True, (("MODELSCOPE_CACHE", "hub"),),
+    Spec("modelscope", "flat", False, (("MODELSCOPE_CACHE", "hub"),),
          ("{home}/.cache/modelscope/hub",), depth=5),
     Spec("kagglehub", "flat", False, (("KAGGLEHUB_CACHE", "models"),),
          ("{home}/.cache/kagglehub/models",), depth=8),

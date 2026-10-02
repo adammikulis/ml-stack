@@ -11,7 +11,8 @@ from ._util import dotted, exempt, parse, python_files, rel
 NAME = "http-servers"
 OWNER = "ml_stack.graph.serve"
 ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/graph/serve.py", "src/ml_stack/testing/fakes.py")
+OWNS = ("src/ml_stack/graph/serve.py", "src/ml_stack/testing/fakes.py",
+        "src/ml_stack/testing/fakehub.py")
 
 
 def describe() -> str:
