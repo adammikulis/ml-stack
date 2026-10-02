@@ -1,5 +1,6 @@
-"""The text of a PDF that a reader can see: invisible render mode, white or tiny text, text off
-the page and text in a layer that is switched off are left out."""
+"""The text of a PDF that a reader can see. Invisible render mode, white or tiny text and
+transparent text are left out here; text off the page and in a layer that is switched off is
+left out by the extraction itself."""
 
 from __future__ import annotations
 
@@ -19,24 +20,19 @@ def _white(color: Any) -> bool:
     return isinstance(color, (tuple, list)) and len(color) >= 3 and all(c >= 0.97 for c in color[:3])
 
 
-def _hidden_spans(page: Any, off_layers: set[str]) -> Counter[str]:
+def _hidden_spans(page: Any) -> Counter[str]:
+    """The text of spans drawn invisibly, white, under `MIN_POINTS` or transparent."""
     bad: Counter[str] = Counter()
-    rect = page.rect
     for span in page.get_texttrace():
         text = "".join(chr(c[0]) for c in span.get("chars", ())).strip()
-        if not text:
-            continue
-        box = span.get("bbox") or (0, 0, 0, 0)
-        outside = box[2] < rect.x0 or box[0] > rect.x1 or box[3] < rect.y0 or box[1] > rect.y1
-        if (span.get("type") == 3 or _white(span.get("color")) or span.get("size", 12) < MIN_POINTS
-                or outside or span.get("layer", "") in off_layers
-                or span.get("opacity", 1.0) <= 0.02):
+        if text and (span.get("type") == 3 or _white(span.get("color"))
+                     or span.get("size", 12) < MIN_POINTS or span.get("opacity", 1.0) <= 0.02):
             bad[text] += 1
     return bad
 
 
-def _page_text(page: Any, off_layers: set[str]) -> tuple[str, int]:
-    bad = _hidden_spans(page, off_layers)
+def _page_text(page: Any) -> tuple[str, int]:
+    bad = _hidden_spans(page)
     lines: list[str] = []
     dropped = 0
     for block in page.get_text("dict").get("blocks", ()):
@@ -63,11 +59,10 @@ def visible_text(path: str | Path, *, limit: int | None = None) -> tuple[str, st
         raise ImportError("reading a PDF needs pymupdf: pip install 'ml-stack[pdf]'") from exc
     removed = 0
     with pymupdf.open(str(Path(path).expanduser())) as doc:
-        off = {str(v.get("name", "")) for v in doc.get_ocgs().values() if not v.get("on", True)}
         out: list[str] = []
         size = 0
         for page in doc:
-            text, dropped = _page_text(page, off)
+            text, dropped = _page_text(page)
             removed += dropped
             out.append(text)
             size += len(text)
