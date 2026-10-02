@@ -569,7 +569,17 @@ class ServerManager:
         return reclaim_port(port, recorded_pids=[recorded] if recorded else None)
 
 
-_DEFAULT = ServerManager()
+_DEFAULT: ServerManager | None = None
+_DEFAULT_LOCK = threading.Lock()
+
+
+def default_manager() -> ServerManager:
+    """The manager `serve` uses when it is not given one, built on first use."""
+    global _DEFAULT
+    with _DEFAULT_LOCK:
+        if _DEFAULT is None:
+            _DEFAULT = ServerManager()
+        return _DEFAULT
 
 
 @contextmanager
@@ -592,7 +602,7 @@ def serve(
     ``roam``, ``escalate``, ``anyway``, ``on_event`` and ``say`` go to
     :meth:`ServerManager.lease`.
     """
-    manager = manager or _DEFAULT
+    manager = manager or default_manager()
     spec = ServerSpec(
         model=model,
         port=port if port is not None else free_port(),
