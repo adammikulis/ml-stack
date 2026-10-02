@@ -333,11 +333,14 @@ merge, so what it costs is what the pass costs.
   makes the next `quick` a full run, and each new worktree pays one full run to record its map.
   Seeding a new worktree's map from the last one, or ignoring the packages that change often
   (`testmon_ignore_dependencies`), would stop that.
-- [ ] **`scripts/verify-quick` has not finished a pass over all sixteen modules.** The first pass
-  found one miss (`ml_stack.claude.main`, reached only through `tests/test_cli_help.py`'s computed
-  import), which `affected.dynamic_tests` now covers; the pass after the fix covered fewer modules
-  than the first. Run `scripts/verify-quick` over `serve`, `client`, `harness`, `claude`, `hub`,
-  `fleet`, `http`, `ui`, `train` and `units` in a throwaway worktree.
+- [ ] **`scripts/verify-quick` has covered seven modules, not fifteen, and `quick` reruns about
+  855 tests whatever changed.** It mutated `serve/ports`, `serve/escalation`, `client/tokens`,
+  `client/cache`, `harness`, `claude` and `hub/naming`; the one miss (`claude.main`, reached only
+  through `tests/test_cli_help.py`'s computed import) is covered by `affected.dynamic_tests` and
+  caught on the re-run. Not yet covered: `fleet`, `http`, `ui`, `train`, `units` and the
+  credential code in `fleet/session`. The 855 tests are a constant set testmon selects on top of
+  the change (831 to 855 in every row, load 190 to 240); what makes them always affected is not
+  found, and it is most of `quick`'s run time.
 - [ ] **Two slow tests fail under load and pass alone.** `test_fleet_daemon.py::
   test_the_default_is_still_one_job_at_a_time` and `test_fleet_discovery.py::
   test_peers_ls_reports_the_running_daemon` (a fixture error) failed in a `--slow -n 2` run of
