@@ -68,7 +68,7 @@ CATALOG: tuple[Library, ...] = (
             platforms=("darwin",), vendors=("apple",)),
     Library("bench", "Measuring",
             "Running the model sweeps other machines send this one.",
-            ("ml-stack[graph,store,serve,hub]",), size_mb=150),
+            ("ml-stack[graph,store,hub]",), size_mb=150),
     Library("vision", "Images",
             "Reading and resizing pictures.",
             ("pillow>=10.0",), size_mb=15),

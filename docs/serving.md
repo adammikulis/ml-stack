@@ -70,7 +70,7 @@ before the first call to keep everything inside a directory the program owns. `S
 reports through the `ml_stack.serve` loggers, or through the `say=` callback `lease` takes. A
 `ServerManager` is a context manager: `with ServerManager() as manager:` stops every server
 it started when the block ends and leaves adopted ones running, and `manager.close()` does
-the same. Process control needs `pip install 'ml-stack[serve]'` (psutil). A manager is safe
+the same. A manager is safe
 to call from several threads (one lock per port); a server started by a program that is
 killed without running `close()` keeps running, is listed as orphaned by `ml-stack-serve
 status`, and is stopped or adopted by the next lease on its port.

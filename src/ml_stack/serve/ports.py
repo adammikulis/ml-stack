@@ -7,6 +7,8 @@ import socket
 import sys
 import time
 
+import psutil
+
 from ml_stack.serve.process import kill_pid, pid_exists
 
 logger = logging.getLogger(__name__)
@@ -51,11 +53,6 @@ def wait_until_free(port: int, host: str = DEFAULT_HOST, *, timeout: float = 5.0
 
 def server_pids_on_port(port: int) -> list[int]:
     """Pids of *our* model-server binaries listening on ``port``."""
-    try:
-        import psutil
-    except ImportError:
-        return []
-
     pids: list[int] = []
     for process in psutil.process_iter(["pid", "name"]):
         name = process.info.get("name") or ""
