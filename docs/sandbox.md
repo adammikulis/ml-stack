@@ -94,15 +94,15 @@ macOS (Seatbelt), checked by `tests/test_sandbox_seatbelt.py` against the real `
 
 Known limits:
 
-- Metadata (existence, size) of a path outside the allow-list can be observed for its parent
-  directories only; contents cannot be read.
+- Metadata (existence, size) is readable only for the allow-listed trees and their ancestor
+  directories; contents outside the allow-list cannot be read.
 - A process that calls `setsid` leaves the group the runner kills. It stays inside the sandbox.
 - macOS does not enforce `RLIMIT_AS` or a useful `RLIMIT_NPROC` (the process limit is per user), so
   there is no memory or process-count ceiling.
 - Detecting a refusal reads the system log (about 1.2 s) and only happens after a failed run or
   with `diagnose="always"`.
-- `localhost` in a Seatbelt rule matches `127.0.0.1` and `::1`; a connection to an IPv4-mapped
-  IPv6 address is not covered.
+- Refusals that every confined process provokes at start-up (preference files, a few Mach
+  services, `net.routetable`) are filtered out of `Result.denials`.
 
 ## GPU
 
@@ -118,7 +118,8 @@ from a guessed list of 12 IOKit classes, 4 Mach services, 3 read paths and `ioki
 and removing one at a time while the server still loaded all 33 layers onto the GPU and answered.
 Only the two above were needed. The server is up in 3.6 to 4.7 s with them. llama.cpp embeds its
 Metal library, so it needs no shader-cache directory; `Policy.cache` names one directory that is
-readable and writable for a stack that does (MLX, PyTorch). The base profile also allows
+readable and writable for a stack that does (MLX, PyTorch). A model server started from a Homebrew prefix also needs that prefix readable (its libraries are
+linked by absolute path) and a working directory it can read. The base profile also allows
 `hw.pagesize_compat` (without it the allocator asks for 2^44 MiB and the server crashes).
 
 ## Where it is applied
@@ -160,3 +161,25 @@ are not written because they could not be verified here.
 `ml-stack security sandbox status` prints the backend, whether it can run and the deprecation
 note. `ml-stack security sandbox test` runs five guarantees against real confined processes and
 exits 1 when one fails.
+
+## Sandboxed model server
+
+`LlamaServerBackend(sandboxed=True)` or `ML_STACK_SANDBOX_SERVE=1` starts `llama-server` under
+the `model_server` policy: loopback, the GPU, the binary's install tree, the directories of
+the files on its command line, and the slot-save directory as the only writable path. A failed
+start appends the sandbox's refusals to the `ServerFailed` message. It is opt-in; it stays off by
+default until it has run a day of real workloads (speculative heads, mmproj, multi-shard models and
+Hugging Face downloads were not tried; a Hugging Face reference needs the network and is not
+supported while confined). The measured cost on a 350M model was within the 3.6 to 4.7 s start-up
+of the unconfined server (not separately timed).
+
+## Tests and measurements
+
+- `tests/test_sandbox_policy.py` (pure), `tests/test_sandbox_seatbelt.py` (real `sandbox-exec`),
+  `tests/test_sandbox_integration.py`, `tests/test_sandbox_redteam.py` and
+  `tests/test_sandbox_gpu.py` (slow: a real `llama-server` offloading every layer inside the
+  profile, plus a decoy read and a connection out refused). The Seatbelt tests skip cleanly
+  where `sandbox-exec` is absent.
+- Mutation check of the profile writer, validators, runner and bubblewrap argv: 45 hand-made
+  mutations. The first pass left 7 alive (message-masked validation errors, signals, the
+  operation parser); tests were tightened and all 45 are now killed.
