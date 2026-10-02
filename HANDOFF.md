@@ -769,18 +769,16 @@ worth taking, in this order:
 ### Security (ml-stack issue #18)
 
 What the 2026-10 hardening pass left open; `docs/security.md` has the model and the findings.
-- [ ] **Nothing on the fleet's wire is encrypted.** Requests are signed (authentic, intact,
-  not replayable) but bodies and replies are readable by anyone on the segment, and a reply is
-  not signed. Design: a self-signed certificate per daemon, its SHA-256 fingerprint carried in
-  the beacon (which is already MAC'd with the cluster key) so a peer pins it without a
-  certificate authority, served with `ssl.SSLContext` and pinned by `http.build_request`. The
-  stdlib cannot mint a certificate; it needs `openssl` on the PATH or the `cryptography`
-  package, and a rotation story.
-- [ ] **The passphrase-derived key is shared and its salt is fixed per cluster name.**
-  `discovery._salt_for` hashes the cluster name, so two clusters named `ml-stack` share a salt
-  and a precomputed table covers both. A random per-cluster salt would be minted by the first
-  machine and carried in its beacon; a joiner would try each candidate salt against the
-  beacon's MAC. Until then the defence is a 12 character minimum and `ml-stack-peers init`.
+- [ ] **A daemon's certificate is renewed only when it starts.** `tls.identity` makes a new
+  one when under 30 days of the 90 are left, but a daemon that runs longer than 60 days
+  keeps serving the old one until it restarts. Renewing in place means rebuilding the
+  `SSLContext` the server holds and re-announcing the new certificate; peers re-pin from the
+  next beacon.
+- [ ] **A reply is not signed.** Inside TLS this is moot for a peer that pinned the
+  certificate; a daemon run with `ML_STACK_FLEET_TLS=off` still sends replies anyone on the
+  segment can forge.
+- [ ] **A cluster joined before protocol 2 cannot onboard a machine by passphrase** (it has
+  no salt to tell). Each machine of it must join again; `ml-stack-peers setup` does that.
 - [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**
   `ml_stack.httpguard.fetch` pins the checked address for the connection and checks every
   redirect; the page reader and the browser (a redirect or a sub-request inside Playwright

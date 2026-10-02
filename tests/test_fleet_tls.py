@@ -160,7 +160,7 @@ def test_a_peer_that_was_never_pinned_is_not_trusted_on_sight(tmp_path):
 
 def test_plain_http_from_another_machine_is_dropped_but_this_machine_may_use_it(tmp_path):
     ident = tls.identity(tmp_path / "tls", "d")
-    httpd, runner, token = serve(tmp_path, ident)
+    httpd, runner, _ = serve(tmp_path, ident)
     try:
         port = httpd.server_port
         with socket.create_connection((lan_address(), port), timeout=5) as sock:

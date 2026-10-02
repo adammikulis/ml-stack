@@ -40,7 +40,9 @@ Top-level string values only. It is read only when:
 
 Hugging Face's own token file is read with the ownership and size checks but not the mode
 check, because `huggingface-cli login` writes it with the account's umask (usually `0644`).
-Mode `0600` is still what to want there.
+Mode `0600` is still what to want there. The file is only read: ml-stack never copies it into
+its own credentials file, a log or a child's environment unless that child is a server that
+will download weights.
 
 A value must be one printable line of at most 8192 characters; leading and trailing
 whitespace and newlines are stripped, anything else (an embedded newline, a control

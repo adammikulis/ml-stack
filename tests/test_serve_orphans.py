@@ -24,11 +24,11 @@ def _dead_pid():
     return done.pid
 
 
-def _record(proc, port, *, owner, started=True, cmdline=True, offset=0.0):
+def _record(proc, port, *, owner, started=True, cmdline=True):
     entry = {"port": port, "pid": proc.pid, "owner_pid": owner, "model": "m.gguf",
              "backend": "llama-server"}
     if started:
-        entry["started"] = started_at(proc.pid) + offset
+        entry["started"] = started_at(proc.pid)
     if cmdline:
         entry["cmdline"] = cmdline_digest(proc.pid)
     return entry

@@ -981,7 +981,7 @@ class TestWhereADownloadMayComeFrom:
         for source in ("http://127.0.0.1:9/m.gguf", "http://169.254.169.254/latest/m.gguf",
                        "http://localhost/m.gguf", "http://192.168.1.9/m.gguf",
                        "http://[::1]/m.gguf"):
-            with pytest.raises(ModelError, match="not on the public internet|this machine"):
+            with pytest.raises(ModelError, match=r"not on the public internet|this machine"):
                 store.ensure("m.gguf", source=source)
         assert not list(store.store.glob("*"))
 
@@ -1005,7 +1005,7 @@ class TestWhereADownloadMayComeFrom:
         srv = Server(("127.0.0.1", free_port()), Redirecting)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
-            with pytest.raises(ModelError, match="169.254.169.254"):
+            with pytest.raises(ModelError, match=r"169\.254\.169\.254"):
                 store.ensure("far.gguf", source=f"http://127.0.0.1:{srv.server_address[1]}/f")
         finally:
             srv.shutdown()

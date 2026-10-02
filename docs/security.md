@@ -26,16 +26,16 @@ in the cluster. The passphrase is all that stands between the LAN and that, so i
 
 | Surface | Default | Who can reach it |
 |---|---|---|
-| Fleet daemon, TCP 8770 | `127.0.0.1` until the machine joins a cluster, or `--lan`, `--host`, `--setup-from-lan` | a LAN peer holding the cluster key (signed requests only); anyone gets `{"ok": true}` from `/health` |
+| Fleet daemon, TCP 8770 | `127.0.0.1` (plain HTTP) until the machine joins a cluster, or `--lan`, `--host`, `--setup-from-lan`; beyond this machine it speaks TLS only | a LAN peer that pins its certificate and holds the cluster key (signed requests inside TLS); plain HTTP from another machine is dropped |
 | Daemon web interface, `/ui` | this machine alone | other machines only with `--ui-from-lan` (it signs in with the passphrase over plain HTTP) |
 | Discovery beacons, UDP 8771, multicast `239.255.77.70`, TTL 1 | sent once a cluster is joined | the LAN segment |
 | llama-server and other model servers | `127.0.0.1`, a random port | this machine; the daemon's `/infer` passes signed requests on to a fixed set of model-server paths |
 | `ml-stack-graph` page | `127.0.0.1` | this machine |
 
-A beacon carries the machine's name, port, device report and an HMAC-SHA256 under the cluster
-key. It never carries the passphrase, the cluster key or the request secret. It does let
-anyone on the segment test passphrase guesses offline (they cost one scrypt, N=2^16, each),
-which is why a passphrase has a 12 character minimum; see "Open".
+A beacon carries the machine's name, port, device report, its TLS certificate and an
+HMAC-SHA256 under the cluster key. It never carries the passphrase, the cluster key or the request secret. It does let
+anyone on the segment test passphrase guesses offline (they cost one scrypt, N=2^16, each, under
+the cluster's own random salt), which is why a passphrase has a 12 character minimum.
 
 ## Who can do what
 
@@ -43,8 +43,9 @@ which is why a passphrase has a 12 character minimum; see "Open".
 run a job, read or write a file, learn the name or device report from `/health`, or open the
 web interface. Can send requests; one that is not correctly signed is refused, and an address
 with ten failures in a minute is locked out for a minute. Can try passphrase guesses against a
-captured beacon (see above). Can read any traffic between peers: bodies are not encrypted
-(see "Open").
+captured beacon (see above). Cannot read traffic between peers: it is TLS to a certificate
+the beacon vouched for, and a different, rotated or expired certificate fails the handshake.
+With `ML_STACK_FLEET_TLS=off` it can read it.
 
 **A web page in the user's browser.** Cannot read the daemon: it listens on loopback, an API
 request must be signed with a secret the page does not have, and `/ui` requires a custom header
@@ -74,8 +75,12 @@ These apply to every consumer of the library without a switch.
   lease that stops only a server whose record proves its pid).
 - Importing `ml_stack` registers no signal handler or exit hook, builds no manager, opens no
   socket and writes no file; `ml_stack.__version__` and a `NullHandler` are all it adds.
-- The daemon listens on this machine until the machine joins a cluster; every request to it is
-  signed, fresh and unseen; request framing, connection count and time are bounded.
+- The daemon listens on this machine until the machine joins a cluster; beyond this machine it
+  is TLS to a pinned certificate or nothing (`ML_STACK_FLEET_TLS=off` is the one named switch,
+  announced at every start); every request is signed, fresh and unseen; request framing,
+  connection count and time are bounded.
+- A cluster's key is derived under its own random salt, learned from a machine already in it;
+  a protocol 1 peer is ignored.
 - `ml_stack.http.open_stream` and `build_request` open only `http` and `https`; messages about
   a URL carry no user, password or secret query parameter.
 - Model downloads and release downloads refuse loopback, private, link-local, metadata,
@@ -122,6 +127,8 @@ at that commit.
 | 25 | Info | `credentials` (new) | Tokens were read ad hoc from the environment by each caller | `816f978` one resolver; `docs/credentials.md` |
 | 26 | Info | `http.check` | The address check ran before the connection, so DNS could answer differently the second time | `db89b03` `httpguard.fetch` connects to the address it checked |
 | 27 | Low | `serve/preflight.py:87`, `serve/mlx_tree.py:92` | A model file whose header declares a string, an array or a pair count of 2^40 made the preflight allocate or loop on it | `35846af` |
+| 28 | Medium | `fleet/daemon.py`, `fleet/api.py` | Anyone on the segment read and altered peer-to-peer bodies (jobs, files, replies) | `d6ea366` |
+| 29 | Medium | `fleet/discovery.py:_salt_for` | The passphrase salt was a hash of the cluster name, so a table precomputed for `ml-stack` fit every cluster of that name | `518a855` per-cluster random salt, protocol 2 |
 
 `ruff --select S` (bandit) over `src`: 84 findings at `agent/audit`; the `ruff-security` budget
 now stands lower by the sites fixed (S104, S202, S314, S310, S107, the sampling `S311`s) and the
@@ -150,17 +157,6 @@ resolve.
 These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-stack issue
 #18).
 
-- **No encryption in transit.** Requests are authenticated, not hidden, and replies are not
-  signed. A design that fits the codebase: a self-signed certificate per daemon whose SHA-256
-  fingerprint rides in the beacon, which is already MAC'd with the cluster key; peers pin that
-  fingerprint, so there is no certificate authority and no trust-on-first-use. The standard
-  library cannot make a certificate; it needs `openssl` on the PATH or the `cryptography`
-  package. Decision wanted: add `cryptography` to the fleet, or require `openssl`, or accept a
-  signed-only fleet on trusted networks.
-- **The salt of the passphrase-derived key is the cluster name.** Two clusters named
-  `ml-stack` share one, so a precomputed table covers both. A random per-cluster salt minted by
-  the first machine would travel in its beacon; a joiner would try each candidate against the
-  beacon's MAC.
 - **`web.py`, the scraper's browser and `ingest/run.py`** still use `http.check` (resolve, then
   fetch) rather than `httpguard.fetch`. A page redirect or sub-request inside the browser is
   unchecked.

@@ -147,7 +147,7 @@ def test_a_url_that_is_not_plain_http_to_a_host_is_refused_before_resolving(url)
                                   "127.0.0.1", "[::1]", "2130706433", "0x7f.1", "017700000001",
                                   "169.254.169.254", "[::ffff:127.0.0.1]"])
 def test_hosts_that_mean_this_machine_are_refused(host):
-    with pytest.raises(Refused, match="this machine|public internet"):
+    with pytest.raises(Refused, match=r"this machine|public internet"):
         fetch(f"http://{host}/", limits=Limits(resolver=lambda h, p: ["127.0.0.1"]))
 
 
