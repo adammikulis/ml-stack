@@ -772,8 +772,19 @@ def pytest_addoption(parser) -> None:
                           "wheel build, a network timeout)")
 
 
+def heavy_modules() -> frozenset[str]:
+    """The test modules listed in ``tests/heavy-modules.txt``, one file name per line."""
+    listed = (Path(__file__).parent / "heavy-modules.txt").read_text(encoding="utf-8")
+    return frozenset(line.split("#")[0].strip() for line in listed.splitlines()
+                     if line.split("#")[0].strip())
+
+
 def pytest_collection_modifyitems(config, items) -> None:
-    """Leave the slow tests out unless --slow was asked for."""
+    """Mark the modules in ``heavy-modules.txt``, and leave the slow tests out unless --slow."""
+    heavy = heavy_modules()
+    for item in items:
+        if Path(str(item.fspath)).name in heavy:
+            item.add_marker(pytest.mark.heavy)
     if config.getoption("--slow"):
         return
     kept, dropped = [], []
