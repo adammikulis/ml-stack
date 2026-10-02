@@ -135,7 +135,7 @@ def started_at(pid: int | None) -> float | None:
 
     try:
         return float(psutil.Process(pid).create_time())
-    except Exception:  # noqa: BLE001
+    except psutil.Error:
         return None
 
 

@@ -19,7 +19,7 @@
   "ruff-blind-except": 19,
   "ruff-bugbear": 55,
   "ruff-other": 463,
-  "ruff-security": 85,
+  "ruff-security": 84,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
