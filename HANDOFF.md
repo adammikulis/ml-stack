@@ -30,6 +30,41 @@ the benchmarks" is an entry someone should rewrite as the change plus the re-mea
 What is broken, unproven, or claims more than it does. Nothing here is a new
 capability; every line is something that already exists not being what it says.
 
+### What still reaches the internet around the pipeline
+
+`docs/internet.md` is the list; each of these is a path in it.
+
+- [ ] **`ddgs` makes its own requests.** `web.ddgs_engine` hands the query to the library, which
+  opens its own connections to the engines, so the address check, the host policy and the size
+  cap do not apply to the search call itself (its results are cleaned and labelled). Replace it
+  with an engine written against `net.default().open`, or make SearXNG the default.
+- [ ] **pip installs unpinned dependencies.** `fleet/environment.py:Environment.pip` and
+  `fleet/updates.py:pip_install` run `pip install`, which talks to the index with pip's own
+  transport and checks no hashes. Download wheels through the pipeline into staging and install
+  from there with `--no-index --require-hashes`, or state the index and the packages and pin
+  them.
+- [ ] **`ml-stack-bench standard` lets lm-eval fetch datasets.** `datasets` downloads through
+  `huggingface_hub`'s transport. Fetch the datasets a task names through `hub.snapshot` and run
+  the harness with `HF_HUB_OFFLINE=1`.
+- [ ] **The browser resolves names itself.** `net/browserguard.py` checks the address of every
+  request, then Chromium resolves the name again to connect, so a name whose answer changes in
+  between reaches a private address. Pin with `--host-resolver-rules` from the checked answer,
+  or send the browser through a local proxy that connects to the pinned address.
+- [ ] **Windows Defender and Linux ClamAV are untested here.** The Defender command line and
+  exit codes are tested against a stand-in script; ClamAV was exercised on macOS only. Run
+  `tests/test_net_scan.py` on a Windows machine with Defender and on Linux with `clamav`
+  installed, and keep the result in `docs/internet.md`.
+- [ ] **The hash-reputation lookup has met no real service.** It is tested against a local
+  server shaped like VirusTotal's answer. Run it once with a key
+  (`ML_STACK_NET_HASH_LOOKUP=1`, `ml-stack-credentials set VIRUSTOTAL_API_KEY`, then approve
+  `www.virustotal.com`) and compare the fields.
+- [ ] **A `/metrics` address in the fleet view is fetched from this machine.** `fleet/ui.py:_scraped`
+  opens whatever a signed-in person typed, loopback and LAN included. Limit it to loopback and
+  the fleet's peers, or send it through `net`.
+- [ ] **Branch tracking installs what it pulls.** `fleet/updates.py:track_once` runs
+  `pip install -e .` after a fast-forward of a branch a person chose to follow. Show the diff
+  of the packaging files to the person, or install only from a tag with a digest.
+
 ### Getting it onto a machine that is not this one
 
 - [ ] **`ml-stack` needs a similarity waiver from PyPI before anything can be uploaded.**
