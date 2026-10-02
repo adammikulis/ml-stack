@@ -44,37 +44,24 @@
 
     if (d.ram_gb) {
       const used = d.ram_used_gb;
-      const pct = used === undefined ? null
-        : Math.max(0, Math.min(100, (used / d.ram_gb) * 100));
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, "memory"),
-          el("b", {}, used === undefined ? `${gb(d.ram_gb)} total`
-            : `${gb(used)} of ${gb(d.ram_gb)} in use`)),
-        pct === null ? null
-          : el("div", { class: "track" },
-              el("div", { class: "fill", style: `width:${pct}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "memory", capacity: d.ram_gb, unit: "GB", compact: true,
+        ...(used === undefined ? { caption: `${gb(d.ram_gb)} total` }
+          : { value: Math.max(0, used), caption: `${gb(used)} of ${gb(d.ram_gb)} in use` }) }));
     }
 
     if (d.cpu_pct !== undefined) {
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, "processors"),
-          el("b", {}, `${Math.round(d.cpu_pct)}% busy`)),
-        el("div", { class: "track" },
-          el("div", { class: "fill util",
-                      style: `width:${Math.min(100, d.cpu_pct)}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "processors", capacity: 100, value: Math.min(100, d.cpu_pct), compact: true,
+        caption: `${Math.round(d.cpu_pct)}% busy` }));
     }
 
     if (d.vram_total_gb) {
       const used = d.vram_total_gb - (d.vram_free_gb ?? d.vram_total_gb);
-      const pct = Math.max(0, Math.min(100, (used / d.vram_total_gb) * 100));
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, d.vendor === "apple" ? "unified memory" : "video memory"),
-          el("b", {}, `${gb(d.vram_free_gb)} free of ${gb(d.vram_total_gb)}`)),
-        el("div", { class: "track" },
-          el("div", { class: "fill vram", style: `width:${pct}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: d.vendor === "apple" ? "unified memory" : "video memory",
+        capacity: d.vram_total_gb, value: Math.max(0, used), compact: true,
+        caption: `${gb(d.vram_free_gb)} free of ${gb(d.vram_total_gb)}` }));
     }
 
     // Temperature, clock and power, when a vendor tool or metal-smi reported them.
@@ -91,12 +78,9 @@
     if (chips.length) meters.push(el("div", { class: "chips" }, chips));
 
     if (d.gpu_util_pct !== undefined) {
-      meters.push(el("div", { class: "meter" },
-        el("div", { class: "cap" },
-          el("span", {}, "gpu"),
-          el("b", {}, `${Math.round(d.gpu_util_pct)}% busy`)),
-        el("div", { class: "track" },
-          el("div", { class: "fill util", style: `width:${Math.min(100, d.gpu_util_pct)}%` }))));
+      meters.push(M.ui("ml-meter", {
+        label: "gpu", capacity: 100, value: Math.min(100, d.gpu_util_pct), compact: true,
+        caption: `${Math.round(d.gpu_util_pct)}% busy` }));
     }
 
     const held = (d.availability || {}).paused;

@@ -1,26 +1,23 @@
 <!-- close-sheet: the question the native window asks when the close button is clicked -->
 <template>
-  <div class="sheet" id="close-sheet" hidden>
-    <div class="sheet-card">
-      <h1>Close ml-stack?</h1>
-      <p class="sub" id="close-why"></p>
-      <div class="choices">
-        <button class="choice" id="close-background">
-          <span class="t">Keep running in the background</span>
-          <span class="d" id="close-background-d"></span>
-        </button>
-        <button class="choice" id="close-quit">
-          <span class="t">Quit</span>
-          <span class="d" id="close-quit-d"></span>
-        </button>
-      </div>
-      <label class="opt" for="remember" style="margin-top:16px">
-        <input type="checkbox" id="remember" checked="1">
-        <span><b>Save my setting and don't ask again</b><span class="why">You can change it later under this machine's settings.</span></span>
-      </label>
-      <button class="ghost" id="close-cancel">Cancel</button>
+  <ml-sheet id="close-sheet" heading="Close ml-stack?" dismissible="true">
+    <p class="sub" id="close-why"></p>
+    <div class="choices">
+      <button class="choice" id="close-background">
+        <span class="t">Keep running in the background</span>
+        <span class="d" id="close-background-d"></span>
+      </button>
+      <button class="choice" id="close-quit">
+        <span class="t">Quit</span>
+        <span class="d" id="close-quit-d"></span>
+      </button>
     </div>
-  </div>
+    <label class="opt" for="remember" style="margin-top:16px">
+      <input type="checkbox" id="remember" checked="1">
+      <span><b>Save my setting and don't ask again</b><span class="why">You can change it later under this machine's settings.</span></span>
+    </label>
+    <button class="ghost" id="close-cancel">Cancel</button>
+  </ml-sheet>
 </template>
 <script>
 (function () {
@@ -40,14 +37,15 @@
       this.sheet = this.querySelector("#close-sheet");
       this.why = this.querySelector("#close-why");
       this.remember = this.querySelector("#remember");
+      const shut = () => this.sheet.removeAttribute("open");
       const choose = (mode) => async () => {
-        this.sheet.hidden = true;
+        shut();
         const native = window.mlStackNative();
         if (native) await native.closeChoice(mode, this.remember.checked);
       };
       this.querySelector("#close-background").onclick = choose("background");
       this.querySelector("#close-quit").onclick = choose("quit");
-      this.querySelector("#close-cancel").onclick = () => { this.sheet.hidden = true; };
+      this.querySelector("#close-cancel").onclick = shut;
       // Asked once, by the native window, when someone clicks the close button.
       window.mlStackAskOnClose = () => {
         this.remember.checked = true;
@@ -63,7 +61,7 @@
         this.querySelector("#close-quit-d").textContent = clustered
           ? "Leaves the cluster until you open it again."
           : "Stops answering until you open it again.";
-        this.sheet.hidden = false;
+        this.sheet.setAttribute("open", "");
       };
     }
   }

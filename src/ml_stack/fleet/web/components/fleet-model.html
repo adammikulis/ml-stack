@@ -35,6 +35,14 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   };
   const el = M.el;
 
+  /** An ml-ui element with its properties set; a property set before the element is defined
+      is kept by the element when it upgrades. */
+  M.ui = function (tag, props = {}) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) if (v !== null && v !== undefined) n[k] = v;
+    return n;
+  };
+
   /** The children that are there: `replaceChildren` writes the word "null" for a gap. */
   M.kids = (...nodes) => nodes.flat()
     .filter((n) => n !== null && n !== undefined && n !== false);
@@ -75,24 +83,19 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
 
   /** The slider for how much a conversation reads, and what it costs. */
   M.contextPicker = function (start, onPick) {
-    let at = Math.max(0, CTX_STEPS.indexOf(start));
-    if (at < 0) at = 2;
-    const out = el("b", {});
-    const slider = el("input", { type: "range", min: "0",
-      max: String(CTX_STEPS.length - 1), value: String(at), id: "ctx" });
-    const paint = () => {
-      const n = CTX_STEPS[Number(slider.value)];
-      out.textContent = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of memory`;
+    const slider = M.ui("ml-slider", {
+      label: "how much it reads", stops: CTX_STEPS,
+      value: CTX_STEPS.includes(start) ? start : 8192,
+      hint: "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
+        + "smaller one costs less." });
+    slider.id = "ctx";
+    const paint = (n) => {
+      slider.valueText = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of memory`;
       onPick(n);
     };
-    slider.oninput = paint;
-    paint();
-    return el("div", { class: "meter" },
-      el("div", { class: "cap" }, el("span", {}, "how much it reads"), out),
-      slider,
-      el("div", { class: "hint" },
-        "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
-        + "smaller one costs less."));
+    slider.addEventListener("input", (e) => paint(e.detail.value));
+    paint(slider.value);
+    return el("div", { class: "meter" }, slider);
   };
 
   // ------------------------------------------------------------- which screen is showing

@@ -14,6 +14,8 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+from ml_stack.ui import assets as ui_assets
+
 from .discovery import (
     DiscoveryError,
     cluster_group,
@@ -35,6 +37,15 @@ def asset_bytes(name: str) -> tuple[bytes, str] | None:
     """One file from ``web/``, by exact name."""
     allowed = {p.name: p for p in ASSETS.iterdir() if p.is_file()} if ASSETS.is_dir() else {}
     path = allowed.get(name)
+    if path is None:
+        return None
+    kind, _ = mimetypes.guess_type(name)
+    return path.read_bytes(), kind or "application/octet-stream"
+
+
+def ui_asset(name: str) -> tuple[bytes, str] | None:
+    """One file from the ml-ui folder, by exact name."""
+    path = ui_assets().get(name)
     if path is None:
         return None
     kind, _ = mimetypes.guess_type(name)
@@ -147,6 +158,17 @@ class PageRoutes:
                 self.send(500, {"error": "the UI assets are missing from this install"})
                 return True
             write(self.handler, 200, page.encode("utf-8"), "text/html; charset=utf-8")
+            return True
+        if self.path in ("/ui/gallery", "/ui/gallery/"):
+            self.send(302, {}, {"Location": "/ui/ml-ui/gallery.html"})
+            return True
+        if self.path.startswith("/ui/ml-ui/"):
+            asset = ui_asset(self.path[len("/ui/ml-ui/"):])
+            if asset is None:
+                self.send(404, {"error": "no such asset"})
+                return True
+            write(self.handler, 200, asset[0], asset[1],
+                  {"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
             return True
         if self.path.startswith("/ui/static/"):
             asset = asset_bytes(self.path[len("/ui/static/"):])

@@ -16,6 +16,10 @@
       this.wired = true;
       this.box = this.querySelector("#first-run");
       this.card = this.querySelector("#first-run-card");
+      this.stepper = M.ui("ml-stepper", {
+        steps: Array.from({ length: STEPS }, (_, i) => ({ id: String(i), title: `Step ${i + 1}` })),
+        controls: "none", compact: true });
+      this.card.append(this.stepper);
       this.state = { step: 0, name: "", group: "", pass: "", clusters: [],
                      libraries: null, suggest: null, prefs: null, install: null };
       M.onRoute((route) => {
@@ -31,15 +35,16 @@
       this.paint();
     }
 
-    show(...nodes) { this.card.replaceChildren(...nodes); }
+    show(...nodes) {
+      const at = this.state.step;
+      this.stepper.current = at;
+      this.stepper.replaceChildren(el("div", { slot: `step-${at}` }, ...nodes));
+    }
 
     go(n) { this.state.step = n; this.paint(); }
 
     steps(n, back) {
-      return el("div", {},
-        back ? el("button", { class: "back", onclick: back }, "← Back") : null,
-        el("div", { class: "steps" },
-          Array.from({ length: STEPS }, (_, i) => el("i", { class: i <= n ? "on" : "" }))));
+      return back ? el("button", { class: "back", onclick: back }, "← Back") : null;
     }
 
     paint() {

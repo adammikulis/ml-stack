@@ -245,21 +245,12 @@
 
   /** How far a download has got. */
   function bar(g) {
-    const pct = g.total ? Math.min(100, Math.round((g.done / g.total) * 100)) : 0;
-    return el("div", { class: "row" },
-      el("span", { class: "grow" },
-        el("b", {}, g.name),
-        el("span", { class: "why" },
-          g.state === "failed" ? g.error
-            : g.total ? `${fileSize(g.done)} of ${fileSize(g.total)} — ${pct}%`
-            : (g.note || "Starting…")),
-        g.state === "getting"
-          ? el("div", { class: "track" },
-              el("div", { class: "fill vram", style: `width:${g.total ? pct : 0}%` }))
-          : null),
-      g.state === "failed"
-        ? el("span", { class: "label bad" }, "failed")
-        : el("span", { class: "spin" }));
+    return el("div", { class: "row" }, el("span", { class: "grow" },
+      M.ui("ml-progress", {
+        label: g.name, format: "bytes", done: g.done, total: g.total || 0,
+        state: g.state === "failed" ? "failed" : "running",
+        message: g.state === "failed" ? g.error : g.total ? "" : (g.note || "Starting…"),
+      })));
   }
 
   customElements.define("models-view", ModelsView);

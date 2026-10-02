@@ -7,6 +7,7 @@ def package_dir(name):
 
 datas = [
     (str(package_dir("ml_stack.fleet") / "web"), "ml_stack/fleet/web"),
+    (str(package_dir("ml_stack.ui") / "assets"), "ml_stack/ui/assets"),
     (str(package_dir("ml_stack.contracts") / "_data"), "ml_stack/contracts/_data"),
 ]
 

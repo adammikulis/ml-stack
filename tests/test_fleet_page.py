@@ -213,7 +213,10 @@ class TestTheClusterView:
                                                                   open_page):
         page, errors = open_page(with_peers, cookie=with_peers.cookie)
         page.wait_for_selector("#cluster-cards .peer")
-        card = page.locator("#cluster-cards .peer").first.inner_text()
+        peer = page.locator("#cluster-cards .peer").first
+        # the meters draw inside their shadow roots, which inner_text does not enter
+        card = peer.inner_text() + " " + peer.evaluate(
+            "n => [...n.querySelectorAll('ml-meter')].map(m => m.shadowRoot.textContent).join(' ')")
         assert "greenhollow" in card
         assert "NVIDIA · CUDA" in card and "Marrowgate 5000" in card
         assert "3 running of 4" in card and "2 waiting" in card
@@ -492,7 +495,7 @@ class TestClosingTheWindow:
         page.wait_for_selector("#cluster:not([hidden])")
 
         page.evaluate("window.mlStackAskOnClose()")
-        page.wait_for_selector("#close-sheet:not([hidden])")
+        page.wait_for_selector("#close-sheet[open] #close-why")
 
         assert "part of your cluster" not in page.locator("#close-why").inner_text()
         assert "Stays reachable" in page.locator("#close-background-d").inner_text()
@@ -504,7 +507,7 @@ class TestClosingTheWindow:
         page.wait_for_selector("#cluster:not([hidden])")
 
         page.evaluate("window.mlStackAskOnClose()")
-        page.wait_for_selector("#close-sheet:not([hidden])")
+        page.wait_for_selector("#close-sheet[open] #close-why")
 
         assert "part of your cluster" in page.locator("#close-why").inner_text()
         assert "Leaves the cluster" in page.locator("#close-quit-d").inner_text()
