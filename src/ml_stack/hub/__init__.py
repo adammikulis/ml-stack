@@ -37,6 +37,7 @@ from ml_stack.hub.drafts import (
     head_choice,
     heads_for,
 )
+from ml_stack.hub.kinds import KINDS as KINDS
 from ml_stack.hub.listing import (
     PREFER,
     Found,

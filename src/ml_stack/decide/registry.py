@@ -7,16 +7,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
-from ml_stack.decide.sources import CONFIG, FORMAT
+from ml_stack.decide.sources import FORMAT
 from ml_stack.decide.types import DecideError
+from ml_stack.deciders import (  # noqa: F401  (the readers live below hub; re-exported here)
+    CONFIG,
+    listing,
+    local_bases,
+    path,
+)
 from ml_stack.files import read_json, write_json
 from ml_stack.home import expand
-
-
-def path() -> Path:
-    """The registry file."""
-    return home.state("decide", "registry.json")
 
 
 def register(directory: Path | str) -> dict[str, Any]:
@@ -33,12 +33,6 @@ def register(directory: Path | str) -> dict[str, Any]:
     held[entry["name"]] = entry
     write_json(path(), sorted(held.values(), key=lambda e: e["name"]))
     return entry
-
-
-def listing() -> list[dict[str, Any]]:
-    """Every registered decider whose directory still exists."""
-    rows = read_json(path(), [])
-    return [r for r in rows if isinstance(r, dict) and (Path(r.get("path", "")) / CONFIG).is_file()]
 
 
 def find(name: str) -> Path:

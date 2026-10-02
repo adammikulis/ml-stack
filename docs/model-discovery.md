@@ -88,6 +88,23 @@ nothing is hashed. Header facts are read from the front of each file and kept un
 `<cache>/models/headers.json` by path, size and modification time. 93 models on the machine of
 the table below: 0.13 s cold, 0.03 s warm.
 
+### Kinds of model
+
+Every row carries a `kind`, one of `hub.KINDS` (defined once, in `hub/kinds.py`): `chat`,
+`embedding`, `vision`, `speech`, `decision`. `discover(kind=...)` and
+`ml-stack-models list --kind decision` filter on it, and the listing has a KIND column.
+The label comes from the header's architecture (`bert` embeds, `whisper` hears), a vision
+projector beside the weights, and, for `decision`, either an entry in the decider registry
+(`decide/registry.py`: the model sits in a registered decider's directory or is its local
+base) or the words `decision` / `decider` in the model's name or repository (the Strands
+decision models). Only scalar header keys are read, so `general.tags` arrays are not consulted.
+The decide package asks the same library (`decide/library.py`) for `kind="decision"` models
+when a named decider is not a directory or a registry name. The fleet catalogue's suggestions
+carry the same label.
+
+A kind is a label and nothing else: a `decision` model is still loaded only through a Broker
+lease, and admission and the memory fit treat it like any other model of its size.
+
 Serving reuses what is installed: `ServerManager.lease` replaces an `hf:owner/repo/file`
 model, projector or draft that `installed_for` finds with the file, and `hub.located` resolves a
 name such as `llama3:latest` to its Ollama blob.

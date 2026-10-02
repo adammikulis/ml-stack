@@ -117,6 +117,11 @@ These apply to every consumer of the library without a switch.
 - A credential is read through `ml_stack.credentials`, from a file only its owner can read.
 - State, token and credential files are written atomically with mode `0600`.
 - Server logs are bounded in count, size and age.
+- Decision models are the guard/decider layer, and their kind is a label, not a trust grant:
+  `decision` in a listing (`hub.KINDS`) comes from the decider registry or from the words in a
+  model's own name, so a file can claim it. The label changes no admission: such a model is
+  still served only through a Broker lease, fitted against memory like any other, and the
+  hashes in its decider config are checked when it loads.
 
 ## What is exempt from the net scan
 

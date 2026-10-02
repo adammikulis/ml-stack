@@ -11,6 +11,7 @@ from typing import Any
 
 from ml_stack import net
 from ml_stack.http import ServerError
+from ml_stack.hub import kinds
 
 from .weights import QUANTS, is_a_piece, is_beside
 
@@ -67,6 +68,8 @@ class Suggestion:
                 "family": self.family or family_of(self.name),
                 "params_b": self.params_b, "active_b": self.active_b,
                 "moe": self.moe,
+                "kind": kinds.classify(name=self.name, repo=self.ref,
+                                       has_projector="image" in self.takes),
                 "takes": [MODALITY.get(m, m) for m in self.takes],
                 "gives": [MODALITY.get(m, m) for m in self.gives],
                 "unfiltered": self.unfiltered or is_unfiltered(self.name),

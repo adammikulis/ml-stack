@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from ml_stack import files, home, hub
-from ml_stack.hub import header
+from ml_stack.hub import header, kinds
 from ml_stack.hub.naming import QUANT, _precision, base_words, pretty_name
 from ml_stack.hub.places import Place
 from ml_stack.hub.scan import Entry, scan
@@ -53,6 +53,8 @@ class ModelInfo:
     verified: bool = True
     copies: tuple[Path, ...] = ()
     """Paths of the other copies of this model, which were collapsed into this row."""
+    kind: str = kinds.CHAT
+    """One of `kinds.KINDS`: a label for listings, never a grant of trust."""
 
     def as_dict(self) -> dict[str, object]:
         """The row as plain JSON types."""
@@ -167,6 +169,7 @@ def _info(one: Entry, parts: list[Entry], head: header.Header | None,
                             and not one.repo else "") or pretty_name(_stem(one.name))
     if one.format != "gguf":
         shown = one.repo.split("/")[-1] if one.repo else one.name
+    mmproj = _mmproj(one, side, alone) if one.format == "gguf" else None
     return ModelInfo(
         id=_identity(one, _stem(one.name) if total == 1 else one.name),
         name=shown, path=one.path, format=one.format, size_bytes=size, source=one.place,
@@ -174,7 +177,7 @@ def _info(one: Entry, parts: list[Entry], head: header.Header | None,
         parameters=head.parameters if head else 0,
         architecture=head.architecture if head else "",
         context_length=head.context_length if head else 0,
-        mmproj=_mmproj(one, side, alone) if one.format == "gguf" else None,
+        mmproj=mmproj,
         repo=one.repo or "", mtime=max(p.mtime for p in parts),
         is_complete=all(p.complete for p in parts) and len(parts) == total
         and (head is not None or one.format != "gguf"),
@@ -200,16 +203,22 @@ def _collapse(infos: list[tuple[ModelInfo, header.Header | None]]) -> list[Model
     return [_best(g) for g in groups.values()]
 
 
-def discover(roots: Iterable[Path | str | Place] | None = None,
+def discover(  # noqa: PLR0913 - one more filter
+        roots: Iterable[Path | str | Place] | None = None,
              formats: Iterable[str] = FORMATS, include: Iterable[str] | None = None, *,
-             companions: bool = False, refresh: bool = False) -> list[ModelInfo]:
+             companions: bool = False, refresh: bool = False,
+             kind: str | None = None) -> list[ModelInfo]:
     """Every installed model in ``formats``, one row each, newest first.
 
     ``roots`` replaces the standard folders (see `places`) with the folders given, each
     searched as whatever layout it holds. ``include`` keeps only models from those sources
     (``huggingface``, ``ollama``, ``lmstudio``, ...). ``companions`` adds vision projectors
-    and draft heads as rows of their own. ``refresh`` ignores the header cache.
+    and draft heads as rows of their own. ``refresh`` ignores the header cache. ``kind``
+    keeps only models of that `kinds.KINDS` label.
     """
+    if kind is not None:
+        kinds.valid(kind)
+    held = kinds.registered_paths()
     wanted = set(formats)
     kept = set(include) if include is not None else None
     chosen = _as_places(roots)
@@ -233,9 +242,13 @@ def discover(roots: Iterable[Path | str | Place] | None = None,
         if one.format not in wanted:
             continue
         head = headers.of(one.path, one.size, one.mtime) if one.format == "gguf" else None
-        found.append((_info(one, parts, head, side, solo.get(one.path.parent, 0) == 1), head))
+        info = _info(one, parts, head, side, solo.get(one.path.parent, 0) == 1)
+        label = kinds.classify(architecture=info.architecture, name=info.name, repo=info.repo,
+                               path=info.path, has_projector=info.mmproj is not None, held=held)
+        found.append((replace(info, kind=label), head))
     headers.save()
-    return sorted(_collapse(found), key=lambda m: (-m.mtime, m.id))
+    rows = [m for m in _collapse(found) if kind is None or m.kind == kind]
+    return sorted(rows, key=lambda m: (-m.mtime, m.id))
 
 
 _SPLIT = re.compile(r"[\s/_:]+")

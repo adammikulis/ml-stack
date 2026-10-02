@@ -109,3 +109,25 @@ def test_a_real_server_is_leased_queued_and_stopped(real, monkeypatch):
     while pid_exists(info.pid) and time.monotonic() < deadline:
         time.sleep(0.2)
     assert not pid_exists(info.pid), "releasing the last lease stopped the server"
+
+
+def test_a_decision_model_is_served_only_through_the_broker(real, monkeypatch, tmp_path):
+    """Labelled `decision`, the smallest local model still takes a lease, and the decide
+    package then asks the server that lease returned."""
+    from ml_stack.decide import router
+    from ml_stack.hub import kinds
+
+    binary, model = real
+    assert kinds.classify(path=model, held=[model.parent]) == "decision"
+    assert kinds.classify(path=model, held=[tmp_path]) != "decision", "a label needs a registry"
+    monkeypatch.setenv("LLAMA_CPP_SERVER", str(binary))
+    held = ServerManager(LlamaServerBackend(binary=binary))
+    info = held.lease(ServerSpec(model=model, port=free_port(), context=512), timeout=300)
+    try:
+        assert info.lease and pid_exists(info.pid)
+        config = router.Config(backend="logprob", url=info.base_url)
+        assert router.unavailable("logprob", config) == ""
+        got = router.decide("Which letter comes first?", {}, ["a", "b"], config=config)
+        assert got.choice in ("a", "b") and got.backend == "logprob"
+    finally:
+        held.release(info)

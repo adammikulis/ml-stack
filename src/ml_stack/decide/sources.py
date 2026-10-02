@@ -11,11 +11,11 @@ from typing import Any
 from ml_stack.decide.fetch import Pin, locate
 from ml_stack.decide.pins import STRANDS_V19, Checkpoint
 from ml_stack.decide.types import DecideError
+from ml_stack.deciders import CONFIG
 from ml_stack.files import sha256_file
 from ml_stack.home import expand
 
 FORMAT = "ml-stack-decider/1"
-CONFIG = "decider.json"
 REFUSED_SUFFIXES = frozenset({".bin", ".pt", ".pth", ".pkl", ".pickle", ".ckpt", ".npy", ".npz"})
 
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
 
-from ml_stack.decide import registry
+from ml_stack.decide import library, registry
 from ml_stack.decide.base import Decider, State
 from ml_stack.decide.calibrate import Calibration
 from ml_stack.decide.embed import EmbedDecider, Head, server_embedder
@@ -67,7 +67,17 @@ def _reachable(url: str, token: str) -> str:
 
 
 def _trained(name: str) -> Path:
-    return expand(name) if expand(name).is_dir() else registry.find(name)
+    """A trained decider's directory: a path, a registered name, or the directory of a
+    model the library files under kind ``decision``."""
+    if expand(name).is_dir():
+        return expand(name)
+    try:
+        return registry.find(name)
+    except DecideError:
+        found = library.decider_dir(name)
+        if found is None:
+            raise
+        return found
 
 
 def unavailable(name: str, config: Config) -> str:
