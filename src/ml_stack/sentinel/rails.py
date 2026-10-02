@@ -51,8 +51,11 @@ class RailWatch:
         return out + self._count(session, rail)
 
     def tainted(self, session: str, rail: str, reason: str) -> list[Finding]:
-        """A rail marked the session's context as carrying outside instructions."""
-        return [finding("guard.tainted", Severity.NOTICE, ("session", session), HEURISTIC, {"rail": rail, "reason": reason})]
+        """A rail marked the session's context as carrying outside instructions. It is
+        watched; five of these inside the window freeze the session in ``enforce`` mode."""
+        return [finding("guard.tainted", Severity.NOTICE, ("session", session),
+                        HEURISTIC, {"rail": rail, "reason": reason}),
+                *self._count(session, rail)]
 
     def tainted_text(self, session: str, rail: str, reason: str, text: str) -> list[Finding]:
         """A rail let ``text`` through marked as carrying outside instructions: the session
