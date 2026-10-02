@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import sys
 import time
 
 from ml_stack.serve.process import kill_pid, pid_exists
@@ -21,7 +22,8 @@ DEFAULT_HOST = "127.0.0.1"
 def port_is_free(port: int, host: str = DEFAULT_HOST) -> bool:
     """Whether ``port`` can be bound on ``host``. A pure socket check, no state."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if sys.platform != "win32":  # on Windows SO_REUSEADDR binds over a live listener
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
             return True

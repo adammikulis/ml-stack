@@ -204,6 +204,15 @@ class TestPorts:
         sock.close()
         assert port_is_free(port)
 
+    def test_windows_does_not_ask_to_share_the_port(self, monkeypatch):
+        asked = []
+        real = socket.socket.setsockopt
+        monkeypatch.setattr(socket.socket, "setsockopt",
+                            lambda self, *a: (asked.append(a), real(self, *a))[1])
+        monkeypatch.setattr(sys, "platform", "win32")
+        port_is_free(free_port())
+        assert (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) not in asked
+
 
 class TestProcess:
     def test_a_live_process_exists(self):
