@@ -34,8 +34,8 @@ def test_a_report_read_back_from_json_has_the_same_attempts_and_meta(tmp_path):
 
 
 def test_a_report_of_another_schema_is_refused():
-    with pytest.raises(ValueError, match="schema"):
-        Report.from_json(json.dumps({"schema": 99, "meta": {}, "attempts": []}))
+    with pytest.raises(ValueError, match="version"):
+        Report.from_json(json.dumps({"version": 99, "meta": {}, "attempts": []}))
 
 
 def test_an_attack_that_failed_before_and_succeeds_now_is_a_regression():

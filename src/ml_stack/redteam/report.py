@@ -12,7 +12,7 @@ from typing import Any
 
 __all__ = ["Attempt", "Report", "compare", "markdown", "summary"]
 
-SCHEMA = 1
+VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,14 +49,14 @@ class Report:
         self.attempts.extend(attempts)
 
     def to_json(self) -> str:
-        return json.dumps({"schema": SCHEMA, "meta": self.meta,
+        return json.dumps({"version": VERSION, "meta": self.meta,
                            "attempts": [asdict(a) for a in self.attempts]}, indent=1)
 
     @classmethod
     def from_json(cls, text: str) -> Report:
         data = json.loads(text)
-        if data.get("schema") != SCHEMA:
-            raise ValueError(f"report schema {data.get('schema')!r}, expected {SCHEMA}")
+        if data.get("version") != VERSION:
+            raise ValueError(f"report version {data.get('version')!r}, expected {VERSION}")
         return cls(dict(data["meta"]), [Attempt(**row) for row in data["attempts"]])
 
     @classmethod

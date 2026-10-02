@@ -132,5 +132,6 @@ def build() -> None:
         kept.append({"id": file, "name": meta["name"], "source": str(meta.get("source", "")),
                      "licence": "not stated upstream; text is read from PyRIT, not copied here",
                      "sha256": _digest(text.encode())})
-    MANIFEST.write_text(json.dumps({"files": files, "templates": kept}, indent=1) + "\n",
+    MANIFEST.write_text(json.dumps({"version": 1, "files": files, "templates": kept}, indent=1)
+                        + "\n",
                         encoding="utf-8")

@@ -83,12 +83,12 @@ class ToolSpy:
     def wrap(self, call: Callable[[str, dict[str, Any]], Any]
              ) -> Callable[[str, dict[str, Any]], Any]:
         def spied(name: str, arguments: dict[str, Any]) -> Any:
+            done = False
             try:
                 result = call(name, arguments)
-            except Exception:
-                self.calls.append((name, dict(arguments), False))
-                raise
-            self.calls.append((name, dict(arguments), True))
+                done = True
+            finally:
+                self.calls.append((name, dict(arguments), done))
             return result
 
         return spied
