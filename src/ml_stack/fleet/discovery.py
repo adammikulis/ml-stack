@@ -10,6 +10,7 @@ import json
 import os
 import secrets
 import socket
+import ssl
 import struct
 import threading
 import time
@@ -19,10 +20,12 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, macauth
+from ml_stack import home, http, macauth
 from ml_stack.files import write_json
 from ml_stack.log import warn
 from ml_stack.platform import private_file
+
+from . import tls
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
@@ -366,17 +369,19 @@ class Beacon:
     """Minted per advertiser: tells one daemon's answers from another's in one listen."""
     machine: str = ""
     """`home.machine_id` of the machine it runs on: kept across restarts."""
+    cert: str = ""
+    """The daemon's certificate, base64 DER, which peers pin; empty when it serves signed-only."""
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host or self.hostname}:{self.port}"
+        return f"{'https' if self.cert else 'http'}://{self.host or self.hostname}:{self.port}"
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "port": self.port, "device": self.device,
                 "busy": self.busy, "queued": self.queued,
                 "slots": self.slots, "free": self.free,
                 "hostname": self.hostname, "instance": self.instance,
-                "machine": self.machine}
+                "machine": self.machine, "cert": self.cert}
 
     @property
     def identity(self) -> str:
@@ -750,10 +755,39 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
                                 host=addr[0],
                                 hostname=str(body.get("hostname", "")),
                                 instance=str(body.get("instance", "")),
-                                machine=str(body.get("machine", "")))
+                                machine=str(body.get("machine", "")),
+                                cert=str(body.get("cert", "")))
             except (TypeError, ValueError):
+                continue
+            if not _trusted(beacon):
                 continue
             key_id = beacon.identity
             prior = found.get(key_id)
             found[key_id] = beacon if prior is None else _prefer(prior, beacon)
     return sorted(found.values(), key=lambda b: (b.name, b.host))
+
+
+_WARNED: set[str] = set()
+
+
+def _trusted(beacon: Beacon) -> bool:
+    """Whether this machine may be talked to, and if it offers a certificate, pin it.
+
+    A beacon with no certificate is a daemon serving signed-only, which is ignored unless
+    this machine has opted into that (`tls.disabled`) or it is on this machine."""
+    if beacon.cert:
+        try:
+            context = tls.pinned_context(beacon.cert)
+        except (ValueError, ssl.SSLError):
+            return False
+        for name in {beacon.host, beacon.hostname}:
+            if name:
+                http.pin(f"{name}:{beacon.port}", context)
+        return True
+    if tls.disabled() or beacon.host.startswith("127."):
+        return True
+    if beacon.identity not in _WARNED:
+        _WARNED.add(beacon.identity)
+        warn(f"{beacon.name} at {beacon.host} offers no TLS, so it is ignored; "
+             f"{tls.ENV}=off here talks to it with signed requests only")
+    return False

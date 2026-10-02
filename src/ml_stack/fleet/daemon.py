@@ -25,7 +25,7 @@ from ml_stack.log import say, warn
 from ml_stack.platform import on_quit
 from ml_stack.speech import service as speech
 
-from . import autostart, updates as updating
+from . import autostart, tls, updates as updating
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
@@ -206,8 +206,34 @@ def serve_forever(root: Path | str | None = None,
         bench=bench_host[0], hosting=hosting,
         ui_from_lan=ui_from_lan or setup_from_lan))
     listening = [bind_address(host, lan=lan or setup_from_lan, joined=key is not None)]
-    httpd = LimitedServer((listening[0], port), handler)
     widen = threading.Event()
+    cert: list[tls.Identity | None] = [None]
+
+    def identity() -> tls.Identity | None:
+        """This daemon's certificate, made on first use; None when signed-only is named."""
+        if tls.disabled():
+            return None
+        if cert[0] is None:
+            cert[0] = tls.identity(root / "tls", live_name[0])
+        return cert[0]
+
+    def served_cert() -> str:
+        """The certificate peers should pin: this daemon's, if it listens beyond this machine."""
+        if listening[0] == LOOPBACK or (found := identity()) is None:
+            return ""
+        return found.beacon
+
+    def listen(address: str) -> LimitedServer:
+        """A server on ``address``: a machine-only one speaks plain HTTP, any other TLS."""
+        if address in (LOOPBACK, "localhost", "::1"):
+            return LimitedServer((address, port), handler)
+        found = identity()
+        if found is None:
+            warn(f"  {tls.ENV}=off: traffic on {address}:{port} is signed but NOT encrypted")
+            return LimitedServer((address, port), handler)
+        return LimitedServer((address, port), handler, tls=tls.server_context(found))
+
+    httpd = listen(listening[0])
     # Keeping this machine current, in one of two modes and never in both. Either way the
     # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
     nothing_running = updating.quiet(
@@ -255,7 +281,12 @@ def serve_forever(root: Path | str | None = None,
         for group, member in joined.items():
             if group in advertisers:
                 continue
-            beacon = Beacon(name=live_name[0], port=port, device=report(),
+            try:
+                offered = served_cert()
+            except tls.TlsUnavailable as exc:
+                say(f"  discovery OFF for {group}: {exc}")
+                continue
+            beacon = Beacon(name=live_name[0], port=port, device=report(), cert=offered,
                             slots=runner.slots, free=runner.slots,
                             machine=bench_host[0].machine)
             try:
@@ -313,7 +344,8 @@ def serve_forever(root: Path | str | None = None,
 
     if announce:
         start_announcing()
-    say(f"ml-stack traind on http://{listening[0]}:{port}"
+    say(f"ml-stack traind on {'http' if listening[0] == LOOPBACK else 'https'}://"
+        f"{listening[0]}:{port}"
         + ("" if listening[0] != LOOPBACK else "  (this machine only; --lan opens it)"))
     say(f"  name  {name}")
     say(f"  root  {root}")
@@ -376,8 +408,11 @@ def serve_forever(root: Path | str | None = None,
             widen.clear()
             httpd.server_close()
             listening[0] = ALL_INTERFACES
-            httpd = LimitedServer((ALL_INTERFACES, port), handler)
-            say(f"  joined a cluster: now listening on http://{ALL_INTERFACES}:{port}")
+            httpd = listen(ALL_INTERFACES)
+            for one in advertisers.values():
+                one.beacon.cert = served_cert()
+                one.announce()
+            say(f"  joined a cluster: now listening on {ALL_INTERFACES}:{port}")
     except KeyboardInterrupt:
         pass
     finally:

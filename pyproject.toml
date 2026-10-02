@@ -45,6 +45,8 @@ train = ["numpy>=1.24", "safetensors>=0.4"]
 # base frozen. What makes an 8B tool caller trainable on one machine, where a full
 # fine-tune of it would need ~128G of optimizer state.
 train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
+# a daemon on the LAN makes its own TLS certificate with this (or with openssl on PATH)
+fleet-tls = ["cryptography>=42"]
 # `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
 # each engine still wants
@@ -79,7 +81,7 @@ mcp = ["mcp>=1.0"]
 # `ifeval` brings langdetect, immutabledict and nltk
 standard = ["lm-eval[ifeval]>=0.4"]
 all = [
-    "ml-stack[train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
+    "ml-stack[train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls]",
 ]
 
 [project.urls]

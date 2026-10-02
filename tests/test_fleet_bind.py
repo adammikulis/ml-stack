@@ -1,5 +1,6 @@
 """The daemon listens on this machine alone until it is told, or the machine joins a cluster."""
 
+import contextlib
 import socket
 import subprocess
 import sys
@@ -112,3 +113,38 @@ def test_the_web_interface_answers_other_machines_only_when_told_to(tmp_path, ui
         runner.shutdown()
         httpd.shutdown()
         httpd.server_close()
+
+
+@pytest.mark.slow
+def test_a_lan_daemon_serves_its_certificate_and_refuses_plain_http_from_the_lan(tmp_path):
+    import ssl
+
+    from ml_stack.fleet import tls
+
+    lan_address = primary_ip()
+    if lan_address.startswith("127."):
+        pytest.skip("this machine has no address other than loopback")
+    port = _free_port()
+    proc = _daemon(tmp_path, port, "--lan")
+    try:
+        assert _reachable("127.0.0.1", port), "the daemon did not come up"
+        deadline = time.monotonic() + 20
+        cert = tmp_path / "traind" / "tls" / "cert.pem"
+        while not cert.exists() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        ctx = tls.pinned_context(__import__("base64").b64encode(
+            ssl.PEM_cert_to_DER_cert(cert.read_text())).decode())
+        with socket.create_connection((lan_address, port), timeout=5) as raw, \
+                ctx.wrap_socket(raw) as secure:
+            secure.sendall(b"GET /health HTTP/1.0\r\n\r\n")
+            said = b""
+            while chunk := secure.recv(4096):
+                said += chunk
+            assert b'"ok": true' in said
+        with socket.create_connection((lan_address, port), timeout=5) as raw:
+            raw.sendall(b"GET /health HTTP/1.0\r\n\r\n")
+            with contextlib.suppress(ConnectionResetError):
+                assert raw.recv(100) == b""
+    finally:
+        proc.terminate()
+        proc.wait(timeout=20)

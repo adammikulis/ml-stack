@@ -79,8 +79,23 @@ def trust(cafile: str | Path | None) -> None:
     _TRUSTED = ssl.create_default_context(cafile=str(cafile)) if cafile else None
 
 
+_PINNED: dict[str, ssl.SSLContext] = {}
+
+
+def pin(netloc: str, context: ssl.SSLContext | None) -> None:
+    """Talk to ``host:port`` over HTTPS with ``context``, which trusts that machine's one
+    certificate; None forgets it. A host that is not pinned is verified against the usual
+    authorities, which a self-signed certificate does not satisfy."""
+    if context is None:
+        _PINNED.pop(netloc.lower(), None)
+    else:
+        _PINNED[netloc.lower()] = context
+
+
 def _https_context(url: str) -> ssl.SSLContext | None:
-    return _TRUSTED if url.lower().startswith("https://") else None
+    if not url.lower().startswith("https://"):
+        return None
+    return _PINNED.get(urllib.parse.urlsplit(url).netloc.lower(), _TRUSTED)
 
 
 @dataclass(frozen=True, slots=True)

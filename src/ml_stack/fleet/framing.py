@@ -13,6 +13,7 @@ import contextlib
 import ipaddress
 import re
 import socket
+import ssl
 import threading
 import time
 from typing import Any
@@ -28,6 +29,7 @@ MOST_UPLOAD = 24 << 20
 MOST_CONNECTIONS = 64
 HEADER_S = 15.0
 SOCKET_S = 30.0
+HANDSHAKE_S = 10.0
 SLOWEST_BYTES_PER_S = 16 * 1024
 DIGITS = re.compile(r"[0-9]{1,18}")
 RANGE = re.compile(r"bytes (?P<start>[0-9]{1,18})-(?P<end>[0-9]{1,18})/(?P<total>[0-9]{1,18}|\*)")
@@ -140,6 +142,19 @@ class Limited:
     timeout = SOCKET_S
     header_s = HEADER_S
 
+    def setup(self) -> None:
+        """On a TLS server, shake hands with a client that starts with a TLS hello; a client
+        from this machine may speak plain HTTP, any other that does is dropped."""
+        context = getattr(self.server, "tls", None)  # type: ignore[attr-defined]
+        if context is not None:
+            sock = self.request  # type: ignore[attr-defined]
+            sock.settimeout(HANDSHAKE_S)
+            if sock.recv(1, socket.MSG_PEEK) == b"\x16":
+                self.request = context.wrap_socket(sock, server_side=True)
+            elif not addressed_to_this_machine("localhost", self.client_address[0]):  # type: ignore[attr-defined]
+                raise ConnectionAbortedError("plain HTTP from another machine")
+        super().setup()  # type: ignore[misc]
+
     def handle_one_request(self) -> None:
         guard = threading.Timer(self.header_s, self._hang_up)
         guard.daemon = True
@@ -163,10 +178,19 @@ class Limited:
 class LimitedServer(Server):
     """A threaded server that answers 503 to a connection past ``most`` open at once."""
 
-    def __init__(self, address: tuple[str, int], handler: Any, *, most: int = MOST_CONNECTIONS
-                 ) -> None:
+    def __init__(self, address: tuple[str, int], handler: Any, *, most: int = MOST_CONNECTIONS,
+                 tls: ssl.SSLContext | None = None) -> None:
         super().__init__(address, handler)
         self._room = threading.BoundedSemaphore(most)
+        self.tls = tls
+        """With a context, a client that speaks TLS is served over it; see `Limited.setup`."""
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """A handshake that failed or a client that hung up is not worth a traceback."""
+        import sys
+
+        if not isinstance(sys.exc_info()[1], (ssl.SSLError, ConnectionError, TimeoutError)):
+            super().handle_error(request, client_address)
 
     def process_request(self, request: Any, client_address: Any) -> None:
         if not self._room.acquire(blocking=False):
