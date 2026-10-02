@@ -41,7 +41,7 @@ NO_TASK = "look things up with the tools and tell me what you find"
 MIN_CHARS = 12
 WINDOW = 1500
 WORDS = re.compile(r"\S+")
-PLAIN = re.compile(r"^[A-Za-z][A-Za-z'\u2019,.;:!?()\"-]*$")
+PLAIN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['\u2019,.;:!?()\"-])*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,25 +77,45 @@ def _strings(value: object) -> list[str]:
 
 
 def free_text(text: str) -> str:
-    """The sentences in ``text``: the whole of it when it is prose, the prose lines of a table
-    or log, the sentence-like strings inside JSON. Empty when there are none."""
+    """What of ``text`` is worth judging: all of it when it holds prose, only the sentence-like
+    strings of JSON, and nothing for a list or table with no sentence in it."""
     stripped = text.strip()
     if stripped[:1] in "[{":
         try:
             return "\n".join(_strings(json.loads(stripped)))
         except ValueError:
             pass
-    return "\n".join(line.strip() for line in stripped.splitlines() if _prose(line))
+    return stripped if any(_prose(line) for line in stripped.splitlines()) else ""
+
+
+def _pieces(text: str, size: int) -> list[str]:
+    """The lines of ``text``, a line longer than ``size`` cut into overlapping parts."""
+    out: list[str] = []
+    step = size - size // 5
+    for line in text.splitlines():
+        if len(line) <= size:
+            out.append(line)
+        else:
+            out.extend(line[i: i + size] for i in range(0, len(line), step))
+    return out
 
 
 def _windows(text: str, size: int = WINDOW) -> list[str]:
+    """``text`` in pieces of about ``size`` characters cut between lines, those with prose first."""
     if len(text) <= size:
         return [text]
-    out, i = [], 0
-    while i < len(text):
-        out.append(text[i: i + size])
-        i += size - size // 5
-    return out
+    windows: list[str] = []
+    current: list[str] = []
+    used = 0
+    for piece in _pieces(text, size):
+        if current and used + len(piece) + 1 > size:
+            windows.append("\n".join(current))
+            current, used = [], 0
+        current.append(piece)
+        used += len(piece) + 1
+    windows.append("\n".join(current))
+    prose = [w for w in windows if any(_prose(line) for line in w.splitlines())]
+    return prose or windows
 
 
 class Judge:

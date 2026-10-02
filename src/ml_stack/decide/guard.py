@@ -11,6 +11,7 @@ from ml_stack.decide.guards.states import (
     QUESTIONS,
     destructive_state,
     grounded_state,
+    requested_state,
 )
 from ml_stack.decide.types import DecideError, Decision
 from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Verdict, merge
@@ -20,6 +21,7 @@ MAX_OUTPUT = 2000
 DEFAULT_ACTIONS: Mapping[str, Mapping[str, str]] = {
     "destructive": {"safe": "ok", "reversible": "ok", "destructive": "confirm"},
     "grounded": {"grounded": "ok", "injected": "deny"},
+    "requested": {"requested": "ok", "unrequested": "confirm"},
 }
 """For each check, what each answer leads to: ``ok``, ``confirm`` or ``deny``."""
 
@@ -62,7 +64,7 @@ class ToolCallGuard(Base):
     def __init__(self, decider: Decider, *, project_dir: str = "",
                  allowed_hosts: Collection[str] = (), policy: Policy | None = None,
                  checks: Collection[str] = ("destructive", "grounded")) -> None:
-        unknown = set(checks) - {"destructive", "grounded"}
+        unknown = set(checks) - {"destructive", "grounded", "requested"}
         if unknown:
             raise ValueError(f"unknown checks {sorted(unknown)}")
         self.decider = decider
@@ -75,8 +77,8 @@ class ToolCallGuard(Base):
     def _state(self, check: str, call: Call, context: Context) -> str:
         if check == "destructive":
             return destructive_state(context.task, call.name, call.arguments or {})
-        return grounded_state(context.task, last_tool_output(context), call.name,
-                              call.arguments or {})
+        make = requested_state if check == "requested" else grounded_state
+        return make(context.task, last_tool_output(context), call.name, call.arguments or {})
 
     def _verdict(self, check: str, answer: Decision, call: Call) -> Verdict | None:
         name = f"{call.name}: {QUESTIONS[check][0]}"
