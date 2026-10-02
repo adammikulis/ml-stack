@@ -278,3 +278,62 @@ def test_parse_call_reads_json_objects_and_flags_everything_else():
         assert parse_call({"function": {"name": "a", "arguments": raw}}).arguments is None
     assert parse_call({"function": {"name": "a", "arguments": {"y": 2}}}).arguments == {"y": 2}
     assert parse_call({"function": {"name": "a"}}).arguments == {}
+
+
+# -- cases the mutation run found unguarded -----------------------------------------------
+
+def test_a_url_that_cannot_be_parsed_is_denied_rather_than_raising():
+    assert policy().on_tool_call(call("models_find", {"words": "http://[bad/x"})).denied
+
+
+def test_approving_one_tool_does_not_approve_another():
+    rail = policy()
+    rail.approve("1. serve_up quince-2b")
+    assert not rail.on_tool_call(call("serve_up", {"model": "x"}, tainted=True)).denied
+    assert rail.on_tool_call(call("models_fetch", {"reference": "hf:a/b"}, tainted=True)).denied
+
+
+def test_a_credential_in_an_argument_name_or_a_nested_list_is_found():
+    rail = SecretRail({})
+    assert rail.on_tool_call(call("x", {TOKEN: 1})).denied
+    assert rail.on_tool_call(call("x", {"argv": ["run", TOKEN]})).denied
+    assert rail.on_tool_call(call("x", {"argv": ["run", "fast"]})).action == "allow"
+
+
+class Withhold:
+    name = "withhold"
+
+    def on_input(self, text, source):
+        return g.Verdict("deny", reason="nope", rail=self.name)
+
+    def on_output(self, text, source):
+        return g.Verdict()
+
+    def on_tool_call(self, c):
+        return g.Verdict()
+
+
+def test_a_result_a_rail_denies_never_reaches_the_model():
+    import io
+
+    from ml_stack import do, mcp
+    from ml_stack.testing import ScriptedModel
+
+    def models_find(words: str) -> dict:
+        return {"text": "SECRET-LISTING"}
+
+    tools = do.command_tools([mcp.Tool("models_find", "find", models_find)], files=[],
+                             fetch=lambda *_: {})
+    model = ScriptedModel([("models_find", {"words": "q"})], answer="ok")
+    out = io.StringIO()
+    do.run("find q", model, tools=tools, person=do.Person(io.StringIO(""), out),
+           guard=g.Guard([Withhold()]))
+    assert "[withheld by the withhold rail: nope]" in model.told()
+    assert "SECRET-LISTING" not in model.told()
+
+
+def test_the_system_prompt_tells_the_model_what_the_fence_means():
+    from ml_stack import do
+
+    for yes in (False, True):
+        assert g.NOTICE in do.system_for(yes)

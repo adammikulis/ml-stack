@@ -21,8 +21,8 @@ PROSE = frozenset({"tool:speech_transcribe", "tool:web_search", "tool:web_fetch"
                    "tool:WebFetch", "tool:WebSearch"})
 """Sources whose results are free text. The model scores a list, table or JSON of eight or more
 records as an injection (0.95 and up), so it is not run on structured tool output."""
-WINDOW = 400
-STRIDE = 200
+WINDOW = 128
+STRIDE = 64
 
 
 def fetch(cache_dir: str | None = None) -> Path:
@@ -45,15 +45,17 @@ def cached(cache_dir: str | None = None) -> Path | None:
 
 class InjectionClassifierRail:
     """Scores each result from a ``sources`` tool for text that gives the assistant orders.
-    Over ``taint`` the result is tainted; over ``withhold`` it is replaced by a notice."""
+    Over ``taint`` the result is tainted; over ``withhold``, when one is given, it is replaced
+    by a notice."""
 
     name = "injection-model"
 
-    def __init__(self, folder: Path, *, taint: float = 0.5, withhold: float = 0.98,
+    def __init__(self, folder: Path, *, taint: float = 0.5, withhold: float | None = None,
                  sources: frozenset[str] = PROSE) -> None:
         import onnxruntime
         from tokenizers import Tokenizer
 
+        self.folder = folder
         self.taint, self.withhold, self.sources = taint, withhold, sources
         self.tokenizer = Tokenizer.from_file(str(folder / "tokenizer.json"))
         self.session = onnxruntime.InferenceSession(str(folder / "model.onnx"),
@@ -61,7 +63,7 @@ class InjectionClassifierRail:
         self.inputs = {i.name for i in self.session.get_inputs()}
 
     def score(self, text: str) -> float:
-        """The probability that ``text`` is an injection; the highest over its windows."""
+        """The probability that ``text`` is an injection; the highest over its token windows."""
         ids = self.tokenizer.encode(text, add_special_tokens=False).ids
         windows = [ids[i: i + WINDOW] for i in range(0, max(len(ids), 1), STRIDE)] or [[]]
         return max(self._window(w) for w in windows)
@@ -80,7 +82,7 @@ class InjectionClassifierRail:
         if source not in self.sources:
             return ALLOW
         score = self.score(unfenced(text))
-        if score >= self.withhold:
+        if self.withhold is not None and score >= self.withhold:
             return deny(self.name, f"reads as an instruction to the assistant (score {score:.2f})")
         if score >= self.taint:
             return modify(self.name, text, f"may be an instruction (score {score:.2f})", tainted=True)
