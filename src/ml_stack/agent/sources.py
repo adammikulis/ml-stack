@@ -13,7 +13,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-__all__ = ["FunctionTools", "McpTools", "ToolOutput", "ToolSource"]
+__all__ = ["FunctionTools", "McpAuthError", "McpTools", "ToolOutput", "ToolSource"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,20 +79,42 @@ class FunctionTools:
         return ToolOutput(_text_of(value), structured=value)
 
 
+class McpAuthError(RuntimeError):
+    """The MCP server refused the credentials (HTTP 401 or 403)."""
+
+
+SENSITIVE = ("authorization", "proxy-authorization", "x-api-key", "cookie")
+"""Header names whose values are never shown."""
+
+CHECKED = (401, 403)
+
+
 class McpTools:
     """An MCP server's tools through the official ``mcp`` client, used as an async context
-    manager: ``async with McpTools.stdio("python", ["-m", "server"]) as tools``."""
+    manager: ``async with McpTools.stdio("python", ["-m", "server"]) as tools``.
 
-    def __init__(self, connect: Callable[[AsyncExitStack], Any]) -> None:
+    Credentials given to `http` are sent on every request, are re-read from a callable
+    ``bearer`` each time the connection is made, and are cut out of everything the server
+    sends back and out of this object's repr.
+    """
+
+    def __init__(self, connect: Callable[[AsyncExitStack, McpTools], Any],
+                 label: str = "mcp server") -> None:
         self._connect = connect
+        self._label = label
         self._stack = AsyncExitStack()
         self._session: Any = None
+        self._secrets: list[str] = []
+        self._refused = 0
+
+    def __repr__(self) -> str:
+        return f"McpTools({self._label})"
 
     @classmethod
     def stdio(cls, command: str, args: Sequence[str] = (),
               env: Mapping[str, str] | None = None) -> McpTools:
         """A server spawned as ``command args`` and spoken to over its stdin and stdout."""
-        async def connect(stack: AsyncExitStack) -> Any:
+        async def connect(stack: AsyncExitStack, owner: McpTools) -> Any:
             from mcp import StdioServerParameters
             from mcp.client.stdio import stdio_client
 
@@ -100,30 +122,68 @@ class McpTools:
                                            env=dict(env) if env else None)
             return await stack.enter_async_context(stdio_client(params))
 
-        return cls(connect)
+        return cls(connect, command)
 
     @classmethod
-    def http(cls, url: str) -> McpTools:
-        """A server reached at ``url`` over streamable HTTP."""
-        async def connect(stack: AsyncExitStack) -> Any:
+    def http(cls, url: str, *, headers: Mapping[str, str] | None = None,
+             bearer: str | Callable[[], str] | None = None) -> McpTools:
+        """A server reached at ``url`` over streamable HTTP. ``headers`` go on every request;
+        ``bearer`` (a token, or a function returning the current one) is sent as
+        ``Authorization: Bearer ...``."""
+        async def connect(stack: AsyncExitStack, owner: McpTools) -> Any:
+            sent = dict(headers or {})
+            token = bearer() if callable(bearer) else bearer
+            if token:
+                sent["Authorization"] = f"Bearer {token}"
+            owner._secrets = [v for k, v in sent.items() if k.lower() in SENSITIVE]
+            owner._secrets += [token] if token else []
+            return await stack.enter_async_context(owner._http_streams(url, sent))
+
+        return cls(connect, url.split("?")[0])
+
+    def _http_streams(self, url: str, headers: dict[str, str]) -> Any:
+        try:
             from mcp.client.streamable_http import streamable_http_client
+            from mcp.shared._httpx_utils import create_mcp_http_client
+        except ImportError:
+            from mcp.client.streamable_http import streamablehttp_client
 
-            return await stack.enter_async_context(streamable_http_client(url))
+            return streamablehttp_client(url, headers=headers)
+        client = create_mcp_http_client(headers=headers)
 
-        return cls(connect)
+        async def note(response: Any) -> None:
+            if response.status_code in CHECKED:
+                self._refused = response.status_code
+
+        client.event_hooks["response"].append(note)
+        return streamable_http_client(url, http_client=client)
+
+    def _raise_if_refused(self) -> None:
+        if self._refused:
+            status, self._refused = self._refused, 0
+            raise McpAuthError(
+                f"{self._label} answered {status}: it did not accept the credentials sent "
+                f"(an Authorization bearer token and any headers given). Check the token "
+                f"is current and that the server expects this scheme.") from None
+
+    def _clean(self, text: str) -> str:
+        for secret in self._secrets:
+            text = text.replace(secret, "[redacted]")
+        return text
 
     async def __aenter__(self) -> McpTools:
         from mcp import ClientSession
 
         opened = False
         try:
-            streams = await self._connect(self._stack)
+            streams = await self._connect(self._stack, self)
             self._session = await self._stack.enter_async_context(
                 ClientSession(streams[0], streams[1]))
             await self._session.initialize()
             opened = True
         finally:
             if not opened:
+                self._raise_if_refused()
                 await self._stack.aclose()
         return self
 
@@ -131,16 +191,30 @@ class McpTools:
         await self._stack.aclose()
 
     async def list_tools(self) -> list[dict[str, Any]]:
-        listed = await self._session.list_tools()
-        return [{"name": t.name, "description": t.description or "",
+        done = False
+        try:
+            listed = await self._session.list_tools()
+            done = True
+        finally:
+            if not done:
+                self._raise_if_refused()
+        return [{"name": t.name, "description": self._clean(t.description or ""),
                  "inputSchema": t.model_dump(by_alias=True)["inputSchema"]}
                 for t in listed.tools]
 
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolOutput:
-        result = (await self._session.call_tool(name, arguments)).model_dump(
-            by_alias=True, exclude_none=True)
-        text = "\n".join(c.get("text", "") for c in result.get("content") or []
-                         if c.get("type") == "text")
+        done = False
+        try:
+            result = (await self._session.call_tool(name, arguments)).model_dump(
+                by_alias=True, exclude_none=True)
+            done = True
+        finally:
+            if not done:
+                self._raise_if_refused()
+        text = self._clean("\n".join(c.get("text", "") for c in result.get("content") or []
+                                     if c.get("type") == "text"))
         structured = result.get("structuredContent")
+        if structured is not None:
+            structured = json.loads(self._clean(json.dumps(structured)))
         return ToolOutput(text or (_text_of(structured) if structured is not None else ""),
                           structured=structured, is_error=bool(result.get("isError")))

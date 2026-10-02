@@ -36,7 +36,7 @@ from ml_stack.agent.interventions import (
 )
 from ml_stack.agent.loop import Agent, Budget, Cancelled
 from ml_stack.agent.schema import from_mcp, parse_arguments, validate
-from ml_stack.agent.sources import FunctionTools, McpTools, ToolOutput, ToolSource
+from ml_stack.agent.sources import FunctionTools, McpAuthError, McpTools, ToolOutput, ToolSource
 from ml_stack.agent.summarise import model_summarizer
 from ml_stack.agent.transcript import Transcript
 from ml_stack.agent.vet import Confirmer
@@ -64,7 +64,7 @@ __all__ = [
     "Guide",
     "Intervention",
     "InterventionContext",
-    "McpTools",
+    "McpAuthError", "McpTools",
     "Proceed",
     "Repair",
     "Spill",

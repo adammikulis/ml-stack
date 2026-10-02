@@ -29,6 +29,7 @@ from ml_stack.agent import (
 from ml_stack.client import Client
 from ml_stack.testing.tool_server import ToolCallingServer, Turn
 
+sys.path.insert(0, str(Path(__file__).parent))
 SERVER = Path(__file__).with_name("toy_mcp_server.py")
 ADD = {"name": "add", "description": "Add.", "inputSchema": {
     "type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
@@ -256,3 +257,42 @@ def test_tools_from_an_mcp_server_over_stdio(served) -> None:
 
     results = [e.text for e in asyncio.run(go()) if isinstance(e, ToolResult)]
     assert results == ["42", "HI"]
+
+
+def test_an_http_server_that_wants_a_bearer_token(served) -> None:
+    import toy_mcp_http
+
+    from ml_stack.agent import McpAuthError
+
+    secret = "tok-7f3a9c"
+    server = toy_mcp_http.serve(secret, leak=True)
+    url = f"http://127.0.0.1:{server.server_address[1]}/mcp"
+    fake = served(Turn(calls=(call("echo", text="hi"),)), Turn(text=("done",)))
+    tokens = iter([secret])
+
+    async def good() -> tuple[list, str]:
+        async with McpTools.http(url, bearer=lambda: next(tokens),
+                                 headers={"X-Client": "a"}) as tools:
+            shown = repr(tools)
+            events = [e async for e in Agent(Client(fake.base_url), tools).run("go")]
+        return events, shown
+
+    async def refused(**kw: object) -> None:
+        async with McpTools.http(url, **kw):
+            pass
+
+    try:
+        events, shown = asyncio.run(good())
+        results = [e for e in events if isinstance(e, ToolResult)]
+        assert results[0].text == "[redacted]"
+        assert secret not in shown and secret not in repr(events)
+        assert secret not in json.dumps(fake.bodies)
+        assert {r["authorization"] for r in server.seen} == {f"Bearer {secret}"}
+        assert all(r.get("x-client") == "a" and "origin" not in r for r in server.seen)
+        for kw in ({}, {"bearer": "wrong-token-1"}):
+            with pytest.raises(McpAuthError) as err:
+                asyncio.run(refused(**kw))
+            assert "401" in str(err.value) and "wrong-token-1" not in str(err.value)
+    finally:
+        server.shutdown()
+        server.server_close()
