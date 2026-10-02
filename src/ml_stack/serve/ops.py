@@ -23,6 +23,7 @@ from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.log import warn
 from ml_stack.serve import (
+    broker_wire,
     fit as fit_mod,
     measuring as measuring_mod,
     preflight as preflight_mod,
@@ -644,6 +645,11 @@ def write_plist(where: Path, mb: int) -> Path:
     return where
 
 
+def adopt_unmanaged(mode: str) -> None:
+    """Set whether the broker adopts llama-servers it did not start: off, ask or auto."""
+    limits_mod.changed(adopt_unmanaged=mode)
+
+
 def limits(*, memory_size: str = "", servers: int | None = None, slots: int | None = None,
            idle: str = "", clear: bool = False) -> Limits:
     """Set whatever is named, then read back what this machine allows.
@@ -717,8 +723,14 @@ def down(port: int, *, root: str | Path | None = None) -> tuple[Stopped, str]:
         raise Refused(f"something is serving on {url}{where}, and this machine has no "
                       "record of starting it.", "  stop it the way it was started.")
 
+    if entry.get("unmanaged"):
+        raise Refused(f"{url} was adopted and not started by ml-stack, so ml-stack does not "
+                      "stop it.", "  stop it the way it was started.")
     owner = _int_or_none(entry.get("owner_pid"))
     pid = _int_or_none(entry.get("pid"))
+    if owner is not None and owner == broker_wire.running():
+        broker_wire.stop(port, force=True)
+        return Stopped(port, url, pid, pid_exists(pid), owner), withdraw(root, port)
     if owner is not None and owner != pid and pid_exists(owner):
         raise Refused(f"{url} is held by process {owner}, which is still running.",
                       "  that process started it and will stop it.")

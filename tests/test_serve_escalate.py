@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 
 import pytest
 
@@ -19,6 +20,7 @@ from ml_stack.serve.backend import ServerFailed, ServerSpec
 from ml_stack.serve.escalation import EscalationRefused
 from ml_stack.serve.manager import ServerManager
 from ml_stack.testing.fakes import FakeBackend, FakeLlamaServer, Served
+from ml_stack.testing.registry import record_server
 
 MODEL = "quince-2b.gguf"
 SUMMARY = "a summary"
@@ -35,9 +37,11 @@ def _slot(id_slot: int, n_ctx: int, tokens: int = 0, prompt: str = "") -> dict:
 
 
 @pytest.fixture
-def serving():
-    """A llama-server on a real socket holding the slots the test hands it."""
+def serving(tmp_path):
+    """A llama-server on a real socket holding the slots the test hands it, on the lease
+    registry the test's manager reads."""
     started: list[FakeLlamaServer] = []
+    processes: list[subprocess.Popen] = []
 
     def start(slots: list[dict], *, chat_reply: str = SUMMARY) -> FakeLlamaServer:
         def said(body: dict) -> str:
@@ -49,12 +53,18 @@ def serving():
         fake = FakeLlamaServer(Served(model=MODEL, context=32768, slots=len(slots),
                                       answer=said))
         fake.slots = list(slots)
+        process = subprocess.Popen(["sleep", "60"])
+        processes.append(process)
+        record_server(tmp_path / "servers.json", fake.port, model=MODEL, pid=process.pid)
         started.append(fake)
         return fake
 
     yield start
     for fake in started:
         fake.close()
+    for process in processes:
+        process.kill()
+        process.wait()
 
 
 def write_fit(model: str, *, per_token: int, per_seq: int = 0, room: int = 10**12) -> None:

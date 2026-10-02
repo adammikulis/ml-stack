@@ -87,7 +87,7 @@ def _say_processes(as_json: bool) -> int:
         if cache is not None:
             say(f"      cache  {cache[0]}  ({sized(cache[1])})")
         if one["port"] not in got.leased:
-            say(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
+            say(f"    unmanaged -- pid {one['pid']}, not started by ml-stack; reported and left alone")
     if got.strays:
         say(f"  {len(got.strays)} not leased: 'ml-stack-serve down --port N' stops one")
     return 0
@@ -166,7 +166,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                                      args.parallel))
     for held in found.foreign:
         say(base_url_for(held["port"]))
-        say(f"  foreign -- pid {held['pid']}, not started by ml-stack; left alone")
+        say(f"  unmanaged -- pid {held['pid']}, not started by ml-stack; reported and left alone")
         say("  drafting " + (f"{held['draft']}, from its command line"
                              if held.get("draft") else
                              "no draft head -- every token is written by the model itself"))

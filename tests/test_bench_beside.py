@@ -41,7 +41,7 @@ def test_the_line_names_each_server_and_what_it_costs(monkeypatch):
     said = note_beside_the_run()
     assert said.startswith("2 server(s) already hold this card: ")
     assert ":8080 big.gguf 1.0G" in said
-    assert ":8081 small.gguf 512.0M, not leased" in said
+    assert ":8081 small.gguf 512.0M, unmanaged" in said
     assert "in these timings" in said
     assert len(beside_the_run()) == 2, "kept for the runs this measurement writes"
     note_beside([])

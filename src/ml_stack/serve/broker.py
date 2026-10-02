@@ -12,20 +12,26 @@ A server put up with ``ml-stack-serve up`` is held by itself until it is taken d
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
+import sys
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
+from ml_stack import gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
-from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
+from ml_stack.serve import unmanaged
+from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
+from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager
+from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager, Starting
 from ml_stack.serve.matching import model_matches
 from ml_stack.serve.ports import DEFAULT_HOST, free_port
 from ml_stack.serve.process import every_server, kill_process_tree, pid_exists
@@ -37,6 +43,11 @@ __all__ = ["Ask", "Broker", "BrokerError", "Grant", "Held", "Waiting"]
 IDLE_S = 600.0
 POLL_S = 0.5
 _SPEC_FIELDS = frozenset(f.name for f in dataclasses.fields(ServerSpec)) - {"model", "port"}
+
+
+def who() -> str:
+    """This process as a person would recognise it in the queue."""
+    return " ".join([Path(sys.argv[0]).name, *sys.argv[1:]])[:120] if sys.argv else ""
 
 
 class BrokerError(RuntimeError):
@@ -86,6 +97,8 @@ class Held:
     purpose: str = ""
     pid: int | None = None
     ours: bool = True
+    #: running without a record in the lease registry: counted, listed, never leased from
+    unmanaged: bool = False
     loading: bool = False
     weight: int = 0
     idle_since: float = 0.0
@@ -111,7 +124,8 @@ class Held:
 
     def said(self) -> dict[str, Any]:
         return {"port": self.port, "model": self.model, "purpose": self.purpose,
-                "pid": self.pid, "ours": self.ours, "loading": self.loading,
+                "pid": self.pid, "ours": self.ours, "unmanaged": self.unmanaged,
+                "loading": self.loading,
                 "base_url": self.base_url,
                 "holders": [{"lease": lease, "pid": pid, "label": label}
                             for lease, (pid, label) in self.holders.items()]}
@@ -161,12 +175,94 @@ class Broker:
         self.room = room
         self.alive = alive
         self.servers: dict[int, Held] = {}
+        self.managers: dict[str, ServerManager] = {}
         self.queue: list[Waiting] = []
         self.claims: dict[str, dict[str, Any]] = {}
         #: lease -> (pid, cores, since) for the test runners sharing this machine's cores
         self.cores: dict[str, tuple[int, int, float]] = {}
         self.cpus = os.cpu_count() or 1
         self._cond = threading.Condition()
+
+    # ------------------------------------------------------------------ servers by spec
+    def _manager_for(self, options: Mapping[str, Any]) -> ServerManager:
+        """The manager that starts servers the way ``options["backend"]`` says."""
+        wanted = dict(options.get("backend") or {})
+        if not wanted:
+            return self.manager
+        key = json.dumps(wanted, sort_keys=True)
+        with self._cond:
+            if key not in self.managers:
+                self.managers[key] = self.manager.with_backend(LlamaServerBackend(**wanted))
+            return self.managers[key]
+
+    def start(self, spec: ServerSpec, caller: Caller | None = None, *,
+              timeout: float | None = None,
+              options: Mapping[str, Any] | None = None) -> ServerInfo:
+        """A server for exactly ``spec``, held for the caller until `drop`. One already up
+        that serves it is shared; otherwise one is started once the machine has the memory."""
+        caller = caller or Caller()
+        options = dict(options or {})
+        manager = self._manager_for(options)
+        how = Starting(**{k: v for k, v in options.items() if k != "backend"})
+        info = manager._start_server(spec, timeout=timeout, how=how, on_event=caller.on_event,
+                                     say=caller.say)
+        return self._held_by(info, spec, caller.pid or os.getpid(), caller.label or who())
+
+    def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str) -> ServerInfo:
+        lease = uuid.uuid4().hex
+        entry = recorded_servers(self.manager.state_file).get(info.port) or {}
+        with self._cond:
+            held = self.servers.get(info.port)
+            if held is None or held.pid != info.pid:
+                held = Held(port=info.port, model=str(spec.model), pid=info.pid,
+                            ours=not entry.get("unmanaged"), names=(str(spec.model),),
+                            info=info)
+                self.servers[info.port] = held
+            elif not info.adopted:
+                held.info = info
+            held.holders[lease] = (pid, label)
+            self._write_held()
+            self._cond.notify_all()
+        return replace(info, lease=lease)
+
+    def drop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
+        """Let go of the lease ``info`` was granted under. The server is stopped when
+        nobody else holds it."""
+        with self._cond:
+            held = self.servers.get(info.port)
+            if held is not None:
+                held.holders.pop(info.lease, None)
+                if held.holders or held.loading or not held.ours:
+                    self._write_held()
+                    self._cond.notify_all()
+                    return
+                self.servers.pop(info.port, None)
+                self._write_held()
+                self._cond.notify_all()
+        if held is not None:
+            self._stop(held)
+        elif not info.adopted and info.pid and self.alive(info.pid):
+            self.manager._stop_server(info, grace_s=grace_s)
+
+    def escalate(self, spec: ServerSpec, growth: Growth, caller: Caller | None = None, *,
+                 options: Mapping[str, Any] | None = None) -> ServerInfo:
+        """Grow the server on ``spec.port`` as ``growth`` says."""
+        info = self._manager_for(options or {})._escalate(spec, growth, caller or Caller())
+        with self._cond:
+            held = self.servers.get(info.port)
+            if held is not None:
+                held.info, held.pid = info, info.pid
+        return info
+
+    def detach(self, info: ServerInfo) -> None:
+        """Record the server under its own pid, held by nobody but itself."""
+        self.manager._detach(info)
+        with self._cond:
+            held = self.servers.get(info.port)
+            if held is not None and info.pid:
+                held.holders[f"up-{info.port}"] = (info.pid, "ml-stack-serve up")
+                held.holders.pop(info.lease, None)
+                self._write_held()
 
     # ------------------------------------------------------------------ leases
     def lease(self, ask: Ask, *, timeout: float) -> Grant:
@@ -251,8 +347,8 @@ class Broker:
 
     def _decide(self, ask: Ask) -> tuple[Held | None, list[Held], str]:
         """``(server to share, servers to stop first, why it must wait)``."""
-        mine = [h for h in self.servers.values()
-                if h.purpose == ask.purpose or (not h.purpose and h.serves(ask.models))]
+        mine = [h for h in self.servers.values() if not h.unmanaged
+                and (h.purpose == ask.purpose or (not h.purpose and h.serves(ask.models)))]
         match = next((h for h in mine if h.serves(ask.models)), None)
         if match is not None:
             return match, [], f"{match.model} is loading on port {match.port}" if match.loading else ""
@@ -315,7 +411,7 @@ class Broker:
     def _start(self, waiting: Waiting, placeholder: Held) -> Grant:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
-            info = self.manager.lease(spec, roam=False)
+            info = self.manager._start_server(spec, how=Starting(roam=False))
         except Measuring:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
@@ -339,7 +435,7 @@ class Broker:
 
     def _stop(self, held: Held) -> None:
         if held.info is not None and not held.info.adopted:
-            self.manager.release(held.info)
+            self.manager._stop_server(held.info)
         elif held.pid and self.alive(held.pid):
             kill_process_tree(held.pid)
 
@@ -456,14 +552,16 @@ class Broker:
             if owner == pid:
                 holders[f"up-{port}"] = (pid, "ml-stack-serve up")
             found.append(Held(port=port, model=str(entry.get("model") or ""), pid=pid,
-                              purpose=str(was.get("purpose") or ""), idle_since=now, holders=holders,
+                              ours=not entry.get("unmanaged"), purpose=str(was.get("purpose") or ""), idle_since=now, holders=holders,
                               info=ServerInfo(base_url=f"http://{DEFAULT_HOST}:{port}",
                                               port=port, pid=pid, backend="", adopted=True)))
         known = {h.port for h in found} | set(self.servers)
         for proc in self.scan():
             if proc["port"] not in known and not proc["defunct"]:
+                taken = self._take_in(proc)
                 found.append(Held(port=proc["port"], model=proc["model"], pid=proc["pid"],
-                                  ours=False, weight=proc["rss"], idle_since=now))
+                                  ours=False, unmanaged=not taken, weight=proc["rss"],
+                                  idle_since=now))
         with self._cond:
             for held in found:
                 if held.port in self.servers or not is_healthy(held.base_url, timeout=2.0):
@@ -475,6 +573,20 @@ class Broker:
             self._write_held()
             self._cond.notify_all()
         return found
+
+    def _take_in(self, proc: Mapping[str, Any]) -> bool:
+        """Adopt the unmanaged server ``proc`` when the setting is ``auto`` and it passes the
+        checks; whether it was adopted."""
+        if unmanaged.mode() != "auto":
+            return False
+        seen = unmanaged.examine(int(proc["port"]))
+        if not seen.ok:
+            self.say(f"port {proc['port']}: not adopting pid {proc['pid']} -- {seen.why}")
+            return False
+        self.manager.register_unmanaged(int(proc["port"]), seen)
+        self.say(f"port {proc['port']}: adopted pid {seen.pid} serving {seen.model} "
+                 f"({unmanaged.ENV}=auto)")
+        return True
 
     def supervising(self) -> bool:
         """Whether anything is the broker's to look after: a server of ours, a held or loading
@@ -494,6 +606,7 @@ class Broker:
                            "waited_s": round(now - w.since, 1), "blocked_by": w.blocked_by}
                           for w in self.queue],
                 "claims": {k: dict(v) for k, v in self.claims.items()},
+                "requests": gate.snapshot(),
                 "cores": {"cpus": self.cpus,
                           "grants": [{"lease": lease, "pid": pid, "cores": cores}
                                      for lease, (pid, cores, _since) in self.cores.items()]},

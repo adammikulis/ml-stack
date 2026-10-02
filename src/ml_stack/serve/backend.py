@@ -421,6 +421,8 @@ class ServerInfo:
     # shaders and allocating the KV cache happen on the first real request whether or not
     # anything measures them; this is what makes the *next* one the first that pays for it.
     warmup_s: float | None = None
+    #: the broker's id for the lease this info was granted under; "" for a record read back
+    lease: str = ""
     # The ``Popen`` for a server this process started, for whoever stops it to wait on.
     # Never serialised: it is not a value, and it is None for an adopted server.
     process: Any = field(default=None, repr=False, compare=False)
@@ -513,6 +515,12 @@ class LlamaServerBackend(ServerBackend):
         self._vendor_dir = vendor_dir
         self._build = build
         self.quiet = quiet
+
+    def options(self) -> dict[str, Any]:
+        """The arguments that make another backend like this one, for the broker to rebuild."""
+        return {k: str(v) if isinstance(v, Path) else v for k, v in {
+            "binary": self._explicit, "vendor_dir": self._vendor_dir, "build": self._build,
+            "quiet": self.quiet}.items() if v is not None}
 
     @property
     def binary(self) -> Path:

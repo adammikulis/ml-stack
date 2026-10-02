@@ -39,6 +39,22 @@ capability; every line is something that already exists not being what it says.
   scores one served model; comparing a base and a tuned model means running it against each
   server and diffing the JSON.
 
+### Serving: one broker, one request at a time per pool
+- [ ] **Run `tests/test_serve_real_llama.py` on a card with nothing else on it** (`pytest
+  --slow tests/test_serve_real_llama.py`). It leases a real llama-server through the
+  broker, sends two requests from separate processes and checks the line of requests and
+  the stop on release; it skips while any other llama-server runs, so it has not run
+  against a real server yet.
+- [ ] **The machine's broker does not deliver `on_event` or `say` to its caller.** Over
+  its socket `RemoteBroker.start` answers once, and the caller is told only that the
+  server is ready. A load's progress (`loading`, `restoring`, a memory wait) belongs
+  streamed back as lines.
+- [ ] **One `gpu` pool.** A machine with several CUDA devices queues all their requests
+  in one line; `ServerSpec` has no device to put a server in a pool of its own.
+- [ ] **`adopt_unmanaged = ask` has no prompt.** `ServerManager.confirm` is the hook; no
+  command sets it, so `ask` adopts nothing from the CLI. vLLM, SGLang and MLX servers
+  started by hand are not found at all, only `llama-server`.
+
 ### Getting it onto a machine that is not this one
 
 - [ ] **`ml-stack` needs a similarity waiver from PyPI before anything can be uploaded.**
