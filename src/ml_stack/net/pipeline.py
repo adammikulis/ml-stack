@@ -10,6 +10,7 @@ from HTTPS to HTTP is refused.
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import time
 import urllib.parse
@@ -21,6 +22,7 @@ from ml_stack import http, httpguard
 from ml_stack.httpguard import Fetched, Limits, Refused
 from ml_stack.net import policy as hosts
 from ml_stack.net.hold import Hold, SentinelHold
+from ml_stack.net.policy import host_of
 from ml_stack.net.scan import Scanner, ScanPolicy
 from ml_stack.net.scanners import default_scanners
 
@@ -48,6 +50,12 @@ class Ask:
 
 
 ASK = Ask()
+
+
+def mirror_hosts() -> frozenset[str]:
+    """The host of ``$HF_ENDPOINT``: a mirror the person named may be on this network."""
+    named = host_of(os.environ.get("HF_ENDPOINT", ""))
+    return frozenset({named}) if named else frozenset()
 
 
 class Headers(dict[str, str]):
@@ -109,6 +117,8 @@ class Pipeline:
         """This pipeline's limits with ``changes`` applied and, when ``admit``, the host
         policy checked on every hop."""
         vet = (lambda url: self.policy.admit(url, purpose)) if admit else None
+        changes.setdefault("allow_hosts", self.limits.allow_hosts)
+        changes["allow_hosts"] = frozenset(changes["allow_hosts"]) | mirror_hosts()  # type: ignore[arg-type]
         return replace(self.limits, vet=vet, **changes)  # type: ignore[arg-type]
 
     def get(self, url: str, ask: Ask = ASK) -> Fetched:
@@ -119,7 +129,7 @@ class Pipeline:
 
     def plain(self) -> frozenset[str]:
         """Hosts a token may be sent to without TLS: those named as private-network hosts."""
-        return self.limits.allow_hosts | httpguard.allowed_hosts()
+        return self.limits.allow_hosts | httpguard.allowed_hosts() | mirror_hosts()
 
     def _limits(self, ask: Ask) -> Limits:
         changes: dict[str, object] = {"max_bytes": ask.max_bytes} if ask.max_bytes else {}

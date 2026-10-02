@@ -24,10 +24,11 @@ from ml_stack.net import provenance, sniff
 from ml_stack.net.hold import staging_dir
 from ml_stack.net.pipeline import Pipeline, bearer, default
 from ml_stack.net.policy import host_of
-from ml_stack.net.scan import Outcome, scan_file
+from ml_stack.net.scan import Outcome
 from ml_stack.safenames import safe_filename
 
-__all__ = ["Blocked", "Cancel", "ChecksumMismatch", "Hooks", "NoDigest", "Progress", "Truncated", "Want", "download", "sweep"]
+__all__ = ["Blocked", "Cancel", "ChecksumMismatch", "Hooks", "NoDigest", "Progress", "Truncated", "Want", "download", "staged_part",
+           "sweep"]
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +91,12 @@ Progress = Callable[[int, int], None]
 
 @dataclass(frozen=True, slots=True)
 class Hooks:
-    """A ``cancel`` flag and a ``progress(done, total)`` callback for a download."""
+    """A ``cancel`` flag, a ``progress(done, total)`` callback and a ``phase(name)`` callback
+    (``verifying``) for a download."""
 
     cancel: Cancel | None = None
     progress: Progress | None = None
+    phase: Callable[[str], None] | None = None
 
 
 NO_HOOKS = Hooks()
@@ -101,6 +104,11 @@ NO_HOOKS = Hooks()
 
 def _key(url: str, dest: Path) -> str:
     return hashlib.sha256(f"{url}\n{dest}".encode()).hexdigest()[:20]
+
+
+def staged_part(url: str, dest: Path | str) -> Path:
+    """Where the partial file of a download of ``url`` to ``dest`` is kept in staging."""
+    return staging_dir() / f"{_key(url, Path(dest))}.part"
 
 
 def _event(kind: str, severity: str, subject: str, evidence: dict[str, Any]) -> None:
@@ -124,9 +132,9 @@ def _resume_headers(part: Path, want: Want) -> tuple[dict[str, str], int]:
         return {}, 0
     held = files.read_json(_meta(part), {})
     tag = held.get("etag") or held.get("last-modified")
-    if not tag:
-        return {}, 0
-    return {"Range": f"bytes={offset}-", "If-Range": tag}, offset
+    if tag:
+        return {"Range": f"bytes={offset}-", "If-Range": tag}, offset
+    return ({"Range": f"bytes={offset}-"}, offset) if want.sha256 else ({}, 0)
 
 
 def _stream_to(pipe: Pipeline, url: str, part: Path, want: Want,
@@ -140,6 +148,9 @@ def _stream_to(pipe: Pipeline, url: str, part: Path, want: Want,
         if shown.status == 416:
             part.unlink(missing_ok=True)
             raise Truncated("the partial file did not fit the server's; it was discarded, retry")
+        if shown.status >= 400:
+            raise http.ServerError(f"{http.shown(url)} -> HTTP {shown.status}",
+                                   status=shown.status, headers=shown.headers)
         if shown.status not in (200, 206):
             raise Refused(f"{http.shown(shown.url)} answered {shown.status}")
         resumed = shown.status == 206
@@ -217,7 +228,7 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
         raise NoDigest(f"{name}: this download is refused without a pinned SHA-256")
     host = pipe.policy.admit(url, want.purpose) if want.admit else host_of(url)
     key = _key(url, final)
-    part = staging_dir() / f"{key}.part"
+    part = staged_part(url, final)
     shown = _stream_to(pipe, url, part, want, hooks)
     staged = part.with_name(f"{key}__{name}")
     part.replace(staged)
@@ -228,6 +239,8 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
         renamed = staged.with_name(f"{key}__{name}")
         staged.replace(renamed)
         staged = renamed
+    if hooks.phase:
+        hooks.phase("verifying")
     digest, size = files.sha256_file(staged), staged.stat().st_size
     served = shown.headers.get("content-type", "")
     note = provenance.Provenance(
@@ -245,7 +258,7 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
     verdict = sniff.sniff(staged, want.kind or sniff.expected_kind(name), content_type=served)
     if not verdict.ok:
         raise _reject(pipe, staged, note, "; ".join(verdict.problems))
-    summary = scan_file(staged, pipe.scanners)
+    summary = pipe.scan_policy.scan(staged, verdict.kind, pipe.scanners)
     keep, why = pipe.scan_policy.decide(verdict.kind, summary, allow_unscanned=want.allow_unscanned)
     if not keep:
         raise _reject(pipe, staged, note, why)

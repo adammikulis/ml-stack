@@ -12,7 +12,8 @@ import urllib.parse
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ml_stack import home, http
+from ml_stack import home, http, net
+from ml_stack.httpguard import Refused
 from ml_stack.hub.naming import _SHARD, QUANT, aside
 
 DEFAULT_ENDPOINT = "https://huggingface.co"
@@ -123,12 +124,14 @@ class RemoteFile:
 
 def _get(url: str, *, auth: str, repo: str) -> object:
     try:
-        return http.request_json(url, token=auth, timeout=30.0)
+        return net.default().json(url, net.Ask(purpose="model hub", token=auth, tries=3))
     except http.ServerError as exc:
         if exc.status in (401, 403):
             raise GatedRepo(hint(repo, exc.status)) from exc
         if exc.status == 404:
             raise NotFound(f"{repo} is not on {endpoint()}") from exc
+        raise RemoteError(str(exc)) from exc
+    except Refused as exc:
         raise RemoteError(str(exc)) from exc
 
 

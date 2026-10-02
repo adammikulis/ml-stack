@@ -57,9 +57,10 @@ def _page_text(page: Any, off_layers: set[str]) -> tuple[str, int]:
 def visible_text(path: str | Path, *, limit: int | None = None) -> tuple[str, str, int, int]:
     """``(title, text, page_count, removed)`` of a PDF with only what a reader can see, and
     invisible Unicode characters stripped. ``removed`` counts hidden spans and characters."""
-    from ml_stack.sources.pdf import _pymupdf
-
-    pymupdf = _pymupdf()
+    try:
+        import pymupdf
+    except ImportError as exc:
+        raise ImportError("reading a PDF needs pymupdf: pip install 'ml-stack[pdf]'") from exc
     removed = 0
     with pymupdf.open(str(Path(path).expanduser())) as doc:
         off = {str(v.get("name", "")) for v in doc.get_ocgs().values() if not v.get("on", True)}

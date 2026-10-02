@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import struct
 import threading
 
 import pytest
@@ -15,7 +16,8 @@ MIB = 1 << 20
 
 
 def blob(size: int, seed: int = 0) -> bytes:
-    return bytes((seed + i * 7) % 251 for i in range(256)) * (size // 256)
+    head = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
+    return (head + bytes((seed + i * 7) % 251 for i in range(256)) * (size // 256 + 1))[:size]
 
 
 REPOS = {
@@ -127,7 +129,10 @@ def test_a_wrong_checksum_is_refused_and_the_partial_removed(server, tmp_path):
     server.corrupt.add("maker/thing-GGUF/thing-Q4_K_M.gguf")
     with pytest.raises(pulling.ChecksumMismatch):
         hub.pull("hf:maker/thing-GGUF/thing-Q4_K_M.gguf", tmp_path)
-    assert not list(tmp_path.rglob("*.gguf*"))
+    assert not list(tmp_path.glob("thing-Q4_K_M.gguf*"))
+    assert not list((tmp_path / "machine-state" / "net" / "staging").glob("*.part*"))
+    (held,) = (tmp_path / "machine-state" / ".ml-stack-quarantine").rglob("*thing-Q4_K_M.gguf")
+    assert held.stat().st_size == 3 * MIB
 
 
 def test_too_little_disk_is_refused_before_a_byte_is_read(server, tmp_path, monkeypatch):

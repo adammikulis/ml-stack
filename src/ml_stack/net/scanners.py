@@ -19,6 +19,8 @@ __all__ = ["ClamAV", "HashLookup", "MacNotice", "WindowsDefender", "default_scan
 
 TIMEOUT_S = 900.0
 STALE_DAYS = 7.0
+MOST_SCANNED = 2000 << 20
+MAX_ARG = "2000M"
 FOUND = re.compile(r":\s*(.+?)\s+FOUND\s*$", re.MULTILINE)
 CLAM_DATE = re.compile(r"ClamAV [\d.]+(?:-\S+)?/\d+/(.+)$")
 
@@ -57,11 +59,15 @@ class ClamAV:
         return f"the signature database is {age:.0f} days old; run freshclam" if age > STALE_DAYS else ""
 
     def scan(self, path: Path) -> ScanResult:
+        if path.stat().st_size > MOST_SCANNED:
+            return ScanResult(self.name, Outcome.ERROR,
+                              f"larger than the scanner's {MOST_SCANNED >> 20} MB limit; not scanned")
         attempts = []
         if self.clamdscan:
             attempts.append([self.clamdscan, "--no-summary", "--fdpass", str(path)])
         if self.clamscan:
-            attempts.append([self.clamscan, "--no-summary", str(path)])
+            attempts.append([self.clamscan, "--no-summary", f"--max-filesize={MAX_ARG}",
+                             f"--max-scansize={MAX_ARG}", str(path)])
         last = ScanResult(self.name, Outcome.ERROR, "no clamav command ran")
         for argv in attempts:
             try:

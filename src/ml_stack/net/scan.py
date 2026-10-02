@@ -14,6 +14,7 @@ __all__ = ["Outcome", "ScanPolicy", "ScanResult", "Scanner", "Summary", "categor
            "summarise"]
 
 UNSCANNED_ENV = "ML_STACK_NET_UNSCANNED"
+SCAN_MODELS_ENV = "ML_STACK_NET_SCAN_MODELS"
 
 
 class Outcome(StrEnum):
@@ -23,6 +24,7 @@ class Outcome(StrEnum):
     INFECTED = "infected"
     ERROR = "error"
     NO_SCANNER = "no scanner available"
+    SKIPPED = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,8 @@ class Summary:
         """`scanned: clean (clamav)`, `scanned: no scanner available` and so on."""
         if self.outcome == Outcome.NO_SCANNER:
             return "scanned: no scanner available"
+        if self.outcome == Outcome.SKIPPED:
+            return "scan skipped: model weights (a virus scanner cannot judge them; format checked)"
         names = ", ".join(r.scanner for r in self.results if r.outcome == self.outcome)
         return f"scanned: {self.outcome.value} ({names})" if names else f"scanned: {self.outcome.value}"
 
@@ -109,6 +113,7 @@ class ScanPolicy:
     archive: str = "refuse"
     model: str = "warn"
     data: str = "warn"
+    scan_models: bool = False
 
     @classmethod
     def from_env(cls) -> ScanPolicy:
@@ -120,7 +125,13 @@ class ScanPolicy:
             if name in ("executable", "archive", "model", "data") and action in (
                     "refuse", "warn", "allow"):
                 values[name] = action
-        return cls(**values)
+        return cls(scan_models=os.environ.get(SCAN_MODELS_ENV) == "1", **values)
+
+    def scan(self, path: Path, kind: str, scanners: Sequence[Scanner]) -> Summary:
+        """The scan of ``path``; model weights are skipped unless ``scan_models``."""
+        if category(kind) == "model" and not self.scan_models:
+            return Summary(Outcome.SKIPPED)
+        return scan_file(path, scanners)
 
     def action(self, kind: str) -> str:
         """The policy for a file of ``kind``."""
@@ -131,7 +142,7 @@ class ScanPolicy:
         """``(keep, why)`` for a file of ``kind`` that scanned as ``summary``."""
         if summary.outcome == Outcome.INFECTED:
             return False, summary.line
-        if summary.outcome == Outcome.CLEAN:
+        if summary.outcome in (Outcome.CLEAN, Outcome.SKIPPED):
             return True, summary.line
         action = "allow" if allow_unscanned else self.action(kind)
         if action == "refuse":
