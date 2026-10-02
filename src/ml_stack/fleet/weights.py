@@ -17,6 +17,9 @@ class ModelError(RuntimeError):
 QUANTS = ("q4_k_m", "q4_k_s", "q4_1", "q4_0", "q5_k_m", "q8_0")
 
 
+LISTING = "https://huggingface.co/api/models"
+
+
 def resolve(source: str) -> str:
     """``hf:owner/repo/file.gguf``, ``hf:owner/repo``, or a plain URL.
 
@@ -41,7 +44,7 @@ def resolve(source: str) -> str:
 def repo_files(owner: str, repo: str) -> list[str]:
     """Every file Hugging Face lists in a repository."""
     try:
-        listed = request_json(f"https://huggingface.co/api/models/{owner}/{repo}",
+        listed = request_json(f"{LISTING}/{owner}/{repo}",
                               method="GET", timeout=30, tries=3)
     except (ServerError, OSError, ValueError) as exc:
         raise ModelError(f"could not read hf:{owner}/{repo}: {exc}") from None

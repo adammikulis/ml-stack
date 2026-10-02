@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Run the test suite one tier at a time.
+
+    scripts/test quick     only the tests a change reaches (needs pytest-testmon)
+    scripts/test fast      every test not marked slow or heavy
+    scripts/test full      every test not marked slow
+    scripts/test slow      only the tests marked slow
+    scripts/test all       everything, slow included: what CI runs
+    scripts/test heavy --junit J   rewrite tests/heavy-modules.txt from a pytest --junitxml file J
+
+Every tier queues for workers in the machine-wide budget (scripts/testslots.py) and runs with
+the number it is granted, at most ``-n``.
+
+Arguments after the tier go to pytest. ``quick`` runs the full tier in full, and says
+why, when it cannot tell what a change reaches.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import affected
+import testslots
+
+ROOT = Path(__file__).resolve().parent.parent
+BASE = "0.2dev"
+DATAFILE = ".testmondata"
+FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
+    "test_spec_decode.py", "test_spec_qwen4.py", "test_spec_qwen4_load.py", "test_spec_serve.py"))]
+CASE = re.compile(r'<testcase classname="([^"]+)" name="[^"]*" time="([^"]+)"')
+HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
+FULL: list[str] = []
+
+
+def pytest_command(workers: int, *rest: str) -> list[str]:
+    """The pytest invocation every tier shares."""
+    return [sys.executable, "-m", "pytest", "-q", "-n", str(workers), *rest]
+
+
+def run(command: list[str], env: dict[str, str] | None = None) -> int:
+    """Run a command in the repo, returning its exit status."""
+    print("+", " ".join(command), flush=True)
+    return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
+
+
+def testmon_env() -> dict[str, str]:
+    """The environment a testmon run uses, with its data file inside this checkout."""
+    return {**os.environ, "TESTMON_DATAFILE": str(ROOT / DATAFILE)}
+
+
+def testmon_missing() -> bool:
+    """Whether pytest-testmon cannot be imported by the interpreter the tests run on."""
+    return importlib.util.find_spec("testmon") is None
+
+
+def clean(status: int) -> int:
+    """A pytest exit status with "no tests were selected" counted as success."""
+    return 0 if status == 5 else status
+
+
+def quick(args: argparse.Namespace, rest: list[str]) -> int:
+    """Run the tests a change reaches: testmon's recorded map, plus the import graph.
+
+    Always under xdist: a map recorded with ``-n 0`` and one recorded with workers disagree
+    about the installed packages, and testmon reruns everything when they do.
+    """
+    args.workers = max(1, args.workers)
+    tier = ["--slow"] if args.slow else FULL
+    try:
+        changed, deleted = affected.changed_since(ROOT, args.base)
+    except (RuntimeError, IndexError) as exc:
+        print(f"quick: cannot diff against {args.base} ({exc}); running the full tier")
+        return run(pytest_command(args.workers, *tier, *rest))
+    if not changed:
+        print(f"quick: nothing differs from {args.base}; running nothing")
+        return 0
+    picked = affected.select(ROOT, changed, deleted)
+    why = [f"{p}: nothing says which tests it affects" for p in picked.unmapped]
+    if testmon_missing():
+        why = ["pytest-testmon is not installed (pip install -e '.[test]')", *why]
+    elif not (ROOT / DATAFILE).exists():
+        why = [f"no {DATAFILE} in this checkout yet; this run records it", *why]
+    if why:
+        for line in why[:8]:
+            print(f"quick: {line}")
+        print("quick: running the full tier")
+        record = [] if testmon_missing() else ["--testmon-noselect"]
+        return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env())
+    if args.explain:
+        for test, reasons in sorted(picked.why.items()):
+            print(f"quick: {test}  <- {'; '.join(sorted(set(reasons))[:3])}")
+    direct = sorted(picked.files)
+    status = 0
+    if direct:
+        print(f"quick: {len(direct)} test file(s) importing or naming a changed module")
+        status = clean(run(pytest_command(min(args.workers, len(direct)), "--testmon-noselect",
+                                          *tier, *direct, *rest), testmon_env()))
+    print("quick: every other test whose recorded execution touches a changed line")
+    return max(status, clean(run(pytest_command(args.workers, "--testmon", *tier, *rest),
+                                 testmon_env())))
+
+
+def heavy(junit: Path, over: float) -> int:
+    """Rewrite the heavy-module list with every module whose tests took ``over`` seconds."""
+    totals: dict[str, float] = {}
+    for classname, seconds in CASE.findall(junit.read_text(encoding="utf-8")):
+        module = classname.split(".")[1]
+        totals[module] = totals.get(module, 0.0) + float(seconds)
+    names = sorted(f"{m}.py" for m, seconds in totals.items() if seconds >= over)
+    head = HEAVY_FILE.read_text(encoding="utf-8").split("test_")[0]
+    HEAVY_FILE.write_text(head + "\n".join(names) + "\n", encoding="utf-8")
+    print(f"{len(names)} modules took {over:g} s or more; wrote {HEAVY_FILE.relative_to(ROOT)}")
+    return 0
+
+
+def main() -> int:
+    """Parse the tier and run it."""
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy"])
+    parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
+    parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
+    parser.add_argument("-n", "--workers", type=int, default=4)
+    parser.add_argument("--base", default=BASE, help="branch quick diffs against")
+    parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
+    parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
+    args, rest = parser.parse_known_args()
+    if args.tier == "heavy":
+        return heavy(args.junit, args.over)
+    tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
+    with testslots.lease(max(1, args.workers), label=f"ml-stack: {args.tier}") as got:
+        args.workers = min(args.workers, got.workers)
+        if args.tier == "quick":
+            return quick(args, rest)
+        return run(pytest_command(args.workers, *tiers[args.tier], *rest))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

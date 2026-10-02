@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from conftest import threaded_server
 
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.weights import ModelError, resolve
@@ -70,17 +71,46 @@ class TestFinding:
         assert len(store.digest(model)) == 64
 
 
+def handler_replying(status: int, body: dict):
+    """A request handler class answering every GET with ``status`` and ``body`` as JSON."""
+    class Replying(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    return Replying
+
+
 class TestSources:
     def test_a_hugging_face_reference_becomes_a_url(self):
         url = resolve("hf:Qwen/Qwen3-4B-GGUF/qwen3-4b-q4.gguf")
         assert url.startswith("https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/")
         assert url.endswith("qwen3-4b-q4.gguf?download=true")
 
-    @pytest.mark.parametrize("bad", ["just-a-name", "hf:owner", "hf:owner/repo",
-                                     "ftp://somewhere/x.gguf"])
+    @pytest.mark.parametrize("bad", ["just-a-name", "hf:owner", "ftp://somewhere/x.gguf"])
     def test_something_that_is_not_a_source_is_refused(self, bad):
         with pytest.raises(ModelError):
             resolve(bad)
+
+    def test_a_repository_alone_is_answered_with_its_q4_build(self, monkeypatch):
+        listing = {"siblings": [{"rfilename": n} for n in (
+            "README.md", "m-q8_0.gguf", "m-q4_k_m.gguf", "mmproj-f16.gguf",
+            "m-q4_k_m-00001-of-00002.gguf")]}
+        with threaded_server(handler_replying(200, listing)) as base:
+            monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
+            assert resolve("hf:owner/repo").endswith("/owner/repo/resolve/main/m-q4_k_m.gguf?download=true")
+
+    def test_a_repository_the_hub_does_not_know_is_refused(self, monkeypatch):
+        with threaded_server(handler_replying(404, {"error": "not found"})) as base:
+            monkeypatch.setattr("ml_stack.fleet.weights.LISTING", base + "/api/models")
+            with pytest.raises(ModelError, match="could not read hf:owner/repo"):
+                resolve("hf:owner/repo")
 
 
 class TestGetting:

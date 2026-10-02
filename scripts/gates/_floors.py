@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ._util import dotted, parse, python_files
+from ._util import dotted, parse, python_files, remembered
 
 NAME = "tests-collected"
 OWNER = ""
@@ -61,7 +61,18 @@ def skip(root: Path) -> str:
 
 
 def collect(root: Path) -> tuple[int, int]:
-    """How many tests pytest collects under root, and how many modules failed to."""
+    """How many tests pytest collects under root, and how many modules failed to.
+
+    A tree whose files are byte-identical to one already counted gets the same answer back
+    instead of being collected again.
+    """
+    counted = remembered(root, "collect", lambda: list(collect_fresh(root)),
+                         ",".join(f"{n}={installed(n)}" for n in guards(root)))
+    return int(counted[0]), int(counted[1])
+
+
+def collect_fresh(root: Path) -> tuple[int, int]:
+    """Collect under root with pytest, whatever was counted before."""
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(
         [str(root / "src"), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
     done = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",

@@ -1,7 +1,7 @@
 """The web as tools: search, read, look — with the network and the browser faked.
 
 Every engine, fetch and browser here is a stand-in, so nothing reaches the network and no
-browser opens. The one test that really searches is skipped unless ``MLSTACK_NET`` is set,
+browser opens. The one test that really searches is skipped unless ``ML_STACK_LIVE_NET=1`` is set,
 so a person can run it on purpose and an agent never does by accident.
 """
 
@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import os
 import urllib.request
 
 import pytest
@@ -445,8 +444,7 @@ def test_the_look_tool_returns_the_shape_the_ask_loop_strips(public_dns):
     assert got["_images"] == [PNG] and got["title"] == "About the Quenlow works"
 
 
-@pytest.mark.skipif(not os.environ.get("MLSTACK_NET"),
-                    reason="really searches the web; set MLSTACK_NET=1 to run on purpose")
+@pytest.mark.live_net
 def test_a_real_search_returns_pages_with_links():
     """Deliberate: this one reaches ddgs and whatever engines it fronts. A rate limit is a
     skip, not a failure — it says something about the afternoon, not about the code."""

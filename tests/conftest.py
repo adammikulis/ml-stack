@@ -29,6 +29,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
+os.environ["HF_HUB_OFFLINE"] = "1"
 sys.path.insert(0, str(REPO / "scripts"))
 
 
@@ -64,6 +65,7 @@ _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
 from ml_stack.http import Server  # noqa: E402
+from ml_stack.testing import live  # noqa: E402
 from ml_stack.testing.fakes import (  # noqa: E402
     LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
     fake_binary as fake_binary,
@@ -154,7 +156,7 @@ _STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE
              "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE", "MLSTACK_PROFILES_FILE",
              "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_TRAIN_HOME",
              "MLSTACK_WEB_PROFILE", "MLSTACK_WHISPER_CPP_MODEL", "ML_STACK_CHECKOUTS",
-             "ML_STACK_RATES")
+             "ML_STACK_RATES", *live.CREDENTIALS)
 
 
 #: What a store in the suite may hold in memory. Left to the engine it is a share of the
@@ -460,7 +462,27 @@ _GUARDED_PORTS = range(8080, 8100)
 """Where a stray model server would collide with one already serving."""
 
 
+def _testmon_ignores_scripts_without_a_suffix() -> None:
+    """Keep pytest-testmon from recording scripts such as ``scripts/budgets``.
+
+    A few tests import those in-process, and testmon raises on a covered file with no suffix.
+    """
+    try:
+        from testmon.testmon_core import TestmonData
+    except ImportError:
+        return
+    recorded = TestmonData.get_tests_fingerprints
+
+    def get_tests_fingerprints(self, nodes_files_lines, reports):
+        suffixed = {test: {name: lines for name, lines in files.items() if "." in Path(name).name}
+                    for test, files in nodes_files_lines.items()}
+        return recorded(self, suffixed, reports)
+
+    TestmonData.get_tests_fingerprints = get_tests_fingerprints
+
+
 def pytest_configure(config):
+    _testmon_ignores_scripts_without_a_suffix()
     config.addinivalue_line(
         "markers",
         "real_port: exempt from _no_real_ports -- binds or connects to a real port on "
@@ -524,6 +546,60 @@ def _no_real_ports(request):
 
     if violations:
         pytest.fail("a real port was touched:\n" + "\n".join(violations), pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_public_network(request):
+    """No test resolves, connects to or sends to a host beyond this machine and its LAN.
+
+    A UDP socket may ``connect`` anywhere: that only picks the local address and sends nothing.
+
+    A test marked ``live_api`` or ``live_net`` is skipped unless its switch is set, so what
+    reaches this fixture with one of them is already allowed.
+    """
+    if request.node.get_closest_marker("live_api") or request.node.get_closest_marker("live_net"):
+        yield
+        return
+
+    violations: list[str] = []
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    real_sendto, real_resolve = socket.socket.sendto, socket.getaddrinfo
+
+    def refuse(what: str, host: object) -> None:
+        violations.append(f"{what} {host} at {_call_site()}")
+        raise OSError(f"a test reached {host}: set {live.LIVE_NET}=1 and mark it live_net")
+
+    def connect(self, address):
+        if self.type != socket.SOCK_DGRAM and isinstance(address, tuple) and live.outside(address[0]):
+            refuse("connect to", address[0])
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        if self.type != socket.SOCK_DGRAM and isinstance(address, tuple) and live.outside(address[0]):
+            refuse("connect to", address[0])
+        return real_connect_ex(self, address)
+
+    def sendto(self, data, *rest):
+        address = rest[-1]
+        if isinstance(address, tuple) and live.outside(address[0]):
+            refuse("send to", address[0])
+        return real_sendto(self, data, *rest)
+
+    def resolve(host, *args, **kwargs):
+        if live.outside(host):
+            refuse("resolve", host)
+        return real_resolve(host, *args, **kwargs)
+
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    socket.socket.sendto, socket.getaddrinfo = sendto, resolve
+    try:
+        yield
+    finally:
+        socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
+        socket.socket.sendto, socket.getaddrinfo = real_sendto, real_resolve
+
+    if violations:
+        pytest.fail("a real remote host was reached:\n" + "\n".join(violations), pytrace=False)
 
 
 def truncated_logs(before: dict[str, tuple[int, int]],
@@ -635,6 +711,20 @@ def changed_files(before: dict[str, int], after: dict[str, int]) -> list[str]:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _public_suffix_list_is_the_bundled_one():
+    """tldextract reads the list it ships instead of fetching the current one from the web."""
+    try:
+        import tldextract.tldextract as module
+    except ImportError:
+        yield
+        return
+    kept = module.TLD_EXTRACTOR
+    module.TLD_EXTRACTOR = module.TLDExtract(cache_dir=None, suffix_list_urls=())
+    yield
+    module.TLD_EXTRACTOR = kept
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _real_home(tmp_path_factory):
     """The real state and cache roots, captured before the session moves ``HOME``,
     ``ML_STACK_HOME`` and ``ML_STACK_CACHE`` into a temporary directory; fails the run when
@@ -651,6 +741,8 @@ def _real_home(tmp_path_factory):
         mp.setenv("PYTHONUSERBASE", site.getuserbase())
         mp.setenv("PLAYWRIGHT_BROWSERS_PATH",
                   os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or str(browsers / "ms-playwright"))
+        # matplotlib rebuilds its font list in an empty HOME, once per worker
+        mp.setenv("MPLCONFIGDIR", os.environ.get("MPLCONFIGDIR") or str(browsers / "matplotlib"))
         mp.setenv("HOME", str(away))
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
@@ -777,9 +869,23 @@ def pytest_addoption(parser) -> None:
                      help="also run the tests marked redteam (they need the redteam extra)")
 
 
+def heavy_modules() -> frozenset[str]:
+    """The test modules listed in ``tests/heavy-modules.txt``, one file name per line."""
+    listed = (Path(__file__).parent / "heavy-modules.txt").read_text(encoding="utf-8")
+    return frozenset(line.split("#")[0].strip() for line in listed.splitlines()
+                     if line.split("#")[0].strip())
+
+
 def pytest_collection_modifyitems(config, items) -> None:
-    """Leave the slow tests out unless --slow was asked for, and the redteam tests out unless
-    --redteam was."""
+    """Mark the modules in ``heavy-modules.txt``, skip the live tests nobody switched on, leave
+    the slow tests out unless --slow, and the redteam tests out unless --redteam."""
+    heavy = heavy_modules()
+    for item in items:
+        if Path(str(item.fspath)).name in heavy:
+            item.add_marker(pytest.mark.heavy)
+        reason = live.skip_reason((m.name for m in item.iter_markers()), os.environ)
+        if reason:
+            item.add_marker(pytest.mark.skip(reason=reason))
     left_out = [name for name in ("slow", "redteam") if not config.getoption(f"--{name}")]
     if not left_out:
         return

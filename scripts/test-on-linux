@@ -42,6 +42,11 @@ consulted; the image is public and needs no login.
 HELP
 }
 
+# Queue for workers in the machine-wide budget, then run again holding the lease.
+if [ -z "${DEV_TEST_WORKERS:-}" ] && [ "${1:-}" != "-h" ] && [ "${1:-}" != "--help" ]; then
+  exec python3 "$REPO/scripts/testslots.py" run --want 4 --min 2 --label "ml-stack: test-on-linux" -- "$0" "$@"
+fi
+
 SINGLE=""
 REBUILD=""
 while [ $# -gt 0 ]; do
@@ -71,7 +76,11 @@ git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
 
 PYTEST_ARGS=("$@")
 [ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
-[ -n "$SINGLE" ] && PYTEST_ARGS+=(-n 0)
+if [ -n "$SINGLE" ]; then
+  PYTEST_ARGS+=(-n 0)
+elif ! printf '%s\n' "${PYTEST_ARGS[@]}" | grep -q -e '^-n' -e '^--numprocesses'; then
+  PYTEST_ARGS+=(-n "${DEV_TEST_WORKERS:-4}")
+fi
 
 # --init: without a real pid 1 the suite's own parent is pid 0, and a server owned by a
 # process that does not exist is an orphan to stop.
