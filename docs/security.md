@@ -165,3 +165,33 @@ These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-
 - **Windows:** the mode and ownership checks on credential files do not apply, `icacls` is
   best effort, and the exit watchdog was not run on Windows.
 - **`scripts/test-on-linux` was not run** for this pass.
+
+## Sentinel
+
+`ml_stack.sentinel` watches for the attacks above and holds what they touched; the design,
+the measurements and the limits are in `docs/sentinel.md`. What it adds to this model, and
+no more than what its tests show:
+
+- **A pinned model, binary, adapter or config file that changes is found** at load and on a
+  timer, by digest (and by link target), and in the default `guarded` mode moved aside into a
+  `.ml-stack-quarantine` directory under the managed root it sits in. Nothing outside
+  `ML_STACK_HOME`, `ML_STACK_CACHE` and the Hugging Face hub cache is ever moved. Release
+  moves the file back byte for byte; only a person's confirmed purge deletes.
+- **A peer that replays signed requests or sends forged ones is refused** once it crosses a
+  threshold, through a wrapper around `macauth.Authenticator.check`. Wiring the wrapper into
+  the daemon is not done here.
+- **Text a guard rail denies or reads as an instruction is held**, not shown again, and a
+  summary that repeats a held sentence is held too. Nothing a model could be shown comes back
+  except through a person's release at a terminal. Rewording defeats the summary check.
+- **Decoy credentials** planted in the state root turn any read or send of them into a
+  high-confidence event that freezes the session.
+- **The event log is hash-chained** and `ml-stack security verify` finds edits, cuts and
+  reordering; the head can be written down elsewhere.
+- **A model that answers a fixed probe set differently from how it did at install is
+  flagged.** This is not backdoor detection. A model that was bad when it was pinned, or whose
+  trigger no probe contains, passes.
+
+Release, purge and mode changes need a person at a terminal; the check against an agent is on
+strings and on the environment, and code running as the owner can bypass all of it. In
+`observe` mode nothing is acted on; in `guarded` (the default) only the high-confidence
+signals above act; `enforce` also acts on thresholds.

@@ -8,24 +8,27 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack.interventions import Call
 from ml_stack.sentinel.core import Sentinel
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.human import agent_may
 from ml_stack.sentinel.store import Record
 
-__all__ = ["GuardLogHandler", "agent_gate", "broker_listener", "note_refusal",
-           "serve_hooks", "watch_authenticator"]
+__all__ = ["GuardLogHandler", "RailAnswer", "agent_gate", "broker_listener", "note_refusal",
+           "screening", "serve_hooks", "watch_authenticator"]
 
 _OUTCOMES = (("already seen", "replay"), ("outside the window", "clock"),
              ("too many failures", "locked"), ("not signed", "bad_sig"))
 
 
 class GuardLogHandler(logging.Handler):
-    """Reads ``ml_stack.guard`` warnings (``rail, action, reason, source``) as findings for
-    ``session``. Attach it with ``logging.getLogger("ml_stack.guard").addHandler``."""
+    """Reads the ``ml_stack.guard`` warnings a `Run` writes (``rail, verdict, hook``) as
+    findings for ``session``: every Deny is a denial counted against the session. Attach it
+    with ``logging.getLogger("ml_stack.guard").addHandler``."""
 
     def __init__(self, sentinel: Sentinel, session: Callable[[], str] = lambda: "") -> None:
         super().__init__(logging.WARNING)
@@ -33,11 +36,35 @@ class GuardLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         args = record.args
-        if not (isinstance(args, tuple) and len(args) == 4):
+        if not (isinstance(args, tuple) and len(args) == 3):
             return
-        rail, action, reason, source = (str(a) for a in args)
+        rail, verdict, hook = (str(a) for a in args)
+        if verdict != "Deny":
+            return
         self.sentinel.handle_all(self.sentinel.rails.noted(
-            self.session() or "none", rail, action, reason, source))
+            self.session() or "none", rail, "deny", hook, hook))
+
+
+@dataclass(frozen=True, slots=True)
+class RailAnswer:
+    """What a `Run` said about a text: whether it withheld it, whether it marked the run as
+    carrying outside text, and the rail and reason behind it."""
+
+    denied: bool
+    tainted: bool
+    rail: str
+    reason: str
+
+
+def screening(run: Any, tool: str = "web_fetch") -> Callable[[str, str], RailAnswer]:
+    """The ``verdict`` for `Sentinel.screen`: it shows ``run`` (an ``interventions.Run``) a
+    tool result from ``source`` and reports what the run's interventions did with it."""
+    def verdict(text: str, source: str) -> RailAnswer:
+        shown = run.screen_result(Call(tool if source.startswith("tool:") else source), text)
+        by = shown.verdict
+        return RailAnswer(bool(shown.withheld), bool(getattr(by, "tainted", False)),
+                          str(getattr(by, "by", "")), str(getattr(by, "reason", "")))
+    return verdict
 
 
 def watch_authenticator(auth: Any, sentinel: Sentinel, verdict: type) -> Any:
