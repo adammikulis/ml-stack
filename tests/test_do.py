@@ -79,7 +79,7 @@ def drive(script, stdin: str, *, task="run benchmarks with quince-2b", tools=Non
     model = Scripted(script, answer="I have nothing more to do.")
     out = io.StringIO()
     got = do.run(task, model, tools=tools if tools is not None else tools_over(seen),
-                 stdin=io.StringIO(stdin), stdout=out, **kw)
+                 person=do.Person(io.StringIO(stdin), out, yes=kw.pop("yes", False)), **kw)
     return got, model, seen, out.getvalue()
 
 

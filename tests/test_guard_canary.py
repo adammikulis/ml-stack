@@ -48,7 +48,7 @@ def test_a_blocked_call_is_told_to_the_model_and_recorded_on_the_outcome():
     attack = next(a for a in ATTACKS if a.name == "read-ssh-key")
     model = Obeying(attack.steps)
     out = do.run("transcribe", model, tools=canary._tools(run, attack),
-                 stdin=io.StringIO(""), stdout=io.StringIO())
+                 person=do.Person(io.StringIO(""), io.StringIO()))
     assert run.calls == [] and [v.rail for v in out.blocked] == ["tool-policy"]
     told = [m["content"] for m in out.messages if m.get("role") == "tool"]
     assert "blocked by the tool-policy rail" in told[0] and "credential file" in told[0]

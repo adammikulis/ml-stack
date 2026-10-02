@@ -555,22 +555,21 @@ def transcript(messages: Iterable[dict[str, Any]]) -> str:
 
 def run(task: str, client: Any, *,
         tools: Sequence[tuple[dict[str, Any], Callable[..., Any]]] | None = None,
-        stdin: TextIO | None = None, stdout: TextIO | None = None, yes: bool = False,
-        rounds: int = ROUNDS, messages: list[dict[str, Any]] | None = None,
-        guard: Guard | None = None) -> Outcome:
+        person: Person | None = None, rounds: int = ROUNDS,
+        messages: list[dict[str, Any]] | None = None, guard: Guard | None = None) -> Outcome:
     """One task through the loop: the model is offered every tool, each call is run and
     answered, ``ask_user`` and ``plan`` reach the person, ``done`` ends it. ``messages``
     carries a conversation across tasks; a new one is started when none is given.
 
     Every call and every tool result passes ``guard`` (`ml_stack.guard`); with none given the
     built-in rails are on. ``Guard.off(because=...)`` is the only way to run without them."""
-    person = Person(stdin or sys.stdin, stdout or sys.stdout, yes=yes)
+    person = person or Person(sys.stdin, sys.stdout)
     offered = [*(command_tools() if tools is None else tools), *person.tools()]
     schemas = [schema for schema, _ in offered]
     run_by = {schema["function"]["name"]: fn for schema, fn in offered}
     guard = (guard or Guard.default()).bind(schemas, confirm=person.confirm)
     if messages is None:
-        messages = [{"role": "system", "content": system_for(yes)}]
+        messages = [{"role": "system", "content": system_for(person.yes)}]
     messages.append({"role": "user", "content": task})
     out = Outcome(messages=messages)
     began = time.monotonic()
@@ -630,8 +629,10 @@ def _answer(call: dict[str, Any], run_by: dict[str, Callable[..., Any]], guard: 
     if asked.name == "plan" and not verdict.denied and not person.yes and result.get("go"):
         guard.approve(" ".join(str(step) for step in args.get("steps") or []))
     text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)[:CUT]
-    answer = text if asked.name in OWN or verdict.denied else guard.input(
-        text, f"tool:{asked.name}").text
+    answer = text
+    if asked.name not in OWN and not verdict.denied:
+        fed = guard.input(text, f"tool:{asked.name}")
+        answer = f"[withheld by the {fed.rail} rail: {fed.reason}]" if fed.denied else fed.text
     if asked.name not in OWN:
         person.say("   " + guard.output(text, "display").text[:300])
     out.messages.append({"role": "tool", "tool_call_id": call.get("id") or asked.name,
@@ -761,7 +762,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
     client = client_for(args)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_for(args.yes)}]
     if args.task:
-        got = run(args.task, client, tools=tools, stdin=stdin, stdout=stdout, yes=args.yes,
+        got = run(args.task, client, tools=tools, person=Person(stdin, stdout, yes=args.yes),
                   rounds=args.rounds, messages=messages)
         return 0 if got.done else 1
     code = 0
@@ -774,8 +775,8 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
             break
         if not line.strip():
             continue
-        got = run(line.strip(), client, tools=tools, stdin=stdin, stdout=stdout,
-                  yes=args.yes, rounds=args.rounds, messages=messages)
+        got = run(line.strip(), client, tools=tools, person=Person(stdin, stdout, yes=args.yes),
+                  rounds=args.rounds, messages=messages)
         if not got.done:
             code = 1
     return code
