@@ -11,7 +11,7 @@
                                              model being the llama-server at URL (run in an
                                              environment with the `guardrails` extra)
 
-Each screen is scored on `EVAL` and on `FRESH` (`ml_stack.testing.injection_corpus`). Prints
+Each screen is scored on `EVAL`, `FRESH` and `REDTEAM` (`ml_stack.testing.injection_corpus`). Prints
 one line per miss and false positive, then the totals and the time per text.
 """
 
@@ -22,7 +22,7 @@ import sys
 import time
 
 from ml_stack.guard.untrusted import injection_markers
-from ml_stack.testing.injection_corpus import EVAL, FRESH
+from ml_stack.testing.injection_corpus import EVAL, FRESH, REDTEAM
 
 TASK = "look things up with the tools and tell me what you find"
 
@@ -97,11 +97,17 @@ prompts:
     return screen
 
 
-def run(name: str, screen) -> None:
-    for label, (injections, benign) in (("eval", EVAL), ("fresh", FRESH)):
+SETS = (("eval", EVAL), ("fresh", FRESH), ("redteam", REDTEAM))
+
+
+def run(name: str, screen) -> dict[str, tuple[list[bool], list[bool]]]:
+    """Score ``screen`` on every set; the flags per set are returned for combining."""
+    flags: dict[str, tuple[list[bool], list[bool]]] = {}
+    for label, (injections, benign) in SETS:
         began = time.time()
         hits = [screen(t) for t in injections]
         false = [screen(t) for t in benign]
+        flags[label] = (hits, false)
         for text, hit in zip(injections, hits, strict=True):
             if not hit:
                 sys.stdout.write(f"  MISSED  {text[:70]!r}\n")
@@ -109,10 +115,20 @@ def run(name: str, screen) -> None:
             if hit:
                 sys.stdout.write(f"  FALSE+  {text[:70]!r}\n")
         took = time.time() - began
-        total = len(injections) + len(benign)
+        total = max(len(injections) + len(benign), 1)
         sys.stdout.write(f"{name} on {label}: caught {sum(hits)}/{len(hits)} injections, flagged "
                          f"{sum(false)}/{len(false)} benign, {took:.1f}s "
                          f"({took / total * 1000:.0f} ms each)\n")
+    return flags
+
+
+def either(name: str, one: dict, two: dict) -> None:
+    """Print the screens ``one`` and ``two`` run together: a text is flagged when either flags it."""
+    for label, _ in SETS:
+        hits = [a or b for a, b in zip(one[label][0], two[label][0], strict=True)]
+        false = [a or b for a, b in zip(one[label][1], two[label][1], strict=True)]
+        sys.stdout.write(f"{name} on {label}: caught {sum(hits)}/{len(hits)} injections, flagged "
+                         f"{sum(false)}/{len(false)} benign\n")
 
 
 def main() -> int:
@@ -123,14 +139,17 @@ def main() -> int:
     ap.add_argument("--classifier", action="store_true")
     args = ap.parse_args()
     run("built-in markers", markers)
+    native = onnx = None
     if args.native or args.judge:
         screen = judge_screen(args.judge)
         try:
-            run("native judge", screen)
+            native = run("native judge", screen)
         finally:
             screen.close()
     if args.classifier:
-        run("onnx injection classifier", classifier_screen())
+        onnx = run("onnx injection classifier", classifier_screen())
+    if native and onnx:
+        either("native judge + onnx classifier", native, onnx)
     if args.nemo:
         run("nemoguardrails self-check input", nemo_screen(args.nemo))
     return 0

@@ -35,11 +35,6 @@ capability; every line is something that already exists not being what it says.
 - [ ] **MCP tasks are not driven.** The mcp 2.2 client has no tasks API, so a long-running tool
   call cannot be polled or cancelled through `McpTools`, and task progress is not an agent
   event. Progress for an ordinary call reaches `McpTools.on_progress` only.
-- [ ] **`ml_stack.agent.interventions` holds a local copy of the decision types.** When
-  `ml_stack.interventions` lands, its hooks take a `Call` dataclass (name, arguments, id) and a
-  `Context` (task, messages, tools, trusted, notes) where the loop passes a dict and an
-  `InterventionContext`; the four verdict types match. Build `Call` and `Context` in
-  `agent/loop.py`, import the verdicts from it, and delete the local module.
 - [ ] **No tool-calling base-versus-tuned comparison in one command.** `ml-stack-train-tools eval`
   scores one served model; comparing a base and a tuned model means running it against each
   server and diffing the JSON.
@@ -742,11 +737,6 @@ Capabilities that do not exist yet.
 
 ### Decision models
 
-- [ ] **The tool loop does not call interventions yet.** `ml_stack.interventions.guard_tool_call(call,
-  context, execute, interventions, confirm=...)` is the step; `Agent.run` in the tool-loop
-  branch should build a `Call` and a `Context` from its messages, run it in place of its own
-  dispatch, and take `interventions=[...]`. `tests/test_decide_guard.py` drives it the way a
-  loop would.
 - [ ] **Trained deciders are not in model discovery.** `ml_stack.decide.registry` records them
   by name under the state root; `hub.discover` (model-discovery branch) should list a directory
   holding `decider.json` as a model of format `decider`.

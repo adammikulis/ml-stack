@@ -154,9 +154,10 @@ def test_a_denied_result_names_the_judge_and_the_score(judged):
 
 
 def test_the_screen_reads_through_the_untrusted_fence(judged):
-    judge, _ = judged
+    judge, seen = judged
     fenced = rails.default()[0].after_tool_call(Call("web_fetch"), INJECTION, Context()).text
     assert isinstance(after(TextScreen(judge), fenced), Deny)
+    assert "<untrusted" not in seen[0]["messages"][-1]["content"]
 
 
 def test_when_the_judge_is_down_a_result_goes_through_tainted(server):
@@ -273,8 +274,10 @@ def test_the_first_installed_candidate_that_fits_is_chosen(tmp_path):
     assert native.pick_model((str(big),), room=lambda: None, size=lambda p: sizes[p]) == str(big)
 
 
-def test_the_environment_turns_the_tier_off_and_names_a_server():
+def test_the_environment_turns_the_tier_off_and_names_a_server(monkeypatch):
+    monkeypatch.setattr(native, "pick_model", lambda *a, **k: "/models/judge.gguf")
     assert screen(env={native.ENV: "off"}) == []
+    assert len(screen(env={})) == 2
     items = screen(env={native.ENV: "http://127.0.0.1:9"})
     assert [type(i).__name__ for i in items] == ["TextScreen", "CallScreen"]
 

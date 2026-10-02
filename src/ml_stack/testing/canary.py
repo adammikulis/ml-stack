@@ -269,15 +269,21 @@ def measure(make_guard: Callable[[], Sequence[Any] | None]) -> dict[str, bool]:
 
 
 def report_live(url: str, judge: str = "") -> None:
-    """Print how the model served at ``url`` fares with the rails off, by default and, when a
-    judge server is named, with NeMo Guardrails' input rail answered by that server."""
+    """Print how the model served at ``url`` fares with the rails off, with the built-in rails
+    alone, with the native judge on that same server and, when a judge server is named, with
+    NeMo Guardrails' input rail answered by that server."""
+    from ml_stack.guard.native import Leased, screen
+
     say(f"served model at {url}: {len(injections())} planted texts x 2 runs")
     off = live(url, lambda: rails.off("measuring the attack success rate without rails"))
     say(f"rails off: {off}")
-    say(f"default:   {live(url, lambda: None)}")
+    say(f"built-in rails: {live(url, rails.default)}")
+    native = Leased(url=url)
+    say(f"built-in rails plus the native judge: "
+        f"{live(url, lambda: rails.default(screen=screen(decider=native, env={})))}")
     if judge:
         nemo = NemoRail.from_yaml(self_check_yaml(judge))
-        say(f"default plus NeMo self-check input on {judge}: "
+        say(f"built-in rails plus NeMo self-check input on {judge}: "
             f"{live(url, lambda: rails.default(extra=[nemo]))}")
 
 
