@@ -9,7 +9,7 @@ import platform
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ml_stack.http import ServerError, request_bytes
@@ -55,7 +55,7 @@ def cmake_flags() -> list[str]:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 LIB_GLOBS = ("lib*.dylib", "lib*.so", "*.dll")

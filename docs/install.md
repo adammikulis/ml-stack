@@ -129,7 +129,7 @@ new Windows machine, in this order, each of which should say what follows it:
 scratch prefix, the console scripts on its own PATH, then `-Uninstall` taking the venv away
 again -- against a wheel built in the same job, with no model and no network.
 
-**If you write Python**, on 3.10 to 3.14:
+**If you write Python**, on 3.11 to 3.14:
 
 ```
 pip install git+https://github.com/adammikulis/ml-stack

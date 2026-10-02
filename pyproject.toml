@@ -7,7 +7,7 @@ name = "ml-stack"
 version = "0.2.1"  # x-release-please-version
 description = "Train and run models across every machine on your network."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "a member" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -16,7 +16,6 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -26,7 +25,7 @@ classifiers = [
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 # ml_stack.installed reads the pins with Requirement, SpecifierSet and Version.
-dependencies = ["packaging>=22", "tomli>=2; python_version < '3.11'"]
+dependencies = ["packaging>=22"]
 
 # Nothing below is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
@@ -75,7 +74,7 @@ pdf = ["pymupdf>=1.24"]
 viz = ["manim>=0.19"]
 # `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
 # own --plot writes hand-built SVG with no library, so it opens on a machine with no packages
-plot = ["matplotlib>=3.11.2; python_version >= '3.11'"]
+plot = ["matplotlib>=3.11.2"]
 testing = ["numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
@@ -173,7 +172,7 @@ markers = ["slow: needs a browser, a subprocess, a wheel build or a network time
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 # python with no .py on it: ruff matches by extension unless the name is spelled out
 extend-include = ["scripts/budgets", "scripts/hooks/budgets",
                   "scripts/hooks/claude-bash-guard", "scripts/hooks/claude-edit-guard"]

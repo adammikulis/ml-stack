@@ -39,7 +39,7 @@ import shutil
 import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,7 @@ class Snapshot:
         return max(0.0, (time.time() - self.created_at) / 86400.0)
 
     def describe(self) -> str:
-        stamp = datetime.fromtimestamp(self.created_at, timezone.utc).astimezone()
+        stamp = datetime.fromtimestamp(self.created_at, UTC).astimezone()
         held = " / ".join(f"{v} {k}" for k, v in sorted(self.counts.items())
                           if not k.endswith(DISAGREEING) or v)
         return (f"{Path(self.path).name}\n"
@@ -197,7 +197,7 @@ def take(source: str | Path, *, reason: str, count: Any, fold: Any = None,
 
     target = snapshot_dir(src)
     target.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d_%H%M%S")
     dst = target / f"{src.stem}.{stamp}{src.suffix}"
     # two snapshots inside one second must not quietly overwrite each other
     serial = 0

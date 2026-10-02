@@ -11,7 +11,7 @@ import email
 import email.policy
 import json
 import mailbox
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -106,7 +106,7 @@ def test_product_ids_are_minted_the_same_every_time():
 
 def test_a_slack_ts_survives_the_trip_through_a_datetime():
     assert ts_of(when("1725148800.000100")) == "1725148800.000100"
-    assert when("1725148800.000100") == datetime(2024, 9, 1, 0, 0, 0, 100, tzinfo=timezone.utc)
+    assert when("1725148800.000100") == datetime(2024, 9, 1, 0, 0, 0, 100, tzinfo=UTC)
 
 
 # --- slack --------------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 `ml_stack.serve` starts, adopts and stops `llama-server`; `ml_stack.client` talks to it over
 HTTP. Both import nothing outside the standard library, read no file and open no socket when
-imported. The package runs on Python 3.10 to 3.14; the app's own environment is 3.13.
+imported. The package runs on Python 3.11 to 3.14; the app's own environment is 3.13.
 
 ```
 pip install "ml-stack @ git+https://github.com/adammikulis/ml-stack"
@@ -10,7 +10,7 @@ pip install -e /path/to/ml-stack               # a local checkout
 ```
 
 The base install adds `packaging` and `psutil`, which finds and stops the server's process
-tree, plus `tomli` below Python 3.11. Nothing else is installed: no torch, no MLX, no daemon.
+tree. Nothing else is installed: no torch, no MLX, no daemon.
 
 ## One conversation, pinned to a slot
 

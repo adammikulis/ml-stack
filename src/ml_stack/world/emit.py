@@ -22,7 +22,7 @@ import re
 import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import format_datetime, formataddr
 from pathlib import Path
@@ -388,7 +388,7 @@ def rows(messages: Iterable[Message], people: Mapping[str, Mapping[str, Any]], *
     for m in said:
         if m.thread and m.thread in by_id:
             reply_count[m.thread] += 1
-    stamp = scraped_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    stamp = scraped_at or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     out: list[dict[str, Any]] = []
     for m in said:
         cid = slack_dm_id(m.channel) if is_dm(m.channel) else slack_channel_id(m.channel)

@@ -24,7 +24,7 @@ SH = (REPO / "packaging" / "install.sh").read_text(encoding="utf-8")
 PS1 = (REPO / "packaging" / "install.ps1").read_text(encoding="utf-8")
 RUNNER = (REPO / "scripts" / "test-on-linux").read_text(encoding="utf-8")
 MAJOR, MINOR = (int(part) for part in PYTHON.split("."))
-OLDEST = "3.10"
+OLDEST = "3.11"
 NEWEST = "3.14"
 SUPPORTED = {f"3.{minor}" for minor in range(int(OLDEST.split(".")[1]), int(NEWEST.split(".")[1]) + 1)}
 

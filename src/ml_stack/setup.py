@@ -14,8 +14,9 @@ import os
 import shutil
 import socket
 import subprocess
+import tomllib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
@@ -25,11 +26,6 @@ from ml_stack.installed import standard
 from ml_stack.log import say
 from ml_stack.platform import is_windows
 from ml_stack.units import human_bytes
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
 
 __all__ = ["BEHAVIOURS", "SPEECH_PROTOCOLS", "Behaviour", "explain", "look", "main"]
 
@@ -442,8 +438,8 @@ def _age(built_at: str) -> str:
     except ValueError:
         return ""
     if then.tzinfo is None:
-        then = then.replace(tzinfo=timezone.utc)
-    delta = datetime.now(timezone.utc) - then
+        then = then.replace(tzinfo=UTC)
+    delta = datetime.now(UTC) - then
     if delta.days >= 1:
         return f"{delta.days}d"
     if delta.seconds >= 3600:

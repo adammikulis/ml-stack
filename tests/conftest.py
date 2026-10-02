@@ -26,13 +26,6 @@ from pathlib import Path
 
 import pytest
 
-try:
-    import tomllib  # noqa: F401
-except ModuleNotFoundError:  # Python 3.10
-    import tomli
-
-    sys.modules["tomllib"] = tomli
-
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
