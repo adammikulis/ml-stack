@@ -9,7 +9,6 @@ head, ``ngram``, or nothing -- and ``spec_draft_max`` the most tree nodes a pass
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -25,6 +24,7 @@ from ml_stack.serve.backend import (
     launch,
     server_log,
 )
+from ml_stack.serve.binary import hub_environment
 from ml_stack.serve.preflight import Check, Report
 from ml_stack.spec import LAYOUTS
 
@@ -155,6 +155,6 @@ class MlxTreeBackend(ServerBackend):
                 raise ServerFailed(report.said())
         log_path = server_log("mlx-tree", spec.port)
         process, base_url, load_s = launch(argv, lease, log_path=log_path,
-                                           timeout=timeout, env=dict(os.environ))
+                                           timeout=timeout, env=hub_environment())
         return ServerInfo(base_url=base_url, port=spec.port, pid=process.pid, backend=self.name,
                           log_path=log_path, load_s=load_s, process=process)

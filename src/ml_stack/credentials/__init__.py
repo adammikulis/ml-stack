@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.credentials.environment import child_environment
 from ml_stack.credentials.reading import (
     INSECURE_ENV,
     CredentialError,
@@ -26,8 +27,8 @@ from ml_stack.credentials.reading import (
 )
 from ml_stack.credentials.writing import write
 
-__all__ = ["FILE_ENV", "INSECURE_ENV", "CredentialError", "Secret", "describe", "file_path",
-           "get", "set", "status", "unset"]
+__all__ = ["FILE_ENV", "INSECURE_ENV", "CredentialError", "Secret", "child_environment",
+           "describe", "file_path", "get", "set", "status", "unset"]
 
 logger = logging.getLogger(__name__)
 

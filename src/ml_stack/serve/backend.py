@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import credentials, home
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
 from ml_stack.serve import exit_guard
@@ -802,6 +802,10 @@ class LlamaServerBackend(ServerBackend):
             # once at startup. Without it, escalate()'s summariser has a token count and
             # nothing to summarise.
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
+        if spec.is_hf_ref or ServerSpec.hf_parts(spec.draft or ""):
+            token = credentials.get("HF_TOKEN")
+            if token:
+                extra_env["HF_TOKEN"] = str(token)
 
         process, base_url, load_s = launch(
             argv, lease, log_path=log_path, timeout=timeout,

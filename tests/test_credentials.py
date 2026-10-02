@@ -405,3 +405,46 @@ def test_a_refusal_is_a_message_and_status_1(isolated, monkeypatch, capsys):
     assert code == 0, "only the first line is the value"
     code, _, err = _run(monkeypatch, capsys, ["set", "bad name", "--stdin"], "x")
     assert code == 1 and "credential name" in err
+
+
+# -- what a child process is given ---------------------------------------------------------
+
+
+SECRETS = {"HF_TOKEN": "t1", "ANTHROPIC_API_KEY": "t2", "GITHUB_TOKEN": "t3",
+           "AWS_SECRET_ACCESS_KEY": "t4", "DB_PASSWORD": "t5", "MY_SERVICE_CREDENTIALS": "t6",
+           "SESSION_COOKIE": "t7", "ML_STACK_CREDENTIALS_FILE": "/x", "WIDGET_KEY_FILE": "/y"}
+
+
+def test_a_child_gets_this_environment_without_anything_that_looks_like_a_secret(monkeypatch):
+    for name, value in SECRETS.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/agent")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    env = credentials.child_environment()
+    assert not set(SECRETS) & set(env) - {"WIDGET_KEY_FILE"}
+    assert env["PATH"] == "/usr/bin" and env["SSH_AUTH_SOCK"] == "/agent"
+
+
+def test_a_child_is_handed_exactly_the_credential_it_needs():
+    env = credentials.child_environment({"HF_TOKEN": "needed"}, source={"HF_TOKEN": "old",
+                                                                         "OTHER_TOKEN": "x",
+                                                                         "HOME": "/h"})
+    assert env == {"HF_TOKEN": "needed", "HOME": "/h"}
+
+
+def test_llama_server_gets_no_secret_but_the_hugging_face_token_it_downloads_with(
+        monkeypatch, isolated):
+    from ml_stack.serve.binary import child_env, hub_environment
+
+    monkeypatch.setenv("HF_TOKEN", SECRET)
+    monkeypatch.setenv("GITHUB_TOKEN", "other")
+    assert "HF_TOKEN" not in child_env("/bin/llama-server")
+    assert "GITHUB_TOKEN" not in hub_environment()
+    assert hub_environment()["HF_TOKEN"] == SECRET
+
+
+def test_the_token_comes_from_the_credentials_file_when_the_environment_has_none(isolated):
+    from ml_stack.serve.binary import hub_environment
+
+    _stored(isolated, f'HF_TOKEN = "{SECRET}"\n')
+    assert hub_environment()["HF_TOKEN"] == SECRET
