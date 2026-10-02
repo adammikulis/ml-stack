@@ -16,7 +16,7 @@ __all__ = ["SUMMARY_PREFIX", "Ledger", "ledger_of", "message_text"]
 SUMMARY_PREFIX = "[Summary of the earlier conversation]\n"
 GUIDANCE = "[Guidance]\n"
 SCHEMA_VERSION = 1
-MIN_SPAN = 3
+MIN_SPAN = 5
 """Shortest value that can be traced to a source."""
 MAX_ITEM = 100_000
 MAX_ITEMS = 500

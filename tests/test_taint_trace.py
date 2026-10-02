@@ -26,10 +26,14 @@ def test_system_text_is_not_recorded_as_typed():
     assert ledger.typed == [] and not ledger.contaminated
 
 
-def test_a_value_of_three_characters_is_traced_and_two_are_not():
-    ledger = read("the port is abc and xy")
-    assert ledger.trace("abc") == ["page#1"]
-    assert ledger.trace("xy") == []
+def test_a_value_of_five_characters_is_traced_and_four_are_not():
+    ledger = read("the port is abcde and wxyz")
+    assert ledger.trace("abcde") == ["page#1"]
+    assert ledger.trace("wxyz") == []
+
+
+def test_a_short_plain_word_that_a_tool_result_happens_to_contain_is_not_a_trace():
+    assert read("log: /tmp/bench_run.log written").trace("run") == []
 
 
 def test_a_whole_phrase_of_plain_words_is_traced():

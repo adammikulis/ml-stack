@@ -124,7 +124,7 @@ def ml_stack_tools() -> Sinks:
         speech_say=Sink(Capability.WRITE, result="local"),
         world_make=Sink(Capability.WRITE, {"size": Arg(pattern=r"small|medium|large"),
                                            "seed": Arg(low=0, high=2**31)}, result="local"),
-        bench_run=Sink(Capability.EXEC, result="local"),
+        bench_run=Sink(Capability.EXEC, other=Arg(registry="models"), result="local"),
         **{f"bench_{sub}": Sink(Capability.EXEC, result="local")
            for sub in ("standard", "speed", "compare", "animate", "sweep", "gate")},
         conversation_compact=Sink(Capability.WRITE, result="local"),

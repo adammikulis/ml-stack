@@ -342,10 +342,18 @@ ACCEPTANCE = [
          choices=["sample of 10", "the hundred", "sample plus speed and standard"]),
     call("ask_user", question="one comparison video of all three, or a clip per panel?",
          choices=["one video", "a clip per panel"]),
-    call("plan", steps=["bench_run sweep flash-next with its head -> Qwen3.8-Flash--plain",
-                        "bench_run sweep without the head -> Qwen3.8-Flash--nodraft-plain",
-                        "bench_run run Qwen3.8-Flash--ollama-plain against ollama",
-                        "jobs_wait bench", "bench_compare --export", "bench_animate"]),
+    call("plan", steps=[
+        'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+        '"--serve-draft", "auto", "--plain-only", "--sample", "10"] -> Qwen3.8-Flash--plain',
+        'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+        '"--serve-draft", "", "--label-suffix", "-nodraft", "--plain-only", "--sample", "10"] '
+        '-> Qwen3.8-Flash--nodraft-plain',
+        'bench_run ["run", "Qwen3.8-Flash--ollama-plain", "--base-url", '
+        '"http://127.0.0.1:11434", "--sample", "10"]',
+        "jobs_wait bench",
+        'bench_compare ["Qwen3.8-Flash--plain", "Qwen3.8-Flash--nodraft-plain", '
+        '"Qwen3.8-Flash--ollama-plain", "--export", "compare.json"]',
+        'bench_animate ["compare.json", "--out", "compare.mp4"]']),
     call("bench_run", argv=["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
                             "--serve-draft", "auto", "--plain-only", "--sample", "10"]),
     call("bench_run", argv=["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
@@ -363,9 +371,11 @@ ACCEPTANCE = [
 
 
 def test_the_acceptance_prompt_looks_up_both_backends_confirms_asks_twice_more_plans_then_runs(
-        tmp_path):
+        tmp_path, monkeypatch):
     seen: list = []
-    tools = tools_over(seen, files=model_files(tmp_path), fetch=ollama_fake)
+    files = model_files(tmp_path)
+    monkeypatch.setattr(do.hub, "weight_paths", lambda: files)
+    tools = tools_over(seen, files=files, fetch=ollama_fake)
     got, model, seen, printed = drive(list(ACCEPTANCE), "1\n1\n1\ny\n", task=PROMPT,
                                       tools=tools, seen=seen)
     names = [c[0] for c in got.calls]
@@ -389,9 +399,11 @@ def test_the_acceptance_prompt_looks_up_both_backends_confirms_asks_twice_more_p
 
 
 def test_with_yes_the_models_are_still_looked_up_and_confirmed_but_nobody_is_asked_go(
-        tmp_path):
+        tmp_path, monkeypatch):
     seen: list = []
-    tools = tools_over(seen, files=model_files(tmp_path), fetch=ollama_fake)
+    files = model_files(tmp_path)
+    monkeypatch.setattr(do.hub, "weight_paths", lambda: files)
+    tools = tools_over(seen, files=files, fetch=ollama_fake)
     got, model, seen, printed = drive(list(ACCEPTANCE), "1\n1\n1\ny\ny\ny\ny\ny\n", task=PROMPT,
                                       tools=tools, seen=seen, yes=True)
     names = [c[0] for c in got.calls]

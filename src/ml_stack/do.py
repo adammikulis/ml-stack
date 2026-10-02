@@ -57,10 +57,11 @@ SYSTEM = (
     "and, when it names Ollama or two backends, ollama_models too, and the person is "
     "asked to confirm the exact files before anything starts. Do not start a measurement "
     "the person has not confirmed.\n\n"
-    "Then call plan with the steps in order; it asks the person \"go?\". Only when the "
-    "person passed --yes is that skipped, and even then a task naming more than one "
-    "backend still confirms the models found. Then act: call the tools in the order "
-    "planned. A long command detaches and returns a log and a pid; call jobs_wait to "
+    "Then call plan with the steps in order, each naming the tool and every argument it "
+    "will be called with; it asks the person \"go?\", and the go covers those values and no "
+    "others. Only when the person passed --yes is that skipped, and even then a task naming "
+    "more than one backend still confirms the models found. Then act: call the tools in the "
+    "order planned. A long command detaches and returns a log and a pid; call jobs_wait to "
     "wait for it rather than calling status again and again.\n\n"
     "Last, call done with what was measured and where it is -- the labels, the numbers if "
     "any came back, the files written. Say plainly when something failed and what the "
@@ -213,11 +214,15 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
               'plan(steps=["bench_run sweep flash-next with its draft head, a sample of 10, '
               'kept as Qwen3.8-Flash--plain", "jobs_wait bench", "bench_show"])'),
              (ACCEPTANCE,
-              'plan(steps=["bench_run sweep with the head -> Qwen3.8-Flash--plain", '
-              '"jobs_wait bench", "bench_run sweep without the head, --label-suffix -nodraft '
-              '-> Qwen3.8-Flash--nodraft-plain", "jobs_wait bench", "bench_run run '
-              'Qwen3.8-Flash--ollama-plain --base-url http://127.0.0.1:11434", "jobs_wait '
-              'bench", "bench_compare --export compare.json", "bench_animate compare.json"])')),
+              'plan(steps=[\'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+              '"--serve-draft", "auto", "--plain-only", "--sample", "10"]\', "jobs_wait bench", '
+              '\'bench_run ["sweep", "--serve", "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", '
+              '"--serve-draft", "", "--label-suffix", "-nodraft", "--plain-only", "--sample", '
+              '"10"]\', "jobs_wait bench", \'bench_run ["run", "Qwen3.8-Flash--ollama-plain", '
+              '"--base-url", "http://127.0.0.1:11434", "--sample", "10"]\', "jobs_wait bench", '
+              '\'bench_compare ["Qwen3.8-Flash--plain", "Qwen3.8-Flash--nodraft-plain", '
+              '"Qwen3.8-Flash--ollama-plain", "--export", "compare.json"]\', '
+              '\'bench_animate ["compare.json", "--out", "compare.mp4"]\'])')),
     "done": (("run benchmarks with qwen3.8-flash-next",
               'done(summary="Measured 10 questions as Qwen3.8-Flash--plain: 83% F1 at 44 s a '
               'question; the runs are under the bench home, `bench_show` reads them back.")'),
@@ -481,7 +486,8 @@ class Person:
         return {"answer": got}
 
     def plan(self, steps: list[str]) -> dict[str, Any]:
-        """Print the steps in order and ask the person \"go?\" once; with --yes the plan is
+        """Print the steps in order and ask the person \"go?\" once; each step names a tool and
+        the arguments it will get, and the go covers those values. With --yes the plan is
         printed and taken as agreed."""
         self.say("\nplan:")
         for n, step in enumerate(steps or [], start=1):
