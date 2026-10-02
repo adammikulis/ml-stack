@@ -93,7 +93,7 @@ DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
 # The runners have cmake; the image has not, and tests/test_serve_build.py configures a
 # checkout with it. PyPI's wheel carries the binary, so it caches with the venv.
 DEPS="$DEPS cmake"
-EXTRAS='.[store,hub,web,plot,privacy,guardrails]'
+EXTRAS='.[store,hub,web,plot,privacy,guardrails,mcp]'
 
 mkdir -p /work
 tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -

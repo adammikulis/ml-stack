@@ -23,7 +23,7 @@ def api(tmp_path, server):
     files = tmp_path / "files"
     files.mkdir()
     runner = JobRunner(tmp_path / "traind")
-    decide = Deciding(config=router.Config(url=chat.base_url))
+    decide = Deciding(config=router.Config(backend="logprob", url=chat.base_url))
     good = load_or_create_token(tmp_path / "root")
     httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, files, good, decide=decide)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

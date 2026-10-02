@@ -132,7 +132,7 @@ class TestTheLockOnWindows:
         only_one, _, _ = win_lock
         said = []
         other = subprocess.Popen(
-            [sys.executable, "-c", FAKE_MSVCRT + textwrap.dedent(f"""
+            [sys.executable, "-c", "import ml_stack\n" + FAKE_MSVCRT + textwrap.dedent(f"""
                 import time
                 from ml_stack.lock import only_one
                 with only_one({str(tmp_path / 'l')!r}):
