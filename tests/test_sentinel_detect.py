@@ -485,7 +485,7 @@ class TaintedVerdict:
     denied = False
     tainted = True
     rail = "untrusted"
-    reason = "fenced as data; reads like an instruction"
+    reason = "fenced as data; reads like an instruction (override)"
 
 
 def test_text_a_rail_let_through_as_tainted_is_watched_in_guarded_and_held_in_enforce(tmp_path):
@@ -554,3 +554,19 @@ def test_the_any_rule_takes_either_spelling():
     water = next(p for p in canary.DEFAULT_PROBES if p.id == "fact-water")
     assert water.passes("H2O") and water.passes("The formula is H\u2082O.")
     assert not water.passes("CO2")
+
+
+class ExternalOnlyVerdict:
+    denied = False
+    tainted = True
+    rail = "untrusted"
+    reason = "fenced as data"
+
+
+def test_text_fenced_only_because_its_source_is_external_is_left_alone(tmp_path):
+    node = Sentinel(tmp_path / "e", mode=Mode.ENFORCE, roots=[tmp_path])
+    text = "Qwen3 4B Instruct is a small model released in July."
+    shown = node.screen(text, "tool:web_fetch", session="s1",
+                        verdict=lambda *_: ExternalOnlyVerdict())
+    assert shown.text == text and not shown.withheld
+    assert node.store.records() == []

@@ -13,7 +13,15 @@ from ml_stack.sentinel.events import Severity
 from ml_stack.sentinel.findings import HEURISTIC, HIGH, Finding, finding
 from ml_stack.sentinel.rates import Windows
 
-__all__ = ["RailWatch"]
+__all__ = ["RailWatch", "reads_like_instruction"]
+
+MARKER = "reads like an instruction"
+
+
+def reads_like_instruction(reason: str) -> bool:
+    """Whether a rail's reason says the text reads like an instruction to the model. A rail
+    marking text tainted because its source is external says nothing about the text."""
+    return MARKER in reason.lower()
 
 
 class RailWatch:
@@ -62,7 +70,7 @@ class RailWatch:
         if action == "deny":
             return [finding("guard.denied", Severity.WARNING, ("session", session), HEURISTIC, {"rail": rail, "reason": reason, "source": source}),
                     *self._count(session, rail)]
-        return self.tainted(session, rail, reason)
+        return self.tainted(session, rail, reason) if reads_like_instruction(reason) else []
 
     def _count(self, session: str, rail: str) -> list[Finding]:
         n = self.windows.add(session, "denied")
