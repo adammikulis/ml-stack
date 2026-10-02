@@ -10,19 +10,36 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
+import os
 import socket
 import ssl
 import time
 import urllib.parse
 import zlib
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ml_stack.files import writing
 
-__all__ = ["DEFAULT", "DOWNLOAD", "MOST_BYTES", "Fetched", "Limits", "Refused", "TooLarge",
-           "allowed_address", "download", "fetch", "resolve", "split"]
+__all__ = [
+    "DEFAULT",
+    "DOWNLOAD",
+    "MOST_BYTES",
+    "Fetched",
+    "Limits",
+    "Refused",
+    "Streaming",
+    "TooLarge",
+    "allowed_address",
+    "allowed_hosts",
+    "download",
+    "fetch",
+    "resolve",
+    "split",
+    "stream",
+]
 
 MOST_BYTES = 8 * 1024 * 1024
 MOST_REDIRECTS = 5
@@ -96,6 +113,16 @@ class Fetched:
     redirects: tuple[str, ...] = field(default=())
 
 
+ALLOW_ENV = "ML_STACK_FETCH_ALLOW_HOSTS"
+
+
+def allowed_hosts() -> frozenset[str]:
+    """Hosts the operator has named, comma separated in ``ML_STACK_FETCH_ALLOW_HOSTS``, as
+    ones that may be private (a mirror on the LAN). Nothing is allowed by default."""
+    return frozenset(one.strip().lower() for one in os.environ.get(ALLOW_ENV, "").split(",")
+                     if one.strip())
+
+
 def allowed_address(address: str) -> bool:
     """Whether ``address`` is on the public internet: not loopback, private, link-local
     (the cloud metadata address included), carrier-grade NAT, multicast, reserved or
@@ -123,7 +150,7 @@ def _system_resolver(host: str, port: int) -> list[str]:
 def resolve(host: str, port: int, limits: Limits = DEFAULT) -> list[str]:
     """Every address ``host`` names; `Refused` when any is not public (unless ``host`` is one
     of the limits' ``allow_hosts``)."""
-    allow_private, resolver = host in limits.allow_hosts, limits.resolver
+    allow_private, resolver = host in limits.allow_hosts | allowed_hosts(), limits.resolver
     if not allow_private and (host == "localhost"
                               or host.endswith((".localhost", ".local", ".internal"))):
         raise Refused(f"{host} is this machine or its network")
@@ -266,8 +293,8 @@ def _body(response: http.client.HTTPResponse, trip: Trip) -> Iterator[bytes]:
         yield piece
 
 
-def _request(headers: dict[str, str] | None) -> dict[str, str]:
-    sent = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip", **(headers or {})}
+def _request(headers: dict[str, str] | None, encoding: str = "gzip") -> dict[str, str]:
+    sent = {"User-Agent": USER_AGENT, "Accept-Encoding": encoding, **(headers or {})}
     for name, value in sent.items():
         if "\r" in f"{name}{value}" or "\n" in f"{name}{value}":
             raise Refused("a header holds a line break")
@@ -287,6 +314,34 @@ def fetch(url: str, *, method: str = "GET", data: bytes | None = None,
         body = b"".join(_body(response, trip))
         return Fetched(final, response.status, {k.lower(): v for k, v in response.getheaders()},
                        body, seen)
+    finally:
+        conn.close()
+
+
+@dataclass(frozen=True, slots=True)
+class Streaming:
+    """An answer being read: its status and headers now, its body as `chunks`."""
+
+    url: str
+    status: int
+    headers: dict[str, str]
+    chunks: Iterator[bytes]
+
+
+@contextmanager
+def stream(url: str, *, headers: dict[str, str] | None = None,
+           limits: Limits = DOWNLOAD) -> Iterator[Streaming]:
+    """``url`` opened for reading in pieces, under the same checks as `fetch`.
+
+    The status is not judged here: a caller resuming a download reads a 206 or a 416 itself.
+    The body is asked for uncompressed, so a byte range means bytes of the file.
+    """
+    trip = Trip.begin(limits)
+    response, conn, final, _ = _open(url, "GET", None, _request(headers, "identity"), trip)
+    try:
+        yield Streaming(final, response.status,
+                        {k.lower(): v for k, v in response.getheaders()},
+                        _body(response, trip))
     finally:
         conn.close()
 

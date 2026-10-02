@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import secrets
@@ -17,7 +18,8 @@ from typing import Any
 
 from ml_stack import hub
 from ml_stack.files import UNVERSIONED, promote, read_json, version_of, versioned, write_json
-from ml_stack.http import ServerError, ServerUnreachable, open_stream
+from ml_stack.httpguard import Limits, Refused, stream
+from ml_stack.safenames import Unsafe, safe_filename
 
 from .weights import ModelError, resolve
 
@@ -25,6 +27,8 @@ __all__ = ["CHUNK", "Downloads", "Getting", "Model", "Models", "caches",
            "draft_beside", "holding", "sized"]
 
 CHUNK = 1 << 20
+MODEL_LIMITS = Limits(max_bytes=1 << 40, timeout=120.0, deadline_s=7 * 86400.0)
+"""A model download: a terabyte, a week, two minutes of silence."""
 
 #: 1 -- the url a partial download came from and its validator.
 STAMP_VERSION = 1
@@ -49,11 +53,19 @@ def _read_stamp(stamp: Path) -> dict[str, Any]:
 
 def _write_stamp(stamp: Path, url: str, headers: Any) -> None:
     validator = headers.get("ETag") or headers.get("Last-Modified") or ""
-    try:
+    with contextlib.suppress(OSError):
         write_json(stamp, versioned({"url": url, "validator": validator}, STAMP_VERSION),
                    indent=None)
-    except OSError:
-        pass
+
+
+@dataclass(frozen=True, slots=True)
+class Resume:
+    """One download: what it is called, where it lands, how much is already there and from where."""
+
+    name: str
+    target: Path
+    start: int
+    url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +97,7 @@ def holding(directory: Path | str) -> tuple[int, int]:
                             continue
                         if entry.name.lower().endswith(WEIGHTS) and entry.is_file():
                             files += 1
-                            total += os.stat(entry.path).st_size
+                            total += Path(entry.path).stat().st_size
                     except OSError:
                         continue
         except OSError:
@@ -198,8 +210,8 @@ class Models:
         return out
 
     def ensure(self, name: str, *, source: str = "", key: bytes | None = None,
-               on_progress: "Callable[[int, int], None] | None" = None,
-               on_note: "Callable[[str], None] | None" = None,
+               on_progress: Callable[[int, int], None] | None = None,
+               on_note: Callable[[str], None] | None = None,
                autodownload: bool = True) -> Model:
         """Make sure this machine holds a model, preferring one on the network."""
         found = self.find(name)
@@ -247,8 +259,6 @@ class Models:
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 
     def _from_internet(self, name: str, source: str, on_progress: Any) -> Model:
-        from .remote import range_total
-
         url = resolve(source)
         self.store.mkdir(parents=True, exist_ok=True)
         # The name that was asked for wins: saving it under whatever the URL happened
@@ -256,7 +266,10 @@ class Models:
         wanted = Path(name).name
         if Path(wanted).suffix.lower() not in hub.WEIGHT_SUFFIXES:
             wanted = Path(urllib.parse.urlparse(url).path).name or wanted
-        target = self.store / wanted
+        try:
+            target = self.store / safe_filename(wanted)
+        except Unsafe as exc:
+            raise ModelError(f"{name}: {exc}") from None
         partial = target.with_suffix(target.suffix + ".part")
         stamp = Path(str(partial) + ".from")
 
@@ -273,39 +286,46 @@ class Models:
             if origin.get("validator"):
                 headers["If-Range"] = str(origin["validator"])
         try:
-            response = open_stream(url, headers=headers, timeout=120)
-        except ServerUnreachable as exc:
+            with stream(url, headers=headers, limits=MODEL_LIMITS) as got:
+                return self._save(got, Resume(name, target, start, url), on_progress)
+        except Refused as exc:
             raise ModelError(f"could not download {name}: {exc}") from None
-        except ServerError as exc:
-            if exc.status == 416 and start:
-                size = range_total(exc.headers.get("Content-Range", ""))
-                if size is not None and size == start:
-                    promote(partial, target)
-                    stamp.unlink(missing_ok=True)
-                    stat = target.stat()
-                    return Model(target.name, target, stat.st_size, stat.st_mtime)
-                partial.unlink(missing_ok=True)
+
+    def _save(self, got: Any, plan: Resume, on_progress: Any) -> Model:
+        """Write one answer to the target's ``.part`` file, resuming it at ``plan.start``."""
+        from .remote import range_total
+
+        name, target, start, url = plan.name, plan.target, plan.start, plan.url
+        partial = target.with_suffix(target.suffix + ".part")
+        stamp = Path(str(partial) + ".from")
+        if got.status == 416 and start:
+            size = range_total(got.headers.get("content-range", ""))
+            if size is not None and size == start:
+                promote(partial, target)
                 stamp.unlink(missing_ok=True)
-                raise ModelError(
-                    f"{name}: the part here is {start} bytes but the file is "
-                    f"{size}; discarded it, ask again") from None
-            raise ModelError(f"could not download {name}: {exc.status}") from None
+                stat = target.stat()
+                return Model(target.name, target, stat.st_size, stat.st_mtime)
+            partial.unlink(missing_ok=True)
+            stamp.unlink(missing_ok=True)
+            raise ModelError(
+                f"{name}: the part here is {start} bytes but the file is "
+                f"{size}; discarded it, ask again")
+        if got.status >= 400:
+            raise ModelError(f"could not download {name}: {got.status}")
 
         # A server that does not honour Range answers 200 with the whole file.
-        if start and response.status != 206:
+        if start and got.status != 206:
             start = 0
         if start:
-            total = range_total(response.headers.get("Content-Range", "")) or 0
+            total = range_total(got.headers.get("content-range", "")) or 0
         else:
-            total = int(response.headers.get("Content-Length") or 0)
+            total = int(got.headers.get("content-length") or 0)
 
-        _write_stamp(stamp, url, response.headers)
+        _write_stamp(stamp, url, {"ETag": got.headers.get("etag", ""),
+                                  "Last-Modified": got.headers.get("last-modified", "")})
         done = start
-        with response, partial.open("ab" if start else "wb") as fh:
-            while True:
-                block = response.read(CHUNK)
-                if not block:
-                    break
+        with partial.open("ab" if start else "wb") as fh:
+            for block in got.chunks:
                 fh.write(block)
                 done += len(block)
                 if on_progress:
@@ -320,7 +340,7 @@ class Models:
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 
     def ensure_draft(self, model: Model, source: str, *, key: bytes | None = None,
-                     on_progress: "Callable[[int, int], None] | None" = None) -> Path:
+                     on_progress: Callable[[int, int], None] | None = None) -> Path:
         """Fetch the small model that guesses ahead for ``model``, beside it.
 
         Taken from a machine on this network if one holds it, as the model itself is.
@@ -435,7 +455,7 @@ class Downloads:
 
     KEEP_S = 300.0
 
-    def __init__(self, models: "Models", *, slots: int = 1) -> None:
+    def __init__(self, models: Models, *, slots: int = 1) -> None:
         self.models = models
         self.getting: dict[str, Getting] = {}
         self._lock = threading.Lock()
@@ -470,11 +490,8 @@ class Downloads:
                                          autodownload=autodownload)
                 if draft:
                     row.note = f"Getting the draft for {got.name}"
-                    try:
-                        self.models.ensure_draft(got, draft, key=key,
-                                                 on_progress=progress)
-                    except (ModelError, OSError):
-                        pass          # a model without its draft still runs
+                    with contextlib.suppress(ModelError, OSError):  # still runs without it
+                        self.models.ensure_draft(got, draft, key=key, on_progress=progress)
                 row.state = "done"
                 row.name = got.name
                 row.done = row.total = got.size
