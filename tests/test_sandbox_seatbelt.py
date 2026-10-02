@@ -190,6 +190,7 @@ def test_output_over_the_cap_is_cut_and_the_command_stopped(tmp_path, seatbelt):
     pol = policy(limits=Limits(wall_seconds=30, output_bytes=10_000))
     result = run(["/usr/bin/yes"], pol)
     assert result.truncated and len(result.stdout) == 10_000 and result.returncode != 0
+    assert not result.timed_out and result.seconds < 10
 
 
 def test_a_denial_is_reported_as_an_event_and_as_a_clear_error(tmp_path, seatbelt):
