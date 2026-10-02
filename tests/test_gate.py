@@ -148,6 +148,24 @@ def test_requests_sent_at_the_same_instant_never_overlap(servers):
     assert len(windows) == 12 and overlap(windows) <= 0.0
 
 
+def test_a_ticket_sorts_after_every_ticket_already_in_the_line_even_when_the_clock_went_back(
+        monkeypatch, tmp_path):
+    import itertools
+
+    clock = itertools.count(10**18, -1000)
+    monkeypatch.setattr(gate.time, "time_ns", lambda: next(clock))
+    line = tmp_path / "line"
+    line.mkdir()
+    first = gate._take_ticket(line, "http://127.0.0.1:1")
+    second = gate._take_ticket(line, "http://127.0.0.1:1")
+    try:
+        assert first[0] < second[0]
+        assert gate._ahead(line, second[0]) == [first[0]]
+    finally:
+        for name, fd in (first, second):
+            gate._drop(line, name, fd)
+
+
 def test_parallel_requests_are_an_explicit_opt_out_and_do_overlap(servers):
     first, second = servers(2)
     env = {gate.ENV_PARALLEL: "1"}

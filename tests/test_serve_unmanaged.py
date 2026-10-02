@@ -59,6 +59,9 @@ def test_adoption_is_off_unless_it_is_asked_for(monkeypatch):
     assert unmanaged.mode() == "auto", "the environment wins over the limits file"
     monkeypatch.setenv(unmanaged.ENV, "sometimes")
     assert unmanaged.mode() == "ask", "a word that is not a mode is ignored"
+    monkeypatch.delenv(unmanaged.ENV)
+    limits.changed(adopt_unmanaged="sometimes")
+    assert unmanaged.mode() == "off"
 
 
 def test_a_llama_server_of_this_user_on_loopback_passes(served):
@@ -171,7 +174,12 @@ def lease_beside(tmp_path, served_port: int, *, model: str, roam: bool, state=No
         ServerSpec(model=model, port=served_port), roam=roam, preflight=False)
 
 
-def test_by_default_a_busy_port_with_an_unmanaged_server_is_left_alone(served, tmp_path):
+def test_by_default_a_busy_port_with_an_unmanaged_server_is_left_alone(served, tmp_path,
+                                                                       monkeypatch):
+    def never(*args, **kwargs):
+        raise AssertionError("the listener was examined with adoption off")
+
+    monkeypatch.setattr(unmanaged, "examine", never)
     fake = served()
     _, _, lease = lease_beside(tmp_path, fake.port, model="model.gguf", roam=True)
     info = lease()
