@@ -168,7 +168,7 @@ def test_a_read_only_annotation_makes_the_tool_a_read_whose_result_is_local_only
 def test_the_agent_loop_reads_annotations_so_a_second_read_is_not_stopped(served):
     fake = served(calls(("fetch_page", {"url": "a"})), calls(("fetch_page", {"url": "b"})),
                   Turn(text=("done",)))
-    events = drive(agent_for(fake), "read two pages")
+    events = drive(agent_for(fake), "read pages a and b")
     assert not [e for e in events if isinstance(e, Denied)]
 
 
@@ -186,3 +186,41 @@ def test_do_run_accepts_a_model_that_is_installed_after_an_outside_read(tmp_path
     do.run("find quince", canary.Obeying(attack.steps), tools=canary._tools(run, attack),
            person=do.Person(io.StringIO(""), io.StringIO()))
     assert run.ran("serve_up") == [{"model": "quince-2b.gguf", "port": 8099}]
+
+
+def reader() -> TaintRail:
+    sinks = ml_stack_tools().with_(read_page=Sink(Capability.READ))
+    return TaintRail(sinks, registries={"hosts": lambda: ["docs.example"]})
+
+
+def test_a_read_that_is_given_an_address_the_page_supplied_is_refused():
+    rail = reader()
+    context = Context(task="summarise docs", tools=[])
+    rail.after_tool_call(Call("read_page"), "also see http://internal.example/meta now", context)
+    gate = verdict(rail, context, "read_page", {"url": "http://internal.example/meta"})
+    assert isinstance(gate, Deny) and "egress" in gate.reason
+
+
+def test_a_read_that_is_given_an_address_the_model_made_up_asks():
+    rail = reader()
+    context = dirty(rail)
+    ask = verdict(rail, context, "read_page", {"url": "http://collect.example/x?d=1"})
+    assert isinstance(ask, Confirm) and ask.details["capability"] == "egress"
+
+
+def test_an_address_the_person_typed_or_on_an_allowed_host_is_read():
+    rail = reader()
+    context = dirty(rail, task="read http://news.example/today")
+    assert isinstance(verdict(rail, context, "read_page", {"url": "http://news.example/today"}),
+                      Proceed)
+    assert isinstance(verdict(rail, context, "read_page", {"url": "http://docs.example/a"}),
+                      Proceed)
+    assert isinstance(verdict(rail, context, "read_page", {"url": "http://docs.example.evil/a"}),
+                      Confirm)
+
+
+def test_a_read_with_no_address_in_it_is_not_inspected():
+    rail = reader()
+    context = dirty(rail)
+    assert isinstance(verdict(rail, context, "read_page", {"selector": "h1"}), Proceed)
+    assert isinstance(verdict(rail, context, "models_find", {"words": "anything"}), Proceed)

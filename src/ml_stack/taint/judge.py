@@ -8,16 +8,17 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from ml_stack.taint.ledger import Ledger
 from ml_stack.taint.sinks import Arg, Sink
 
-__all__ = ["Finding", "judge", "schema_for"]
+__all__ = ["Finding", "addresses", "judge", "schema_for"]
 
 logger = logging.getLogger("ml_stack.guard")
 PREVIEW = 60
 Registries = Mapping[str, Callable[[], Iterable[str]]]
-INTENT = frozenset({"typed", "vouched"})
+INTENT = frozenset({"typed", "vouched", "host"})
 """Reasons that show the person asked for the value, not just that it is harmless."""
 
 
@@ -33,6 +34,26 @@ class Finding:
     origins: tuple[str, ...] = ()
     preview: str = field(default="", repr=False)
     digest: str = ""
+
+
+ADDRESS_NAMES = frozenset({"url", "uri", "href", "link", "endpoint", "host", "hostname", "address",
+                           "base_url", "server", "website"})
+URL = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://\S+$")
+
+
+def addresses(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    """The arguments of a call that hold an address: a URL anywhere in them, or a string under a
+    name such as ``url`` or ``host``."""
+    def holds(name: str, value: Any) -> bool:
+        if isinstance(value, str):
+            return name.lower() in ADDRESS_NAMES or "://" in value
+        if isinstance(value, dict):
+            return any(holds(str(k), v) or "://" in str(k) for k, v in value.items())
+        if isinstance(value, list | tuple):
+            return any(holds(name, v) for v in value)
+        return False
+
+    return {k: v for k, v in arguments.items() if holds(k, v)}
 
 
 def schema_for(tools: Iterable[Mapping[str, Any]], name: str) -> Mapping[str, Any]:
@@ -68,6 +89,17 @@ def _in_registry(name: str, value: str, registries: Registries) -> bool:
         return False
 
 
+def _on_allowed_host(url: str, registries: Registries) -> bool:
+    fn = registries.get("hosts")
+    if fn is None:
+        return False
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+        return bool(host) and host in {h.lower() for h in fn()}
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
+
+
 def _within(value: float, low: float | None, high: float | None) -> bool:
     return low is not None and high is not None and low <= value <= high
 
@@ -89,6 +121,8 @@ def _safe(value: Any, rule: Arg, schema: Mapping[str, Any], ledger: Ledger,
         if _within(value, rule.low, rule.high) or _within(value, low, high):
             return "range"
         return ""
+    if URL.match(text) and _on_allowed_host(text, registries):
+        return "host"
     if rule.validated and ledger.is_vouched(rule.validated, text):
         return "vouched"
     if rule.registry and _in_registry(rule.registry, text, registries):

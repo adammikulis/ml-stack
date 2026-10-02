@@ -87,11 +87,11 @@ class Harness:
         self.options = dict(options or {})
         self.guard = list(guard) if guard is not None else sdk_guard()
 
-    def configured(self, **over: Any) -> Any:
+    def configured(self, task: str = "", **over: Any) -> Any:
         """A `ClaudeAgentOptions` for this model: the environment that points every call
         at the server, the served alias as the model, and whatever the caller adds."""
         merged = {**self.options, **over}
-        ours = sdk_hooks(start(self.guard))
+        ours = sdk_hooks(start(self.guard, task=task))
         theirs = dict(merged.get("hooks") or {})
         hooks = {event: [*ours.get(event, []), *theirs.get(event, [])]
                  for event in {*ours, *theirs}}
@@ -101,7 +101,7 @@ class Harness:
 
     async def stream(self, prompt: str, **over: Any) -> AsyncIterator[Any]:
         """The SDK's messages for ``prompt``, as they arrive."""
-        async for message in sdk().query(prompt=prompt, options=self.configured(**over)):
+        async for message in sdk().query(prompt=prompt, options=self.configured(prompt, **over)):
             yield message
 
     async def ask_async(self, prompt: str, **over: Any) -> Answer:

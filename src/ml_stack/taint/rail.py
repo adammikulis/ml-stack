@@ -8,10 +8,10 @@ from typing import Any
 
 from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
 from ml_stack.taint.events import TaintEvent, emit
-from ml_stack.taint.judge import INTENT, Finding, Registries, judge, schema_for
+from ml_stack.taint.judge import INTENT, Finding, Registries, addresses, judge, schema_for
 from ml_stack.taint.labels import Label, Level
 from ml_stack.taint.ledger import Ledger, ledger_of
-from ml_stack.taint.sinks import HARD, Capability, Sinks, ml_stack_tools, sinks_from_mcp
+from ml_stack.taint.sinks import HARD, Capability, Sink, Sinks, ml_stack_tools, sinks_from_mcp
 
 __all__ = ["TaintRail"]
 
@@ -76,10 +76,15 @@ class TaintRail(Base):
     def before_tool_call(self, call: Call, context: Context) -> Verdict:
         ledger = self._ledger(context)
         sink = self.sinks.get(call.name)
-        if not ledger.contaminated or sink.capability == Capability.READ \
-                or call.arguments is None:
+        arguments = call.arguments
+        if not ledger.contaminated or arguments is None:
             return Proceed()
-        found = judge(call.arguments, sink, schema_for(context.tools, call.name), ledger,
+        if sink.capability == Capability.READ:
+            arguments = addresses(arguments)
+            sink = Sink(Capability.EGRESS, sink.args, sink.other, sink.result)
+        if not arguments:
+            return Proceed()
+        found = judge(arguments, sink, schema_for(context.tools, call.name), ledger,
                       self.registries)
         unsafe = [f for f in found if f.status != "safe"]
         hard = sink.capability in HARD
