@@ -19,13 +19,13 @@
   "ruff-blind-except": 17,
   "ruff-bugbear": 55,
   "ruff-other": 390,
-  "ruff-security": 79,
+  "ruff-security": 64,
   "subprocess-spawns": 4,
   "unversioned-records": 0,
   "urlopen-calls": 2,
   "wide-signatures": 33,
   "floors-only-rise": {
-    "tests-collected": 5921
+    "tests-collected": 5964
   },
   "ratchet": {
     "date": "2026-09-18",
