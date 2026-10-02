@@ -51,7 +51,8 @@ class Deciding:
                 raise TypeError("options must be a list of names or an object of descriptions")
             abstain = body.get("abstain_below")
             options = options_of(options)
-            config = self._for(str(body.get("backend") or "auto"), str(body.get("model") or ""))
+            config = self._for(str(body.get("backend") or self.config.backend),
+                               str(body.get("model") or ""))
             got = router.decide(question, body.get("state", ""), options,
                                 abstain_below=None if abstain is None else float(abstain),
                                 config=config)
