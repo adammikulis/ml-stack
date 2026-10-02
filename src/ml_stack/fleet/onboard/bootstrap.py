@@ -246,7 +246,7 @@ class BootstrapServer:
             path = safe_join(self.share.root, entry.name)
         except (KeyError, Unsafe):
             return Reply(404, b"not found", content_type="text/plain")
-        if entry.kind not in PROGRAM_KINDS or not entry.shareable or not path.is_file():
+        if entry.kind not in PROGRAM_KINDS or entry.sharing != "open" or not path.is_file():
             self.bus.emit("onboard.bootstrap.refused", "notice", "", file=entry.name)
             return Reply(403, b"this offer carries program files only", content_type="text/plain")
         return Reply(200, path.read_bytes())

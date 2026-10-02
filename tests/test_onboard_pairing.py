@@ -22,6 +22,12 @@ from ml_stack.fleet.onboard.pairing import (
 from ml_stack.fleet.onboard.requests import State
 
 
+@pytest.fixture(autouse=True)
+def needs_spake2():
+    pytest.importorskip("spake2")
+
+
+
 @pytest.fixture
 def world(tmp_path):
     rec = Recorder()
@@ -49,7 +55,7 @@ def test_the_right_code_pairs_and_delivers_the_grant(world):
     request_id = ask(c)
     assert c.state() == "pending"
     assert world.told and world.told[0].id == request_id        # the owner was told
-    code = world.rq.accept(request_id).code
+    code = world.rq.accept(request_id, mine=True).code
     assert c.state() == "accepted"
     grant = c.finish(code)
     assert (grant.group, grant.key, grant.salt) == ("home", "secret-cluster-key", "c2FsdA")
@@ -62,14 +68,14 @@ def test_the_right_code_pairs_and_delivers_the_grant(world):
 
 def test_a_code_typed_with_a_space_still_works(world):
     c = client(world)
-    code = world.rq.accept(ask(c)).code
+    code = world.rq.accept(ask(c), mine=True).code
     assert c.finish(f"{code[:3]} {code[3:]}").key
 
 
 def test_a_wrong_code_gets_two_more_tries_then_the_request_is_dead(world):
     c = client(world)
     request_id = ask(c)
-    code = world.rq.accept(request_id).code
+    code = world.rq.accept(request_id, mine=True).code
     wrong = "000000" if code != "000000" else "111111"
     tries = []
     for _ in range(3):
@@ -89,9 +95,9 @@ def test_the_server_reveals_nothing_checkable_before_the_asker_proves_the_code(w
     confirmation has no confirmation, grant or tag in it."""
     c = client(world)
     request_id = ask(c)
-    world.rq.accept(request_id)
-    from ml_stack.fleet.onboard import spake
-    guess = spake.start_initiator("000000", context=b"x", mine=world.joiner.fingerprint,
+    world.rq.accept(request_id, mine=True)
+    from ml_stack.fleet.onboard import pake
+    guess = pake.start_initiator("000000", context=b"x", mine=world.joiner.fingerprint,
                                   theirs=world.acceptor.fingerprint)
     status, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": guess.message})
     assert status == 200 and set(body) == {"message"}
@@ -102,8 +108,8 @@ def test_the_server_reveals_nothing_checkable_before_the_asker_proves_the_code(w
 def test_a_request_nobody_accepted_cannot_start_an_exchange(world):
     c = client(world)
     request_id = ask(c)
-    from ml_stack.fleet.onboard import spake
-    guess = spake.start_initiator("123456", context=b"x", mine="a", theirs="b")
+    from ml_stack.fleet.onboard import pake
+    guess = pake.start_initiator("123456", context=b"x", mine="a", theirs="b")
     status, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": guess.message})
     assert status == 409 and set(body) == {"error"}
     with pytest.raises(PairError):
@@ -114,10 +120,10 @@ def test_a_request_nobody_accepted_cannot_start_an_exchange(world):
 def test_a_confirmation_cannot_be_replayed(world):
     c = client(world)
     request_id = ask(c)
-    code = world.rq.accept(request_id).code
-    from ml_stack.fleet.onboard import spake
+    code = world.rq.accept(request_id, mine=True).code
+    from ml_stack.fleet.onboard import pake
     from ml_stack.fleet.onboard.pairing import context_for
-    session = spake.start_initiator(code, context=context_for(request_id, c.nonce),
+    session = pake.start_initiator(code, context=context_for(request_id, c.nonce),
                                     mine=world.joiner.fingerprint,
                                     theirs=world.acceptor.fingerprint)
     _, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": session.message})
@@ -251,7 +257,7 @@ def test_a_machine_in_the_middle_cannot_complete_a_pairing_even_with_the_right_c
         c = client(world, relay.port)
         request_id = ask(c)                  # the relay's lie is consistent: the asker sees nothing
         assert c.server_fingerprint == relay.ident.fingerprint != world.acceptor.fingerprint
-        code = world.rq.accept(request_id).code
+        code = world.rq.accept(request_id, mine=True).code
         with pytest.raises(PairError):
             c.finish(code)                   # the right code, and still no pairing
         assert world.rq.get(request_id).state is not State.PAIRED
@@ -286,16 +292,16 @@ def test_the_asker_refuses_a_grant_from_a_machine_that_did_not_prove_the_code(tm
     with Bluffer(rq, acceptor, Hooks(lambda r: grant_for(acceptor)),
                  address=("127.0.0.1", 0), bus=rec.bus) as server:
         c = PairingClient("127.0.0.1", server.port, fingerprint=joiner.fingerprint)
-        code = rq.accept(ask(c)).code
+        code = rq.accept(ask(c), mine=True).code
         with pytest.raises(PairError, match="did not prove"):
             c.finish(code)
 
 
 def _open_exchange(c, world, request_id, code, *, context=None):
     """The asker's side of one exchange, by hand: returns the session after the server's reply."""
-    from ml_stack.fleet.onboard import spake
+    from ml_stack.fleet.onboard import pake
     from ml_stack.fleet.onboard.pairing import context_for
-    session = spake.start_initiator(code, context=context or context_for(request_id, c.nonce),
+    session = pake.start_initiator(code, context=context or context_for(request_id, c.nonce),
                                     mine=world.joiner.fingerprint,
                                     theirs=world.acceptor.fingerprint)
     status, body = c._call("POST", f"{API}/{request_id}/exchange", {"message": session.message})
@@ -307,7 +313,7 @@ def _open_exchange(c, world, request_id, code, *, context=None):
 def test_an_asker_who_opens_exchanges_and_never_confirms_runs_out_of_tries(world):
     c = client(world)
     request_id = ask(c)
-    code = world.rq.accept(request_id).code
+    code = world.rq.accept(request_id, mine=True).code
     statuses = [_open_exchange(c, world, request_id, code)[0] for _ in range(4)]
     assert statuses == [200, 200, 200, 429]
     assert world.rq.get(request_id).state is State.FAILED
@@ -316,7 +322,7 @@ def test_an_asker_who_opens_exchanges_and_never_confirms_runs_out_of_tries(world
 def test_a_malformed_message_costs_a_try_and_the_third_closes_the_request(world):
     c = client(world)
     request_id = ask(c)
-    world.rq.accept(request_id)
+    world.rq.accept(request_id, mine=True)
     for _ in range(3):
         status, _ = c._call("POST", f"{API}/{request_id}/exchange", {"message": "04" + "11" * 64})
         assert status == 400
@@ -329,7 +335,7 @@ def test_a_wrong_confirmation_cannot_be_retried_on_the_same_exchange(world):
     try being spent."""
     c = client(world)
     request_id = ask(c)
-    code = world.rq.accept(request_id).code
+    code = world.rq.accept(request_id, mine=True).code
     _, session = _open_exchange(c, world, request_id, code)
     status, _ = c._call("POST", f"{API}/{request_id}/confirm", {"confirmation": "0" * 64})
     assert status == 403
@@ -351,6 +357,6 @@ def test_the_asker_refuses_a_grant_whose_tag_is_not_the_exchanges(tmp_path):
     with BadTag(rq, acceptor, Hooks(lambda r: grant_for(acceptor)),
                 address=("127.0.0.1", 0), bus=rec.bus) as server:
         c = PairingClient("127.0.0.1", server.port, fingerprint=joiner.fingerprint)
-        code = rq.accept(ask(c)).code
+        code = rq.accept(ask(c), mine=True).code
         with pytest.raises(PairError, match="tag"):
             c.finish(code)

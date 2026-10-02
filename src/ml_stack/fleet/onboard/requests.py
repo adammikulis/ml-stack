@@ -98,6 +98,8 @@ class Request:
     attempts: int = 0
     decided: float = 0.0
     note: str = ""
+    mine: bool | None = None
+    """Whether the owner said the asking device is theirs; set when they accept."""
 
     def public(self) -> dict[str, Any]:
         """What a person sees, and what an API may return: never the code."""
@@ -123,6 +125,10 @@ class Device:
     status: str = "active"
     revoked: float = 0.0
     shared_cluster_key: bool = False
+    mine: bool = False
+    """Whether the owner said this device is theirs, as against another person's."""
+    secret: str = ""
+    """The key this device signs its file requests with (urlsafe base64); private file."""
 
 
 @dataclass(slots=True)
@@ -161,12 +167,13 @@ class Devices:
         with self._lock:
             return self._read()
 
-    def add(self, request: Request, *, shared_cluster_key: bool) -> Device:
+    def add(self, request: Request, *, shared_cluster_key: bool, secret: str = "") -> Device:
         with self._lock, only_one(self.path.with_suffix(".lock"), announce=lambda _m: None):
             rows = [d for d in self._read() if d.fingerprint != request.fingerprint]
             device = Device(request.fingerprint, request.name, request.hostname,
                             request.address, self.clock(),
-                            shared_cluster_key=shared_cluster_key)
+                            shared_cluster_key=shared_cluster_key, mine=bool(request.mine),
+                            secret=secret)
             rows.append(device)
             self._write(rows)
         return device
@@ -339,8 +346,9 @@ class Requests:
             raise ValueError(f"{prefix!r} matches {len(hits)} requests")
         return hits[0]
 
-    def accept(self, request_id: str) -> Request:
-        """A person says yes: the request gets a code that lasts `Limits.code_ttl_s`.
+    def accept(self, request_id: str, *, mine: bool) -> Request:
+        """A person says yes, and whether the device is theirs or another person's: the
+        request gets a code that lasts `Limits.code_ttl_s`.
         Raises `KeyError` for an unknown request and `Refused` (409) for one that is not
         waiting, so accepting twice does not mint a second code."""
         with self._lock, self._transaction():
@@ -352,7 +360,7 @@ class Requests:
             if request.state is not State.PENDING:
                 self._save(ledger)
                 raise Refused(409, f"the request is {request.state.value}")
-            request.state = State.ACCEPTED
+            request.state, request.mine = State.ACCEPTED, mine
             request.code = f"{secrets.randbelow(10 ** CODE_DIGITS):0{CODE_DIGITS}d}"
             request.decided = self.clock()
             request.code_expires = request.decided + self.limits.code_ttl_s
@@ -429,7 +437,7 @@ class Requests:
                       fingerprint=request.fingerprint[:16], address=request.address,
                       reason=why)
 
-    def paired(self, request_id: str, *, shared_cluster_key: bool) -> Device:
+    def paired(self, request_id: str, *, shared_cluster_key: bool, secret: str = "") -> Device:
         with self._lock, self._transaction():
             ledger = self._load()
             request = next((r for r in ledger.requests if r.id == request_id), None)
@@ -437,8 +445,8 @@ class Requests:
                 raise Refused(409, "the request is not waiting for a code")
             request.state, request.code, request.decided = State.PAIRED, "", self.clock()
             self._save(ledger)
-        device = self.devices.add(request, shared_cluster_key=shared_cluster_key)
+        device = self.devices.add(request, shared_cluster_key=shared_cluster_key, secret=secret)
         self.bus.emit("onboard.pair.succeeded", "notice", f"device:{request.fingerprint}",
                       name=request.name, address=request.address,
-                      shared_cluster_key=shared_cluster_key)
+                      shared_cluster_key=shared_cluster_key, mine=bool(request.mine))
         return device

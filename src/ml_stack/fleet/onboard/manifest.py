@@ -16,7 +16,6 @@ import base64
 import hashlib
 import json
 import math
-import os
 import re
 import time
 from collections.abc import Iterable
@@ -28,13 +27,16 @@ from ml_stack.safenames import Unsafe, safe_filename
 
 __all__ = [
     "SCHEMA_VERSION",
+    "SHARING_LEVELS",
+    "VALID_S",
+    "Carried",
     "Entry",
     "Manifest",
     "ManifestError",
+    "RotationAnnounced",
     "Signer",
     "chunk_digests",
     "key_fingerprint",
-    "load_signer",
     "verify",
 ]
 
@@ -43,9 +45,11 @@ MIN_CHUNK = 64 * 1024
 MAX_CHUNK = 64 * 1024 * 1024
 DEFAULT_CHUNK = 4 * 1024 * 1024
 MOST_ENTRIES = 256
+VALID_S = 3 * 86400
 MOST_BYTES = 1 << 40
 HEX64 = re.compile(r"[0-9a-f]{64}")
 KINDS = ("wheel", "sdist", "model", "other")
+SHARING_LEVELS = ("open", "owner", "never")
 
 
 class ManifestError(ValueError):
@@ -60,8 +64,10 @@ class Entry:
     chunk_size: int
     chunks: tuple[str, ...]
     kind: str = "other"
-    shareable: bool = True
+    sharing: str = "open"
+    """``open``, ``owner`` or ``never``; see `sharing.py`."""
     licence: str = ""
+    licence_url: str = ""
     source: str = ""
     """Where the file comes from when it may not be shared (a gated model): the new machine
     fetches it from there with its own credentials, through the guarded pipeline."""
@@ -69,7 +75,8 @@ class Entry:
     def to_json(self) -> dict[str, Any]:
         return {"name": self.name, "size": self.size, "sha256": self.sha256,
                 "chunk_size": self.chunk_size, "chunks": list(self.chunks), "kind": self.kind,
-                "shareable": self.shareable, "licence": self.licence, "source": self.source}
+                "sharing": self.sharing, "licence": self.licence,
+                "licence_url": self.licence_url, "source": self.source}
 
     @classmethod
     def from_json(cls, row: Any) -> Entry:
@@ -94,11 +101,12 @@ class Entry:
         kind = str(row.get("kind", "other"))
         if kind not in KINDS:
             raise ManifestError(f"{name}: unknown kind {kind!r}")
-        shareable = row.get("shareable", True)
-        if not isinstance(shareable, bool):
-            raise ManifestError(f"{name}: shareable is true or false")
-        return cls(name, size, digest, chunk, tuple(chunks), kind, shareable,
-                   str(row.get("licence", ""))[:200], str(row.get("source", ""))[:500])
+        sharing = row.get("sharing", "owner")       # not said: treat as restricted
+        if sharing not in SHARING_LEVELS:
+            raise ManifestError(f"{name}: sharing is one of {SHARING_LEVELS}")
+        return cls(name, size, digest, chunk, tuple(chunks), kind, sharing,
+                   str(row.get("licence", ""))[:200], str(row.get("licence_url", ""))[:500],
+                   str(row.get("source", ""))[:500])
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +116,8 @@ class Manifest:
     expires: float
     key_id: str
     entries: tuple[Entry, ...] = field(default_factory=tuple)
+    revoked_keys: tuple[str, ...] = ()
+    """Signing keys the signer says are no longer to be trusted."""
 
     def entry(self, name: str) -> Entry:
         for e in self.entries:
@@ -119,6 +129,10 @@ class Manifest:
         return {"schema_version": SCHEMA_VERSION, "serial": self.serial, "issued": self.issued,
                 "expires": self.expires, "key_id": self.key_id,
                 "entries": [e.to_json() for e in self.entries]}
+
+
+def _ssh_string(raw: bytes) -> bytes:
+    return len(raw).to_bytes(4, "big") + raw
 
 
 def _canonical(body: dict[str, Any]) -> bytes:
@@ -138,6 +152,14 @@ def chunk_digests(path: Path, chunk_size: int) -> tuple[str, tuple[str, ...]]:
             whole.update(piece)
             parts.append(hashlib.sha256(piece).hexdigest())
     return whole.hexdigest(), tuple(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class Carried:
+    """What a manifest carries besides its files: key-change announcements and revocations."""
+
+    rotations: tuple[dict[str, Any], ...] = ()
+    revoked: tuple[str, ...] = ()
 
 
 class Signer:
@@ -161,38 +183,105 @@ class Signer:
     def key_id(self) -> str:
         return key_fingerprint(self.public)
 
-    def save(self, path: Path) -> None:
-        """Write the private key, raw and base64, mode 0600 from the first byte."""
+    def private_raw(self) -> bytes:
+        """The 32 secret bytes. For the key store only: callers must not write them anywhere
+        unencrypted (`signing.py` is the one place that stores them)."""
         from cryptography.hazmat.primitives import serialization
-        raw = self._private.private_bytes(serialization.Encoding.Raw,
-                                          serialization.PrivateFormat.Raw,
-                                          serialization.NoEncryption())
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as out:
-            out.write(base64.b64encode(raw))
+        return self._private.private_bytes(serialization.Encoding.Raw,
+                                           serialization.PrivateFormat.Raw,
+                                           serialization.NoEncryption())
 
-    def entry(self, path: Path, *, chunk_size: int = DEFAULT_CHUNK, **terms: Any) -> Entry:
-        """The entry for the file at ``path``; ``terms`` are `Entry`'s ``kind``,
-        ``shareable``, ``licence`` and ``source``."""
+    @classmethod
+    def from_raw(cls, raw: bytes) -> Signer:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        return cls(Ed25519PrivateKey.from_private_bytes(raw))
+
+    def ssh_public_line(self, name: str = "ml-stack") -> str:
+        """The key as an OpenSSH ``allowed_signers`` line, so ``ssh-keygen -Y verify`` (on a
+        machine that has no Python packages yet) can check what this key signed."""
+        blob = _ssh_string(b"ssh-ed25519") + _ssh_string(self.public)
+        return f"{name} ssh-ed25519 {base64.b64encode(blob).decode()}"
+
+    def sshsig(self, data: bytes, namespace: str) -> str:
+        """An OpenSSH signature (PROTOCOL.sshsig) over ``data`` by this key: the framing is
+        written here, the Ed25519 signature is `cryptography`'s, and the check on the other
+        side is OpenSSH's own ``ssh-keygen -Y verify``."""
+        hashed = hashlib.sha512(data).digest()
+        signed = (b"SSHSIG" + _ssh_string(namespace.encode()) + _ssh_string(b"")
+                  + _ssh_string(b"sha512") + _ssh_string(hashed))
+        signature = _ssh_string(b"ssh-ed25519") + _ssh_string(self._private.sign(signed))
+        blob = (b"SSHSIG" + (1).to_bytes(4, "big")
+                + _ssh_string(_ssh_string(b"ssh-ed25519") + _ssh_string(self.public))
+                + _ssh_string(namespace.encode()) + _ssh_string(b"") + _ssh_string(b"sha512")
+                + _ssh_string(signature))
+        text = base64.b64encode(blob).decode()
+        lines = [text[i:i + 70] for i in range(0, len(text), 70)]
+        return "-----BEGIN SSH SIGNATURE-----\n" + "\n".join(lines) + "\n-----END SSH SIGNATURE-----\n"
+
+    def announce_rotation(self, new: Signer, *, now: float | None = None) -> dict[str, Any]:
+        """A statement, signed by this (old) key, that ``new`` takes over. Members that pinned
+        this key can see the change announced; they adopt it only after a person agrees."""
+        statement = {"v": 1, "old": self.key_id, "new": base64.b64encode(new.public).decode(),
+                     "issued": time.time() if now is None else now}
+        return {"statement": statement,
+                "signature": base64.b64encode(self._private.sign(_canonical(statement))).decode()}
+
+    @staticmethod
+    def entry_for(path: Path, *, chunk_size: int = DEFAULT_CHUNK, **terms: Any) -> Entry:
+        """The entry for the file at ``path`` (hashing needs no key); ``terms`` are `Entry`'s
+        ``kind``, ``sharing``, ``licence``, ``licence_url`` and ``source``."""
         whole, parts = chunk_digests(path, chunk_size)
         return Entry(safe_filename(path.name), path.stat().st_size, whole, chunk_size, parts,
                      **terms)
 
-    def sign(self, entries: Iterable[Entry], *, serial: int, valid_s: float = 7 * 86400,
-             now: float | None = None) -> bytes:
-        """The signed manifest as bytes to store and serve."""
+    def entry(self, path: Path, *, chunk_size: int = DEFAULT_CHUNK, **terms: Any) -> Entry:
+        return self.entry_for(path, chunk_size=chunk_size, **terms)
+
+    def sign(self, entries: Iterable[Entry], *, serial: int, valid_s: float = VALID_S,
+             now: float | None = None, carried: Carried | None = None) -> bytes:
+        """The signed manifest as bytes to store and serve. It lasts ``valid_s`` (days, not
+        months: a copy that leaks stops working soon). ``carried`` holds announcements of earlier key
+        changes and revoked key ids, so members that were behind catch up."""
+        carried = carried or Carried()
         now = time.time() if now is None else now
         manifest = Manifest(serial, now, now + valid_s, self.key_id, tuple(entries))
         body = manifest.body()
+        body["public_key"] = base64.b64encode(self.public).decode()
+        body["rotations"] = list(carried.rotations)
+        body["revoked_keys"] = sorted(set(carried.revoked))
         signature = self._private.sign(_canonical(body))
         return json.dumps({"manifest": body, "signature": base64.b64encode(signature).decode()},
                           sort_keys=True).encode()
 
 
-def load_signer(path: Path) -> Signer:
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    return Signer(Ed25519PrivateKey.from_private_bytes(base64.b64decode(path.read_bytes())))
+class RotationAnnounced(ManifestError):
+    """The manifest is signed by a key the pinned one handed over to. ``new_public`` is that
+    key; nothing is trusted until a person pins it."""
+
+    def __init__(self, new_public: bytes) -> None:
+        super().__init__(f"the signing key was rotated to {key_fingerprint(new_public)}; a "
+                         "person must accept it (ml-stack fleet signing accept)")
+        self.new_public = new_public
+
+
+def _follow(pinned: bytes, rotations: Any) -> bytes:
+    """The key ``pinned`` handed over to along a chain of statements, each signed by the one
+    before; ``pinned`` itself if none applies."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    current = pinned
+    for row in rotations if isinstance(rotations, list) else []:
+        try:
+            statement, signature = row["statement"], base64.b64decode(row["signature"],
+                                                                      validate=True)
+            if statement["old"] != key_fingerprint(current):
+                continue
+            Ed25519PublicKey.from_public_bytes(current).verify(signature, _canonical(statement))
+            current = base64.b64decode(statement["new"], validate=True)
+        except (InvalidSignature, ValueError, KeyError, TypeError):
+            continue
+    return current
 
 
 def verify(raw: bytes, pinned: bytes, *, now: float | None = None, min_serial: int = 0,
@@ -218,6 +307,14 @@ def verify(raw: bytes, pinned: bytes, *, now: float | None = None, min_serial: i
     try:
         Ed25519PublicKey.from_public_bytes(pinned).verify(signature, _canonical(body))
     except (InvalidSignature, ValueError):
+        successor = _follow(pinned, body.get("rotations"))
+        if successor != pinned:
+            try:
+                Ed25519PublicKey.from_public_bytes(successor).verify(signature, _canonical(body))
+            except (InvalidSignature, ValueError):
+                pass
+            else:
+                raise RotationAnnounced(successor) from None
         raise ManifestError("the signature is not by the pinned key") from None
     serial, issued, expires = body.get("serial"), body.get("issued"), body.get("expires")
     if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
@@ -236,5 +333,9 @@ def verify(raw: bytes, pinned: bytes, *, now: float | None = None, min_serial: i
     entries = tuple(Entry.from_json(r) for r in rows)
     if len({e.name for e in entries}) != len(entries):
         raise ManifestError("two entries have one name")
-    return Manifest(int(serial), float(issued), float(expires), str(body["key_id"]), entries)
+    revoked = body.get("revoked_keys", [])
+    if not isinstance(revoked, list) or not all(isinstance(k, str) for k in revoked):
+        raise ManifestError("revoked keys are a list of key ids")
+    return Manifest(int(serial), float(issued), float(expires), str(body["key_id"]), entries,
+                    tuple(revoked))
 

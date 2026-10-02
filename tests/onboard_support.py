@@ -3,7 +3,12 @@ the event bus. Nothing here replaces a network or a file system."""
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+
+from keyring.backend import KeyringBackend
+from keyring.errors import PasswordDeleteError
 
 from ml_stack.fleet import tls
 from ml_stack.fleet.onboard.events import Bus, Event
@@ -54,3 +59,36 @@ def info(fingerprint: str, nonce: str = "ab" * 16, **more: str) -> dict[str, str
 
 def grant_for(ident: tls.Identity) -> Grant:
     return Grant(group="home", key="secret-cluster-key", salt="c2FsdA", certificate=ident.beacon)
+
+
+class FileKeyring(KeyringBackend):
+    """A real keyring backend whose entries live in the JSON file named by
+    ``ML_STACK_TEST_KEYRING``: stands in for the Keychain so tests never touch it, and lets
+    separate processes share one keystore."""
+
+    priority = 5
+
+    @staticmethod
+    def _file() -> Path:
+        return Path(os.environ["ML_STACK_TEST_KEYRING"])
+
+    def _all(self) -> dict:
+        try:
+            return json.loads(self._file().read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def get_password(self, service, username):
+        return self._all().get(f"{service}/{username}")
+
+    def set_password(self, service, username, password):
+        rows = self._all()
+        rows[f"{service}/{username}"] = password
+        self._file().write_text(json.dumps(rows))
+
+    def delete_password(self, service, username):
+        rows = self._all()
+        if f"{service}/{username}" not in rows:
+            raise PasswordDeleteError(username)
+        del rows[f"{service}/{username}"]
+        self._file().write_text(json.dumps(rows))

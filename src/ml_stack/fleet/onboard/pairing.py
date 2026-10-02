@@ -3,7 +3,7 @@
 All over TLS to the accepting machine's self-signed certificate: ``POST /onboard/v1/requests``
 (who I am; the owner is told), ``GET .../<id>`` (poll until the owner says yes, which is when
 a code first exists, on the owner's screen), then ``POST .../exchange`` and ``.../confirm``
-(SPAKE2 with both certificate fingerprints in the transcript, three tries). The TLS handshake
+(SPAKE2 from the `spake2` package, both certificate fingerprints as its identities, three tries). The TLS handshake
 is deliberately unverified, since the asker has nothing to check it against yet; what
 authenticates the certificate is the exchange, which binds the one actually presented to the
 code only the two people know. The accepting side reveals nothing until the asker's
@@ -29,7 +29,7 @@ from ml_stack import macauth
 from ml_stack.fleet import tls
 from ml_stack.fleet.framing import Malformed
 
-from . import spake
+from . import pake
 from .events import BUS, Bus
 from .requests import Refused, Request, Requests, State
 from .web import Call, Listener, Reply, json_reply
@@ -72,10 +72,14 @@ class Grant:
     salt: str = ""
     certificate: str = ""
     signing_key: str = ""
+    device_secret: str = ""
+    """What this device signs its file requests with, so the owner's machine knows which device
+    asks (urlsafe base64 of 32 random bytes)."""
 
     def encode(self) -> bytes:
         return json.dumps({"v": 1, "group": self.group, "key": self.key, "salt": self.salt,
-                           "certificate": self.certificate, "signing_key": self.signing_key},
+                           "certificate": self.certificate, "signing_key": self.signing_key,
+                           "device_secret": self.device_secret},
                           sort_keys=True, separators=(",", ":")).encode()
 
     @classmethod
@@ -84,7 +88,7 @@ class Grant:
         if not isinstance(data, dict) or data.get("v") != 1:
             raise PairError("the grant is in a format this version does not know")
         return cls(**{k: str(data.get(k, "")) for k in
-                      ("group", "key", "salt", "certificate", "signing_key")})
+                      ("group", "key", "salt", "certificate", "signing_key", "device_secret")})
 
 
 @dataclass(slots=True)
@@ -103,7 +107,8 @@ class PairingServer:
                  address: tuple[str, int] = ("127.0.0.1", DEFAULT_PORT), bus: Bus = BUS) -> None:
         self.requests, self.ident, self.hooks, self.bus = requests, ident, hooks, bus
         self.lockout = macauth.Lockout(failures=20, window_s=60.0, lock_s=120.0)
-        self._sessions: dict[str, spake.Session] = {}
+        self._sessions: dict[str, pake.Session] = {}
+        pake.require()
         self._lock = threading.Lock()
         self.listener = Listener(self.dispatch, address, tls.server_context(ident))
 
@@ -176,11 +181,11 @@ class PairingServer:
     def exchange(self, request_id: str, message: str) -> str:
         request = self.requests.take_attempt(request_id)
         try:
-            session = spake.start_responder(
+            session = pake.start_responder(
                 request.code, context=context_for(request.id, request.nonce),
                 mine=self.ident.fingerprint, theirs=request.fingerprint)
             session.receive(message)
-        except spake.Bad as exc:
+        except pake.Bad as exc:
             self.requests.wrong(request_id)
             raise Refused(400, f"bad message: {exc}") from None
         with self._lock:
@@ -203,7 +208,8 @@ class PairingServer:
                           "wrong code; the request is closed")
         grant = self.hooks.grant(request)
         payload = grant.encode()
-        self.requests.paired(request_id, shared_cluster_key=bool(grant.key))
+        self.requests.paired(request_id, shared_cluster_key=bool(grant.key),
+                             secret=grant.device_secret)
         return {"confirmation": session.confirmation(),
                 "grant": base64.b64encode(payload).decode(), "tag": session.seal(payload)}
 
@@ -286,16 +292,19 @@ class PairingClient:
         """Prove the code and receive the grant. `PairError` for a wrong code, with
         ``tries_left``, or for a machine that fails to prove it knew the code too."""
         code = re.sub(r"\s", "", code)
-        session = spake.start_initiator(
-            code, context=context_for(self.request_id, self.nonce), mine=self.fingerprint,
-            theirs=self.server_fingerprint)
+        try:
+            session = pake.start_initiator(
+                code, context=context_for(self.request_id, self.nonce), mine=self.fingerprint,
+                theirs=self.server_fingerprint)
+        except pake.PakeUnavailable as exc:
+            raise PairError(str(exc)) from None
         status, body = self._call("POST", f"{API}/{self.request_id}/exchange",
                                   {"message": session.message})
         if status != 200:
             raise PairError(str(body.get("error", f"status {status}")), status=status)
         try:
             session.receive(str(body.get("message")))
-        except spake.Bad as exc:
+        except pake.Bad as exc:
             raise PairError(f"bad message from the machine: {exc}") from None
         status, body = self._call("POST", f"{API}/{self.request_id}/confirm",
                                   {"confirmation": session.confirmation()})

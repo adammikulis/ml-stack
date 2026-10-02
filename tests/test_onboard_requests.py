@@ -19,7 +19,7 @@ def test_a_request_waits_then_is_accepted_with_a_code_then_pairs(tmp_path):
     rq, rec, _ = make(tmp_path)
     r = rq.submit(info(FP1), "10.0.0.5")
     assert r.state is State.PENDING and r.code == ""
-    got = rq.accept(r.id)
+    got = rq.accept(r.id, mine=True)
     assert got.state is State.ACCEPTED and len(got.code) == 6 and got.code.isdigit()
     assert "code" not in got.public()
     device = rq.paired(r.id, shared_cluster_key=True)
@@ -35,9 +35,9 @@ def test_unanswered_requests_expire_and_the_code_expires_sooner(tmp_path):
     clock.advance(301)
     assert rq.get(r.id).state is State.EXPIRED
     with pytest.raises(Refused):
-        rq.accept(r.id)
+        rq.accept(r.id, mine=True)
     r2 = rq.submit(info(FP2), "10.0.0.6")
-    rq.accept(r2.id)
+    rq.accept(r2.id, mine=True)
     clock.advance(121)
     assert rq.get(r2.id).state is State.EXPIRED and rq.get(r2.id).code == ""
     with pytest.raises(Refused):
@@ -48,9 +48,9 @@ def test_unanswered_requests_expire_and_the_code_expires_sooner(tmp_path):
 def test_accepting_twice_does_not_mint_a_second_code(tmp_path):
     rq, _, _ = make(tmp_path)
     r = rq.submit(info(FP1), "10.0.0.5")
-    code = rq.accept(r.id).code
+    code = rq.accept(r.id, mine=True).code
     with pytest.raises(Refused) as why:
-        rq.accept(r.id)
+        rq.accept(r.id, mine=True)
     assert why.value.status == 409
     assert rq.get(r.id).code == code
 
@@ -111,7 +111,7 @@ def test_a_declined_device_waits_and_three_declines_block_it_for_an_hour(tmp_pat
 def test_three_wrong_codes_close_the_request_and_the_right_code_no_longer_helps(tmp_path):
     rq, rec, _ = make(tmp_path)
     r = rq.submit(info(FP1), "10.0.0.5")
-    code = rq.accept(r.id).code
+    code = rq.accept(r.id, mine=True).code
     left = []
     for _ in range(3):
         rq.take_attempt(r.id)
@@ -130,7 +130,7 @@ def test_three_wrong_codes_close_the_request_and_the_right_code_no_longer_helps(
 def test_a_revoked_device_cannot_ask_again(tmp_path):
     rq, rec, _ = make(tmp_path)
     r = rq.submit(info(FP1), "10.0.0.5")
-    rq.accept(r.id)
+    rq.accept(r.id, mine=True)
     rq.paired(r.id, shared_cluster_key=True)
     gone = rq.devices.revoke("kitchen-pi")
     assert gone.status == "revoked" and gone.shared_cluster_key
@@ -146,7 +146,7 @@ def test_revoke_by_fingerprint_prefix_and_ambiguity(tmp_path):
     rq, _, _ = make(tmp_path)
     for fp, addr in ((FP1, "10.0.0.5"), (FP2, "10.0.0.6")):
         r = rq.submit(info(fp), addr)
-        rq.accept(r.id)
+        rq.accept(r.id, mine=True)
         rq.paired(r.id, shared_cluster_key=False)
     with pytest.raises(ValueError):
         rq.devices.revoke("kitchen-pi")             # two devices share that name
@@ -192,7 +192,7 @@ def _accept_elsewhere(root, request_id, out):
     from pathlib import Path
 
     from ml_stack.fleet.onboard.requests import Requests
-    out.put(Requests(Path(root) / "requests.json").accept(request_id).code)
+    out.put(Requests(Path(root) / "requests.json").accept(request_id, mine=True).code)
 
 
 def test_the_file_is_private_and_carries_a_schema_version(tmp_path):

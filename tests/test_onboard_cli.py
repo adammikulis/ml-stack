@@ -4,10 +4,12 @@ are different processes sharing nothing but a TCP port."""
 
 import json
 import os
+import platform
 import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,11 @@ import pytest
 from ml_stack.fleet import discovery
 
 FP1 = "1" * 64
+
+@pytest.fixture(autouse=True)
+def needs_spake2():
+    pytest.importorskip("spake2")
+
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +32,8 @@ def needs_cryptography():
 def env_for(root):
     root.mkdir(exist_ok=True)
     return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(root),
+            "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
+            "ML_STACK_TEST_KEYRING": str(root / "keyring.json"),
             "ML_STACK_CLUSTER_KEY": str(root / "cluster.key"), "PYTHONUNBUFFERED": "1"}
 
 
@@ -106,7 +115,7 @@ def test_the_whole_conversation_across_three_processes(owner, tmp_path):
                 break
             pair.poll()
         assert seen and seen[0]["name"] == "new-box" and "code" not in seen[0]
-        accepted = fleet(owner.env, "accept", seen[0]["id"][:8], "--json",
+        accepted = fleet(owner.env, "accept", seen[0]["id"][:8], "--mine", "--json",
                          "--state", str(owner.state))
         assert accepted.returncode == 0, accepted.stderr
         doc = json.loads(accepted.stdout)
@@ -144,7 +153,7 @@ def test_a_wrong_code_on_the_command_line_says_how_many_tries_are_left(owner, tm
                                     str(owner.state)).stdout)["requests"]
             if seen:
                 break
-        code = json.loads(fleet(owner.env, "accept", seen[0]["id"][:8], "--json", "--state",
+        code = json.loads(fleet(owner.env, "accept", seen[0]["id"][:8], "--mine", "--json", "--state",
                                 str(owner.state)).stdout)["code"]
         out, _ = pair.communicate(timeout=60)
         doc = json.loads(out)
@@ -173,7 +182,7 @@ def test_decline_and_an_unknown_request_are_answered_in_json(owner, tmp_path):
         assert json.loads(out)["state"] == "declined" and pair.returncode == 1
     finally:
         pair.kill()
-    nope = fleet(owner.env, "accept", "ffffffff", "--json", "--state", str(owner.state))
+    nope = fleet(owner.env, "accept", "ffffffff", "--mine", "--json", "--state", str(owner.state))
     assert nope.returncode == 2 and "error" in json.loads(nope.stdout)
 
 
@@ -201,13 +210,13 @@ def test_nearby_with_nobody_there_exits_nonzero(tmp_path):
     assert out.returncode == 1 and json.loads(out.stdout) == {"nearby": []}
 
 
-def test_revoke_with_no_such_device_and_ssh_push_say_so(tmp_path):
+def test_revoke_with_no_such_device_and_ssh_without_files_say_so(tmp_path):
     env = env_for(tmp_path / "x")
     out = fleet(env, "revoke", "nobody", "--json", "--state", str(tmp_path / "x" / "s"))
     assert out.returncode == 2 and "error" in json.loads(out.stdout)
     ssh = fleet(env, "bootstrap", "--ssh", "pi@10.0.0.9", "--json", "--state",
                 str(tmp_path / "x" / "s"))
-    assert ssh.returncode == 2 and "designed, not built" in json.loads(ssh.stdout)["error"]
+    assert ssh.returncode == 2 and "--share" in json.loads(ssh.stdout)["error"]
 
 
 def test_bootstrap_prints_an_offer_with_a_pinned_certificate(tmp_path):
@@ -223,7 +232,10 @@ def test_bootstrap_prints_an_offer_with_a_pinned_certificate(tmp_path):
             f"#fp={doc['certificate']}")
         assert doc["files"] == ["ml_stack-0.2-py3-none-any.whl"]
         assert "--pinnedpubkey" in doc["command"]
-        assert (tmp_path / "x" / "s" / "signing.key").stat().st_mode & 0o077 == 0
+        state = tmp_path / "x" / "s"
+        assert (state / "signing.json").stat().st_mode & 0o077 == 0
+        assert not (state / "signing.key").exists() and not (state / "signing.key.enc").exists()
+        assert json.loads((state / "signing.json").read_text())["store"] == "keyring"
     finally:
         stop(proc)
     refused = fleet(env, "bootstrap", "--json", "--state", str(tmp_path / "x" / "s"))
@@ -242,7 +254,7 @@ def pair_up(owner, tmp_path):
                                     str(owner.state)).stdout)["requests"]
             if seen:
                 break
-        code = json.loads(fleet(owner.env, "accept", seen[0]["id"][:8], "--json", "--state",
+        code = json.loads(fleet(owner.env, "accept", seen[0]["id"][:8], "--mine", "--json", "--state",
                                 str(owner.state)).stdout)["code"]
         pair.stdin.write(code + "\n")
         pair.stdin.flush()
@@ -260,12 +272,13 @@ def test_after_pairing_the_new_machine_fetches_files_from_the_owner(owner, tmp_p
     wheel = os.urandom(300_000)
     (shared / "ml_stack-0.2-py3-none-any.whl").write_bytes(wheel)
     (shared / "gated.gguf").write_bytes(b"GGUF" * 1000)
-    sharing = spawn(owner.env, "share", "--dir", str(shared), "--private", "gated.gguf",
+    sharing = spawn(owner.env, "share", "--dir", str(shared),
+                    "--sharing", "gated.gguf=never", "--licence", "gated.gguf=nocopy,https://x/l",
                     "--host", "127.0.0.1", "--json", "--state", str(owner.state), "--for", "120s")
     try:
         started = json.loads(read_document(sharing))
-        assert {f["name"]: f["shareable"] for f in started["files"]} == {
-            "ml_stack-0.2-py3-none-any.whl": True, "gated.gguf": False}
+        assert {f["name"]: f["sharing"] for f in started["files"]} == {
+            "ml_stack-0.2-py3-none-any.whl": "open", "gated.gguf": "never"}
         source = f"127.0.0.1:{started['port']}"
         got = fleet(env, "fetch", "ml_stack-0.2-py3-none-any.whl", "--from", source, "--json",
                     "--state", str(state))
@@ -327,3 +340,55 @@ def test_share_answers_only_requests_signed_with_the_cluster_secret(owner, tmp_p
         assert answers == [401, 401, 200]
     finally:
         stop(sharing)
+
+
+@pytest.mark.skipif(platform.system() != "Darwin", reason="the fake osascript answers a macOS dialog")
+def test_a_click_on_accept_in_the_dialog_accepts_the_request_and_the_code_comes_in_a_second_dialog(
+        tmp_path):
+    """The owner's side with a fake `osascript` first on PATH: it answers the first dialog as a
+    click on 'Accept as mine' and records the second, which carries the code."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    record = tmp_path / "dialogs.txt"
+    fake = bin_dir / "osascript"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$@" >> "$FAKE_DIALOGS"\n'
+        'case "$2" in *"set answer"*) echo "button returned:Accept as mine, gave up:false";; esac\n')
+    fake.chmod(0o755)
+    env = {**env_for(tmp_path / "owner"), "ML_STACK_NOTIFY": "system", "FAKE_DIALOGS": str(record),
+           "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    key_path = tmp_path / "owner" / "cluster.key"
+    discovery.join("a-long-enough-passphrase", path=key_path,
+                   salting=discovery.Salting(salt=b"s" * 16))
+    state = tmp_path / "owner" / "state"
+    listener = spawn(env, "listen", "--json", "--state", str(state), "--host", "127.0.0.1",
+                     "--port", "0", "--no-announce", "--for", "120s")
+    try:
+        started = json.loads(read_document(listener))
+        assert started["notifier"] == "macos"
+        new_env = env_for(tmp_path / "newbox")
+        pair = spawn(new_env, "pair", "--host", "127.0.0.1", "--port", str(started["port"]),
+                     "--json", "--state", str(tmp_path / "newbox" / "state"), "--wait", "60s")
+        try:
+            for _ in range(300):                      # the owner clicks nothing: the dialog did
+                if record.exists() and record.read_text().count("-e") >= 2:
+                    break
+                pair.poll()
+                time.sleep(0.1)
+            lines = record.read_text().split("\n")
+            code_line = next(line for line in lines if line.startswith("Pairing code "))
+            code = code_line.removeprefix("Pairing code ").replace(" ", "")
+            shown = json.loads(fleet(env, "requests", "--json", "--state", str(state)).stdout)
+            assert shown["requests"][0]["state"] == "accepted" and shown["requests"][0]["mine"]
+            pair.stdin.write(code + "\n")
+            pair.stdin.flush()
+            out, err = pair.communicate(timeout=60)
+            assert pair.returncode == 0, err
+            assert json.loads(out)["paired"]
+        finally:
+            pair.kill()
+        ledger = json.loads((state / "devices.json").read_text())["devices"]
+        assert ledger[0]["mine"] is True
+    finally:
+        stop(listener)

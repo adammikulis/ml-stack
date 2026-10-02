@@ -6,11 +6,13 @@ listed for it, a peer that sends a wrong one is dropped, and the finished file i
 before it is moved to staging (not installed: the caller's scan and quarantine step,
 ``on_staged``, decides). Resumable: chunks verified earlier are hashed again from disk before
 they are trusted. The whole file plus a reserve must fit on disk before a byte is asked for.
-A file marked ``shareable: false`` is never asked of a peer and never served to one.
+Who may have which file is `sharing.py`: ``never`` files are not asked of a peer, ``owner`` files
+go only to the owner's own devices with the licence acceptance on record.
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import hashlib
 import http.client
@@ -20,7 +22,7 @@ import shutil
 import ssl
 import threading
 import urllib.parse
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,10 +35,12 @@ from ml_stack.safenames import Unsafe, safe_filename, safe_join
 
 from .events import BUS, Bus
 from .manifest import Entry, Manifest
+from .requests import Device
+from .sharing import NEVER, Access, Licences, decide
 from .web import Call, Listener, Reply, json_reply
 
 __all__ = ["Downloader", "NotShareable", "PeerSource", "Settings", "Share", "ShareServer",
-           "TransferError", "fetch_manifest", "mac_gate"]
+           "TransferError", "Withheld", "fetch_manifest", "mac_gate"]
 
 API = "/onboard/v1"
 RESERVE = 1 << 30
@@ -56,6 +60,10 @@ class NotShareable(TransferError):
         self.source = source
 
 
+class Withheld(TransferError):
+    """A peer refused the file under the owner's sharing rules (not a lie: it is not struck)."""
+
+
 # -- serving -----------------------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class Share:
@@ -64,12 +72,31 @@ class Share:
     root: Path
     manifest_raw: bytes
     manifest: Manifest
+    licences: Licences | None = None
+    """The owner's record of licences accepted, which ``owner`` files need."""
 
 
-def mac_gate(auth: macauth.Authenticator) -> Callable[[str, str, Any, str], bool]:
-    """The fleet's own authentication as the gate a `ShareServer` asks."""
-    def gate(method: str, target: str, headers: Any, who: str) -> bool:
-        return auth.check(method, target, headers, None, who).ok
+def mac_gate(cluster_secret: str, devices: Callable[[], Iterable[Device]] = lambda: (),
+             ) -> Callable[[str, str, Any, str], Access | None]:
+    """The fleet's own authentication as the gate a `ShareServer` asks, with each paired
+    device able to sign with a key of its own: a request signed by the cluster secret alone is
+    a member with no device identity; one signed by a device's key says which device it is."""
+    def secrets_now() -> list[str]:
+        return [cluster_secret, *(macauth.derive(base64.urlsafe_b64decode(d.secret))
+                                  for d in devices() if d.secret and d.status == "active")]
+
+    auth = macauth.Authenticator(secrets_now)
+
+    def gate(method: str, target: str, headers: Any, who: str) -> Access | None:
+        if not auth.check(method, target, headers, None, who).ok:
+            return None
+        given = dict(part.split("=", 1) for part in headers.get("Authorization", "")
+                     .partition(" ")[2].split(",") if "=" in part).get("k", "")
+        for d in devices():
+            if d.secret and d.status == "active" and given == macauth.key_id(
+                    macauth.derive(base64.urlsafe_b64decode(d.secret))):
+                return Access(d.fingerprint, d.mine)
+        return Access()
     return gate
 
 
@@ -86,15 +113,17 @@ def file_stream(path: Path, start: int, length: int) -> Iterator[bytes]:
             yield piece
 
 
-def serve_file(share: Share, name: str, range_header: str, bus: Bus, who: str) -> Reply:
+def serve_file(share: Share, name: str, range_header: str, bus: Bus, access: Access) -> Reply:
     """The reply for one ranged GET of ``name``: 206 with the span, or why not."""
     try:
         entry = share.manifest.entry(safe_filename(name))
     except (KeyError, Unsafe):
         return json_reply(404, {"error": "no such file"})
-    if not entry.shareable:
-        bus.emit("onboard.transfer.unshareable_asked", "notice", "", file=entry.name, peer=who)
-        return json_reply(403, {"error": "this file may not be shared"})
+    reason = decide(entry, access, share.licences)
+    if reason:
+        bus.emit("onboard.transfer.withheld", "notice", f"device:{access.device}",
+                 file=entry.name, level=entry.sharing, reason=reason)
+        return json_reply(403, {"error": reason})
     try:
         path = safe_join(share.root, entry.name)
         if not path.is_file() or path.stat().st_size != entry.size:
@@ -114,10 +143,12 @@ def serve_file(share: Share, name: str, range_header: str, bus: Bus, who: str) -
 
 
 class ShareServer:
-    """Serves the manifest and the shareable files in it to peers that pass ``authenticate``
-    ``(method, target, headers, client) -> bool``; the fleet's is `mac_gate`."""
+    """Serves the manifest and the files in it that each asking device may have. ``authenticate``
+    ``(method, target, headers, client)`` says who is asking (an `Access`) or None; the
+    fleet's is `mac_gate`."""
 
-    def __init__(self, share: Share, *, authenticate: Callable[[str, str, Any, str], bool],
+    def __init__(self, share: Share, *,
+                 authenticate: Callable[[str, str, Any, str], Access | None],
                  ident: tls.Identity | None, address: tuple[str, int] = ("127.0.0.1", 0),
                  bus: Bus = BUS) -> None:
         self.share, self.authenticate, self.bus = share, authenticate, bus
@@ -142,8 +173,9 @@ class ShareServer:
         self.stop()
 
     def dispatch(self, call: Call) -> Reply:
-        if call.method != "GET" or not self.authenticate(call.method, call.path, call.headers,
-                                                          call.client):
+        access = self.authenticate(call.method, call.path, call.headers, call.client) \
+            if call.method == "GET" else None
+        if access is None:
             return json_reply(401, {"error": "not signed"})
         if call.path == f"{API}/manifest":
             return Reply(200, self.share.manifest_raw, content_type="application/json")
@@ -151,7 +183,7 @@ class ShareServer:
         if not call.path.startswith(prefix):
             return json_reply(404, {"error": "no such path"})
         name = urllib.parse.unquote(call.path[len(prefix):].split("?")[0])
-        return serve_file(self.share, name, call.headers.get("Range", ""), self.bus, call.client)
+        return serve_file(self.share, name, call.headers.get("Range", ""), self.bus, access)
 
 
 # -- fetching ----------------------------------------------------------------------------
@@ -222,7 +254,7 @@ class Downloader:
     def download(self, name: str) -> Path:
         """Fetch ``name`` into the staging directory; returns its path."""
         entry = self.manifest.entry(safe_filename(name))
-        if not entry.shareable:
+        if entry.sharing == NEVER:
             raise NotShareable(entry.name, entry.source)
         if not self.peers:
             raise TransferError("no peer to fetch from")
@@ -234,8 +266,8 @@ class Downloader:
             with part.open("wb") as fh:
                 fh.truncate(entry.size)
         failure = self._fetch(entry, part, state, done)
-        if failure:
-            raise TransferError(failure)
+        if failure is not None:
+            raise failure
         if len(done) != len(entry.chunks):
             raise TransferError(f"{entry.name}: {len(entry.chunks) - len(done)} chunks missing")
         if sha256_file(part) != entry.sha256:
@@ -258,14 +290,15 @@ class Downloader:
                                 f"{self.cfg.reserve >> 20} MiB of reserve; {free >> 20} MiB "
                                 "is free")
 
-    def _fetch(self, entry: Entry, part: Path, state: Path, done: set[int]) -> str:
+    def _fetch(self, entry: Entry, part: Path, state: Path,
+               done: set[int]) -> TransferError | None:
         """Fetch every chunk not in ``done`` with several workers; returns why it stopped, or
-        an empty string."""
+        None."""
         todo: queue.Queue[int] = queue.Queue()
         for index in range(len(entry.chunks)):
             if index not in done:
                 todo.put(index)
-        failure: list[str] = []
+        failure: list[TransferError] = []
 
         def work() -> None:
             while not failure:
@@ -276,7 +309,7 @@ class Downloader:
                 try:
                     data, peer = self._chunk(entry, index)
                 except TransferError as exc:
-                    failure.append(str(exc))
+                    failure.append(exc)
                     return
                 with self._lock:
                     with part.open("r+b") as fh:
@@ -295,7 +328,7 @@ class Downloader:
         for t in threads:
             t.join()
         self._remember(entry, state, done)
-        return failure[0] if failure else ""
+        return failure[0] if failure else None
 
     def _remember(self, entry: Entry, state: Path, done: set[int]) -> None:
         write_json(state, {"schema_version": 1, "sha256": entry.sha256, "done": sorted(done)},
@@ -329,6 +362,7 @@ class Downloader:
         start = index * entry.chunk_size
         want = min(entry.chunk_size, entry.size - start)
         order = self.peers[index % len(self.peers):] + self.peers[:index % len(self.peers)]
+        withheld = ""
         for peer in order:
             if peer.banned:
                 continue
@@ -336,6 +370,9 @@ class Downloader:
                 data = self._get(peer, entry, start, want)
             except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
                 self._strike(peer, entry, f"unreachable: {type(exc).__name__}", hard=False)
+                continue
+            except Withheld as exc:
+                withheld = str(exc)
                 continue
             except TransferError as exc:
                 self._strike(peer, entry, str(exc), hard=True)
@@ -346,6 +383,8 @@ class Downloader:
                 self._strike(peer, entry, "sent a chunk that fails its digest", hard=True)
                 continue
             return data, peer
+        if withheld:
+            raise Withheld(f"{entry.name}: {withheld}")
         raise TransferError(f"{entry.name}: no peer could supply chunk {index}")
 
     def _strike(self, peer: PeerSource, entry: Entry, why: str, *, hard: bool) -> None:
@@ -374,6 +413,12 @@ class Downloader:
         try:
             conn.request("GET", parts.path, headers=headers)
             response = conn.getresponse()
+            if response.status == 403:
+                try:
+                    why = str(json.loads(response.read(2048)).get("error", "refused"))[:200]
+                except ValueError:
+                    why = "refused"
+                raise Withheld(why)
             if response.status != 206:
                 raise TransferError(f"answered {response.status}")
             if response.getheader("Content-Range") != \

@@ -46,7 +46,7 @@ class Peers:
     def __init__(self, tmp_path, signer):
         self.tmp, self.signer, self.procs = tmp_path, signer, []
 
-    def make(self, name, *, files, entries, tls_dir=None):
+    def make(self, name, *, files, entries, tls_dir=None, state=None):
         root = self.tmp / name
         root.mkdir()
         for fname, data in files.items():
@@ -56,8 +56,10 @@ class Peers:
         manifest_file.write_bytes(raw)
         argv = [sys.executable, str(HELPER), str(root), str(manifest_file),
                 base64.b64encode(self.signer.public).decode(), SECRET]
-        if tls_dir:
-            argv.append(str(tls_dir))
+        if tls_dir or state:
+            argv.append(str(tls_dir) if tls_dir else "-")
+        if state:
+            argv.append(str(state))
         proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
                                 env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)})
         self.procs.append(proc)
@@ -174,18 +176,18 @@ def test_not_enough_disk_refuses_before_asking_a_peer(tmp_path, signer, peers, e
     assert d.fetched_from == {}
 
 
-def test_a_file_that_may_not_be_shared_is_neither_asked_for_nor_served(tmp_path, signer, peers):
-    gated = mf.Entry("gated-model.gguf", SIZE, "1" * 64, CHUNK, ("2" * 64,) * 6, "model",
-                      shareable=False, licence="gated", source="hf://org/gated")
-    a, port, _ = peers.make("a", files={"gated-model.gguf": PAYLOAD}, entries=[gated])
-    m = manifest_of(signer, gated)
-    d = downloader(m, [a], tmp_path / "stage", reserve=0)
+def test_a_file_whose_licence_forbids_copies_is_neither_asked_for_nor_served(tmp_path, signer,
+                                                                          peers):
+    never = mf.Entry("never-model.gguf", SIZE, "1" * 64, CHUNK, ("2" * 64,) * 6, "model",
+                     sharing="never", licence="no-copies", source="hf://org/never")
+    a, port, _ = peers.make("a", files={"never-model.gguf": PAYLOAD}, entries=[never])
+    d = downloader(manifest_of(signer, never), [a], tmp_path / "stage", reserve=0)
     with pytest.raises(transfer.NotShareable) as why:
-        d.download("gated-model.gguf")
-    assert why.value.source == "hf://org/gated"
+        d.download("never-model.gguf")
+    assert why.value.source == "hf://org/never"
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)    # and the server itself
-    url = f"http://127.0.0.1:{port}{transfer.API}/files/gated-model.gguf"
-    conn.request("GET", f"{transfer.API}/files/gated-model.gguf",
+    url = f"http://127.0.0.1:{port}{transfer.API}/files/never-model.gguf"
+    conn.request("GET", f"{transfer.API}/files/never-model.gguf",
                  headers={"Range": "bytes=0-9", **macauth.sign(SECRET, "GET", url, None)})
     assert conn.getresponse().status == 403
 

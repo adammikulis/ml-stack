@@ -1,128 +1,224 @@
-"""Telling the owner that a machine wants to join, in the way their desktop shows things.
+"""Asking the owner, on their own screen, whether a machine may join.
 
-A notification from a command-line program cannot carry an Accept button (macOS needs a signed
-app bundle, Windows a registered app id, notify-send has no portable answer), so it says who
-is asking and the command to answer with; the answer is given in the terminal or the web
-interface. The text is from a stranger, so it is cleaned to one short printable line and
-handed to the operating system as an argument, never spliced into a script. The pairing code
-is never in a notification: it exists only after the owner says yes.
+macOS and Linux get a dialog with real buttons (Decline, Accept as mine, Accept as someone
+else's); the pairing code is in a second dialog, only after an Accept. Windows is designed
+(toast buttons need a registered app id), not built. With no desktop, the console fallback
+prints the request and `ml-stack fleet accept` / `decline` answer it. A stranger's text is
+cleaned and passed to the system as an argument after ``--``, never spliced into a script.
+``ML_STACK_NOTIFY`` picks the notifier: ``system`` (default), ``console`` or ``off``. The test
+suite sets ``console``, and shims on PATH make any real attempt fail the run.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import platform
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
+from ml_stack.log import say as say_
+
 from .requests import Request, clean, short
 
-__all__ = ["Console", "LinuxNotifier", "MacNotifier", "Notifier", "Unsupported", "WindowsNotifier",
-           "compose", "pick"]
+__all__ = ["ENV", "Console", "LinuxNotifier", "MacNotifier", "Notifier", "Silent", "Unsupported",
+           "WindowsNotifier", "compose", "compose_code", "parse_mac", "pick"]
 
+ENV = "ML_STACK_NOTIFY"
+WAIT_S = 120
 logger = logging.getLogger("ml_stack.fleet.onboard")
 
-Runner = Callable[[Sequence[str]], int]
+Result = tuple[int, str, str]
+Runner = Callable[[Sequence[str]], Result]
 
-MAC_SCRIPT = ("on run argv\n"
-              "display notification (item 1 of argv) with title (item 2 of argv)\n"
-              "end run")
+DECLINE, MINE, OTHER = "Decline", "Accept as mine", "Accept as someone else's"
+"""The three buttons; the owner says whose device it is in the same click."""
+
+MAC_ASK = ("on run argv\n"
+           "set answer to display alert (item 1 of argv) message (item 2 of argv) as critical "
+           f'buttons {{"{DECLINE}", "{OTHER}", "{MINE}"}} default button "{DECLINE}" '
+           f'cancel button "{DECLINE}" giving up after {WAIT_S}\n'
+           "return answer\n"
+           "end run")
+MAC_CODE = ("on run argv\n"
+            "display alert (item 1 of argv) message (item 2 of argv) "
+            f'buttons {{"OK"}} default button "OK" giving up after {WAIT_S}\n'
+            "end run")
 
 
 class Notifier(Protocol):
     name: str
 
-    def notify(self, title: str, body: str) -> bool: ...
+    def ask(self, title: str, body: str) -> str:
+        """Put the question to the owner; ``mine``, ``other``, ``decline``, ``timeout`` or
+        ``unavailable`` (no way to ask here; the command line answers)."""
+
+    def show_code(self, title: str, body: str) -> bool: ...
 
 
 class Unsupported(Exception):
     pass
 
 
-def compose(request: Request) -> tuple[str, str]:
-    """The title and body for a request: who is asking, from where, and how to answer."""
-    who = clean(request.name, 40) or "a device"
-    title = f"{who} wants to join ml-stack"
+def _text(request: Request) -> str:
     host = f" ({clean(request.hostname, 40)})" if request.hostname else ""
     model = f", {clean(request.model, 40)}" if request.model else ""
-    body = (f"{who}{host}{model} at {clean(request.address, 45)}, certificate "
-            f"{short(request.fingerprint)}. To answer: ml-stack fleet accept "
-            f"{request.id[:8]} or ml-stack fleet decline {request.id[:8]}. "
-            "Only accept a device you are holding.")
-    return title, body
+    return (f"{clean(request.name, 40) or 'a device'}{host}{model} at "
+            f"{clean(request.address, 45)}, certificate {short(request.fingerprint)}.")
 
 
-def _run(argv: Sequence[str]) -> int:
+def compose(request: Request) -> tuple[str, str]:
+    """The title and the question for a request: who is asking, from where."""
+    title = f"{clean(request.name, 40) or 'A device'} wants to join ml-stack"
+    return title, _text(request) + " Accept only a device you are holding."
+
+
+def compose_code(request: Request) -> tuple[str, str]:
+    """The second dialog: the code to read to the person at the new machine."""
+    code = f"{request.code[:3]} {request.code[3:]}"
+    return (f"Pairing code {code}",
+            f"Type {code} on {clean(request.name, 40) or 'the new device'} within "
+            f"{WAIT_S} seconds. It is good for three tries.")
+
+
+def _run(argv: Sequence[str]) -> Result:
     try:
-        return subprocess.run(list(argv), capture_output=True, timeout=10,
-                              check=False).returncode
+        done = subprocess.run(list(argv), capture_output=True, text=True,
+                              timeout=WAIT_S + 15, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("notification command failed: %s", type(exc).__name__)
-        return 1
+        return 1, "", type(exc).__name__
+    return done.returncode, done.stdout, done.stderr
+
+
+def parse_mac(result: Result) -> str:
+    """The answer in osascript's output: ``button returned:Accept as mine, gave up:false``."""
+    code, out, err = result
+    if code != 0:
+        return "decline" if "-128" in err else "unavailable"      # -128: Decline / Escape
+    if re.search(r"gave up:\s*true", out):
+        return "timeout"
+    got = re.search(r"button returned:\s*(.*?)(?:,\s*gave up:|$)", out.strip())
+    return {MINE: "mine", OTHER: "other", DECLINE: "decline"}.get(got[1] if got else "", "decline")
 
 
 class MacNotifier:
-    """``osascript`` with the text as script arguments, so it is data to the script."""
+    """``osascript display alert`` with buttons; the text is script arguments after ``--``."""
 
     name = "macos"
 
     def __init__(self, run: Runner = _run) -> None:
         self.run = run
 
-    def notify(self, title: str, body: str) -> bool:
-        return self.run(["osascript", "-e", MAC_SCRIPT, "--", clean(body, 300),
-                         clean(title, 80)]) == 0
+    def ask(self, title: str, body: str) -> str:
+        return parse_mac(self.run(["osascript", "-e", MAC_ASK, "--", clean(title, 80),
+                                   clean(body, 300)]))
+
+    def show_code(self, title: str, body: str) -> bool:
+        return self.run(["osascript", "-e", MAC_CODE, "--", clean(title, 80),
+                         clean(body, 300)])[0] == 0
 
 
 class LinuxNotifier:
-    """``notify-send``, with ``--`` before the text so a title that starts with a dash is
-    not an option."""
+    """``notify-send --action ... --wait`` where libnotify supports actions, else ``zenity``.
+    ``--`` goes before the text so a title that starts with a dash is not an option."""
 
     name = "linux"
 
-    def __init__(self, run: Runner = _run) -> None:
-        self.run = run
+    def __init__(self, run: Runner = _run,
+                 which: Callable[[str], str | None] = shutil.which) -> None:
+        self.run, self.which = run, which
 
-    def notify(self, title: str, body: str) -> bool:
-        return self.run(["notify-send", "--app-name=ml-stack", "--urgency=normal", "--",
-                         clean(title, 80), clean(body, 300)]) == 0
+    def ask(self, title: str, body: str) -> str:
+        title, body = clean(title, 80), clean(body, 300)
+        if self.which("notify-send"):
+            code, out, _ = self.run([
+                "notify-send", "--app-name=ml-stack", "--urgency=critical", "--wait",
+                f"--expire-time={WAIT_S * 1000}", "--action=mine=" + MINE,
+                "--action=other=" + OTHER, "--action=decline=" + DECLINE, "--", title, body])
+            if code == 0 and out.strip() in ("mine", "other", "decline"):
+                return out.strip()
+            if code == 0 and not out.strip():
+                return "timeout"
+        if self.which("zenity"):
+            code, out, _ = self.run(["zenity", "--list", "--title", title, "--text", body,
+                                     "--column", "Answer", DECLINE, MINE, OTHER,
+                                     f"--timeout={WAIT_S}"])
+            if code == 5:
+                return "timeout"
+            return {MINE: "mine", OTHER: "other"}.get(out.strip(), "decline") if code == 0 \
+                else "decline"
+        return "unavailable"
+
+    def show_code(self, title: str, body: str) -> bool:
+        if self.which("zenity"):
+            return self.run(["zenity", "--info", "--title", clean(title, 80), "--text",
+                             clean(body, 300), f"--timeout={WAIT_S}"])[0] == 0
+        return self.run(["notify-send", "--app-name=ml-stack", "--", clean(title, 80),
+                         clean(body, 300)])[0] == 0
 
 
 class WindowsNotifier:
-    """Designed, not built: a toast needs an app id registered with the shell, and the
-    PowerShell route builds XML from text, which is the injection described above. Until it
-    is built with the text passed as data (a registered helper executable), this says so."""
+    """Designed, not built: toast buttons need an app id registered with the shell, and the
+    PowerShell route builds XML from text, which is an injection."""
 
     name = "windows"
 
-    def notify(self, title: str, body: str) -> bool:
-        raise Unsupported("Windows toast notifications are not built; use the terminal or "
-                          "web interface to see requests")
+    def ask(self, title: str, body: str) -> str:
+        return "unavailable"
+
+    def show_code(self, title: str, body: str) -> bool:
+        raise Unsupported("Windows toast notifications are not built; use the terminal or the "
+                          "web interface to answer requests")
 
 
 class Console:
-    """Prints; the fallback where there is no desktop (and what a test collects)."""
+    """Prints; the fallback where there is no desktop, and what the tests use."""
 
     name = "console"
 
-    def __init__(self, say: Callable[[str], None] = print) -> None:
+    def __init__(self, say: Callable[[str], None] = say_) -> None:
         self.say = say
 
-    def notify(self, title: str, body: str) -> bool:
+    def ask(self, title: str, body: str) -> str:
+        self.say(f"{clean(title, 80)}: {clean(body, 300)} Answer with: ml-stack fleet accept "
+                 "ID --mine|--other, or ml-stack fleet decline ID")
+        return "unavailable"
+
+    def show_code(self, title: str, body: str) -> bool:
         self.say(f"{clean(title, 80)}: {clean(body, 300)}")
         return True
 
 
+class Silent:
+    """``ML_STACK_NOTIFY=off``: nothing is shown."""
+
+    name = "off"
+
+    def ask(self, title: str, body: str) -> str:
+        return "unavailable"
+
+    def show_code(self, title: str, body: str) -> bool:
+        return False
+
+
 def pick(system: str | None = None, *, which: Callable[[str], str | None] = shutil.which,
-         run: Runner = _run) -> Notifier:
-    """The notifier for this machine, or the console where there is none."""
+         run: Runner = _run, env: dict[str, str] | None = None) -> Notifier:
+    """The notifier for this machine: what ``ML_STACK_NOTIFY`` says, else the desktop's, else
+    the console."""
+    chosen = (os.environ if env is None else env).get(ENV, "system").strip().lower()
+    if chosen == "off":
+        return Silent()
+    if chosen == "console":
+        return Console()
     system = system or platform.system()
     if system == "Darwin" and which("osascript"):
         return MacNotifier(run)
-    if system == "Linux" and which("notify-send"):
-        return LinuxNotifier(run)
+    if system == "Linux" and (which("notify-send") or which("zenity")):
+        return LinuxNotifier(run, which)
     if system == "Windows":
         return WindowsNotifier()
     return Console()

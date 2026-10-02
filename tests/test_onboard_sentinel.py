@@ -8,6 +8,12 @@ from ml_stack.fleet.onboard.pairing import Grant, Hooks, PairError, PairingClien
 from ml_stack.fleet.onboard.requests import Refused
 
 
+@pytest.fixture(autouse=True)
+def needs_spake2():
+    pytest.importorskip("spake2")
+
+
+
 def watch_onboarding(bus, sentinel, Event, Severity):
     """The adapter from docs/onboarding.md, verbatim."""
     return bus.subscribe(lambda e: sentinel.bus.emit(
@@ -22,7 +28,7 @@ def test_a_whole_pairing_leaves_the_events_a_watcher_needs(tmp_path):
                        bus=rec.bus, address=("127.0.0.1", 0)) as server:
         c = PairingClient("127.0.0.1", server.port, fingerprint=joiner.fingerprint)
         rid = c.ask(name="n", hostname="h", model="m")
-        code = rq.accept(rid).code
+        code = rq.accept(rid, mine=True).code
         wrong = "000000" if code != "000000" else "111111"
         with pytest.raises(PairError):
             c.finish(wrong)
