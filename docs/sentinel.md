@@ -262,4 +262,84 @@ deletes).
 
 ## Results
 
-See the end of this file once the measurements are written down.
+Measured on one Apple-silicon laptop, 2026-10-02. "Scripted" means a function that answers
+the canary probes correctly with a set probability; "real" means a llama-server leased
+through `ServerManager`, one at a time, stopped afterwards.
+
+**Integrity.**
+
+| Check | Result |
+|---|---|
+| one flipped byte at the start, middle and end of a 200 kB pinned file, deep check | 3 of 3 found |
+| a change that keeps size and mtime (inode unchanged) | the quick check misses it, the deep check finds it |
+| real GGUF (a 484 MB copy of Qwen3Guard-Gen-0.6B Q4_K_M), one bit flipped mid-file | refused at load, file moved aside, original untouched |
+| cost of hashing that file | 0.2 to 0.5 s, 1 to 2.7 GB/s with the file in the page cache; a cold disk is slower |
+| touched but unchanged file, deep and quick scans | no finding |
+| symlink retargeted, file deleted, binary replaced | each found; the link or the binary is the thing moved |
+
+**Canaries.** 12 probes (5 known answers, 1 JSON extraction, 1 format, 2 refusals, 3
+compliances), baseline 10 runs each, check 5 runs each.
+
+| Model | Result |
+|---|---|
+| scripted, unchanged, baseline p = 0.98 or 0.95 | 0 false alarms in 600 checks each |
+| scripted, got worse to p = 0.5 or 0.2 | 300 of 300 caught each |
+| scripted, p = 0.7 | caught 220 of 300 (baseline 0.98), 184 of 300 (baseline 0.95) |
+| scripted, p = 0.8 | caught 53 of 300, 30 of 300 |
+| scripted, p = 0.9 | 0 of 300 caught |
+| scripted, stops refusing the two refusal probes | caught, both probes named |
+| real Qwen3-VL-2B-Instruct Q4_K_M, temperature 0, 3 runs | baseline 36 of 36; the same model again: no drift |
+| real, replaced by Qwen3Guard-Gen-0.6B | 9 of 36 pass; drift found |
+
+So the detector is built not to cry wolf and sees a model that is much worse or different; a
+slip of ten points in the pass rate is invisible to it, and so is any change the 12 probes do
+not exercise. At 3 runs per probe no single probe has the power to be named; the pooled
+interval does the work.
+
+**Peers.** A request replayed three times: the peer is quarantined at the third and its next
+valid request is refused (against the real `Authenticator`). 35 forged signatures from one
+address: quarantined; an honest address sending 50 valid requests meanwhile: untouched.
+Against the peer watch alone, on a synthetic clock: 5000 valid requests at two per second
+from one peer gave 0 findings, and four failures followed by 200 good requests gave no
+high-confidence finding.
+
+**Benign use.** 3000 screened documents (paragraphs of this repository's `docs/`), 3000 tool
+calls, 3000 peer requests with an occasional single failure and six pinned files touched and
+rewritten with the same bytes, in `enforce` mode: 0 quarantined, 0 watched. 2000 further
+screens and calls with decoys planted: 0 decoy findings. Held-text overlap against 536
+paragraphs of `docs/` after three injections were held: 0 false matches. Against the real
+guard rails, text they fence is watched in `guarded` mode and held in `enforce` mode; how
+often they fence ordinary text is theirs to report.
+
+**Held text copied into a summary.** Six verbatim copies (whole, and quoted sentence) of held
+injections: 6 of 6 found. Three paraphrases: 0 of 3 found. The signal is shared six-word runs;
+a model that rewords the instruction gets past it. The first PyRIT baseline put a planted
+instruction in a summary 7 of 9 times, and this catches the copies among those, not the
+rewordings.
+
+**Agent surface.** 17 attack calls (a shell command or file edit naming a sentinel verb or
+path, a sentinel tool name, an environment override) refused; 11 ordinary calls (including
+the words "security", "release", "mode" and "sentinel" in prose) allowed. `release`, `purge`
+and `mode` through the command line, run as a real subprocess: refused with no terminal,
+refused under `CLAUDECODE` even on a pseudo-terminal, refused on a wrong id, accepted on a
+pseudo-terminal when the id is typed.
+
+**Crash safety.** The state writer was killed with SIGKILL at 12 different moments, the log
+writer at 8: the state always loaded with its seal intact (`tampered` false) and a non-decreasing
+record count, and the log always verified. A rotation interrupted after the head was updated
+and before the oldest file was removed verifies.
+
+**Mutation check.** 112 hand-written faults, one at a time, each run against the sentinel
+tests: 110 killed, 2 not applicable (a fault written against code that was then removed, and
+one mis-specified). The first pass killed 83; the 15 survivors named missing tests (the
+sequence and link checks each hiding behind the other, an interrupted rotation, the
+previous-copy fallback, probe voting, the any/complies/rate paths, protected-path
+resolution, a mode of `off` reaching `handle`, the file mode of held text) and a redundant
+`chmod`, which was removed. Each now fails a test.
+
+**Not verified.** The Broker (admission-control branch) was not merged, so canaries were run
+through `ServerManager` rather than through its request queue, and the fleet daemon was not
+wrapped; the `Authenticator` is where the integration was tested. No pyright run was made on
+the sentinel package beyond the repository's budget check. Nothing was tried on Linux or
+Windows. `agent_may` was not run against a live model-driven attack: the PyRIT suite
+(`agent/redteam`) was not merged, and the attack strings are hand-written.
