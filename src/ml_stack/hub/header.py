@@ -80,35 +80,56 @@ def _value(f: BinaryIO, kind: int) -> object:
     return struct.unpack(code, f.read(struct.calcsize(code)))[0]
 
 
-def _wanted(key: str) -> bool:
-    return (key.startswith("general.")
-            or key.endswith((".context_length", ".block_count")))
+def _array(f: BinaryIO) -> list[object] | None:
+    """A short array of numbers or flags, or ``None`` after skipping any other."""
+    (item,) = struct.unpack("<I", f.read(4))
+    (count,) = struct.unpack("<Q", f.read(8))
+    if item in (8, 9) or count > 4096:
+        for _ in range(count):
+            _skip(f, item)
+        return None
+    return [_value(f, item) for _ in range(count)]
 
 
-def read(path: Path | str) -> Header | None:
-    """The header summary of a GGUF file, or ``None`` when it is not one.
+VOCAB = "vocab_size"
+"""The key `meta` adds: how many tokens the tokenizer lists."""
 
-    Reading stops at the first tokenizer key, which writers place after the architecture's
-    own keys; the tokenizer's arrays are the only large part of a header.
+
+def meta(path: Path | str) -> dict[str, object] | None:
+    """Every key the header holds before its tokenizer, or ``None`` when it is not a GGUF.
+
+    Scalars, strings and short numeric arrays are read; the tokenizer's arrays are the only
+    large part of a header, so reading stops at the first tokenizer key, counting the tokens
+    there as ``vocab_size``.
     """
+    found: dict[str, object] = {}
     try:
         with Path(path).open("rb") as f:
             if f.read(4) != MAGIC:
                 return None
             f.seek(12, 1)
             (count,) = struct.unpack("<Q", f.read(8))
-            found: dict[str, object] = {}
             for _ in range(count):
                 key = _text(f)
                 (kind,) = struct.unpack("<I", f.read(4))
                 if key.startswith("tokenizer."):
+                    if key == "tokenizer.ggml.tokens" and kind == 9:
+                        f.seek(4, 1)
+                        found[VOCAB] = struct.unpack("<Q", f.read(8))[0]
                     break
-                if kind != 9 and _wanted(key):
-                    found[key] = _value(f, kind)
+                if kind == 9:
+                    got = _array(f)
+                    if got is not None:
+                        found[key] = got
                 else:
-                    _skip(f, kind)
+                    found[key] = _value(f, kind)
     except (OSError, struct.error, KeyError):
         return None
+    return found
+
+
+def summary(found: dict[str, object]) -> Header:
+    """The listing facts out of a header read by `meta`."""
     arch = str(found.get("general.architecture", ""))
     label = str(found.get("general.size_label", ""))
     count_key = found.get("general.parameter_count")
@@ -122,3 +143,9 @@ def read(path: Path | str) -> Header | None:
         context_length=int(found.get(f"{arch}.context_length", 0) or 0),
         layers=int(found.get(f"{arch}.block_count", 0) or 0),
     )
+
+
+def read(path: Path | str) -> Header | None:
+    """The header summary of a GGUF file, or ``None`` when it is not one."""
+    found = meta(path)
+    return summary(found) if found is not None else None
