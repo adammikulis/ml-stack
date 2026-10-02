@@ -873,7 +873,18 @@ def main(argv: list[str] | None = None) -> int:
     leave_p.add_argument("--keep-running", action="store_true",
                          help="leave the daemon up, just stop answering as a peer")
 
+    from .onboard.cli import COMMANDS as ONBOARD
+    from .onboard.cli import add_commands
+    from .onboard.cli import run as run_onboard
+
+    add_commands(sub)
     args = ap.parse_args(argv)
+    if args.cmd in ONBOARD:
+        try:
+            return run_onboard(args)
+        except (OSError, SystemExit) as exc:
+            warn(f"error: {exc}")
+            return 2
     fn = {"join": cmd_join, "status": cmd_status, "plan": cmd_plan,
           "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave}[args.cmd]
     try:
