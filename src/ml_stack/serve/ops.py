@@ -37,6 +37,7 @@ from ml_stack.serve.backend import (
     ServerSpec,
     default_slot_save_path,
 )
+from ml_stack.serve import broker_wire
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.leases import lease_file, orphaned, recorded_servers
 from ml_stack.serve.manager import ServerManager
@@ -645,7 +646,7 @@ def write_plist(where: Path, mb: int) -> Path:
 
 
 def limits(*, memory_size: str = "", servers: int | None = None, slots: int | None = None,
-           idle: str = "", clear: bool = False) -> Limits:
+           idle: str = "", clear: bool = False, adopt_unmanaged: str = "") -> Limits:
     """Set whatever is named, then read back what this machine allows.
 
     Every limit is off until somebody sets one. Raises `Refused` on a size or a length of
@@ -671,6 +672,8 @@ def limits(*, memory_size: str = "", servers: int | None = None, slots: int | No
     for name, value in (("servers", servers), ("slots", slots)):
         if value is not None:
             asked[name] = int(value)
+    if adopt_unmanaged:
+        asked["adopt_unmanaged"] = adopt_unmanaged
     if asked:
         limits_mod.changed(**asked)
 
@@ -717,8 +720,14 @@ def down(port: int, *, root: str | Path | None = None) -> tuple[Stopped, str]:
         raise Refused(f"something is serving on {url}{where}, and this machine has no "
                       "record of starting it.", "  stop it the way it was started.")
 
+    if entry.get("unmanaged"):
+        raise Refused(f"{url} was adopted and not started by ml-stack, so ml-stack does not "
+                      "stop it.", "  stop it the way it was started.")
     owner = _int_or_none(entry.get("owner_pid"))
     pid = _int_or_none(entry.get("pid"))
+    if owner is not None and owner == broker_wire.running():
+        broker_wire.stop(port, force=True)
+        return Stopped(port, url, pid, pid_exists(pid), owner), withdraw(root, port)
     if owner is not None and owner != pid and pid_exists(owner):
         raise Refused(f"{url} is held by process {owner}, which is still running.",
                       "  that process started it and will stop it.")

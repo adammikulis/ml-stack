@@ -49,6 +49,8 @@ class Limits:
     """The most conversations one server may hold."""
     idle_s: float = 0.0
     """Stop a server that has not been seen busy for this long. 0 leaves it running."""
+    adopt_unmanaged: str = "off"
+    """``off``, ``ask`` or ``auto``: whether the broker takes in llama-servers it did not start."""
 
     def room(self, machine: int) -> int:
         """The memory a model may use here: the machine's answer, capped by ours."""
@@ -83,6 +85,8 @@ class Limits:
             out.append(f"slots    {self.slots} on one server")
         if self.idle_s:
             out.append(f"idle     stop a server unused for {self.idle_s:.0f}s")
+        if self.adopt_unmanaged != "off":
+            out.append(f"adopt    unmanaged servers: {self.adopt_unmanaged}")
         return out
 
 

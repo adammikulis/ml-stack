@@ -8,6 +8,7 @@ caller starts it by hand.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import secrets
@@ -25,12 +26,16 @@ from ml_stack.lock import Busy, only_one
 from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
 from ml_stack.serve.backend import ServerFailed
-from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant
+from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
+from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
 from ml_stack.serve.ports import DEFAULT_HOST
 from ml_stack.serve.process import pid_exists
 
 __all__ = ["call", "claim", "cores", "give_back_cores", "lease", "record_path", "release",
            "serve", "status", "stop", "unclaim"]
+
+LOCAL_ENV = "ML_STACK_BROKER_LOCAL"
+"""Set to ``1`` to run the broker inside the process instead of reaching the machine's."""
 
 START_WAIT_S = 30.0
 REAP_EVERY_S = 1.0
@@ -54,8 +59,8 @@ class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         try:
             reply = self.server.answer(json.loads(self.rfile.readline()))
-        except (BrokerError, ServerFailed, ValueError, TypeError, KeyError) as exc:
-            reply = {"ok": False, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - whatever a call raises is the caller's to see
+            reply = {"ok": False, "error": str(exc), "kind": type(exc).__name__}
         self.wfile.write((json.dumps(reply) + "\n").encode("utf-8"))
 
 
@@ -76,6 +81,24 @@ class _Server(socketserver.ThreadingTCPServer):
         if op == "lease":
             ask = Ask.from_json(body)
             return {"ok": True, **self.broker.lease(ask, timeout=float(body["wait_s"])).as_dict()}
+        if op == "start":
+            info = self.broker.start(
+                spec_from(body["spec"]), pid=pid, label=str(body.get("label") or ""),
+                timeout=body.get("timeout_s"), options=body.get("options") or {})
+            return {"ok": True, **info_dict(info)}
+        if op == "drop":
+            self.broker.drop(ServerInfo(**{**info_fields(body["info"]), "process": None}),
+                             grace_s=float(body.get("grace_s") or 5.0))
+            return {"ok": True}
+        if op == "escalate":
+            info = self.broker.escalate(
+                spec_from(body["spec"]), add_slots=int(body.get("add_slots") or 1),
+                room=body.get("room"), timeout=body.get("timeout_s"),
+                anyway=bool(body.get("anyway")), options=body.get("options") or {})
+            return {"ok": True, **info_dict(info)}
+        if op == "detach":
+            self.broker.detach(ServerInfo(**info_fields(body["info"])))
+            return {"ok": True}
         if op == "release":
             return {"ok": True, "released": self.broker.release(str(body["lease"]))}
         if op == "status":
@@ -92,6 +115,87 @@ class _Server(socketserver.ThreadingTCPServer):
         if op == "unclaim":
             return {"ok": True, "released": self.broker.unclaim(str(body["name"]), pid)}
         return {"ok": False, "error": f"no such broker call: {op!r}"}
+
+
+_INFO_FIELDS = ("base_url", "port", "pid", "backend", "adopted", "load_s", "warmup_s", "lease")
+
+
+def info_dict(info: ServerInfo) -> dict[str, Any]:
+    """A server as it crosses the wire."""
+    return {**{k: getattr(info, k) for k in _INFO_FIELDS},
+            "log_path": str(info.log_path) if info.log_path else None}
+
+
+def info_fields(body: dict[str, Any]) -> dict[str, Any]:
+    """The `ServerInfo` arguments in ``body``."""
+    out = {k: body[k] for k in _INFO_FIELDS if k in body}
+    if body.get("log_path"):
+        out["log_path"] = Path(body["log_path"])
+    return out
+
+
+def spec_to_json(spec: ServerSpec) -> dict[str, Any]:
+    """A spec as it crosses the wire."""
+    return {f.name: str(v) if isinstance(v, Path) else v
+            for f in dataclasses.fields(spec) if f.name != "process"
+            for v in [getattr(spec, f.name)]}
+
+
+def spec_from(body: dict[str, Any]) -> ServerSpec:
+    """The spec ``spec_to_json`` wrote; a field a spec has no name for is refused."""
+    names = {f.name for f in dataclasses.fields(ServerSpec)} - {"process"}
+    unknown = sorted(set(body) - names)
+    if unknown:
+        raise ValueError(f"not server settings: {', '.join(unknown)}")
+    return ServerSpec(**{k: tuple(v) if isinstance(v, list) else v for k, v in body.items()})
+
+
+class RemoteBroker:
+    """The machine's broker, reached over its socket, for a `ServerManager` to start
+    servers through."""
+
+    def __init__(self, backend: LlamaServerBackend) -> None:
+        self.options = {"backend": backend.options()}
+
+    def start(self, spec: ServerSpec, *, timeout: float | None = None,
+              options: dict[str, Any] | None = None, on_event: Any = None,
+              say: Any = None) -> ServerInfo:
+        """A server for ``spec`` from the broker, which waits for memory to start one."""
+        reply = call("start", timeout=None, label=who(), spec=spec_to_json(spec),
+                     timeout_s=timeout, options={**self.options, **(options or {})})
+        info = ServerInfo(**info_fields(reply))
+        if on_event is not None:
+            on_event({"event": "ready", "port": info.port, "adopted": info.adopted})
+        return info
+
+    def drop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
+        """Let go of the lease ``info`` was granted under."""
+        call("drop", info=info_dict(info), grace_s=grace_s, start=False)
+
+    def escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
+                 timeout: float | None = None, anyway: bool = False, on_event: Any = None,
+                 say: Any = None) -> ServerInfo:
+        """Grow the server on ``spec.port`` by ``add_slots`` conversations."""
+        reply = call("escalate", timeout=None, spec=spec_to_json(spec), add_slots=add_slots,
+                     room=room, timeout_s=timeout, anyway=anyway, options=dict(self.options))
+        return ServerInfo(**info_fields(reply))
+
+    def detach(self, info: ServerInfo) -> None:
+        """Record the server under its own pid."""
+        call("detach", info=info_dict(info), start=False)
+
+
+def broker_for(manager: Any) -> Any:
+    """The broker ``manager`` starts servers through: the machine's, over its socket, when
+    the manager keeps the machine's records and starts llama.cpp the ordinary way; else one
+    that runs in this process over the manager's own records."""
+    from ml_stack.serve.leases import lease_file
+
+    backend = manager.backend
+    if (os.environ.get(LOCAL_ENV) != "1" and type(backend) is LlamaServerBackend
+            and Path(manager.state_file) == lease_file()):
+        return RemoteBroker(backend)
+    return Broker(manager)
 
 
 def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> int:
@@ -187,6 +291,12 @@ def _reach(*, start: bool) -> dict[str, Any]:
     raise BrokerError(f"the broker did not come up within {START_WAIT_S:.0f}s; see {log_path()}")
 
 
+def running() -> int | None:
+    """The pid of the machine's broker when it answers, else ``None``."""
+    record = _answering()
+    return int(record["pid"]) if record else None
+
+
 def call(op: str, *, timeout: float | None = 30.0, start: bool = True,
          **fields: Any) -> dict[str, Any]:
     """Send ``op`` to the broker, starting it first when ``start``. Raises `BrokerError`
@@ -199,8 +309,20 @@ def call(op: str, *, timeout: float | None = 30.0, start: bool = True,
             raise
         reply = _send(_reach(start=True), body, timeout=timeout)  # it quit after the ping
     if not reply.get("ok"):
-        raise BrokerError(str(reply.get("error") or f"the broker refused {op}"))
+        raise _error(str(reply.get("kind") or ""))(
+            str(reply.get("error") or f"the broker refused {op}"))
     return reply
+
+
+def _error(kind: str) -> type[Exception]:
+    """The exception class named ``kind`` among the server failures; else `BrokerError`."""
+    todo: list[type[Exception]] = [ServerFailed]
+    seen: dict[str, type[Exception]] = {}
+    while todo:
+        one = todo.pop()
+        seen[one.__name__] = one
+        todo.extend(one.__subclasses__())
+    return seen.get(kind, BrokerError)
 
 
 def lease(purpose: str, models: list[str] | tuple[str, ...], *, spec: dict[str, Any] | None = None,
@@ -209,14 +331,9 @@ def lease(purpose: str, models: list[str] | tuple[str, ...], *, spec: dict[str, 
     calls `release` or ends. Waits up to ``timeout`` seconds in the queue; ``weight`` is
     the bytes it will take when the weights are not on disk to measure."""
     reply = call("lease", timeout=None, purpose=purpose, models=list(models), spec=spec or {},
-                 weight=weight, label=_label(), wait_s=timeout)
+                 weight=weight, label=who(), wait_s=timeout)
     return Grant(**{k: reply[k] for k in ("lease", "purpose", "model", "port", "base_url",
                                           "shared")})
-
-
-def _label() -> str:
-    """This process as a person would recognise it in the queue."""
-    return " ".join([Path(sys.argv[0]).name, *sys.argv[1:]])[:120] if sys.argv else ""
 
 
 def release(lease_id: str) -> bool:

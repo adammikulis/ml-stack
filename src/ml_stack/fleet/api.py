@@ -14,11 +14,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from ml_stack import gate
 from ml_stack.files import promote
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
@@ -195,6 +197,16 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if body is not None:
                 upstream.add_header("Content-Length", str(len(body)))
 
+            where = f"http://127.0.0.1:{port}{rest}"
+            try:
+                with gate.turn(where) if gate.is_generation(where) else nullcontext():
+                    return self._forward(upstream)
+            except gate.QueueTimeout as exc:
+                self._send(429, {"error": str(exc)})
+                return True
+
+        def _forward(self, upstream: urllib.request.Request) -> bool:
+            """Relay ``upstream`` to the caller as it is generated."""
             try:
                 response = urllib.request.urlopen(upstream, timeout=INFER_TIMEOUT)
             except urllib.error.HTTPError as exc:

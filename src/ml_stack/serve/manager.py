@@ -17,6 +17,7 @@ from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
 from ml_stack.files import write_json
 from ml_stack.hub import free_memory, room as machine_room
+from ml_stack.serve import admission
 from ml_stack.serve.backend import (
     Lease,
     LlamaServerBackend,
@@ -35,6 +36,7 @@ from ml_stack.serve.escalation import (
     summarise,
 )
 from ml_stack.serve.events import Event, emit
+from ml_stack.lock import only_one
 from ml_stack.serve.leases import (
     lease_file,
     merge_state,
@@ -43,6 +45,8 @@ from ml_stack.serve.leases import (
     recorded_servers,
 )
 from ml_stack.serve.matching import model_matches, serving_mismatch
+from ml_stack.serve import unmanaged
+from ml_stack.serve.unmanaged import unmanaged_servers
 from ml_stack.serve.mlx_tree import MlxTreeBackend, is_mlx
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free, reclaim_port
 from ml_stack.serve.process import (
@@ -95,11 +99,15 @@ class ServerManager:
         backend: ServerBackend | None = None,
         *,
         state_file: Path | None = None,
+        broker: Any = None,
     ) -> None:
         self.backend = backend or LlamaServerBackend()
         self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
         self.say: Callable[[str], None] | None = None
+        self._broker = broker
+        self.confirm: Callable[[str], bool] | None = None
+        self._leases: dict[str, ServerInfo] = {}
         self._mine: dict[str, dict] = {}
         self._processes: dict[int, Any] = {}
         self._lock = threading.Lock()
@@ -118,12 +126,51 @@ class ServerManager:
 
     # ------------------------------------------------------------------ leasing
 
+    def with_backend(self, backend: ServerBackend) -> ServerManager:
+        """A manager over ``backend`` that shares this one's records and processes."""
+        other = ServerManager(backend, state_file=self.state_file, broker=self._broker)
+        other._mine, other._processes = self._mine, self._processes
+        other._lock, other._port_locks = self._lock, self._port_locks
+        other.tree = self.tree
+        return other
+
+    @property
+    def broker(self) -> Any:
+        """The broker every start, release and escalation goes through."""
+        if self._broker is None:
+            from ml_stack.serve.broker_wire import broker_for
+
+            self._broker = broker_for(self)
+        return self._broker
+
     def lease(self, spec: ServerSpec, *, timeout: float | None = None,
               roam: bool = True, check_flags: bool = True, preflight: bool = True,
               warmup_request: bool = True, escalate: bool = False, anyway: bool = False,
               on_event: Event | None = None,
               say: Callable[[str], None] | None = None) -> ServerInfo:
+        """A healthy server for ``spec``, from the broker: one already up that fits, else a
+        new one when the machine has the memory for it. The broker waits for memory and
+        refuses with `AdmissionRefused` when none comes free.
+
+        ``on_event`` and ``say`` are called with a broker running in this process and not
+        with the machine's broker. The rest of the arguments are those of
+        :meth:`_start_server`.
+        """
+        options = {"roam": roam, "check_flags": check_flags, "preflight": preflight,
+                   "warmup_request": warmup_request, "escalate": escalate, "anyway": anyway}
+        info = self.broker.start(spec, timeout=timeout, options=options,
+                                 on_event=on_event, say=say or self.say)
+        if info.lease:
+            self._leases[info.lease] = info
+        return info
+
+    def _start_server(self, spec: ServerSpec, *, timeout: float | None = None,
+                      roam: bool = True, check_flags: bool = True, preflight: bool = True,
+                      warmup_request: bool = True, escalate: bool = False,
+                      anyway: bool = False, on_event: Event | None = None,
+                      say: Callable[[str], None] | None = None) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
+        Called by the broker and by nothing else.
 
         A server on the port whose record names a leasing process that has gone is an
         orphan: one serving what was asked for is adopted and its record made this
@@ -189,12 +236,14 @@ class ServerManager:
                 if escalate:
                     running = self._slots_shortfall(spec)
                     if running is not None:
-                        return self.escalate(
+                        return self._escalate(
                             running, add_slots=max(1, int(spec.parallel or 1))
                             - max(1, int(running.parallel or 1)),
                             timeout=resolved_timeout, anyway=anyway, on_event=on_event,
                             say=told)
                 if stray is None:
+                    if roam and (reused := self._reusable(spec, on_event=on_event)):
+                        return reused
                     if not roam or not port_is_free(spec.port):
                         elsewhere = (self._beside(spec, timeout=resolved_timeout,
                                                   on_event=on_event, anyway=anyway,
@@ -210,11 +259,31 @@ class ServerManager:
                         self._take_over(spec.port, stray, say=told)
                     emit(on_event, "ready", port=spec.port, adopted=True)
                     return adopted
+                if (stray is None and not port_is_free(spec.port)
+                        and is_healthy(f"http://{DEFAULT_HOST}:{spec.port}", timeout=1.0)):
+                    taken = self._unmanaged_on(spec, told)
+                    if taken is not None:
+                        emit(on_event, "ready", port=spec.port, adopted=True)
+                        return taken
+                    if roam and (reused := self._reusable(spec, on_event=on_event)):
+                        return reused
+                    elsewhere = (self._beside(spec, timeout=resolved_timeout,
+                                              on_event=on_event, anyway=anyway, **starting)
+                                 if roam else None)
+                    if elsewhere is not None:
+                        return elsewhere
+                    raise ServerFailed(
+                        f"port {spec.port} is served by a server ml-stack did not start. "
+                        f"It is left alone; lease on a different port, or set "
+                        f"{unmanaged.ENV}=auto to adopt servers that pass its checks.")
 
+            if roam and (reused := self._reusable(spec, on_event=on_event)):
+                return reused
             try:
                 info = self._launch(spec, timeout=resolved_timeout, on_event=on_event,
                                     anyway=anyway, **starting)
-            except Measuring:
+            except (Measuring, admission.AdmissionRefused):
+                self._forget(spec.port)
                 raise
             except ServerFailed:
                 self._forget(spec.port)
@@ -243,8 +312,8 @@ class ServerManager:
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
         emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
-        info = self.backend_for(spec).start(spec, lease=self._pending(spec), timeout=timeout,
-                                  **starting)
+        info = self.backend_for(spec).start(spec, lease=self._admitted(spec, on_event=on_event),
+                                            timeout=timeout, **starting)
         emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
         return info
 
@@ -305,7 +374,8 @@ class ServerManager:
             try:
                 info = self._launch(moved, timeout=timeout, on_event=on_event,
                                     anyway=anyway, **starting)
-            except Measuring:
+            except (Measuring, admission.AdmissionRefused):
+                self._forget(moved.port)
                 raise
             except ServerFailed:
                 self._forget(moved.port)
@@ -314,9 +384,11 @@ class ServerManager:
             return info
 
     def adopt(self, spec: ServerSpec) -> ServerInfo | None:
-        """The already-running server for ``spec``, if there is one. Else ``None``."""
+        """The running server for ``spec`` on its port, if the lease record holds one there.
+        ``None`` for a port nothing answers on, and for one only an unmanaged server
+        answers on."""
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"
-        if not is_healthy(base_url, timeout=1.0):
+        if str(spec.port) not in self._load() or not is_healthy(base_url, timeout=1.0):
             return None
 
         mismatch = serving_mismatch(spec, reported_models(base_url), serving_params(base_url))
@@ -340,6 +412,14 @@ class ServerManager:
                 timeout: float | None = None, anyway: bool = False,
                 on_event: Event | None = None,
                 say: Callable[[str], None] | None = None) -> ServerInfo:
+        """:meth:`_escalate`, asked of the broker."""
+        return self.broker.escalate(spec, add_slots=add_slots, room=room, timeout=timeout,
+                                    anyway=anyway, on_event=on_event, say=say or self.say)
+
+    def _escalate(self, spec: ServerSpec, *, add_slots: int = 1, room: int | None = None,
+                  timeout: float | None = None, anyway: bool = False,
+                  on_event: Event | None = None,
+                  say: Callable[[str], None] | None = None) -> ServerInfo:
         """Grow the server on ``spec.port`` by ``add_slots`` more concurrent conversations,
         keeping every one already live.
 
@@ -410,6 +490,15 @@ class ServerManager:
         return info
 
     def release(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
+        """Let go of a lease; the broker stops the server when nobody else holds it. A
+        record with no lease is stopped directly."""
+        if info.lease:
+            self._leases.pop(info.lease, None)
+            self.broker.drop(info, grace_s=grace_s)
+            return
+        self._stop(info, grace_s=grace_s)
+
+    def _stop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Stop a server this process started. Adopted servers are left running."""
         if info.adopted:
             logger.debug("not stopping %s: we adopted it", info.base_url)
@@ -423,6 +512,10 @@ class ServerManager:
         self._forget(info.port)
 
     def detach(self, info: ServerInfo) -> None:
+        """Record the server under its own pid, held by nobody, until it is taken down."""
+        self.broker.detach(info)
+
+    def _detach(self, info: ServerInfo) -> None:
         """Record the server under its own pid and stop tracking it in this process."""
         self._processes.pop(info.port, None)
         entry = self._mine.pop(str(info.port), None)
@@ -435,8 +528,12 @@ class ServerManager:
             self._write(state)
 
     def stop_all(self, *, grace_s: float = 5.0) -> list[int]:
-        """Stop every server this process started."""
+        """Release every lease this process holds and stop every server it started."""
         stopped: list[int] = []
+        for info in list(self._leases.values()):
+            self.release(info, grace_s=grace_s)
+            if info.pid:
+                stopped.append(info.pid)
         for entry in list(self._mine.values()):
             pid = entry.get("pid")
             if isinstance(pid, int) and pid_exists(pid):
@@ -450,7 +547,104 @@ class ServerManager:
 
     # ------------------------------------------------------------------ state file
 
-    def _pending(self, spec: ServerSpec) -> Lease:
+    def _admitted(self, spec: ServerSpec, *, on_event: Event | None = None) -> Lease:
+        """The record for a server about to start, written once the machine has the memory
+        for it: waits while the servers up and this one would rate red, and raises
+        `AdmissionRefused` when no room comes free in `admission.wait_s()`."""
+        told = self.say or logger.info
+        deadline = time.monotonic() + admission.wait_s()
+        waiting = False
+        while True:
+            with only_one(self.state_file.with_name("servers.admission.lock"), wait=True,
+                          timeout=STATE_LOCK_TIMEOUT_S, announce=logger.debug):
+                records = recorded_servers(self.state_file)
+                verdict = self._rated(spec, records)
+                if verdict.rating == "red" and self._stop_leaked(records, told):
+                    verdict = self._rated(spec, recorded_servers(self.state_file))
+                if verdict.rating != "red":
+                    if verdict.rating == "yellow":
+                        told(f"port {spec.port}: {verdict.said()}")
+                    return self._pending(spec, est_bytes=verdict.wanted)
+            if time.monotonic() >= deadline:
+                raise admission.AdmissionRefused(
+                    f"port {spec.port}: {verdict.said()}; no memory came free in "
+                    f"{admission.wait_s():.0f}s ({admission.ENV_WAIT} sets the wait)")
+            if not waiting:
+                told(f"port {spec.port}: waiting for memory -- {verdict.said()}")
+                waiting = True
+            time.sleep(0.5)
+
+    def _rated(self, spec: ServerSpec, records: dict[int, dict]) -> admission.Verdict:
+        return admission.check(spec, records, budget=machine_room(),
+                               unmanaged=unmanaged_servers(records))
+
+    def _stop_leaked(self, records: dict[int, dict], told: Callable[[str], None]) -> bool:
+        """Stop every server whose leasing process has gone; whether any was."""
+        stopped = False
+        for port, entry in records.items():
+            if orphaned(entry):
+                told(f"port {port}: stopping the server (pid {entry['pid']}) left running "
+                     f"by pid {entry['owner_pid']}, which has exited")
+                kill_process_tree(int(entry["pid"]))
+                stopped = True
+        if stopped:
+            self._save()
+        return stopped
+
+    def register_unmanaged(self, port: int, seen: unmanaged.Examined) -> None:
+        """Put the examined server on ``port`` in the registry as one ml-stack does not own."""
+        with self._exclusive():
+            state = merge_state(self._load(), self._mine, os.getpid())
+            state[str(port)] = unmanaged.adopt_entry(port, seen)
+            self._write(state)
+
+    def _unmanaged_on(self, spec: ServerSpec, told: Callable[[str], None]) -> ServerInfo | None:
+        """The server ml-stack did not start that listens on ``spec.port``, taken into the
+        registry when the adoption setting allows it and it passes every check; else
+        ``None``."""
+        how = unmanaged.mode()
+        if how == "off":
+            return None
+        seen = unmanaged.examine(spec.port)
+        if not seen.ok:
+            told(f"port {spec.port}: not adopting the server there -- {seen.why}")
+            return None
+        base_url = f"http://{DEFAULT_HOST}:{spec.port}"
+        mismatch = serving_mismatch(spec, reported_models(base_url), serving_params(base_url))
+        if mismatch:
+            told(f"port {spec.port}: not adopting pid {seen.pid} -- " + "; ".join(mismatch))
+            return None
+        what = (f"pid {seen.pid} on port {spec.port} serving {Path(seen.model).name or '?'}")
+        if how == "ask" and not (self.confirm is not None and self.confirm(what)):
+            told(f"port {spec.port}: not adopting {what}; it was not confirmed")
+            return None
+        self.register_unmanaged(spec.port, seen)
+        told(f"port {spec.port}: adopted {what} (setting {unmanaged.ENV}={how}); ml-stack "
+             "queues its requests and counts its memory, and never stops it")
+        logger.warning("adopted unmanaged server: pid=%s port=%s model=%s by pid %s",
+                       seen.pid, spec.port, seen.model, os.getpid())
+        return ServerInfo(base_url=base_url, port=spec.port, pid=seen.pid,
+                          backend=self.backend_for(spec).name, adopted=True)
+
+    def _reusable(self, spec: ServerSpec, *, on_event: Event | None = None) -> ServerInfo | None:
+        """A running server on another port that serves ``spec`` as asked, else ``None``."""
+        for port, entry in recorded_servers(self.state_file).items():
+            if (port == spec.port or entry.get("pending") or not admission.live(entry)
+                    or not model_matches(str(entry.get("model") or ""), spec.model)):
+                continue
+            base_url = f"http://{DEFAULT_HOST}:{port}"
+            if not is_healthy(base_url, timeout=1.0):
+                continue
+            shape = replace(spec, port=port)
+            mismatch = serving_mismatch(shape, reported_models(base_url), serving_params(base_url))
+            if admission.compatible(shape, entry, mismatch):
+                logger.info("reusing the server on %s for %s", base_url, spec.model)
+                emit(on_event, "ready", port=port, adopted=True)
+                return ServerInfo(base_url=base_url, port=port, pid=entry.get("pid"),
+                                  backend=str(entry.get("backend") or ""), adopted=True)
+        return None
+
+    def _pending(self, spec: ServerSpec, *, est_bytes: int = 0) -> Lease:
         """Write the server down before it exists, and hand the backend the proof.
 
         The record carries the port, the model and this process as owner with no pid yet;
@@ -461,6 +655,8 @@ class ServerManager:
         self._mine[str(spec.port)] = {
             "port": spec.port, "pid": None, "backend": self.backend_for(spec).name,
             "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
+            "pool": admission.pool_of(spec), "est_bytes": est_bytes,
+            "embedding": bool(spec.embedding), "mmproj": bool(spec.mmproj),
         }
         self._save()
         return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
@@ -472,6 +668,10 @@ class ServerManager:
             "backend": info.backend,
             "model": str(spec.model),
             "owner_pid": os.getpid(),
+            "pool": admission.pool_of(spec),
+            "est_bytes": (self._mine.get(str(spec.port)) or {}).get("est_bytes", 0),
+            "embedding": bool(spec.embedding),
+            "mmproj": bool(spec.mmproj),
             "base_url": info.base_url,
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
@@ -593,12 +793,19 @@ def stop_all_servers() -> list[int]:
     except (OSError, ValueError):
         return stopped
 
-    for entry in state.values() if isinstance(state, dict) else []:
+    kept = {}
+    for key, entry in state.items() if isinstance(state, dict) else []:
         if not isinstance(entry, dict):
+            continue
+        if entry.get("unmanaged"):
+            kept[key] = entry
             continue
         pid = entry.get("pid")
         if isinstance(pid, int) and pid_exists(pid):
             stopped += kill_process_tree(pid)
 
-    held.unlink(missing_ok=True)
+    if kept:
+        write_json(held, kept)
+    else:
+        held.unlink(missing_ok=True)
     return stopped

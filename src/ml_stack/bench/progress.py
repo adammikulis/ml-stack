@@ -55,7 +55,7 @@ def note_beside_the_run() -> str:
     if not found:
         return ""
     each = ", ".join(f":{one['port']} {one['model'] or '?'} {human_bytes(one['bytes'])}"
-                     + ("" if one["leased"] else ", not leased") for one in found)
+                     + ("" if one["leased"] else ", unmanaged") for one in found)
     said = (f"{len(found)} server(s) already hold this card: {each}. Their memory and "
             f"their work are in these timings, and in the run's record.")
     warn(said)
