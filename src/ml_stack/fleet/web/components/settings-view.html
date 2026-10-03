@@ -6,15 +6,18 @@
     <div class="two">
       <div id="settings-left"></div>
       <div id="settings-right">
-        <div class="group" id="settings-libs"></div>
         <div class="group" id="settings-chatting"></div>
         <div class="group" id="settings-updates"></div>
         <div id="settings-when"></div>
       </div>
     </div>
     <button id="settings-save">Save</button>
-    <div class="group" id="settings-again"></div>
-    <div class="group" id="settings-removal"></div>
+    <details class="aside" id="settings-advanced">
+      <summary>Advanced options: runtimes and maintenance</summary>
+      <div class="group" id="settings-libs"></div>
+      <div class="group" id="settings-again"></div>
+      <div class="group" id="settings-removal"></div>
+    </details>
     <div id="settings-note"></div>
   </main>
 </template>
@@ -88,7 +91,7 @@
           this.radio("autostart", "manual", "Only when I open it", "")));
 
       this.querySelector("#settings-chatting").replaceChildren(
-        el("h2", {}, "Chatting"),
+        el("h2", {}, "Model defaults"),
         M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }));
 
       const status = el("div", { class: "hint", style: "margin-top:10px" },

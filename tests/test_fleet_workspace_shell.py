@@ -91,6 +91,8 @@ def test_chat_sends_history_and_renders_sanitized_markdown(joined, serving_chat,
 
     page, errors = open_page(joined, cookie=joined.cookie, path="/ui/#chat")
     page.wait_for_selector("#chat-askrow:not([hidden])")
+    page.locator("#chat-options summary").click()
+    page.get_by_label("Temperature",exact=True).fill("1.2")
     page.fill("#ask", "Hello")
     page.click("#chat-send")
     page.wait_for_selector("#chat-send:not([hidden])")
@@ -100,6 +102,7 @@ def test_chat_sends_history_and_renders_sanitized_markdown(joined, serving_chat,
     page.wait_for_function("document.querySelectorAll('.msg.assistant').length === 2 && !document.querySelector('#chat-send').hidden")
     sent = [json.loads(raw) for method, path, raw in serving_chat.requests
             if method == "POST" and path == "/v1/chat/completions"]
+    assert sent[-1]["temperature"] == 1.2
     assert [m["content"] for m in sent[-1]["messages"]] == ["Hello", "**Hello** world", "Continue"]
     page.evaluate("""() => {
         const chat = document.querySelector('chat-view');
