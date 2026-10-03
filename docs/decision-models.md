@@ -146,3 +146,17 @@ of anything irreversible.
 - Only PyTorch is wired for training. The released checkpoint runs on CUDA, MPS and CPU
   through transformers; there is no MLX path and no prefix cache across questions about one
   state.
+
+## JevBench (opt-in)
+
+`ml-stack-decide jevbench --fetch` downloads the 231 public items of
+[JevBench](https://github.com/fstandhartinger/jevbench) (MIT, Benchmark Heaven; not affiliated
+with TypeSafe AI) into the cache through the net pipeline, pinned by commit and SHA-256;
+`ml-stack-decide jevbench --yes --backend rules --backend pointer --backend logprob --gguf M.gguf`
+scores the backends per question type and tier (accuracy with an unanswered item counted wrong,
+Brier and ECE over the answered ones). The held-out half and the sealed items are not public, and
+this is not the official JevBench Score (which also weighs cost, speed and a sealed set). It uses
+the GPU, so it is in no test tier. Measured 2026-10-03, one M-series Mac, llama.cpp b11380,
+torch 2.14 on MPS: pointer (Strands v19) 170/231 = 0.736 (easy 1.000, original 0.917, hard 0.505;
+Brier 0.339, ECE 0.073); logprob Qwen3.8-27B Q4_K_M 0.874 (hard 0.748; Brier 0.166, ECE 0.031);
+first-option rules floor 0.303.
