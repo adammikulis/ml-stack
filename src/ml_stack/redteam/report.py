@@ -116,3 +116,19 @@ def compare(old: Report, new: Report) -> dict[str, list[tuple[str, str, str, str
         "new": sorted(k for k in after if k not in before),
         "gone": sorted(k for k in before if k not in after),
     }
+
+
+def success_rates(old: Report, new: Report) -> tuple[float, float, int]:
+    """Attack-success rate of ``old`` and ``new`` over the targets ``new`` attacked, and how many attempts that is in ``new``.
+
+    Attempts that errored count nothing either way. A run that attacked a subset of the baseline's
+    targets (the CI job runs only the scenarios that need no model) is compared with the baseline
+    restricted to those targets, so the two rates are over the same surfaces.
+    """
+    targets = {a.target for a in new.attempts}
+
+    def rate(report: Report) -> tuple[float, int]:
+        rows = [a for a in report.attempts if a.target in targets and not a.error]
+        return (sum(a.succeeded for a in rows) / len(rows) if rows else 0.0), len(rows)
+
+    return rate(old)[0], rate(new)[0], rate(new)[1]

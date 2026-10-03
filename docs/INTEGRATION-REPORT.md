@@ -1,8 +1,10 @@
 # Integration report: `integration/0.3.0`
 
-One branch, cut from `0.2dev` (5c1353a), carrying the finished agent branches. 203 commits ahead of
-`0.2dev`; 451 files changed. Run on one Apple-silicon Mac (Python 3.13.5, 16 cores, load 20 to 190
-from other agents' runs), 2026-10-02.
+One branch, cut from `0.2dev` (5c1353a), carrying the finished agent branches. At 83f0009 it is 259
+commits ahead of `0.2dev` (`git rev-list --count`); 585 files changed. Run on one Apple-silicon Mac
+(Python 3.13.5, 16 cores, load 20 to 190 from other agents' runs), 2026-10-02. This report was
+refreshed against 83f0009 by the release-cleanup pass; the sections that describe the first ten merges
+and the first full runs are unchanged from when they were written.
 
 ## What merged, in order
 
@@ -18,28 +20,33 @@ from other agents' runs), 2026-10-02.
 | `agent/py312` (the Python 3.11 floor) | 17bf2ad | 4942588 | `docs/packages.md`. |
 | `agent/release-ready` | 6768564 | 00c790e | three workflow files: comment-only conflicts, the version-annotated side kept. |
 | `fix/test-speed` | b8fb60e | 1a3051d | `tests/conftest.py` (heavy and live-API markers kept with the redteam deselection), `pyproject.toml` (markers), `budgets.json`. |
+| `agent/lan-onboarding` | cf7118c | 904995b | merged onto the load-aware test-slot commit 35d1409; `docs/commands.md`, `docs/security.md`, `pyproject.toml` (the `fleet-onboard` extra), `cli/reference.py`. |
+| `agent/internet-pipeline` | 59e75b9 | 938716b | `HANDOFF.md`, `budgets.json`, `docs/commands.md`, `docs/security.md`, `pyproject.toml`, `scripts/testslots.py`, `cli/reference.py`; the merge also changed `fleet/onboard/{events,human,lan,web,pairing,transfer}.py` against the onboarding branch's versions, `decide/fetch.py`, `fleet/updates.py`, `fleet/weights.py`, `fleet/llama.py`, `fleet/environment.py`, `fleet/catalogue.py`. |
+| `feat/decision-model-type` | 16c2010 | 18601d9 | the registered-decider readers moved to `ml_stack.deciders` (core) so `hub` and `decide` no longer import each other; the layer test stays green. |
+| `feat/workspace-landing` | 1077e13 | 65a58d7 | merged after 40ce397 (below). |
+| `agent/sandbox` | 1dab54b | 4d1b3a8 | union of the `security.md` sections and the `ml-stack-security` row; the sandbox layer is placed in the layer test; `launch()` carries a reasoned `noqa` for its new cwd and the probe helper uses `pathlib` so no budget rises (2838fa4 then recorded `ruff-other` 386 to 385). |
+| `feat/sentinel-wiring` | c1d1c2a | 83f0009 | sentinel armed by default in the Agent, the Broker and the daemons (issues 24, 26, 31). |
+
+Between those merges the lead committed two integration changes on the branch itself: 35d1409
+(load-aware test slots with heavy lanes, offline fleet page tests, real-llama model choice by header)
+and 40ce397 (a decider's server must be on this machine unless the operator names the host:
+`ML_STACK_DECIDE_URL` and the embed server are loopback-only by default and `ML_STACK_FETCH_ALLOW_HOSTS`
+names the exceptions; the router's reachability probe checks first). `HANDOFF.md`, "Integration (0.3.0)"
+records the two decisions that need a person's check.
 
 `agent/redteam-integ`, `agent/audit`, `agent/decide`, `agent/guardrails`, `agent/port-pcbe`,
 `agent/redteam` and `fix/serve-admission-control` have no commit that is not already in the merged
 branches.
 
-### Not merged
+### Merged late
 
-- **`agent/lan-onboarding`** (9a54ca5, 5978f85, 859bbe9) and **`agent/internet-pipeline`**
-  (88 commits ahead of `0.2dev`). The task said to skip branches still in progress; a later
-  message from the lead said both were finished and to merge them. The permission classifier
-  refused each merge (`git merge --no-ff agent/lan-onboarding`: "Modify Shared Resources";
-  `agent/internet-pipeline`: "Interfere With Workloads"). Nothing in the repository was changed
-  for either. Work that depends on them is not done: the `http-servers` fold of
-  `fleet/onboard/web.py`, device-only pairing as the default, the SPAKE2 library check against
-  the branch's `spake.py`, the net-pipeline no-bypass scan and its network seal across the merged
-  suite, the ClamAV skip, and the internet-pipeline HANDOFF leftovers. The owner decides whether
-  to run the two merges (`git merge --no-ff agent/lan-onboarding`, then
-  `agent/internet-pipeline`) in this worktree.
-- SPAKE2, from what is knowable without the branch: `spake2` 0.9 on PyPI is a pure-Python wheel
-  (`py3-none-any`) with the SPAKE2 protocol over Ed25519, used by magic-wormhole; the
-  `cryptography` package has no SPAKE2 or generic group arithmetic to build it from. Whether it
-  is a drop-in for `fleet/onboard/spake.py` was not checked and stays an open risk.
+`agent/lan-onboarding` and `agent/internet-pipeline` were first left out (the merges were refused by the
+permission classifier while the branches were still in progress) and are merged now, in the order above,
+followed by `feat/decision-model-type`, `feat/workspace-landing`, `agent/sandbox` and
+`feat/sentinel-wiring`. The checks that depended on the first two (the net-pipeline no-bypass scan and its
+network seal across the merged suite) are in the default tier whose latest result is below.
+The SPAKE2 library check against `fleet/onboard/pake.py` on the wheel the `fleet-onboard` extra installs is
+still open (`HANDOFF.md`).
 
 ## Integration bugs found and fixed
 
@@ -107,7 +114,8 @@ All commands from the worktree, through the machine's shared test-slot queue.
 
 | Run | Command | Result |
 |---|---|---|
-| Default tier, final tree | `python scripts/test full` | `6948 passed, 5 skipped, 7 warnings in 325.76s (0:05:25)` |
+| Default tier, latest tree (83f0009) | `python scripts/test full` | `7716 passed, 10 skipped` (the line as recorded by the lead for 83f0009; the elapsed time was not recorded) |
+| Default tier, before the late merges | `python scripts/test full` | `6948 passed, 5 skipped, 7 warnings in 325.76s (0:05:25)` |
 | Default tier, before the fixes | `pytest tests -n 2 -q` | `5 failed, 6867 passed, 6 skipped, 5 warnings in 687.48s (0:11:27)` |
 | Default tier, after test-speed merge | `python scripts/test full` | `3 failed, 6945 passed, 5 skipped, 9 warnings in 430.37s` (two table tests and the decide backend; fixed) |
 | Slow tier, model and server modules, serial | `pytest --slow -n 0 tests/test_serve_real_llama.py tests/test_sentinel_real_model.py tests/test_serve_three_callers.py tests/test_serve_broker.py tests/test_serve_orphans.py tests/test_serve_exit_guard.py tests/test_serve.py tests/test_guard_native.py tests/test_spec_serve.py tests/test_fleet_serving.py tests/test_sentinel_crash.py tests/test_isolation_guard.py` | `1 failed, 210 passed, 1 skipped in 303.55s`; the failure was bug 11. `ML_STACK_TEST_GGUF=<gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf> pytest --slow -n 0 tests/test_serve_real_llama.py`: `1 passed in 23.65s` (a real llama-server leased through the broker, queued, stopped; `servers.json` empty afterwards) |
@@ -161,7 +169,7 @@ only.
 - `gate/gpu` isolation is shown by a probe and a guard that watch files, not by a directory
   watcher.
 - The `quick` and `fast` tiers of `scripts/test` were not timed.
-- Both unmerged branches (above).
+- The slow tier and the red-team tier were not re-run on 83f0009; the numbers above for them are from before the late merges.
 
 ## Open items carried from the branches' `HANDOFF.md`
 
@@ -180,10 +188,8 @@ objects.
 
 ## Decisions for the owner
 
-1. Run the two remaining merges (`agent/lan-onboarding`, `agent/internet-pipeline`), then the
-   work listed under "Not merged". Device-only pairing as the default, `cryptography` staying
-   optional (`fleet-tls`) with a clear message when it is missing, and a vetted SPAKE2 library
-   are the lead's instructions for the first.
+1. Check the `spake2` wheel the `fleet-onboard` extra installs against `fleet/onboard/pake.py`, and that
+   `cryptography` stays optional (`fleet-tls`) with a clear message when it is missing.
 2. Whether `docs/INTEGRATION-REPORT.md` stays after the release.
 3. Whether a fresh `tests-collected` is recorded from a machine that has every extra installed.
 4. Whether the red-team tier (`--redteam`) joins the default tier or a scheduled job; it is what

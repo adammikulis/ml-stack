@@ -77,6 +77,12 @@ clock from about 145 s to about 109 s on four workers.
 | `test_packaging.py`, `test_fleet_environment.py` | builds a wheel |
 | `test_bench_selfcheck.py` (four of them) | runs the whole self-check path |
 
+`test_packaging_install_runs.py` (slow) builds what it needs from the checkout: the ml-stack wheel through
+`packaging/build.py` (hatchling, from the local pip cache or the index) and a stand-in wheelhouse of the
+extras plus every unconditional requirement read from the built wheel's metadata, then installs with
+`--no-index`. The Windows-installer tests need `pwsh` (skipped with that reason when it is absent). Nothing
+else is a prerequisite once hatchling is cached.
+
 Two costs are *not* marked, because marking them would move the cost rather than remove it:
 
 - `test_graph_thread.py::long_thread` — a module-scoped fixture that builds a two-hundred-turn
