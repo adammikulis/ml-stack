@@ -35,7 +35,7 @@ COMMANDS.add(
 COMMANDS.add(
     "up", lifecycle_cli.cmd_up,
     help="serve a model, or adopt the one already serving it",
-    options=lifecycle_cli.OPTIONS_UP)
+    options=lifecycle_cli.OPTIONS_UP, allow_abbrev=False)
 
 COMMANDS.add(
     "profile", profile_cli.cmd_profile,

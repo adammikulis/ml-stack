@@ -130,6 +130,62 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server started with
 the wrong settings hands back a lease that cannot do what was asked of it.
 
+### IQ quantisations on Apple silicon
+
+A lease for an IQ-family GGUF (IQ1_S, IQ1_M, IQ2_XXS/XS/S/M, IQ3_XXS/XS/S/M, IQ4_NL, IQ4_XS)
+on a Mac with an arm64 CPU is refused with `BlockedQuant`. `ml-stack-serve up` exits 3 for it
+(2 for every other refusal). Linux, Windows, a CPU-only lease (`n_gpu_layers` 0) and engines
+other than llama.cpp are never refused. The refusal names the model and the quantisation,
+quotes the measurement below, lists non-IQ builds of the same model found beside the file
+(the same folder, its parent and their subfolders), and shows the override.
+
+**Why.** The one measurement on this machine class, Qwen3.8-Flash-Next answering `plain`
+with thinking on and no draft head on Metal (`docs/architectures/qwen4exp.md`,
+`docs/report-2026-09-23.md`): `UD-IQ4_XS` took 70.1 s a question at 54% F1 over ten
+questions, `UD-Q4_K_XL` 43.7 s at 64% over nine. The policy rests on that and on the general
+expectation that IQ types decode through lookup tables Metal runs slowly.
+
+**Limits of that evidence.** It is one model on one machine, ten and nine questions, one
+run each. The same report holds rows that point the other way or show the noise: the same
+`UD-Q4_K_XL` asking (`plain`, thinking on, no head, nine questions) also ran at 27.6 s and
+81% F1; `UD-IQ4_XS` `plain` thinking on over 34 questions ran at 40.0 s and 59% (and at
+65.1 s and 55% in another run); with thinking off and `plain+tight` asking `UD-IQ4_XS` scored
+85% F1 at 36.6 s over nine questions, the best F1 the K-quant reached too. Run-to-run spread
+on one configuration is larger than the gap in the pair. The IQ4_XS build is also 87.6G
+against 104.0G for the K-quant, which is why someone picks it. No other IQ against K-quant
+measurement exists in `docs/model-ranking.md`, `docs/fit.md` or the bench store code
+(`docs/fit.md` holds IQ4_XS memory numbers, not speed). The refusal is the owner's policy,
+not a benchmark result; re-measure with `ml-stack-bench` before treating it as one.
+
+**How a file is judged IQ** (`ml_stack.serve.quant_guard.iq_quant`, header only, no tensor
+data read): its `general.file_type` is an IQ type, or IQ tensors hold more than half of the
+weight bytes over all shards. One IQ tensor does not make a file IQ: an unsloth
+`UD-Q4_K_XL` carries an IQ4_NL lookup table of about a quarter of its bytes and is served.
+The file name decides only for a model that is not a file on this machine yet
+(`hf:` references). The check runs in `ServerManager._start_server`, which every lease passes
+(`lease`, `serve`, `up`, the Broker's `start` and ask paths, bench, fleet, ingest).
+
+**Override.** The person sets one of these, in their own process:
+
+- `ML_STACK_ALLOW_IQ=1` in the environment;
+- `--allow-iq` on `ml-stack-serve up`;
+- `allow_iq=True` on `ServerManager.lease`, `serve` or `ops.up`.
+
+Each use logs one warning per process, records a sentinel event `serve.iq_override` (model,
+quant, who), marks the lease record, and `ml-stack-serve status` shows a `WARNING` line for
+the server for as long as it runs. The model is never swapped for another.
+
+Nothing a model or a request sends can set it: `serve_up` (MCP and chat) returns the refusal
+instead of starting a process and rejects an `--allow...` word in `extra`; `up` takes no
+abbreviation of its flags; a spec or ask on the Broker wire with an `allow_iq` field is
+refused, and an `allow_iq` option on the wire is dropped unless the broker was started with
+`ML_STACK_BROKER_ALLOW_IQ_LEASES=1`. To lease an IQ model through the machine's broker, start
+the broker with `ML_STACK_ALLOW_IQ=1`, or with the lease-option variable, or set
+`ML_STACK_BROKER_LOCAL=1`. `suggest`, `recommend` and the chat default rank IQ builds below
+every other build on Apple silicon and never offer one; `ml-stack-models files` marks them.
+The llama.cpp smoke test takes the smallest non-IQ model, and on a machine that holds only
+IQ models it leases with the override (recorded like any other) because it checks the build.
+
 ### The settings a model scored best with, for one kind of work
 
 The `Serving` above was typed out by hand, and every value in it came from a bench run

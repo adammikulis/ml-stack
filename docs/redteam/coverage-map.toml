@@ -119,6 +119,17 @@ tests = [
 ]
 
 [[group]]
+match = ["mcp-tool:serve_up"]
+status = "partial"
+tests = [
+  "tests/test_redteam_iq_override.py::test_the_mcp_serve_up_tool_refuses_an_iq_model_and_says_why",
+  "tests/test_redteam_iq_override.py::test_the_extra_argument_of_serve_up_cannot_carry_the_override",
+  "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
+  "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+]
+note = "the IQ-on-Apple-silicon override cannot be set through the tool or its extra flags; the model path itself is a person-visible reference and is not otherwise vetted here"
+
+[[group]]
 match = ["mcp-tool:*"]
 status = "partial"
 tests = [
@@ -234,8 +245,12 @@ tests = ["tests/test_redteam_graph_serve.py::test_the_page_server_listens_on_loo
 [[group]]
 match = ["listener:serve/broker_wire.py:*"]
 status = "partial"
-tests = ["tests/test_guard_native.py"]
-note = "the lease broker on loopback: its wire is exercised by the guard tests, a hostile frame is not sent"
+tests = [
+  "tests/test_guard_native.py",
+  "tests/test_redteam_iq_override.py::test_the_broker_wire_drops_the_option_on_a_start",
+  "tests/test_redteam_iq_override.py::test_a_lease_ask_through_the_broker_is_refused_whatever_the_options_say",
+]
+note = "the lease broker on loopback: its wire is exercised by the guard tests and by hostile start and lease frames that try to switch off the IQ refusal; other hostile frames are not sent"
 
 [[group]]
 match = ["listener:*"]
