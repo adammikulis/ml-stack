@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack.lock import pid_alive
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.policy import Mode
 from ml_stack.sentinel.sealed import SealedFile
@@ -156,21 +157,6 @@ def arm_scan(sentinel: Sentinel) -> Scanner | None:
     return Scanner(sentinel, chosen.interval_s).start()
 
 
-def process_alive(pid: int) -> bool:
-    """Whether a process with this id exists (signal 0 sends nothing). A process of another user counts as alive."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
 def scanner_state(root: Path, now: float | None = None) -> dict[str, Any]:
     """Whether a scan loop is armed on the sentinel at ``root``: a process wrote a heartbeat
     within three intervals and has not stopped it."""
@@ -186,7 +172,7 @@ def scanner_state(root: Path, now: float | None = None) -> dict[str, Any]:
         return {**out, "why": "the scan loop was stopped"}
     if now - float(beat.get("beat") or 0) > 3 * interval + 5:
         return {**out, "why": "the scan loop has not reported within three intervals"}
-    if not process_alive(pid):
+    if not pid_alive(pid):
         return {**out, "why": f"process {pid} that wrote the heartbeat is gone"}
     return {**out, "armed": True, "why": ""}
 
