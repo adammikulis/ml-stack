@@ -468,6 +468,8 @@ class Downloader:
         finally:
             with contextlib.suppress(OSError):
                 conn.close()
+        if len(data) < want:
+            raise ConnectionError("the connection ended before the chunk did")   # a cut, not a lie
         if len(data) != want:
             raise TransferError("sent the wrong number of bytes")
         return data
