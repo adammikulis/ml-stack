@@ -3,6 +3,11 @@
 from ml_stack.gym.values import json_value
 
 
+def front_progress(native):
+    """Locate the vehicle's front bumper along its native route."""
+    return native.agent.navigation.travelled_length + native.agent.LENGTH / 2
+
+
 class StopCheckpoint:
     """A route stop rule independent of native vehicle dynamics."""
 
@@ -16,7 +21,7 @@ class StopCheckpoint:
         remaining = self.distance - progress
         reward = 0.
         if not self.passed:
-            if 0 <= remaining <= 8 and speed_m_s <= .5:
+            if 0 <= remaining <= 3 and speed_m_s <= .5:
                 self.held += dt
                 if self.held >= 1 and not self.completed:
                     self.completed, reward = True, 5.
@@ -34,6 +39,7 @@ class StopCheckpoint:
                 "heading": self.heading, "heading_unit": "radians",
                 "distance_m": self.distance - progress, "held_seconds": self.held,
                 "required_hold_seconds": 1., "speed_threshold_m_s": .5,
+                "stop_zone_m": 3.,
                 "completed": self.completed, "passed": self.passed, "violated": self.violated,
                 "state": "violation" if self.violated else "stopped" if self.completed else "pending",
                 "stop_line": json_value(self.stop_line)}
@@ -52,7 +58,7 @@ def stop_environment(env):
                 high=np.concatenate((native.observation_space.high, [1., 1., 1.])).astype(np.float32), dtype=np.float32)
 
         def augment(self, observation):
-            state = self.unwrapped.stop_checkpoint.state(self.unwrapped.vehicle.navigation.travelled_length)
+            state = self.unwrapped.stop_checkpoint.state(front_progress(self.unwrapped))
             return np.concatenate((observation, [np.clip(state["distance_m"] / 100, -1, 1),
                                                 min(state["held_seconds"], 1), float(state["completed"])])).astype(np.float32)
 
@@ -81,10 +87,10 @@ def stop_environment(env):
             observation, reward, terminated, truncated, info = self.env.step(action)
             native = self.unwrapped
             dt = native.config["physics_world_step_size"] * native.config["decision_repeat"]
-            extra = native.stop_checkpoint.update(native.vehicle.navigation.travelled_length,
+            extra = native.stop_checkpoint.update(front_progress(native),
                                                    native.vehicle.speed_km_h / 3.6, dt)
             info = {**info, "stop_rule_reward": extra,
-                    "stop_rule": native.stop_checkpoint.state(native.vehicle.navigation.travelled_length)}
+                    "stop_rule": native.stop_checkpoint.state(front_progress(native))}
             return self.augment(observation), reward + extra, terminated, truncated, info
 
     return RoadRules(env)

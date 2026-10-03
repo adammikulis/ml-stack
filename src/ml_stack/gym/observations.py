@@ -1,5 +1,6 @@
 """Named decision-model inputs from specialist simulators."""
 
+from ml_stack.gym.road_rules import front_progress
 from ml_stack.gym.values import json_value
 
 
@@ -16,7 +17,7 @@ def decision_state(name, env, observation):
                      sensors={"lidar_normalized": json_value(sensor.cloud_points),
                               "lidar_range_m": vehicle.config["lidar"]["distance"]})
         if hasattr(native, "stop_checkpoint"):
-            state["stop_rule"] = native.stop_checkpoint.state(vehicle.navigation.travelled_length)
+            state["stop_rule"] = native.stop_checkpoint.state(front_progress(native))
     elif name == "warehouse":
         state.update(robots=[{"x": int(agent.x), "y": int(agent.y),
                               "direction": agent.dir.name,
