@@ -3,18 +3,24 @@ refused, a pinned model must still hash to its pin, and an unpinned model is pin
 
 from __future__ import annotations
 
+import logging
 import weakref
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from ml_stack import sentinel
+from ml_stack.files import sha256_file
+from ml_stack.fleet.onboard.trusted import TrustedLists
 from ml_stack.sentinel import Sentinel
 from ml_stack.sentinel.adapters import serve_hooks
 from ml_stack.sentinel.events import Event, Severity
+from ml_stack.sentinel.findings import HIGH, finding
 from ml_stack.sentinel.watch import Scanner
 from ml_stack.serve.backend import ServerFailed
 from ml_stack.serve.leases import recorded_servers
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["SentinelRefused", "arm", "blocked", "register", "verify"]
 
@@ -66,23 +72,63 @@ def arm(manager: Any) -> Scanner | None:
     return sentinel.arm_scan(node)
 
 
-def verify(model: object, *, state_file: Path, stop: Callable[[int], Any]) -> None:
-    """Refuse to start a server for ``model`` when sentinel holds it or its bytes differ from
-    the pin. A model with no pin is pinned now, with source ``first-use``."""
+def _by_manifest(node: Sentinel, path: Path, digest: str) -> str:
+    """Check ``path`` (whose bytes hash to ``digest``) against the signed lists this machine
+    has accepted. '' when no list names the file (or none can be read); ``verified by manifest
+    serial N`` when one does and agrees; `SentinelRefused` after quarantining when lists name it
+    and none lists these bytes."""
+    try:
+        listed = TrustedLists().lookup(path.name)
+    except (OSError, ImportError, ValueError) as exc:
+        logger.warning("signed lists not consulted for %s: %s", path.name, exc)
+        return ""
+    if not listed:
+        return ""
+    for one in listed:
+        if one.entry.sha256 == digest:
+            text = f"verified by manifest serial {one.serial}"
+            node.bus.emit(Event("model.manifest_verified", Severity.INFO, "serve",
+                                f"model:{path}", {"name": path.name, "serial": one.serial,
+                                                  "key_id": one.key_id}, node.clock()))
+            return text
+    found = finding("integrity.manifest_mismatch", Severity.CRITICAL, ("model", str(path)), HIGH,
+                    {"sha256": digest, "listed": sorted({o.entry.sha256 for o in listed}),
+                     "serials": sorted({o.serial for o in listed})},
+                    path=str(path), move="file")
+    node.handle(found)
+    if node.mode == sentinel.Mode.OBSERVE:
+        return ""
+    raise SentinelRefused(f"{path.name} is not what the signed manifest lists for it and is "
+                          f"quarantined by sentinel; the file was moved aside")
+
+
+def verify(model: object, *, state_file: Path, stop: Callable[[int], Any]) -> str:
+    """Refuse to start a server for ``model`` when sentinel holds it, its bytes differ from
+    the pin, or a signed manifest this machine accepted lists other bytes for it. A model with
+    no pin is pinned now with source ``first-use`` (a model ml-stack pulled has its pin from
+    the pull). Returns ``verified by manifest serial N`` when a manifest vouched for the file,
+    else ''."""
     node = sentinel.armed()
     register(node, state_file, stop)
     if node.mode == sentinel.Mode.OFF:
-        return
+        return ""
     if why := blocked(model):
         raise SentinelRefused(why)
     path = _file(model)
     if path is None:
-        return
-    if str(path) not in node.manifest.pins():
-        node.manifest.pin(path, "model", source="first-use")
+        return ""
+    pin = node.manifest.pins().get(str(path))
+    if pin is None:
+        digest = sha256_file(path)
+        said = _by_manifest(node, path, digest)
+        node.manifest.pin_verified(path, "model", digest, source="first-use",
+                                   digest_from="computed")
+        logger.warning("%s was not pulled by ml-stack and had no pin: pinned on first use "
+                       "(its bytes are trusted as they are now)", path.name)
         node.bus.emit(Event("model.pinned_first_use", Severity.NOTICE, "serve", f"model:{path}",
-                            {"name": path.name}, node.clock()))
-        return
+                            {"name": path.name, "manifest": said}, node.clock()))
+        return said
     if not node.verify_before_load(path, cached=True):
         raise SentinelRefused(f"{path.name} does not match its pin and is quarantined by "
                               f"sentinel; the file was moved aside")
+    return _by_manifest(node, path, pin.sha256)

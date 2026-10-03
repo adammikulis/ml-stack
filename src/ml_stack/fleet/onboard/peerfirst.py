@@ -49,6 +49,7 @@ from .transfer import (
     TransferError,
     fetch_manifest,
 )
+from .trusted import remember
 
 __all__ = ["PeerBook", "PeerSession", "quarantine_veto", "session"]
 
@@ -169,6 +170,7 @@ class PeerSession:
             took = time.monotonic() - began
             key = base64.b64decode(str(row["signing_key"]), validate=True)
             manifest = verify(raw, key, min_serial=int(row.get("min_serial", 0)))
+            remember(raw, key)
         except ManifestError as exc:
             self.notes.append(f"{name}: manifest refused: {exc}")
             self.bus.emit("onboard.peer.bad_manifest", "warning", f"peer:{name}", reason=str(exc))

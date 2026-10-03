@@ -30,7 +30,7 @@ from typing import Any
 
 from ml_stack.files import promote
 from ml_stack.graph.snapshots import WAL_SUFFIX
-from ml_stack.lock import release, take
+from ml_stack.lock import pid_alive, release, take
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +58,6 @@ class Holder:
     def describe(self) -> str:
         state = "alive" if self.alive else "dead"
         return f"pid={self.pid} host={self.host} ({state}, held {max(0.0, time.time() - self.since):.1f}s)"
-
-
-def pid_alive(pid: int) -> bool:
-    """Whether a process is running here. Asked, never assumed."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True          # it exists; it belongs to somebody else
-    except OSError:
-        return False
-    return True
 
 
 def lock_path(path: str | Path) -> Path:

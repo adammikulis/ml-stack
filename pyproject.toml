@@ -7,7 +7,7 @@ name = "ml-stack"
 version = "0.2.1"  # x-release-please-version
 description = "Train and run models across every machine on your network."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{ name = "a member" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -16,7 +16,6 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -49,11 +48,11 @@ train = ["numpy>=1.24", "safetensors>=0.4"]
 # fine-tune of it would need ~128G of optimizer state.
 train-lora = ["ml-stack[train,torch,transformers]", "peft>=0.21.0"]
 # a daemon on the LAN makes its own TLS certificate with this (or with openssl on PATH)
-fleet-tls = ["cryptography>=42"]
+fleet-tls = ["cryptography>=50"]
 # adding a machine with a short code (`ml-stack-fleet listen` / `pair`): SPAKE2 from the
 # maintained `spake2` package, Ed25519 signing from cryptography, the signing key in the OS
 # keystore through `keyring`
-fleet-onboard = ["cryptography>=42", "spake2>=0.9", "keyring>=24"]
+fleet-onboard = ["cryptography>=50", "spake2>=0.9", "keyring>=24"]
 # `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
 # each engine still wants
@@ -78,11 +77,15 @@ vision = ["numpy>=1.24", "pillow>=10.0"]
 # a book is a source like any other: `ml_stack.sources.pdf` reads one into sections through
 # pdfminer.six (MIT), which gives text with the font it was set in -- how a heading is found in a
 # PDF with no outline -- and the position of every picture; Pillow renders the pictures. The
-# reading runs in a bounded child process (`ml_stack.net.pdfread`).
-pdf = ["pdfminer.six>=20240706", "pillow>=10.0"]
+# reading runs in a bounded child process (`ml_stack.net.pdfread`). Pages are rendered to PNG by
+# PDFium (pypdfium2: Apache-2.0/BSD-3-Clause, one 3-4 MB wheel with no dependencies) in a second
+# bounded child (`ml_stack.net.pdfrender`); `pdf-render` is that part alone, and `pdf` includes it.
+pdf-render = ["pypdfium2>=4.30", "pillow>=10.0"]
+pdf = ["pdfminer.six>=20260107", "pillow>=10.0", "ml-stack[pdf-render]"]
 # MuPDF is AGPL-3.0 (or Artifex's commercial licence): a network service built on it must offer
 # its source. It is NOT in `pdf`, `all` or `redteam`; install it only on purpose, and select it
-# with ML_STACK_PDF_ENGINE=pymupdf. The datasheet pin tables and page pictures need it.
+# with ML_STACK_PDF_ENGINE=pymupdf. Only the datasheet pin tables need it now: page pictures and
+# outline pages work with the permissive `pdf` extra.
 pdf-agpl = ["pymupdf>=1.24"]
 # `ml-stack-bench animate`: a comparison of builds as an animated graphic
 viz = ["manim>=0.19"]
@@ -93,7 +96,7 @@ testing = ["numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that.
 # `ml_stack.agent.McpTools` is an MCP client on the same SDK (2026-07-28 revision).
-mcp = ["mcp>=2.2,<3"]
+mcp = ["mcp>=2.3,<3"]
 # NVIDIA NeMo Guardrails as one more rail over the built-in ones (`ml_stack.guard.nemo`); its
 # rails call the llama.cpp server a configuration names. The built-in rails need no extra.
 guardrails = ["nemoguardrails>=0.24.1,<0.25"]
@@ -216,7 +219,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 # python with no .py on it: ruff matches by extension unless the name is spelled out
 extend-include = ["scripts/budgets", "scripts/hooks/budgets",
                   "scripts/hooks/claude-bash-guard", "scripts/hooks/claude-edit-guard"]

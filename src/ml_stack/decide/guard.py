@@ -17,6 +17,9 @@ from ml_stack.decide.types import DecideError, Decision
 from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Verdict, merge
 
 MAX_OUTPUT = 2000
+MAX_STATE = 20_000
+"""The longest question text a call is judged on; a longer call is confirmed, never cut (a cut
+could hide the part that does the harm)."""
 
 DEFAULT_ACTIONS: Mapping[str, Mapping[str, str]] = {
     "destructive": {"safe": "ok", "reversible": "ok", "destructive": "confirm"},
@@ -108,10 +111,15 @@ class ToolCallGuard(Base):
             return merge(found)
         for check in self.checks:
             question, options = QUESTIONS[check]
+            state = self._state(check, call, context)
+            if len(state) > MAX_STATE:
+                found.append(Confirm(f"{check} check not run: the call is {len(state)} characters, "
+                                     f"too long for the guard to read", {"check": check}))
+                continue
             try:
-                answer = self.decider.decide(question, self._state(check, call, context),
-                                             options, abstain_below=self.policy.abstain_below)
-            except DecideError as exc:
+                answer = self.decider.decide(question, state, options,
+                                             abstain_below=self.policy.abstain_below)
+            except (DecideError, ValueError, OSError) as exc:
                 reason = f"{check} check could not run ({exc})"
                 found.append(Deny(reason) if self.policy.errors == "deny"
                              else Confirm(reason, {"check": check}))

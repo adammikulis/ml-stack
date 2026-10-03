@@ -2,7 +2,7 @@
 """Runs on a machine that is being given ml-stack over SSH. Fixed text: the controller prints it
 in full with its SHA-256 (`bootstrap --ssh HOST --dry-run`), copies it with the files, and runs
 nothing else on the machine. Standard library only. It changes nothing until every check passes:
-Python >= 3.11, macOS or Linux, disk space, the manifest's OpenSSH signature (ssh-keygen -Y
+Python >= 3.12, macOS or Linux, disk space, the manifest's OpenSSH signature (ssh-keygen -Y
 verify) by the key whose id was sent, the manifest's expiry, and the size and SHA-256 of every
 file. Then it makes a per-user venv (no sudo), installs the wheels in it, and starts
 `ml-stack-fleet listen` so pairing can finish with a code. Models are not copied here."""
@@ -44,8 +44,8 @@ def sha256(path):
 
 
 def check_machine(total):
-    if sys.version_info < (3, 11):
-        refuse(f"Python {sys.version_info[0]}.{sys.version_info[1]} is older than 3.11")
+    if sys.version_info < (3, 12):
+        refuse(f"Python {sys.version_info[0]}.{sys.version_info[1]} is older than 3.12")
     if platform.system() not in ("Darwin", "Linux"):
         refuse(f"{platform.system()} is not a supported target")
     free = shutil.disk_usage(HOME).free
