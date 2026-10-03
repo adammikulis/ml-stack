@@ -2,6 +2,8 @@
 
 The daemon workspace groups interactive screens in its sidebar. Tools exposes every installed
 `ml-stack-*` console entry point, its help, command review, monitored execution, logs, and cancellation.
+Common controls remain visible; less common settings are grouped under collapsed Advanced
+sections. Chat labels its token-window setting **Context length**.
 Commands execute in the daemon files root with the existing job environment and scheduling gate.
 
 | Capability | Destination |
@@ -20,15 +22,17 @@ Commands execute in the daemon files root with the existing job environment and 
 | Security, audit and credentials | Tools: ml-stack-security, ml-stack-audit, ml-stack-credentials |
 | Diagnostics and installation | Tools: ml-stack-doctor, ml-stack-setup |
 | Workspace coordination, jobs, suites | Tools: ml-stack-workspace, ml-stack-jobs, ml-stack-suite |
-| Agent and MCP workflows | Tools: ml-stack-agent, ml-stack-do, ml-stack-claude, ml-stack-mcp |
-| Serving, drafts and terminal chat | Tools: ml-stack-serve, ml-stack-draft, ml-stack-chat |
+| Agent and MCP workflows | Tools: ml-stack-agent, ml-stack-claude, ml-stack-mcp |
+| Serving, drafts, native chat agents and memory | Tools: ml-stack-serve, ml-stack-draft, ml-stack-chat, ml-stack-memory |
 | Libraries, machine preferences, updates | Settings |
 
 ## Native environment integration
 
 Gym forwards JSON configuration to each environment's native adapter. Car uses MetaDrive's
-native rendered frames. Warehouse and traffic visualizations render simulator snapshots in
-locally packaged Three.js and OrbitControls; display coordinates do not advance the simulator. Each session exposes numeric
+native physics and sensors, displayed in the default sensor scene or its native camera.
+The locally packaged Three.js and OrbitControls display simulator snapshots; the car
+scene adds a follow camera, physical materials, environment lighting and native sensor
+overlays. Display coordinates do not advance the simulator. Each session exposes numeric
 observations, controller decisions, applied actions, reward, episode information and its trajectory
 artifact path. Downloaded snapshots contain the browser-observed sequence; native trajectory
 artifacts contain the authoritative episode record.
@@ -56,5 +60,13 @@ The exported JSONL path is handed directly to the decision-model training form. 
 checkpoint directory into a live decision controller to test it on fresh scenarios.
 
 Gym dependencies install through Settings' managed environment and the environment catalog's
-Install button. Readiness reflects the managed interpreter's package versions and the wheel's
-selected extra requirements. The daemon's own packages are reported separately from job readiness.
+Install button. An existing simulator interpreter can be selected with `ml-stack-traind
+--root ROOT --gym-python PYTHON`; keep the same root on later launches to retain completed
+setup and the saved interpreter. `ML_STACK_GYM_PYTHON` takes precedence over that selection,
+which takes precedence over the managed environment. Readiness reflects the selected
+simulator interpreter's package versions and the wheel's selected extra requirements. The daemon's own packages are reported separately from job readiness.
+
+See [Studio and live Gym](studio-gym.md) for native ownership, the winding-road stop task,
+recordings, and the PPO/decision-model training loop. In the combined traffic-driving
+example, MetaDrive IDM drives vehicles and learned policies control SUMO-RL signal phases
+at one intersection.
