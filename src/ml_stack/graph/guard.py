@@ -3,7 +3,7 @@ POST, its content type and the length it claims."""
 
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler
+from typing import Any
 from urllib.parse import urlsplit
 
 __all__ = ["MAX_BODY", "Guarded", "refusal"]
@@ -50,8 +50,18 @@ def refusal(method: str, headers: dict[str, str], port: int) -> tuple[int, str] 
     return None
 
 
-class Guarded(BaseHTTPRequestHandler):
-    """Mix in ahead of the routes: ``rejected`` answers a request `refusal` rejects."""
+class Guarded:
+    """Mix into an ``http.server`` handler ahead of its routes: ``rejected`` answers a
+    request `refusal` rejects."""
+
+    command: str
+    headers: Any
+    server: Any
+    wfile: Any
+    close_connection: bool
+    send_response: Any
+    send_header: Any
+    end_headers: Any
 
     def rejected(self) -> bool:
         """Send the refusal for this request, closing the connection, and say so."""

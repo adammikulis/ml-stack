@@ -16,7 +16,7 @@ from ml_stack.log import say, warn
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
-from ml_stack.workspace.identity import ROLES, TOKEN_ENV, Denied
+from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
@@ -129,6 +129,9 @@ def _released(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _init(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    if not any(os.environ.get(m) for m in AGENT_MARKERS) and not (
+            sys.stdin.isatty() and sys.stdout.isatty()):
+        raise Denied("init needs a person at a terminal on stdin and stdout")
     return {"token": ws.init(args.name), "note": f"keep this; set {TOKEN_ENV} to use it"}
 
 

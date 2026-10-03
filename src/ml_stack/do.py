@@ -94,8 +94,6 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
                    ("what did the last three runs score?", "bench_show(last=3)")),
     "fleet_peers": (("who else is on the network?", "fleet_peers()"),
                     ("is the studio serving anything?", "fleet_peers(timeout_s=4)")),
-    "fleet_join": (("make this machine a peer", 'fleet_join(passphrase="...")'),
-                   ("join at logon too", 'fleet_join(passphrase="...", persist=True)')),
     "world_make": (("invent a small company", 'world_make(kind="company", size="small")'),
                    ("a medium university, seed 3",
                     'world_make(kind="university", size="medium", seed=3)')),

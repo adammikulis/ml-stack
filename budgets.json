@@ -8,7 +8,7 @@
   "file-locks": 0,
   "home-paths": 0,
   "http-servers": 2,
-  "local-imports": 450,
+  "local-imports": 449,
   "long-docstrings": 81,
   "long-functions": 10,
   "module-skips": 31,

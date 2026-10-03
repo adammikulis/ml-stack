@@ -21,7 +21,7 @@ import pytest
 from ml_stack import home, mcp
 from ml_stack.fleet import join
 
-ACTING = ("serve_up", "serve_down", "serve_escalate", "models_fetch", "bench_run", "fleet_join",
+ACTING = ("serve_up", "serve_down", "serve_escalate", "models_fetch", "bench_run",
           "world_make", "speech_say", "conversation_compact", "workspace_send", "workspace_ack",
           "workspace_note_add", "workspace_claim", "workspace_release", "workspace_heartbeat",
           "workspace_scratch_new", "workspace_scratch_rm")
@@ -104,11 +104,10 @@ def test_a_hostile_model_name_is_one_argument_never_a_shell_line(tmp_path, spawn
     mcp.models_fetch(name)
     mcp.serve_up(name, extra=[name])
     assert len(spawned.commands) == 2 and not any(spawned.shells)
-    assert spawned.commands[0][-2:] == ["fetch", name]
+    assert spawned.commands[0][-3:] == ["fetch", "--", name]
     assert spawned.commands[1].count(name) == 2 and "up" in spawned.commands[1]
 
 
-@pytest.mark.xfail(strict=True, reason="a reference that starts with a dash is parsed as an option")
 def test_a_reference_that_starts_with_a_dash_is_not_an_option(tmp_path, spawned):
     answer = mcp.call("models_fetch", {"reference": "--bogus-flag"})
     argv = spawned.commands[0] if spawned.commands else []
@@ -145,16 +144,68 @@ class Spoken:
         return b"RIFF-attacker-chosen-bytes"
 
 
-@pytest.mark.xfail(strict=True, reason="speech_say writes to any path the model names (finding F10)")
 def test_speech_say_writes_only_inside_the_state_directory(tmp_path, monkeypatch):
     monkeypatch.setattr("ml_stack.speech.service.say", lambda *a, **k: Spoken())
-    outside = tmp_path / "elsewhere" / "authorized_keys"
-    mcp.call("speech_say", {"text": "x", "out": str(outside)})
-    assert not outside.exists()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "link").symlink_to(home.home())
+    for out in (elsewhere / "authorized_keys", "../../../../../tmp/x.wav", "/etc/cron.d/x",
+                elsewhere / "link" / "planted.wav", "~/planted.wav"):
+        answer = mcp.call("speech_say", {"text": "x", "out": str(out)})
+        assert answer["isError"], out
+    assert tree(elsewhere) == {}
+    assert not (home.home() / "planted.wav").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="fleet_join joins a cluster on a model-supplied passphrase "
-                                       "with no person present (finding F11)")
-def test_fleet_join_needs_a_person():
-    source = inspect.getsource(join.join_machine) + inspect.getsource(mcp.fleet_join)
-    assert "require_person" in source or "mint(" in source or "HumanRequired" in source
+def test_speech_say_names_its_own_file_under_the_state_directory(monkeypatch):
+    monkeypatch.setattr("ml_stack.speech.service.say", lambda *a, **k: Spoken())
+    first = json.loads(mcp.call("speech_say", {"text": "x"})["content"][0]["text"])
+    second = json.loads(mcp.call("speech_say", {"text": "x"})["content"][0]["text"])
+    assert first["out"] != second["out"]
+    for made in (first, second):
+        target = Path(made["out"]).resolve()
+        assert target.is_relative_to(home.home().resolve()) and target.suffix == ".wav"
+        assert target.read_bytes() == b"RIFF-attacker-chosen-bytes"
+
+
+def test_fleet_join_is_not_a_tool_a_model_can_call():
+    assert "fleet_join" not in {t.name for t in mcp.TOOLS}
+    assert not hasattr(mcp, "fleet_join")
+    answer = mcp.call("fleet_join", {"passphrase": "correct horse battery staple"})
+    assert answer["isError"]
+
+
+def test_joining_a_fleet_stays_a_command_a_person_runs():
+    with pytest.raises(SystemExit) as left:
+        join.main(["join", "--help"])
+    assert left.value.code == 0
+
+
+def test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it(spawned):
+    for tool, arguments in (("models_fetch", {"reference": "--bogus-flag"}),
+                            ("models_fetch", {"reference": " -x"}),
+                            ("serve_up", {"model": "--exec=id"}),
+                            ("serve_up", {"model": "m.gguf", "draft": "-rf"}),
+                            ("serve_up", {"model": "m.gguf", "mmproj": "--oops"})):
+        assert mcp.call(tool, arguments)["isError"], (tool, arguments)
+    assert spawned.commands == []
+
+
+def test_the_tool_arguments_are_checked_against_the_declared_types(spawned):
+    for name, arguments in (("serve_escalate", {"port": "x"}), ("serve_escalate", {"add": 1.5}),
+                            ("serve_escalate", {"port": True}), ("serve_down", {"port": "8080"}),
+                            ("serve_up", {"model": "m", "extra": "--exec"}),
+                            ("serve_up", {"model": "m", "extra": [1]}),
+                            ("serve_up", {"model": "m", "escalate": "yes"}),
+                            ("serve_up", {}), ("bench_run", {"argv": ["a", 7]}),
+                            ("models_find", {"words": "x", "limit": "3"}),
+                            ("fleet_peers", {"timeout_s": "2"})):
+        answer = mcp.call(name, arguments)
+        assert answer["isError"], (name, arguments)
+    assert spawned.commands == []
+    assert "must be" in mcp.call("serve_escalate", {"port": "x"})["content"][0]["text"]
+
+
+def test_a_number_may_be_given_to_a_float_argument(tmp_path):
+    mcp.checked(mcp.fleet_peers, {"timeout_s": 2})
+    mcp.checked(mcp.fleet_peers, {"timeout_s": 2.5})
