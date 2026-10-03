@@ -490,8 +490,13 @@ def test_peers_are_ranked_by_measured_throughput_and_the_rate_is_kept(
     session = peerfirst.PeerSession(fleet.book)
     _pin, offers = session._offers(hub_peers.Wanted("maker/thing-GGUF", NAME, len(GOOD), SHA))
     assert [o.peer.name for o in offers] == ["b", "a"]
-    fleet.book.record_rate("a", 200 * MIB)                          # blends with the 1 MiB/s
-    assert 90 * MIB < {r["name"]: r for r in fleet.book.rows()}["a"]["rate"] < 110 * MIB
+    fleet.book.record_rate("a", 400 * MIB)
+    fleet.book.record_rate("b", 1)                                # now b is the slow one
+    session = peerfirst.PeerSession(fleet.book)
+    _pin, offers = session._offers(hub_peers.Wanted("maker/thing-GGUF", NAME, len(GOOD), SHA))
+    assert [o.peer.name for o in offers] == ["a", "b"]
+    fleet.book.record_rate("a", 200 * MIB)                          # blends with what it had
+    assert 150 * MIB < {r["name"]: r for r in fleet.book.rows()}["a"]["rate"] < 250 * MIB
 
 
 def test_a_transfer_writes_the_rate_it_measured_into_the_peer_book(stand_in, fleet, tmp_path):
@@ -555,6 +560,13 @@ def test_a_device_with_no_tailnet_and_a_dead_lan_address_is_skipped_with_a_note(
     assert any("not reachable" in n for n in session.notes)
     assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
     assert fleet.requests(peer) == [] and file_requests(stand_in) > 0
+
+
+def test_the_real_probe_accepts_the_pinned_certificate_and_only_that_one(fleet):
+    peer = fleet.peer("far")
+    assert routes.pinned_probe("127.0.0.1", peer["port"], peer["fingerprint"]) is True
+    assert routes.pinned_probe("127.0.0.1", peer["port"], "0" * 64) is False
+    assert routes.pinned_probe("127.0.0.1", 1, peer["fingerprint"]) is False        # nobody there
 
 
 def test_a_revoked_device_left_in_the_book_is_not_asked(stand_in, fleet, tmp_path):
