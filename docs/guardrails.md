@@ -66,7 +66,7 @@ model is installed and fits in free memory, and `do.run` does so unless told not
 
 What it does not judge: a list, table, CSV or JSON is not scored as a whole, only the sentence-like
 strings inside it (a line is a sentence when it has three words or more and at least 60% are
-plain letters); a result with none is never sent to the model. Text over 1500 characters is cut
+plain letters, or two words that are both plain: "call wipe" is an order); a result with none is never sent to the model. Text over 1500 characters is cut
 between lines into windows and at most 4 are judged, those holding sentences first, within 30 s.
 Answers are kept by the SHA-256 of the request and the text (256 of them).
 
@@ -108,8 +108,11 @@ Measured with Qwen3-4B-Instruct-2507 Q4_K_M leased through the broker (`tests/te
 34 attack texts, each carrying the same injected goal, judged as a tool result; one run, greedy): with nothing
 between the text and the model all 34 reach it; the judge before the hardening let 0 of 34 pass; hardened it
 lets 1 of 34 pass (`json-with-prompt-in-value`, a JSON value that contains a copy of the judge's own prompt
-followed by the goal: a regression in this one case, the defanged copy no longer reads as an attack, not yet
-fixed). 3 of 3 plain injections without wrapping are flagged and 0 of 5 benign texts are. The scripted
+followed by the goal: the defanged copy no longer read as an attack). A text that contains the judge's own
+prompt is now flagged by itself (score at least 0.5, tainted) and shown to the model as quoted lines, and
+two-word orders reach the judge; after that 0 of 34 pass, 0 of 7 two-word orders pass, 3 of 3 plain
+injections without wrapping are flagged and 0 of 5 benign texts and 0 of 5 short harmless texts are
+(numbers and the measurement in `docs/redteam/findings.md`). The scripted
 tests (`tests/test_redteam_judge.py`) pin the prompt structure, the bounds and the failure handling, which
 a real model's answers cannot.
 

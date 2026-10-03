@@ -30,6 +30,9 @@ MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((n, re.compile(p, re.I 
     ("exfiltrate", r"\b(?:send|post|upload|forward|exfiltrate|leak|email)\b[^.\n]{0,60}"
                    r"\b(?:to|at)\s+(?:https?://|[\w.-]+@[\w.-]+)"),
     ("chat-markup", r"<\|[a-z_]+\|>|\[/?INST\]|<</?SYS>>|^\s*(?:system|assistant)\s*:"),
+    ("short-override", r"(?m)^[ \t>*-]*(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+)?"
+                       r"(?:previous|prior|above|earlier|everything|rules|instructions)[ \t.!]*$"),
+    ("short-order", r"\A\s*(?:call|invoke|execute|run)\s+[\w.-]+\s*[.!]?\s*\Z"),
     ("fake-fence", r"</?\s*untrusted\b"),
 ))
 
