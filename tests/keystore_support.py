@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import keyring
@@ -75,6 +76,7 @@ class CountingFileRing(KeyringBackend):
 
     def get_password(self, service, username):
         self._note("get")
+        time.sleep(float(os.environ.get("ML_STACK_TEST_KEYRING_DELAY", "0")))
         return self._all().get(f"{service}/{username}")
 
     def set_password(self, service, username, password):

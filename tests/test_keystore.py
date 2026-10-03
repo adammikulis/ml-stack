@@ -181,7 +181,7 @@ def child_env(tmp_path: Path) -> dict[str, str]:
     return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(tmp_path / "home"),
             "PYTHON_KEYRING_BACKEND": "tests.keystore_support.CountingFileRing",
             "ML_STACK_TEST_KEYRING": str(tmp_path / "ring.json"), "GO": str(tmp_path / "go"),
-            "ML_STACK_NOTIFY": "off"}
+            "ML_STACK_NOTIFY": "off", "ML_STACK_TEST_KEYRING_DELAY": "0.3"}
 
 
 def test_six_processes_starting_together_create_one_master(tmp_path):
