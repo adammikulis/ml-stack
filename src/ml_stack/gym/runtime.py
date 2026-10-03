@@ -53,6 +53,11 @@ class SessionManager:
                 session["snapshot"].update(status="error", error="Simulation worker exited")
             return dict(session["snapshot"])
 
+    def list(self):
+        """Return current live session snapshots."""
+        with self.lock:
+            return [self.get(identifier) for identifier in self.sessions]
+
     def control(self, identifier, command, payload=None):
         if command not in {"play", "pause", "step", "reset", "speed", "action", "controller"}:
             raise ValueError(f"Unknown simulation command: {command}")
