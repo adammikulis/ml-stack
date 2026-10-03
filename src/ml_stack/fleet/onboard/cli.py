@@ -38,6 +38,7 @@ from .devices_cli import add_devices, cmd_devices
 from .manifest import ManifestError, RotationAnnounced, Signer, key_fingerprint, verify
 from .notify import compose, compose_code, pick
 from .pairing import DEFAULT_PORT, Grant, Hooks, PairError, PairingClient, PairingServer
+from .peers_cli import add_peers, cmd_peers
 from .requests import Devices, Refused, Request, Requests, State, short
 from .routes import resolve
 from .share_cli import add_share, cmd_share
@@ -56,7 +57,7 @@ from .transfer import (
 __all__ = ["add_commands", "adopt", "run"]
 
 COMMANDS = ("nearby", "pair", "listen", "requests", "accept", "decline", "revoke", "bootstrap",
-            "share", "fetch", "signing", "devices")
+            "share", "fetch", "signing", "devices", "peers")
 
 
 def state_dir(args: argparse.Namespace) -> Path:
@@ -136,6 +137,7 @@ def add_commands(sub: Any) -> None:
 
     add_share(sub, common)
     add_devices(sub, common)
+    add_peers(sub, common)
     add_signing(sub, common)
 
     p = common(sub.add_parser("fetch", help="fetch files from a machine this one paired with"))
@@ -432,6 +434,7 @@ def run(args: argparse.Namespace) -> int:
     fn = {"nearby": cmd_nearby, "pair": cmd_pair, "listen": cmd_listen,
           "requests": cmd_requests, "accept": cmd_accept, "decline": cmd_decline,
           "revoke": cmd_revoke, "bootstrap": cmd_bootstrap, "share": cmd_share,
-          "fetch": cmd_fetch, "signing": cmd_signing, "devices": cmd_devices}[args.cmd]
+          "fetch": cmd_fetch, "signing": cmd_signing, "devices": cmd_devices,
+          "peers": cmd_peers}[args.cmd]
     return fn(args)
 

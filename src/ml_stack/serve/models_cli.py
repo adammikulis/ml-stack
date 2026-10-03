@@ -58,6 +58,8 @@ def add(sub: argparse._SubParsersAction) -> None:
     suggest.add_argument("--max-verdict", choices=("green", "yellow", "red"), default="green")
     pull = make("pull", "download hf:owner/repo[/file.gguf][:QUANT]", arg="ref")
     pull.add_argument("--dest", help="folder to download into (default: the store)")
+    pull.add_argument("--no-peers", action="store_true",
+                      help="do not ask paired devices first; download from the Hub (also ML_STACK_NO_PEERS=1)")
     find = make("search", "GGUF repositories on the Hub", arg="query")
     find.add_argument("--max-size", type=float, default=0, help="largest build, in GB")
     find.add_argument("--quant", default="")
@@ -176,7 +178,7 @@ def _pull(args: argparse.Namespace) -> int:
             warn(f"\r{p.phase:11} {p.fraction:6.1%}  {human_bytes(p.bytes_per_second)}/s  "
                  f"{p.file}", end="", flush=True)
 
-    got = hub.pull(args.ref, args.dest, show)
+    got = hub.pull(args.ref, args.dest, show, peers=False if args.no_peers else None)
     warn("")
     return _emit(args, {"path": str(got)}, lambda: say(str(got)))
 

@@ -24,6 +24,7 @@ from ..discovery import memberships
 from ..tls import TlsUnavailable, identity
 from .human import HumanRequired, mint
 from .manifest import SHARING_LEVELS, Entry, Signer, verify
+from .peerfirst import quarantine_veto
 from .requests import Devices
 from .sharing import OPEN, OWNER, Licences
 from .signing import KeyStoreError, SigningKeys
@@ -107,7 +108,8 @@ def cmd_share(args: argparse.Namespace) -> int:
     devices = Devices(directory / "devices.json")
     gate = mac_gate(macauth.derive(held[0].key), devices.all)
     span = parse_duration(args.span) or 600.0
-    with ShareServer(Share(share_dir, raw, verify(raw, keys.public), licences),
+    with ShareServer(Share(share_dir, raw, verify(raw, keys.public), licences,
+                           quarantine_veto),
                      authenticate=gate, ident=ident,
                      address=(args.host or "0.0.0.0", args.port)) as server:  # noqa: S104
         _emit(args, {"sharing": True, "port": server.port, "certificate": ident.fingerprint,

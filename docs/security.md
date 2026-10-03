@@ -247,7 +247,12 @@ terminal; manifests last three days), chunk by chunk, and are staged for the sca
 installed. A gated model goes only to the devices the owner marked as theirs, after their licence
 acceptance is on record; credentials never travel. Nothing pushes software to a machine that has none: the owner
 opens an offer on it and runs a short, pinned installer, or starts `bootstrap --ssh` with their own
-keys, a host key typed in full and a fixed script. What this does not cover:
+keys, a host key typed in full and a fixed script. Model downloads ask the paired devices before the
+Hub (`docs/model-discovery.md`, "Peers first"): the digest a file must have is the Hub's listing,
+never one a peer states; peers are reached only on private, loopback, link-local or tailnet
+addresses over pinned TLS; the serving device applies the sharing level and withholds a quarantined
+copy; a peer whose bytes fail a digest is dropped and reported to sentinel. Off with `--no-peers`,
+`ML_STACK_NO_PEERS=1` or `ml-stack fleet peers off`. What this does not cover:
 the pairing mathematics is Python integers (not constant time) and wants an independent review
 before a public release; the re-key flow, per-device credentials and SSH push are designed and
 not built.
