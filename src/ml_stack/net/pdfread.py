@@ -26,6 +26,11 @@ ENGINE_ENV = "ML_STACK_PDF_ENGINE"
 ENGINES = ("pdfminer", "pymupdf")
 
 
+CHILD = Path(__file__).with_name("pdfchild.py")
+"""The reader that runs in the child. It imports only the standard library and pdfminer, so it is
+run by path (``-P``: nothing from its folder joins the module path) and does not depend on which
+copy of ml_stack the child interpreter would find."""
+
 class PdfRefused(ValueError):
     """The PDF was not read, and why: too big, too many pages, a bomb, too slow, encrypted, bad."""
 
@@ -87,7 +92,7 @@ def load(path: str | Path, *, limits: Limits | None = None, images: bool = False
     with tempfile.TemporaryFile() as out:
         try:
             done = subprocess.run(
-                [sys.executable, "-m", "ml_stack.net.pdfchild"], input=json.dumps(request).encode(),
+                [sys.executable, "-P", str(CHILD)], input=json.dumps(request).encode(),
                 stdout=out, stderr=subprocess.PIPE, timeout=limits.timeout_s, check=False, env=env,
                 cwd=tempfile.gettempdir())
         except subprocess.TimeoutExpired as exc:

@@ -8,6 +8,7 @@ in half, an object nested a hundred thousand deep, an encryption dictionary nobo
 
 from __future__ import annotations
 
+import os
 import random
 import re
 import subprocess
@@ -88,7 +89,8 @@ def test_mupdf_is_never_imported_by_a_default_read(tmp_path):
             "assert len(d.sections) == 2, d.sections\n"
             "assert 'pymupdf' not in sys.modules and 'fitz' not in sys.modules, 'MuPDF was imported'\n"
             "print('ok')")
-    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(ROOT / "src"), os.environ.get("PYTHONPATH", "")])}   # this checkout, not an installed copy
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, env=env)
     assert done.stdout.strip() == "ok", done.stderr[-600:]
 
 
@@ -342,7 +344,8 @@ def test_the_installed_packages_of_those_extras_carry_no_copyleft_licence():
             meta = metadata.metadata(name)
         except metadata.PackageNotFoundError:
             continue
-        text = " ".join([meta.get("License-Expression") or "", meta.get("License") or "",
+        legacy = meta.get("License") or ""                                  # an identifier, or (matplotlib, ...) the whole licence text
+        text = " ".join([meta.get("License-Expression") or "", legacy if len(legacy) <= 80 else "",
                          *[c for c in (meta.get_all("Classifier") or []) if c.startswith("License")]])
         checked += 1
         if AGPL.search(text) and not LGPL.search(text) and name not in ALLOWED_COPYLEFT:
