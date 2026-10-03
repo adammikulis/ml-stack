@@ -305,6 +305,18 @@ def test_history_carries_across_turns_and_is_saved_after_each():
     assert all(m["role"] != "system" for m in saved["messages"])
 
 
+def test_the_per_message_call_limits_start_over_with_each_message():
+    from ml_stack.guard.policy import Limits
+
+    script = [call("models_find", words="a"), call("models_find", words="b"), "one",
+              call("models_find", words="c"), call("models_find", words="d"), "two"]
+    chat_, model, seen, _ = session(script)
+    chat_.limits.limits = Limits(calls=2)
+    chat_.turn("first")
+    chat_.turn("second")
+    assert len(seen) == 4 and "blocked" not in model.told()
+
+
 def test_resume_continues_the_last_chat_with_a_fresh_system_prompt():
     first, _, _, _ = session(["noted"])
     first.turn("remember: the port is 8099")
