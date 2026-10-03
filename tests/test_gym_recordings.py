@@ -30,3 +30,15 @@ def test_export_rejects_review_for_absent_transition(tmp_path):
     reviews.write_text('{"episode_id":3,"sequence":5,"label":"brake"}\n')
     with pytest.raises(ValueError, match="absent"):
         export_reviewed(trajectory, reviews, tmp_path / "cases.jsonl")
+
+
+def test_export_preserves_exact_named_controller_state(tmp_path):
+    trajectory, reviews, output = (tmp_path / name for name in ("trajectory.jsonl", "reviews.jsonl", "cases.jsonl"))
+    state = {"ego": {"speed_km_h": 2.}, "native_observation": [1]}
+    trajectory.write_text(json.dumps({"environment": "car", "actions": ["brake", "go"],
+                                      "decision": {"state": state},
+                                      "transition": {"episode_id": 1, "sequence": 2,
+                                                     "observation": [1], "next_observation": [2]}}) + "\n")
+    reviews.write_text('{"episode_id":1,"sequence":2,"label":"brake"}\n')
+    export_reviewed(trajectory, reviews, output)
+    assert read_cases(output)[0].state == state
