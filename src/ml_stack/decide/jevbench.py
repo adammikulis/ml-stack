@@ -1,17 +1,11 @@
 """JevBench's public items as decision cases, and a scored run of the deciders over them.
 
-JevBench (https://github.com/fstandhartinger/jevbench, MIT, by Benchmark Heaven; not affiliated
-with TypeSafe AI) is a benchmark for typed decision models: a state and a question that is a
-``noul`` (yes/no), a ``choice`` (named options) or a ``score`` (ordered levels). The public half
-is 231 items in three files (easy 48, original 72, hard 111); the other half is held out by its
-publisher and is not here.
-
-The files are pinned by commit and SHA-256 and downloaded only through the net pipeline into
-ml-stack's cache. Opt-in: nothing here runs in a default test tier, and a run uses the GPU.
-
-Accuracy is the argmax of the decider's own distribution against the item's label, an item the
-decider could not answer counting as wrong (JevBench's rule, which ``eval.evaluate`` does not
-share: it leaves such items out). Calibration (Brier, ECE) is over the answered items. Commands: docs/decision-models.md.
+JevBench (https://github.com/fstandhartinger/jevbench, MIT, Benchmark Heaven; not affiliated with
+TypeSafe AI) scores typed decision models on ``noul``, ``choice`` and ``score`` questions. Only
+its 231 public items are here, pinned by commit and SHA-256 and fetched through the net pipeline.
+Opt-in: no default test tier runs it, and a run uses the GPU. An item the decider could not
+answer counts as wrong (JevBench's rule; ``eval.evaluate`` leaves it out). Commands are in
+docs/decision-models.md.
 """
 
 from __future__ import annotations
