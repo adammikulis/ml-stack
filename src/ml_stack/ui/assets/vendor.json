@@ -24,6 +24,11 @@
       "three",
       "build/three.core.js",
       "three.core.js"
+    ],
+    [
+      "three",
+      "examples/jsm/controls/OrbitControls.js",
+      "OrbitControls.js"
     ]
   ]
 }

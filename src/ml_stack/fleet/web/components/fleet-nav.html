@@ -1,10 +1,16 @@
 <style>
 fleet-nav { display: contents; }
+.nav-search { width:100%; min-width:0; margin:12px 0; padding:9px 11px; background:var(--bg);
+  color:var(--text); border:1px solid var(--line); border-radius:8px; }
+.workspace-jobs-indicator { font-size:12px; padding:6px 10px; border-radius:20px;
+  background:var(--bg); color:var(--muted); border:1px solid var(--line); }
 </style>
 <template>
   <aside class="sidebar" aria-label="Workspace navigation">
     <a class="brand" href="#chat"><span class="dot"></span>ml-stack</a>
     <div class="sidebar-caption">Local intelligence studio</div>
+    <input class="nav-search" id="nav-search" type="search" aria-label="Search workspace"
+      placeholder="Search workspace…">
     <nav class="tabs" id="nav-tabs" aria-label="Main navigation"></nav>
     <footer class="sidebar-footer">
       <div class="workspace-label"><span class="pulse"></span><span id="nav-group"></span></div>
@@ -14,6 +20,7 @@ fleet-nav { display: contents; }
   <header class="workspace-header">
     <div><span class="eyebrow" id="nav-section"></span><strong id="nav-title"></strong></div>
     <span class="header-hint">Your models. Your machines.</span>
+    <button class="workspace-jobs-indicator" id="nav-jobs" type="button" hidden>Jobs</button>
   </header>
 </template>
 <script>
@@ -38,17 +45,46 @@ fleet-nav { display: contents; }
       this.group = this.querySelector("#nav-group");
       this.heading = this.querySelector("#nav-title");
       this.section = this.querySelector("#nav-section");
+      this.search = this.querySelector("#nav-search");
+      this.search.oninput = () => this.paint(M.route);
+      this.jobs = this.querySelector("#nav-jobs");
+      this.jobs.onclick = () => M.go("training");
+      document.addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+          event.preventDefault(); this.search.focus(); this.search.select();
+        }
+      });
       this.querySelector("#nav-signout").onclick = M.signOut;
       const skip = document.querySelector(".skip-link");
       if (skip) skip.onclick = (e) => {
         e.preventDefault(); document.getElementById("workspace")?.focus();
       };
-      M.onRoute((route) => this.paint(route));
+      M.onRoute((route) => { this.paint(route); this.refreshJobs(); });
+      this.timer = setInterval(() => this.refreshJobs(), 5000);
+    }
+
+    disconnectedCallback() { clearInterval(this.timer); }
+
+    async refreshJobs() {
+      if (!document.querySelector("training-view") || document.querySelector("#app")?.hidden || this.refreshing) return;
+      this.refreshing = true;
+      try {
+        const result = await M.api("/ui/workspace/jobs");
+        if (!result.ok) return;
+        const jobs = result.jobs || [];
+        const running = jobs.filter((job) => job.state === "running").length;
+        const queued = jobs.filter((job) => job.state === "queued").length;
+        this.jobs.textContent = `${running} running · ${queued} queued`;
+        this.jobs.hidden = false;
+      } catch { this.jobs.hidden = true; }
+      finally { this.refreshing = false; }
     }
 
     paint(route) {
       this.group.textContent = M.group || (M.inCluster ? "Connected fleet" : "Local workspace");
-      const groups = GROUPS.map(([label, entries]) => [label, entries.filter(here)])
+      const query = this.search.value.trim().toLowerCase();
+      const groups = GROUPS.map(([label, entries]) => [label, entries.filter(here)
+        .filter((entry) => !query || `${label} ${entry.join(" ")}`.toLowerCase().includes(query))])
         .filter(([, entries]) => entries.length);
       this.tabs.replaceChildren(...groups.map(([label, entries]) =>
         el("div", { class: "nav-section" }, el("span", { class: "nav-label" }, label),
