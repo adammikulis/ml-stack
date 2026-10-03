@@ -377,6 +377,8 @@ Owner's standing choices (2026-10-03); do not ask again.
   `docs/decision-models.md` against that bar as a defect worth an issue; the gap analysis lives
   in the issue tracker, not in a private note.
 
+- **Default decider: Strands 2B** (`StrandsAgents/strands-decider-2B-hobson-v19`), chosen for its small size; revisit only against measured results (JevBench and our own sets). **Fine-tuned deciders are never committed**: datasets and weights stay in caches, the repo keeps recipes and metrics only.
+
 ## Saying that something works
 
 Drive it the way a person does before you say it works: open the interface, click through the
