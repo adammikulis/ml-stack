@@ -19,7 +19,7 @@ from typing import Any
 
 from ml_stack import http, httpguard
 from ml_stack.httpguard import Fetched, Limits, Refused
-from ml_stack.net import policy as hosts
+from ml_stack.net import observed, policy as hosts
 from ml_stack.net.hold import Hold, SentinelHold
 from ml_stack.net.policy import mirror_netloc
 from ml_stack.net.scan import Scanner, ScanPolicy
@@ -126,7 +126,13 @@ class Pipeline:
         """``url``'s answer. `Refused` for a host the policy does not admit, a private
         address at any hop, a downgrade, or a body over the limit."""
         limits = self._limits(ask)
-        return httpguard.fetch(url, headers=bearer(url, ask.headers, ask.token, self.plain()), limits=limits)
+        try:
+            got = httpguard.fetch(url, headers=bearer(url, ask.headers, ask.token, self.plain()), limits=limits)
+        except Refused as exc:
+            observed.refused(url, exc)
+            raise
+        observed.fetched(url, got.url, got.redirects, len(got.body), got.headers.get("content-type", ""))
+        return got
 
     def plain(self) -> frozenset[str]:
         """Hosts a token may be sent to without TLS: those named as private-network hosts."""
@@ -146,6 +152,8 @@ class Pipeline:
         for attempt in range(tries):
             with httpguard.stream(url, headers=sent, limits=limits) as shown:
                 if shown.status < 400:
+                    observed.fetched(url, shown.url, shown.redirects, 0,
+                                     shown.headers.get("content-type", ""))
                     yield Reply(shown)
                     return
                 error = http.ServerError(f"{http.shown(url)} -> HTTP {shown.status}",
