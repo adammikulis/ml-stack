@@ -10,12 +10,12 @@ from importlib.util import find_spec
 CAR_ACTIONS = [f"{steer} {drive}" for steer in ("left", "straight", "right")
                for drive in ("brake", "coast", "accelerate")]
 ENVIRONMENTS = {
-    "traffic-driving": {"title": "Smart traffic city", "description": "SUMO signals and traffic with MetaDrive vehicle physics",
-                        "library": "SUMO-RL + MetaDrive", "physics": "Bullet + SUMO",
-                        "modules": ["metadrive", "sumo_rl", "gymnasium"], "extra": "gym", "actions": []},
     "car": {"title": "Smart car", "description": "Road navigation with lidar and vehicle dynamics",
                 "library": "MetaDrive", "physics": "Bullet", "modules": ["metadrive", "gymnasium"],
                 "extra": "gym-driving", "actions": CAR_ACTIONS},
+    "traffic-driving": {"title": "Smart traffic city", "description": "SUMO signals and traffic with MetaDrive vehicle physics",
+                        "library": "SUMO-RL + MetaDrive", "physics": "Bullet + SUMO",
+                        "modules": ["metadrive", "sumo_rl", "gymnasium"], "extra": "gym", "actions": []},
     "warehouse": {"title": "Warehouse robots", "description": "Two robots collecting and delivering orders",
                       "library": "RWARE", "physics": "Discrete logistics", "modules": ["rware", "gymnasium"],
                       "extra": "gym-warehouse", "actions": ["noop", "forward", "left", "right", "toggle load"]},
