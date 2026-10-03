@@ -13,7 +13,7 @@ from ml_stack.log import say
 from ml_stack.serve import ops
 from ml_stack.serve.backend import ServerSpec, logs_of, parse_context
 from ml_stack.serve.ops import base_url_for
-from ml_stack.serve.quant_guard import override_note
+from ml_stack.serve.quant_guard import status_note
 
 __all__ = ["OPTIONS", "cmd_status"]
 
@@ -157,8 +157,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             " per slot")
         say(f"  slots    {snapshot.slots if snapshot.slots is not None else 'not reported'}")
         say(f"  lease    {_lease_line(snapshot)}")
-        if snapshot.iq_override:
-            say(f"  WARNING  {override_note(snapshot.model or snapshot.iq_override)}")
+        if snapshot.iq_warning:
+            say(f"  WARNING  {status_note(snapshot.iq_warning)}")
         if snapshot.log:
             say(f"  log      {snapshot.log}")
         if snapshot.load_s is not None:

@@ -9,7 +9,7 @@ import json
 from ml_stack import hub
 from ml_stack.command import flag, option
 from ml_stack.log import say, warn
-from ml_stack.serve import build, ops
+from ml_stack.serve import build, ops, quant_guard
 from ml_stack.serve.backend import ServerFailed, ServerSpec, UnknownFlag, parse_context
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.ops import Refused
@@ -256,9 +256,10 @@ OPTIONS_UP = [
          help="start the server even while a measurement holds this card; both its "
               "timings and anything measured through this server are then two models "
               "sharing a GPU"),
-    flag("--allow-iq", action="store_true",
-         help="serve an IQ-family quantisation on Apple silicon, which is refused by "
-              "default; the override is warned about and recorded"),
+    flag("--iq", choices=quant_guard.MODES, default="",
+         help="what an IQ-family quantisation on Apple silicon gets: warn (default; one "
+              "warning, may be slower and less accurate than a K-quant), off (no warning) "
+              "or block (refused). $ML_STACK_IQ sets the default"),
 ]
 
 
@@ -284,7 +285,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     chosen = str(getattr(args, "binary", "") or "")
     manager = ops.manager_for(chosen, str(getattr(args, "build", "") or ""))
     extra = tuple(profile.extra_args) if profile is not None else ()
-    manager.allow_iq = bool(getattr(args, "allow_iq", False))
+    manager.iq = str(getattr(args, "iq", "") or "")
     resolved_spec = ops.resolve_spec(_asked_spec(args, model, extra), manager=manager)
     for note in resolved_spec.notes:
         warn(note)
