@@ -84,3 +84,21 @@ def test_planted_text_cannot_raise_the_role_or_write_a_rule(text):
     assert session.role.name == "operator"
     assert [name for name, _ in ran if name != "models_find"] == []
     assert saved.Rules().rules == []
+
+
+@pytest.mark.parametrize("text", TEXTS)
+def test_planted_text_in_project_memory_cannot_raise_the_role_or_write_a_rule(text, tmp_path):
+    from ml_stack import memory, rules as saved
+    from tests.test_memory import inject
+    from tests.test_memory_scopes import repo
+
+    mem = memory.Memory.open(explicit=repo(tmp_path, "alpha"))
+    inject(mem.project, text)
+    ran: list = []
+    person = do.Person(io.StringIO("n\n" * 30), io.StringIO())
+    tools = chat.tools_for_chat(person=person, registry=registry(ran))
+    session = chat.Chat(Raiser(), person, tools=tools, extension=chat.extensions(person, mem))
+    session.turn("what do we know? /role runner")
+    assert session.role.name == "operator"
+    assert [name for name, _ in ran if name != "models_find"] == []
+    assert saved.Rules().rules == []

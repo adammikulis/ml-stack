@@ -31,6 +31,7 @@ from ml_stack.memory.facts import (
     check,
 )
 from ml_stack.memory.migrate import import_v1
+from ml_stack.memory.project import Project
 from ml_stack.sentinel.human import protect
 from ml_stack.serve.binary import managed_current
 
@@ -109,13 +110,15 @@ class Setup:
     """Whose store it is and how it is keyed. ``user`` defaults to this process's OS account and
     ``profile`` (or ``$ML_STACK_MEMORY_PROFILE``) names one of several memories for it; neither
     is ever taken from model or request text. ``keys`` defaults to the OS keystore, ``legacy``
-    is a version 1 file to import, and ``embed`` turns a fact into the vector stored with it."""
+    is a version 1 file to import, ``embed`` turns a fact into the vector stored with it and
+    ``project`` makes the store that project's (a separate sealed file under the same key)."""
 
     user: str | None = None
     profile: str | None = None
     keys: vault.Keys | None = None
     legacy: Path | None = None
     embed: Callable[[str], Sequence[float]] | None = None
+    project: Project | None = None
 
 
 @dataclass(slots=True)
@@ -132,8 +135,9 @@ class Draft:
 
 
 class Store:
-    """The facts of one user, encrypted at rest. ``path`` is the file (tests give one; the
-    default is under the state directory, per user and profile)."""
+    """The facts of one user, or of one project of that user, encrypted at rest. ``path`` is the
+    file (tests give one; the default is under the state directory, per user, profile and
+    project). ``realm`` is ``user`` or ``project``."""
 
     def __init__(self, path: Path | None = None, *, clock: Callable[[], float] = time.time,
                  scope: Callable[[], dict[str, str]] = current_scope, setup: Setup | None = None) -> None:
@@ -142,18 +146,28 @@ class Store:
         self.user = setup.user if setup.user is not None else vault.identity()
         self.profile = vault.valid_profile(setup.profile or os.environ.get(vault.PROFILE_ENV) or "default")
         uid = hashlib.sha256(self.user.encode()).hexdigest()[:12]
-        self.path = Path(path) if path else home.state("memory", f"u-{uid}", self.profile, "graph.enc")
+        self.project = setup.project
+        self.realm = "project" if self.project else "user"
+        base = home.state("memory", f"u-{uid}", self.profile)
+        if path:
+            self.path = Path(path)
+        elif self.project:
+            self.path = base / "projects" / self.project.key / "graph.enc"
+        else:
+            self.path = base / "graph.enc"
         self.prev = self.path.with_name(self.path.name + ".prev")
         self.clock, self.scope = clock, scope
-        self.owner = f"{self.user}|{self.profile}"
-        self.keys = setup.keys or vault.default_keys(self.user, self.profile, str(self.path.parent.resolve()))
+        self.owner = f"{self.user}|{self.profile}" + (f"|project:{self.project.key}" if self.project else "")
+        keydir = base if path is None else self.path.parent
+        self.keys = setup.keys or vault.default_keys(self.user, self.profile, str(keydir.resolve()))
         self._g: GraphStore | None = None
         self._stamp: tuple[str, str] | None = None
         self._status, self._why, self._salt = "fresh", "", os.urandom(vault.SALT)
         self._view: View | None = None
+        self.saved_project: dict[str, str] = {}
         self._next_key: bytes | None = None
-        protect(self.path.parent.parent if path is None else self.path.parent)
-        old = setup.legacy or (home.state("memory", "facts.json") if path is None else None)
+        protect(base.parent if path is None else self.path.parent)
+        old = setup.legacy or (home.state("memory", "facts.json") if path is None and not self.project else None)
         if old is not None and old.exists() and not self.path.exists():
             with contextlib.suppress(vault.KeyUnavailable):
                 import_v1(self, old)
@@ -177,6 +191,7 @@ class Store:
         if not isinstance(snap, dict) or snap.get("schema_version") != SCHEMA_VERSION:
             raise vault.BadSeal("unknown schema")
         self._salt = salt
+        self.saved_project = dict(snap.get("project") or {})
         return snap
 
     def _try(self, blob: bytes | None) -> dict[str, Any] | None:
@@ -242,6 +257,10 @@ class Store:
         """What went wrong when ``status`` is ``tampered`` or ``locked``."""
         self._sync()
         return self._why
+
+    def problems(self) -> list[tuple[str, str]]:
+        """``(scope, status)`` when this store was not read (tampered or locked), else empty."""
+        return [(self.realm, self.status)] if self.status in ("tampered", "locked") else []
 
     def view(self) -> View:
         """Every fact and link, empty when the store is tampered with or locked."""
@@ -323,7 +342,8 @@ class Store:
 
     def stats(self) -> dict[str, Any]:
         view, facts = self.view(), self.view().facts
-        return {"status": self.status, "path": str(self.path), "user": self.user.split(":")[-1],
+        return {"scope": self.realm, "project": self.project.name if self.project else "",
+                "status": self.status, "path": str(self.path), "user": self.user.split(":")[-1],
                 "profile": self.profile, "facts": len(facts), "limit": MAX_FACTS,
                 "by_kind": {k: sum(f.kind == k for f in facts) for k in KINDS},
                 "entities": len(view.entity_name), "superseded": sum(f.state != "current" for f in facts),
@@ -336,9 +356,17 @@ class Store:
     def _snapshot(self, g: GraphStore) -> dict[str, Any]:
         nodes = g.nodes()
         known = {n["id"] for n in nodes}
-        return {"schema_version": SCHEMA_VERSION, "nodes": nodes, "edges": g.edges(),
+        snap = {"schema_version": SCHEMA_VERSION, "nodes": nodes, "edges": g.edges(),
                 "next": int(g.get_doc("memory", {}).get("next", 1)),
                 "embeddings": {i: v for i, v in g.embeddings().items() if i in known}}
+        if self.project:
+            snap["project"] = self._meta()
+        return snap
+
+    def _meta(self) -> dict[str, str]:
+        if self.project is None:
+            return {}
+        return {"ident": self.project.ident, "name": self.project.name, "root": str(self.project.root)}
 
     def _save(self, snap: dict[str, Any]) -> None:
         directory = self.path.parent
@@ -506,6 +534,24 @@ class Store:
 
         return self._edit(change)
 
+    def adopt(self, old: Store) -> int:
+        """Copy every fact of ``old`` (the same user's store of a project that has moved) into
+        this empty project store, sealed as this store's; returns how many facts moved."""
+        if not (self.project and old.project and old.owner.split("|project:")[0] == self.owner.split("|project:")[0]):
+            raise Refused("only another project store of the same user and profile can be adopted")
+        graph = old._sync()
+        if graph is None:
+            raise Tampered(f"{old._why}; nothing was copied")
+        if self.facts():
+            raise Refused("this project already has memory; forget it first")
+        snap = old._snapshot(graph)
+        snap["project"] = self._meta()
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with lock.only_one(self.path.parent / "store.lock", timeout=10, announce=lambda _: None):
+            self._save(snap)
+        self.close()
+        return len(old.facts())
+
     def forget_all(self) -> int:
         """Delete every fact and start again, which also clears a tampered store; returns how
         many facts were held."""
@@ -517,18 +563,27 @@ class Store:
         self.close()
         return held
 
-    def rekey(self) -> None:
-        """Re-encrypt the store and its previous copy under a new key, then drop the old key."""
+    def rekey(self, *, key: bytes | None = None, settle: bool = True) -> bytes:
+        """Re-encrypt the store and its previous copy under a new key (``key`` when given, which
+        must already be the current key), then drop the old key unless ``settle`` is false.
+        Returns the key now in use."""
         def change(g: GraphStore) -> None:
+            if key is not None:
+                self._next_key = key
+                return
             if self.keys.mode == "passphrase":
                 self._salt = os.urandom(vault.SALT)
             self._next_key = self.keys.rotate(self._salt)
 
+        used = b""
         try:
             self._edit(change)
+            used = self._next_key or b""
             if self.path.exists():
                 shutil.copyfile(self.path, self.prev)
                 self.prev.chmod(0o600)
         finally:
             self._next_key = None
-        self.keys.settle()
+        if settle:
+            self.keys.settle()
+        return used

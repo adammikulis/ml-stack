@@ -452,6 +452,17 @@ class Person:
             return {"go": True, "said": "go"}
         return {"go": False, "said": f"The person said: {got!r}. Change the plan or ask."}
 
+    def choose(self, question: str, options: Sequence[str]) -> int | None:
+        """Show ``question`` with numbered ``options`` and return the index of the one the person
+        typed (a number, or yes for the first), else None. Only the terminal answers."""
+        self.asked += 1
+        self.say(f"\n! {question}")
+        menu = "  ".join(f"{n}) {each}" for n, each in enumerate(options, start=1))
+        got = (self._read(f"{menu}  [Enter = no] > ") or "").lower()
+        if got.isdigit() and 1 <= int(got) <= len(options):
+            return int(got) - 1
+        return 0 if got in ("y", "yes") and options else None
+
     def confirm(self, ask: Confirm, call: Call | None = None) -> bool:
         """Put an intervention's question to the person: allow this time, always allow, never
         allow, or (anything else) no. A rule is saved only on the person's own answer."""
