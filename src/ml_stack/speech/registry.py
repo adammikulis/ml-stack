@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
 
 from ml_stack.speech.protocols import NoProviderAvailable, ProviderHealth
 
-P = TypeVar("P")
-Factory = Callable[[], P]
+type Factory[P] = Callable[[], P]
 
 
 @dataclass
-class Registry(Generic[P]):
+class Registry[P]:
     """Named provider factories, an order to try them in, and one cached instance."""
 
     kind: str

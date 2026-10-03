@@ -46,8 +46,7 @@ The library imports and its suite runs on 3.12 to 3.14; CI runs each, and 3.15 a
 experiment that may fail. The app builds its own environment on 3.13 (`fleet.environment.PYTHON`,
 the installers). Code in `src/` and `tests/` uses nothing newer than 3.12:
 
-- generics use `Generic` and `TypeVar`, not `class C[T]`, `def f[T]` or `type X = ...`
-- no nested quotes inside an f-string expression, no `itertools.batched`, no `typing.override`
+- generics use PEP 695 (`class C[T]`, `def f[T]`, `type X[T] = ...`), not `Generic` and `TypeVar` (ruff UP046, UP047)
 - `os.waitid` is missing on macOS before 3.13
 
 `vermin -t=3.12- --no-tips src tests scripts` lists what a change added.
