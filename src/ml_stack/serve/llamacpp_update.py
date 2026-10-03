@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import shutil
@@ -127,6 +128,8 @@ def update(ref: str = "master", env: Env | None = None, *, force: bool = False,
         return Outcome("built", name, str(info["version"]))
     finally:
         shutil.rmtree(work, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            work.parent.rmdir()
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import ml_stack.setup as stack_setup
 from ml_stack import sentinel
 from ml_stack.serve import (
     binary,
@@ -315,3 +316,9 @@ def test_origin_is_named_for_each_place_a_binary_can_come_from(tmp_path, monkeyp
     assert llamacpp_status.origin_of(Path("/usr/local/bin/llama-server")) == "PATH"
     monkeypatch.setenv("LLAMA_CPP_SERVER", str(tmp_path / "x" / "llama-server"))
     assert llamacpp_status.origin_of(tmp_path / "x" / "llama-server").startswith("env override")
+
+
+def test_the_architectures_of_a_statically_linked_server_are_read_from_the_binary(tmp_path):
+    server = tmp_path / "llama-server"
+    server.write_bytes(b"\x00\x01qwen4exp\x00gemma4\x00unrelated\x00")
+    assert stack_setup._arches(server, known={"qwen4exp", "gemma4", "bert"}) == {"qwen4exp", "gemma4"}

@@ -451,7 +451,8 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
     """Which model architectures a build reads, from the names in libllama.
 
     ``target`` is the server binary (its sibling ``lib/`` and its own directory are
-    searched) or a directory holding the dylibs directly. A prefix match alone is
+    searched, then the binary itself when it is linked statically) or a directory holding the
+    dylibs directly. A prefix match alone is
     imprecise -- ``"phi4"`` names a chat template, not an architecture -- so ``known``
     (the names llama.cpp's source defines) replaces the guess when it is given.
     """
@@ -461,14 +462,17 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
     else:
         dirs = (path.resolve().parent.parent / "lib", path.resolve().parent)
     found: set[str] = set()
-    for where in dirs:
-        for name in sorted(where.glob("libllama*.dylib")) + sorted(where.glob("libllama*.so")):
-            try:
-                got = subprocess.run(["strings", "-n", "2", str(name)], capture_output=True,
-                                     text=True, timeout=30)
-            except (OSError, subprocess.SubprocessError):
-                continue
-            found.update(line.strip() for line in got.stdout.splitlines())
+    scanned = [name for where in dirs
+               for name in sorted(where.glob("libllama*.dylib")) + sorted(where.glob("libllama*.so"))]
+    if not scanned and path.is_file():
+        scanned = [path.resolve()]
+    for name in scanned:
+        try:
+            got = subprocess.run(["strings", "-n", "2", str(name)], capture_output=True,
+                                 text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        found.update(line.strip() for line in got.stdout.splitlines())
     if known is not None:
         return found & known
     return {w for w in found if w.islower() and 4 <= len(w) <= 20
