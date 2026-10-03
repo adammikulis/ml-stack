@@ -25,6 +25,8 @@ class Settings:
     """``stop`` gets the machine back now, at the cost of restarting the current job"""
     autostart: str = "manual"
     setup_done: bool = False
+    gym_python: str = ""
+    """An explicitly selected existing interpreter for native simulator libraries."""
     """Whether the first-run wizard was finished. A machine may finish it in no cluster."""
     on_close: str = ""
     auto_update: bool = True
