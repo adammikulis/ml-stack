@@ -132,16 +132,9 @@ class Memory:
         return out
 
     def rekey(self) -> None:
-        """Re-encrypt the user store and every project store under one new key."""
-        stores = [self.user, *self.on_disk()]
-        if self.user.keys.mode != "keystore":
-            for each in stores:
-                each.rekey()
-            return
-        key = self.user.rekey(settle=False)
-        for each in stores[1:]:
-            each.rekey(key=key, settle=False)
-        self.user.keys.settle()
+        """Re-encrypt the user store and every project store, each under the key of its own new salt."""
+        for each in [self.user, *self.on_disk()]:
+            each.rekey()
 
     def close(self) -> None:
         for each in self.stores.values():

@@ -183,10 +183,10 @@ def test_a_tool_argument_naming_the_floor_is_refused_whichever_tool_carries_it()
             assert agent_may(tool, {"argv": [text], "extra": [text]}), (tool, text)
 
 
-def test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code():
+def test_the_os_keystore_is_reached_only_from_the_keystore_module():
     import ast
     src = Path(SRC) / "ml_stack"
-    allowed = {"memory/vault.py", "fleet/onboard/signing.py", "credentials/__init__.py"}
+    allowed = {"keystore.py"}
     found = set()
     for path in src.rglob("*.py"):
         rel = path.relative_to(src).as_posix()

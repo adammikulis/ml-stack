@@ -9,32 +9,13 @@ import sys
 
 import pytest
 
-from ml_stack import credentials
+from ml_stack import credentials, keystore
 from ml_stack.credentials import CredentialError, Secret, cli as credentials_cli
+from tests import memory_keys
 
 SECRET = "tok-4f9a1c7e2b8d6035a1c97e"
 
-class MemoryKeychain:
-    """A keychain in memory, with the three calls `keyring` has and the errors it raises."""
-
-    class errors:
-        KeyringError = type("KeyringError", (Exception,), {})
-        PasswordDeleteError = type("PasswordDeleteError", (KeyringError,), {})
-
-    def __init__(self):
-        self.held = {}
-
-    def get_password(self, service, name):
-        return self.held.get((service, name))
-
-    def set_password(self, service, name, value):
-        self.held[(service, name)] = value
-
-    def delete_password(self, service, name):
-        try:
-            del self.held[(service, name)]
-        except KeyError:
-            raise self.errors.PasswordDeleteError(name) from None
+ring = memory_keys.ring
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +26,6 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
-    monkeypatch.setattr(credentials, "_keyring", lambda: None)
     return tmp_path
 
 
@@ -77,10 +57,8 @@ def test_each_source_is_found_when_it_is_the_only_one(isolated, monkeypatch):
 
 
 def test_the_order_is_argument_then_environment_then_named_file_then_file_then_keychain(
-        isolated, monkeypatch):
-    chain = MemoryKeychain()
-    chain.set_password("ml-stack", "WIDGET_KEY", "from-keychain")
-    monkeypatch.setattr(credentials, "_keyring", lambda: chain)
+        isolated, monkeypatch, ring):
+    ring.set_password("ml-stack", "WIDGET_KEY", "from-keychain")
     assert credentials.get("WIDGET_KEY") == "from-keychain"
     _stored(isolated, 'WIDGET_KEY = "from-file"\n')
     assert credentials.get("WIDGET_KEY") == "from-file"
@@ -307,18 +285,42 @@ def test_unset_removes_one_entry_and_says_whether_it_was_there(isolated):
     assert credentials.get("ONE") is None and credentials.get("TWO") == "2"
 
 
-def test_the_keychain_is_used_only_when_asked_for(isolated, monkeypatch):
-    chain = MemoryKeychain()
-    monkeypatch.setattr(credentials, "_keyring", lambda: chain)
+def test_the_keychain_is_used_only_when_asked_for(isolated, ring):
     assert credentials.set("WIDGET_KEY", SECRET, keychain=True) == "keychain"
     assert not (isolated / "home" / "credentials.toml").exists()
     assert credentials.get("WIDGET_KEY") == SECRET
+    assert list(ring.held) == [("ml-stack", keystore.default().account)]
+    for each in (isolated / "home").rglob("*"):
+        assert not each.is_file() or SECRET.encode() not in each.read_bytes(), each
     assert credentials.unset("WIDGET_KEY", keychain=True) is True
     assert credentials.get("WIDGET_KEY") is None
 
 
-def test_the_keychain_without_keyring_installed_says_what_to_install():
-    with pytest.raises(CredentialError, match="pip install keyring"):
+def test_an_item_an_older_version_kept_moves_into_the_wrapped_file_and_is_deleted(isolated, ring):
+    ring.set_password("ml-stack", "WIDGET_KEY", SECRET)
+    assert credentials.get("WIDGET_KEY") == SECRET
+    assert ("ml-stack", "WIDGET_KEY") not in ring.held
+    assert credentials.get("WIDGET_KEY") == SECRET
+    for each in (isolated / "home").rglob("*"):
+        assert not each.is_file() or SECRET.encode() not in each.read_bytes(), each
+
+
+def test_status_and_list_never_touch_the_keystore(isolated, ring):
+    calls = []
+    for name in ("get_password", "set_password", "delete_password"):
+        original = getattr(ring, name)
+        setattr(ring, name, lambda *a, _o=original, _n=name, **k: calls.append(_n) or _o(*a, **k))
+    credentials.status("WIDGET_KEY")
+    credentials.describe()
+    assert calls == []
+
+
+def test_the_keychain_without_a_keystore_says_so(monkeypatch):
+    import keyring
+    from keyring.backends import null
+
+    keyring.set_keyring(null.Keyring())
+    with pytest.raises(CredentialError, match="keystore"):
         credentials.set("WIDGET_KEY", SECRET, keychain=True)
 
 

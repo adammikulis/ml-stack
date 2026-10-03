@@ -17,7 +17,10 @@ Nothing else in the library reads `HF_TOKEN` or an API key from the environment 
 5. for `HF_TOKEN` (and its older name `HUGGING_FACE_HUB_TOKEN`), Hugging Face's own token
    file: `HF_TOKEN_PATH`, else `$HF_HOME/token`, else `~/.cache/huggingface/token`. A token
    saved by `huggingface-cli login` is found without copying it.
-6. the OS keychain, when the `keyring` package is installed (service `ml-stack`)
+6. the values stored with `--keychain`: wrapped under a subkey of the keystore master key
+   (`docs/keystore.md`), kept in `~/.ml-stack/keystore/credentials.json`. A lookup that finds
+   nothing there reads no keystore item; an item an older version stored one per name is moved
+   in on first lookup and deleted once the wrapped copy reads back
 7. nothing: `get` returns `None`, or raises `CredentialError` with `required=True`
 
 A source that exists but cannot be trusted raises `CredentialError` instead of being skipped.
@@ -57,7 +60,7 @@ the profile directory that holds it.
 ```
 ml-stack credentials set NAME            # hidden prompt, or stdin when it is not a terminal
 echo "$TOKEN" | ml-stack credentials set NAME --stdin
-ml-stack credentials set NAME --keychain # the OS keychain instead of the file
+ml-stack credentials set NAME --keychain # wrapped under the keystore master instead of plain in the file
 ml-stack credentials list [--json]       # name, whether set, which source; never a value
 ml-stack credentials unset NAME [--keychain]
 ml-stack credentials path

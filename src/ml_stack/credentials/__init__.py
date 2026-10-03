@@ -2,12 +2,13 @@
 
 `get(name)` looks in order at the explicit argument, the environment variable ``NAME``, the
 file named by ``NAME_FILE``, the credentials file, Hugging Face's own token file for
-``HF_TOKEN``, and the OS keychain when ``keyring`` is installed. Values are never logged or
+``HF_TOKEN``, and the values wrapped under the user's keystore master key (`ml_stack.keystore`). Values are never logged or
 put in an exception; `describe` and `status` say where a credential came from, not what it is.
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import logging
 import os
@@ -16,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import home, keystore
 from ml_stack.credentials.environment import child_environment
 from ml_stack.credentials.reading import (
     INSECURE_ENV,
@@ -26,6 +27,7 @@ from ml_stack.credentials.reading import (
     valid_name,
 )
 from ml_stack.credentials.writing import write
+from ml_stack.files import read_json, write_json
 
 __all__ = ["FILE_ENV", "INSECURE_ENV", "CredentialError", "Secret", "child_environment",
            "describe", "file_path", "get", "set", "status", "unset"]
@@ -36,6 +38,7 @@ FILE_ENV = "ML_STACK_CREDENTIALS_FILE"
 KEYRING_SERVICE = "ml-stack"
 HF_NAMES = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 KNOWN = ("HF_TOKEN", "ANTHROPIC_API_KEY")
+PURPOSE = "credentials"
 
 
 class Secret(str):
@@ -108,25 +111,59 @@ def _from_hf_file(name: str) -> str | None:
     return clean(text, "Hugging Face's token file")
 
 
-def _keyring() -> Any | None:
-    try:
-        import keyring
-        import keyring.errors
-    except ImportError:
+def wrapped_path() -> Path:
+    """The file holding the values stored with ``--keychain``, each wrapped under the keystore."""
+    return home.state("keystore", "credentials.json")
+
+
+def _wrapped() -> dict[str, str]:
+    table = read_json(wrapped_path(), {}).get("values", {})
+    return table if isinstance(table, dict) else {}
+
+
+def _keep(name: str, value: str) -> None:
+    ks = keystore.default()
+    blob = base64.b64encode(ks.wrap(PURPOSE, name, value.encode())).decode()
+    wrapped_path().parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    write_json(wrapped_path(), {"schema_version": 1, "values": {**_wrapped(), name: blob}})
+    wrapped_path().chmod(0o600)
+    ks.mark_migrated(KEYRING_SERVICE, name)
+
+
+def _open(name: str) -> str | None:
+    held = _wrapped().get(name)
+    if held is None:
         return None
-    return keyring
+    try:
+        return clean(keystore.default().unwrap(PURPOSE, name, base64.b64decode(held)).decode(),
+                     "the keychain entry")
+    except (keystore.KeystoreError, ValueError) as exc:
+        logger.debug("keystore unavailable: %s", type(exc).__name__)
+        return None
+
+
+def _migrate(name: str) -> None:
+    """Move an item an older version kept in the OS keystore into the wrapped file, once; the
+    old item is deleted after the wrapped value reads back equal."""
+    ks = keystore.default()
+    if ks.migrated(KEYRING_SERVICE, name):
+        return
+    try:
+        old = ks.legacy_get(KEYRING_SERVICE, name, PURPOSE)
+        if old:
+            if _open(name) != clean(old, "the keychain entry"):
+                _keep(name, old)
+            if _open(name) != clean(old, "the keychain entry"):
+                return
+            ks.legacy_drop(KEYRING_SERVICE, name, PURPOSE)
+        ks.mark_migrated(KEYRING_SERVICE, name)
+    except keystore.KeystoreError as exc:
+        logger.debug("keystore unavailable: %s", type(exc).__name__)
 
 
 def _from_keyring(name: str) -> str | None:
-    backend = _keyring()
-    if backend is None:
-        return None
-    try:
-        value = backend.get_password(KEYRING_SERVICE, name)
-    except (backend.errors.KeyringError, OSError) as exc:
-        logger.debug("keyring unavailable: %s", type(exc).__name__)
-        return None
-    return clean(value, "the keychain entry") if value else None
+    _migrate(name)
+    return _open(name)
 
 
 SOURCES: tuple[tuple[str, Callable[[str], str | None]], ...] = (
@@ -138,11 +175,11 @@ SOURCES: tuple[tuple[str, Callable[[str], str | None]], ...] = (
 )
 
 
-def _lookup(name: str) -> tuple[str, str] | None:
+def _lookup(name: str, *, read: bool = True) -> tuple[str, str] | None:
     names = HF_NAMES if name in HF_NAMES else (name,)
     for source, reader in SOURCES:
         for alias in names:
-            found = reader(alias)
+            found = reader(alias) if read or source != "keychain" else ("-" if alias in _wrapped() else None)
             if found:
                 return source, found
     return None
@@ -172,7 +209,7 @@ def status(name: str) -> dict[str, Any]:
     exists but cannot be used. Never the value."""
     valid_name(name)
     try:
-        found = _lookup(name)
+        found = _lookup(name, read=False)
     except CredentialError as exc:
         return {"present": False, "source": None, "error": str(exc)}
     return {"present": found is not None, "source": found[0] if found else None}
@@ -192,10 +229,10 @@ def set(name: str, value: str, *, keychain: bool = False) -> str:
     valid_name(name)
     value = clean(value, "the value")
     if keychain:
-        backend = _keyring()
-        if backend is None:
-            raise CredentialError("the keychain needs: pip install keyring")
-        backend.set_password(KEYRING_SERVICE, name, value)
+        try:
+            _keep(name, value)
+        except keystore.KeystoreError as exc:
+            raise CredentialError(str(exc)) from exc
         return "keychain"
     path = file_path()
     entries = _entries(path)
@@ -208,13 +245,12 @@ def unset(name: str, *, keychain: bool = False) -> bool:
     """Remove ``name`` from the credentials file (or the keychain). Whether it was there."""
     valid_name(name)
     if keychain:
-        backend = _keyring()
-        if backend is None:
+        _migrate(name)
+        table = _wrapped()
+        if name not in table:
             return False
-        try:
-            backend.delete_password(KEYRING_SERVICE, name)
-        except backend.errors.PasswordDeleteError:
-            return False
+        del table[name]
+        write_json(wrapped_path(), {"schema_version": 1, "values": table})
         return True
     path = file_path()
     entries = _entries(path)

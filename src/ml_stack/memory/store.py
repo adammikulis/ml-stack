@@ -161,7 +161,8 @@ class Store:
         self.clock, self.scope = clock, scope
         self.owner = f"{self.user}|{self.profile}" + (f"|project:{self.project.key}" if self.project else "")
         keydir = base if path is None else self.path.parent
-        self.keys = setup.keys or vault.default_keys(self.user, self.profile, str(keydir.resolve()))
+        older = (base / "graph.enc", base / "graph.enc.prev") if self.project else (self.path, self.prev)
+        self.keys = setup.keys or vault.default_keys(self.user, self.profile, str(keydir.resolve()), older)
         self._g: GraphStore | None = None
         self._stamp: tuple[str, str] | None = None
         self._status, self._why, self._salt = "fresh", "", os.urandom(vault.SALT)
@@ -573,8 +574,7 @@ class Store:
             if key is not None:
                 self._next_key = key
                 return
-            if self.keys.mode == "passphrase":
-                self._salt = os.urandom(vault.SALT)
+            self._salt = os.urandom(vault.SALT)
             self._next_key = self.keys.rotate(self._salt)
 
         used = b""

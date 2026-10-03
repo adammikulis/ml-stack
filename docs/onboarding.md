@@ -310,8 +310,10 @@ cluster members over pinned TLS.
 One Ed25519 key per cluster, generated on the controller on first use, **separate from the
 cluster key** (losing one is not losing the other). `onboard/signing.py`:
 
-* **Stored in the OS keystore by default** through `keyring` (macOS Keychain, Windows
-  Credential Manager, Linux Secret Service). With no usable keystore it is stored in a file
+* **Wrapped under the keystore master key by default** (`docs/keystore.md`): the key sits in
+  `signing.key.wrapped` in the state directory, sealed under the `fleet-signing` subkey for that
+  directory; an older install's item in the OS keystore is moved there on first use and deleted
+  once the file unwraps to the same key. With no usable keystore it is stored in a file
   encrypted under a passphrase (scrypt, ChaCha20-Poly1305, mode 0600) with a warning and a
   `warning` event; the passphrase comes from `ML_STACK_SIGNING_PASSPHRASE` or a prompt, and with
   neither it refuses rather than write a plaintext key. There is no plaintext path; tests scan

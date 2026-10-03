@@ -127,6 +127,18 @@ These apply to every consumer of the library without a switch.
   still served only through a Broker lease, fitted against memory like any other, and the
   hashes in its decider config are checked when it loads.
 
+## The OS keystore
+
+One module, `ml_stack/keystore.py`, talks to the operating system's keystore, and
+`tests/test_keystore_gate.py` fails if another does. It holds one master key per user; the
+memory vault, the fleet signing key and wrapped credentials use subkeys cut from it with a
+purpose label that is also authenticated data. It asks the OS lazily and at most once per
+process, stops for good in a process after a refusal (and for ten minutes across processes),
+allows twenty operations per hour, lets one process of several that start together do the
+asking, and refuses a background process until a person runs `ml-stack-security unlock`.
+Every operation is a sentinel event without a value. The design and the limits are in
+`docs/keystore.md`; the attacks it is tested against are in `tests/test_redteam_keystore.py`.
+
 ## What is exempt from the net scan
 
 `tests/test_net_no_bypass.py` fails for any module outside `ml_stack.net` that imports a network

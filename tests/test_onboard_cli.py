@@ -33,7 +33,7 @@ def env_for(root):
     root.mkdir(exist_ok=True)
     return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(root),
             "PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
-            "ML_STACK_TEST_KEYRING": str(root / "keyring.json"),
+            "ML_STACK_TEST_KEYRING": str(root / "keyring.json"), "DISPLAY": ":0",
             "ML_STACK_CLUSTER_KEY": str(root / "cluster.key"), "PYTHONUNBUFFERED": "1"}
 
 
@@ -235,7 +235,7 @@ def test_bootstrap_prints_an_offer_with_a_pinned_certificate(tmp_path):
         state = tmp_path / "x" / "s"
         assert (state / "signing.json").stat().st_mode & 0o077 == 0
         assert not (state / "signing.key").exists() and not (state / "signing.key.enc").exists()
-        assert json.loads((state / "signing.json").read_text())["store"] == "keyring"
+        assert json.loads((state / "signing.json").read_text())["store"] == "keystore"
     finally:
         stop(proc)
     refused = fleet(env, "bootstrap", "--json", "--state", str(tmp_path / "x" / "s"))
