@@ -47,23 +47,30 @@ class Role:
 @dataclass(frozen=True)
 class Extension:
     """What a feature adds to a session: ``tools`` (``(schema, callable)`` pairs), text for the
-    system message from ``context``, the names in ``reads`` that only look (every role may
+    system message from ``context``, text put in front of a session's first message from
+    ``start`` (given that message), slash ``commands`` by name that answer the person in text (given
+    the words after the command and the messages so far), the names in ``reads`` that only look (every role may
     call them) and the names in ``asks`` that change something, with what each does (roles
-    that act ask first). A name on the person-only floor is refused."""
+    that act ask first) and the names in ``asks_itself`` that change something and ask the person
+    inside the tool (only roles that act may call them; the rail does not ask a second time and
+    offers no always rule). A name on the person-only floor is refused."""
 
     tools: Callable[[], Sequence[tuple[dict[str, Any], Callable[..., Any]]]] = lambda: ()
     context: Callable[[], str] = lambda: ""
+    start: Callable[[str], str] = lambda task: ""
+    commands: Mapping[str, Callable[[str, Sequence[dict[str, Any]]], str]] = field(default_factory=dict)
     reads: frozenset[str] = frozenset()
     asks: Mapping[str, str] = field(default_factory=dict)
+    asks_itself: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        bad = sorted(n for n in (*self.reads, *self.asks) if _TOOL_NAME.search(n) or n in OWN)
+        bad = sorted(n for n in (*self.reads, *self.asks, *self.asks_itself) if _TOOL_NAME.search(n) or n in OWN)
         if bad:
             raise ValueError(f"extension tools {bad} are on the person-only floor or the loop's own")
 
     def allowed(self, role: Role) -> frozenset[str]:
         """The extension's tool names ``role`` may call."""
-        return self.reads | (frozenset(self.asks) if role.acts else frozenset())
+        return self.reads | (frozenset(self.asks) | self.asks_itself if role.acts else frozenset())
 
 
 def _table(*roles: Role) -> Mapping[str, Role]:
@@ -192,7 +199,7 @@ class RoleRail(Base):
         ext = self.extension
         if call.name not in role.tools | ext.allowed(role) or call.name not in self.offered():
             return Deny(f"{call.name} is not a tool the {role.name} role offers", self.name)
-        if call.name in READ or call.name in ext.reads:
+        if call.name in READ or call.name in ext.reads or call.name in ext.asks_itself:
             return Proceed()
         does = CONFIRM.get(call.name) or ext.asks[call.name]
         if role.max_gpu_seconds is not None and self.gpu_seconds >= role.max_gpu_seconds \

@@ -14,7 +14,7 @@ from ml_stack import sentinel
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sandbox import cli as sandbox_cli
-from ml_stack.sentinel import human, inert, review
+from ml_stack.sentinel import human, inert, observers, review
 from ml_stack.sentinel.events import Severity
 from ml_stack.sentinel.explain import show
 from ml_stack.sentinel.integrity import FILE_KINDS
@@ -58,6 +58,7 @@ def status(args: argparse.Namespace) -> int:
     """Print the sentinel's state, and what is held by name with the command that reviews it."""
     held = _held()
     info = {**sentinel.default().status(), "sandbox": sandbox_cli.summary(),
+            "reputation": observers.line() or "no sources recorded",
             "held": [i.to_json() for i in held]}
     return _out(args, info, lambda: [
         *(f"{k}: {_loop(v) if k == 'scanner' else v}" for k, v in info.items() if k != "held"),

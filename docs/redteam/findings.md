@@ -144,3 +144,20 @@ did not contain it.
 
 `pointer_prompt.render` wrote the state between `<state>` and `</state>` as given, so a state containing `</state>`, `<question type="choice">` or `<answer>` changed the structure the pointer decider reads; only callers that ran `prepare()` first were safe, and `answer` was not in the shared tag pattern. `render` now passes the state through `closed()` itself, `answer` is in `STATE_TAGS`, the pattern allows space around the slash (`< / STATE >`), and `closed()` deletes control characters instead of replacing them with a space. Not covered: homoglyphs that NFKC leaves alone (Cyrillic or Greek letters inside a tag name), HTML-entity spellings (`&lt;/state&gt;`), and the question and option text, which callers define. `echoes_prompt` now also flags a tool result containing an `<answer>` tag. Tests: `tests/test_decide_questions.py` (22 spellings through the pointer prompt, the logprob prompt, the guard judge and the guard states).
 
+
+## Coverage run (feat/redteam-coverage)
+
+Each has a `xfail(strict=True)` test that turns green-to-red when the hole is closed (remove the marker then).
+Nothing here was fixed on this branch.
+
+| id | severity | where | summary | test |
+|---|---|---|---|---|
+| F10 | medium | `mcp.speech_say` | writes the synthesised WAV to any path the caller names, outside the state directory | `tests/test_redteam_mcp.py::test_speech_say_writes_only_inside_the_state_directory` |
+| F11 | medium | `mcp.fleet_join` | a model-supplied passphrase joins a cluster (and can persist at logon) with no person at a terminal; only the MCP client's prompt stands in the way | `tests/test_redteam_mcp.py::test_fleet_join_needs_a_person` |
+| F12 | medium | `graph/serve.py` | a request with another `Host` name is answered (DNS rebinding reaches `/ask`, threads, exports) | `tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused` |
+| F13 | medium | `graph/serve.py` | a cross-origin form POST (`Origin` not loopback, `text/plain`) reaches `/ask` | `tests/test_redteam_graph_serve.py::test_a_post_from_another_origin_is_refused` |
+| F14 | medium | `graph/serve.py` `read_body` | the body is read to the claimed length (hangs on a huge one; a negative length raises) | `tests/test_redteam_graph_serve.py::test_a_body_that_claims_to_be_huge_is_refused_at_once` |
+| F15 | low | `workspace init` | checks the agent markers but not for a terminal, so an agent without a marker can register the first human identity | `tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal[8]` |
+| F16 | low | `mcp.models_fetch` and other positional arguments | a value starting with a dash is parsed as an option by the spawned command | `tests/test_redteam_mcp.py::test_a_reference_that_starts_with_a_dash_is_not_an_option` |
+| F17 | low | `mcp.serve_escalate`, `serve_down` | the MCP boundary does not type-check: `serve_escalate(port="x")` spawns a process | none (noted) |
+| F18 | low | `graph/serve.py` | `POST /ask` with no model configured answers 500 | none (noted) |

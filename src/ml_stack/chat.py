@@ -29,6 +29,7 @@ from ml_stack import (
     guard as rails,
     home,
     mcp,
+    memory,
     roles,
     rules as saved,
 )
@@ -40,6 +41,7 @@ from ml_stack.guard.policy import Limits, ToolPolicyRail
 from ml_stack.guard.secrets import SecretRail
 from ml_stack.guard.untrusted import UntrustedRail
 from ml_stack.interventions import Deny, Run, Verdict
+from ml_stack.memory import Memory
 from ml_stack.serve import suggest
 from ml_stack.taint import TaintRail
 
@@ -287,6 +289,7 @@ class Chat:
             TaintRail(registries={"models": do.on_disk_ids}), *self.extra]
         self.limits = next((r for r in mine if isinstance(r, ToolPolicyRail)), ToolPolicyRail())
         self.watch: Run = rails.start(mine, offered=schemas, task="", confirm=self.person.confirm)
+        self.started = False
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": self.system()},
                                                *history]
         self.watch.context.messages = self.messages
@@ -341,6 +344,10 @@ class Chat:
             else (only or self.names())
         schemas, run_by = self._only(names)
         refusal = policy.refusal_for(text)
+        if not self.started:
+            self.started = True
+            first = self.extension.start(text)
+            prefix = first + "\n\n" + prefix if first else prefix
         body = prefix + text
         if refusal:
             self.person.say(f"\n{policy.refused(*refusal)}")
@@ -465,6 +472,8 @@ HELP = f"""/help          this list
 /role [NAME]   the roles; with NAME, run under that role (only you can: the model has no way to)
 /plan TEXT     have the model plan TEXT and show the steps, doing nothing
 /model [REF]   the model in use; with REF, switch to it
+/memory [TEXT] what would be recalled for TEXT (default: your last message), with the scope
+               of each fact (user: you, all projects; project: this one)
 /quit          leave (the conversation is saved: ml-stack-chat --resume)
 anything else  is said to the model
 {saved.RULES_HELP}"""
@@ -475,7 +484,8 @@ def _tools_text(chat: Chat) -> str:
     shown = {s["function"]["name"] for s, _ in chat.offered} & chat.names()
     for name in sorted(shown):
         mark = ("asks first" if chat.role.asks == "each" else "asks unless the plan names it") \
-            if name in policy.CONFIRM else "reads"
+            if name in policy.CONFIRM else "asks you itself, every time" if name in chat.extension.asks_itself \
+            else "reads"
         lines.append(f"  {name:<16} {mark}")
     return "tools:\n" + "\n".join(lines)
 
@@ -520,6 +530,8 @@ def _slash(chat: Chat, word: str, rest: str, stdout: TextIO,
             chat.client = connect(rest.strip())
             chat.session.model = rest.strip()
             stdout.write(f"model: {rest.strip()}\n")
+    elif word[1:] in chat.extension.commands:
+        stdout.write(chat.extension.commands[word[1:]](rest, chat.messages) + "\n")
     else:
         stdout.write(f"{word} is not a command; /help lists them\n")
 
@@ -567,6 +579,9 @@ OPTIONS = (
          help="the draft head: 'auto', 'none' or a named head (default: %(default)s)"),
     flag("--rounds", type=int, default=0,
          help=f"tool-calling rounds one message may spend (default: {ROUNDS}, a task {TASK_ROUNDS})"),
+    flag("--project", default="", metavar="PATH",
+         help="the project whose memory is used with yours (default: the git repository or "
+              "directory the chat was started in)"),
     flag("--n-predict", type=int, default=do.N_PREDICT),
     option("timeout", default=900.0, help="seconds to wait for one reply (default: %(default)s)"),
     flag("--context-size", type=int, default=0, metavar="TOKENS",
@@ -576,14 +591,29 @@ OPTIONS = (
 )
 
 
-def extensions() -> roles.Extension:
-    """The tools and session-start context features add to every session.
+def extensions(person: do.Person, mem: Memory | None = None) -> roles.Extension:
+    """The tools, context and commands features add to every session.
 
     EXTENSION POINT: wire a feature here with its `roles.Extension` (``tools``, ``context``,
-    ``reads``, ``asks``); its tools are offered, held to the roles and shown to the model with
-    its context in the system message. A tool that asks the person itself is named in
-    ``reads`` so the role does not ask twice."""
-    return roles.Extension()
+    ``start``, ``commands``, ``reads``, ``asks``); its tools are offered, held to the roles and
+    shown to the model with its context in the system message, ``start`` text goes in front of
+    the first message of a session, and ``commands`` are slash commands for the person. A tool
+    that asks the person itself is named in ``asks_itself`` so the role does not ask twice.
+
+    Memory: the person's memory and the open project's (``mem``), searched together."""
+    mem = mem or Memory.open()
+    merged = mem.merged()
+
+    def shown(rest: str, messages: Sequence[dict[str, Any]]) -> str:
+        asked = rest.strip() or next((str(m["content"]) for m in reversed(messages)
+                                      if m.get("role") == "user"), "")
+        return memory.describe(merged, asked[:300])
+
+    return roles.Extension(
+        tools=lambda: memory.tools(confirm=person.choose, store=mem.user, project=mem.project),
+        context=lambda: memory.guidance(mem.project.project.name if mem.project and mem.project.project else ""),
+        start=lambda task: memory.session_context(task, store=merged),
+        commands={"memory": shown}, reads=memory.READ, asks_itself=memory.ACTING)
 
 
 def _task_of(args: argparse.Namespace) -> str:
@@ -602,8 +632,13 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     task = _task_of(args)
     role = args.role or (roles.TASK_DEFAULT if task else roles.DEFAULT)
     person = do.Person(stdin, stdout)
+    try:
+        mem = Memory.open(explicit=Path(args.project) if args.project else None)
+    except ValueError as exc:
+        stdout.write(f"{exc}\n")
+        return 2
     if args.dry_run:
-        chat = Chat(None, person, role=role, task=bool(task), extension=extensions())
+        chat = Chat(None, person, role=role, task=bool(task), extension=extensions(person, mem))
         stdout.write(chat.system() + "\n\n")
         do._print_offer([(s, fn) for s, fn in chat.offered if s["function"]["name"] in chat.names()],
                         stdout)
@@ -629,7 +664,7 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     client = connect(args.model) if not args.url else _compacting(do.client_for(args), args, stdout)
     screen = native_screen()
     chat = Chat(client, person, session=session, screen=screen, role=role, task=bool(task),
-                extension=extensions())
+                extension=extensions(person, mem))
     chat.rounds = args.rounds or chat.rounds
     if session.messages:
         stdout.write(f"resumed {len(session.messages)} messages\n")

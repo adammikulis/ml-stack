@@ -14,8 +14,9 @@ from pathlib import Path
 
 from ml_stack import home
 from ml_stack.httpguard import Refused
+from ml_stack.sentinel import observers
 
-__all__ = ["ALLOWED", "ENV", "Approval", "NeedsApproval", "Policy", "approvals_path", "default",
+__all__ = ["ALLOWED", "ENV", "Approval", "Distrusted", "NeedsApproval", "Policy", "approvals_path", "default",
            "host_of", "mirror_netloc"]
 
 ALLOWED: tuple[str, ...] = (
@@ -36,6 +37,15 @@ class NeedsApproval(Refused):
     def __init__(self, host: str, purpose: str) -> None:
         super().__init__(f"{host} is not on the allow-list for {purpose}; a person approves it "
                          f"with `ml-stack-security approve-host {host}`")
+        self.host, self.purpose = host, purpose
+
+
+class Distrusted(NeedsApproval):
+    """A host or URL that is allowed but that the reputation ledger says to ask about."""
+
+    def __init__(self, host: str, purpose: str, reason: str) -> None:
+        Refused.__init__(self, f"{reason}. A person allows {host} again with "
+                         f"`ml-stack-security approve-host {host}` ({purpose} was not made).")
         self.host, self.purpose = host, purpose
 
 
@@ -139,8 +149,19 @@ class Policy:
             raise Refused("that URL has no host")
         netloc = urllib.parse.urlsplit(url.strip()).netloc.lower().rsplit("@", 1)[-1]
         if self.listed(host) or self.listed(netloc) or self.approved(host):
+            self._tighten(host, url, purpose)
             return host
         raise NeedsApproval(host, purpose)
+
+    def _tighten(self, host: str, url: str, purpose: str) -> None:
+        """`Distrusted` for a host or URL the ledger watches or marks bad, unless a person
+        approved the host after that verdict. Only ever adds a refusal."""
+        for kind, key in (("host", host), ("url", url)):
+            found = observers.gate(kind, key)
+            if found and not any(a.host == host and a.at >= found.since
+                                 and (not a.until or a.until > self.clock())
+                                 for a in self.approvals()):
+                raise Distrusted(host, purpose, found.reason)
 
 
 _DEFAULT = Policy()

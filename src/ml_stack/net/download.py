@@ -20,7 +20,7 @@ from typing import Any
 
 from ml_stack import files, http, httpguard, sentinel
 from ml_stack.httpguard import Refused, TooLarge
-from ml_stack.net import provenance, sniff
+from ml_stack.net import observed, provenance, sniff
 from ml_stack.net.hold import staging_dir
 from ml_stack.net.pipeline import Pipeline, bearer, default
 from ml_stack.net.policy import host_of
@@ -49,6 +49,10 @@ class Blocked(Refused):
 
 class ChecksumMismatch(Blocked):
     """The file's SHA-256 is not the pinned one."""
+
+
+class ScanHit(Blocked):
+    """A scanner flagged the file, or none could clear it."""
 
 
 class NoDigest(Refused):
@@ -203,6 +207,8 @@ def _promote(staged: Path, dest: Path) -> None:
 
 def _reject(pipe: Pipeline, staged: Path, note: provenance.Provenance, reason: str,
             error: type[Blocked] = Blocked) -> Blocked:
+    observed.rejected(note.url, note.sha256,
+                      {ChecksumMismatch: "hash_change", ScanHit: "scan_hit"}.get(error, "denial"))
     held = pipe.hold.hold(staged, reason, {"url": note.url, "sha256": note.sha256,
                                             "kind": note.kind, "reason": reason})
     provenance.record(replace(note, outcome="held", reason=reason, path=held))
@@ -288,10 +294,12 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
     summary = pipe.scan_policy.scan(staged, verdict.kind, pipe.scanners)
     keep, why = pipe.scan_policy.decide(verdict.kind, summary, allow_unscanned=want.allow_unscanned)
     if not keep:
-        raise _reject(pipe, staged, note, why)
+        hit = any(r.outcome == Outcome.INFECTED for r in summary.results)
+        raise _reject(pipe, staged, note, why, ScanHit if hit else Blocked)
     warnings = (*verdict.warnings, *(w for r in summary.results for w in r.warnings),
                 *(r.detail for r in summary.results if r.outcome == Outcome.NO_SCANNER))
     _promote(staged, final)
+    observed.downloaded(url)
     _pin_pulled(final, verdict.kind, want, digest, arrival)
     done = replace(note, kind=verdict.kind, scan=why,
                    scanners=tuple(r.scanner for r in summary.results),

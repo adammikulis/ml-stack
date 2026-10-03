@@ -62,7 +62,11 @@ and `/rules` says why. No tool can write it: a tool argument naming it is refuse
 
 ## Adding a feature
 
-`chat.extensions()` returns a `roles.Extension`: `tools` (schema and callable pairs), `context`
-(text added to the system message when a session starts), `reads` (tool names every role may
-call) and `asks` (names that change something; roles that act ask first, and no always rule is
-offered). A tool that asks the person itself belongs in `reads`.
+`chat.extensions(person, mem)` returns a `roles.Extension`: `tools` (schema and callable pairs),
+`context` (text added to the system message when a session starts), `start` (text put in front of
+the first message of a session and of each `/new`), `commands` (slash commands for the person,
+such as `/memory`), `reads` (tool names every role may call), `asks` (names that change
+something; roles that act ask first, and no always rule is offered) and `asks_itself` (names
+that change something and ask the person inside the tool: only roles that act are offered them,
+the rail does not ask a second time, and no always rule exists). `remember` is in `asks_itself`
+and `recall` in `reads`, so the `reader` role recalls but cannot remember.
