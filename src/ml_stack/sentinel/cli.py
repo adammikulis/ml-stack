@@ -5,15 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from ml_stack import sentinel
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sandbox import cli as sandbox_cli
-from ml_stack.sentinel import human, inert, launcher, review
+from ml_stack.sentinel import human, inert, review
 from ml_stack.sentinel.events import Severity
 from ml_stack.sentinel.explain import show
 from ml_stack.sentinel.integrity import FILE_KINDS
@@ -181,29 +182,31 @@ def quarantine(args: argparse.Namespace) -> int:
 
 
 @COMMANDS.command("review", help="see everything held, and release or purge it with single keys "
-                  "(a person at a terminal); --list and --json view anywhere", options=(
-    JSON, flag("--list", action="store_true", help="print the held subjects and exit"),
-    flag("--install-launcher", action="store_true", dest="install_launcher",
-         help="write a double-clickable file that opens this screen"),
-    flag("--dir", default="~/Desktop", help="--install-launcher: the folder to put it in"),
-    flag("--force", action="store_true", help="--install-launcher: replace an existing file")))
+                  "(a person at a terminal); with no terminal a person gets one dialog with "
+                  "Release, Keep held and Later; --list and --json view anywhere", options=(
+    JSON, flag("--list", action="store_true", help="print the held subjects and exit")))
 def review_command(args: argparse.Namespace) -> int:
-    """View what is held (anywhere), or act on it (a person at a terminal)."""
-    if args.install_launcher:
-        try:
-            say(f"launcher written: {launcher.install_launcher(Path(args.dir), force=args.force)}")
-        except launcher.LauncherError as exc:
-            warn(f"ml-stack security: {exc}")
-            return 1
-        return 0
+    """View what is held (anywhere), act on it at a terminal, or answer one dialog."""
     if args.list or args.json:
         items = _held()
         return _out(args, [i.to_json() for i in items], lambda: review.table(items))
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return _dialog()
     try:
         return review.interactive()
     except (human.HumanRequired, review.NeedsTerminal) as exc:
         warn(f"ml-stack security: {exc}")
         return 2
+
+
+def _dialog() -> int:
+    """No terminal: show the list as the dialog the heads-up uses, unless an agent started
+    this process or there is no desktop, when the list is printed."""
+    node = sentinel.default()
+    answered = "" if any(os.environ.get(m) for m in human.AGENT_MARKERS) else node.heads_up.review()
+    if not answered:
+        say("\n".join(review.table(_held())))
+    return 0
 
 
 @COMMANDS.command("release", help="release a quarantined subject (a person at a terminal)",

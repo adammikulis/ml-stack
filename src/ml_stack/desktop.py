@@ -1,5 +1,4 @@
-"""Putting a question with real buttons on the person's own screen, and opening a terminal
-window there.
+"""Putting a question with real buttons on the person's own screen.
 
 ``ML_STACK_NOTIFY`` picks the way: ``system`` (default), ``console`` or ``off``; only the
 desktop (macOS ``osascript``, Linux ``notify-send`` or ``zenity``) shows anything. The text is
@@ -19,7 +18,7 @@ import subprocess
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 
-__all__ = ["ENV", "WAIT_S", "Result", "Runner", "choose", "clean", "open_terminal", "run", "which_way"]
+__all__ = ["ENV", "WAIT_S", "Result", "Runner", "choose", "clean", "run", "which_way"]
 
 ENV = "ML_STACK_NOTIFY"
 WAIT_S = 120
@@ -29,12 +28,19 @@ logger.addHandler(logging.NullHandler())
 Result = tuple[int, str, str]
 Runner = Callable[[Sequence[str]], Result]
 
-MAC_CHOOSE = ("on run argv\n"
-              "set answer to display alert (item 1 of argv) message (item 2 of argv) "
-              "buttons {item 3 of argv, item 4 of argv} default button (item 3 of argv) "
-              f"cancel button (item 3 of argv) giving up after {WAIT_S}\n"
-              "return answer\n"
-              "end run")
+BODY_MOST = 700
+
+
+def mac_script(buttons: int) -> str:
+    """The AppleScript that asks with ``buttons`` (2 or 3) labels taken from argv items 3 on;
+    the first label is the default and the answer to Escape."""
+    labels = ", ".join(f"item {n} of argv" for n in range(3, 3 + buttons))
+    return ("on run argv\n"
+            "set answer to display alert (item 1 of argv) message (item 2 of argv) "
+            f"buttons {{{labels}}} default button (item 3 of argv) "
+            f"cancel button (item 3 of argv) giving up after {WAIT_S}\n"
+            "return answer\n"
+            "end run")
 
 
 def clean(text: object, most: int = 64) -> str:
@@ -73,13 +79,15 @@ def which_way(system: str | None = None, *, env: Mapping[str, str] | None = None
     return "none"
 
 
-def choose(title: str, body: str, buttons: tuple[str, str], *, way: str | None = None,
+def choose(title: str, body: str, buttons: tuple[str, ...], *, way: str | None = None,
            runner: Runner = run) -> str:
-    """Show ``title`` and ``body`` with two buttons (``buttons``: the safe one first) and
-    return the label pressed, ``timeout`` or ``unavailable``. Escape and closing the window
-    answer with the first button."""
+    """Show ``title`` and ``body`` with two or three buttons (``buttons``: the safe one first)
+    and return the label pressed, ``timeout`` or ``unavailable``. Escape and closing the
+    window answer with the first button."""
+    if not 2 <= len(buttons) <= 3:
+        raise ValueError("a dialog has two or three buttons")
     way = which_way() if way is None else way
-    title, body = clean(title, 80), clean(body, 300)
+    title, body = clean(title, 80), clean(body, BODY_MOST)
     if way == "macos":
         return _mac(runner, title, body, buttons)
     if way == "notify-send":
@@ -89,8 +97,9 @@ def choose(title: str, body: str, buttons: tuple[str, str], *, way: str | None =
     return "unavailable"
 
 
-def _mac(runner: Runner, title: str, body: str, buttons: tuple[str, str]) -> str:
-    code, out, err = runner(["osascript", "-e", MAC_CHOOSE, "--", title, body, *buttons])
+def _mac(runner: Runner, title: str, body: str, buttons: tuple[str, ...]) -> str:
+    code, out, err = runner(["osascript", "-e", mac_script(len(buttons)), "--", title, body,
+                             *buttons])
     if code != 0:
         return buttons[0] if "-128" in err else "unavailable"
     if re.search(r"gave up:\s*true", out):
@@ -99,34 +108,19 @@ def _mac(runner: Runner, title: str, body: str, buttons: tuple[str, str]) -> str
     return got[1] if got and got[1] in buttons else buttons[0]
 
 
-def _notify_send(runner: Runner, title: str, body: str, buttons: tuple[str, str]) -> str:
+def _notify_send(runner: Runner, title: str, body: str, buttons: tuple[str, ...]) -> str:
     code, out, _ = runner(["notify-send", "--app-name=ml-stack", "--urgency=critical",
                            "--wait", f"--expire-time={WAIT_S * 1000}",
-                           f"--action=0={buttons[0]}", f"--action=1={buttons[1]}",
+                           *(f"--action={n}={label}" for n, label in enumerate(buttons)),
                            "--", title, body])
-    if code == 0 and out.strip() in ("0", "1"):
+    if code == 0 and out.strip().isdigit() and int(out.strip()) < len(buttons):
         return buttons[int(out.strip())]
     return "timeout" if code == 0 else "unavailable"
 
 
-def _zenity(runner: Runner, title: str, body: str, buttons: tuple[str, str]) -> str:
+def _zenity(runner: Runner, title: str, body: str, buttons: tuple[str, ...]) -> str:
     code, out, _ = runner(["zenity", "--list", "--title", title, "--text", body,
                            "--column", "Answer", *buttons, f"--timeout={WAIT_S}"])
     if code == 5:
         return "timeout"
     return out.strip() if code == 0 and out.strip() in buttons else buttons[0]
-
-
-def open_terminal(command: Sequence[str], *, way: str | None = None, runner: Runner = run,
-                  which: Callable[[str], str | None] = shutil.which) -> bool:
-    """Open a terminal window running ``command`` (a fixed program path, no held text).
-    macOS opens the file with Terminal; Linux uses the first terminal emulator found."""
-    way = which_way(which=which) if way is None else way
-    if way == "macos" and which("open") and len(command) == 1:
-        return runner(["open", "-a", "Terminal", command[0]])[0] == 0
-    if way in ("notify-send", "zenity"):
-        for term in ("x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
-            if which(term):
-                flag = "--" if term == "gnome-terminal" else "-e"
-                return runner([term, flag, *command])[0] == 0
-    return False

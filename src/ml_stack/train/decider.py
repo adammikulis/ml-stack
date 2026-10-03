@@ -470,15 +470,31 @@ def work_tree(path: Path) -> Path | None:
     return None
 
 
+PINNED = (("head.safetensors", "model"), ("lora/adapter_model.safetensors", "model"),
+          ("lora/adapter_config.json", "config"), (CONFIG, "config"))
+
+
 def pin_files(root: Path, name: str) -> None:
     """Pin the decider's weights and config in the sentinel, so a change after training is a
-    finding."""
+    finding. A failure part way unpins what was pinned."""
     node = sentinel.armed()
     if node.mode == sentinel.Mode.OFF:
         return
-    for rel, kind in (("head.safetensors", "model"), ("lora/adapter_model.safetensors", "model"),
-                      ("lora/adapter_config.json", "config"), (CONFIG, "config")):
-        node.manifest.pin(root / rel, kind, source=f"trained:{name}")
+    done = False
+    try:
+        for rel, kind in PINNED:
+            node.manifest.pin(root / rel, kind, source=f"trained:{name}")
+        done = True
+    finally:
+        if not done:
+            unpin_files(root)
+
+
+def unpin_files(root: Path) -> None:
+    """Drop the pins `pin_files` made for the decider in ``root``."""
+    node = sentinel.default()
+    for rel, _ in PINNED:
+        node.manifest.unpin(root / rel)
 
 
 def _gate(s: Settings, result: Result) -> list[str]:

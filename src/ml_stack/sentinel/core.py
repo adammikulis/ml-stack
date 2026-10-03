@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack.lock import pid_alive
 from ml_stack.sentinel import canary as canaries
 from ml_stack.sentinel.canary import Baseline, Results
 from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
@@ -41,6 +42,9 @@ __all__ = ["ENV", "Screened", "Sentinel"]
 
 ENV = "ML_STACK_SENTINEL"
 BECAUSE = "ML_STACK_SENTINEL_BECAUSE"
+MISSING = "integrity.missing"
+GONE_SCANS = 3
+"""Scans in a row a pinned file may be gone before its pin is dropped."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +84,9 @@ class Sentinel:
         self.last_scan = 0.0
         self._derived: dict[str, list[str]] = {}
         self.store.on_quarantine.setdefault("session", []).append(self._taint_derived)
-        self.heads_up = HeadsUp(self.root / "notified.json", clock=clock, bus=self.bus)
+        self.heads_up = HeadsUp(self.root / "notified.json", clock=clock, store=self.store,
+                                bus=self.bus)
+        self._gone: dict[str, int] = {}
         for kind in KINDS:
             self.store.on_quarantine.setdefault(kind, []).append(self.heads_up.on_quarantine)
         self._stop = threading.Event()
@@ -340,8 +346,9 @@ class Sentinel:
         if found is None:
             self._remember(pin)
             return True
-        self.handle(found)
-        return self.mode == Mode.OBSERVE
+        if found.event.kind != MISSING:
+            self.handle(found)
+        return self.mode == Mode.OBSERVE and found.event.kind != MISSING
 
     def _stat_key(self, pin: Pin) -> tuple[str, int, int, int] | None:
         path = Path(pin.path)
@@ -368,7 +375,9 @@ class Sentinel:
         self._verified.save({"files": files})
 
     def scan(self, *, deep: bool = False) -> list[Finding]:
-        """Check every pin (hashing every file when ``deep``) and the decoys."""
+        """Check every pin (hashing every file when ``deep``) and the decoys. A pinned file
+        that is gone is logged once and its pin dropped after `GONE_SCANS` scans in a row;
+        nothing is quarantined for it."""
         out: list[Finding] = []
         for pin in self.manifest.pins().values():
             if self.store.state_of(pin.kind, pin.path) == State.QUARANTINED:
@@ -378,10 +387,36 @@ class Sentinel:
                 out.append(found)
             elif deep:
                 self.manifest.refresh_stat(pin)
+        self._heal([f for f in out if f.event.kind == MISSING])
         out.extend(self.honey.touched())
-        self.handle_all(out)
+        self.handle_all([f for f in out if f.event.kind != MISSING])
         self.last_scan = self.clock()
+        self.heads_up.poll()
         return out
+
+    def _heal(self, missing: list[Finding]) -> None:
+        """Count the scans a pinned file has been gone, drop the pin at `GONE_SCANS`, settle
+        the record an older version quarantined for it, and clear a watched server whose
+        process has exited."""
+        gone = {f.path for f in missing}
+        for path in [p for p in self._gone if p not in gone]:
+            del self._gone[path]
+        for found in missing:
+            seen = self._gone[found.path] = self._gone.get(found.path, 0) + 1
+            if seen == 1:
+                self.bus.emit(found.event)
+            if seen >= GONE_SCANS:
+                self.manifest.unpin(found.path)
+                self.bus.emit(Event("integrity.pin_dropped", Severity.NOTICE, "core",
+                                    found.event.subject, {"scans": seen}, self.clock()))
+                del self._gone[found.path]
+        for record in self.store.records(state=State.QUARANTINED):
+            if self.store.settle_missing(record.id):
+                self.manifest.unpin(record.key)
+        for record in self.store.records(kind="server", state=State.WATCH):
+            pid = record.evidence.get("pid")
+            if isinstance(pid, int) and not pid_alive(pid):
+                self.store.clear("server", record.key, "the server process exited")
 
     def start(self, interval_s: float = 300.0, deep_every: int = 12) -> threading.Thread:
         """Scan on a timer in a background thread, hashing every file every ``deep_every``

@@ -47,14 +47,10 @@ def hint(items: list[Item]) -> str:
     an empty string when nothing is held."""
     if not items:
         return ""
-    names = ", ".join(f"{i.name}" + (f" ({_short(i.code)})" if i.code else "")
+    names = ", ".join(f"{i.name}" + (f" ({explain.short_code(i.code)})" if i.code else "")
                       for i in items[:3])
     more = f" and {len(items) - 3} more" if len(items) > 3 else ""
     return f"{len(items)} held: {names}{more}. Review them: {COMMAND}"
-
-
-def _short(code: str) -> str:
-    return code.partition(".")[2].replace("_", " ") or code
 
 
 def table(items: list[Item]) -> list[str]:
