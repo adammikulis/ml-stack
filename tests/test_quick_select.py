@@ -36,6 +36,9 @@ FILES = {
     "tests/conftest.py": "",
     "docs/notes.md": "notes\n",
     "README.md": "hello\n",
+    ".github/CODEOWNERS": "* @owner\n",
+    ".github/workflows/ci.yml": "name: ci\n",
+    "tests/test_workflow.py": "def test_ci():\n    assert 'ci.yml'\n",
     "pyproject.toml": "[project]\nname = 'toy'\n",
     "contracts/shape.json": "{}\n",
 }
@@ -99,6 +102,13 @@ def test_prose_changes_select_nothing_and_are_not_unmapped(toy) -> None:
     out = affected.select(toy, ["README.md", "docs/notes.md"])
     assert out.unmapped == [] and not out.files and sorted(out.ignored) == [
         "README.md", "docs/notes.md"]
+
+
+def test_ci_config_no_test_names_cannot_change_a_result_and_one_a_test_names_selects_it(toy) -> None:
+    out = affected.select(toy, [".github/CODEOWNERS"])
+    assert out.unmapped == [] and not out.files and out.ignored == [".github/CODEOWNERS"]
+    named = affected.select(toy, [".github/workflows/ci.yml"])
+    assert named.unmapped == [] and "tests/test_workflow.py" in named.files
 
 
 def test_a_deleted_module_is_unmapped(toy) -> None:
