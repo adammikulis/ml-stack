@@ -127,7 +127,7 @@ def run_tiny(tiny_base, tmp_path, steps=6):
     out = tmp_path / "decider"
     settings = Settings(name="tiny", base=tiny_base, steps=steps, batch_size=4, device="cpu",
                         dtype="float32", lora=Lora(4, 8, 0.0, ("q_proj", "v_proj")), lr=1e-3,
-                        test_fraction=0.25, calibrate_fraction=0.25)
+                        test_fraction=0.25, calibrate_fraction=0.25, baseline="none")
     return train(tiny_cases(), out, settings), out
 
 

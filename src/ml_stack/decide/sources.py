@@ -77,5 +77,37 @@ def local_source(path: Path | str, *, download: bool = False) -> Source:
         base_dir, tok_dir = paths["config.json"].parent, paths["tokenizer.json"].parent
     lora = root / "lora"
     return Source(cfg["name"], base_dir, tok_dir, root / "head.safetensors", lora if lora.is_dir() else None,
-                  int(cfg["pointer_dim"]), float(cfg["temperature"]), cfg.get("dtype", "bfloat16"),
+                  int(cfg["pointer_dim"]), valid_temperature(cfg["temperature"]),
+                  cfg.get("dtype", "bfloat16"),
                   cfg)
+
+
+MAX_TEMPERATURE = 100.0
+
+
+def valid_temperature(value: Any) -> float:
+    """``value`` as a temperature, or `DecideError` unless it is finite and in (0, 100]."""
+    try:
+        t = float(value)
+    except (TypeError, ValueError):
+        raise DecideError(f"temperature {value!r} is not a number") from None
+    if not 0.0 < t <= MAX_TEMPERATURE:
+        raise DecideError(f"temperature {t} is outside (0, {MAX_TEMPERATURE:g}]")
+    return t
+
+
+def question_key(question: str) -> str:
+    """A question as the by-question temperature table keys it."""
+    return " ".join(question.lower().split())[:300]
+
+
+def temperature_for(source: Source, question: str) -> float:
+    """The temperature for ``question``: the one fitted for its kind in a trained decider's
+    config, else the decider's single temperature."""
+    cfg = source.details
+    if isinstance(cfg, dict):
+        kind = cfg.get("question_kinds", {}).get(question_key(question))
+        by_kind = cfg.get("temperature_by_kind", {})
+        if kind in by_kind:
+            return valid_temperature(by_kind[kind])
+    return source.temperature

@@ -3,9 +3,11 @@
 One line per case::
 
     {"id": "g-001", "question": "...", "state": "...", "options": {"safe": "...", "unsafe": "..."},
-     "label": "safe", "group": "optional split key", "tags": ["optional"]}
+     "label": "safe", "group": "optional split key", "tags": ["optional"], "kind": "choice"}
 
-``options`` is a list of names or an object of name to description.
+``options`` is a list of names or an object of name to description. ``kind`` is ``noul``
+(two options), ``choice`` or ``score`` (ordered levels); a calibration temperature is fitted
+for each kind. When absent it is ``noul`` for two options and ``choice`` otherwise.
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ from ml_stack import jsonl
 from ml_stack.decide.base import Request, State
 from ml_stack.decide.types import Option, options_of
 
+KINDS = ("noul", "choice", "score")
+
 
 @dataclass(frozen=True, slots=True)
 class Case:
@@ -33,11 +37,20 @@ class Case:
     id: str = ""
     group: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+    kind: str = ""
 
     def __post_init__(self) -> None:
         if self.label not in {o.name for o in self.options}:
             raise ValueError(f"case {self.id or self.question[:40]!r}: label {self.label!r} "
                              f"is not one of {[o.name for o in self.options]}")
+        if self.kind and self.kind not in KINDS:
+            raise ValueError(f"case {self.id or self.question[:40]!r}: kind {self.kind!r} is not "
+                             f"one of {list(KINDS)}")
+
+    @property
+    def kind_name(self) -> str:
+        """``kind``, or ``noul``/``choice`` by option count when it is not given."""
+        return self.kind or ("noul" if len(self.options) == 2 else "choice")
 
     @property
     def label_index(self) -> int:
@@ -57,18 +70,22 @@ class Case:
             out["group"] = self.group
         if self.tags:
             out["tags"] = list(self.tags)
+        if self.kind:
+            out["kind"] = self.kind
         return out
 
 
 def case_from(row: Mapping[str, Any]) -> Case:
     """A `Case` from one parsed line; a missing or mistyped field raises ValueError."""
+    if not isinstance(row, Mapping):
+        raise ValueError(f"a case is a JSON object, got {type(row).__name__}: {str(row)[:80]}")
     for key in ("question", "state", "options", "label"):
         if key not in row:
             raise ValueError(f"case has no {key!r}: {str(dict(row))[:120]}")
     return Case(question=str(row["question"]), state=row["state"],
                 options=options_of(row["options"]), label=str(row["label"]),
                 id=str(row.get("id", "")), group=str(row.get("group", "")),
-                tags=tuple(str(t) for t in row.get("tags", ())))
+                tags=tuple(str(t) for t in row.get("tags", ())), kind=str(row.get("kind", "")))
 
 
 def read_cases(path: Path | str) -> list[Case]:

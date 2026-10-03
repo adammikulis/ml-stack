@@ -4,39 +4,39 @@
     ml-stack-train-decider cases.jsonl --out ./my-decider --init strands --download
 
 A LoRA on a small base model plus a ~1M-parameter pointer head, trained on the cases with
-the options shuffled on every pass, then a temperature fitted on cases held apart from both
-training and scoring. The output directory holds ``head.safetensors``, ``lora/``, the
+the options shuffled on every pass, then a temperature per question kind fitted on cases
+held apart from both training and scoring. The data is checked first, the run holds the GPU
+at the Broker, and a decider worse than its baseline on the test cases is not registered.
+The output directory holds ``head.safetensors``, ``lora/``, the
 tokenizer files, ``decider.json`` (base pins, file hashes, temperature), ``manifest.json``
 (data hash, split sizes, metrics) and ``model_card.md``, and `PointerDecider` loads it.
 """
 
 from __future__ import annotations
 
-import json
 import random
 import shutil
 import time
-from argparse import Namespace
 from collections.abc import Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.command import Group, flag, option
-from ml_stack.decide import pointer_prompt, registry
+from ml_stack import sentinel
+from ml_stack.decide import dataset, metrics, pointer_prompt, registry
 from ml_stack.decide.base import text_of
-from ml_stack.decide.calibrate import fit_temperature, softmax
-from ml_stack.decide.cases import Case, fingerprint, read_cases
-from ml_stack.decide.eval import brier, ece, top_of
+from ml_stack.decide.calibrate import fit_temperature, fit_temperature_ece, softmax
+from ml_stack.decide.cases import Case, fingerprint
 from ml_stack.decide.fetch import locate
-from ml_stack.decide.guards import guard_cases
 from ml_stack.decide.pins import QWEN35_0_8B_BASE, STRANDS_V19, Checkpoint
 from ml_stack.decide.pointer import build_head, device_name, load_torso
-from ml_stack.decide.sources import CONFIG, FORMAT, Source, strands_source
+from ml_stack.decide.sources import CONFIG, FORMAT, Source, question_key, strands_source
 from ml_stack.decide.types import DecideError
 from ml_stack.files import sha256_file, write_json
 from ml_stack.home import expand
-from ml_stack.log import say, warn
+from ml_stack.log import say
+from ml_stack.train import gpu
 from ml_stack.train.holdout import by_group
 from ml_stack.train.lora import (
     DEFAULT_TARGETS,
@@ -48,7 +48,7 @@ from ml_stack.train.schedule import warmup_cosine
 from ml_stack.train.step import TorchStep
 from ml_stack.train.trainer import Trainer
 
-__all__ = ["COMMANDS", "Result", "Settings", "main", "train"]
+__all__ = ["Result", "Settings", "check_inputs", "train"]
 
 SMALL_DATA = 500
 """Training cases under which the model card says the run checks the pipeline and nothing else."""
@@ -75,6 +75,14 @@ class Settings:
     calibrate_fraction: float = 0.15
     test_fraction: float = 0.25
     download: bool = False
+    baseline: str = "auto"
+    """``auto`` (the checkpoint continued from, else the majority label), ``majority``,
+    ``strands``, ``none`` or the name of a registered decider."""
+    allow_worse: bool = False
+    replace: bool = False
+    wait_s: float = 0.0
+    floor: float = metrics.FLOOR
+    allow_repo: bool = False
 
 
 @dataclass
@@ -91,6 +99,12 @@ class Result:
     losses: list[float]
     seconds: float
     data_hash: str
+    temperatures: dict[str, float] = field(default_factory=dict)
+    baseline_name: str = ""
+    warnings: list[str] = field(default_factory=list)
+    refusal: list[str] = field(default_factory=list)
+    registered: bool = False
+    kinds: dict[str, str] = field(default_factory=dict)
 
 
 def _torch() -> Any:
@@ -200,53 +214,138 @@ def predict(net: Any, tok: Any, cases: Sequence[Case], settings: Settings, devic
     return out
 
 
-def metrics_of(logits: Sequence[Sequence[float]], cases: Sequence[Case], temperature: float
+def metrics_of(logits: Sequence[Sequence[float]], cases: Sequence[Case], temperature: float,
+               by_kind: dict[str, float] | None = None, floor: float = metrics.FLOOR
                ) -> dict[str, float]:
-    """Accuracy, Brier, ECE and mean confidence of ``logits`` scaled by ``temperature``."""
-    rows = [softmax([x / temperature for x in r]) for r in logits]
-    labels = [c.label_index for c in cases]
-    return {"n": len(cases),
-            "accuracy": sum(top_of(r) == y for r, y in zip(rows, labels, strict=True)) / len(rows),
-            "brier": brier(rows, labels), "ece": ece(rows, labels),
-            "confidence": sum(max(r) for r in rows) / len(rows)}
+    """`metrics.Metrics` (as a dict) of ``logits`` scaled by ``temperature``, or by the
+    temperature of each case's kind in ``by_kind``."""
+    temps = by_kind or {}
+    rows = [softmax([x / temps.get(c.kind_name, temperature) for x in r])
+            for r, c in zip(logits, cases, strict=True)]
+    return metrics.of_rows(rows, [c.label_index for c in cases], floor=floor).public()
 
 
 def splits(cases: Sequence[Case], settings: Settings) -> tuple[list[Case], list[Case], list[Case]]:
-    """Train, calibration and test cases, split by whole groups so no group is in two."""
-    groups = [c.group or c.id or c.question for c in cases]
+    """Train, calibration and test cases, split by whole groups so no group is in two. A case
+    without a group is grouped with the cases that say the same thing."""
+    groups = [c.group or dataset.key_of(c) for c in cases]
     rest = by_group(cases, groups, settings.test_fraction, seed=settings.seed)
-    inner = by_group(rest.train, [c.group or c.id or c.question for c in rest.train],
+    inner = by_group(rest.train, [c.group or dataset.key_of(c) for c in rest.train],
                      settings.calibrate_fraction / (1 - settings.test_fraction),
                      seed=settings.seed + 1)
     return list(inner.train), list(inner.holdout), list(rest.holdout)
 
 
+MIN_KIND_CASES = 20
+ECE_FIT_CASES = 50
+
+
+def fit_temperatures(logits: Sequence[Sequence[float]], cases: Sequence[Case]
+                     ) -> tuple[float, dict[str, float]]:
+    """The temperature over every calibration case, and one for each kind with at least
+    `MIN_KIND_CASES` of them. A set of `ECE_FIT_CASES` or more is fitted to minimise ECE,
+    a smaller one to minimise NLL."""
+    def fit_on(idx: list[int]) -> float:
+        rows = [softmax(logits[i]) for i in idx]
+        labels = [cases[i].label_index for i in idx]
+        return (fit_temperature_ece if len(idx) >= ECE_FIT_CASES else fit_temperature)(rows, labels)
+
+    everything = fit_on(list(range(len(cases))))
+    by_kind: dict[str, float] = {}
+    for kind in sorted({c.kind_name for c in cases}):
+        idx = [i for i, c in enumerate(cases) if c.kind_name == kind]
+        if len(idx) >= MIN_KIND_CASES:
+            by_kind[kind] = fit_on(idx)
+    return everything, by_kind
+
+
+def question_kinds(cases: Sequence[Case]) -> dict[str, str]:
+    """Each question text that always has one kind, mapped to it, so the decider can pick the
+    temperature of a question it is asked."""
+    seen: dict[str, set[str]] = {}
+    for c in cases:
+        seen.setdefault(question_key(c.question), set()).add(c.kind_name)
+    return {q: next(iter(k)) for q, k in sorted(seen.items()) if len(k) == 1}
+
+
+def majority_rows(fit_cases: Sequence[Case], cases: Sequence[Case]) -> list[list[float]]:
+    """Probabilities from the training label frequencies alone: the floor any model must beat."""
+    counts: dict[str, int] = {}
+    for c in fit_cases:
+        counts[c.label] = counts.get(c.label, 0) + 1
+    out = []
+    for c in cases:
+        raw = [counts.get(o.name, 0) + 1.0 for o in c.options]
+        out.append([x / sum(raw) for x in raw])
+    return out
+
+
+def baseline_of(spec: str, fit_cases: Sequence[Case], test: Sequence[Case], s: Settings
+                ) -> tuple[str, dict[str, float] | None]:
+    """The name and test metrics of the baseline ``spec`` names, scored on ``test``."""
+    if spec == "none":
+        return "", None
+    if spec == "majority":
+        rows = majority_rows(fit_cases, test)
+        return "majority label", metrics.of_rows(
+            rows, [c.label_index for c in test], floor=s.floor).public()
+    from ml_stack.decide.pointer import PointerDecider
+    source: Checkpoint | Path = STRANDS_V19 if spec == "strands" else registry.find(spec)
+    decider = PointerDecider(source, device=s.device, download=s.download)
+    rows = []
+    for c in test:
+        got = decider.decide(c.question, c.state, c.options)
+        rows.append([got.scores[o.name] for o in c.options])
+    return spec, metrics.of_rows(rows, [c.label_index for c in test], floor=s.floor).public()
+
+
+def _safe(text: str, limit: int = 48) -> str:
+    """``text`` cut to ``limit`` characters and reduced to ones that cannot alter a Markdown
+    card."""
+    return "".join(ch if ch.isalnum() or ch in " _.-" else "?" for ch in text)[:limit]
+
+
+def _row(label: str, m: dict[str, float]) -> str:
+    return (f"| {label} | {m['accuracy']:.3f} | {m['brier']:.3f} | {m['ece']:.3f} | "
+            f"{m['abstain_rate']:.3f} |")
+
+
 def _write_card(out: Path, cfg: dict[str, Any], result: Result) -> None:
-    small = result.n_train < SMALL_DATA
+    small = result.n_train < dataset.WARN_CASES
     m, b = result.metrics, result.baseline
-    lines = [f"# {cfg['name']}", "",
+    floor = m["floor"]
+    lines = [f"# {_safe(cfg['name'])}", "",
              "A pointer-head decision model: a LoRA on "
-             f"`{cfg['base']['repo']}` and a pointer head, trained by `ml-stack-train-decider`.",
-             ""]
+             f"`{_safe(cfg['base']['repo'], 80)}` and a pointer head, trained by "
+             "`ml-stack-decide train`.", ""]
     if small:
         lines += [f"**Pipeline check, not a quality claim.** Trained on {result.n_train} cases "
                   f"for {cfg['training']['steps']} steps.", ""]
+    if result.refusal:
+        lines += ["**Not registered:** " + "; ".join(result.refusal), ""]
     lines += ["## Data", f"- data hash (SHA-256 of the cases): `{result.data_hash}`",
               f"- cases: {result.n_train} train, {result.n_calibrate} calibration, "
               f"{result.n_test} test (whole groups; no group is in two)",
-              "- the licence of the data is the licence of the cases you trained on", "",
-              "## Results on the test cases",
-              "| | accuracy | Brier | ECE |", "|---|---|---|---|"]
+              "- the licence of the data is the licence of the cases you trained on"]
+    lines += [f"- warning: {_safe(w, 200)}" for w in result.warnings]
+    lines += ["", "## Results on the test cases",
+              f"| | accuracy | Brier | ECE | abstain rate at {floor:g} |", "|---|---|---|---|---|"]
     if b:
-        lines.append(f"| before training | {b['accuracy']:.3f} | {b['brier']:.3f} | "
-                     f"{b['ece']:.3f} |")
-    lines += [f"| after training, temperature {result.temperature:.3f} | {m['accuracy']:.3f} | "
-              f"{m['brier']:.3f} | {m['ece']:.3f} |", "",
-              "Brier is the sum over options of the squared error, 0 to 2; ECE uses 10 bins.", "",
+        lines.append(_row(f"baseline: {_safe(result.baseline_name)}", b))
+    lines += [_row("this decider", m), "",
+              f"Accuracy among answered cases (confidence at least {floor:g}): "
+              f"{m['answered_accuracy']:.3f}. Brier is the sum over options of the squared "
+              "error, 0 to 2; ECE uses 10 bins.", "",
+              "## Calibration",
+              f"Temperature {result.temperature:.3f} over all calibration cases"
+              + ("; by kind: " + ", ".join(f"{k} {t:.3f}" for k, t in
+                                           sorted(result.temperatures.items()))
+                 if result.temperatures else "") + ".", "",
               "## Files",
               "`head.safetensors`, `lora/adapter_model.safetensors`, `decider.json`, "
               "`manifest.json`. The base model is "
-              + (f"the local directory {cfg['base']['path']}." if "path" in cfg["base"] else
+              + (f"the local directory {_safe(cfg['base']['path'], 200)}."
+                 if "path" in cfg["base"] else
                  f"fetched by pinned hash ({cfg['base']['repo']} at "
                  f"{cfg['base']['revision'][:12]})."), "",
               "## Licence",
@@ -278,7 +377,9 @@ def _save(out: Path, net: Any, tok_dir: Path, settings: Settings, result: Result
                                                  "lora/adapter_model.safetensors",
                                                  "lora/adapter_config.json")}
     cfg = {"format": FORMAT, "name": settings.name, "base": _base_entry(given),
-           "pointer_dim": 256, "temperature": result.temperature, "dtype": settings.dtype,
+           "pointer_dim": 256, "temperature": result.temperature,
+           "temperature_by_kind": result.temperatures, "question_kinds": result.kinds,
+           "dtype": settings.dtype,
            "lora": settings.lora.as_dict(), "sha256": hashes,
            "training": {"steps": settings.steps, "batch_size": settings.batch_size,
                         "lr": settings.lr, "seed": settings.seed}}
@@ -287,7 +388,10 @@ def _save(out: Path, net: Any, tok_dir: Path, settings: Settings, result: Result
         "data_hash": result.data_hash, "n_train": result.n_train,
         "n_calibrate": result.n_calibrate, "n_test": result.n_test,
         "temperature": result.temperature, "metrics": result.metrics,
-        "baseline": result.baseline, "losses": result.losses, "seconds": result.seconds,
+        "baseline": result.baseline, "baseline_name": result.baseline_name,
+        "warnings": result.warnings, "refusal": result.refusal, "registered": result.registered,
+        "temperature_by_kind": result.temperatures,
+        "losses": result.losses, "seconds": result.seconds,
         "settings": {k: str(v) for k, v in vars(settings).items()}})
     _write_card(out, cfg, result)
 
@@ -359,82 +463,119 @@ def fit_model(loaded: Loaded, cases: Sequence[Case], s: Settings, out: Path, dev
     return [h["loss"] for h in report.history]
 
 
-def train(cases: Sequence[Case], out: Path | str, settings: Settings | None = None) -> Result:
-    """Train on ``cases``, calibrate, score the test split and write the directory ``out``."""
+def work_tree(path: Path) -> Path | None:
+    """The nearest directory above ``path`` that holds a ``.git`` entry, else None."""
+    for parent in (path.resolve(), *path.resolve().parents):
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def pin_files(root: Path, name: str) -> None:
+    """Pin the decider's weights and config in the sentinel, so a change after training is a
+    finding."""
+    node = sentinel.armed()
+    if node.mode == sentinel.Mode.OFF:
+        return
+    for rel, kind in (("head.safetensors", "model"), ("lora/adapter_model.safetensors", "model"),
+                      ("lora/adapter_config.json", "config"), (CONFIG, "config")):
+        node.manifest.pin(root / rel, kind, source=f"trained:{name}")
+
+
+def _gate(s: Settings, result: Result) -> list[str]:
+    """Why the result may not be registered: worse than its baseline on the test cases."""
+    if result.baseline is None:
+        return []
+    ours = metrics.Metrics(**result.metrics)
+    return metrics.worse_than(ours, metrics.Metrics(**result.baseline))
+
+
+def check_inputs(cases: Sequence[Case], eval_cases: Sequence[Case] | None, s: Settings,
+                 out: Path) -> list[str]:
+    """Refuse before any work: a bad name, a name already registered, an output directory in
+    use, a bad training or evaluation set, or an evaluation set that overlaps training.
+    Returns the warnings."""
+    registry.check_name(s.name)
+    if not s.allow_repo and (tree := work_tree(out)) is not None:
+        raise DecideError(f"{out} is inside the git work tree {tree}: trained weights and data "
+                          "are not committed. Write to the state directory (the default), or "
+                          "pass --allow-in-repo")
+    if registry.taken(s.name) and not s.replace:
+        raise DecideError(f"a decider called {s.name!r} is already registered; pass replace to "
+                          "register this run instead (the old one is kept as "
+                          f"{s.name + registry.PREVIOUS!r})")
+    if out.exists() and any(out.iterdir()):
+        raise DecideError(f"{out} is not empty; a run never writes into an existing directory")
+    found = dataset.check(cases, label="training data")
+    warnings = list(found.warnings)
+    problems = list(found.errors)
+    if eval_cases is not None:
+        held = dataset.check(eval_cases, label="evaluation data")
+        problems += [e for e in held.errors
+                     if "needed to hold out" not in e and "nothing to learn" not in e]
+        warnings += held.warnings + [e for e in held.errors if "nothing to learn" in e]
+        problems += dataset.leaks(cases, eval_cases)
+    if problems:
+        raise dataset.DataError("; ".join(problems))
+    return warnings
+
+
+def split_cases(cases: Sequence[Case], eval_cases: Sequence[Case] | None, s: Settings
+           ) -> tuple[list[Case], list[Case], list[Case]]:
+    if eval_cases is None:
+        return splits(cases, s)
+    inner = by_group(list(cases), [c.group or dataset.key_of(c) for c in cases],
+                     s.calibrate_fraction, seed=s.seed)
+    return list(inner.train), list(inner.holdout), list(eval_cases)
+
+
+def train(cases: Sequence[Case], out: Path | str, settings: Settings | None = None, *,
+          eval_cases: Sequence[Case] | None = None) -> Result:
+    """Train on ``cases``, calibrate, score the test split and write the directory ``out``.
+
+    The test cases are ``eval_cases`` when given (refused if they share a case or group with
+    ``cases``), else a share of whole groups. The decider is registered unless it is worse
+    than its baseline on them and ``settings.allow_worse`` is not set, in which case the
+    directory is written and `DecideError` names why.
+    """
     s = settings or Settings()
     out = expand(out)
-    out.mkdir(parents=True, exist_ok=True)
-    began = time.perf_counter()
-    fit_cases, cal_cases, test_cases = splits(cases, s)
+    warnings = check_inputs(cases, eval_cases, s, out)
+    fit_cases, cal_cases, test_cases = split_cases(cases, eval_cases, s)
     if min(len(fit_cases), len(cal_cases), len(test_cases)) < 1:
         raise DecideError("too few cases (or groups) to hold out calibration and test splits")
-    _torch().manual_seed(s.seed)
+    if overlap := dataset.leaks([*fit_cases, *cal_cases], test_cases, held_label="test"):
+        raise dataset.DataError("; ".join(overlap))
+    out.mkdir(parents=True, exist_ok=True)
+    began = time.perf_counter()
+    spec = ("strands" if s.init else "majority") if s.baseline == "auto" else s.baseline
     device = device_name(s.device)
-    loaded = load_model(s, device)
-    baseline = None
-    if loaded.start is not None:
-        baseline = metrics_of(predict(loaded.net, loaded.tok, test_cases, s, device),
-                              test_cases, loaded.start.temperature)
-    say(f"training {trainable_parameters(loaded.net)} parameters on {len(fit_cases)} cases "
-        f"({len(cal_cases)} calibration, {len(test_cases)} test) on {device}")
-    losses = fit_model(loaded, fit_cases, s, out, device)
-    cal_logits = predict(loaded.net, loaded.tok, cal_cases, s, device)
-    temperature = fit_temperature([softmax(r) for r in cal_logits],
-                                  [c.label_index for c in cal_cases])
-    test_logits = predict(loaded.net, loaded.tok, test_cases, s, device)
-    result = Result(out, len(fit_cases), len(cal_cases), len(test_cases), temperature,
-                    metrics_of(test_logits, test_cases, temperature), baseline, losses,
-                    time.perf_counter() - began, fingerprint(list(cases)))
-    _save(out, loaded.net, loaded.tok_dir, s, result)
-    registry.register(out)
+    hold = (nullcontext() if device == "cpu"
+            else gpu.hold(f"train decider {s.name}", wait_s=s.wait_s))
+    with hold:
+        base_name, base = baseline_of(spec, fit_cases, test_cases, s)
+        _torch().manual_seed(s.seed)
+        loaded = load_model(s, device)
+        say(f"training {trainable_parameters(loaded.net)} parameters on {len(fit_cases)} cases "
+            f"({len(cal_cases)} calibration, {len(test_cases)} test) on {device}")
+        losses = fit_model(loaded, fit_cases, s, out, device)
+        cal_logits = predict(loaded.net, loaded.tok, cal_cases, s, device)
+        temperature, by_kind = fit_temperatures(cal_logits, cal_cases)
+        test_logits = predict(loaded.net, loaded.tok, test_cases, s, device)
+        result = Result(out, len(fit_cases), len(cal_cases), len(test_cases), temperature,
+                        metrics_of(test_logits, test_cases, temperature, by_kind, s.floor), base,
+                        losses, time.perf_counter() - began, fingerprint(list(cases)),
+                        by_kind, base_name, warnings)
+        result.refusal = _gate(s, result)
+        result.registered = not result.refusal or s.allow_worse
+        result.kinds = question_kinds(cases)
+        _save(out, loaded.net, loaded.tok_dir, s, result)
+    if result.registered:
+        registry.register(out, replace=s.replace)
+        pin_files(out, s.name)
+    else:
+        raise DecideError(f"{s.name!r} is worse than the baseline ({base_name}) on the "
+                          f"{result.n_test} test cases: {'; '.join(result.refusal)}. The "
+                          f"directory {out} is written and not registered; allow_worse "
+                          "registers it anyway")
     return result
-
-
-def _run(args: Namespace) -> int:
-    cases = guard_cases() if args.cases == "guards" else read_cases(args.cases)
-    init = STRANDS_V19 if args.init == "strands" else None
-    settings = Settings(name=args.name, init=init, steps=args.steps, batch_size=args.batch_size,
-                        lr=args.lr, seed=args.seed, device=args.device, download=args.download,
-                        lora=Lora(args.rank, 2 * args.rank, 0.05, DEFAULT_TARGETS))
-    try:
-        got = train(cases, args.out, settings)
-    except (DecideError, ValueError, OSError) as exc:
-        warn(f"error: {exc}")
-        return 2
-    say(f"wrote {got.out} in {got.seconds:.0f}s: test accuracy {got.metrics['accuracy']:.3f}, "
-        f"Brier {got.metrics['brier']:.3f}, ECE {got.metrics['ece']:.3f}, "
-        f"temperature {got.temperature:.3f}")
-    if got.baseline:
-        say(f"before training: accuracy {got.baseline['accuracy']:.3f}, "
-            f"Brier {got.baseline['brier']:.3f}, ECE {got.baseline['ece']:.3f}")
-    if got.n_train < SMALL_DATA:
-        say(f"{got.n_train} training cases: this checks the pipeline, it is not a quality claim")
-    say(json.dumps({"data_hash": got.data_hash}))
-    return 0
-
-
-COMMANDS = Group(
-    "ml-stack-train-decider",
-    "Fine-tune a pointer-head decision model from labelled cases: a LoRA on a small base "
-    "model and a pointer head, options shuffled on every pass, a temperature fitted on cases "
-    "held apart from training and scoring. Writes a directory `PointerDecider` loads, with a "
-    "model card that records the data hash, the splits and the metrics.",
-    allow_abbrev=False, run=_run,
-    options=[
-        flag("cases", help="a JSONL file of labelled cases, or `guards`"),
-        option("out", required=True), flag("--name", default="decider"),
-        flag("--steps", type=int, default=60), flag("--batch-size", type=int, default=4),
-        flag("--lr", type=float, default=2e-4), flag("--seed", type=int, default=0),
-        flag("--rank", type=int, default=16),
-        flag("--init", choices=("strands",), default=None,
-             help="continue from the released checkpoint instead of a fresh adapter"),
-        flag("--device", default="auto"),
-        flag("--download", action="store_true", help="download the pinned base files"),
-    ])
-
-
-main = COMMANDS.run
-
-
-if __name__ == "__main__":  # pragma: no cover - the entry point is `ml-stack-train-decider`
-    raise SystemExit(main())
