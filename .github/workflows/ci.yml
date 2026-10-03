@@ -55,9 +55,6 @@ jobs:
             python: "3.13"
             pytest: -n 0
           - os: ubuntu-latest
-            python: "3.11"
-            pytest: --slow
-          - os: ubuntu-latest
             python: "3.12"
             pytest: --slow
           - os: ubuntu-latest

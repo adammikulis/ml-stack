@@ -4,7 +4,7 @@
 
 ### Breaking changes
 
-* **Python 3.11 or later.** `requires-python` is `>=3.11`; CI runs 3.11 to 3.14.
+* **Python 3.12 or later.** `requires-python` is `>=3.12`; CI runs 3.12 to 3.14.
 * **`mcp>=2.2,<3`.** `ml_stack.mcp` and `ml_stack.agent.McpTools` use the 2.x client (MCP revision 2026-07-28).
 * **`psutil` is a core dependency.** The `serve` extra is gone; finding and stopping a server's process tree needs it.
 * **Fleet protocol 2, pinned TLS, signed requests.** A daemon beyond this machine speaks TLS to a certificate its peers pin, every request is signed with a secret derived from the cluster key, and the passphrase salt is random per cluster. A protocol 1 peer is ignored and a machine of a cluster joined before this must join again (`ml-stack-peers setup`). A passphrase is at least 12 characters. A daemon listens on this machine only until it joins a cluster, or `--lan`, `--host` or `--setup-from-lan` says otherwise.

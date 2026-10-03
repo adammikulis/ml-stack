@@ -7,7 +7,7 @@ name = "ml-stack"
 version = "0.2.1"  # x-release-please-version
 description = "Train and run models across every machine on your network."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{ name = "a member" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -16,7 +16,6 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -216,7 +215,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 # python with no .py on it: ruff matches by extension unless the name is spelled out
 extend-include = ["scripts/budgets", "scripts/hooks/budgets",
                   "scripts/hooks/claude-bash-guard", "scripts/hooks/claude-edit-guard"]
