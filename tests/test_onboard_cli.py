@@ -272,7 +272,7 @@ def test_after_pairing_the_new_machine_fetches_files_from_the_owner(owner, tmp_p
     wheel = os.urandom(300_000)
     (shared / "ml_stack-0.2-py3-none-any.whl").write_bytes(wheel)
     (shared / "gated.gguf").write_bytes(b"GGUF" * 1000)
-    sharing = spawn(owner.env, "share", "--dir", str(shared),
+    sharing = spawn(owner.env, "share", "--port", "0", "--dir", str(shared),
                     "--sharing", "gated.gguf=never", "--licence", "gated.gguf=nocopy,https://x/l",
                     "--host", "127.0.0.1", "--json", "--state", str(owner.state), "--for", "120s")
     try:
@@ -303,7 +303,7 @@ def test_an_older_manifest_than_one_already_seen_is_refused(owner, tmp_path):
     shared = tmp_path / "shared"
     shared.mkdir()
     (shared / "a-0.1-py3-none-any.whl").write_bytes(b"w" * 70_000)
-    sharing = spawn(owner.env, "share", "--dir", str(shared), "--host", "127.0.0.1", "--json",
+    sharing = spawn(owner.env, "share", "--port", "0", "--dir", str(shared), "--host", "127.0.0.1", "--json",
                     "--state", str(owner.state), "--for", "120s")
     try:
         source = f"127.0.0.1:{json.loads(read_document(sharing))['port']}"
@@ -324,7 +324,7 @@ def test_share_answers_only_requests_signed_with_the_cluster_secret(owner, tmp_p
     shared = tmp_path / "shared"
     shared.mkdir()
     (shared / "a-0.1-py3-none-any.whl").write_bytes(b"w" * 70_000)
-    sharing = spawn(owner.env, "share", "--dir", str(shared), "--host", "127.0.0.1", "--json",
+    sharing = spawn(owner.env, "share", "--port", "0", "--dir", str(shared), "--host", "127.0.0.1", "--json",
                     "--state", str(owner.state), "--for", "120s")
     try:
         port = json.loads(read_document(sharing))["port"]

@@ -71,12 +71,15 @@ class Entry:
     source: str = ""
     """Where the file comes from when it may not be shared (a gated model): the new machine
     fetches it from there with its own credentials, through the guarded pipeline."""
+    repo: str = ""
+    """The repository a model file came from (``owner/name``), for the people reading a listing
+    and the record a downloading machine keeps; never a path and never trusted for anything."""
 
     def to_json(self) -> dict[str, Any]:
         return {"name": self.name, "size": self.size, "sha256": self.sha256,
                 "chunk_size": self.chunk_size, "chunks": list(self.chunks), "kind": self.kind,
                 "sharing": self.sharing, "licence": self.licence,
-                "licence_url": self.licence_url, "source": self.source}
+                "licence_url": self.licence_url, "source": self.source, "repo": self.repo}
 
     @classmethod
     def from_json(cls, row: Any) -> Entry:
@@ -106,7 +109,7 @@ class Entry:
             raise ManifestError(f"{name}: sharing is one of {SHARING_LEVELS}")
         return cls(name, size, digest, chunk, tuple(chunks), kind, sharing,
                    str(row.get("licence", ""))[:200], str(row.get("licence_url", ""))[:500],
-                   str(row.get("source", ""))[:500])
+                   str(row.get("source", ""))[:500], str(row.get("repo", ""))[:200])
 
 
 @dataclass(frozen=True, slots=True)

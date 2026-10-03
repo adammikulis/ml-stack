@@ -6,6 +6,7 @@ with its own home and sentinel), the Hub is the local stand-in, the file is a sm
 
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import hashlib
@@ -21,13 +22,13 @@ from onboard_support import Recorder
 from test_hub_pull import blob
 
 from ml_stack import hub, macauth, sentinel
-from ml_stack.fleet import tls
-from ml_stack.fleet.onboard import lan, manifest as mf, peerfirst
+from ml_stack.fleet import tailnet as tn, tls
+from ml_stack.fleet.onboard import lan, manifest as mf, peerfirst, routes
 from ml_stack.fleet.onboard.human import mint
 from ml_stack.fleet.onboard.peers_cli import cmd_peers
 from ml_stack.fleet.onboard.requests import Device, Devices
 from ml_stack.fleet.onboard.sharing import Licences
-from ml_stack.hub import peers as hub_peers, transfer as pulling
+from ml_stack.hub import origins, peers as hub_peers, transfer as pulling
 from ml_stack.sentinel.store import Holding
 from ml_stack.testing.fakehub import fake_hub
 
@@ -110,7 +111,7 @@ class Fleet:
         self.rows.append(row)
         self.book.add(row)
         return {"root": root, "log": log, "home": home, "row": row, "port": port,
-                "entry": entries[0] if entries else None}
+                "fingerprint": ident.fingerprint, "entry": entries[0] if entries else None}
 
     def requests(self, peer: dict) -> list[str]:
         return peer["log"].read_text().splitlines()
@@ -420,3 +421,293 @@ def _write(path: Path, data: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path
+
+
+# (k) speed: rolling throughput, the floor, per-peer limits, ranking ---------------------------
+def test_a_peer_under_the_throughput_floor_for_a_window_is_given_up_and_the_hub_is_used(
+        stand_in, fleet, tmp_path, monkeypatch):
+    monkeypatch.setattr(peerfirst, "FLOOR_BPS", 1 * MIB)
+    monkeypatch.setattr(peerfirst, "WINDOW_S", 1.5)
+    slow = fleet.peer("slow", env={"PEER_DELAY": "0.9"})        # ~280 KiB/s a stream, two streams
+    started = time.monotonic()
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert file_requests(stand_in) > 0                      # the Hub finished it
+    assert len(fleet.requests(slow)) < 3 * MIB // CHUNK       # the peer was dropped part way
+    assert time.monotonic() - started < 20
+
+
+def test_a_fast_enough_peer_is_not_given_up_on(stand_in, fleet, tmp_path, monkeypatch):
+    monkeypatch.setattr(peerfirst, "FLOOR_BPS", 1 * MIB)
+    monkeypatch.setattr(peerfirst, "WINDOW_S", 1.5)
+    fleet.peer("quick")
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert file_requests(stand_in) == 0
+
+
+def test_a_bandwidth_limit_is_honoured_and_the_file_still_arrives(stand_in, fleet, tmp_path):
+    peer = fleet.peer("capped")
+    fleet.book.configure("capped", limit_bps=int(1.5 * MIB))
+    started = time.monotonic()
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    took = time.monotonic() - started
+    assert file_requests(stand_in) == 0 and len(fleet.requests(peer)) == 3 * MIB // CHUNK
+    assert took >= 1.5, f"3 MiB at 1.5 MiB/s cannot take {took:.2f} s"          # (12 - 1) * 256 KiB / 1.5 MiB/s = 1.8 s
+
+
+def test_without_a_limit_the_same_pull_is_quick(stand_in, fleet, tmp_path):
+    fleet.peer("free")
+    started = time.monotonic()
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert time.monotonic() - started < 1.5
+
+
+def test_a_metered_peer_is_not_asked_at_all(stand_in, fleet, tmp_path):
+    peer = fleet.peer("hotspot")
+    fleet.book.configure("hotspot", metered=True)
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert fleet.requests(peer) == [] and file_requests(stand_in) > 0
+
+
+def test_a_peer_gets_at_most_its_stream_limit_of_requests_at_once(stand_in, fleet, tmp_path):
+    one = fleet.peer("narrow", env={"PEER_DELAY": "0.15"})
+    fleet.book.configure("narrow", streams=1)
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert int(Path(str(one["log"]) + ".peak").read_text()) == 1
+
+
+def test_the_default_is_two_streams_to_one_peer_not_all_four_workers(stand_in, fleet, tmp_path):
+    two = fleet.peer("default", env={"PEER_DELAY": "0.15"})
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert int(Path(str(two["log"]) + ".peak").read_text()) == 2
+
+
+def test_peers_are_ranked_by_measured_throughput_and_the_rate_is_kept(
+        stand_in, fleet, tmp_path):
+    fleet.peer("a")
+    fleet.peer("b")
+    fleet.book.record_rate("a", 1 * MIB)
+    fleet.book.record_rate("b", 80 * MIB)
+    session = peerfirst.PeerSession(fleet.book)
+    _pin, offers = session._offers(hub_peers.Wanted("maker/thing-GGUF", NAME, len(GOOD), SHA))
+    assert [o.peer.name for o in offers] == ["b", "a"]
+    fleet.book.record_rate("a", 400 * MIB)
+    fleet.book.record_rate("b", 1)                                # now b is the slow one
+    session = peerfirst.PeerSession(fleet.book)
+    _pin, offers = session._offers(hub_peers.Wanted("maker/thing-GGUF", NAME, len(GOOD), SHA))
+    assert [o.peer.name for o in offers] == ["a", "b"]
+    fleet.book.record_rate("a", 200 * MIB)                          # blends with what it had
+    assert 150 * MIB < {r["name"]: r for r in fleet.book.rows()}["a"]["rate"] < 250 * MIB
+
+
+def test_a_transfer_writes_the_rate_it_measured_into_the_peer_book(stand_in, fleet, tmp_path):
+    only = fleet.peer("solo")
+    assert "rate" not in fleet.book.rows()[0]
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert only["log"].read_text()
+    assert fleet.book.rows()[0]["rate"] > 0
+
+
+# (l) routes: LAN, then tailnet, in the download path -------------------------------------------
+def pair_record(fleet, peer, tmp_path, *, address="::1", status="active"):
+    """A paired-device record for ``peer`` whose network address is dead (::1: the peers listen
+    on 127.0.0.1 only), and a peer-book row that names it by certificate fingerprint."""
+    devices = Devices(fleet.book.path.with_name("devices.json"))
+    devices.add_accepter(peer["fingerprint"], peer["row"]["name"], address, secret="x")
+    if status != "active":
+        devices.revoke(peer["row"]["name"])
+    row = {k: v for k, v in peer["row"].items() if k != "url"}
+    fleet.book.add({**row, "url": peer["row"]["url"], "fingerprint": peer["fingerprint"],
+                    "source": "pairing"})
+
+
+def tailnet_with(name: str, *addresses: str) -> tn.Tailnet:
+    return tn.Tailnet(installed=True, up=True, state="Running", name="me", peers=(
+        tn.TailnetPeer(name=name, dns_name=f"{name}.ts.net", addresses=addresses, online=True),))
+
+
+def test_a_paired_device_whose_lan_address_is_dead_is_reached_by_its_tailnet_address(
+        stand_in, fleet, tmp_path, monkeypatch):
+    peer = fleet.peer("far")
+    pair_record(fleet, peer, tmp_path)
+    # the tailnet says the device is at 127.0.0.1 (a CGNAT address cannot be dialled here)
+    monkeypatch.setattr(peerfirst, "detect", lambda: tailnet_with("far", "127.0.0.1"))
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert file_requests(stand_in) == 0 and fleet.requests(peer)
+
+
+def test_a_tailnet_address_that_answers_with_another_certificate_is_not_used(
+        stand_in, fleet, tmp_path, monkeypatch):
+    peer = fleet.peer("far")
+    other = fleet.peer("someone-else")
+    pair_record(fleet, peer, tmp_path)
+    fleet.book.remove("someone-else")
+    # the tailnet claims "far" is at 127.0.0.1, but the port named in the book is far's; point the
+    # row at the other process, whose certificate is not the one pinned for "far"
+    fleet.book.add({**{r["name"]: r for r in fleet.book.rows()}["far"],
+                    "url": other["row"]["url"]})
+    monkeypatch.setattr(peerfirst, "detect", lambda: tailnet_with("far", "127.0.0.1"))
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert fleet.requests(other) == [] and file_requests(stand_in) > 0
+
+
+def test_a_device_with_no_tailnet_and_a_dead_lan_address_is_skipped_with_a_note(
+        stand_in, fleet, tmp_path, monkeypatch):
+    peer = fleet.peer("far")
+    pair_record(fleet, peer, tmp_path)
+    monkeypatch.setattr(peerfirst, "detect", lambda: tn.Tailnet())
+    session = peerfirst.PeerSession(fleet.book, tailnet=lambda: tn.Tailnet())
+    assert session._ask(fleet.book.rows()[0]) is None
+    assert any("not reachable" in n for n in session.notes)
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert fleet.requests(peer) == [] and file_requests(stand_in) > 0
+
+
+def test_the_real_probe_accepts_the_pinned_certificate_and_only_that_one(fleet):
+    peer = fleet.peer("far")
+    assert routes.pinned_probe("127.0.0.1", peer["port"], peer["fingerprint"]) is True
+    assert routes.pinned_probe("127.0.0.1", peer["port"], "0" * 64) is False
+    assert routes.pinned_probe("127.0.0.1", 1, peer["fingerprint"]) is False        # nobody there
+
+
+def test_a_revoked_device_left_in_the_book_is_not_asked(stand_in, fleet, tmp_path):
+    peer = fleet.peer("gone")
+    pair_record(fleet, peer, tmp_path, address="127.0.0.1", status="revoked")
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert fleet.requests(peer) == [] and file_requests(stand_in) > 0
+
+
+def test_the_lan_address_is_preferred_when_it_answers(stand_in, fleet, tmp_path, monkeypatch):
+    peer = fleet.peer("near")
+    pair_record(fleet, peer, tmp_path, address="127.0.0.1")
+    monkeypatch.setattr(peerfirst, "detect", lambda: pytest.fail("the tailnet was not needed"))
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert file_requests(stand_in) == 0
+
+
+def device(**more) -> Device:
+    base = {"fingerprint": "a" * 64, "name": "far", "hostname": "far.local",
+            "address": "192.168.1.9", "paired": 1.0}
+    return Device(**{**base, **more})
+
+
+def test_route_choice_lan_then_tailnet_never_a_public_address():
+    seen = []
+
+    def probe_for(live):
+        def probe(address, port, fingerprint):
+            seen.append(address)
+            return address in live
+        return probe
+
+    both = tailnet_with("far", "100.100.1.1")
+    assert routes.reach(device(), both, 8773, probe_for({"192.168.1.9", "100.100.1.1"})).route \
+        == routes.Route.LAN
+    got = routes.reach(device(), both, 8773, probe_for({"100.100.1.1"}))
+    assert (got.route, got.address) == (routes.Route.TAILNET, "100.100.1.1")
+    # the tailnet is not consulted when the network answers
+    called = []
+    routes.reach(device(), lambda: called.append(1) or both, 8773, probe_for({"192.168.1.9"}))
+    assert called == []
+    # a public address recorded as the device's address, and no tailnet: nothing is tried
+    seen.clear()
+    nothing = routes.reach(device(address="8.8.8.8"), tn.Tailnet(), 8773, probe_for({"8.8.8.8"}))
+    assert nothing.route == routes.Route.UNREACHABLE and seen == []
+    # a tailnet address is taken from the stored one only if it is in the tailnet range
+    seen.clear()
+    routes.reach(device(address="", tailnet_address="8.8.8.8"), tailnet_with("far"), 1,
+                 probe_for(set()))
+    assert seen == []
+
+
+def test_the_real_probe_never_dials_a_public_address(monkeypatch):
+    def refuse(*_a, **_k):
+        raise AssertionError("dialled")
+    monkeypatch.setattr(routes.socket, "create_connection", refuse)
+    assert routes.pinned_probe("8.8.8.8", 8773, "f" * 64) is False
+    assert routes.open_probe("8.8.8.8", 22) is False
+
+
+def test_the_ssh_target_goes_by_the_tailnet_when_the_network_address_is_dead(tmp_path):
+    devices = Devices(tmp_path / "devices.json")
+    devices.add_accepter("b" * 64, "far", "192.168.1.9", secret="x")
+    live = {"100.100.1.1"}
+
+    def probe(address, port, _fp=""):
+        return address in live and port == 22
+    found = routes.ssh_address("far", 22, devices, lambda: tailnet_with("far", "100.100.1.1"), probe)
+    assert found == "100.100.1.1"
+    assert routes.ssh_address("build-box.example", 22, devices, tn.Tailnet, probe) == "build-box.example"
+    with pytest.raises(lan.NotLocal):
+        routes.ssh_address("far", 22, devices, tn.Tailnet, probe)
+
+
+def test_nearby_adds_paired_devices_reachable_only_over_the_tailnet(tmp_path):
+    devices = Devices(tmp_path / "devices.json")
+    devices.add_accepter("b" * 64, "far", "192.168.1.9", secret="x")
+    devices.add_accepter("c" * 64, "heard", "192.168.1.10", secret="y")
+    out = routes.beyond_the_lan(devices, {"c" * 64}, tailnet_with("far", "100.100.1.1"), 8772,
+                                lambda a, p, f: a == "100.100.1.1")
+    assert [(r.name, r.address, r.route.value) for r in out] == [("far", "100.100.1.1", "tailnet")]
+
+
+# (m) the downloading side's record of where a model came from ---------------------------------
+def test_a_gated_model_from_a_peer_is_recorded_with_the_acceptance_it_relied_on(
+        stand_in, fleet, tmp_path):
+    peer = fleet.peer("mine", sharing="owner", licence="llama")
+    device_secret = base64.urlsafe_b64encode(b"d" * 32).decode()
+    Devices(peer["root"] / "state" / "devices.json")._write(
+        [Device("f" * 64, "laptop", "laptop.local", "127.0.0.1", 1.0, mine=True,
+                secret=device_secret)])
+    peer["row"].pop("cluster_key")
+    fleet.book.add({**peer["row"], "device_secret": device_secret})
+    Licences(peer["root"] / "state" / "licences.json").record(
+        mint("accept-licence", "llama", typed=lambda _p: "llama", terminal=(True, True), env={}),
+        peer["entry"], who="adam")
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert file_requests(stand_in) == 0
+    line = origins.latest(NAME, len(GOOD))
+    assert line and line["peer"] == "mine" and line["sha256"] == SHA and line["at"] > 0
+    assert line["relies_on"]["accepted_by"] == "adam" and line["relies_on"]["licence"] == "llama"
+    assert line["relies_on"]["device"] == "mine" and line["relies_on"]["accepted_at"]
+
+
+def test_a_model_from_the_hub_has_no_peer_record(stand_in, tmp_path):
+    assert hub.pull(REF, tmp_path / "out").read_bytes() == GOOD
+    assert origins.latest(NAME, len(GOOD)) is None
+
+
+def test_the_record_is_append_only_and_lists_every_download(tmp_path):
+    path = tmp_path / "r.jsonl"
+    origins.record({"file": "a.gguf", "size": 1, "peer": "x"}, path)
+    origins.record({"file": "a.gguf", "size": 1, "peer": "y"}, path)
+    first = path.read_text().splitlines()[0]
+    origins.record({"file": "b.gguf", "size": 2, "peer": "z"}, path)
+    assert path.read_text().splitlines()[0] == first
+    assert [r["peer"] for r in origins.read(path)] == ["x", "y", "z"]
+    assert origins.latest("a.gguf", 1, path)["peer"] == "y"
+
+
+# (n) the limit command --------------------------------------------------------------------------
+def test_peers_limit_sets_a_rate_streams_and_metered_for_one_device_or_all(tmp_path):
+    from ml_stack.fleet.onboard.peers_cli import parse_rate
+    assert parse_rate("20MiB/s") == 20 * MIB and parse_rate("512k") == 512 * 1024
+    assert parse_rate("1.5 MB/s") == 1.5 * MIB and parse_rate("off") == 0.0 and parse_rate("fast") is None
+    book = peerfirst.PeerBook(tmp_path / "s" / "peers.json")
+    for name in ("a", "b"):
+        book.add({"name": name, "url": "https://127.0.0.1:1", "signing_key": "AAAA"})
+
+    def run(**more):
+        base = {"cmd": "peers", "action": "limit", "name": "", "state": str(tmp_path / "s"),
+                "json": True, "url": "", "certificate": "", "signing_key": "", "device_secret": "",
+                "rate": "", "streams": None, "metered": ""}
+        return cmd_peers(argparse.Namespace(**{**base, **more}))
+
+    assert run(name="a", rate="2MiB/s", streams=1) == 0
+    rows = {r["name"]: r for r in book.rows()}
+    assert rows["a"]["limit_bps"] == 2 * MIB and rows["a"]["streams"] == 1 and "limit_bps" not in rows["b"]
+    assert run(metered="on") == 0                                  # every device
+    assert all(r["metered"] for r in book.rows())
+    assert run(name="a", rate="off", streams=0, metered="off") == 0
+    assert {r["name"]: r for r in book.rows()}["a"].keys().isdisjoint(
+        {"limit_bps", "streams", "metered"})
+    assert run(name="nobody", rate="1M") == 1 and run() == 2 and run(rate="quick") == 2

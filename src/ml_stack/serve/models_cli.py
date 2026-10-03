@@ -8,7 +8,7 @@ import json
 from collections.abc import Callable
 
 from ml_stack import hub
-from ml_stack.hub import cli as hub_cli
+from ml_stack.hub import cli as hub_cli, origins
 from ml_stack.log import say, warn
 from ml_stack.serve import estimate as est, suggest as pick
 from ml_stack.units import human_bytes
@@ -80,11 +80,23 @@ def _table(rows: list[list[str]], head: list[str]) -> None:
 def _list(args: argparse.Namespace) -> int:
     found = hub.discover(formats=args.format or hub.FORMATS, include=args.source,
                          companions=args.all, kind=args.kind)
+    came = {m.id: origins.latest(m.path.name, m.size_bytes) for m in found}
     rows = [[m.name[:40], m.kind, human_bytes(m.size_bytes), m.quantization, m.format, m.source,
-             "" if m.is_complete else "incomplete", m.id[:60]] for m in found]
-    return _emit(args, [m.as_dict() for m in found], lambda: (
-        _table(rows, ["NAME", "KIND", "SIZE", "QUANT", "FORMAT", "SOURCE", "", "ID"]),
+             _from(came[m.id]), "" if m.is_complete else "incomplete", m.id[:60]] for m in found]
+    return _emit(args, [m.as_dict() | {"from_peer": came[m.id]} for m in found], lambda: (
+        _table(rows, ["NAME", "KIND", "SIZE", "QUANT", "FORMAT", "SOURCE", "FROM", "", "ID"]),
         say(f"\n{len(found)} models, {human_bytes(sum(m.size_bytes for m in found))}")))
+
+
+def _from(line: dict | None) -> str:
+    """A model that came from a paired device says which, and whose licence acceptance it
+    relied on (`hub.origins`)."""
+    if not line:
+        return ""
+    relied = line.get("relies_on") or {}
+    return f"peer {line.get('peer', '?')}" + (
+        f", licence accepted by {relied.get('accepted_by') or '?'} on {relied.get('device', '?')}"
+        if relied else "")
 
 
 def _where(args: argparse.Namespace) -> int:

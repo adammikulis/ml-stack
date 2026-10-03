@@ -5,12 +5,14 @@ quarantine veto; its own ML_STACK_HOME (the environment) holds its sentinel.
 
 ``PEER_LOG`` names a file that gets one line per file request (``bytes=a-b``); ``PEER_CUT_AFTER=N``
 makes the process die after N file requests (a cut connection); ``PEER_STALL=1`` makes file
-requests hang (a peer too slow to use).
+requests hang (a peer too slow to use); ``PEER_DELAY=S`` makes each file request take S seconds
+(a slow link); the most file requests in flight at once is written to ``$PEER_LOG.peak``.
 """
 
 import base64
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -24,17 +26,31 @@ from ml_stack.fleet.onboard.transfer import API, Share, ShareServer, mac_gate
 
 class Logged(ShareServer):
     served = 0
+    inflight = 0
+    peak = 0
+    lock = threading.Lock()
 
     def dispatch(self, call):
-        if call.path.startswith(f"{API}/files/") and call.method == "GET":
-            if os.environ.get("PEER_STALL"):
-                time.sleep(120)
-            with Path(os.environ["PEER_LOG"]).open("a") as log:
-                log.write(call.headers.get("Range", "") + "\n")
+        if not (call.path.startswith(f"{API}/files/") and call.method == "GET"):
+            return super().dispatch(call)
+        if os.environ.get("PEER_STALL"):
+            time.sleep(120)
+        with Path(os.environ["PEER_LOG"]).open("a") as log:
+            log.write(call.headers.get("Range", "") + "\n")
+        with Logged.lock:
             Logged.served += 1
+            Logged.inflight += 1
+            if Logged.inflight > Logged.peak:
+                Logged.peak = Logged.inflight
+                Path(os.environ["PEER_LOG"] + ".peak").write_text(str(Logged.peak))
+        try:
             if Logged.served > int(os.environ.get("PEER_CUT_AFTER", "1000000")):
                 os._exit(0)
-        return super().dispatch(call)
+            time.sleep(float(os.environ.get("PEER_DELAY", "0")))
+            return super().dispatch(call)
+        finally:
+            with Logged.lock:
+                Logged.inflight -= 1
 
 
 def main() -> None:

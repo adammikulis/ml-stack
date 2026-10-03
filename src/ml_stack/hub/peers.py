@@ -1,11 +1,11 @@
 """Paired devices are asked for a model file before the internet is.
 
-This module is the hub's side of that: what is wanted, the on/off switches, and how the
-fleet's provider is found. The hub sits below the fleet in the package layers, so it names the
-provider by module path and loads it only when a pull is about to start and peers are on; with
-no cluster, no paired peer or no ``cryptography`` the provider answers None and the pull goes to
-the Hub as it always did. The provider (``ml_stack.fleet.onboard.peerfirst``) owns trust: the
-digest a file must have comes from `Wanted` (the Hub's own listing), never from a peer.
+The hub's side: what is wanted (`Wanted`), what a session does (`Session`), the on/off switches and
+how the fleet's provider is found. The shared data type is `hub.peerbook`. The provider
+(``ml_stack.fleet.onboard.peerfirst``) is loaded by module path, because the hub sits below the fleet
+(tests/test_layers.py) and a lower layer cannot be handed higher code without an import or an
+import-time registration, which the hard rules forbid; but only when a pull is about to start, peers
+are on and the book has a row. It owns trust: the digest comes from `Wanted`, never from a peer.
 
 Off for one pull with ``peers=False`` (``--no-peers``), for the shell with ``ML_STACK_NO_PEERS=1``,
 and for the machine with ``ml-stack fleet peers off``.
@@ -20,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from ml_stack.hub.peerbook import PeerBook
 
 __all__ = ["ENV", "PROVIDER", "Session", "Stopped", "Wanted", "enabled", "session"]
 
@@ -69,6 +71,9 @@ def enabled(flag: bool | None = None) -> bool:
 def session(flag: bool | None = None) -> Session | None:
     """The peer session for a pull, or None when peers are off or there is nobody to ask."""
     if not enabled(flag):
+        return None
+    book = PeerBook()
+    if not book.enabled or not book.rows():
         return None
     try:
         return importlib.import_module(PROVIDER).session()  # type: ignore[no-any-return]
