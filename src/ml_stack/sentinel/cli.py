@@ -38,12 +38,19 @@ def _row(r: Record) -> dict[str, Any]:
             "held": bool(r.held and "file" in r.held), "moved": bool(r.action)}
 
 
+def _loop(state: dict[str, Any]) -> str:
+    if state["armed"]:
+        return f"armed, pid {state['pid']}, every {state['interval_s']:g}s"
+    return f"NOT ARMED ({state['why']})"
+
+
 @COMMANDS.command("status", help="mode, counts by state, pins, decoys and whether the log verifies",
                   options=(JSON,))
 def status(args: argparse.Namespace) -> int:
     """Print the sentinel's state."""
     info = {**sentinel.default().status(), "sandbox": sandbox_cli.summary()}
-    return _out(args, info, lambda: [f"{k}: {v}" for k, v in info.items()])
+    return _out(args, info, lambda: [f"{k}: {_loop(v) if k == 'scanner' else v}"
+                                     for k, v in info.items()])
 
 
 @COMMANDS.command("sandbox", help="status | test: the confinement used for untrusted execution",
