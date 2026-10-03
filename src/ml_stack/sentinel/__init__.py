@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import threading
 
+from ml_stack.sandbox.run import HOOKS
+from ml_stack.sentinel.adapters import sandbox_listener
 from ml_stack.sentinel.core import ENV, Screened, Sentinel
 from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
 from ml_stack.sentinel.findings import HEURISTIC, HIGH, Finding
@@ -46,4 +48,6 @@ def default() -> Sentinel:
         where = str(sentinel_dir())
         if where not in _DEFAULT:
             _DEFAULT[where] = Sentinel()
-        return _DEFAULT[where]
+        node = _DEFAULT[where]
+        HOOKS.watch(sandbox_listener(node), node.scrub_env)
+        return node

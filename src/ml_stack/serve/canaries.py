@@ -19,7 +19,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.http import ServerError, request_json
+from ml_stack.client import Client
+from ml_stack.http import ServerError
 from ml_stack.sentinel import Sentinel, canary
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.findings import Finding
@@ -47,16 +48,14 @@ class Target:
 
 
 def asker(base_url: str) -> Callable[[str], str]:
-    """``ask(prompt) -> reply`` over the server's chat endpoint at temperature 0."""
+    """``ask(prompt) -> reply`` over the server's chat endpoint, greedy (the client's default)
+    and at most ``MAX_TOKENS`` long."""
+    client = Client(base_url.rstrip("/"))
+
     def ask(prompt: str) -> str:
-        reply = request_json(
-            f"{base_url.rstrip('/')}/v1/chat/completions",
-            payload={"messages": [{"role": "user", "content": prompt}], "temperature": 0,
-                     "max_tokens": MAX_TOKENS, "stream": False}, timeout=60.0)
-        try:
-            return str(reply["choices"][0]["message"]["content"] or "")
-        except (KeyError, IndexError, TypeError):
-            return ""
+        reply = client.chat([{"role": "user", "content": prompt}], n_predict=MAX_TOKENS,
+                            timeout=60.0)
+        return str(reply.content or "")
     return ask
 
 
