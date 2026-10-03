@@ -24,6 +24,9 @@ def make_environment(name, config=None):
         return make_cosim(cfg)
     if name == "car":
         from metadrive import MetaDriveEnv
+        magnitude = float(cfg.pop("steering_magnitude", .35))
+        if not 0 < magnitude <= 1:
+            raise ValueError("steering_magnitude must be greater than zero and at most one")
 
         class Driving(gym.ActionWrapper):
             def __init__(self, env):
@@ -31,7 +34,7 @@ def make_environment(name, config=None):
                 self.action_space = gym.spaces.Discrete(9)
 
             def action(self, action):
-                return np.array([(-1., 0., 1.)[int(action) // 3],
+                return np.array([(-magnitude, 0., magnitude)[int(action) // 3],
                                  (-1., 0., 1.)[int(action) % 3]], dtype=np.float32)
 
             def reset(self, *, seed=None, options=None):
@@ -62,6 +65,7 @@ def make_environment(name, config=None):
                 vehicle_config.setdefault(flag, debug)
             cfg["vehicle_config"] = vehicle_config
         env = Driving(MetaDriveEnv(cfg))
+        env.unwrapped.steering_magnitude = magnitude
         return stop_environment(env) if stop_signs else env
     if name == "warehouse":
         import rware  # noqa: F401
