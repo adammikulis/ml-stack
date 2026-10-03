@@ -15,6 +15,7 @@ For a source checkout:
 
 ```sh
 python -m pip install -e '.[gym]'
+python -m pip install 'metadrive-simulator @ git+https://github.com/metadriverse/metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db'
 ml-stack-gym catalogue
 ```
 
@@ -28,8 +29,11 @@ Install individual extras to select workloads:
 | `gym-rl` | Stable-Baselines3 PPO and Gymnasium |
 | `decide-pointer` | Local pointer decision models, including Strands 2B |
 
-MetaDrive uses the verified source revision recorded in `pyproject.toml`. Its native
-renderer downloads official assets on first use. SUMO comes through the `eclipse-sumo`
+The `gym-driving` extra installs Gymnasium and image support. MetaDrive requires the
+separate pinned source install shown above; the maintained native API used by the driving
+adapter is available at that revision. The desktop library installer supplies this source
+explicitly for both Smart car and All live environments. Published package dependencies
+use PyPI packages only. MetaDrive's native renderer downloads official assets on first use. SUMO comes through the `eclipse-sumo`
 package; the adapter resolves `SUMO_HOME` and the packaged SUMO-RL intersection scenario.
 An existing SUMO installation can also supply `SUMO_HOME`.
 
@@ -112,8 +116,8 @@ the effective steering magnitude. PPO loading rejects a checkpoint trained with 
 different magnitude.
 `sensor_debug` controls the native camera's lidar and road detector overlays.
 Session manifests record installed simulator versions and SHA256 hashes of the SUMO
-network and route files. MetaDrive uses the pinned 0.4.3 source revision listed in the
-`gym-driving` dependency; its installed package metadata records that source URL.
+network and route files. MetaDrive uses the pinned source revision shown in the installation command; its
+installed package metadata records that source URL.
 
 ## Native procedural and manual worlds
 

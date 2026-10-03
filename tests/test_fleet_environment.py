@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from ml_stack.fleet.environment import CATALOG, Environment, catalog_for
+from ml_stack.fleet.environment import CATALOG, METADRIVE_SOURCE, Environment, catalog_for
 
 
 class TestCatalog:
@@ -164,14 +164,14 @@ def test_extra_readiness_requires_selected_dependencies(monkeypatch):
     metadata['Provides-Extra'] = 'gym-driving'
     dist = SimpleNamespace(metadata=metadata, requires=[
         'packaging>=24.2', 'gymnasium>=1.0; extra == "gym-driving"',
-        'metadrive-simulator @ git+https://example.invalid/native.git@abc ; extra == "gym-driving"',
         'rware; extra == "gym-warehouse"'])
     monkeypatch.setattr(environment.metadata, 'distribution', lambda name: dist)
     library = next(lib for lib in CATALOG if lib.name == 'gym-driving')
     have = {'ml-stack': '0.3', 'packaging': '25.0', 'gymnasium': '1.2'}
     assert not environment._library_installed(library, have)
     have['metadrive-simulator'] = '0.4'
-    cache = {'direct_urls': {'metadrive-simulator': {'url': 'https://example.invalid/native.git', 'vcs_info': {'vcs': 'git', 'commit_id': 'abc'}}}}
+    base, revision = METADRIVE_SOURCE.split('git+')[1].rsplit('@', 1)
+    cache = {'direct_urls': {'metadrive-simulator': {'url': base, 'vcs_info': {'vcs': 'git', 'commit_id': revision}}}}
     assert environment._library_installed(library, have, cache)
     have['gymnasium'] = '0.29'
     assert not environment._library_installed(library, have)
@@ -196,16 +196,62 @@ def test_managed_metadata_controls_extra_readiness(tmp_path, monkeypatch):
     env = Environment(tmp_path)
     env.python.parent.mkdir(parents=True)
     env.python.write_text('managed')
-    requirement = 'metadrive-simulator @ git+https://example.invalid/native.git@abc ; extra == "gym-driving"'
+    base, revision = METADRIVE_SOURCE.split('git+')[1].rsplit('@', 1)
     payload = {'installed': [
         {'metadata': {'name': 'ml-stack', 'version': '0.3', 'provides_extra': ['gym-driving'],
-                      'requires_dist': [requirement]}},
+                      'requires_dist': []}},
         {'metadata': {'name': 'metadrive-simulator', 'version': '0.4'},
-         'direct_url': {'url': 'https://example.invalid/native.git',
-                        'vcs_info': {'vcs': 'git', 'commit_id': 'abc'}}}]}
+         'direct_url': {'url': base,
+                        'vcs_info': {'vcs': 'git', 'commit_id': revision}}}]}
     monkeypatch.setattr(env, 'pip', lambda args, **kwargs: subprocess.CompletedProcess(
         args, 0, stdout=json.dumps(payload)))
     library = next(lib for lib in CATALOG if lib.name == 'gym-driving')
     assert env.has(library)
     payload['installed'][1]['direct_url']['vcs_info']['commit_id'] = 'def'
     assert not env.has(library)
+
+
+@pytest.mark.parametrize('name', ['gym', 'gym-driving'])
+def test_managed_driving_install_supplies_source_outside_package_metadata(tmp_path, monkeypatch, name):
+    import subprocess
+
+    env = Environment(tmp_path)
+    monkeypatch.setattr(env, 'create', lambda **kwargs: env.python)
+    calls = []
+
+    def pip(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout='')
+
+    monkeypatch.setattr(env, 'pip', pip)
+    result = env.install([name])
+    assert result[name]['ok']
+    assert calls == [['install', '--upgrade', f'ml-stack[{name}]', METADRIVE_SOURCE]]
+
+
+def test_every_published_extra_uses_index_dependencies():
+    import tomllib
+    from pathlib import Path
+
+    from packaging.requirements import Requirement
+
+    project = tomllib.loads((Path(__file__).parents[1] / 'pyproject.toml').read_text())
+    assert not project.get('tool', {}).get('hatch', {}).get('metadata', {}).get('allow-direct-references')
+    for requirements in project['project']['optional-dependencies'].values():
+        assert all(Requirement(requirement).url is None for requirement in requirements)
+
+
+def test_built_wheel_metadata_has_no_direct_dependencies():
+    from zipfile import ZipFile
+
+    from packaging.requirements import Requirement
+
+    wheels = Environment('.').wheels()
+    if wheels is None:
+        pytest.skip('build wheels with packaging/build.py')
+    for wheel in wheels.glob('ml_stack-*.whl'):
+        with ZipFile(wheel) as archive:
+            metadata_file = next(name for name in archive.namelist() if name.endswith('.dist-info/METADATA'))
+            metadata = archive.read(metadata_file).decode()
+        requirements = [line.removeprefix('Requires-Dist: ') for line in metadata.splitlines() if line.startswith('Requires-Dist: ')]
+        assert requirements and all(Requirement(requirement).url is None for requirement in requirements)
