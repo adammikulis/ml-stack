@@ -252,7 +252,15 @@ Hub (`docs/model-discovery.md`, "Peers first"): the digest a file must have is t
 never one a peer states; peers are reached only on private, loopback, link-local or tailnet
 addresses over pinned TLS; the serving device applies the sharing level and withholds a quarantined
 copy; a peer whose bytes fail a digest is dropped and reported to sentinel. Off with `--no-peers`,
-`ML_STACK_NO_PEERS=1` or `ml-stack fleet peers off`. What this does not cover:
+`ML_STACK_NO_PEERS=1` or `ml-stack fleet peers off`. Pairing fills the peer book: each side's
+share address, pinned certificate, signing key and request key arrive in the grant and in an
+offer sealed under the exchange (a bad tag, or a certificate other than the one the exchange
+bound, stores nothing); revoking removes the rows. `fleet share --models` serves only paths that
+resolve inside the model roots at every request, never a quarantined copy, and a gated model only
+to the owner's marked devices with the licence acceptance on record, which the downloading device
+writes down (who, when, hash) in an append-only file. Routes to a paired device (this network,
+then its tailnet address) always end in the pinned certificate after the public-address check; a
+peer that stays under 2 MiB/s for 15 s is given up for the Hub. What this does not cover:
 the pairing mathematics is Python integers (not constant time) and wants an independent review
 before a public release; the re-key flow, per-device credentials and SSH push are designed and
 not built.

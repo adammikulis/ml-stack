@@ -6,6 +6,7 @@ with its own home and sentinel), the Hub is the local stand-in, the file is a sm
 
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import hashlib
@@ -672,3 +673,29 @@ def test_the_record_is_append_only_and_lists_every_download(tmp_path):
     assert path.read_text().splitlines()[0] == first
     assert [r["peer"] for r in origins.read(path)] == ["x", "y", "z"]
     assert origins.latest("a.gguf", 1, path)["peer"] == "y"
+
+
+# (n) the limit command --------------------------------------------------------------------------
+def test_peers_limit_sets_a_rate_streams_and_metered_for_one_device_or_all(tmp_path):
+    from ml_stack.fleet.onboard.peers_cli import parse_rate
+    assert parse_rate("20MiB/s") == 20 * MIB and parse_rate("512k") == 512 * 1024
+    assert parse_rate("1.5 MB/s") == 1.5 * MIB and parse_rate("off") == 0.0 and parse_rate("fast") is None
+    book = peerfirst.PeerBook(tmp_path / "s" / "peers.json")
+    for name in ("a", "b"):
+        book.add({"name": name, "url": "https://127.0.0.1:1", "signing_key": "AAAA"})
+
+    def run(**more):
+        base = {"cmd": "peers", "action": "limit", "name": "", "state": str(tmp_path / "s"),
+                "json": True, "url": "", "certificate": "", "signing_key": "", "device_secret": "",
+                "rate": "", "streams": None, "metered": ""}
+        return cmd_peers(argparse.Namespace(**{**base, **more}))
+
+    assert run(name="a", rate="2MiB/s", streams=1) == 0
+    rows = {r["name"]: r for r in book.rows()}
+    assert rows["a"]["limit_bps"] == 2 * MIB and rows["a"]["streams"] == 1 and "limit_bps" not in rows["b"]
+    assert run(metered="on") == 0                                  # every device
+    assert all(r["metered"] for r in book.rows())
+    assert run(name="a", rate="off", streams=0, metered="off") == 0
+    assert {r["name"]: r for r in book.rows()}["a"].keys().isdisjoint(
+        {"limit_bps", "streams", "metered"})
+    assert run(name="nobody", rate="1M") == 1 and run() == 2 and run(rate="quick") == 2

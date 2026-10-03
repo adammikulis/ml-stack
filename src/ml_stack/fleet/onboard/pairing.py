@@ -212,8 +212,9 @@ class PairingServer:
                                                   str(call.json(MOST_BODY).get("message")))}
         if call.method == "POST" and action == "confirm":
             body = call.json(MOST_BODY)
-            return 200, self.confirm(request_id, str(body.get("confirmation")),
-                                     str(body.get("offer") or ""), str(body.get("offer_tag") or ""))
+            sealed = {"offer": str(body["offer"]), "offer_tag": str(body.get("offer_tag") or "")} \
+                if body.get("offer") else {}
+            return 200, self.confirm(request_id, str(body.get("confirmation")), **sealed)
         raise Refused(404, "no such request")
 
     def submit(self, info: dict[str, Any], client: str) -> dict[str, Any]:
@@ -253,8 +254,8 @@ class PairingServer:
         except (ValueError, PairError):
             raise Refused(400, "the offer is malformed") from None
 
-    def confirm(self, request_id: str, confirmation: str, body_offer: str = "",
-                body_tag: str = "") -> dict[str, Any]:
+    def confirm(self, request_id: str, confirmation: str, offer: str = "",
+                offer_tag: str = "") -> dict[str, Any]:
         with self._lock:
             session = self._sessions.pop(request_id, None)
         if session is None:
@@ -266,13 +267,13 @@ class PairingServer:
             left = self.requests.wrong(request_id)
             raise Refused(403, f"wrong code; {left} tries left" if left else
                           "wrong code; the request is closed")
-        offer = self._offer(body_offer, body_tag, session) if body_offer else None
+        asker = self._offer(offer, offer_tag, session) if offer else None
         grant = self.hooks.grant(request)
         payload = grant.encode()
         self.requests.paired(request_id, shared_cluster_key=bool(grant.key),
                              secret=grant.device_secret)
-        if offer is not None and self.hooks.learned is not None:
-            self.hooks.learned(request, offer)
+        if asker is not None and self.hooks.learned is not None:
+            self.hooks.learned(request, asker)
         return {"confirmation": session.confirmation(),
                 "grant": base64.b64encode(payload).decode(), "tag": session.seal(payload)}
 

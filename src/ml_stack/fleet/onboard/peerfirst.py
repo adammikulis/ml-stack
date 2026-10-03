@@ -225,8 +225,7 @@ class PeerSession:
             self._measured(peers)
             raise hub_peers.Stopped(wanted.path) from exc
         except TooSlow as exc:
-            self._measured(peers)
-            shutil.rmtree(stage, ignore_errors=True)
+            self._measured(peers)           # the verified chunks stay for a later try
             self.notes.append(f"{wanted.name}: {exc}; using the Hub")
             return False
         except TransferError as exc:
