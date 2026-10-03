@@ -97,10 +97,14 @@ class Watch:
         return self._gate(tool, arguments, session=self.session, caller=CALLER)
 
     def denied(self, tool: str, arguments: Mapping[str, Any] | None, rail: str, reason: str,
-               ) -> None:
-        """Tell sentinel that a rail refused the call, so it is held and counted."""
+               *, logged: bool = True) -> None:
+        """Tell sentinel that a rail refused the call, so it is held and counted. A refusal the
+        guard logged as a Deny is counted by the log handler; any other (a Confirm nobody
+        answered) is counted here."""
         self.node.handle_all(self.node.rails.denied_call(self.session, rail, reason, tool,
-                                                         arguments))
+                                                         arguments, count=not logged))
+        if not logged:
+            self.node.note("session", self.session, "guard.denied")
 
     def shown(self, tool: str, original: str, screened: Screened) -> str:
         """What the model may read of a tool result: the rails' text, or a placeholder when

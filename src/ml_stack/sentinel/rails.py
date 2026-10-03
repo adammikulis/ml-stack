@@ -45,13 +45,16 @@ class RailWatch:
         return out + ([] if self.tapped else self._count(session, rail))
 
     def denied_call(self, session: str, rail: str, reason: str, tool: str,
-                    arguments: Mapping[str, Any] | None) -> list[Finding]:
-        """A rail refused a tool call: park it with its arguments, and count the denial."""
+                    arguments: Mapping[str, Any] | None, *, count: bool | None = None,
+                    ) -> list[Finding]:
+        """A rail refused a tool call: park it with its arguments, and count the denial unless
+        ``count`` is False (default: unless a log handler counts every denial already)."""
         body = json.dumps({"tool": tool, "arguments": arguments}, default=str, sort_keys=True)
         digest = hashlib.sha256(body.encode()).hexdigest()[:12]
         out = [finding("guard.call_denied", Severity.WARNING, ("tool_call", f"{session}:{tool}:{digest}"), HIGH,
                        {"rail": rail, "reason": reason, "tool": tool}, text=body)]
-        return out + ([] if self.tapped else self._count(session, rail))
+        counted = (not self.tapped) if count is None else count
+        return out + (self._count(session, rail) if counted else [])
 
     def tainted(self, session: str, rail: str, reason: str) -> list[Finding]:
         """A rail marked the session's context as carrying outside instructions. It is

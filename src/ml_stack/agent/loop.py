@@ -352,7 +352,7 @@ class Agent:
                     one.denied = "" if item.allowed else getattr(item.verdict, "reason", "")
                     if one.denied and self.watch:
                         self.watch.denied(one.name, one.args, getattr(item.verdict, "by", ""),
-                                          one.denied)
+                                          one.denied, logged=item.confirmed is None)
                 else:
                     yield item
 
