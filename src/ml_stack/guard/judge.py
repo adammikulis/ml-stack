@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 
 from ml_stack.decide.base import Decider
 from ml_stack.decide.logprob import defang
-from ml_stack.decide.types import Option
+from ml_stack.decide.types import DecideError, Option
 from ml_stack.guard.untrusted import unfenced
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
 
@@ -46,6 +46,9 @@ MAX_TEXT = 200_000
 """The most of a result the judge looks at, however large it is; the rest is not read and the
 result is marked as only partly read."""
 MAX_TASK = 1000
+FAILURES = (DecideError, LookupError, ArithmeticError, ValueError, TypeError, AttributeError,
+            RuntimeError, OSError)
+"""What a judge that fails raises (RecursionError is a RuntimeError); none of it clears a text."""
 WORDS = re.compile(r"\S+")
 PLAIN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['\u2019,.;:!?()\"-])*$")
 
@@ -168,7 +171,7 @@ class Judge:
                 got = self.decider.decide(
                     QUESTION, f"User request: {defang(task) or NO_TASK}\nTool result:\n"
                               f"{defang(piece)}", OPTIONS)
-            except Exception as exc:  # noqa: BLE001 whatever goes wrong, the text is not cleared
+            except FAILURES as exc:  # whatever goes wrong, the text is not cleared
                 error = str(exc) or type(exc).__name__
                 break
             top = max(top, got.scores["yes"])
@@ -200,7 +203,7 @@ class TextScreen(Base):
     def after_tool_call(self, call: Call, result: str, context: Context) -> Verdict:
         try:
             got = self.judge.judge(unfenced(result), context.task)
-        except Exception as exc:  # noqa: BLE001 a judge that breaks has not cleared the text
+        except FAILURES as exc:  # a judge that breaks has not cleared the text
             got = Judgement(error=f"{type(exc).__name__}: {exc}"[:200])
         self.log.append((call.name, got))
         if got.skipped:

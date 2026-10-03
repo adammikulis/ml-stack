@@ -71,10 +71,10 @@ def test_the_markdown_lists_each_success_by_name_and_where_the_run_came_from():
 from ml_stack.redteam.report import gate, scenario_table  # noqa: E402
 
 
-def watched(attack_id: str, *, succeeded=False, detected=True, ttd: int | None = 0, layer="taint",
-            arm="default") -> Attempt:
-    return Attempt("sentinel", "injected-page-privileged-call", attack_id, succeeded, arm=arm,
-                   layer=layer, detected=detected, ttd=ttd)
+def watched(attack_id: str, *, succeeded=False, detected=True, ttd: int | None = 0,
+            layer="taint") -> Attempt:
+    return Attempt("sentinel", "injected-page-privileged-call", attack_id, succeeded,
+                   arm="default", layer=layer, detected=detected, ttd=ttd)
 
 
 def test_the_table_has_a_row_per_attack_with_the_layer_the_detection_and_the_time():
