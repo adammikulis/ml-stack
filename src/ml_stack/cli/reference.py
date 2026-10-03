@@ -38,6 +38,7 @@ HELP: dict[str, str] = {
     "reputation": "How every source (host, URL, peer, repository, hash) has behaved: list, show and forget.",
     "doctor": "The checkouts, the bench store and the managed llama.cpp, with a fix for each.",
     "fleet": "Make this machine a peer in one command, and see what the fleet sees.",
+    "gym": "Live specialist simulations, CPU PPO training, evaluation and reviewed decision datasets.",
     "graph": "A rendered graph page, served with a model behind it.",
     "help": "every command with the first line of its help, or one command's own help",
     "ingest": "Read documents into a knowledge graph, section by section.",
@@ -64,6 +65,8 @@ HELP: dict[str, str] = {
 
 
 TABLE: tuple[Row, ...] = (
+    Row("ml-stack-gym catalogue\\|run\\|train\\|evaluate\\|replay\\|export",
+        "`catalogue` reports native dependencies for MetaDrive driving, RWARE warehouse robots, SUMO-RL traffic and integrated traffic-driving. `run ENV --controller CONTROLLER --config JSON` records native observations, actions and rewards with manual, random or decision-model control; `train ENV --timesteps N` trains a CPU PPO policy in the cache, and `evaluate ENV CHECKPOINT --episodes N` measures it on separate seeds. `replay TRAJECTORY` reads recorded transitions; `export TRAJECTORY REVIEWS OUTPUT` exports reviewed action labels as decision-model Case JSONL. Install the matching `gym-driving`, `gym-warehouse`, `gym-traffic` or `gym-rl` extra; the app's Gym view provides live controls, native camera and sensor scenes, and episode review."),
     Row("ml-stack-models find <words>",
         "search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends; `layout <model>` prints the attention layout off a GGUF header -- which layers hold a full cache, slide, recur or share it, plus experts, indexers and lookup tables"),
     Row("ml-stack-serve fit",
