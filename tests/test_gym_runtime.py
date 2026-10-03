@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.gym import adapters, catalog, runtime
+from ml_stack.gym import adapters, catalog, simulation as runtime
 from ml_stack.gym.cli import argument_parser
+from ml_stack.gym.runtime import SessionManager
 
 
 @pytest.fixture
@@ -156,7 +157,7 @@ def test_warehouse_native_adapter():
 @pytest.mark.slow
 def test_external_worker_lifecycle_and_recording():
     pytest.importorskip("rware")
-    manager = runtime.SessionManager()
+    manager = SessionManager()
     identifier = manager.create("warehouse", {"max_steps": 3})["id"]
     try:
         deadline = time.monotonic() + 10
