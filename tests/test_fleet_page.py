@@ -341,8 +341,8 @@ class TestTheSettingsView:
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
                            ("Models", "#models-here h2"),
                            ("Settings", "#settings-removal label.opt"),
-                           ("Fit", "table.fit tbody tr"),
-                           ("Cluster", "#cluster-sweep .searchrow")):
+                           ("Capacity", "table.fit tbody tr"),
+                           ("Fleet", "#cluster-sweep .searchrow")):
             page.click(f"nav.tabs a:has-text('{tab}')")
             page.wait_for_selector(ready)
             shown = page.locator("#root").inner_text()
@@ -371,7 +371,7 @@ class TestTheFitView:
         from ml_stack.serve.fit import Fit
 
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        page.click("nav.tabs a:has-text('Capacity')")
         page.wait_for_selector("table.fit tbody tr")
         rows = page.locator("table.fit tbody tr")
         assert rows.count() == 2
@@ -387,7 +387,7 @@ class TestTheFitView:
 
     def test_moving_the_room_asks_again_and_slots_fewer(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        page.click("nav.tabs a:has-text('Capacity')")
         page.wait_for_selector("table.fit tbody tr")
         before = page.locator("table.fit tbody tr").first.locator("td").nth(3).inner_text()
         page.select_option("#fit-controls select", "8")
@@ -405,7 +405,7 @@ class TestTheFitView:
 
     def test_both_panels_are_drawn(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        page.click("nav.tabs a:has-text('Capacity')")
         page.wait_for_selector(".panels svg path.ln")
         assert page.locator(".panels .panel").count() == 2
         assert page.locator(".panels svg path.ln").count() >= 2
@@ -417,7 +417,7 @@ class TestTheFitView:
         costs at that point, the line nearest the pointer goes hot, and its row in the table
         lights with it. Fails when the cursor tracking is dropped from either panel."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        page.click("nav.tabs a:has-text('Capacity')")
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1)
         line = cost.locator("svg path.ln").first.bounding_box()
@@ -437,7 +437,7 @@ class TestTheFitView:
         whole axis back. Fails when the drag no longer narrows it, and when the
         double-click no longer restores it."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        page.click("nav.tabs a:has-text('Capacity')")
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1).locator("svg")
 
@@ -467,7 +467,7 @@ class TestTheFitView:
 
     def test_the_other_two_views_open(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        page.click("nav.tabs a:has-text('Capacity')")
         page.wait_for_selector("#fit-views button")
         page.click("#fit-views button:has-text('What it cost to be right')")
         page.wait_for_selector("#fit-heading:has-text('What it cost to be right')")
