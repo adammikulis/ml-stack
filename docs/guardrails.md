@@ -20,6 +20,7 @@ the model's next turn and records whether text from outside the person has been 
 | Loop | Where | What a consumer does to get the guard |
 | --- | --- | --- |
 | `ml_stack.do.run` (the served model calls `ml_stack.mcp` tools) | `before_tool_call` on every call, `after_tool_call` on every result, `after_model_call` on every word the model says or the screen shows | nothing; `guard=None` builds the rails and, when a model can be leased, the model tier |
+| `ml_stack.chat` (`ml-stack-chat`, one conversation) | the rails of `ml_stack.do.run` with `chatpolicy`'s `human-only` and `confirm` rails in front, a fresh call budget per message | nothing; `Chat(screen=...)` adds the model tier, and there is no way to switch a rail off |
 | `ml_stack.agent.Agent` | the same three hooks, plus `before_invocation` and `before_model_call` | nothing; `interventions=None` builds fresh rails and the model tier for each run. A list replaces them (`[*guard.default(), mine]` keeps them); an empty list is refused and `interventions=guard.off(because=...)` is the logged way to run bare |
 | `ml_stack.harness` (Claude Agent SDK on a served model) | `PreToolUse` / `PostToolUse` hooks on every SDK tool, `max_turns` 50 | nothing; `Harness(guard=None)` builds the SDK rails (no model tier) |
 

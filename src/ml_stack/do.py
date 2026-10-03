@@ -34,7 +34,7 @@ from ml_stack.guard.native import screen as native_screen
 from ml_stack.interventions import Call, Confirm, Deny, Run, Verdict
 from ml_stack.log import say
 
-__all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "bench_cli", "client_for",
+__all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "answer_call", "bench_cli", "client_for",
            "command_tools", "main", "models_on_disk", "ollama_models", "own_tools", "run",
            "system_for"]
 
@@ -613,7 +613,7 @@ def run(task: str, client: Any, *,
         out.rounds += 1
         messages.append({"role": "assistant", "content": content, "tool_calls": calls})
         for call in calls:
-            _answer(call, run_by, watch, person, out)
+            answer_call(call, run_by, watch, person, out)
             if person.finished or person.left:
                 break
         if person.finished or person.left:
@@ -631,7 +631,7 @@ def run(task: str, client: Any, *,
     return out
 
 
-def _answer(call: dict[str, Any], run_by: dict[str, Callable[..., Any]], watch: Run,
+def answer_call(call: dict[str, Any], run_by: dict[str, Callable[..., Any]], watch: Run,
             person: Person, out: Outcome) -> None:
     """Run one call the model made, if the interventions let it, and append what came back."""
     asked = parse_call(call)
