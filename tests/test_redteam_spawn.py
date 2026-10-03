@@ -86,6 +86,11 @@ def recorded(monkeypatch):
 @pytest.mark.parametrize("text", HOSTILE)
 def test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell(tmp_path, recorded, text):
     jobs.detach("ml_stack.serve.cli", ["up", text], log=tmp_path / "a.log")
+    if text.startswith("-"):
+        assert mcp.call("serve_up", {"model": text, "extra": [text]})["isError"]
+        assert mcp.call("models_fetch", {"reference": text})["isError"]
+        assert len(recorded.calls) == 1
+        return
     mcp.serve_up(text, extra=[text])
     seen_before = len(recorded.calls)
     mcp.models_fetch(text)

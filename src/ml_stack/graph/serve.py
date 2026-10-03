@@ -73,6 +73,7 @@ from ml_stack.asking import ASKING
 from ml_stack.client.spent import Spent
 from ml_stack.graph.completions import CompletionRoutes
 from ml_stack.graph.conversation import converse, converse_stream
+from ml_stack.graph.guard import MAX_BODY, Guarded
 from ml_stack.graph.metrics import MetricsRoutes
 from ml_stack.graph.payloads import answer_payload, drained, sse, thread_request
 from ml_stack.graph.questions import Ask, History
@@ -509,7 +510,7 @@ class AskRoutes(MetricsRoutes):
     def read_body(self) -> dict[str, Any] | None:
         """The request's JSON object, or None when there was not one."""
         try:
-            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            raw = self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), MAX_BODY)))
             body = json.loads(raw or b"{}")
         except (ValueError, TypeError):
             return None
@@ -561,7 +562,7 @@ class AskRoutes(MetricsRoutes):
             self.asking = None
 
 
-class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, CompletionRoutes,
+class Handler(Guarded, RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, CompletionRoutes,
               AskRoutes, BaseHTTPRequestHandler):
     """The page, its exports and every route the page's components talk to, on one
     ``http.server`` handler.
@@ -607,6 +608,14 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
             return converse_stream(question, self.graph, client, on_event=emit, **asked)
         return converse(question, self.graph, client, **asked)
 
+    def ready(self) -> str | None:
+        if type(self).asker is Handler.asker and type(self).client_on_slot is AskRoutes.client_on_slot:
+            if self.graph is None:
+                return "no graph on this server: serve with --graph FILE"
+            if self.config is None:
+                return "no model on this server: serve with --model"
+        return None
+
     def proposed(self, row: Mapping[str, Any]) -> None:
         """Put a filed request in ``queue`` at once, then replace it with what the model
         read out of it over ``graph``, or with the reason it could not be read."""
@@ -627,6 +636,8 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
     # ------------------------------------------------------------------- the routes
 
     def do_GET(self) -> None:
+        if self.rejected():
+            return
         path = urlsplit(self.path).path
         if path in ("/", "/index.html"):
             self.handle_page()
@@ -654,6 +665,8 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, Completio
             self.send_error(404)
 
     def do_POST(self) -> None:
+        if self.rejected():
+            return
         path = urlsplit(self.path).path
         body = self.read_body()
         if path == "/ask":

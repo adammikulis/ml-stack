@@ -20,7 +20,7 @@ from ml_stack.workspace import tools as workspace_tools
 
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
             "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
-            "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor",
+            "bench_show", "fleet_peers", "world_make", "setup_look", "doctor",
             "speech_providers", "speech_transcribe", "speech_say", "decide",
             "conversation_compact", *workspace_tools.NAMES}
 
@@ -67,7 +67,7 @@ class TestTheProtocol:
             "type": "array", "items": {"type": "string"}}
         assert tools["serve_status"]["inputSchema"]["properties"]["port"] == {
             "type": "integer", "default": 8080}
-        assert tools["fleet_join"]["inputSchema"]["properties"]["persist"]["type"] == "boolean"
+        assert tools["serve_up"]["inputSchema"]["properties"]["escalate"]["type"] == "boolean"
 
     def test_a_bad_line_and_an_unknown_method_are_answered_not_fatal(self):
         reader = io.StringIO('not json\n' + json.dumps(rpc(5, "resources/list")) + "\n")
@@ -255,11 +255,11 @@ class TestTheSpeechTools:
         assert got["segments"][0]["end_s"] == 1.5
 
     def test_speech_say_writes_the_wav_and_says_where(self, tmp_path):
-        out = tmp_path / "spoken" / "said.wav"
         (reply,) = drive(rpc(1, "tools/call", name="speech_say",
-                             arguments={"text": "the fleet is up", "out": str(out)}))
+                             arguments={"text": "the fleet is up"}))
         got = said(reply)
-        assert got["out"] == str(out) and got["duration_s"] == 0.5
+        out = Path(got["out"])
+        assert out.parent == server.mcp_home() / "speech" and got["duration_s"] == 0.5
         assert self.wav.decode(out.read_bytes())[1].sample_rate == 16000
 
     def test_no_engine_is_an_error_result_rather_than_a_crash(self, monkeypatch, tmp_path):

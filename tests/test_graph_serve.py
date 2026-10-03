@@ -799,7 +799,7 @@ def test_anything_else_is_a_404_and_the_ask_routes_still_answer(site):
         assert status == 200 and body["model"] == ""
         assert call(url + "/metrics")[0] == 200
         status, _, body = call(url + "/ask", "POST", {"question": "who?"})
-        assert status == 500 and "graph" in body["error"]
+        assert status == 409 and "graph" in body["error"]
 
 
 def test_a_handler_without_an_export_root_has_no_export_route(site):

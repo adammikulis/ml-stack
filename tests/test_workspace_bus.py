@@ -149,8 +149,10 @@ def test_init_needs_a_person_and_happens_once(monkeypatch, tmp_path):
     assert shown.returncode == 3
     assert "person at a terminal" in shown.stderr
     assert not (base / "agents.json").exists()
-    first = cli(base, "", "init", "--json")
-    assert first.returncode == 0 and json.loads(first.stdout)["token"].startswith("mlws1.")
+    unattended = cli(base, "", "init", "--json")
+    assert unattended.returncode == 3 and "person at a terminal" in unattended.stdout
+    assert not (base / "agents.json").exists()
+    assert Workspace(base).init("owner").startswith("mlws1.")
     assert cli(base, "", "init", "--json").returncode == 3
 
 

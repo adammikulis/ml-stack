@@ -1,7 +1,7 @@
 """``ml-stack-mcp`` -- the commands as MCP tools over stdio, for an agent to drive.
 
 Each tool calls the same function the matching command calls -- `serve.cli.look`,
-`hub.find`, `bench.underway.detach`, `fleet.join.join_machine`, `setup.look`,
+`hub.find`, `bench.underway.detach`, `setup.look`,
 `setup.look_checkouts` -- so what an agent is told is what a person at the terminal
 would be told, and nothing is reimplemented here. Anything long -- a model load, a download, a
 measurement -- never blocks the call: it is started in its own session, owned by no
@@ -27,6 +27,7 @@ import dataclasses
 import inspect
 import io
 import json
+import secrets
 import sys
 import time
 import typing
@@ -171,6 +172,46 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _not_an_option(value: str, what: str) -> str:
+    """``value`` unchanged, or a refusal when a command would read it as an option."""
+    if value.lstrip().startswith("-"):
+        raise ValueError(f"{what} may not start with '-': {value!r}")
+    return value
+
+
+def _check_type(name: str, value: Any, hint: Any) -> None:
+    """Raise ``TypeError`` unless ``value`` is what the tool's hint for ``name`` declares."""
+    if typing.get_origin(hint) is list:
+        inner = (typing.get_args(hint) or (str,))[0]
+        if not isinstance(value, list) or any(not _is(v, inner) for v in value):
+            raise TypeError(f"{name} must be a list of {inner.__name__}")
+    elif hint in _JSON_TYPES and not _is(value, hint):
+        raise TypeError(f"{name} must be {_JSON_TYPES[hint]['type']}, not {type(value).__name__}")
+
+
+def _is(value: Any, kind: Any) -> bool:
+    if kind is bool:
+        return isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float)) if kind is float else isinstance(value, kind)
+
+
+def checked(fn: Callable[..., Any], arguments: dict[str, Any]) -> None:
+    """Raise ``TypeError`` for an argument ``fn`` does not take, a missing required one, or
+    one whose JSON type is not the one its hint declares."""
+    params = inspect.signature(fn).parameters
+    hints = typing.get_type_hints(fn)
+    for name, value in arguments.items():
+        if name not in params:
+            raise TypeError(f"no argument called {name!r}")
+        _check_type(name, value, hints.get(name, str))
+    missing = [n for n, p in params.items() if p.default is inspect.Parameter.empty
+               and n not in arguments]
+    if missing:
+        raise TypeError(f"missing: {', '.join(missing)}")
+
+
 # -- the tools -------------------------------------------------------------------------
 def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     """What is serving on this machine: every recorded server and ``port``, each with its
@@ -194,13 +235,14 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
     when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``. ``escalate``
     grows a server already up on ``port`` with fewer than ``parallel`` slots rather than
     refusing, keeping every live conversation."""
-    argv = ["up", model, "--port", str(port), "--parallel", str(parallel)]
+    argv = ["up", _not_an_option(model, "model"), "--port", str(port), "--parallel",
+            str(parallel)]
     if context:
         argv += ["--context", str(context)]
     if draft:
-        argv += ["--draft", draft]
+        argv += ["--draft", _not_an_option(draft, "draft")]
     if mmproj:
-        argv += ["--mmproj", mmproj]
+        argv += ["--mmproj", _not_an_option(mmproj, "mmproj")]
     if escalate:
         argv += ["--escalate"]
     argv += list(extra or [])
@@ -251,7 +293,7 @@ def models_files(repo: str, ending: str = ".gguf") -> list[dict[str, Any]]:
 def models_fetch(reference: str) -> dict[str, Any]:
     """Download an ``hf:owner/repo/file.gguf`` reference -- every shard -- into the cache
     without serving it (``ml-stack-models fetch``), detached; returns the log and pid."""
-    return detached("ml_stack.hub", ["fetch", reference],
+    return detached("ml_stack.hub", ["fetch", "--", _not_an_option(reference, "reference")],
                     name=f"fetch-{reference.rsplit('/', 1)[-1]}")
 
 
@@ -316,19 +358,6 @@ def fleet_peers(timeout_s: float = 2.0) -> list[dict[str, Any]]:
     return peers(timeout_s=timeout_s, self_machine=str(me.get("machine") or ""))
 
 
-def fleet_join(passphrase: str = "", group: str = "ml-stack", name: str = "",
-               persist: bool = False) -> dict[str, Any]:
-    """Make this machine a peer (``ml-stack-fleet join``): the checks, the cluster
-    ``passphrase`` joins, the daemon started if none answers, at logon with ``persist``,
-    and the peers that answered."""
-    from ml_stack.fleet.join import join_machine
-
-    said: list[str] = []
-    joined = join_machine(name=name, passphrase=passphrase, group=group, persist=persist,
-                          say=said.append)
-    return {**joined.public(), "said": said}
-
-
 def world_make(kind: str = "company", size: str = "small", seed: int = 0,
                out: str = "") -> dict[str, Any]:
     """Invent an organised group as a graph with people who could talk
@@ -366,13 +395,13 @@ def speech_transcribe(path: str, provider: str = "", language: str = "") -> dict
                              language=language or None))
 
 
-def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict[str, Any]:
-    """Speak ``text`` into the WAV file ``out`` (``ml-stack-speech say``); returns the path,
-    how long it is and the voice that said it."""
+def speech_say(text: str, provider: str = "", voice: str = "") -> dict[str, Any]:
+    """Speak ``text`` into a new WAV file under ``~/.ml-stack/mcp/speech``
+    (``ml-stack-speech say``); returns the path, how long it is and the voice that said it."""
     from ml_stack.speech.service import say
 
     spoken = say(text, provider=provider or None, voice=voice or None)
-    target = Path(out).expanduser()
+    target = mcp_home() / "speech" / f"say-{time.strftime('%Y%m%dT%H%M%S')}-{secrets.token_hex(4)}.wav"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(spoken.to_wav())
     return {"out": str(target), "duration_s": spoken.duration_s,
@@ -439,8 +468,6 @@ _TOOLS: list[Tool] = [
     Tool("bench_show", "Every benchmark run kept, as records: what was served, how "
          "it was asked, what it scored and what it cost.", bench_show),
     Tool("fleet_peers", "Every peer on the LAN: serving, room, busy, commit.", fleet_peers),
-    Tool("fleet_join", "Make this machine a peer: checks, cluster, daemon, announce.",
-         fleet_join),
     Tool("world_make", "Invent an organised group as a graph with people who could talk.",
          world_make),
     Tool("setup_look", "The machine facts serving depends on, with a fix for each.",
@@ -454,7 +481,7 @@ _TOOLS: list[Tool] = [
                              "activity.", speech_providers),
     Tool("speech_transcribe", "An audio file as text, with the times of each segment.",
          speech_transcribe),
-    Tool("speech_say", "Speak text into a WAV file.", speech_say),
+    Tool("speech_say", "Speak text into a new WAV file in the state directory.", speech_say),
     Tool("decide", "Choose one of a named set of options and report a probability for each.",
          decide),
 ]
@@ -473,9 +500,8 @@ _HINTS: dict[str, dict[str, bool]] = {
     "serve_escalate": _hints(read_only=False),
     "models_fetch": _hints(read_only=False, idempotent=True, open_world=True),
     "bench_run": _hints(read_only=False),
-    "fleet_join": _hints(read_only=False, idempotent=True),
     "world_make": _hints(read_only=False, idempotent=True),
-    "speech_say": _hints(read_only=False, idempotent=True),
+    "speech_say": _hints(read_only=False),
     "conversation_compact": _hints(read_only=False, destructive=True),
 }
 TOOLS: list[Tool] = [dataclasses.replace(t, hints=_HINTS.get(t.name, t.hints)) for t in _TOOLS]
@@ -499,6 +525,7 @@ def call(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"content": [{"type": "text", "text": f"no tool called {name!r}"}],
                 "isError": True}
     try:
+        checked(tool.fn, arguments or {})
         got = tool.fn(**(arguments or {}))
     except Exception as exc:  # noqa: BLE001 - the error is the answer
         return {"content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}],

@@ -205,8 +205,8 @@ claude mcp add ml-stack -- ml-stack-mcp
 or in a project's `.mcp.json`: `{"mcpServers": {"ml-stack": {"command": "ml-stack-mcp"}}}`.
 The tools are `serve_status`, `serve_up`, `serve_down`, `models_find`, `models_files`,
 `models_fetch`, `bench_run`, `bench_status`, `bench_history`, `bench_show`, `fleet_peers`,
-`fleet_join`, `world_make`, `setup_look` and `doctor`; a model load, a download and a
+`world_make`, `setup_look` and `doctor`; a model load, a download and a
 measurement never block the call -- each returns a log path and a pid, and `bench_status`
-follows it. With `pip install 'ml-stack[mcp]'` the SDK's server is used; without it the
+follows it. Joining a fleet is a command a person runs (`ml-stack-fleet join`), never an MCP tool. With `pip install 'ml-stack[mcp]'` the SDK's server is used; without it the
 command speaks the protocol itself.
 

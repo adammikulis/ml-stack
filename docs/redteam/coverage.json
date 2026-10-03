@@ -1,9 +1,9 @@
 {
- "surfaces": 553,
+ "surfaces": 552,
  "by_status": {
-  "covered": 243,
+  "covered": 244,
   "partial": 206,
-  "uncovered": 56,
+  "uncovered": 54,
   "n/a": 48,
   "unmapped": 0
  },
@@ -72,9 +72,9 @@
    "unmapped": 0
   },
   "mcp-tool": {
-   "covered": 18,
+   "covered": 19,
    "partial": 19,
-   "uncovered": 2,
+   "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
   },
@@ -2343,7 +2343,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -3080,7 +3083,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3095,7 +3101,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3110,7 +3119,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3125,7 +3137,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3140,7 +3155,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3155,7 +3173,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3170,21 +3191,12 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
-  },
-  {
-   "id": "mcp-tool:fleet_join",
-   "kind": "mcp-tool",
-   "source": "mcp.py:fleet_join",
-   "trust": "tool arguments written by a model that may have read hostile text",
-   "attacker": "a prompt-injected model calls the tool with hostile arguments",
-   "status": "uncovered",
-   "tests": [
-    "tests/test_redteam_mcp.py::test_speech_say_writes_only_inside_the_state_directory"
-   ],
-   "note": "open hole F10/F11: a model-supplied output path and a model-supplied cluster passphrase; strict xfail in the test file, see docs/redteam/findings.md"
   },
   {
    "id": "mcp-tool:fleet_peers",
@@ -3197,7 +3209,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3212,7 +3227,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3227,7 +3245,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3242,7 +3263,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3257,7 +3281,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3272,7 +3299,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3287,7 +3317,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3302,7 +3335,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3317,7 +3353,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3332,7 +3371,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3342,11 +3384,12 @@
    "source": "mcp.py:speech_say",
    "trust": "tool arguments written by a model that may have read hostile text",
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
-   "status": "uncovered",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_mcp.py::test_speech_say_writes_only_inside_the_state_directory"
+    "tests/test_redteam_mcp.py::test_speech_say_writes_only_inside_the_state_directory",
+    "tests/test_redteam_mcp.py::test_speech_say_names_its_own_file_under_the_state_directory"
    ],
-   "note": "open hole F10/F11: a model-supplied output path and a model-supplied cluster passphrase; strict xfail in the test file, see docs/redteam/findings.md"
+   "note": ""
   },
   {
    "id": "mcp-tool:speech_transcribe",
@@ -3359,7 +3402,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -3626,7 +3672,10 @@
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
-    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints"
+    "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+    "tests/test_redteam_mcp.py::test_the_tool_arguments_are_checked_against_the_declared_types",
+    "tests/test_redteam_mcp.py::test_a_value_that_starts_with_a_dash_is_refused_where_a_command_would_read_it",
+    "tests/test_redteam_human_floor.py::test_no_mcp_tool_takes_a_secret_or_joins_a_fleet"
    ],
    "note": "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
   },
@@ -5728,7 +5777,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5741,7 +5793,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5754,7 +5809,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5767,7 +5825,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5780,7 +5841,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5793,7 +5857,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5806,7 +5873,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5819,7 +5889,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5832,7 +5905,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5845,7 +5921,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5858,7 +5937,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5871,7 +5953,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5884,7 +5969,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5897,7 +5985,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5910,7 +6001,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5923,7 +6017,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5936,7 +6033,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5949,7 +6049,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5962,7 +6065,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5975,7 +6081,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -5988,7 +6097,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6001,7 +6113,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6014,7 +6129,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6027,7 +6145,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6040,7 +6161,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6053,7 +6177,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6066,7 +6193,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6079,7 +6209,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6092,7 +6225,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6105,7 +6241,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6118,7 +6257,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6131,7 +6273,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },
@@ -6144,7 +6289,10 @@
    "status": "covered",
    "tests": [
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
-    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404"
+    "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+    "tests/test_redteam_graph_serve.py::test_a_request_addressed_to_another_host_name_is_refused",
+    "tests/test_redteam_graph_serve.py::test_a_post_needs_a_json_content_type_and_a_loopback_origin",
+    "tests/test_redteam_graph_serve.py::test_a_content_length_that_is_not_a_length_is_a_400_and_nothing_hangs"
    ],
    "note": ""
   },

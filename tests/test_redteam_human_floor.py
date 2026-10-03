@@ -104,8 +104,7 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-@pytest.mark.parametrize("index", [*range(8), pytest.param(8, marks=pytest.mark.xfail(
-    strict=True, reason="workspace init checks the agent markers and never asks for a terminal"))])
+@pytest.mark.parametrize("index", range(9))
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
@@ -227,3 +226,22 @@ def test_building_the_signing_keys_never_asks_the_keystore(tmp_path):
     finally:
         keyring.set_keyring(before)
         os.environ.pop("ML_STACK_TEST_KEYRING", None)
+
+
+def test_workspace_init_registers_the_first_identity_for_a_person_at_a_terminal(tmp_path):
+    done = run_command(tmp_path, ("ml_stack.workspace.cli", "main", ["init"]), agent=False,
+                       terminal=True)
+    assert done.returncode == 0, done.stdout
+    assert "token" in done.stdout
+
+
+SECRET_NAMES = ("passphrase", "password", "secret", "token", "credential", "api_key", "cluster_key")
+
+
+def test_no_mcp_tool_takes_a_secret_or_joins_a_fleet():
+    from ml_stack import mcp
+
+    for tool in mcp.TOOLS:
+        taken = {n.lower() for n in tool.schema()["properties"]}
+        assert not any(w in n for n in taken for w in SECRET_NAMES), tool.name
+        assert "join" not in tool.name and "pair" not in tool.name, tool.name
