@@ -93,3 +93,58 @@ def test_recipe_contracts_are_exposed(daemon):
     recipes = {item['id']: item for item in result['recipes']}
     assert set(recipes) >= {'text-lm', 'classify-text', 'tool-calls'}
     assert recipes['text-lm']['fields'][0]['name'] == 'steps'
+
+
+def test_frozen_gym_uses_installed_environment(daemon, monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    configured = []
+    from ml_stack.fleet import gym_routes
+    monkeypatch.setattr(gym_routes, 'catalogue', lambda: [{'id': 'car', 'available': True}])
+    monkeypatch.setattr(gym_routes, 'manager', SimpleNamespace(configure=lambda python: configured.append(python)))
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    python = tmp_path / 'env' / 'bin' / 'python'
+    daemon.ui.environment = SimpleNamespace(exists=True, python=python)
+    code, result, _ = daemon.call('/ui/gym/catalogue')
+    assert code == 200
+    assert result['environments'][0]['id'] == 'car'
+    assert configured == [python]
+
+
+def test_recording_review_boundary_and_export_handoff(daemon, tmp_path, monkeypatch):
+    import json
+
+    root = tmp_path / 'gym'
+    recording = root / 'session-a'
+    recording.mkdir(parents=True)
+    snapshot = {'id': 'session-a', 'sequence': 2, 'episode_id': 1, 'environment': 'warehouse',
+                'actions': ['stop', 'forward'], 'action': 0, 'reward': 1., 'terminated': False,
+                'truncated': False, 'observation': [0., 1.], 'frame': None,
+                'transition': {'episode_id': 1, 'sequence': 2, 'observation': [1., 0.]}}
+    (recording / 'trajectory.jsonl').write_text(json.dumps(snapshot) + '\n')
+    from ml_stack.fleet import gym_recording_routes
+    monkeypatch.setattr(gym_recording_routes, 'artifact_root', lambda: root)
+
+    def export(trajectory, reviews, output):
+        assert trajectory == recording / 'trajectory.jsonl'
+        assert json.loads(reviews.read_text())['label'] == 'stop'
+        output.write_text('{"reviewed":true}\n')
+        return 1
+
+    monkeypatch.setattr(gym_recording_routes, 'export_reviewed', export)
+    code, result, _ = daemon.call('/ui/gym/recordings')
+    assert code == 200 and result['recordings'][0]['id'] == 'session-a'
+    code, result, _ = daemon.call('/ui/gym/recordings/session-a')
+    assert code == 200 and result['steps'][0]['sequence'] == 2
+    code, result, _ = daemon.call('/ui/gym/recordings/session-a/frame?sequence=2')
+    assert code == 200 and result['transition']['observation'] == [1., 0.]
+    assert daemon.call('/ui/gym/recordings/../outside')[0] == 400
+    body = {'episode_id': 1, 'sequence': 2, 'label': 'invented'}
+    assert daemon.call('/ui/gym/recordings/session-a/review', method='POST', body=body)[0] == 400
+    body['label'] = 'stop'
+    assert daemon.call('/ui/gym/recordings/session-a/review', method='POST', body=body)[0] == 200
+    code, result, _ = daemon.call('/ui/gym/recordings/session-a/export', method='POST',
+                                  body={'path': 'datasets/reviewed.jsonl'})
+    assert code == 201 and result['cases'] == 1
+    assert (daemon.files / result['path']).is_file()
