@@ -9,6 +9,7 @@ import pytest
 
 from ml_stack.gym import adapters, catalog, simulation as runtime
 from ml_stack.gym.cli import argument_parser
+from ml_stack.gym.provenance import native_provenance
 from ml_stack.gym.runtime import SessionManager
 
 
@@ -66,6 +67,29 @@ def test_reset_starts_an_episode_and_preserves_sequence(simulation):
     assert simulation.state["episode_id"] == 2
     assert simulation.state["observation"] == [9]
     assert simulation.state["decision"] is None
+
+
+def test_snapshot_retains_active_controls_for_reattachment(simulation):
+    simulation.command("action", {"action": 1})
+    simulation.command("speed", {"speed": 4})
+    simulation.command("reset", {"seed": 7})
+    assert simulation.state["manual_action"] == 1
+    assert simulation.state["speed"] == 4
+    assert simulation.state["seed"] == 7
+    assert simulation.state["config"] == {}
+    manifest = json.loads((simulation.path / "manifest.json").read_text())
+    assert manifest["seed"] == 7
+    assert manifest["versions"]["gymnasium"]
+
+
+def test_scenario_provenance_uses_opened_native_files(tmp_path):
+    scenario = tmp_path / "intersection.xml"
+    scenario.write_text("native scenario")
+    env = SimpleNamespace(unwrapped=SimpleNamespace(_net=str(scenario), _route=str(scenario)))
+    provenance = native_provenance("traffic", env)
+    assert provenance["scenario_files"]["net_file"]["path"] == str(scenario)
+    assert provenance["scenario_files"]["route_file"]["sha256"] == provenance["scenario_files"]["net_file"]["sha256"]
+    assert len(provenance["scenario_files"]["net_file"]["sha256"]) == 64
 
 
 def test_completed_episode_cannot_advance(simulation):
