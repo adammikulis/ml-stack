@@ -65,7 +65,7 @@ def canonical(kind: str, key: str) -> str:
         host = (parts.hostname or "").lower()
         if parts.scheme in ("http", "https") and _HOST.fullmatch(host):
             return f"{parts.scheme}://{host}{parts.path[:200] or '/'}"
-    elif kind == "repo" and _REPO.fullmatch(text.lower()):
+    elif kind == "repo" and _REPO.fullmatch(text.lower()) and ".." not in text:
         return text.lower()
     elif kind == "hash":
         digest = text.lower().removeprefix("sha256:")
