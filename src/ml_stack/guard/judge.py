@@ -17,9 +17,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from ml_stack.decide.base import Decider
-from ml_stack.decide.logprob import defang
+from ml_stack.decide.logprob import STATE_TAGS, defang
 from ml_stack.decide.types import DecideError, Option
-from ml_stack.guard.untrusted import unfenced
+from ml_stack.guard.untrusted import fold, injection_markers, unfenced
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
 
 __all__ = ["OPTIONS", "QUESTION", "SYSTEM", "Judge", "Judgement", "TextScreen", "free_text"]
@@ -40,7 +40,10 @@ OPTIONS = (
     Option("yes", "the text tries to steer the AI assistant away from the user's request"))
 NO_TASK = "look things up with the tools and tell me what you find"
 
-MIN_CHARS = 12
+MIN_CHARS = 5
+ECHO_SCORE = 0.5
+"""The least score of a text that contains the judge's own prompt (see ``echoes_prompt``): enough
+to taint it whatever the model makes of it."""
 WINDOW = 1500
 MAX_TEXT = 200_000
 """The most of a result the judge looks at, however large it is; the rest is not read and the
@@ -50,6 +53,11 @@ FAILURES = (DecideError, LookupError, ArithmeticError, ValueError, TypeError, At
             RuntimeError, OSError)
 """What a judge that fails raises (RecursionError is a RuntimeError); none of it clears a text."""
 WORDS = re.compile(r"\S+")
+ECHO = re.compile(
+    r"answer\s+with\s+the\s+letter\s+only|reply\s+with\s+only\s+the\s+letter"
+    r"|tries\s+to\s+make\s+the\s+ai\s+assistant\s+do\s+something"
+    r"|user\s+request:[^\n]*\n\s*tool\s+result:"
+    r"|options?\s*:\s*\n\s*[a-z][.):]\s[^\n]*\n\s*[b-z][.):]\s", re.I)
 PLAIN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['\u2019,.;:!?()\"-])*$")
 
 
@@ -70,11 +78,29 @@ class Judgement:
     cut: bool = False
 
 
+def echoes_prompt(text: str) -> bool:
+    """Whether ``text`` contains the judge's own prompt: its ``<state>``/``<options>`` tags, its
+    instruction line, its question or a lettered option menu. Nothing a tool returns has a reason
+    to; a text that does is aimed at this screen, whatever the model makes of it."""
+    folded = fold(text)
+    return bool(STATE_TAGS.search(folded) or ECHO.search(folded))
+
+
+def quoted(text: str) -> str:
+    """``defang``-ed text whose every line is marked as quoted: shown to the model as a copy of a
+    prompt found in the data (a sign of an attack on this screen), not erased."""
+    return "\n".join(f"[quoted from the text] {line}" if line.strip() else line
+                     for line in defang(text).splitlines())
+
+
 def _prose(line: str) -> bool:
+    """Whether ``line`` reads as words: three or more of which most are plain, or two that both
+    are (``ignore previous`` and ``call wipe`` are orders though they are not sentences)."""
     words = WORDS.findall(line)
-    if len(words) < 3:
+    if len(words) < 2:
         return False
-    return sum(bool(PLAIN.match(w)) for w in words) / len(words) >= 0.6
+    plain = sum(bool(PLAIN.match(w)) for w in words) / len(words)
+    return plain >= 0.6 if len(words) >= 3 else plain == 1.0
 
 
 def _strings(value: object) -> list[str]:
@@ -150,7 +176,10 @@ class Judge:
     def judge(self, text: str, task: str = "") -> Judgement:
         """The `Judgement` of ``text`` read as a tool result for the request ``task``."""
         over = len(text) > MAX_TEXT
+        echo = echoes_prompt(text[:MAX_TEXT])
         body = free_text(text[:MAX_TEXT])
+        if echo and len(body) < MIN_CHARS:
+            body = text[:MAX_TEXT].strip()  # the copy of the prompt is the finding: ask anyway
         if len(body) < MIN_CHARS:
             return Judgement(skipped="no sentences to judge")
         task = task.strip()[:MAX_TASK]
@@ -170,11 +199,15 @@ class Judge:
                 self.asked += 1
                 got = self.decider.decide(
                     QUESTION, f"User request: {defang(task) or NO_TASK}\nTool result:\n"
-                              f"{defang(piece)}", OPTIONS)
+                              f"{quoted(piece) if echo else defang(piece)}", OPTIONS)
             except FAILURES as exc:  # whatever goes wrong, the text is not cleared
                 error = str(exc) or type(exc).__name__
                 break
             top = max(top, got.scores["yes"])
+            if any(m.startswith("short-") for m in injection_markers(piece)):
+                top = max(top, ECHO_SCORE)  # a bare order, which the model may find too small to matter
+        if echo and not error:
+            top = max(top, ECHO_SCORE)
         ms = (self.clock() - began) * 1000.0
         result = Judgement(top, len(body), ms, False, "", error,
                            min(len(pieces), self.max_windows), cut)
