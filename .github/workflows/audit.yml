@@ -1,6 +1,7 @@
 name: audit
 # pip-audit gates: a known vulnerability in the shipped extras fails the job unless .github/pip-audit-allow.json
-# accepts it (with a reason and an expiry date). npm and cargo audit are still report-only.
+# accepts it (with a reason and an expiry date). npm audit and cargo audit gate the same way (the entry names its
+# ecosystem); a report the tool did not produce fails the job too.
 on:
   schedule:
     - cron: "11 6 * * 1"
@@ -45,12 +46,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
       - name: npm audit
-        continue-on-error: true
-        working-directory: app
         run: |
-          npm audit 2>&1 | tee npm-audit.txt
+          npm audit --json --prefix app > npm-audit.json || true
+          npm audit --prefix app 2>&1 | tee npm-audit.txt || true
           { echo '### npm audit'; echo '```'; cat npm-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python scripts/audit_gate.py --kind npm npm-audit.json
 
   cargo-audit:
     runs-on: ubuntu-latest
@@ -61,10 +65,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
       - name: cargo audit
-        continue-on-error: true
-        working-directory: app/src-tauri
         run: |
-          cargo install cargo-audit --locked
-          cargo audit 2>&1 | tee cargo-audit.txt
+          cargo install cargo-audit --locked --version 0.21.2
+          cargo audit --file app/src-tauri/Cargo.lock --json > cargo-audit.json || true
+          cargo audit --file app/src-tauri/Cargo.lock 2>&1 | tee cargo-audit.txt || true
           { echo '### cargo audit'; echo '```'; cat cargo-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python scripts/audit_gate.py --kind cargo cargo-audit.json
