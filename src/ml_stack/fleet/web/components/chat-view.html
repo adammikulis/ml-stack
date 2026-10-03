@@ -13,6 +13,12 @@
       <div class="hint" id="chat-none" hidden>
         No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your fleet.
       </div>
+      <details class="aside" id="chat-options" hidden>
+        <summary>Advanced options</summary>
+        <label for="chat-temperature">Temperature</label>
+        <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
+        <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
+      </details>
       <div class="messages" id="chat-messages" aria-label="Chat messages" role="log"></div>
       <div id="chat-note" role="status"></div>
       <div class="askrow" id="chat-askrow" hidden>
@@ -38,6 +44,8 @@
       this.picker = this.querySelector("#model");
       this.pickrow = this.querySelector("#chat-pickrow");
       this.none = this.querySelector("#chat-none");
+      this.options = this.querySelector("#chat-options");
+      this.temperature = this.querySelector("#chat-temperature");
       this.list = this.querySelector("#chat-messages");
       this.note = this.querySelector("#chat-note");
       this.askrow = this.querySelector("#chat-askrow");
@@ -119,6 +127,7 @@
         this.pickrow.hidden = !available.length;
         this.askrow.hidden = !available.length;
         this.none.hidden = !!available.length;
+        this.options.hidden = !available.length;
         await this.paintList();
         if (this.open) await this.load(this.open);
       } catch (error) { this.showError(error.message); }
@@ -179,6 +188,7 @@
       this.send.hidden = true;
       this.stop.hidden = false;
       this.newChat.disabled = this.picker.disabled = true;
+      this.temperature.disabled = true;
       let reply;
       try {
         if (!this.open) {
@@ -194,7 +204,8 @@
         reply = this.say("assistant", "");
         const messages = [...this.messages, { role: "user", content: text }];
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
-          body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages }) });
+          body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages,
+            ...(this.temperature.value !== "" ? { temperature: Number(this.temperature.value) } : {}) }) });
         if (!r.ok) {
           const why = await r.json().catch(() => ({}));
           if (r.status === 401) M.signIn();
@@ -217,6 +228,7 @@
         this.send.hidden = false;
         this.stop.hidden = true;
         this.newChat.disabled = this.picker.disabled = false;
+        this.temperature.disabled = false;
         this.paintList();
       }
     }
