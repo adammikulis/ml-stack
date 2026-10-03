@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from test_fleet_ui import Serving
 
+from ml_stack.fleet.workspace_routes import PURPOSES
+
 
 @pytest.fixture
 def daemon(tmp_path):
@@ -148,3 +150,10 @@ def test_recording_review_boundary_and_export_handoff(daemon, tmp_path, monkeypa
                                   body={'path': 'datasets/reviewed.jsonl'})
     assert code == 201 and result['cases'] == 1
     assert (daemon.files / result['path']).is_file()
+
+
+def test_specialist_descriptions_cover_native_chat_memory_and_gym():
+    assert 'approve' in PURPOSES['chat']
+    assert 'export' in PURPOSES['memory']
+    assert 'evaluate' in PURPOSES['gym']
+    assert 'do' not in PURPOSES
