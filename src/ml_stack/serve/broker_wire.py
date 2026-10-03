@@ -120,7 +120,8 @@ class _Server(socketserver.ThreadingTCPServer):
         return {"ok": False, "error": f"no such broker call: {op!r}"}
 
 
-_INFO_FIELDS = ("base_url", "port", "pid", "backend", "adopted", "load_s", "warmup_s", "lease")
+_INFO_FIELDS = ("base_url", "port", "pid", "backend", "adopted", "load_s", "warmup_s", "lease", "mtp",
+                "mtp_note")
 
 
 def info_dict(info: ServerInfo) -> dict[str, Any]:

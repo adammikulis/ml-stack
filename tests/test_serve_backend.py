@@ -512,10 +512,10 @@ class TestLaunchRefusal:
         monkeypatch.setattr(subprocess, "Popen", popen)
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
-        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
+        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"), mtp=False)
         with pytest.raises(OSError, match="stop here"):
-            leased(LlamaServerBackend(binary=binary), 
-                spec, timeout=1.0, check_flags=False, preflight=False)
+            leased(LlamaServerBackend(binary=binary),
+                   spec, timeout=1.0, check_flags=False, preflight=False)
         assert reached == ["popen"]
 
     def test_a_build_that_prints_no_help_is_not_refused(self, tmp_path, monkeypatch):

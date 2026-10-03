@@ -271,6 +271,9 @@ class ServerSpec:
     # transcribing, summarising -- and costs no weights and no memory, where a draft head
     # costs both. `ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-mod`, `ngram-cache`.
     spec_type: str = ""
+    # Multi-token prediction: None serves the model's MTP head when one is found and trusted
+    # (`serve.mtp.plan`); False serves without; True marks a head that default picked.
+    mtp: bool | None = None
     spec_draft_max: int | None = None       # tokens guessed ahead (server default 3)
     spec_p_min: float | None = None         # draft's minimum probability (server default 0.00)
     # Guess ahead in a tree rather than a chain: the branches the drafter expands per depth,
@@ -428,6 +431,10 @@ class ServerInfo:
     warmup_s: float | None = None
     #: the broker's id for the lease this info was granted under; "" for a record read back
     lease: str = ""
+    mtp: str = ""
+    """What multi-token prediction the server was started with: ``embedded``, a head's file
+    name, or "" for none; ``mtp_note`` says which and why."""
+    mtp_note: str = ""
     # The ``Popen`` for a server this process started, for whoever stops it to wait on.
     # Never serialised: it is not a value, and it is None for an adopted server.
     process: Any = field(default=None, repr=False, compare=False)
