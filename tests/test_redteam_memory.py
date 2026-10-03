@@ -8,7 +8,7 @@ import io
 
 import pytest
 
-from ml_stack import chat, do, memory
+from ml_stack import chat, do, memory, roles
 from ml_stack.client import Reply
 from ml_stack.interventions import Confirm
 from ml_stack.memory import recall as recalling
@@ -51,12 +51,14 @@ def test_a_poisoned_stored_fact_changes_no_permission_and_stores_nothing(tmp_pat
     before = store.path.read_bytes()
     ran: list = []
     person = do.Person(io.StringIO("n\n" * 40), io.StringIO())
-    offered = [*chat.tools_for_chat(person=person, registry=registry(ran)),
-               *memory.tools(confirm=lambda q: person.confirm(Confirm(q, {}, "memory")),
-                             store=store)]
+    extra = roles.Extension(
+        tools=lambda: memory.tools(confirm=lambda q: person.confirm(Confirm(q, {}, "memory")),
+                                   store=store),
+        reads=memory.READ | memory.ACTING)
+    offered = [*chat.tools_for_chat(person=person, registry=registry(ran)), *extra.tools()]
     names = {s["function"]["name"] for s, _ in offered}
     model = Gullible(str(store.path))
-    session = chat.Chat(model, person, tools=offered)
+    session = chat.Chat(model, person, tools=offered, extension=extra)
     context = memory.session_context(None, store=store)
     assert context.startswith("<untrusted source='memory'>") and context.count("</untrusted>") == 1
     session.turn("hello", prefix=context + "\n\n")
