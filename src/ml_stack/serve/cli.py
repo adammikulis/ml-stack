@@ -13,6 +13,7 @@ from ml_stack.serve import (
     broker_cli,
     fit_cli,
     lifecycle_cli,
+    llamacpp_cli,
     machine_cli,
     profile_cli,
     slots_cli,
@@ -83,6 +84,12 @@ COMMANDS.add(
     help="build llama-server from llama.cpp's own master (or download the newest "
          "release), and switch to it once it is verified",
     options=lifecycle_cli.OPTIONS_BUILD)
+
+COMMANDS.add(
+    "llama-cpp", llamacpp_cli.cmd_llama_cpp,
+    help="follow upstream llama.cpp: which llama-server is in use, build a newer one from "
+         "source in the sandbox, switch to it only after a smoke test, roll back, pin, prune",
+    options=llamacpp_cli.OPTIONS)
 
 COMMANDS.add(
     "broker", broker_cli.cmd_broker,

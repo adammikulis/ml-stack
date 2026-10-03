@@ -360,6 +360,10 @@ and only switches `current` itself once it goes on to verify. `ml-stack-setup` n
 directly when an architecture or a flag is missing. A one-off binary from somewhere else
 still works: `ml-stack-serve up --binary /path/to/llama-server`.
 
+`ml-stack-serve llama-cpp status|update|rollback|pin|list|prune` is the flow that follows upstream
+with a pinned commit, a sandboxed compile, a smoke test before a build is trusted, and a pin
+sentinel verifies every time the binary is found; see [llama-cpp-tracking.md](llama-cpp-tracking.md).
+
 Verifying by architecture *name* is only as precise as the name: measured for real, a
 build's `libllama` read `phi4` and looked exactly like a missing architecture next to a
 build that had it — but master's own `src/llama-arch.cpp` defines no `LLM_ARCH_PHI4` at

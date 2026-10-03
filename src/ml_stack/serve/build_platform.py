@@ -91,7 +91,8 @@ def version_of(binary: Path) -> str:
     except (OSError, subprocess.SubprocessError):
         return ""
     text = ((done.stdout or "") + (done.stderr or "")).strip()
-    return text.splitlines()[0] if text else ""
+    lines = text.splitlines()
+    return next((ln for ln in lines if ln.startswith("version")), lines[0] if lines else "")
 
 
 def arches_from_source(source: Path) -> set[str]:
