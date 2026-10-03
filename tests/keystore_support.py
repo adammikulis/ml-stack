@@ -64,7 +64,7 @@ class CountingFileRing(KeyringBackend):
         return Path(os.environ["ML_STACK_TEST_KEYRING"])
 
     def _note(self, name: str) -> None:
-        with open(f"{self._file()}.calls", "a") as out:
+        with Path(f"{self._file()}.calls").open("a") as out:
             out.write(name + "\n")
 
     def _all(self) -> dict:
