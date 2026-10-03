@@ -140,6 +140,7 @@ note = "the loopback route (reads, and one person-only post), live follow and ch
 [[group]]
 match = ["route:fleet/gym_routes.py:*", "route:fleet/gym_recording_routes.py:*", "route:fleet/workspace_routes.py:*"]
 status = "covered"
+count = 9
 tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py",
          "tests/test_fleet_workspace_routes.py"]
 note = "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
@@ -487,6 +488,7 @@ note = "prompts built from the person's own benchmark questions, canaries and fi
 match = ["parser:gym/world_files.py", "parser:gym/car_definition.py", "parser:gym/traffic_world.py",
          "parser:fleet/request_fields.py", "parser:fleet/gym_recording_routes.py", "parser:fleet/workspace_routes.py"]
 status = "covered"
+count = 6
 tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py"]
 note = "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
 
