@@ -13,7 +13,7 @@ import os
 import pytest
 from decide_fakes import logprob_handler
 
-from ml_stack import do, guard as rails, mcp
+from ml_stack import chat, do, guard as rails, mcp
 from ml_stack.decide.logprob import Chat, LogprobDecider
 from ml_stack.decide.types import DecideError
 from ml_stack.guard import native
@@ -176,7 +176,7 @@ def test_the_loop_withholds_an_injected_result_before_the_model_sees_it(server):
     tools = do.command_tools([mcp.Tool("models_find", "find", models_find)], files=[],
                              fetch=lambda *_: {})
     model = ScriptedModel([("models_find", {"words": "q"})], answer="ok")
-    out = do.run("find q", model, tools=tools, person=do.Person(io.StringIO(""), io.StringIO()),
+    out = chat.run_task("find q", model, tools=tools, person=do.Person(io.StringIO(""), io.StringIO()),
                  guard=items)
     assert "[withheld by the judge rail" in model.told()
     assert "fleet_join" not in model.told()
@@ -202,7 +202,7 @@ def test_a_tainted_run_asks_the_person_before_a_changing_tool(server):
         calls.clear()
         model = ScriptedModel([("models_find", {"words": "q"}),
                                ("serve_up", {"model": "x.gguf"})], answer="ok")
-        do.run("find q", model, tools=tools,
+        chat.run_task("find q", model, tools=tools,
                person=do.Person(io.StringIO(answer), io.StringIO()), guard=items)
         assert calls == ran
 
@@ -323,7 +323,7 @@ def test_a_view_asks_with_its_own_system_prompt(server):
 def test_the_default_run_in_do_adds_the_tier_only_when_a_model_is_usable(monkeypatch):
     monkeypatch.setattr(native, "pick_model", lambda *a, **k: "")
     model = ScriptedModel([], answer="hello")
-    out = do.run("hi", model, tools=[], person=do.Person(io.StringIO(""), io.StringIO()))
+    out = chat.run_task("hi", model, tools=[], person=do.Person(io.StringIO(""), io.StringIO()))
     assert out.screened == 0
 
 

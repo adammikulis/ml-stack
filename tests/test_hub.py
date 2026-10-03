@@ -452,7 +452,7 @@ class TestFetch:
 
 class TestLocated:
     """The one way a name becomes a model file: the bench, the serve preflight, the fleet
-    and `ml-stack-do` all ask this, so it has to answer for a name copied out of
+    and `ml-stack-chat` all ask this, so it has to answer for a name copied out of
     `ml-stack-models files`, a path, an `hf:` reference and a half-typed name alike."""
 
     def test_a_path_is_returned_expanded_and_an_hf_reference_is_not_a_local_file(self, tmp_path):

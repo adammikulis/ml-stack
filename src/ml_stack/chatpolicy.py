@@ -1,4 +1,4 @@
-"""What the chat agent may call: the tool lists, the actions that wait for the person's yes,
+"""What the agent may call: the tool lists, the actions that wait for the person's yes,
 and the actions only a person at a terminal can take, each with the command to run.
 """
 
@@ -6,17 +6,17 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from ml_stack import home, mcp
 from ml_stack.guard.untrusted import EXTERNAL
-from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
+from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
 from ml_stack.net.cli import command as security_command
 from ml_stack.sentinel.human import agent_may
 
-__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "ConfirmRail", "HumanOnlyRail",
+__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "HumanOnlyRail",
            "refusal_for", "review_view"]
 
 READ = frozenset({
@@ -65,12 +65,17 @@ HUMAN_ONLY: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ("plant or remove baselines and decoys",
          r"\b(?:baseline|honey\w*|decoys?)\b.{0,30}\b(?:plant\w*|remov\w*|reset\w*|clear\w*)\b",
          "ml-stack-security baseline"),
+        ("change the role this session runs under",
+         r"\b(?:roles?|permissions?|privileges?)\b.{0,40}\b(?:runner|operator|raise\w*|elevat\w*"
+         r"|upgrad\w*|admin|escalat\w*|grant\w*|chang\w*|switch\w*|set)\b"
+         r"|\b(?:runner|operator|reader)\b.{0,20}\b(?:roles?|mode)\b",
+         "/role NAME, typed at the prompt"),
     ))
 """Actions only a person at a terminal can take: what it is, how it is spelled, the command."""
 
 _TOOL_NAME = re.compile(
     r"quarantin|releas|purg|approv|grant|mint|sentinel|security|baseline|honey|polic|guard|rail|"
-    r"unblock", re.I)
+    r"unblock|role|permission|privilege|rule|always", re.I)
 
 
 def refusal_for(text: str) -> tuple[str, str] | None:
@@ -98,6 +103,8 @@ def _command_for(name: str) -> tuple[str, str]:
         return HUMAN_ONLY[2][0], HUMAN_ONLY[2][2]
     if re.search(r"baseline|honey", low):
         return HUMAN_ONLY[4][0], HUMAN_ONLY[4][2]
+    if re.search(r"role|permission|privilege|rule|always", low):
+        return HUMAN_ONLY[5][0], HUMAN_ONLY[5][2]
     return HUMAN_ONLY[3][0], HUMAN_ONLY[3][2]
 
 
@@ -117,6 +124,9 @@ class HumanOnlyRail(Base):
         if _TOOL_NAME.search(call.name) and call.name not in READ | frozenset(CONFIRM):
             what, command = _command_for(call.name)
             return Deny(refused(what, command), self.name)
+        if "agent-rules" in _words(call.arguments):
+            return Deny(refused("change the always and never rules", "/rules, typed at the prompt"),
+                        self.name)
         why = agent_may(call.name, call.arguments)
         if why:
             return Deny(refused("change what sentinel holds or decides", "ml-stack-security review")
@@ -140,30 +150,6 @@ def _outside_state(value: Any) -> list[str]:
         for item in value:
             found += _outside_state(item)
     return found
-
-
-class ConfirmRail(Base):
-    """Every call to a tool in ``CONFIRM`` asks the person first, saying what it will do
-    and with which arguments; a tool in neither list is refused."""
-
-    name = "confirm"
-
-    def __init__(self, offered: Callable[[], set[str]] | None = None) -> None:
-        self.offered = offered
-
-    def before_tool_call(self, call: Call, context: Context) -> Verdict:
-        if call.name in READ:
-            return Proceed()
-        if call.name in CONFIRM:
-            args = call.arguments or {}
-            note = ""
-            outside = _outside_state(args)
-            if outside:
-                note = f" It names paths outside ml-stack's state: {', '.join(outside[:3])}."
-            return Confirm(f"{call.name} will {CONFIRM[call.name]}.{note}", _words(args), self.name)
-        if self.offered is not None and call.name in self.offered():
-            return Proceed()
-        return Deny(f"{call.name} is not a tool this chat offers", self.name)
 
 
 def review_view(what: str = "status", limit: int = 20) -> dict[str, Any]:

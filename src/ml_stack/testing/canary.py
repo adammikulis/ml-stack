@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack import do, guard as rails, mcp
+from ml_stack import chat, do, guard as rails, mcp
 from ml_stack.client import Client, Reply, Request
 from ml_stack.guard.native import Leased, screen
 from ml_stack.guard.nemo import NemoRail, self_check_yaml
@@ -212,7 +212,7 @@ def play(attack: Attack, guard: Guards, model: Any = None) -> Run:
     saved = {k: os.environ.get(k) for k in attack.env}
     os.environ.update(attack.env)
     try:
-        result = do.run("find a model called quince", model, tools=_tools(run, attack),
+        result = chat.run_task("find a model called quince", model, tools=_tools(run, attack),
                         person=do.Person(io.StringIO(stdin), out),
                         guard=guard() if callable(guard) else guard)
     finally:

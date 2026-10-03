@@ -12,7 +12,7 @@ result and every message that arrives from outside as untrusted. A `TaintRail` (
 `ml_stack.taint.TaintRail`) answers `before_tool_call`. When the ledger says untrusted content has
 entered the context, a call to a sink whose arguments are not individually vouched for is
 `Deny` (proven flow into a hard sink) or `Confirm` (everything else). It is on by default in
-`ml_stack.do.run` and `ml_stack.agent.Agent` (both run `guard.default()` unless told otherwise), and
+`ml_stack.chat.run_task` and `ml_stack.agent.Agent` (both run `guard.default()` unless told otherwise), and
 turning it off needs a reason that is logged.
 
 Status: accepted and implemented in `src/ml_stack/taint/`. The dual-model extractor ships as a helper; the dual-model
@@ -180,7 +180,7 @@ branch, where the bus lives. The `ml_stack.guard` logger gets a warning for each
 
 ## Opting out
 
-`guard.rails(without=["taint"], because="...")`, for `ml_stack.do.run(guard=...)` and for
+`guard.rails(without=["taint"], because="...")`, for `ml_stack.chat.run_task(guard=...)` and for
 `Agent(..., interventions=...)`. It needs the reason, logs it at warning level and prints it, the
 same as every other rail. `Agent` with no `interventions` runs `guard.default()`, which includes
 the taint rail.

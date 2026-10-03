@@ -104,7 +104,7 @@ def _port() -> Arg:
 
 
 def ml_stack_tools() -> Sinks:
-    """The sinks for the `ml_stack.mcp` tools and the `ml_stack.do` loop's own."""
+    """The sinks for the `ml_stack.mcp` tools and the `ml_stack.chat` loop's own."""
     reads = ("models_find", "models_files", "ollama_models", "speech_transcribe", "fleet_peers")
     local = ("serve_status", "bench_status", "bench_history", "bench_show", "setup_look",
              "speech_providers", "doctor", "decide", "models_on_disk",

@@ -108,7 +108,7 @@ def test_every_command_answers_help(command, capsys):
 
 @pytest.mark.parametrize("command", sorted(c for c in SCRIPTS if c.startswith("ml-stack-")))
 def test_the_umbrella_hands_back_the_same_help(command, capsys):
-    """``ml-stack do --help`` is ``ml-stack-do --help``; ``ml-stack train run`` joins the words."""
+    """``ml-stack chat --help`` is ``ml-stack-chat --help``; ``ml-stack train run`` joins the words."""
     words = command[len("ml-stack-"):].split("-")
     with pytest.raises(SystemExit) as left:
         _main_of(command)(["--help"])

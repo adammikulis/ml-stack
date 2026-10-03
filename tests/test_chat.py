@@ -92,7 +92,7 @@ def call(name, **args):
 
 def test_the_tool_list_has_nothing_that_releases_approves_mints_purges_or_changes_policy():
     chat_, _model, _, _ = session([])
-    names = {s["function"]["name"] for s, _ in chat_.offered}
+    names = chat_.names()
     assert names <= chatpolicy.READ | set(chatpolicy.CONFIRM) | {"ask_user", "plan"}
     assert "done" not in names
     for name in names:
@@ -104,7 +104,7 @@ def test_the_tool_list_has_nothing_that_releases_approves_mints_purges_or_change
 def test_the_real_registry_offers_no_tool_that_writes_outside_the_ones_that_ask():
     names = {s["function"]["name"] for s, _ in chat.tools_for_chat(
         person=do.Person(io.StringIO(), io.StringIO()))}
-    assert names <= chatpolicy.READ | set(chatpolicy.CONFIRM) | {"ask_user", "plan"}
+    assert names <= chatpolicy.READ | set(chatpolicy.CONFIRM) | {"ask_user", "plan", "done"}
     assert not names & {"fleet_join", "world_make", "speech_say", "conversation_compact",
                         "workspace_send", "workspace_release", "decide"}
 

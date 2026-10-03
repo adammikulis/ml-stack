@@ -2,9 +2,9 @@
 
 `ml-stack-chat` is a conversation with a served model that operates ml-stack: what is serving,
 the models on this machine and on the Hub, downloads, benchmarks, jobs, and read-only views of
-the security review. It is `ml-stack-do` (`docs/agent.md`) kept open across messages: the same
-tools, the same rails, one history. It is a separate command because `ml-stack-do` ends when a
-task is `done` and asks `plan`/`go` for every task; a chat has no end and no task.
+the security review. It is the one agent command: with no task it is a conversation (one history,
+no end), with a task in words (`ml-stack-chat "run benchmarks with quince-2b"`) it plans, asks
+go and ends on `done`. Which calls run unasked is the role (`docs/agent-roles.md`).
 
 ```
 ml-stack-chat                         # the best downloaded mixture-of-experts model ranked for an agent
@@ -17,7 +17,7 @@ With no `--model` or `--url` the model is the first of what is already downloade
 `ml-stack-models`' ranking (`serve.suggest.recommend`, goal `agent`) puts forward and whose name
 reads as a mixture-of-experts (`Flash-Next`, `-A3B`, `moe`); a dense model is used only when no
 such one is downloaded, and the chat says so. With nothing suitable downloaded it prints what to
-pull and exits. The server is leased through the broker like `ml-stack-do`'s. Nothing leaves the
+pull and exits. The server is leased through the broker like any other served model's. Nothing leaves the
 machine and no paid API is called.
 
 ## Inside the chat
@@ -26,7 +26,9 @@ machine and no paid API is called.
 | --- | --- |
 | `/help` | the list |
 | `/new` | forget the conversation and start another under a new id |
-| `/tools` | the tools, and which ask you first |
+| `/tools` | the tools in this role, and which ask you first |
+| `/role [NAME]` | the roles; with `NAME`, run under that one (typed by you; the model has no way to) |
+| `/rules ...` | list, remove, flip and clear the saved always/never rules (`docs/agent-roles.md`) |
 | `/plan TEXT` | the model sees only the read tools and `plan`; it shows the steps and does nothing |
 | `/model [REF]` | the model in use; with `REF`, lease that one for the rest of the chat |
 | `/quit` | leave; the chat is saved |
@@ -135,5 +137,5 @@ I can't release a quarantine. Only you can, in your own terminal: ml-stack-secur
   second-layer classifier from `ml_stack.decide` (adding a confirmation, never removing one) is not
   wired in.
 - No file edits, shell or workspace access, and no way to cancel a call already confirmed.
-- The history is compacted by the same summariser as `ml-stack-do`; a summary is the model's
+- The history is compacted by the same summariser as in `docs/compaction.md`; a summary is the model's
   own text, so very long chats lose detail.
