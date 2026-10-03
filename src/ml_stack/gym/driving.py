@@ -46,6 +46,6 @@ def geometry(native):
                       "range_m": maximum},
             "sensors": [{"name": "speed", "value": float(vehicle.speed_km_h), "unit": "km/h"},
                         {"name": "heading", "value": float(vehicle.heading_theta), "unit": "rad"},
-                        {"name": "lidar", "value": json_value(distances), "unit": "normalized range"}] + rule_sensors,
+                        {"name": "lidar", "value": json_value(distances), "unit": "normalized range"}, *rule_sensors],
             "stop_signs": [stop_state] if stop_state else [],
             "camera_is_policy_input": False}
