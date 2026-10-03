@@ -24,7 +24,7 @@ classifiers = [
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 # ml_stack.installed reads the pins with Requirement, SpecifierSet and Version.
-dependencies = ["packaging>=22", "psutil>=7.2.2"]
+dependencies = ["packaging>=24.2", "psutil>=7.2.2"]
 
 # Nothing below is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.

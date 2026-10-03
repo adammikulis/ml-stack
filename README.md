@@ -196,6 +196,7 @@ on whichever machine is free rather than the one you are typing at.
 | [Working with a graph](docs/graph.md) | the six things a model is given instead of the graph, how a question is asked, and a conversation of any length |
 | [Documents into a graph](docs/ingest.md) | a book read section by section, with the page and the model behind every claim |
 | [Training](docs/training.md) | the loop, the recipes, and a fine-tune that ends in a model calling your own tools |
+| [Studio and live Gym](docs/studio-gym.md) | organized workspaces, live sensor/decision views, specialist simulators, PPO, and reviewed training trajectories |
 | [Measuring](docs/bench.md) | timing and scoring a model's answers, what that settled here, and an evening of runs as a file |
 | [An invented world](docs/world.md) | a community with people who talk, the days they talk over, and the exports their corpus arrives as; nobody real in any of it |
 | [Packages](docs/packages.md) | what each module is, and the extras it carries |
