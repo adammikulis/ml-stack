@@ -14,7 +14,7 @@ from typing import Any
 
 from ml_stack import home
 
-__all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "protect"]
+__all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "mint_pressed", "protect", "require_person"]
 
 AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 """Environment variables whose presence means an agent started this process."""
@@ -55,13 +55,10 @@ class HumanGrant:
             raise HumanRequired("the grant expired")
 
 
-def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,
-         terminal: tuple[bool, bool] | None = None,
-         env: Mapping[str, str] | None = None) -> HumanGrant:
-    """A grant for ``action`` on ``subject`` when a person is at a terminal and types the
-    subject back (``terminal`` is stdin and stdout being terminals, read from the process
-    when not given). Refused when stdin or stdout is not a terminal, when the environment
-    carries an agent marker, or when the typed text differs."""
+def require_person(action: str, terminal: tuple[bool, bool] | None = None,
+                   env: Mapping[str, str] | None = None) -> None:
+    """Raise `HumanRequired` unless stdin and stdout are terminals and no agent marker is
+    set. Every way of minting a grant goes through this first."""
     env = os.environ if env is None else env
     tty_in, tty_out = terminal or (sys.stdin.isatty(), sys.stdout.isatty())
     marked = [name for name in AGENT_MARKERS if env.get(name)]
@@ -70,7 +67,30 @@ def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,
                             f"({marked[0]} is set)")
     if not (tty_in and tty_out):
         raise HumanRequired(f"{action} needs a terminal on stdin and stdout")
+
+
+def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,
+         terminal: tuple[bool, bool] | None = None,
+         env: Mapping[str, str] | None = None) -> HumanGrant:
+    """A grant for ``action`` on ``subject`` when a person is at a terminal and types the
+    subject back (``terminal`` is stdin and stdout being terminals, read from the process
+    when not given). Refused when stdin or stdout is not a terminal, when the environment
+    carries an agent marker, or when the typed text differs."""
+    require_person(action, terminal, env)
     if typed(f"type {subject} to {action} it: ").strip() != subject:
+        raise HumanRequired(f"{action} not confirmed")
+    return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
+
+
+def mint_pressed(action: str, subject: str, *, pressed: Callable[[str], bool],
+                 terminal: tuple[bool, bool] | None = None,
+                 env: Mapping[str, str] | None = None) -> HumanGrant:
+    """A grant after one confirming key instead of the typed id: ``pressed`` is shown what
+    will happen and says whether the person pressed the key. The terminal and agent-marker
+    checks are the same as `mint`'s, and they run before ``pressed`` is ever called. Used
+    for a release, which restores what was held; a purge still goes through `mint`."""
+    require_person(action, terminal, env)
+    if not pressed(f"{action} {subject}"):
         raise HumanRequired(f"{action} not confirmed")
     return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
 

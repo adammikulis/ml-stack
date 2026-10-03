@@ -15,6 +15,7 @@ from ml_stack.sentinel import canary as canaries
 from ml_stack.sentinel.canary import Baseline, Results
 from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
 from ml_stack.sentinel.findings import Finding
+from ml_stack.sentinel.heads_up import HeadsUp
 from ml_stack.sentinel.honey import Honey
 from ml_stack.sentinel.human import HumanGrant, protect
 from ml_stack.sentinel.integrity import Manifest, Pin, check_file
@@ -25,6 +26,7 @@ from ml_stack.sentinel.redaction import redact
 from ml_stack.sentinel.score import Score
 from ml_stack.sentinel.sealed import SealedFile
 from ml_stack.sentinel.store import (
+    KINDS,
     Holding,
     Record,
     State,
@@ -78,6 +80,9 @@ class Sentinel:
         self.last_scan = 0.0
         self._derived: dict[str, list[str]] = {}
         self.store.on_quarantine.setdefault("session", []).append(self._taint_derived)
+        self.heads_up = HeadsUp(self.root / "notified.json", clock=clock, bus=self.bus)
+        for kind in KINDS:
+            self.store.on_quarantine.setdefault(kind, []).append(self.heads_up.on_quarantine)
         self._stop = threading.Event()
         self._verified = SealedFile(self.root / "verified.json")
         if self.off_because:

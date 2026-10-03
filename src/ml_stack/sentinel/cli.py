@@ -6,14 +6,16 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ml_stack import sentinel
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sandbox import cli as sandbox_cli
-from ml_stack.sentinel import human, inert
+from ml_stack.sentinel import human, inert, launcher, review
 from ml_stack.sentinel.events import Severity
+from ml_stack.sentinel.explain import show
 from ml_stack.sentinel.integrity import FILE_KINDS
 from ml_stack.sentinel.policy import Mode
 from ml_stack.sentinel.store import KINDS, Holding, Record, State, TransitionRefused
@@ -44,13 +46,21 @@ def _loop(state: dict[str, Any]) -> str:
     return f"NOT ARMED ({state['why']})"
 
 
+def _held() -> list[review.Item]:
+    node = sentinel.default()
+    return review.held_items(node.store, node.clock())
+
+
 @COMMANDS.command("status", help="mode, counts by state, pins, decoys and whether the log verifies",
                   options=(JSON,))
 def status(args: argparse.Namespace) -> int:
-    """Print the sentinel's state."""
-    info = {**sentinel.default().status(), "sandbox": sandbox_cli.summary()}
-    return _out(args, info, lambda: [f"{k}: {_loop(v) if k == 'scanner' else v}"
-                                     for k, v in info.items()])
+    """Print the sentinel's state, and what is held by name with the command that reviews it."""
+    held = _held()
+    info = {**sentinel.default().status(), "sandbox": sandbox_cli.summary(),
+            "held": [i.to_json() for i in held]}
+    return _out(args, info, lambda: [
+        *(f"{k}: {_loop(v) if k == 'scanner' else v}" for k, v in info.items() if k != "held"),
+        *([review.hint(held)] if held else [])])
 
 
 @COMMANDS.command("sandbox", help="status | test: the confinement used for untrusted execution",
@@ -69,9 +79,12 @@ def sandbox(args: argparse.Namespace) -> int:
 @COMMANDS.command("chip", help="the status mark: green, yellow, red or none, with a label",
                   options=(JSON,))
 def chip(args: argparse.Namespace) -> int:
-    """Print the status mark."""
+    """Print the status mark, and what to run when something is held."""
     mark = sentinel.default().chip()
-    return _out(args, mark, lambda: [f"{mark['verdict']}  {mark['label']}"])
+    hint = review.hint(_held())
+    mark = {**mark, "review": hint} if hint else mark
+    return _out(args, mark, lambda: [f"{mark['verdict']}  {mark['label']}",
+                                     *([hint] if hint else [])])
 
 
 @COMMANDS.command("events", help="the most recent security events",
@@ -93,7 +106,8 @@ def _list(args: argparse.Namespace) -> int:
     rows = [_row(r) for r in sentinel.default().store.records()
             if not args.state or r.state.value == args.state]
     return _out(args, rows, lambda: [
-        f"{r['id']}  {r['state']:<11} {r['kind']}:{r['key']}  {r['reason'][:60]}" for r in rows])
+        f"{r['id']}  {r['state']:<11} {r['kind']}:{show(r['key'], 80)}  {show(r['reason'], 60)}"
+        for r in rows])
 
 
 def _find(ident: str) -> Record:
@@ -164,6 +178,32 @@ def quarantine(args: argparse.Namespace) -> int:
     except (TransitionRefused, OSError) as exc:
         warn(f"ml-stack security: {exc}")
         return 1
+
+
+@COMMANDS.command("review", help="see everything held, and release or purge it with single keys "
+                  "(a person at a terminal); --list and --json view anywhere", options=(
+    JSON, flag("--list", action="store_true", help="print the held subjects and exit"),
+    flag("--install-launcher", action="store_true", dest="install_launcher",
+         help="write a double-clickable file that opens this screen"),
+    flag("--dir", default="~/Desktop", help="--install-launcher: the folder to put it in"),
+    flag("--force", action="store_true", help="--install-launcher: replace an existing file")))
+def review_command(args: argparse.Namespace) -> int:
+    """View what is held (anywhere), or act on it (a person at a terminal)."""
+    if args.install_launcher:
+        try:
+            say(f"launcher written: {launcher.install_launcher(Path(args.dir), force=args.force)}")
+        except launcher.LauncherError as exc:
+            warn(f"ml-stack security: {exc}")
+            return 1
+        return 0
+    if args.list or args.json:
+        items = _held()
+        return _out(args, [i.to_json() for i in items], lambda: review.table(items))
+    try:
+        return review.interactive()
+    except (human.HumanRequired, review.NeedsTerminal) as exc:
+        warn(f"ml-stack security: {exc}")
+        return 2
 
 
 @COMMANDS.command("release", help="release a quarantined subject (a person at a terminal)",

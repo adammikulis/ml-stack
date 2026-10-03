@@ -62,7 +62,8 @@ def _no_desktop_notifications() -> None:
     import tempfile
 
     shims = Path(tempfile.mkdtemp(prefix="mlstack-shims-"))
-    for name in ("osascript", "notify-send", "zenity", "kdialog"):
+    for name in ("osascript", "notify-send", "zenity", "kdialog", "open", "xdg-open",
+                 "x-terminal-emulator", "gnome-terminal", "konsole", "xterm"):
         shim = shims / name
         shim.write_text('#!/bin/sh\necho "$0 $*" >> "$ML_STACK_SHIM_LOG"\nexit 97\n')
         shim.chmod(0o755)
@@ -112,14 +113,14 @@ def _install_git_hooks() -> None:
 _install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
+import testslots  # noqa: E402  (``scripts`` is on the path above)
+
 from ml_stack.http import Server  # noqa: E402
 from ml_stack.testing import live  # noqa: E402
 from ml_stack.testing.fakes import (  # noqa: E402
     LLAMA_SERVER_HELP as LLAMA_SERVER_HELP,
     fake_binary as fake_binary,
 )
-
-import testslots  # noqa: E402  (``scripts`` is on the path above)
 
 os.environ.setdefault("DEV_TEST_SLOTS_DIR", str(testslots.slots_dir()))
 """The machine-wide slot directory, fixed before the session moves ``HOME`` so every worker and

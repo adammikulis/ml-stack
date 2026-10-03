@@ -364,8 +364,9 @@ class Store:
     # -- the human's side ------------------------------------------------------------
     def release(self, ident: str, grant: HumanGrant, reason: str = "released by a person",
                 ) -> Record:
-        """Release a quarantined subject: restore its file, run the release hooks. A
-        grant for ``release`` on this id is required."""
+        """Release a quarantined subject: restore its file, run the release hooks. A watched
+        subject is returned to clear (nothing was blocked, so there is nothing to restore).
+        A grant for ``release`` on this id is required."""
         grant.check("release", ident)
         if self.tampered:
             raise TransitionRefused("the sealed state failed its check; nothing is released")
@@ -374,6 +375,10 @@ class Store:
             record = self._records.get(ident)
             if record is None:
                 raise KeyError(ident)
+            if record.state == State.WATCH:
+                self._move(record, State.CLEAR, "watch ended by a person", "human", {})
+                self._save()
+                return record
             if record.state != State.QUARANTINED:
                 raise TransitionRefused(f"{ident} is {record.state.value}, not quarantined")
             if record.action and not record.purged:
