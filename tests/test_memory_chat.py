@@ -146,3 +146,39 @@ def test_a_project_that_is_not_a_directory_is_refused(tmp_path):
     args = chat.COMMAND.parser().parse_args(["--dry-run", "--project", str(tmp_path / "nope")])
     out = io.StringIO()
     assert chat.serve(args, io.StringIO(), out) == 2 and "not a directory" in out.getvalue()
+
+
+class Counting(memory_keys.MemoryRing):
+    """A keystore that counts every call made to it."""
+
+    calls = 0
+
+    def get_password(self, service, username):
+        Counting.calls += 1
+        return super().get_password(service, username)
+
+    def set_password(self, service, username, password):
+        Counting.calls += 1
+        super().set_password(service, username, password)
+
+
+def test_fifty_sessions_and_an_empty_recall_touch_the_keystore_zero_times(tmp_path):
+    import keyring
+
+    before = keyring.get_keyring()
+    keyring.set_keyring(Counting())
+    Counting.calls = 0
+    try:
+        for n in range(50):
+            person = do.Person(io.StringIO(""), io.StringIO())
+            mem = memory.Memory.open(explicit=repo(tmp_path, f"p{n}"))
+            opened.append(mem)
+            ext = chat.extensions(person, mem)
+            session = chat.Chat(Model([("recall", {"query": "anything"})]), person, extension=ext)
+            session.turn("hello")
+            ext.commands["memory"]("", session.messages)
+        assert Counting.calls == 0
+        mem.user.add("a first fact", "note")
+        assert Counting.calls > 0
+    finally:
+        keyring.set_keyring(before)
