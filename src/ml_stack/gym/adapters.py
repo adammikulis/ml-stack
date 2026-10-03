@@ -20,6 +20,8 @@ def make_environment(name, config=None):
     import numpy as np
 
     cfg = dict(config or {})
+    cfg.pop("continuous", None)
+    cfg.pop("new_scenario", None)
     if name == "traffic-driving":
         return make_cosim(cfg)
     if name == "car":

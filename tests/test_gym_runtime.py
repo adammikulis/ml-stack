@@ -104,6 +104,55 @@ def test_completed_episode_cannot_advance(simulation):
         simulation.command("play", {})
 
 
+def test_continuous_records_terminal_before_native_reset(simulation):
+    simulation.command("continuous", {"enabled": True, "new_scenario": True})
+    simulation.command("action", {"action": 1})
+    simulation.command("play", {})
+    for _ in range(3):
+        simulation.step()
+    assert simulation.state["truncated"] and simulation.running
+    terminal_sequence = simulation.state["sequence"]
+    terminal = json.loads((simulation.path / "trajectory.jsonl").read_text().splitlines()[-1])
+    assert terminal["transition"]["truncated"] and terminal["transition"]["episode_id"] == 1
+    simulation.step()
+    assert simulation.state["episode_id"] == 2
+    assert simulation.state["sequence"] == terminal_sequence + 1
+    assert simulation.state["seed"] == 3
+    assert simulation.state["manual_action"] == 1 and simulation.running
+    assert simulation.state["last_episode"]["episode_reward"] == 6.
+    assert simulation.state["episode_steps"] == 0
+
+
+def test_continuous_repeat_preserves_seed_and_pause(simulation):
+    simulation.command("continuous", {"enabled": True, "new_scenario": False})
+    simulation.command("action", {"action": 1})
+    simulation.command("play", {})
+    for _ in range(3):
+        simulation.step()
+    simulation.command("pause", {})
+    assert not simulation.running
+    simulation.command("play", {})
+    simulation.step()
+    assert simulation.state["seed"] == 2 and simulation.running
+
+
+def test_car_continuous_seed_wraps_native_scenario_domain(simulation):
+    simulation.environment = "car"
+    simulation.seed = 5
+    simulation.env.unwrapped = SimpleNamespace(config={"start_seed": 4, "num_scenarios": 2})
+    simulation.new_scenario = True
+    simulation.next_episode()
+    assert simulation.state["seed"] == 4
+
+
+def test_continuous_never_advances_a_paused_active_episode(simulation):
+    simulation.command("continuous", {"enabled": True})
+    sequence = simulation.state["sequence"]
+    simulation.command("pause", {})
+    assert not simulation.running
+    assert simulation.state["sequence"] == sequence
+
+
 def test_invalid_action_does_not_replace_manual_action(simulation):
     simulation.command("action", {"action": 1})
     with pytest.raises(ValueError, match="Invalid manual"):

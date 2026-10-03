@@ -89,6 +89,10 @@ class Simulation:
         self.path = artifact_root() / settings["id"]
         self.path.mkdir(parents=True, exist_ok=True)
         config = dict(settings["config"])
+        self.continuous = config.pop("continuous", False)
+        self.new_scenario = config.pop("new_scenario", True)
+        if not isinstance(self.continuous, bool) or not isinstance(self.new_scenario, bool):
+            raise ValueError("continuous and new_scenario must be booleans")
         self.record_frames = bool(config.pop("record_frames", False))
         checkpoint = config.pop("checkpoint", None)
         config.pop("decision_checkpoint", None)
@@ -112,6 +116,8 @@ class Simulation:
                       "actions": self.names, "config": dict(settings["config"]), "seed": self.seed,
                       "model": settings["model"], "device": settings["device"],
                       "manual_action": self.manual, "speed": self.speed,
+                      "continuous": self.continuous, "new_scenario": self.new_scenario,
+                      "episode_steps": 0, "episode_reward": 0., "last_episode": None,
                       "trajectory_path": str(self.path / "trajectory.jsonl")}
         self.reset({})
 
@@ -126,7 +132,8 @@ class Simulation:
         self.state["episode_id"] += 1
         self.state["sequence"] += 1
         self.state.update(status="paused", observation=json_value(self.observation), info=json_value(info),
-                          reward=0., action=None, decision=None, terminated=False, truncated=False, error=None)
+                          reward=0., action=None, decision=None, terminated=False, truncated=False, error=None,
+                          episode_steps=0, episode_reward=0.)
         self.state.pop("transition", None)
         geometry, frame = render_state(self.environment, self.env)
         self.state["info"]["render"] = geometry
@@ -134,6 +141,9 @@ class Simulation:
 
     def step(self):
         if self.state["terminated"] or self.state["truncated"]:
+            if self.continuous:
+                self.next_episode()
+                return
             self.running = False
             self.state["status"] = "completed"
             return
@@ -146,6 +156,8 @@ class Simulation:
                           action=json_value(action), decision=decision, reward=float(reward),
                           terminated=bool(terminated), truncated=bool(truncated),
                           info=json_value(info), error=None)
+        self.state["episode_steps"] += 1
+        self.state["episode_reward"] += float(reward)
         self.state["transition"] = {"observation": previous, "action": json_value(action),
                                     "reward": float(reward), "next_observation": json_value(self.observation),
                                     "terminated": bool(terminated), "truncated": bool(truncated),
@@ -153,8 +165,10 @@ class Simulation:
         geometry, frame = render_state(self.environment, self.env)
         self.state["info"]["render"], self.state["frame"] = geometry, frame
         if terminated or truncated:
-            self.running = False
+            self.running = self.running and self.continuous
             self.state["status"] = "completed"
+            self.state["last_episode"] = {key: self.state[key] for key in
+                                          ("episode_id", "seed", "sequence", "episode_steps", "episode_reward", "terminated", "truncated")}
         recorded = {**self.state, "frame": None}
         if self.record_frames and frame:
             frames = self.path / "frames"
@@ -165,15 +179,35 @@ class Simulation:
         with (self.path / "trajectory.jsonl").open("a") as handle:
             handle.write(json.dumps(json_value(recorded)) + "\n")
 
+    def next_episode(self):
+        """Reset a finished native episode without changing its controller."""
+        seed = self.seed + 1 if self.new_scenario else self.seed
+        if self.new_scenario and self.environment == "car":
+            config = self.env.unwrapped.config
+            seed = config["start_seed"] + (seed - config["start_seed"]) % config["num_scenarios"]
+        running = self.running
+        self.reset({"seed": seed})
+        self.running = running
+        self.state["status"] = "running" if running else "paused"
+
     def command(self, command, payload):
         if command == "play":
-            if self.state["terminated"] or self.state["truncated"]:
+            if (self.state["terminated"] or self.state["truncated"]) and not self.continuous:
                 raise ValueError("Reset the completed episode before playing")
             self.running = True
             self.state["status"] = "running"
         elif command == "pause":
             self.running = False
             self.state["status"] = "paused"
+        elif command == "continuous":
+            enabled, new = payload["enabled"], payload.get("new_scenario", self.new_scenario)
+            if not isinstance(enabled, bool) or not isinstance(new, bool):
+                raise ValueError("enabled and new_scenario must be booleans")
+            self.continuous, self.new_scenario = enabled, new
+            self.state.update(continuous=enabled, new_scenario=new)
+            self.settings["config"].update(continuous=enabled, new_scenario=new)
+            self.state["config"] = dict(self.settings["config"])
+            (self.path / "manifest.json").write_text(json.dumps(self.settings))
         elif command == "speed":
             self.speed = max(0.1, min(60., float(payload["speed"])))
             self.state["speed"] = self.speed
