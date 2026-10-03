@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,14 +19,18 @@ from ml_stack.sentinel.sealed import SealedFile
 if TYPE_CHECKING:
     from ml_stack.sentinel.core import Sentinel
 
-__all__ = ["BECAUSE", "DEFAULT_INTERVAL_S", "ENV_SCAN", "Cadence", "Scanner", "arm_scan",
-           "cadence", "ensure_honey", "opt_out", "scanner_state"]
+__all__ = ["BECAUSE", "CANARY_BECAUSE", "CANARY_INTERVAL_S", "DEFAULT_INTERVAL_S", "ENV_CANARY",
+           "ENV_SCAN", "Cadence", "Scanner", "arm_scan", "cadence", "canary_cadence",
+           "ensure_honey", "opt_out", "scanner_state"]
 
 logger = logging.getLogger("ml_stack.sentinel")
 
 ENV_SCAN = "ML_STACK_SENTINEL_SCAN"
 BECAUSE = "ML_STACK_SENTINEL_SCAN_BECAUSE"
+ENV_CANARY = "ML_STACK_SENTINEL_CANARY"
+CANARY_BECAUSE = "ML_STACK_SENTINEL_CANARY_BECAUSE"
 DEFAULT_INTERVAL_S = 300.0
+CANARY_INTERVAL_S = 3600.0
 DEEP_EVERY = 12
 HEARTBEAT = "scanner.json"
 
@@ -40,26 +44,37 @@ class Cadence:
     refused: str = ""
 
 
+def _cadence(env: Mapping[str, str] | None, name: str, because_name: str, default: float,
+             ) -> Cadence:
+    env = os.environ if env is None else env
+    named = env.get(name, "").strip().lower()
+    if not named:
+        return Cadence(default)
+    if named == "off":
+        because = env.get(because_name, "").strip()
+        if because:
+            return Cadence(0.0, because)
+        return Cadence(default, refused=f"{name}=off needs {because_name}")
+    try:
+        seconds = float(named)
+    except ValueError:
+        return Cadence(default, refused=f"{name}={named!r} is not seconds or off")
+    if seconds <= 0:
+        return Cadence(default, refused=f"{name} must be above zero")
+    return Cadence(seconds)
+
+
 def cadence(env: Mapping[str, str] | None = None) -> Cadence:
     """The scan cadence ``ML_STACK_SENTINEL_SCAN`` names: seconds, or ``off`` together with
     ``ML_STACK_SENTINEL_SCAN_BECAUSE``. ``off`` without a reason, or anything unreadable, keeps
     the default and says so in ``refused``."""
-    env = os.environ if env is None else env
-    named = env.get(ENV_SCAN, "").strip().lower()
-    if not named:
-        return Cadence(DEFAULT_INTERVAL_S)
-    if named == "off":
-        because = env.get(BECAUSE, "").strip()
-        if because:
-            return Cadence(0.0, because)
-        return Cadence(DEFAULT_INTERVAL_S, refused=f"{ENV_SCAN}=off needs {BECAUSE}")
-    try:
-        seconds = float(named)
-    except ValueError:
-        return Cadence(DEFAULT_INTERVAL_S, refused=f"{ENV_SCAN}={named!r} is not seconds or off")
-    if seconds <= 0:
-        return Cadence(DEFAULT_INTERVAL_S, refused=f"{ENV_SCAN} must be above zero")
-    return Cadence(seconds)
+    return _cadence(env, ENV_SCAN, BECAUSE, DEFAULT_INTERVAL_S)
+
+
+def canary_cadence(env: Mapping[str, str] | None = None) -> Cadence:
+    """Seconds between behavioural canary rounds per served model (``ML_STACK_SENTINEL_CANARY``,
+    default one hour), or ``off`` together with ``ML_STACK_SENTINEL_CANARY_BECAUSE``."""
+    return _cadence(env, ENV_CANARY, CANARY_BECAUSE, CANARY_INTERVAL_S)
 
 
 def opt_out(sentinel: Sentinel, what: str, because: str) -> None:
@@ -93,8 +108,9 @@ class Scanner:
     the sentinel's state so another process can tell the loop is running."""
 
     def __init__(self, sentinel: Sentinel, interval_s: float, *,
-                 deep_every: int = DEEP_EVERY) -> None:
+                 deep_every: int = DEEP_EVERY, rounds: Sequence[Callable[[], object]] = ()) -> None:
         self.sentinel, self.interval_s, self.deep_every = sentinel, interval_s, deep_every
+        self.rounds = list(rounds)
         self._file = SealedFile(sentinel.root / HEARTBEAT)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -128,6 +144,8 @@ class Scanner:
     def _once(self, *, deep: bool) -> None:
         try:
             self.sentinel.scan(deep=deep)
+            for extra in self.rounds:
+                extra()
         except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
             logger.warning("sentinel scan failed: %s", exc)
             self.sentinel.bus.emit(Event("sentinel.scan_failed", Severity.WARNING, "watch", "",
@@ -140,9 +158,10 @@ class Scanner:
                          "beat": self.sentinel.clock(), "running": running})
 
 
-def arm_scan(sentinel: Sentinel) -> Scanner | None:
+def arm_scan(sentinel: Sentinel, rounds: Sequence[Callable[[], object]] = ()) -> Scanner | None:
     """Start the periodic scan at the configured cadence, for a long-running process; the
-    caller stops it. None when the mode is off or the scan was switched off with a reason."""
+    caller stops it. ``rounds`` are called after every scan (the canaries). None when the mode
+    is off or the scan was switched off with a reason."""
     if sentinel.mode == Mode.OFF:
         return None
     chosen = cadence()
@@ -153,7 +172,7 @@ def arm_scan(sentinel: Sentinel) -> Scanner | None:
     if chosen.interval_s <= 0:
         opt_out(sentinel, "the periodic scan", chosen.off_because)
         return None
-    return Scanner(sentinel, chosen.interval_s).start()
+    return Scanner(sentinel, chosen.interval_s, rounds=rounds).start()
 
 
 def scanner_state(root: Path, now: float | None = None) -> dict[str, Any]:

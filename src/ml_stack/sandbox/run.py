@@ -17,10 +17,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import sentinel
 from ml_stack.sandbox.backend import Backend, SandboxUnavailable
 from ml_stack.sandbox.bubblewrap import Bubblewrap
 from ml_stack.sandbox.policy import AllowUnsandboxed, Limits, Policy
 from ml_stack.sandbox.seatbelt import Seatbelt
+from ml_stack.sentinel.adapters import sandbox_listener
 
 __all__ = ["Events", "Result", "SandboxViolation", "backend", "run", "wrapped"]
 
@@ -162,7 +164,7 @@ def run(argv: Sequence[str], policy: Policy, *,  # noqa: PLR0913 - one keyword p
     try:
         proc = subprocess.Popen(
             full, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(policy.env), cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=sentinel.default().scrub_env(policy.env), cwd=cwd,
             start_new_session=True, preexec_fn=_limits(limits))
     except OSError as exc:
         raise SandboxUnavailable(f"{policy.name}: could not start {argv[0]}: {exc}") from exc
@@ -207,9 +209,14 @@ def _diagnose(when: str, result: Result) -> bool:
 
 
 def _emitter(on_event: Events | None) -> Callable[..., None]:
+    """Reports to the caller's ``on_event`` and to the node's sentinel, which every sandbox run
+    is watched by."""
+    watch = sandbox_listener(sentinel.default())
+
     def emit(event: str, **fields: object) -> None:
-        if on_event is not None:
-            with contextlib.suppress(Exception):
-                on_event(event, dict(fields))
+        for call in (watch, on_event):
+            if call is not None:
+                with contextlib.suppress(Exception):
+                    call(event, dict(fields))
     return emit
 

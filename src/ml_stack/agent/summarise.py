@@ -6,7 +6,10 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from ml_stack import sentinel
 from ml_stack.agent.compact import Summarizer
+from ml_stack.agent.watched import current_session
+from ml_stack.sentinel.store import fingerprint
 
 __all__ = ["PROMPT", "model_summarizer", "render"]
 
@@ -55,6 +58,18 @@ def model_summarizer(client: Any, *, words: int = 350) -> Summarizer:
             + f"Conversation to fold in:\n{render(messages)}"
         reply = client.chat([{"role": "system", "content": system},
                              {"role": "user", "content": said}])
-        return str(reply.content or "")
+        return _vetted(str(reply.content or ""))
 
     return summarise
+
+
+def _vetted(text: str) -> str:
+    """The summary as it may be stored and fed back: sentinel's memory screen holds one that
+    repeats held content or carries a decoy value, and nothing is returned for it, so the
+    compaction falls back to its other strategies instead of reusing it."""
+    if not text.strip():
+        return text
+    session = current_session()
+    got = sentinel.default().screen_memory(f"summary:{fingerprint(text)[:16]}", text,
+                                           session=session)
+    return "" if got.withheld else text

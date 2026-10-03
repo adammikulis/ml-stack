@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,8 @@ from ml_stack.sentinel.integrity import Manifest, Pin, check_file
 from ml_stack.sentinel.policy import Mode, decide
 from ml_stack.sentinel.rails import RailWatch, reads_like_instruction
 from ml_stack.sentinel.rates import Abuse, PeerWatch, ToolMix
+from ml_stack.sentinel.redaction import redact
+from ml_stack.sentinel.score import Score
 from ml_stack.sentinel.sealed import SealedFile
 from ml_stack.sentinel.store import (
     Holding,
@@ -45,6 +48,7 @@ class Screened:
 
     text: str
     withheld: str = ""
+    labelled: bool = False
 
 
 class Sentinel:
@@ -68,6 +72,9 @@ class Sentinel:
         self.honey = Honey(state=self.root / "honey.json")
         self.peers, self.tools, self.rails = PeerWatch(), ToolMix(), RailWatch()
         self.abuse = Abuse()
+        self.score = Score()
+        self._flights: dict[str, int] = {}
+        self._flight_lock = threading.Lock()
         self.last_scan = 0.0
         self._derived: dict[str, list[str]] = {}
         self.store.on_quarantine.setdefault("session", []).append(self._taint_derived)
@@ -167,6 +174,74 @@ class Sentinel:
             return Screened(placeholder(again.id), again.id)
         return Screened(placeholder("unrecorded"), "unrecorded") if denied else Screened(text)
 
+    @contextmanager
+    def running(self, session: str) -> Iterator[None]:
+        """Mark ``session`` as having a tool call in flight, so a hit on the decoy listener
+        meanwhile can be attributed to it."""
+        with self._flight_lock:
+            self._flights[session] = self._flights.get(session, 0) + 1
+        try:
+            yield
+        finally:
+            with self._flight_lock:
+                self._flights[session] -= 1
+                if not self._flights[session]:
+                    del self._flights[session]
+
+    def in_flight(self) -> list[str]:
+        """The sessions with a tool call running now."""
+        with self._flight_lock:
+            return sorted(self._flights)
+
+    def decoy_hit(self, path: str) -> list[str]:
+        """A request reached the decoy listener: every session with a tool call running is
+        frozen (its call is the only way a loopback request can be attributed), and with none
+        running the hit is recorded against nobody."""
+        if self.mode == Mode.OFF:
+            return []
+        return self.handle_all(self.honey.endpoint_hit(path, self.in_flight()))
+
+    def note(self, kind: str, key: str, signal: str, weight: float | None = None) -> list[str]:
+        """Count one weak ``signal`` (a guard denial, a sandbox refusal, a refused lease)
+        against the session or caller ``(kind, key)``. The score escalates it to watch and then
+        to quarantine; a person's release starts the count again. Returns what the policy did."""
+        if self.mode == Mode.OFF:
+            return []
+        if self.score.held(kind, key) and self.store.state_of(kind, key) == State.RELEASED:
+            self.score.reset(kind, key)
+        return self.handle_all(self.score.add(kind, key, signal, weight))
+
+    def screen_output(self, text: str, *, session: str = "", source: str = "model") -> Screened:
+        """A model's reply about to be returned or stored. A decoy value, content already
+        held, or a secret-shaped string in it is suspect: in ``guarded`` mode the reply is
+        returned with a visible label, in ``enforce`` it is held and replaced by a placeholder."""
+        if self.mode == Mode.OFF or not text:
+            return Screened(text)
+        reasons = []
+        seen = self.honey.scan(text, "model_output", session=session, caller=source)
+        if seen:
+            self.handle_all(seen)
+            reasons.append("carries a decoy value")
+        held = self.store.find_fingerprint(fingerprint(text)) or self.store.find_overlap(text)
+        if held is not None:
+            reasons.append(f"repeats held content {held.id}")
+        if redact(text) != text:
+            reasons.append("carries a secret-shaped string")
+        if not reasons:
+            return Screened(text)
+        why = "; ".join(reasons)
+        self.bus.emit(Event("output.suspect", Severity.WARNING, "screen",
+                            f"session:{session}" if session else f"caller:{source}",
+                            {"why": why, "bytes": len(text)}, self.clock()))
+        if self.mode == Mode.ENFORCE and not self.dry_run:
+            digest = fingerprint(text)[:12]
+            record = self.store.quarantine(("message", f"{session or source}:{digest}"),
+                                           f"model output {why}", {"bytes": len(text)},
+                                           Holding(text=text))
+            ident = record.id if record else "unrecorded"
+            return Screened(placeholder(ident), ident)
+        return Screened(f"[sentinel: this reply {why}]\n{text}", labelled=True)
+
     def register_derived(self, session: str, memory_key: str) -> None:
         """Note that the memory ``memory_key`` (a summary, note, KV slot) was built from
         ``session``, so freezing the session quarantines it too."""
@@ -192,15 +267,18 @@ class Sentinel:
         if not self.memory_trusted(key):
             held = self.store.find("memory", key)
             return Screened(placeholder(held.id if held else "tampered"), held.id if held else "")
+        seen = self.honey.scan(text, "model_output", session=session, caller="memory")
+        self.handle_all(seen)
         source = self.store.find_overlap(text) or self.store.find_fingerprint(fingerprint(text))
-        if source is None:
+        if source is None and not seen:
             return Screened(text)
+        what = f"repeats held content {source.id}" if source else "carries a decoy value"
+        evidence = {"copies": source.id} if source else {"decoy": seen[0].event.evidence["decoy"]}
         self.bus.emit(Event("memory.poisoned", Severity.WARNING, "memory", f"memory:{key}",
-                            {"copies": source.id}, self.clock()))
+                            evidence, self.clock()))
         if self.mode == Mode.OBSERVE or self.dry_run:
             return Screened(text)
-        held = self.store.quarantine(("memory", key), f"repeats held content {source.id}",
-                                     {"copies": source.id}, Holding(text=text))
+        held = self.store.quarantine(("memory", key), what, evidence, Holding(text=text))
         ident = held.id if held else "unrecorded"
         return Screened(placeholder(ident), ident)
 

@@ -16,6 +16,7 @@ from ml_stack.interventions import Call
 from ml_stack.sentinel.core import Sentinel
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.human import agent_may
+from ml_stack.sentinel.policy import Mode
 from ml_stack.sentinel.store import Record
 
 __all__ = ["GuardLogHandler", "RailAnswer", "agent_gate", "broker_listener", "note_refusal",
@@ -30,19 +31,23 @@ class GuardLogHandler(logging.Handler):
     findings for ``session``: every Deny is a denial counted against the session. Attach it
     with ``logging.getLogger("ml_stack.guard").addHandler``."""
 
-    def __init__(self, sentinel: Sentinel, session: Callable[[], str] = lambda: "") -> None:
+    def __init__(self, sentinel: Sentinel, session: Callable[[], str] = lambda: "", *,
+                 only_known: bool = False) -> None:
         super().__init__(logging.WARNING)
-        self.sentinel, self.session = sentinel, session
+        self.sentinel, self.session, self.only_known = sentinel, session, only_known
 
     def emit(self, record: logging.LogRecord) -> None:
         args = record.args
         if not (isinstance(args, tuple) and len(args) == 3):
             return
         rail, verdict, hook = (str(a) for a in args)
-        if verdict != "Deny":
+        who = self.session()
+        if verdict != "Deny" or (self.only_known and not who):
             return
-        self.sentinel.handle_all(self.sentinel.rails.noted(
-            self.session() or "none", rail, "deny", hook, hook))
+        self.sentinel.handle_all(self.sentinel.rails.noted(who or "none", rail, "deny", hook,
+                                                           hook))
+        if who:
+            self.sentinel.note("session", who, "guard.denied")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,20 +115,30 @@ def broker_listener(sentinel: Sentinel) -> Callable[[str, dict[str, object]], No
                                 {k: v for k, v in fields.items() if k != "caller"},
                                 sentinel.clock()))
         if caller:
-            sentinel.handle_all([sentinel.abuse.note(caller)])
+            seen = sentinel.abuse.note(caller)
+            sentinel.handle_all([seen])
+            if seen is not None:
+                sentinel.note("caller", caller, "abuse.resource")
+            if event == "refused":
+                sentinel.note("caller", caller, "broker.refused")
     return on
 
 
 def sandbox_listener(sentinel: Sentinel) -> Callable[[str, dict[str, object]], None]:
     """A callback with the sandbox's ``on_event(event, fields)`` shape: a refusal, a timeout, a
-    missing sandbox or a run without one becomes an event on the bus."""
+    missing sandbox or a run without one becomes an event on the bus, and counts toward the score
+    of each session that has a tool call running (the only attribution a sandbox run has)."""
     levels = {"warning": Severity.WARNING, "notice": Severity.NOTICE}
 
     def on(event: str, fields: dict[str, object]) -> None:
+        if sentinel.mode == Mode.OFF:
+            return
         level = levels.get(str(fields.get("severity", "")), Severity.INFO)
         sentinel.bus.emit(Event(event, level, "sandbox", f"policy:{fields.get('policy', '')}",
                                 {k: v for k, v in fields.items() if k != "severity"},
                                 sentinel.clock()))
+        for session in sentinel.in_flight():
+            sentinel.note("session", session, event)
     return on
 
 

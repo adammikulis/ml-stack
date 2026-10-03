@@ -4,19 +4,23 @@ refused, a pinned model must still hash to its pin, and an unpinned model is pin
 from __future__ import annotations
 
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 from ml_stack import sentinel
 from ml_stack.sentinel import Sentinel
-from ml_stack.sentinel.adapters import serve_hooks
+from ml_stack.sentinel.adapters import broker_listener, serve_hooks
+from ml_stack.sentinel.servers import unmanaged_findings
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.watch import Scanner
+from ml_stack.serve import canaries, decoy
 from ml_stack.serve.backend import ServerFailed
+from ml_stack.serve.decoy import DecoyListener
 from ml_stack.serve.leases import recorded_servers
 
-__all__ = ["SentinelRefused", "arm", "blocked", "register", "verify"]
+__all__ = ["Armed", "SentinelRefused", "arm", "blocked", "caller_blocked", "register", "report",
+           "start", "unmanaged_seen", "verify"]
 
 
 class SentinelRefused(ServerFailed):
@@ -48,6 +52,29 @@ def blocked(model: object) -> str:
     return ""
 
 
+def report(event: str, **fields: object) -> None:
+    """Tell sentinel what the Broker did (``lease``, ``refused``...), by ``caller``. Every event
+    is logged and counts toward the caller's resource use; refusals add to its score."""
+    node = sentinel.default()
+    if node.mode != sentinel.Mode.OFF:
+        broker_listener(node)(event, dict(fields))
+
+
+def caller_blocked(caller: str) -> str:
+    """Why sentinel keeps ``caller`` from leasing, or an empty string."""
+    node = sentinel.default()
+    if node.mode != sentinel.Mode.OFF and caller and node.store.blocked("caller", caller):
+        return f"{caller} is quarantined by sentinel; a person releases it with `ml-stack-security release`"
+    return ""
+
+
+def unmanaged_seen(procs: Iterable[Mapping[str, Any]]) -> None:
+    """Report listeners ml-stack did not start (watched, never acted on)."""
+    node = sentinel.default()
+    if node.mode != sentinel.Mode.OFF:
+        node.handle_all(unmanaged_findings(procs))
+
+
 def register(node: Sentinel, state_file: Path, stop: Callable[[int], object]) -> None:
     """Make a quarantined model or server stop the servers ml-stack started for it. Once per
     sentinel and lease file."""
@@ -58,12 +85,38 @@ def register(node: Sentinel, state_file: Path, stop: Callable[[int], object]) ->
     serve_hooks(node, lambda: recorded_servers(state_file), stop)
 
 
-def arm(manager: Any) -> Scanner | None:
+class Armed:
+    """What `arm` started: the scan loop (with the canary round) and the decoy listener."""
+
+    def __init__(self, scanner: Scanner | None, decoy: DecoyListener | None) -> None:
+        self.scanner, self.decoy = scanner, decoy
+
+    def stop(self) -> None:
+        if self.scanner is not None:
+            self.scanner.stop()
+        if self.decoy is not None:
+            self.decoy.stop()
+
+
+def arm(manager: Any, broker: Any = None) -> Armed:
     """What a process that runs the Broker arms: the decoys, the stop hooks for ``manager``'s
-    servers and the periodic scan. Returns the scan loop, which the caller stops."""
+    servers, the periodic scan with the behavioural canary round (through ``broker``'s leases
+    when given, else over the servers the lease file records) and the decoy endpoint. The caller
+    calls `Armed.stop`."""
     node = sentinel.armed()
     register(node, manager.state_file, manager.reclaim)
-    return sentinel.arm_scan(node)
+    targets = broker.canary_targets if broker is not None \
+        else canaries.lease_file_targets(manager.state_file)
+    return start(node, targets)
+
+
+def start(node: Sentinel, targets: Callable[[], list[canaries.Target]]) -> Armed:
+    """The scan loop, canary round and decoy listener of ``node``; ``targets`` lists the
+    served models the canaries ask."""
+    rounds = []
+    if (round_ := canaries.schedule(node, targets)) is not None:
+        rounds.append(round_)
+    return Armed(sentinel.arm_scan(node, rounds), decoy.arm(node))
 
 
 def verify(model: object, *, state_file: Path, stop: Callable[[int], Any]) -> None:

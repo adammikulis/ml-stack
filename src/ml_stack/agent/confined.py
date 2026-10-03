@@ -68,5 +68,6 @@ def confine(command: str, args: Sequence[str], env: Mapping[str, str] | None,
         report("sandbox.unsandboxed", {"severity": "warning", "command": command,
                                        "policy": held.name,
                                        "reason": unsandboxed.reason if unsandboxed else ""})
-        return Launch(program, list(args), dict(env) if env else None, cleanup)
-    return Launch(argv[0], argv[1:], dict(held.env), cleanup)
+        return Launch(program, list(args),
+                      sentinel.default().scrub_env(env) if env else None, cleanup)
+    return Launch(argv[0], argv[1:], sentinel.default().scrub_env(held.env), cleanup)

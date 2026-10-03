@@ -23,6 +23,8 @@ from ml_stack.files import write_text
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
 from ml_stack.platform import on_quit
+from ml_stack.serve import canaries, guarded
+from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
 
 from . import autostart, tls, updates as updating
@@ -389,7 +391,7 @@ def serve_forever(root: Path | str | None = None,
         raise KeyboardInterrupt(f"signal {signum}")
 
     on_quit(_quit)
-    scanner = sentinel.arm_scan(sentinel.armed())
+    scanner = guarded.start(sentinel.armed(), canaries.lease_file_targets(lease_file()))
     # A server this machine was told to stop when nobody is using it (`ml-stack-serve
     # limits --idle`). Without one, nothing is watched and nothing is stopped.
     from contextlib import ExitStack
@@ -419,8 +421,7 @@ def serve_forever(root: Path | str | None = None,
         pass
     finally:
         reclaiming.close()
-        if scanner is not None:
-            scanner.stop()
+        scanner.stop()
         _stop_advertisers(advertisers)
         if advertiser is not None:
             advertiser.stop()

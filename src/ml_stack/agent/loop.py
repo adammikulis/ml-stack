@@ -9,6 +9,7 @@ rejected calls, and a final `Done`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 import threading
@@ -157,6 +158,15 @@ class Agent:
     async def run(self, task: str | list[dict[str, Any]]) -> AsyncIterator[Event]:
         """Events for one task; a message list is continued in place. Stopping the
         iteration early, or cancelling the task driving it, stops the model's stream."""
+        try:
+            async with contextlib.aclosing(self._run(task)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            if self.watch:
+                self.watch.leave()
+
+    async def _run(self, task: str | list[dict[str, Any]]) -> AsyncIterator[Event]:
         messages = [{"role": "user", "content": task}] if isinstance(task, str) else task
         schemas = from_mcp(listed := await self.tools.list_tools(), self.budget.profile)
         index = index_by_name(schemas)
@@ -196,6 +206,8 @@ class Agent:
             spent += _completion_tokens(reply)
             pending = self._pending(reply, index)
             text = reply.content or ""
+            if self.watch:
+                text = self.watch.said(text)
             if not pending:
                 messages.append({"role": "assistant", "content": text})
                 yield Done("answer", text, step, calls, spent, messages)
@@ -298,6 +310,8 @@ class Agent:
     async def _decide(self, run: Run, hook: str, out: _Refusal) -> AsyncIterator[Event]:
         """Ask ``hook`` of the run's interventions, yielding the questions put to the person;
         a refusal is left in ``out``."""
+        if self.watch:
+            self.watch.enter()
         async for item in self._watching(run.decide(hook, run.context)):
             if isinstance(item, Gate):
                 out.reason = "" if item.allowed else getattr(item.verdict, "reason", "")
@@ -309,6 +323,8 @@ class Agent:
     async def _results(self, run: Run, pending: list[_Pending], answers: list[ToolOutput],
                        messages: list[dict[str, Any]]) -> AsyncIterator[Event]:
         """Pass each answer through the interventions, then add it to ``messages``."""
+        if self.watch:
+            self.watch.enter()
         for one, answer in zip(pending, answers, strict=True):
             text = answer.text
             if not (one.errors or one.denied):
@@ -323,6 +339,8 @@ class Agent:
             yield ToolResult(one.id, one.name, text, answer.is_error)
 
     async def _vet(self, run: Run, pending: list[_Pending]) -> AsyncIterator[Event]:
+        if self.watch:
+            self.watch.enter()
         for one in pending:
             if one.errors:
                 continue
@@ -365,7 +383,8 @@ class Agent:
                                               "hint": "call the tool again with arguments "
                                                       "that match its schema"}), is_error=True)
             async with gate:
-                done = await self.tools.call(call.name, call.args or {})
+                with self.watch.running() if self.watch else contextlib.nullcontext():
+                    done = await self.tools.call(call.name, call.args or {})
             return ToolOutput(self._shown(call.name, done), done.structured, done.is_error)
 
         return list(await asyncio.gather(*(one(c) for c in pending)))

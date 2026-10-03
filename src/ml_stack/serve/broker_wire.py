@@ -204,7 +204,7 @@ def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> i
         with only_one(home.state("broker.lock"), wait=False, announce=say):
             broker = Broker(idle_s=idle_s)
             broker.say = lambda line: say(line, flush=True)
-            scanner = guarded.arm(broker.manager)
+            scanner = guarded.arm(broker.manager, broker)
             adopted = broker.adopt()
             server = _Server(broker)
             write_json(record_path(), {"pid": os.getpid(), "port": server.server_address[1],
@@ -220,8 +220,7 @@ def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> i
                 server.serve_forever()
             finally:
                 done.set()
-                if scanner is not None:
-                    scanner.stop()
+                scanner.stop()
                 server.server_close()
                 if _record().get("pid") == os.getpid():
                     record_path().unlink(missing_ok=True)
