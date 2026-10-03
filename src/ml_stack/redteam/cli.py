@@ -10,7 +10,7 @@ from pathlib import Path
 from ml_stack.command import Group, flag
 from ml_stack.log import say, warn
 from ml_stack.redteam import corpus
-from ml_stack.redteam.report import Report, compare, markdown
+from ml_stack.redteam.report import Report, compare, markdown, success_rates
 from ml_stack.redteam.run import DEFAULT_MODEL, Plan, execute
 from ml_stack.redteam.scenarios import NAMES, Options
 
@@ -28,7 +28,10 @@ def _regressions(old: Report, new: Report) -> int:
         for target, attack_class, attack_id, arm in got[label]:
             say(f"{label:>9}  {target} / {attack_class} / {attack_id}"
                 f"{' [' + arm + ']' if arm else ''}")
-    return 1 if got["regressed"] else 0
+    before, after, attempts = success_rates(old, new)
+    if after > before:
+        say(f"success rate rose from {before:.4f} to {after:.4f} over {attempts} attempts")
+    return 1 if got["regressed"] or after > before else 0
 
 
 @COMMANDS.command("run", help="run scenarios and write a report", options=[
@@ -39,7 +42,7 @@ def _regressions(old: Report, new: Report) -> int:
     flag("--limit", type=int, help="most attempts per attack class (smoke runs)"),
     flag("--out", type=Path, default=Path("redteam-report"), help="write OUT.json and OUT.md"),
     flag("--against", type=Path,
-         help="a previous report; exit 1 if an attack it blocked now succeeds"),
+         help="a previous report; exit 1 if an attack it blocked now succeeds or the success rate rose"),
 ])
 def _run(args: argparse.Namespace) -> int:
     names = tuple(n for n in args.scenarios.split(",") if n)

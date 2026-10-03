@@ -1,7 +1,9 @@
 name: redteam
-# Report-only: nothing here gates a merge. It runs the parts of the red-team suite that need
-# no local model (the fixtures, the scorers, the daemon attacks, and the chat route against a
-# scripted stub) and keeps the report. The measurement against a real model is run by hand.
+# Gating: the job fails when an attack that the committed baseline (docs/redteam/baseline-2026-10-02.json)
+# recorded as blocked now succeeds, or when the attack-success rate over the surfaces it attacked rises.
+# It runs only the scenarios that need no model and are deterministic (extraction: what text a page
+# reader hands the model; fleet: the daemon's real request handler). The measurement against a real
+# model (chat, loop, compaction, isolation) is run by hand and compared with `compare`.
 on:
   workflow_dispatch:
   schedule:
@@ -27,10 +29,10 @@ jobs:
         run: python -m pip install -e ".[redteam]" pytest-xdist pyyaml psutil
       - name: tests
         run: python -m pytest tests/test_redteam_*.py -q --redteam -n 0
-      - name: attacks on a stub model
+      - name: attacks that need no model, against the recorded baseline
         run: >
           python -m ml_stack.redteam run --model stub --out redteam-stub
-          --scenarios extraction,chat,fleet
+          --scenarios extraction,fleet --against docs/redteam/baseline-2026-10-02.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
