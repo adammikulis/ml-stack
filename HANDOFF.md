@@ -114,9 +114,9 @@ capability; every line is something that already exists not being what it says.
   `tests/test_net_scan.py` on a Windows machine with Defender and on Linux with `clamav`
   installed, and keep the result in `docs/internet.md`.
 - [ ] **The hash-reputation lookup has met no real service.** It is tested against a local
-  server shaped like VirusTotal's answer. Run it once with a key
-  (`ML_STACK_NET_HASH_LOOKUP=1`, `ml-stack-credentials set VIRUSTOTAL_API_KEY`, then approve
-  `www.virustotal.com`) and compare the fields.
+  server shaped like VirusTotal's answer, and nothing constructs `HashLookup` outside tests (there is no
+  `ML_STACK_NET_HASH_LOOKUP` switch). Wire it behind an opt-in, run it once with a key
+  (`ml-stack-credentials set VIRUSTOTAL_API_KEY`, then approve `www.virustotal.com`) and compare the fields.
 - [ ] **A `/metrics` address in the fleet view is fetched from this machine.** `fleet/ui.py:_scraped`
   opens whatever a signed-in person typed, loopback and LAN included. Limit it to loopback and
   the fleet's peers, or send it through `net`.
