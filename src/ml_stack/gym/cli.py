@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from ml_stack.command import Group, flag
-from ml_stack.gym.catalog import catalogue
+from ml_stack.gym.catalog import ENVIRONMENTS, catalogue
 from ml_stack.gym.recordings import export_reviewed
 from ml_stack.gym.runtime import manager
 from ml_stack.gym.training import evaluate, train
@@ -15,7 +15,7 @@ from ml_stack.log import say
 def commands():
     group = Group("ml-stack-gym", "Run, train, and evaluate specialist simulators")
     group.add("catalogue", handle, help="List environments and installation diagnostics")
-    common = (flag("environment", choices=[entry["id"] for entry in catalogue()]),
+    common = (flag("environment", choices=list(ENVIRONMENTS)),
               flag("--config", default="{}", help="Native environment configuration as JSON"),
               flag("--seed", type=int, default=0))
     group.add("run", handle, help="Run a recorded session", options=(*common, flag("--controller", choices=["manual", "random", "decider"], default="manual"), flag("--steps", type=int, default=100), flag("--action", type=int, default=4)))
