@@ -135,6 +135,8 @@ library, opens a socket, runs `git`, `curl` or `pip install` against a remote, o
 carries its reason in the test. Three kinds, none of which can fetch from a public host on its
 own:
 
+- **The guard's judge model** is attacked directly and measured with a real model: results in
+  `docs/redteam/findings.md` ("Judge hardening") and `docs/guardrails.md` ("Attacks on the judge itself").
 - **Model servers a person pointed at.** `client/`, `bench/`, `fleet/*` peers, `serve/*` (a
   server's slots and props by local port), and the decide backend (`decide/logprob.py`,
   `decide/router.py`, the server in `ML_STACK_DECIDE_URL`, 127.0.0.1:8080 unless set). These
