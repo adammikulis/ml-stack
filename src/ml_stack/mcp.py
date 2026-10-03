@@ -35,9 +35,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
-from ml_stack.decide import router
 from ml_stack.agent import Compaction, Counter, Spill, Transcript, compact, model_summarizer
 from ml_stack.client import Client
+from ml_stack.decide import router
 from ml_stack.home import state
 from ml_stack.log import say
 from ml_stack.workspace import tools as workspace_tools

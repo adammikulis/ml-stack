@@ -130,6 +130,7 @@ def ml_stack_tools() -> Sinks:
         **{f"bench_{sub}": Sink(Capability.EXEC, result="local")
            for sub in ("standard", "speed", "compare", "animate", "sweep", "gate")},
         conversation_compact=Sink(Capability.WRITE, result="local"),
+        bash=Sink(Capability.EXEC),
     )
 
 

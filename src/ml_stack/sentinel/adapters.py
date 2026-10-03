@@ -19,7 +19,7 @@ from ml_stack.sentinel.human import agent_may
 from ml_stack.sentinel.store import Record
 
 __all__ = ["GuardLogHandler", "RailAnswer", "agent_gate", "broker_listener", "note_refusal",
-           "screening", "serve_hooks", "watch_authenticator"]
+           "sandbox_listener", "screening", "serve_hooks", "watch_authenticator"]
 
 _OUTCOMES = (("already seen", "replay"), ("outside the window", "clock"),
              ("too many failures", "locked"), ("not signed", "bad_sig"))
@@ -104,6 +104,19 @@ def broker_listener(sentinel: Sentinel) -> Callable[[str, dict[str, object]], No
                                 sentinel.clock()))
         if caller:
             sentinel.handle_all([sentinel.abuse.note(caller)])
+    return on
+
+
+def sandbox_listener(sentinel: Sentinel) -> Callable[[str, dict[str, object]], None]:
+    """A callback with the sandbox's ``on_event(event, fields)`` shape: a refusal, a timeout, a
+    missing sandbox or a run without one becomes an event on the bus."""
+    levels = {"warning": Severity.WARNING, "notice": Severity.NOTICE}
+
+    def on(event: str, fields: dict[str, object]) -> None:
+        level = levels.get(str(fields.get("severity", "")), Severity.INFO)
+        sentinel.bus.emit(Event(event, level, "sandbox", f"policy:{fields.get('policy', '')}",
+                                {k: v for k, v in fields.items() if k != "severity"},
+                                sentinel.clock()))
     return on
 
 

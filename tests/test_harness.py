@@ -138,6 +138,16 @@ def test_the_default_options_carry_the_hooks_and_a_turn_ceiling():
     assert len(both.hooks["PreToolUse"]) == 2
 
 
+def test_bash_runs_in_claude_codes_sandbox_with_no_way_out_of_it():
+    pytest.importorskip("claude_agent_sdk")
+    agent = harness.Harness("http://127.0.0.1:8899", "kestrel-8B")
+    box = agent.configured().sandbox
+    assert box["enabled"] is True and box["failIfUnavailable"] is True
+    assert box["allowUnsandboxedCommands"] is False and box["network"]["allowedDomains"] == []
+    mine = {"enabled": True, "network": {"allowedDomains": ["localhost"]}}
+    assert agent.configured(sandbox=mine).sandbox == mine
+
+
 def test_a_tool_call_that_names_a_credential_file_or_a_foreign_host_is_denied():
     _, before, _ = _hooks()
     for tool, args in (("Read", {"file_path": "/home/x/.ssh/id_rsa"}),

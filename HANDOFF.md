@@ -1038,6 +1038,16 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
   run.
 - [ ] **Record `tests-collected` on a machine with every extra installed.** `scripts/budgets
   --update` refuses without `nemoguardrails`.
+- [ ] **Sandbox: Linux is argv-only.** `bubblewrap.arguments` is tested as a list; no Linux host
+  has run it. Landlock and seccomp are not written.
+- [ ] **Sandbox: container backend.** `sandbox/container.py` raises `NotImplementedError`; Apple
+  `container` was installed but its service was not started, so latency and mounts are unmeasured.
+- [ ] **Sandbox: host allow-lists.** Network is deny, loopback or named ports. Host names need the
+  `sandbox-runtime` proxy as an optional backend.
+- [ ] **Sandbox: confined model server is opt-in** (`ML_STACK_SANDBOX_SERVE=1`). Make it the default
+  after speculative heads, mmproj and multi-shard models have run inside it.
+- [ ] **Sandbox: Claude Code's Bash sandbox** is configured in `harness.confined_bash()` and
+  checked as options only; no model-driven run has exercised it.
 
 ## Verifying
 

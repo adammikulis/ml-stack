@@ -11,6 +11,7 @@ from typing import Any
 from ml_stack import sentinel
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
+from ml_stack.sandbox import cli as sandbox_cli
 from ml_stack.sentinel import human, inert
 from ml_stack.sentinel.events import Severity
 from ml_stack.sentinel.integrity import FILE_KINDS
@@ -41,8 +42,21 @@ def _row(r: Record) -> dict[str, Any]:
                   options=(JSON,))
 def status(args: argparse.Namespace) -> int:
     """Print the sentinel's state."""
-    info = sentinel.default().status()
+    info = {**sentinel.default().status(), "sandbox": sandbox_cli.summary()}
     return _out(args, info, lambda: [f"{k}: {v}" for k, v in info.items()])
+
+
+@COMMANDS.command("sandbox", help="status | test: the confinement used for untrusted execution",
+                  options=(JSON, flag("what", choices=["status", "test"])))
+def sandbox(args: argparse.Namespace) -> int:
+    """Print the sandbox backend, or run the self-test (exit 1 when a check fails)."""
+    if args.what == "status":
+        info = sandbox_cli.status()
+        return _out(args, info, lambda: [f"{k}: {v}" for k, v in info.items()])
+    rows = sandbox_cli.test()
+    _out(args, rows, lambda: [f"{'ok  ' if r['passed'] else 'FAIL'} {r['check']} ({r['detail']})"
+                              for r in rows])
+    return 0 if all(r["passed"] for r in rows) else 1
 
 
 @COMMANDS.command("chip", help="the status mark: green, yellow, red or none, with a label",
