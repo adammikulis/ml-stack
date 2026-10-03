@@ -51,6 +51,7 @@ ALLOWED: dict[str, str] = {
                          "(ML_STACK_DECIDE_URL: this machine only unless the operator names the host)",
     "decide/router.py": "reachability of that same configured decide server",
     "serve/slotdump.py": "slot save and restore on a model server this machine started",
+    "serve/llamacpp_smoke.py": "health, chat and slot checks on the model server a smoke test started",
     "serve/slots_cli.py": "a model server's slots, addressed by local port",
     "serve/unmanaged.py": "the props of a model server found listening on this machine",
     "fleet/onboard/transfer.py": "files from paired peers; a public address is refused at every "

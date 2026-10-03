@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ml_stack import credentials, home
 from ml_stack.credentials import child_environment
+from ml_stack.serve import llamacpp_trust
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,10 @@ _LOGIN_SHELL_DIRS = (
 
 class BinaryNotFound(RuntimeError):
     """No ``llama-server`` could be located, and none could be fetched."""
+
+
+class BinaryTampered(BinaryNotFound):
+    """The managed build is not the one that was pinned, or sentinel holds it."""
 
 
 def is_windows() -> bool:
@@ -104,8 +109,11 @@ def find_binary(
         # both handled above.
         for candidate in candidates:
             path = managed_current() / candidate
-            if path.is_file():
-                return path.resolve()
+            real = Path(os.path.realpath(path))
+            if path.is_file() or llamacpp_trust.held(real):
+                if why := llamacpp_trust.problem(real):
+                    raise BinaryTampered(why)
+                return real
 
     for directory in (vendor_dir, home.cache()):
         if directory is None:

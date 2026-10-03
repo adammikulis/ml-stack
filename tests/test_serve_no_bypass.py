@@ -29,6 +29,7 @@ NAMES_A_SERVER_BINARY = {
     "serve/backend.py": "llama-server, started with a Lease",
     "serve/build_platform.py": "compiles llama.cpp",
     "serve/build_source.py": "compiles llama.cpp",
+    "serve/llamacpp_compile.py": "compiles llama.cpp in the sandbox",
     "setup.py": "looks for the binary and installs",
 }
 """Every module that starts a process and also names the llama-server binary, and why."""
