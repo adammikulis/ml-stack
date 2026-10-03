@@ -62,6 +62,8 @@ def evaluate(environment, checkpoint, config=None, episodes=5, seed=10000):
     """Evaluate a local PPO policy using seeded independent episodes."""
     if episodes < 1:
         raise ValueError("Evaluation episodes must be positive")
+    if (config or {}).get("simulation_mode") == "world":
+        raise ValueError("Independent evaluation requires episode mode; inspect persistent-world trajectories separately")
     env = make_environment(environment, config)
     try:
         policy = load_policy(checkpoint, env)
