@@ -172,6 +172,16 @@ def test_a_file_moved_to_another_user_or_profile_does_not_authenticate(tmp_path,
     assert make(tmp_path / "c", setup=Setup(user="501:alice", profile="work")).status == "tampered"
 
 
+def test_a_second_user_on_the_same_file_has_no_key_for_it(tmp_path):
+    alice = make(tmp_path, setup=Setup(user="501:alice"))
+    fill(alice)
+    bob = make(tmp_path, setup=Setup(user="502:bob"))
+    assert bob.status == "locked" and bob.facts() == []
+    with pytest.raises(memory.KeyUnavailable):
+        bob.add("bob writes")
+    assert len(make(tmp_path, setup=Setup(user="501:alice")).facts()) == 2
+
+
 def test_two_users_and_two_profiles_on_one_home_stay_separate():
     alice, bob = memory.Store(setup=Setup(user="501:alice")), memory.Store(setup=Setup(user="502:bob"))
     work = memory.Store(setup=Setup(user="501:alice", profile="work"))
