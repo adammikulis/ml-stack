@@ -77,6 +77,8 @@ class Simulation:
         self.environment = settings["environment"]
         self.seed = settings["seed"]
         self.controller = settings["controller"]
+        if self.environment == "car":
+            settings["config"].setdefault("steering_magnitude", .35)
         self.running, self.speed, self.manual, self.policy = False, 10., 3 if self.environment == "car" else 0, None
         decision_checkpoint = settings["config"].get("decision_checkpoint")
         if self.controller == "decider":
