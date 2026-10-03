@@ -58,4 +58,4 @@ class WarehouseWorld(gym.Wrapper):
         return self.observation, reward, False, self.task_steps >= self.task_horizon, {**self.info, **self.world_info()}
 
     def decision_state(self, observation):
-        return {**decision_state('warehouse', self, observation), 'simulation_mode': 'world', **self.world_info()}
+        return {**decision_state('warehouse', self.env, observation), 'simulation_mode': 'world', **self.world_info()}

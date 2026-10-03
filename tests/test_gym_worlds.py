@@ -12,7 +12,7 @@ from ml_stack.gym.worlds import configure_world, schema
 def test_world_descriptors_expose_native_modes_without_universal_physics():
     assert schema('warehouse')['fields']['layout']['format'].startswith('RWARE ASCII')
     assert schema('traffic-driving')['modes'] == ['procedural', 'manual']
-    assert schema('car') is None
+    assert schema('car')['fields']['map_file']['format'] == 'MetaDrive PGMap metadata JSON'
 
 
 def test_warehouse_ascii_validation():
