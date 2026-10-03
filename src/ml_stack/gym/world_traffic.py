@@ -114,7 +114,7 @@ class TrafficWorld(gym.Env):
         return self.observation, reward, False, self.task_steps >= self.task_horizon, {**self.info, **self.world_info()}
 
     def decision_state(self, observation):
-        return {**decision_state(self.mode, self, observation), 'simulation_mode': 'world', **self.world_info()}
+        return {**decision_state(self.mode, self.native, observation), 'simulation_mode': 'world', **self.world_info()}
 
     def close(self):
         self.native.close()
