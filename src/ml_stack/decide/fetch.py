@@ -15,7 +15,7 @@ from ml_stack.files import sha256_file, write_json
 from ml_stack.httpguard import Refused
 from ml_stack.safenames import safe_filename
 
-MAX_FILE_BYTES = 8 << 30
+MAX_FILE_BYTES = 16 << 30
 
 
 @dataclass(frozen=True, slots=True)
