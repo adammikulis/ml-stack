@@ -350,3 +350,21 @@ def test_the_environment_decides_whether_a_dialog_can_be_shown():
         assert desktop.which_way("Darwin", env={"ML_STACK_NOTIFY": off},
                                  which=have("osascript")) == "none"
     assert desktop.which_way("Windows", env={}, which=have("osascript")) == "none"
+
+
+@pytest.mark.parametrize("press", [KEEP, "unavailable", "timeout"])
+def test_the_cooldown_follows_every_dialog_whatever_the_answer(press):
+    now = [1_000_000.0]
+    desk = Desk(press)
+    node = wired(desk)
+    node.heads_up.clock = lambda: now[0]
+    node.heads_up.spawn = lambda work: None
+    held(node, "10.1.5.1")
+    node.heads_up.prompt()
+    held(node, "10.1.5.2")
+    now[0] += heads_up.COOLDOWN_S / 2
+    assert node.heads_up.prompt() == "" and len(desk.shown) == 1
+    now[0] += heads_up.COOLDOWN_S
+    if press == "timeout":
+        now[0] += heads_up.LATER_S
+    assert node.heads_up.prompt() == press and len(desk.shown) == 2
