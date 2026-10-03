@@ -20,7 +20,7 @@ from ml_stack.files import write_json
 from ml_stack.hub import free_memory, installed_for, room as machine_room
 from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
-from ml_stack.serve import admission, exit_guard, unmanaged
+from ml_stack.serve import admission, exit_guard, guarded, unmanaged
 from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
@@ -281,7 +281,7 @@ class ServerManager(Admitting):
             try:
                 info = self._launch(spec, timeout=resolved_timeout, on_event=on_event,
                                     anyway=anyway, reuse=roam, **how.checks())
-            except (Measuring, admission.AdmissionRefused):
+            except (Measuring, admission.AdmissionRefused, guarded.SentinelRefused):
                 self._forget(spec.port)
                 raise
             except ServerFailed:
@@ -309,6 +309,8 @@ class ServerManager(Admitting):
             if not spec.kv_unified:
                 spec = replace(spec, kv_unified=True)
 
+        if why := guarded.blocked(spec.model):
+            raise guarded.SentinelRefused(why)
         now = time.monotonic()
         until = self._unavailable_until.get(spec.port, 0.0)
         if now < until:
@@ -338,6 +340,7 @@ class ServerManager(Admitting):
                 f"{measurement_said(held)}. Loading a second model onto it would spoil "
                 f"that measurement and this one. Wait for it to finish, stop it with "
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
+        guarded.verify(spec.model, state_file=self.state_file, stop=self.reclaim)
         emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
         admitted = self._admitted(spec, on_event=on_event, reuse=reuse, load_s=timeout)
@@ -418,7 +421,7 @@ class ServerManager(Admitting):
             try:
                 info = self._launch(moved, timeout=timeout, on_event=on_event,
                                     anyway=anyway, reuse=True, **starting)
-            except (Measuring, admission.AdmissionRefused):
+            except (Measuring, admission.AdmissionRefused, guarded.SentinelRefused):
                 self._forget(moved.port)
                 raise
             except ServerFailed:

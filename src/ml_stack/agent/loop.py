@@ -31,6 +31,7 @@ from ml_stack.agent.events import (
 )
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
+from ml_stack.agent.watched import Watch, resolve
 from ml_stack.client.tokens import estimate_tokens
 from ml_stack.guard import Unguarded, default, native, start
 from ml_stack.http import ServerError
@@ -104,16 +105,18 @@ class Agent:
     list replaces them, so ``[*guard.default(), mine]`` keeps them; running without any says so
     with ``interventions=guard.off(because=...)``, which is logged, and any other empty list is
     refused. ``confirm`` answers a `Confirm`, and without it a `Confirm` is a refusal.
+    Sentinel screens calls and results; ``sentinel=unwatched(because=...)`` or ``guard.off`` opts out.
     """
 
-    def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
+    def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,  # noqa: PLR0913
                  auto_compact: Compaction | None = None,
-                 interventions: Sequence[Any] | None = None) -> None:
+                 interventions: Sequence[Any] | None = None, sentinel: Any = None) -> None:
         if interventions is not None and not interventions \
                 and not isinstance(interventions, Unguarded):
             raise ValueError("an empty interventions list turns the guard off silently; "
                              "use interventions=guard.off(because=...)")
         self._screen: list[Any] | None = None
+        self.watch: Watch | None = resolve(interventions, sentinel)
         self.client = client
         self.tools = tools
         self.budget = budget or Budget()
@@ -298,6 +301,8 @@ class Agent:
         async for item in self._watching(run.decide(hook, run.context)):
             if isinstance(item, Gate):
                 out.reason = "" if item.allowed else getattr(item.verdict, "reason", "")
+                if not out.reason and self.watch:
+                    out.reason = self.watch.frozen()
             else:
                 yield item
 
@@ -310,7 +315,7 @@ class Agent:
                 async for item in self._watching(
                         run.after_tool(Call(one.name, one.args, one.id), text)):
                     if isinstance(item, Screened):
-                        text = item.text
+                        text = self.watch.shown(one.name, text, item) if self.watch else item.text
                     else:
                         yield item
             messages.append({"role": "tool", "tool_call_id": one.id, "name": one.name,
@@ -321,9 +326,15 @@ class Agent:
         for one in pending:
             if one.errors:
                 continue
+            if self.watch and (why := self.watch.refuses(one.name, one.args)):
+                one.denied = f"Denied: {why}"
+                continue
             async for item in self._watching(run.before_tool(Call(one.name, one.args, one.id))):
                 if isinstance(item, Gate):
                     one.denied = "" if item.allowed else getattr(item.verdict, "reason", "")
+                    if one.denied and self.watch:
+                        self.watch.denied(one.name, one.args, getattr(item.verdict, "by", ""),
+                                          one.denied)
                 else:
                     yield item
 

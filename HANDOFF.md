@@ -52,6 +52,27 @@ capability; every line is something that already exists not being what it says.
   scores one served model; comparing a base and a tuned model means running it against each
   server and diffing the JSON.
 
+### Sentinel wiring (`docs/sentinel.md`, "What is armed by default")
+
+- [x] **A bare `Agent`, the Broker (`_launch`, `lease`, `start`), the Broker and fleet daemons
+  (scan loop, decoys, authenticator watch) use sentinel by default**, with a logged opt-out that
+  needs a reason. Tests in `tests/test_sentinel_wiring_*.py` fail when the wiring is removed.
+- [ ] **Model output, summaries and compaction are not screened by sentinel** (`screen_model`,
+  `screen_memory`), `scrub_env` is not applied when a child process starts, and `mcp_allowed`
+  is not asked when an MCP server connects.
+- [ ] **Canaries are never scheduled.** `Sentinel.canary` runs by hand and in tests; nothing
+  runs it after a model is pinned or changes.
+- [ ] **The scan loop lives in the daemons only.** A library user who calls `serve.serve()` or
+  runs an `Agent` in a script gets start-time checks and no timer.
+- [ ] **`broker_listener`, `sandbox_listener`, `GuardLogHandler` and the unmanaged-server
+  findings are attached to nothing shipped**, and `taint.subscribe` still has no sentinel
+  subscriber.
+- [ ] **An unpinned model is trusted at its first start** (pinned then, source `first-use`).
+  Pinning at download (issue 31, signed manifests) is not done.
+- [ ] **A file edited in place with size and mtime restored is caught only by the next deep scan
+  round**, not at start (the start skips the hash when path, size, mtime and inode match the last
+  full verification).
+
 ### Serving: one broker, one request at a time per pool
 - [ ] **Run `tests/test_serve_real_llama.py` on a card with nothing else on it** (`pytest
   --slow tests/test_serve_real_llama.py`). It leases a real llama-server through the

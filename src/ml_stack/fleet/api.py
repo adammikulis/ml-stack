@@ -21,9 +21,10 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate
+from ml_stack import gate, sentinel
 from ml_stack.files import promote
-from ml_stack.macauth import Authenticator
+from ml_stack.macauth import Authenticator, Verdict
+from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
@@ -115,7 +116,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         own = token() if callable(token) else token
         return {one for one in (own, *(tokens() if tokens else ())) if one}
 
-    authenticator = Authenticator(secrets_now)
+    authenticator = watch_authenticator(Authenticator(secrets_now), sentinel.armed(), Verdict)
 
     class Handler(Limited, BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"

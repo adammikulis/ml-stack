@@ -108,7 +108,8 @@ os.environ.setdefault("DEV_TEST_SLOTS_DIR", str(testslots.slots_dir()))
 every run shares one set of heavy lanes."""
 
 LANE_FILES = frozenset({
-    "test_serve_real_llama", "test_sentinel_real_model", "test_serve_broker",
+    "test_serve_real_llama", "test_sentinel_real_model", "test_sentinel_wiring_serve",
+    "test_serve_broker",
     "test_serve_three_callers", "test_spec_serve", "test_fleet_daemon", "test_fleet_bind",
     "test_fleet_join", "test_fleet_bench", "test_graph_bench", "test_graph_bench_animate",
     "test_graph_store_scale",

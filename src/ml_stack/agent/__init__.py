@@ -31,6 +31,7 @@ from ml_stack.agent.schema import from_mcp, parse_arguments, validate
 from ml_stack.agent.sources import FunctionTools, McpAuthError, McpTools, ToolOutput, ToolSource
 from ml_stack.agent.summarise import model_summarizer
 from ml_stack.agent.transcript import Transcript
+from ml_stack.agent.watched import unwatched
 from ml_stack.interventions import Confirm, Deny, Guide, Intervention, Proceed, Rewrite
 
 __all__ = [
@@ -74,5 +75,6 @@ __all__ = [
     "has_open_calls",
     "model_summarizer",
     "parse_arguments",
+    "unwatched",
     "validate",
 ]

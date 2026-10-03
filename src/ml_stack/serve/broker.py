@@ -27,7 +27,7 @@ from ml_stack import gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
-from ml_stack.serve import unmanaged
+from ml_stack.serve import guarded, unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
@@ -202,6 +202,8 @@ class Broker:
         that serves it is shared; otherwise one is started once the machine has the memory."""
         caller = caller or Caller()
         options = dict(options or {})
+        if why := guarded.blocked(spec.model):
+            raise guarded.SentinelRefused(why)
         manager = self._manager_for(options)
         how = Starting(**{k: v for k, v in options.items() if k != "backend"})
         info = manager._start_server(spec, timeout=timeout, how=how, on_event=caller.on_event,
@@ -271,6 +273,10 @@ class Broker:
         loads a second copy of one of them. A card somebody else is measuring is waited on
         like any other holder, so a measurement is never spoiled and never refuses a lease
         that could have had its turn."""
+        allowed = tuple(m for m in ask.models if not guarded.blocked(m))
+        if not allowed:
+            raise BrokerError(guarded.blocked(ask.models[0]))
+        ask = replace(ask, models=allowed)
         self.adopt()
         deadline = time.monotonic() + timeout
         while True:

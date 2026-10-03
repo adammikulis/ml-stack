@@ -275,13 +275,26 @@ no more than what its tests show:
   `ML_STACK_HOME`, `ML_STACK_CACHE` and the Hugging Face hub cache is ever moved. Release
   moves the file back byte for byte; only a person's confirmed purge deletes.
 - **A peer that replays signed requests or sends forged ones is refused** once it crosses a
-  threshold, through a wrapper around `macauth.Authenticator.check`. Wiring the wrapper into
-  the daemon is not done here.
+  threshold, through a wrapper around `macauth.Authenticator.check` that the fleet daemon
+  installs (`tests/test_sentinel_wiring_serve.py` sends forged requests to a real handler).
 - **Text a guard rail denies or reads as an instruction is held**, not shown again, and a
   summary that repeats a held sentence is held too. Nothing a model could be shown comes back
   except through a person's release at a terminal. Rewording defeats the summary check.
-- **Decoy credentials** planted in the state root turn any read or send of them into a
-  high-confidence event that freezes the session.
+- **Decoy credentials** planted in the state root on the first run of an agent or a daemon turn
+  any read or send of them into a high-confidence event that freezes the session.
+- **A bare `Agent` is screened without anyone calling sentinel:** a tool call a rail refuses
+  is parked and counted, one that names a decoy or a sentinel path is refused, and a result
+  that is held or carries a decoy value is replaced. Running without it takes
+  `unwatched(because=...)` or `guard.off(because=...)` and is logged.
+- **A server is started only for a model that matches its pin** (a model with no pin is pinned
+  on first use), and a held model or server cannot be leased or restarted until a person
+  releases it. The Broker and fleet daemons scan every pin on a timer
+  (`ML_STACK_SENTINEL_SCAN`), and `ml-stack security status` says whether that loop is armed.
+  Switching sentinel (`ML_STACK_SENTINEL=off`) or the scan off needs a reason in
+  `ML_STACK_SENTINEL_BECAUSE` / `ML_STACK_SENTINEL_SCAN_BECAUSE`; without one the switch is
+  ignored and logged. A start skips re-hashing a model whose size, mtime and inode are
+  unchanged since its last full check; an in-place edit that restores them waits for a deep scan.
+  `docs/sentinel.md`, "What is armed by default", lists what is not wired.
 - **The event log is hash-chained** and `ml-stack security verify` finds edits, cuts and
   reordering; the head can be written down elsewhere.
 - **A model that answers a fixed probe set differently from how it did at install is

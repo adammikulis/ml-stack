@@ -19,7 +19,7 @@ from ml_stack.sentinel.human import agent_may
 from ml_stack.sentinel.store import Record
 
 __all__ = ["GuardLogHandler", "RailAnswer", "agent_gate", "broker_listener", "note_refusal",
-           "sandbox_listener", "screening", "serve_hooks", "watch_authenticator"]
+           "rail_answer", "sandbox_listener", "screening", "serve_hooks", "watch_authenticator"]
 
 _OUTCOMES = (("already seen", "replay"), ("outside the window", "clock"),
              ("too many failures", "locked"), ("not signed", "bad_sig"))
@@ -65,6 +65,13 @@ def screening(run: Any, tool: str = "web_fetch") -> Callable[[str, str], RailAns
         return RailAnswer(bool(shown.withheld), bool(getattr(by, "tainted", False)),
                           str(getattr(by, "by", "")), str(getattr(by, "reason", "")))
     return verdict
+
+
+def rail_answer(shown: Any) -> RailAnswer:
+    """The `RailAnswer` for an ``interventions.Screened``: what the rails did with a text."""
+    by = shown.verdict
+    return RailAnswer(bool(shown.withheld), bool(getattr(by, "tainted", False)),
+                      str(getattr(by, "by", "")), str(getattr(by, "reason", "")))
 
 
 def watch_authenticator(auth: Any, sentinel: Sentinel, verdict: type) -> Any:

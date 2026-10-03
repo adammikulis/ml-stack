@@ -16,7 +16,7 @@ from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
 from ml_stack.sentinel.findings import Finding
 from ml_stack.sentinel.honey import Honey
 from ml_stack.sentinel.human import HumanGrant, protect
-from ml_stack.sentinel.integrity import Manifest, check_file
+from ml_stack.sentinel.integrity import Manifest, Pin, check_file
 from ml_stack.sentinel.policy import Mode, decide
 from ml_stack.sentinel.rails import RailWatch, reads_like_instruction
 from ml_stack.sentinel.rates import Abuse, PeerWatch, ToolMix
@@ -30,10 +30,12 @@ from ml_stack.sentinel.store import (
     placeholder,
     sentinel_dir,
 )
+from ml_stack.sentinel.watch import scanner_state
 
 __all__ = ["ENV", "Screened", "Sentinel"]
 
 ENV = "ML_STACK_SENTINEL"
+BECAUSE = "ML_STACK_SENTINEL_BECAUSE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ class Sentinel:
         self.bus = Bus(EventLog(self.root / "events.log", anchor=self.root / "anchor.log"))
         self.store = Store(self.root, self.bus, roots=roots, clock=clock)
         self._config = SealedFile(self.root / "config.json")
+        self.off_because, self._refused_off = "", False
         self.mode = mode or self._configured_mode()
         self.dry_run = dry_run
         self.manifest = Manifest(self.root / "manifest.json", clock)
@@ -69,12 +72,24 @@ class Sentinel:
         self._derived: dict[str, list[str]] = {}
         self.store.on_quarantine.setdefault("session", []).append(self._taint_derived)
         self._stop = threading.Event()
-        if self.mode == Mode.OFF:
+        self._verified = SealedFile(self.root / "verified.json")
+        if self.off_because:
+            self.bus.emit(Event("sentinel.opt_out", Severity.WARNING, "core", "opt_out:sentinel",
+                                {"because": self.off_because}, clock()))
+        elif mode is None and self._refused_off:
+            self.bus.emit(Event("sentinel.off_refused", Severity.WARNING, "core", "",
+                                {"why": f"{ENV}=off needs {BECAUSE}"}, clock()))
+        if self.mode == Mode.OFF and not self.off_because:
             self.bus.emit(Event("sentinel.off", Severity.WARNING, "core", "", {}, clock()))
 
     def _configured_mode(self) -> Mode:
         named = os.environ.get(ENV, "").strip().lower()
-        if named in Mode:
+        if named == Mode.OFF.value:
+            self.off_because = os.environ.get(BECAUSE, "").strip()
+            if self.off_because:
+                return Mode.OFF
+            self._refused_off = True
+        elif named in Mode:
             return Mode(named)
         saved = self._config.load().payload.get("mode", "")
         return Mode(saved) if saved in Mode else Mode.GUARDED
@@ -227,19 +242,47 @@ class Sentinel:
         return ""
 
     # -- integrity -------------------------------------------------------------------
-    def verify_before_load(self, path: Path | str) -> bool:
+    def verify_before_load(self, path: Path | str, *, cached: bool = False) -> bool:
         """Hash a pinned file and compare it with its pin. False when it changed or is
-        quarantined; an unpinned file passes."""
+        quarantined; an unpinned file passes. With ``cached`` a file whose size, mtime and
+        inode are those of its last full verification against this pin is not hashed again."""
         pin = self.manifest.pins().get(str(Path(path).expanduser()))
         if pin is None or self.mode == Mode.OFF:
             return True
         if self.store.blocked(pin.kind, pin.path):
             return False
+        if cached and self._verified_before(pin):
+            return True
         found = check_file(pin, deep=True)
         if found is None:
+            self._remember(pin)
             return True
         self.handle(found)
         return self.mode == Mode.OBSERVE
+
+    def _stat_key(self, pin: Pin) -> tuple[str, int, int, int] | None:
+        path = Path(pin.path)
+        try:
+            info = path.stat()
+            return str(path.resolve()), info.st_size, info.st_mtime_ns, info.st_ino
+        except OSError:
+            return None
+
+    def _verified_before(self, pin: Pin) -> bool:
+        key = self._stat_key(pin)
+        entry = self._verified.load().payload.get("files", {}).get(key[0]) if key else None
+        return bool(entry) and (entry["size"], entry["mtime_ns"], entry["inode"],
+                                entry["sha256"]) == (*key[1:], pin.sha256) \
+            and key[1] == pin.bytes
+
+    def _remember(self, pin: Pin) -> None:
+        key = self._stat_key(pin)
+        if key is None:
+            return
+        files = dict(self._verified.load().payload.get("files", {}))
+        files[key[0]] = {"size": key[1], "mtime_ns": key[2], "inode": key[3],
+                         "sha256": pin.sha256}
+        self._verified.save({"files": files})
 
     def scan(self, *, deep: bool = False) -> list[Finding]:
         """Check every pin (hashing every file when ``deep``) and the decoys."""
@@ -305,7 +348,8 @@ class Sentinel:
                 "decoys": len(self.honey.decoys()),
                 "log_ok": None if chain is None else chain.ok,
                 "log_records": 0 if chain is None else chain.records,
-                "last_scan": self.last_scan}
+                "last_scan": self.last_scan, "off_because": self.off_because,
+                "scanner": scanner_state(self.root, self.clock())}
 
 
 def _summary(evidence: Mapping[str, Any]) -> str:

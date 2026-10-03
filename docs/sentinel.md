@@ -162,7 +162,7 @@ Modes, chosen by a person:
   threshold within a window. Everything else is watch plus an alert.
 * `enforce`: the heuristic rules also act (freeze a session at N denies, disable a tool at
   M abuse events, block a peer on sustained rate abuse).
-* `off`: the kill switch. Set by `ML_STACK_SENTINEL=off` at process start or by the person
+* `off`: the kill switch. Set by `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE` at process start or by the person
   through the command line; detectors keep logging that they are off.
 
 Dry-run: `Sentinel(dry_run=True)` writes the event that says what would have been done.
@@ -228,6 +228,37 @@ be offered beside the real tools). The subject is the session (else the caller),
 frozen in `guarded` mode. A decoy file's access time is a weaker signal: it is reported and
 never acts alone. A listening decoy endpoint was left out: it is a new surface to defend.
 
+## What is armed by default
+
+A process that does nothing about sentinel gets this (tests: `tests/test_sentinel_wiring_agent.py`,
+`tests/test_sentinel_wiring_serve.py`, each checked by breaking the wiring):
+
+| Where | What runs | Turn it off |
+|---|---|---|
+| Every `agent.Agent` | Each tool call goes through `agent_gate` before the rails: a call naming a sentinel verb or path, a decoy, a tool or session sentinel holds is refused with the reason. A call the rails refuse is reported to sentinel, which parks it as a `tool_call` and counts the denial. Each tool result is screened with the rails' own answer: held text, a decoy value or a text the rails withhold becomes a placeholder. A frozen session ends the run (`Done("denied")`) before the next model call. | `Agent(..., sentinel=agent.unwatched(because="..."))`, or `interventions=guard.off(because="...")`. Both need a reason, log a `sentinel.opt_out` event and print a warning. `ML_STACK_SENTINEL=off` turns the whole sentinel off only together with `ML_STACK_SENTINEL_BECAUSE=<reason>`: it then logs `sentinel.opt_out` with the reason and `ml-stack security status` shows `mode: off` and `off_because`. Without a reason the switch is ignored, sentinel stays armed and `sentinel.off_refused` is logged. |
+| First run of an agent, the Broker daemon or the fleet daemon | The decoy files are planted under `ML_STACK_HOME` (never in a project). | `ML_STACK_SENTINEL=off` with a reason, or `ml-stack security honey remove`, which the next run plants again. |
+| Every server start (`ServerManager._launch`, the one place a process is asked for) | `serve/guarded.verify`: a model held by sentinel is refused; a pinned model must equal its pin (it is hashed in full the first time, and again whenever its size, mtime or inode differ from the last full verification, which is remembered in the sealed `verified.json`), else it is refused and, when it sits under a managed root, moved aside; a model with no pin is pinned on first use (`source=first-use`, event `model.pinned_first_use`), so the next start is checked against it. A directory or a name that is not a file here (an MLX directory, a repository id) is not pinned. The check also runs in `ServerManager._permitted` and `Broker.lease`/`start` against the store only, so a held model is not shared from a server that is still up. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
+| Stop hooks | `serve_hooks` is registered with the manager's lease file on first use: quarantining a `model` or a `server` stops the servers ml-stack recorded for it (`ServerManager.reclaim`). A process not in the lease file is never touched. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
+| Broker daemon and fleet daemon | A scan loop in a daemon thread: every pin and decoy once at start (hashing every file), then every `ML_STACK_SENTINEL_SCAN` seconds (default 300), hashing everything every twelfth round. It writes a sealed heartbeat `scanner.json`; `ml-stack security status` reports `scanner: armed, pid N, every Ns` or `NOT ARMED (reason)`, and is armed when a process beat within three intervals and did not stop it. | `ML_STACK_SENTINEL_SCAN=off` together with `ML_STACK_SENTINEL_SCAN_BECAUSE="..."`. `off` without a reason is ignored (the scan runs at the default and `sentinel.scan_off_refused` is logged); with one it logs `sentinel.opt_out`. A number sets the cadence in seconds. |
+| Fleet daemon | The request authenticator is wrapped by `watch_authenticator`: forged, replayed and locked-out requests count against the sender's address, and an address sentinel holds is refused. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
+
+Not armed, because nothing calls it: model output is not screened (`screen_model` has no
+sentinel hook); `screen_memory` is not called by compaction or the summariser; canaries are
+never scheduled (`baseline` and `canary` are called by hand and by tests); `scrub_env` is not
+applied where a child process is started; `mcp_allowed` is not asked when an MCP server is
+connected; `broker_listener`, `sandbox_listener`, `GuardLogHandler` and the unmanaged-server
+findings are not attached to anything shipped; a plain process that only calls
+`serve.serve()` gets the start-time checks but no scan loop (the loop lives in the daemons).
+An in-process `Agent` run in a process that is not a daemon has no scan loop either.
+`honey.file_read`, `file_changed` and `file_gone` only watch.
+Start-time verification skips the hash when the file's resolved path, size, mtime and inode
+are those recorded at its last full verification against the same pin, and its size equals the
+pin's. Residual window: a file edited in place with its size and mtime restored (same inode) is
+not caught at the next start. The scan loop's deep rounds (every twelfth, and the first) and
+`ml-stack security scan --deep` hash every file regardless of the cache and catch it; between
+deep rounds (about an hour at the default cadence) the window is open. The window is pinned by
+`test_an_edit_that_restores_size_and_mtime_passes_the_start_and_fails_the_deep_scan`.
+
 ## What is built and tested
 
 | Piece | Where | Status |
@@ -247,8 +278,7 @@ never acts alone. A listening decoy endpoint was left out: it is a new surface t
 | status mark | `Sentinel.chip`, `ml-stack security chip` | built; not yet drawn by the page |
 | `ml-stack security` | `cli.py` | built, tested |
 
-Not built. Wrapping the fleet daemon so that it calls `watch_authenticator` and refuses a
-quarantined address is a line in `fleet/api.py`, which another branch owns. Rotating a
+Not built. Rotating a
 credential is left to the person. No detector reads KV cache or prompt cache contents:
 `screen_memory(key, text)` is the call that decides whether a stored summary may be reused,
 and a cache slot is quarantined by key (`memory`, `kv:slot-3`) by whoever manages it. Nothing
