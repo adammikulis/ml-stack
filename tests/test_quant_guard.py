@@ -303,3 +303,18 @@ def test_ml_stack_serve_up_takes_the_mode_and_exits_3_when_strict(
     finally:
         for entry in json.loads(manager.state_file.read_text()).values():
             kill_process_tree(entry["pid"])
+
+
+def test_a_strict_client_refuses_before_any_broker_is_asked(metal, tmp_path, iq_model):
+    class Machine:
+        asked = 0
+
+        def start(self, *args, **kwargs):
+            Machine.asked += 1
+            raise AssertionError("the broker was asked")
+
+    manager = ServerManager(LlamaServerBackend(binary=fake_llama_binary(tmp_path)),
+                            state_file=tmp_path / "servers.json", broker=Machine())
+    with pytest.raises(BlockedQuant):
+        lease(manager, str(iq_model), iq="block")
+    assert Machine.asked == 0

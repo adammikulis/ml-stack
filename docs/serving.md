@@ -174,6 +174,19 @@ refused. `suggest`, `recommend` and the chat default rank an IQ build after an o
 build on Apple silicon (a tie-break, never an exclusion) and its note says it may be slower on
 Metal.
 
+### Thinking, per use
+
+`ml_stack.client.thinking` decides whether a request asks the model to think, from the
+person's `ML_STACK_THINK=off|on|auto` (default `auto`). Decisions (the decide, judge and guard
+logprob paths) never think. Agent turns and short answers think only when the person sets
+`on`; under `auto` a prompt thinks only when it contains a phrase that asks for reasoning
+("think step by step", "show your reasoning") or the use is `reasoning`. The agent loop and
+the logprob decider send the family's template flag (`enable_thinking` for Qwen and Gemma,
+`reasoning_effort` for gpt-oss) accordingly, and `ml-stack-serve up` prints the policy.
+`ml-stack-chat` sends `think=False` on every turn itself; a `/think` command and `--think`
+there, and the policy's header line, are not wired (chat.py was out of bounds for this
+change). A bench run's thinking is recorded as its thinking column (`--reasoning-budget`).
+
 ### The settings a model scored best with, for one kind of work
 
 The `Serving` above was typed out by hand, and every value in it came from a bench run
