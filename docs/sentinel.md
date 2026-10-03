@@ -197,24 +197,45 @@ kind has none.
 The interactive screen needs a POSIX terminal. It refuses, before drawing anything, when
 stdin or stdout is not a terminal or when `CLAUDECODE`, `ML_STACK_AGENT` or
 `ML_STACK_NONINTERACTIVE` is set, and exits 2 with the reason. Elsewhere use `--list` and
-`quarantine release ID`.
+`quarantine release ID`. With no terminal, `ml-stack-security review` started by a person
+shows the dialog below instead (and prints the list when an agent started it or there is no
+desktop); it never opens Terminal or a text editor.
 
-**One click.** `ml-stack-security review --install-launcher [--dir ~/Desktop] [--force]`
-writes `Review quarantine.command` (macOS) or `Review quarantine.desktop` (Linux), mode
-0700, never over an existing file without `--force`. It is a fixed template holding only the
-absolute path of the installed `ml-stack-security`, run in a login shell; it changes no
-directory, activates no environment and carries no held text. Double-click it to get a
-Terminal outside any agent.
+## What you will and will not see
 
-**A heads-up.** When something is quarantined (not merely watched) a desktop dialog appears
-with two buttons, `Dismiss` and `Review…`; `Review…` opens a terminal running the screen. It
-never releases anything, shows only the sentence from `explain` and a bounded escaped name,
-raises at most one notice per subject per hour and folds a flood into one burst notice, and
-does nothing for a hold you made by hand. `ML_STACK_SENTINEL_NOTIFY=off` turns it off and
-needs `ML_STACK_SENTINEL_NOTIFY_BECAUSE`; without a reason the switch is ignored, and an off
-is logged as `sentinel.notify_off`. `ML_STACK_NOTIFY=console|off` (the onboarding switch)
-also silences it. Where no dialog can be shown (no desktop, Windows) nothing is raised and
-`status` still names what is held.
+Most things need nobody, and say nothing on the screen:
+
+* **A pinned file that is gone** (a training run deleted, a cache cleared, a temporary
+  file). It is logged once (`integrity.missing`), nothing is quarantined or moved, and the
+  pin is dropped after three scans in a row (`integrity.pin_dropped`). A record an older
+  version made for a missing file settles on the next scan.
+* **A model server that was watched and has exited** clears itself.
+* **Anything only watched**, and anything quarantined that is not one of the cases below,
+  shows in `ml-stack-security status` and `chip` and nowhere else.
+* **The decider trainer** pins a trained decider only after it is registered, and unpins on
+  any failure while pinning. A run killed before that leaves nothing pinned.
+
+A dialog appears only when something **changed or was forged** and was quarantined: a pinned
+file's contents changed or a link was retargeted, a tampered program, a model that does not
+match its manifest, a forged or replayed signature, a decoy secret or file touched, text that
+tries to give a session instructions (`heads_up.NEEDS_PERSON`).
+
+It is **one dialog, never a stack**. A lock file beside the state (`heads-up.lock`, held
+while the dialog is open, released when its process dies) lets one process on the machine
+show it, ten minutes pass before the next, and everything quarantined at that moment is in it
+(up to four named, the rest counted). Its title and text are fixed sentences from `explain`
+plus names that are escaped and cut short; nothing held is quoted.
+
+| Button | What it does |
+|---|---|
+| `Release` | releases exactly the subjects the dialog lists, and logs `released_by_dialog` with their ids |
+| `Keep held` | leaves them held and does not ask about them again |
+| `Later` | leaves them held and asks again in four hours (also what Escape, closing it and a time-out mean) |
+
+`ML_STACK_NOTIFY=off` shows no dialog from any ml-stack process; it is read on every
+scan, so a process started with it set stays silent. The status line carries the information
+either way. Where no dialog can be shown (no desktop, Windows) `status` still names what is
+held.
 
 ## Policy: what acts on its own
 

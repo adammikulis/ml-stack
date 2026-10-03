@@ -18,7 +18,7 @@ from pathlib import PurePath
 from ml_stack.sentinel.redaction import redact
 from ml_stack.sentinel.store import Record, State
 
-__all__ = ["BLOCKS", "WHY", "Item", "age", "code_of", "describe", "name_of", "show"]
+__all__ = ["BLOCKS", "WHY", "Item", "age", "code_of", "describe", "name_of", "short_code", "show"]
 
 WHY: dict[str, str] = {
     "peer.forged_traffic": "This machine sent requests with a forged or replayed signature, "
@@ -127,6 +127,11 @@ def name_of(kind: str, key: str) -> str:
         leaf = PurePath(key.replace("\\", "/")).name or key
         return f"{kind} {show(leaf, 40)}"
     return f"{kind} {show(key, 40)}"
+
+
+def short_code(code: str) -> str:
+    """``content changed`` for ``integrity.content_changed``."""
+    return code.partition(".")[2].replace("_", " ") or code
 
 
 def age(seconds: float) -> str:
