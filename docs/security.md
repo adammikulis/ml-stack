@@ -312,6 +312,17 @@ no more than what its tests show:
 - **Text a guard rail denies or reads as an instruction is held**, not shown again, and a
   summary that repeats a held sentence is held too. Nothing a model could be shown comes back
   except through a person's release at a terminal. Rewording defeats the summary check.
+- **Release is human-only, and `ml-stack-security review` keeps it that way while making it
+  easy.** A release or purge needs a grant that only `human.mint` or `human.mint_pressed` can
+  make, and both refuse before reading a key unless stdin and stdout are terminals and no
+  agent marker (`CLAUDECODE`, `ML_STACK_AGENT`, `ML_STACK_NONINTERACTIVE`) is set. The review
+  screen lowers the cost (one confirming key to release, after showing what is unblocked)
+  but not the bar: a purge still needs the id typed in full, the keys come only from the
+  terminal, a notification's buttons can only open the screen, and everything printed from a
+  held subject is escaped and bounded. Viewing (`review --list`, `status`) is open to
+  agents. A process that clears its own environment and drives a pseudo-terminal could
+  still press the keys, as it could for `quarantine release`; that is the limit of a
+  same-user marker (`docs/sentinel.md`, "Reviewing what is held").
 - **Decoy credentials** planted in the state root on the first run of an agent or a daemon turn
   any read or send of them into a high-confidence event that freezes the session.
 - **A bare `Agent` is screened without anyone calling sentinel:** a tool call a rail refuses

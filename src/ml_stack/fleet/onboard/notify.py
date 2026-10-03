@@ -16,10 +16,10 @@ import os
 import platform
 import re
 import shutil
-import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Protocol
 
+from ml_stack.desktop import ENV, WAIT_S, Result, Runner, run as _run
 from ml_stack.log import say as say_
 
 from .requests import Request, clean, short
@@ -27,12 +27,8 @@ from .requests import Request, clean, short
 __all__ = ["ENV", "Console", "LinuxNotifier", "MacNotifier", "Notifier", "Silent", "Unsupported",
            "WindowsNotifier", "compose", "compose_code", "parse_mac", "pick"]
 
-ENV = "ML_STACK_NOTIFY"
-WAIT_S = 120
 logger = logging.getLogger("ml_stack.fleet.onboard")
 
-Result = tuple[int, str, str]
-Runner = Callable[[Sequence[str]], Result]
 
 DECLINE, MINE, OTHER = "Decline", "Accept as mine", "Accept as someone else's"
 """The three buttons; the owner says whose device it is in the same click."""
@@ -82,16 +78,6 @@ def compose_code(request: Request) -> tuple[str, str]:
     return (f"Pairing code {code}",
             f"Type {code} on {clean(request.name, 40) or 'the new device'} within "
             f"{WAIT_S} seconds. It is good for three tries.")
-
-
-def _run(argv: Sequence[str]) -> Result:
-    try:
-        done = subprocess.run(list(argv), capture_output=True, text=True,
-                              timeout=WAIT_S + 15, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("notification command failed: %s", type(exc).__name__)
-        return 1, "", type(exc).__name__
-    return done.returncode, done.stdout, done.stderr
 
 
 def parse_mac(result: Result) -> str:
