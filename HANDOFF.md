@@ -67,8 +67,15 @@ capability; every line is something that already exists not being what it says.
 - [ ] **`broker_listener`, `sandbox_listener`, `GuardLogHandler` and the unmanaged-server
   findings are attached to nothing shipped**, and `taint.subscribe` still has no sentinel
   subscriber.
-- [ ] **An unpinned model is trusted at its first start** (pinned then, source `first-use`).
-  Pinning at download (issue 31, signed manifests) is not done.
+- [ ] **A model ml-stack did not pull is trusted at its first start** (pinned then, source `first-use`, logged).
+  A model it pulled (`gguf`, `safetensors`, through `net.download` / `net.accept`) is pinned at pull with
+  `source=pull`, and a signed manifest accepted from a peer must agree with the file at load (docs/sentinel.md,
+  "Supply chain"). Not armed: manifests match by file name only; a list is accepted only after a peer-first pull or the
+  onboarding `fetch` (no command takes one from a file, no vendor digest list is read); the serial high-water mark is a
+  sealed file the same user could reset; archives (llama.cpp builds, the Python bundle) are not pinned.
+- [ ] **The npm and cargo audit gates and the SBOM step have only run on recorded reports and locally**
+  (`tests/test_supply_chain_audit.py`); the first scheduled `audit.yml` run on GitHub is the real test (the cargo-audit
+  version in the workflow is pinned by hand), and the SBOM omits npm packages.
 - [ ] **A file edited in place with size and mtime restored is caught only by the next deep scan
   round**, not at start (the start skips the hash when path, size, mtime and inode match the last
   full verification).
