@@ -21,6 +21,7 @@ from .discovery import (
     memberships,
 )
 from .onboard.joining import join_by_passphrase
+from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
 from .page import COMPONENTS, render
 from .pausing import minutes_of
@@ -739,7 +740,7 @@ class JobRoutes:
 
 class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
              RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
-             WorkspaceRoutes, GymRoutes, Base):
+             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:
