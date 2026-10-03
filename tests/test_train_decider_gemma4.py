@@ -158,8 +158,17 @@ def _step_grads(tiny_gemma, micros, *, checkpoint):
     net = build_net(torch, torso, build_head(torch, 32, 16))
     opt = torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=0.0)
     step = DeciderStep(net, opt, _loss)
-    loss, applied = step(micros)
+    first = torso.base_model.model.layers[0]
+    original, calls = type(first).forward, []
+    type(first).forward = lambda self, *a, **k: (calls.append(self is first),
+                                                  original(self, *a, **k))[1]
+    try:
+        loss, applied = step(micros)
+    finally:
+        type(first).forward = original
+    calls = [c for c in calls if c]
     assert applied
+    assert len(calls) == len(micros) * (2 if checkpoint else 1)
     grads = {n: p.grad.clone() for n, p in net.named_parameters() if p.grad is not None}
     return loss, grads, step
 
@@ -211,16 +220,29 @@ def test_accumulating_micro_batches_equals_one_larger_batch(tiny_gemma):
 def test_a_step_draws_batch_times_accum_cases_ordered_by_length(tiny_gemma):
     from transformers import AutoTokenizer
 
+    from ml_stack.decide.cases import Case
     from ml_stack.train.decider import Settings, draw
     tok = AutoTokenizer.from_pretrained(tiny_gemma, local_files_only=True)
     s = Settings(batch_size=2, accum=3, max_tokens=4096)
-    micros = draw(tiny_cases(), tok, s, "cpu", 0)
+    cases = [Case("Is the number even?", "the number is " + "1000 " * (i % 7), OPTS, "yes")
+             for i in range(24)]
+    micros = draw(cases, tok, s, "cpu", 0)
     assert [m["ids"].shape[0] for m in micros] == [2, 2, 2]
     lengths = [int(n) for m in micros for n in m["mask"].sum(1)]
     assert lengths == sorted(lengths)
-    assert draw(tiny_cases(), tok, s, "cpu", 0)[0]["ids"].tolist() == micros[0]["ids"].tolist()
+    assert draw(cases, tok, s, "cpu", 0)[0]["ids"].tolist() == micros[0]["ids"].tolist()
 
 
 def test_the_step_reports_its_memory_for_the_metrics_log(tiny_gemma):
     *_, step = _step_grads(tiny_gemma, _micros(_rows(tiny_gemma), 2), checkpoint=False)
     assert set(step.metrics()) == {"peak_gb", "driver_gb"}
+
+
+def test_checkpointing_is_on_by_default_for_an_accelerator_and_off_on_the_cpu(tiny_gemma):
+    from ml_stack.decide.pointer import load_torso
+    from ml_stack.train.decider import Settings, checkpoint_activations
+    torso = load_torso(tiny_gemma, None, "float32", "cpu")
+    assert checkpoint_activations(torso, Settings(), "cpu") is False
+    assert torso.gradient_checkpointing is False
+    assert checkpoint_activations(torso, Settings(), "mps") is True
+    assert torso.gradient_checkpointing is True
