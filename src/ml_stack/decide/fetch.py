@@ -15,8 +15,6 @@ from ml_stack.files import sha256_file, write_json
 from ml_stack.httpguard import Refused
 from ml_stack.safenames import safe_filename
 
-MAX_FILE_BYTES = 16 << 30
-
 
 @dataclass(frozen=True, slots=True)
 class Pin:
@@ -76,8 +74,6 @@ def locate(pin: Pin, *, download: bool = False) -> Path:
     format check, scan); a file that fails any check is held, never kept, and `DecideError` is
     raised.
     """
-    if pin.size > MAX_FILE_BYTES:
-        raise DecideError(f"{pin.filename}: {pin.size} bytes is over the {MAX_FILE_BYTES} limit")
     path = _where(pin)
     if not path.is_file():
         if not download:
