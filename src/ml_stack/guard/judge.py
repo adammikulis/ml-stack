@@ -168,7 +168,7 @@ class Judge:
                 got = self.decider.decide(
                     QUESTION, f"User request: {defang(task) or NO_TASK}\nTool result:\n"
                               f"{defang(piece)}", OPTIONS)
-            except Exception as exc:  # whatever goes wrong, the text is not cleared
+            except Exception as exc:  # noqa: BLE001 whatever goes wrong, the text is not cleared
                 error = str(exc) or type(exc).__name__
                 break
             top = max(top, got.scores["yes"])
