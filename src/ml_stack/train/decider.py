@@ -26,11 +26,11 @@ from typing import Any
 from ml_stack import sentinel
 from ml_stack.decide import dataset, metrics, pointer_prompt, registry
 from ml_stack.decide.base import text_of
-from ml_stack.decide.calibrate import fit_temperature, fit_temperature_ece, softmax
+from ml_stack.decide.calibrate import fit_temperature, softmax
 from ml_stack.decide.cases import Case, fingerprint
 from ml_stack.decide.fetch import locate
 from ml_stack.decide.pins import QWEN35_0_8B_BASE, STRANDS_V19, Checkpoint
-from ml_stack.decide.pointer import build_head, device_name, load_torso
+from ml_stack.decide.pointer import PointerDecider, build_head, device_name, load_torso
 from ml_stack.decide.sources import CONFIG, FORMAT, Source, question_key, strands_source
 from ml_stack.decide.types import DecideError
 from ml_stack.files import sha256_file, write_json
@@ -248,7 +248,7 @@ def fit_temperatures(logits: Sequence[Sequence[float]], cases: Sequence[Case]
     def fit_on(idx: list[int]) -> float:
         rows = [softmax(logits[i]) for i in idx]
         labels = [cases[i].label_index for i in idx]
-        return (fit_temperature_ece if len(idx) >= ECE_FIT_CASES else fit_temperature)(rows, labels)
+        return (metrics.fit_temperature_ece if len(idx) >= ECE_FIT_CASES else fit_temperature)(rows, labels)
 
     everything = fit_on(list(range(len(cases))))
     by_kind: dict[str, float] = {}
@@ -289,7 +289,6 @@ def baseline_of(spec: str, fit_cases: Sequence[Case], test: Sequence[Case], s: S
         rows = majority_rows(fit_cases, test)
         return "majority label", metrics.of_rows(
             rows, [c.label_index for c in test], floor=s.floor).public()
-    from ml_stack.decide.pointer import PointerDecider
     source: Checkpoint | Path = STRANDS_V19 if spec == "strands" else registry.find(spec)
     decider = PointerDecider(source, device=s.device, download=s.download)
     rows = []

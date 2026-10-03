@@ -54,19 +54,6 @@ def fit_temperature(rows: Sequence[Sequence[float]], labels: Sequence[int], *,
     return math.exp((a + b) / 2.0)
 
 
-def fit_temperature_ece(rows: Sequence[Sequence[float]], labels: Sequence[int], *,
-                        low: float = 0.25, high: float = 8.0, steps: int = 80) -> float:
-    """The temperature on a log grid that minimises expected calibration error, ties broken
-    by NLL."""
-    from ml_stack.decide.eval import ece
-    if len(rows) != len(labels):
-        raise ValueError(f"{len(rows)} rows but {len(labels)} labels")
-    grid = [math.exp(math.log(low) + (math.log(high) - math.log(low)) * i / (steps - 1))
-            for i in range(steps)]
-    return min(grid, key=lambda t: (round(ece([rescale(p, t) for p in rows], labels), 6),
-                                    nll(rows, labels, t)))
-
-
 def fit_isotonic(confidences: Sequence[float], correct: Sequence[bool]
                  ) -> list[tuple[float, float]]:
     """Pool-adjacent-violators fit of accuracy against confidence: ``(x, y)`` knots, ascending."""
