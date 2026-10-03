@@ -36,19 +36,19 @@ def seed_quarantine(tmp_path: Path) -> str:
     return node.store.quarantine(("peer", "10.2.2.2"), "forged", None).id
 
 
-def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str]]]:
-    """(label, module, function, argv) for every command that needs a person."""
+def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
+    """(label, module, function, argv, what the person types) for every command that needs one."""
     held = seed_quarantine(tmp_path)
     return [
-        ("sentinel mode off", "ml_stack.sentinel.cli", "command", ["mode", "off"]),
-        ("sentinel release", "ml_stack.sentinel.cli", "command", ["quarantine", "release", held]),
-        ("sentinel purge", "ml_stack.sentinel.cli", "command", ["quarantine", "purge", held]),
-        ("approve a host", "ml_stack.net.cli", "command", ["approve-host", HOST]),
-        ("scan policy", "ml_stack.net.cli", "command", ["scan-policy", CATEGORIES[0], "allow"]),
-        ("memory forget", "ml_stack.memory.cli", "main", ["forget", "--all"]),
-        ("memory rekey", "ml_stack.memory.cli", "main", ["rekey"]),
-        ("memory export", "ml_stack.memory.cli", "main", ["export"]),
-        ("workspace init", "ml_stack.workspace.cli", "main", ["init"]),
+        ("sentinel mode off", "ml_stack.sentinel.cli", "command", ["mode", "off"], "sentinel"),
+        ("sentinel release", "ml_stack.sentinel.cli", "command", ["quarantine", "release", held], held),
+        ("sentinel purge", "ml_stack.sentinel.cli", "command", ["quarantine", "purge", held], held),
+        ("approve a host", "ml_stack.net.cli", "command", ["approve-host", HOST], HOST),
+        ("scan policy", "ml_stack.net.cli", "command", ["scan-policy", CATEGORIES[0], "allow"], CATEGORIES[0]),
+        ("memory forget", "ml_stack.memory.cli", "main", ["forget", "--all"], "yes"),
+        ("memory rekey", "ml_stack.memory.cli", "main", ["rekey"], "yes"),
+        ("memory export", "ml_stack.memory.cli", "main", ["export"], "yes"),
+        ("workspace init", "ml_stack.workspace.cli", "main", ["init"], "yes"),
     ]
 
 
@@ -97,9 +97,9 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
 
 @pytest.mark.parametrize("index", range(9))
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
-    label, module, function, argv = commands(tmp_path)[index]
+    label, module, function, argv, typed = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
-    done = run_command(tmp_path, (module, function, argv), agent=True, terminal=True, answer="yes")
+    done = run_command(tmp_path, (module, function, argv), agent=True, terminal=True, answer=typed)
     assert done.returncode != 0, f"{label} ran for an agent: {done.stdout}"
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
@@ -110,7 +110,7 @@ NO_TERMINAL = [*range(8), pytest.param(8, marks=pytest.mark.xfail(
 
 @pytest.mark.parametrize("index", NO_TERMINAL)
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
-    label, module, function, argv = commands(tmp_path)[index]
+    label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
     done = run_command(tmp_path, (module, function, argv), agent=False, terminal=False)
     assert done.returncode != 0, f"{label} ran with no terminal: {done.stdout}"
