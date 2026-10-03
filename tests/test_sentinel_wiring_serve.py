@@ -9,12 +9,18 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from ml_stack import home, sentinel
+from ml_stack.fleet.api import Daemon, make_handler
+from ml_stack.fleet.daemon import load_or_create_token
+from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.remote import Peer, PeerError
+from ml_stack.http import Server
 from ml_stack.sentinel import State, human, watch
 from ml_stack.sentinel.cli import status as security_status
 from ml_stack.sentinel.store import Holding
@@ -195,3 +201,25 @@ def test_the_broker_daemon_runs_the_scan_and_stops_it_on_exit(model):
         daemon.terminate()
         daemon.wait(timeout=30)
     assert not watch.scanner_state(root)["armed"]
+
+
+def test_the_fleet_daemon_quarantines_a_peer_that_forges_requests(tmp_path):
+    root = tmp_path / "traind"
+    (root / "files").mkdir(parents=True)
+    token = load_or_create_token(root)
+    runner = JobRunner(root)
+    httpd = Server(("127.0.0.1", 0), make_handler(Daemon(runner, root / "files", token)))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        forger = Peer(url, "not-the-token")
+        for _ in range(60):
+            with pytest.raises(PeerError):
+                forger.jobs()
+        assert sentinel.default().store.state_of("peer", "127.0.0.1") == State.QUARANTINED
+        with pytest.raises(PeerError, match=r"quarantined|locked|429|401"):
+            Peer(url, token).jobs()
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
