@@ -15,12 +15,16 @@ from ml_stack.serve.mlx_tree import is_mlx
 from ml_stack.serve.preflight import read_gguf_header
 from ml_stack.serve.tensors import tensors_of
 
-__all__ = ["ENV", "KIND", "Plan", "applied", "enabled", "failed", "plan", "supported"]
+__all__ = ["DEPTH", "ENV", "KIND", "Plan", "applied", "depth_for", "enabled", "failed", "plan",
+           "supported"]
 
 ENV = "ML_STACK_MTP"
 KIND = "draft-mtp"
 _OFF = frozenset({"0", "off", "no", "false", "none", "disable", "disabled"})
 _SAME = ("embedding_length",)
+# Draft depth per model architecture where kept runs favour one (docs/serving.md, "What has been
+# measured"); an architecture not listed is served at the server's own default.
+DEPTH = {"gemma4": 2}
 _FAILED: set[tuple[str, str, str]] = set()
 
 
@@ -33,6 +37,7 @@ class Plan:
     head: str = ""
     note: str = ""
     loud: bool = False
+    depth: int = 0
 
     @property
     def worth_saying(self) -> bool:
@@ -43,6 +48,15 @@ class Plan:
     def active(self) -> bool:
         """Whether the server is started drafting."""
         return bool(self.spec_type)
+
+
+def depth_for(model: Path) -> int:
+    """The draft depth kept runs favour for ``model``'s architecture, or 0 for the default."""
+    try:
+        arch = read_gguf_header(model).get("general.architecture")
+    except (OSError, ValueError):
+        return 0
+    return DEPTH.get(str(arch), 0)
 
 
 def failed(model: str | Path, draft: str | Path | None, binary: str | Path | None) -> None:
@@ -169,10 +183,11 @@ def plan(spec: ServerSpec, *, binary: str | Path | None, escalate: bool = False,
         return Plan(note="MTP off: the weights are not on this machine yet")
     if not supported(binary):
         return Plan(note=f"MTP off: this llama-server build has no --spec-type {KIND}")
+    depth = 0 if spec.spec_draft_max is not None else depth_for(model)
     if embeds_head(model):
         if (str(model), "", str(binary)) in _FAILED:
             return Plan(note="MTP off: the server failed to start with the weights' own layer")
-        return Plan(spec_type=KIND, head="embedded",
+        return Plan(spec_type=KIND, head="embedded", depth=depth,
                     note="MTP on: the weights carry their own prediction layer")
     if binary is None or "-md" not in flags_of(binary):
         return Plan(note="MTP off: this llama-server build takes no draft model")
@@ -185,7 +200,7 @@ def plan(spec: ServerSpec, *, binary: str | Path | None, escalate: bool = False,
         path = Path(one.path)
         why = provenance(model, path) or mismatch(model, path)
         if not why:
-            return Plan(draft=one.path, spec_type=KIND, head=one.name,
+            return Plan(draft=one.path, spec_type=KIND, head=one.name, depth=depth,
                         note=f"MTP on: draft head {one.name}")
         refused.append(why)
     return Plan(note="MTP off: " + ("; ".join(refused) if refused
@@ -197,4 +212,5 @@ def applied(spec: ServerSpec, chosen: Plan) -> ServerSpec:
     """``spec`` served with ``chosen``; ``mtp=True`` marks a head the default picked."""
     if not chosen.active:
         return spec
-    return replace(spec, draft=chosen.draft or None, spec_type=chosen.spec_type, mtp=True)
+    return replace(spec, draft=chosen.draft or None, spec_type=chosen.spec_type, mtp=True,
+                   spec_draft_max=chosen.depth or spec.spec_draft_max)
