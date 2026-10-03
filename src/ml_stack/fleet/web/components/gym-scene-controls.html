@@ -1,0 +1,102 @@
+<style>
+gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index:2; }
+.gym-view-controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding:8px 12px;
+  background:rgba(17,31,36,.9); color:#fff; border:1px solid #ffffff30; border-radius:10px; font-size:11px; }
+.gym-view-controls label { display:flex; gap:5px; align-items:center; margin:0; color:inherit; font-size:11px; }
+.gym-view-controls button { width:auto; margin:0; padding:3px 8px; font-size:11px; }
+.gym-view-controls select { max-width:220px; width:auto; padding:4px 8px; font-size:11px; }
+.gym-selected-agent { flex-basis:100%; color:#d4e5e8; }
+.gym-controls-help { position:absolute; top:100%; right:0; margin-top:8px; max-width:380px; padding:16px;
+  background:#15292f; color:#e8f3f4; border:1px solid #5c858b; border-radius:10px; box-shadow:0 8px 30px #0006; }
+.gym-controls-help p { margin:0 0 10px; }
+.gym-controls-help dl { display:grid; grid-template-columns:auto 1fr; gap:5px 12px; margin:0; font-size:12px; }
+.gym-controls-help dd { margin:0; }
+</style>
+<script>
+(function () {
+  const E = window.fleetModel.el;
+  class GymSceneControls extends HTMLElement {
+    connect(scene) {
+      if (this.scene) return;
+      this.scene = scene;
+      const toggle = (label, field) => {
+        const input = E('input',{type:'checkbox'}); input.checked = scene[field];
+        input.onchange = () => { scene[field] = input.checked; if (scene.pending) scene.update(scene.pending); };
+        return {input, node:E('label',{},input,label)};
+      };
+      const follow = toggle('Follow car','follow'), rays = toggle('Sensor rays','debugRays');
+      const vectors = toggle('Heading / control','debugVectors');
+      this.follow = follow.input; this.rays = rays.input; this.vectors = vectors.input;
+      this.agent = E('select',{'aria-label':'Selected agent'});
+      this.agent.onchange = () => scene.selectAgent(this.agent.value);
+      this.status = E('span',{class:'gym-selected-agent',role:'status'});
+      const fit = E('button',{type:'button',onclick:() => this.wholeMap()},'Whole map');
+      this.helpButton = E('button',{type:'button','aria-expanded':'false','aria-controls':'gym-controls-help'},'Controls');
+      this.help = E('div',{class:'gym-controls-help',id:'gym-controls-help',role:'region','aria-label':'Simulation controls',hidden:true});
+      const shortcuts = [['← / →','Previous / next agent'],['Space','Play / pause simulation'],['.','Single simulation step'],
+        ['V','Switch native camera / sensor scene'],['F','Follow selected agent'],['D','Toggle sensor rays'],
+        ['H','Toggle heading and control vectors'],['M','Show whole map'],['?','Toggle this controls guide'],['Esc','Close controls guide']];
+      this.help.append(E('p',{},'Drag to orbit · Scroll to zoom. Agent selection focuses the camera and exposes its live state.'),
+        E('dl',{},...shortcuts.flatMap(([key,description]) => [E('dt',{},E('kbd',{},key)),E('dd',{},description)])),
+        E('button',{type:'button',onclick:() => this.closeHelp()},'Close controls'));
+      this.helpButton.onclick = () => this.showHelp(true);
+      this.helpButton.onmouseenter = () => this.showHelp(true);
+      this.helpButton.onfocus = () => { if (!this.suppressFocusHelp) this.showHelp(true); };
+      this.onmouseleave = () => { if (!this.contains(document.activeElement)) this.showHelp(false); };
+      this.append(E('div',{class:'gym-view-controls'},E('label',{},'Agent',this.agent),follow.node,rays.node,
+        vectors.node,fit,this.helpButton,this.status),this.help);
+      scene.followInput = this.follow;
+      this.listener = event => this.key(event);
+      document.addEventListener('keydown',this.listener);
+    }
+
+    disconnectedCallback() { document.removeEventListener('keydown',this.listener); }
+
+    update(agents,selected) {
+      const previous = this.agent.value;
+      const signature = agents.map(a => a.key).join('|');
+      if (signature !== this.signature) {
+        this.signature = signature;
+        this.agent.replaceChildren(...agents.map(a => E('option',{value:a.key},`${a.kind === 'robot' ? 'Robot' : 'Vehicle'} ${a.id}`)));
+      }
+      this.agent.disabled = !agents.length;
+      this.agent.value = selected?.key || previous;
+      if (!selected) { this.status.textContent = 'No agents in this snapshot.'; return; }
+      const actor = selected.actor, controller = actor.controller || actor.policy || 'Native simulator';
+      const speed = Number.isFinite(actor.speed) ? ` · Speed ${Number(actor.speed).toFixed(1)} m/s` : '';
+      this.status.textContent = `Selected: ${selected.id} · Controller: ${controller}${actor.role ? ' · Role: '+actor.role : ''}${speed}`;
+    }
+
+    showHelp(open) {
+      this.help.hidden = !open;
+      this.helpButton.setAttribute('aria-expanded',String(open));
+    }
+
+    closeHelp() {
+      this.showHelp(false); this.suppressFocusHelp = true;
+      this.helpButton.focus(); this.suppressFocusHelp = false;
+    }
+
+    wholeMap() { this.scene.follow = false; this.follow.checked = false; this.scene.frameMap(); }
+
+    key(event) {
+      const scene = this.scene;
+      if (!scene?.isConnected || scene.hidden || scene.closest('[hidden]') || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.composedPath().some(n => n instanceof Element && (n.matches('input,textarea,select') || n.isContentEditable))) return;
+      const key = event.key.toLowerCase();
+      if (key === 'arrowleft' || key === 'arrowright') {
+        event.preventDefault(); scene.cycleAgent(key === 'arrowright' ? 1 : -1);
+      } else if (key === 'f') { event.preventDefault(); this.follow.checked = scene.follow = !scene.follow; }
+      else if (key === 'd' || key === 'h') {
+        event.preventDefault(); const input = key === 'd' ? this.rays : this.vectors;
+        input.checked = !input.checked; input.dispatchEvent(new Event('change'));
+      } else if (key === 'm') { event.preventDefault(); this.wholeMap(); }
+      else if (key === '?') { event.preventDefault(); this.showHelp(this.help.hidden); }
+      else if (key === 'escape' && !this.help.hidden) {
+        event.preventDefault(); this.closeHelp();
+      }
+    }
+  }
+  customElements.define('gym-scene-controls',GymSceneControls);
+})();
+</script>
