@@ -104,11 +104,8 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-NO_TERMINAL = [*range(8), pytest.param(8, marks=pytest.mark.xfail(
-    strict=True, reason="workspace init checks the agent markers and never asks for a terminal"))]
-
-
-@pytest.mark.parametrize("index", NO_TERMINAL)
+@pytest.mark.parametrize("index", [*range(8), pytest.param(8, marks=pytest.mark.xfail(
+    strict=True, reason="workspace init checks the agent markers and never asks for a terminal"))])
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
