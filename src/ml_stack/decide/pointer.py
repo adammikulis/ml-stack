@@ -152,7 +152,7 @@ class PointerDecider(BaseDecider):
         tok, torso, head, device, files, info = self._loaded
         temperature = temperature_for(files, asked.question)
         rendered = pointer_prompt.render(asked.question, asked.state, asked.options)
-        enc = tok(rendered.text, return_offsets_mapping=True, add_special_tokens=False,
+        enc = tok(rendered.text, return_offsets_mapping=True, add_special_tokens=True,
                   return_tensors="pt")
         length = int(enc["input_ids"].shape[1])
         if length > MAX_TOKENS:

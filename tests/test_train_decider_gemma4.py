@@ -43,8 +43,11 @@ def tiny_gemma(tmp_path):
         text = pointer_prompt.render(case.question, str(case.state), case.options).text
         for tok in tokenizers.pre_tokenizers.Whitespace().pre_tokenize_str(text):
             words.setdefault(tok[0], len(words))
+    words.setdefault("<bos>", len(words))
     tk = tokenizers.Tokenizer(tokenizers.models.WordLevel(words, unk_token="[UNK]"))
     tk.pre_tokenizer = tokenizers.pre_tokenizers.Whitespace()
+    tk.post_processor = tokenizers.processors.TemplateProcessing(
+        single="<bos> $A", special_tokens=[("<bos>", words["<bos>"])])
     base = tmp_path / "gemma"
     base.mkdir()
     tk.save(str(base / "tokenizer.json"))
@@ -276,3 +279,14 @@ def test_the_whole_run_test_refuses_to_run_where_it_would_pin_into_the_real_home
         cwd=copy.parent, env=env, capture_output=True, text=True, timeout=300, check=False)
     assert got.returncode != 0 and "is the real state root" in got.stdout
     assert list(account.rglob("*")) == []
+
+
+def test_gemma_prompts_start_with_the_bos_token_and_the_positions_still_find_the_options(tiny_gemma):
+    from transformers import AutoTokenizer
+
+    from ml_stack.train.decider import encode
+    tok = AutoTokenizer.from_pretrained(tiny_gemma, local_files_only=True)
+    bos = tok.convert_tokens_to_ids("<bos>")
+    row = encode(tok, tiny_cases(2)[0], [0, 1], 4096)
+    assert row["ids"][0] == bos and row["ids"].count(bos) == 1
+    assert [tok.convert_ids_to_tokens(row["ids"][i]) for i in row["spots"]] == ["is", "not"]

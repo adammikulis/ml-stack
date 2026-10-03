@@ -120,7 +120,7 @@ def encode(tok: Any, case: Case, order: Sequence[int], max_tokens: int) -> dict[
     """One case rendered with its options in ``order``: token ids and the scoring positions."""
     options = tuple(case.options[i] for i in order)
     text = pointer_prompt.render(case.question, _state_text(case), options)
-    enc = tok(text.text, return_offsets_mapping=True, add_special_tokens=False)
+    enc = tok(text.text, return_offsets_mapping=True, add_special_tokens=True)
     if len(enc["input_ids"]) > max_tokens:
         raise DecideError(f"case {case.id or case.question[:30]!r} is {len(enc['input_ids'])} "
                           f"tokens; the limit is {max_tokens}")
