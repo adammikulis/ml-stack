@@ -6,13 +6,14 @@ from ml_stack.gym.road_rules import front_progress
 from ml_stack.gym.values import json_value
 
 
-def geometry(native):
+def geometry(native, vehicle=None, stop_checkpoint=None):
     """Read authoritative road, vehicle, and lidar geometry."""
     from metadrive.component.vehicle.base_vehicle import BaseVehicle
     from metadrive.utils.math import get_laser_end
 
-    vehicle = native.vehicle
-    observation = next(iter(native.observations.values()))
+    vehicle = vehicle or native.agent
+    actor = next(key for key, agent in native.agents.items() if agent is vehicle)
+    observation = native.observations[actor]
     distances = observation.cloud_points
     count = len(distances)
     angles = [2 * math.pi * index / count for index in range(count)]
@@ -35,8 +36,8 @@ def geometry(native):
                  "length": float(obj.LENGTH), "width": float(obj.WIDTH), "height": float(obj.HEIGHT),
                  "last_action": json_value(obj.last_action)}
                 for key, obj in native.engine.get_objects().items() if isinstance(obj, BaseVehicle)]
-    stop = getattr(native, "stop_checkpoint", None)
-    stop_state = stop.state(front_progress(native)) if stop else None
+    stop = stop_checkpoint or getattr(native, "stop_checkpoint", None)
+    stop_state = stop.state(front_progress(native, vehicle)) if stop else None
     rule_sensors = [{"name": "upcoming stop", "value": stop_state["distance_m"], "unit": "m"},
                     {"name": "stop hold", "value": stop_state["held_seconds"], "unit": "s"},
                     {"name": "stop compliance", "value": stop_state["state"], "unit": "status"}] if stop_state else []
