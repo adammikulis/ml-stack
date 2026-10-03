@@ -35,14 +35,24 @@ def make_environment(name, config=None):
             def reset(self, *, seed=None, options=None):
                 if options:
                     raise ValueError("MetaDrive reset options are configured at environment creation")
+                if seed is not None:
+                    start = self.env.config["start_seed"]
+                    count = self.env.config["num_scenarios"]
+                    if not start <= seed < start + count:
+                        raise ValueError(f"Car scenario seed must be in [{start}, {start + count}); configure start_seed and num_scenarios")
                 return self.env.reset(seed=seed)
 
         cfg.setdefault("use_render", False)
+        cfg.setdefault("num_scenarios", 20000)
+        cfg.setdefault("start_seed", 0)
+        cfg.setdefault("horizon", 1000)
         if cfg.pop("render_preview", False):
             from metadrive.obs.state_obs import LidarStateObservation
             cfg.update(image_observation=True, agent_observation=LidarStateObservation,
                        sensors={"main_camera": ()}, window_size=(960, 540), show_interface=False,
                        show_terrain=False)
+            cfg["vehicle_config"] = {**cfg.get("vehicle_config", {}), "show_lidar": True,
+                                     "show_side_detector": True, "show_lane_line_detector": True}
         return Driving(MetaDriveEnv(cfg))
     if name == "warehouse":
         import rware  # noqa: F401
