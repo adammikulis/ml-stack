@@ -1,21 +1,13 @@
 """Model files from the owner's paired devices before the internet (docs/model-discovery.md).
 
 ``hub.pull`` asks `session()`. For each file the session asks every device in the `PeerBook`
-(`hub.peerbook`; TLS pinned to its certificate, `lan.require_local` addresses only) for its signed
-manifest and uses those that list that very file. How a device is reached is `routes`: its
-address on this network, else its tailnet address, each proved by the pinned certificate. The
-digest the bytes must have is the **pin**, the Hub listing's sha256 in `Wanted`; a digest a peer
-states never replaces it (only without any listing digest does a manifest entry signed by the
-owner's pinned key supply one). Chunks are checked against the manifest, the whole file against
-the pin, then it passes the net scan and quarantine (`net.download.accept`). A peer that sends a
-bad byte is dropped for the pull, the partial file is deleted and a critical event goes to the
-bus and to sentinel. Sharing levels and quarantine are enforced by the serving device
-(`sharing.py`, `quarantine_veto`). Anything that goes wrong answers False and the Hub is used.
-
-Speed: peers are ranked by the rate measured on earlier transfers (kept in the peer book), a peer
-gets at most its ``streams`` requests at once and its ``limit_bps`` bytes a second, a peer marked
-``metered`` is not asked, and when the transfer as a whole stays under `FLOOR_BPS` for `WINDOW_S`
-seconds it is given up and the Hub is used (`transfer.TooSlow`).
+(`hub.peerbook`) for its signed manifest over TLS pinned to its certificate, reaching it by `routes`
+(this network, then its tailnet address). The **pin** is the Hub listing's sha256 (`Wanted`); a peer's
+digest never replaces it. Chunks are checked against the manifest, the whole file against the pin,
+then the net scan and quarantine. A peer that sends a bad byte is dropped and sentinel hears of it.
+Speed: peers are ranked by the rate measured before, a peer gets at most its ``streams`` requests and
+``limit_bps`` bytes a second, a ``metered`` peer is not asked, and a transfer under `FLOOR_BPS` for
+`WINDOW_S` seconds is given up for the Hub. Anything that goes wrong answers False.
 """
 
 from __future__ import annotations
@@ -117,7 +109,7 @@ class PeerSession:
     notes: list[str] = field(default_factory=list)
     """Why a peer was not used, for the log and for tests."""
     probe: Probe = pinned_probe
-    tailnet: Callable[[], Tailnet] = detect
+    tailnet: Callable[[], Tailnet] = lambda: detect()   # looked up when called, so a test can replace detect
     devices: Callable[[], list[Device]] | None = None
     """The paired devices (default: the ones beside the peer book)."""
     origins_path: Path | None = None

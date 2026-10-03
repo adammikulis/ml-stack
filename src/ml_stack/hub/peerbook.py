@@ -1,18 +1,12 @@
 """The devices a model pull asks before the Hub: a small private file and nothing else.
 
-Both sides of the peer-first path read it: the fleet's provider (`ml_stack.fleet.onboard.
-peerfirst`) to reach the devices, and the hub (`peers.session`) to know whether there is anybody
-to ask at all, so the fleet module is only loaded when a pull has a peer to try. It lives here
-(below the fleet in the package layers) so neither needs the other's data type by name.
-
-Each row: ``name``, ``url`` (https://host:port of the device's ``fleet share``), ``certificate``
-(its beacon, which TLS is pinned to), ``signing_key`` (the owner's manifest key, base64 raw
-Ed25519 public key), ``device_secret`` (this device's request key from pairing, urlsafe base64),
-``min_serial`` (the lowest manifest serial still accepted: an older list cannot be served again),
-and optionally ``fingerprint`` (the device's pairing record, which lets a route be chosen: LAN,
-then tailnet), ``source`` (``pairing`` or ``manual``), ``rate`` (bytes/s measured on the last
-transfers), ``limit_bps`` (a bandwidth cap), ``streams`` (most parallel requests) and
-``metered`` (the link costs per byte: the device is not asked).
+Both sides read it: the fleet's provider (`ml_stack.fleet.onboard.peerfirst`) to reach the
+devices, and `hub.peers` to know whether there is anybody to ask, so the fleet is only loaded when
+there is. It lives below the fleet in the package layers so neither needs the other's data type.
+A row: ``name``, ``url`` (the device's ``fleet share``), ``certificate`` (its beacon, which TLS is
+pinned to), ``signing_key`` (the owner's manifest key), ``device_secret`` (this device's request key),
+``min_serial``; optionally ``fingerprint`` (its pairing record, so a route can be chosen), ``source``
+(``pairing`` or ``manual``), ``rate`` (bytes/s measured), ``limit_bps``, ``streams``, ``metered``.
 """
 
 from __future__ import annotations

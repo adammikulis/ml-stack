@@ -1,15 +1,11 @@
 """Paired devices are asked for a model file before the internet is.
 
-This module is the hub's side of that: what is wanted (`Wanted`), what a session does (`Session`,
-the "ask the peers" contract), the on/off switches, and how the fleet's provider is found. The
-shared data type, the peer book, is `hub.peerbook`, which both sides import, so neither needs
-the other's types by name. What stays by name is the provider itself: the hub sits below the
-fleet in the package layers (tests/test_layers.py) and cannot import it, and a lower layer
-cannot be handed a higher one's code without either an import or a registration made at import
-time, which the hard rules forbid. So the provider (``ml_stack.fleet.onboard.peerfirst``) is
-loaded by module path, but only when a pull is about to start, peers are on and the peer book
-has a row: a machine with no paired peer never loads the fleet. The provider owns trust: the
-digest a file must have comes from `Wanted` (the Hub's own listing), never from a peer.
+The hub's side: what is wanted (`Wanted`), what a session does (`Session`), the on/off switches and
+how the fleet's provider is found. The shared data type is `hub.peerbook`. The provider
+(``ml_stack.fleet.onboard.peerfirst``) is loaded by module path, because the hub sits below the fleet
+(tests/test_layers.py) and a lower layer cannot be handed higher code without an import or an
+import-time registration, which the hard rules forbid; but only when a pull is about to start, peers
+are on and the book has a row. It owns trust: the digest comes from `Wanted`, never from a peer.
 
 Off for one pull with ``peers=False`` (``--no-peers``), for the shell with ``ML_STACK_NO_PEERS=1``,
 and for the machine with ``ml-stack fleet peers off``.

@@ -1,22 +1,11 @@
 """Serve the machine's own model store to paired devices (``fleet share --models``).
 
-The files are what `hub.discover` finds in the usual folders (GGUF and safetensors in the
-llama.cpp, Hugging Face, LM Studio, ml-stack ... caches), offered by file name with the
-repository they came from, their size and sha256. The rules, each tested:
-
-* **Only the model roots.** A file is listed, and again at every request, only if what its path
-  resolves to lies inside a root. A symlink out of the roots, a ``..`` and a file renamed away
-  are not served (`transfer.confined`).
-* **Nothing sentinel holds.** A copy in quarantine is neither listed nor served.
-* **Levels.** A model is ``owner`` unless its terms say otherwise: only a device the owner marked
-  as theirs gets it, and only once the owner recorded accepting its licence on this machine (who,
-  when, which licence). The terms come from ``--sharing`` / ``--licence`` / ``--source``; with
-  none, the licence is the repository (a person confirms it at the terminal once).
-* **Signed, rising.** The manifest is signed with the owner's key and its serial never goes
-  down, so an older list cannot be served again (`next_serial`).
-
-Hashing a multi-gigabyte model is slow, so digests are kept (`Digests`) by path, size and
-modification time.
+The files are what `hub.discover` finds (GGUF and safetensors), offered by file name with their
+repository, size and sha256. Only the model roots: a file is listed, and again at every request,
+only if its resolved path lies inside a root (`transfer.confined`). Nothing sentinel holds. A model
+is ``owner`` unless its terms say otherwise: only the owner's own devices get it, and only once the
+owner accepted its licence on this machine. The manifest is signed with the owner's key and its
+serial never goes down (`next_serial`). Digests are kept by path, size and mtime (`Digests`).
 """
 
 from __future__ import annotations
