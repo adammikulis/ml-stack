@@ -11,8 +11,8 @@
 # tests    `path` or `path::test_name`; the gate fails when either is gone.
 
 [ratchet]
-uncovered = 0
-partial = 0
+uncovered = 56
+partial = 206
 
 # -- the human-only floor ------------------------------------------------------------------
 [[group]]
@@ -269,12 +269,15 @@ match = ["keystore:memory/*", "keystore:credentials/*"]
 status = "covered"
 tests = ["tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
          "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
-         "tests/test_credentials.py"]
+         "tests/test_credentials.py",
+         "tests/test_redteam_human_floor.py::test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code",
+         "tests/test_no_real_keychain.py"]
 
 [[group]]
 match = ["keystore:fleet/onboard/signing.py:*"]
 status = "partial"
-tests = ["tests/test_onboard_ssh.py"]
+tests = ["tests/test_onboard_ssh.py", "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
+         "tests/test_no_real_keychain.py"]
 note = "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
 
 # -- text that reaches a model -------------------------------------------------------------

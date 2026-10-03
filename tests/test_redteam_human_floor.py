@@ -64,6 +64,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
                 agent: bool, terminal: bool, answer: str = "") -> subprocess.CompletedProcess:
     module, function, argv = target
     env = {**os.environ, "PYTHONPATH": SRC, "ML_STACK_HOME": str(tmp_path / "home"), **CLEAN,
+           "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
            **({"CLAUDECODE": "1"} if agent else {})}
     code = f"import sys; from {module} import {function}; sys.exit({function}({argv!r}))"
     if not terminal:
@@ -179,3 +180,48 @@ def test_a_tool_argument_naming_the_floor_is_refused_whichever_tool_carries_it()
         for text in ("ml-stack security quarantine release q-1", "ml-stack-security mode off",
                      "python -m ml_stack.sentinel.cli release q-1"):
             assert agent_may(tool, {"argv": [text], "extra": [text]}), (tool, text)
+
+
+def test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code():
+    import ast
+    src = Path(SRC) / "ml_stack"
+    allowed = {"memory/vault.py", "fleet/onboard/signing.py", "credentials/__init__.py"}
+    found = set()
+    for path in src.rglob("*.py"):
+        rel = path.relative_to(src).as_posix()
+        if rel.startswith("testing/"):
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
+                [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+            if any(n.split(".")[0] == "keyring" for n in names):
+                found.add(rel)
+    assert found <= allowed, sorted(found - allowed)
+
+
+def test_building_the_signing_keys_never_asks_the_keystore(tmp_path):
+    import keyring
+    from onboard_support import FileKeyring
+
+    from ml_stack.fleet.onboard.signing import SigningKeys
+
+    class Counting(FileKeyring):
+        asked = 0
+
+        def get_password(self, *a):
+            Counting.asked += 1
+            return super().get_password(*a)
+
+        def set_password(self, *a):
+            Counting.asked += 1
+            return super().set_password(*a)
+
+    before = keyring.get_keyring()
+    keyring.set_keyring(Counting())
+    try:
+        os.environ["ML_STACK_TEST_KEYRING"] = str(tmp_path / "ks.json")
+        SigningKeys(tmp_path / "state")
+        assert Counting.asked == 0
+    finally:
+        keyring.set_keyring(before)
+        os.environ.pop("ML_STACK_TEST_KEYRING", None)
