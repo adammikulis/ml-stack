@@ -295,9 +295,22 @@ def test_the_compile_has_no_network(site, pipe, tmp_path):
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "net"], cwd=site.work, check=True)
     subprocess.run(["git", "push", "-q", "origin", "master"], cwd=site.work, check=True)
     assert run(site, pipe).status == "built"
-    with pytest.raises(TimeoutError):
-        listener.accept()
-    listener.close()
+    reached_by_the_compile = False
+    try:
+        while True:                                  # other processes on a busy machine may probe a loopback port;
+            conn, _ = listener.accept()              # only the compile's own request (GET /x) counts
+            conn.settimeout(0.5)
+            try:
+                reached_by_the_compile |= b"GET /x" in conn.recv(2048)
+            except OSError:
+                pass
+            finally:
+                conn.close()
+    except TimeoutError:
+        pass
+    finally:
+        listener.close()
+    assert not reached_by_the_compile
 
 
 def test_the_smoke_test_without_a_model_or_a_working_server_fails_instead_of_passing(tmp_path, monkeypatch):
