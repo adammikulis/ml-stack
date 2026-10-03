@@ -24,7 +24,7 @@ from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
-from ml_stack.serve import guarded, quant_guard
+from ml_stack.serve import guarded
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
 from ml_stack.serve.events import Caller, Growth
@@ -78,8 +78,8 @@ class _Server(socketserver.ThreadingTCPServer):
         if body.get("token") != self.token:
             return {"ok": False, "error": "wrong broker token"}
         op, pid = body.get("op"), int(body.get("pid") or 0)
-        if isinstance(body.get("options"), dict) and not quant_guard.wire_allows():
-            body["options"].pop("allow_iq", None)
+        if isinstance(body.get("options"), dict):
+            body["options"].pop("iq", None)
         if op == "ping":
             return {"ok": True, "pid": os.getpid()}
         if op == "lease":

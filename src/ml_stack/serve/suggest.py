@@ -350,8 +350,8 @@ def suggest_model(candidates: Iterable[Candidate | ModelInfo],
     half), so a larger model wins when it fits; for ``fast`` it is the smaller of the
     models of 1.5 billion parameters or more. Embedding, vision-encoder and speech models
     are left out. No benchmark scores are used: the ranking is a size heuristic. On Apple
-    silicon every IQ quantisation ranks after
-    every other candidate.
+    silicon an IQ quantisation ranks after a
+    candidate it ties with on rating and score, and its note says it may be slower on Metal.
     """
     machine = machine or machine_memory()
     apple = is_apple_silicon()
@@ -371,10 +371,12 @@ def suggest_model(candidates: Iterable[Candidate | ModelInfo],
         if goal == "fast":
             score = -one.size_bytes if _effective(one) >= 1.5e9 else -1e18 + one.size_bytes
         note = f"{human_bytes(one.size_bytes)} {one.quantization or 'weights'}, rated {rated}"
+        if apple and is_iq(one):
+            note += "; IQ quantisation, may be slower on Metal"
         rows.append(Choice(one, rated, score, note))
-    rows.sort(key=lambda r: (apple and is_iq(r.candidate),
-                             est.ORDER[r.verdict] > est.ORDER[max_verdict],
-                             est.ORDER[r.verdict], -r.score, r.candidate.name))
+    rows.sort(key=lambda r: (est.ORDER[r.verdict] > est.ORDER[max_verdict],
+                             est.ORDER[r.verdict], -r.score, apple and is_iq(r.candidate),
+                             r.candidate.name))
     return rows
 
 
@@ -410,8 +412,7 @@ def recommend(machine: MachineMemory | None = None, goal: str = "agent", *, quer
               limit: int = 8) -> list[Recommendation]:
     """Installed models, and with ``query`` the GGUF builds the Hub offers for it, ranked
     for ``goal`` on ``machine`` and cut to ``limit``. Ranking is `suggest_model`'s; the
-    search is skipped when the Hub cannot be reached. On Apple silicon IQ quantisations are
-    left out, because a lease for one is refused."""
+    search is skipped when the Hub cannot be reached."""
     machine = machine or machine_memory()
     installed = hub.discover(formats=("gguf",))
     pool: list[Candidate | ModelInfo] = list(installed)
@@ -421,7 +422,5 @@ def recommend(machine: MachineMemory | None = None, goal: str = "agent", *, quer
             pool += [c for c in download_candidates(remote.search(query, remote.Filters(limit=6)))
                      if c.ref not in owned]
     rows = suggest_model(pool, machine, goal)
-    apple = is_apple_silicon()
     return [Recommendation(r, r.candidate.ref in owned, r.candidate.ref)
-            for r in rows if r.verdict != "none"
-            and not (apple and is_iq(r.candidate))][:limit]
+            for r in rows if r.verdict != "none"][:limit]

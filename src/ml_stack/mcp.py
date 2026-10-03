@@ -238,8 +238,8 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
     refusing, keeping every live conversation."""
     if why := quant_guard.blocked_message(model):
         return {"started": False, "blocked": why}
-    if any(str(one).startswith("--allow") for one in extra or []):
-        raise ValueError("the IQ override is a person's to give, not a tool argument")
+    if any(str(one).startswith("--iq") for one in extra or []):
+        raise ValueError("the IQ mode is a person's to set, not a tool argument")
     argv = ["up", _not_an_option(model, "model"), "--port", str(port), "--parallel",
             str(parallel)]
     if context:

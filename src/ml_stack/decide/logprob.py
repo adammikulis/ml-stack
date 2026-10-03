@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ml_stack import httpguard
-from ml_stack.client import Client
+from ml_stack.client import Client, thinking
 from ml_stack.decide.base import Asked, BaseDecider
 from ml_stack.decide.calibrate import Calibration
 from ml_stack.decide.types import DecideError, Option
@@ -134,7 +134,7 @@ class LogprobDecider(BaseDecider):
                                                             asked.options)}],
             "max_tokens": 1, "temperature": 0, "logprobs": True,
             "top_logprobs": self.chat.top_logprobs, "cache_prompt": True,
-            "chat_template_kwargs": self._client.family.think_kwargs(False)}
+            "chat_template_kwargs": self._client.family.think_kwargs(thinking.resolve(thinking.DECISION))}
         if self.model:
             body["model"] = self.model
         return body

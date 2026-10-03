@@ -1,4 +1,4 @@
-"""The refusal of IQ-family GGUF quantisations on Apple silicon, and the recorded override."""
+"""The warning, or in strict mode the refusal, for IQ-family GGUF quantisations on Apple silicon."""
 
 from __future__ import annotations
 
@@ -17,27 +17,20 @@ from ml_stack.serve.backend import ServerFailed
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "BROKER_ENV",
-    "ENV",
-    "BlockedQuant",
-    "IqQuant",
-    "blocked_message",
-    "enforce",
-    "iq_quant",
-    "overridden",
-    "override_note",
-    "refusal",
-    "wire_allows",
-]
+__all__ = ["DEFAULT_MODE", "ENV", "MODES", "BlockedQuant", "IqQuant", "blocked_message", "enforce",
+           "iq_quant", "mode", "refusal", "status_note"]
 
-ENV = "ML_STACK_ALLOW_IQ"
-BROKER_ENV = "ML_STACK_BROKER_ALLOW_IQ_LEASES"
+ENV = "ML_STACK_IQ"
+MODES = ("off", "warn", "block")
+DEFAULT_MODE = "warn"
 
-# Measured in docs/architectures/qwen4exp.md; the same K-quant build also ran faster in docs/report-2026-09-23.md.
-EVIDENCE = ("The one measurement here is a pair of small runs on this Mac "
-            "(docs/architectures/qwen4exp.md): Qwen3.8-Flash-Next UD-IQ4_XS took 70.1 s a "
-            "question at 54% F1 over ten questions, UD-Q4_K_XL 43.7 s at 64% over nine.")
+EVIDENCE = ("Measured once on this Mac (docs/architectures/qwen4exp.md, "
+            "docs/report-2026-09-23.md): Qwen3.8-Flash-Next UD-IQ4_XS took 70.1 s a question "
+            "at 54% F1 over ten questions, UD-Q4_K_XL 43.7 s at 64% over nine. The same report "
+            "also holds UD-Q4_K_XL at 27.6 s and 81% F1 on nine questions with the same asking, "
+            "and UD-IQ4_XS at 85% F1 in 36.6 s with thinking off, so the evidence is thin and "
+            "points both ways. A controlled test (docs/experiments/iq-vs-kquant-metal.md) is "
+            "pending.")
 
 # IQ tensors holding more than this share of a file's weight bytes make it an IQ file.
 IQ_SHARE = 0.5
@@ -106,75 +99,73 @@ def _alternatives(model: object, quant: IqQuant) -> list[str]:
     return list(seen.values())[:5]
 
 
-def _message(model: object, quant: IqQuant) -> str:
+def _text(model: object, quant: IqQuant, *, blocked: bool) -> str:
     named = naming.pretty_name(Path(str(model)).name) or str(model)
     how = {"file_type": f"its header says file type {quant.name}",
            "tensors": f"{quant.share:.0%} of its weights are {quant.name} tensors",
            "file name": f"its name says {quant.name} and it is not on disk to check"}[quant.basis]
-    lines = [f"blocked: {named} is an IQ quantisation ({how}). On Apple silicon llama.cpp "
-             "runs it through Metal, where IQ quantisations are expected to be slower and "
-             "less accurate than a K-quant of the same model.", EVIDENCE]
+    lines = [f"{'blocked' if blocked else 'warning'}: {named} is an IQ quantisation ({how}). "
+             "On Apple silicon llama.cpp runs it through Metal, where IQ quantisations MAY be "
+             "slower and less accurate than a K-quant of the same model.", EVIDENCE]
     alternatives = _alternatives(model, quant)
     if alternatives:
         lines.append("On disk, not IQ, same model: " + ", ".join(alternatives))
-    lines.append(f"To serve it anyway, the person runs it with {ENV}=1 in the environment, "
-                 "`ml-stack-serve up --allow-iq`, or allow_iq=True on the lease. The "
-                 "override is recorded and warned about.")
+    lines.append(f"Set {ENV}=warn or `--iq warn` to serve it with this warning, {ENV}=off or "
+                 f"`--iq off` for no warning, {ENV}=block or `--iq block` to refuse it."
+                 if blocked else
+                 f"{ENV}=block or `--iq block` refuses IQ quantisations on Apple silicon, "
+                 f"{ENV}=off silences this.")
     return "\n".join(lines)
 
 
-def overridden() -> bool:
-    """Whether this process's own environment allows IQ quantisations on Metal."""
-    return os.environ.get(ENV) == "1"
+def mode(asked: str = "") -> str:
+    """``asked`` when it is a mode, else ``$ML_STACK_IQ`` when that is one, else ``warn``."""
+    for one in (asked, os.environ.get(ENV, "")):
+        if one in MODES:
+            return one
+    return DEFAULT_MODE
 
 
-def wire_allows() -> bool:
-    """Whether this process, as a broker, takes ``allow_iq`` from a client's request."""
-    return os.environ.get(BROKER_ENV) == "1"
+def status_note(quant: str) -> str:
+    """The line ``status`` shows for a server started with the IQ quantisation ``quant``."""
+    return (f"{quant} is an IQ quantisation on Apple silicon: it MAY be slower and less "
+            "accurate than a K-quant; the evidence is thin (docs/serving.md).")
 
 
-def override_note(model: object) -> str:
-    """The warning ``status`` repeats for a server that was started under the override."""
-    named = naming.pretty_name(Path(str(model)).name) or str(model)
-    return (f"{named} is an IQ quantisation served on Apple silicon under the IQ override: "
-            "expected to be slower and less accurate than a K-quant.")
-
-
-def _record(model: object, quant: IqQuant, who: str) -> None:
+def _record(model: object, quant: IqQuant, who: str, message: str) -> None:
     global _told
     if not _told:
         _told = True
-        logger.warning("%s", override_note(model))
+        logger.warning("%s", message)
     node = sentinel.default()
-    node.bus.emit(Event("serve.iq_override", Severity.WARNING, "serve", f"model:{model}",
+    node.bus.emit(Event("serve.iq_warning", Severity.NOTICE, "serve", f"model:{model}",
                         {"model": str(model), "quant": quant.name, "basis": quant.basis,
                          "who": who}, node.clock()))
 
 
-def refusal(model: object, *, gpu_layers: object = "auto") -> tuple[IqQuant, str] | None:
-    """``(quant, message)`` when ``model`` is an IQ quantisation on Apple silicon, else ``None``."""
+def refusal(model: object, *, gpu_layers: object = "auto") -> IqQuant | None:
+    """The IQ quantisation ``model`` is when it is served on Apple silicon, else ``None``."""
     if not is_apple_silicon() or str(gpu_layers) == "0":
         return None
-    quant = iq_quant(model)
-    return None if quant is None else (quant, _message(model, quant))
+    return iq_quant(model)
 
 
-def blocked_message(model: object, *, gpu_layers: object = "auto") -> str:
-    """The refusal text for ``model`` as this process's environment sees it, or an empty
-    string when the lease would go ahead."""
+def blocked_message(model: object, *, gpu_layers: object = "auto", asked: str = "") -> str:
+    """The refusal text when strict mode refuses ``model`` here, else an empty string."""
     found = refusal(model, gpu_layers=gpu_layers)
-    return "" if found is None or overridden() else found[1]
+    return _text(model, found, blocked=True) if found and mode(asked) == "block" else ""
 
 
-def enforce(model: object, *, gpu_layers: object = "auto", allow: bool = False,
+def enforce(model: object, *, gpu_layers: object = "auto", asked: str = "",
             who: str = "") -> IqQuant | None:
-    """Raise `BlockedQuant` for an IQ quantisation on Apple silicon unless ``allow`` or the
-    environment allows it; an override is recorded and its quant returned. Returns ``None``
-    when the model is not IQ or the machine is not Apple silicon."""
+    """Apply the IQ mode to a lease: `BlockedQuant` in ``block``, one warning per process and
+    a ``serve.iq_warning`` event in ``warn``, nothing in ``off``. Returns the quantisation
+    when it was warned about."""
     found = refusal(model, gpu_layers=gpu_layers)
-    if found is None:
+    chosen = mode(asked)
+    if found is None or chosen == "off":
         return None
-    if not (allow or overridden()):
-        raise BlockedQuant(found[1])
-    _record(model, found[0], who)
-    return found[0]
+    if chosen == "block":
+        raise BlockedQuant(_text(model, found, blocked=True))
+    _record(model, found, who, _text(model, found, blocked=False))
+    return found

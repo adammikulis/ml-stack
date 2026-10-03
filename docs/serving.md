@@ -133,58 +133,59 @@ the wrong settings hands back a lease that cannot do what was asked of it.
 ### IQ quantisations on Apple silicon
 
 A lease for an IQ-family GGUF (IQ1_S, IQ1_M, IQ2_XXS/XS/S/M, IQ3_XXS/XS/S/M, IQ4_NL, IQ4_XS)
-on a Mac with an arm64 CPU is refused with `BlockedQuant`. `ml-stack-serve up` exits 3 for it
-(2 for every other refusal). Linux, Windows, a CPU-only lease (`n_gpu_layers` 0) and engines
-other than llama.cpp are never refused. The refusal names the model and the quantisation,
-quotes the measurement below, lists non-IQ builds of the same model found beside the file
-(the same folder, its parent and their subfolders), and shows the override.
+on a Mac with an arm64 CPU goes ahead with one warning per process: it MAY be slower and less
+accurate than a K-quant of the same model on Metal, the evidence is thin, and the K-quant
+builds of the same model found on disk are listed. Each such lease also emits a sentinel event
+`serve.iq_warning` (model, quant, who) and marks its lease record, and `ml-stack-serve status`
+shows a `WARNING` line for the server while it runs. Linux, Windows, CPU-only leases
+(`n_gpu_layers` 0) and engines other than llama.cpp are never affected.
 
-**Why.** The one measurement on this machine class, Qwen3.8-Flash-Next answering `plain`
-with thinking on and no draft head on Metal (`docs/architectures/qwen4exp.md`,
-`docs/report-2026-09-23.md`): `UD-IQ4_XS` took 70.1 s a question at 54% F1 over ten
-questions, `UD-Q4_K_XL` 43.7 s at 64% over nine. The policy rests on that and on the general
-expectation that IQ types decode through lookup tables Metal runs slowly.
+`ML_STACK_IQ=block|warn|off` (default `warn`) and `ml-stack-serve up --iq block|warn|off`
+set the mode, and `iq=` on `ServerManager.lease` and `serve` does the same for one lease.
+`block` refuses with `BlockedQuant` (`up` exits 3); `off` gives no warning and records nothing.
 
-**Limits of that evidence.** It is one model on one machine, ten and nine questions, one
-run each. The same report holds rows that point the other way or show the noise: the same
-`UD-Q4_K_XL` asking (`plain`, thinking on, no head, nine questions) also ran at 27.6 s and
-81% F1; `UD-IQ4_XS` `plain` thinking on over 34 questions ran at 40.0 s and 59% (and at
-65.1 s and 55% in another run); with thinking off and `plain+tight` asking `UD-IQ4_XS` scored
-85% F1 at 36.6 s over nine questions, the best F1 the K-quant reached too. Run-to-run spread
-on one configuration is larger than the gap in the pair. The IQ4_XS build is also 87.6G
-against 104.0G for the K-quant, which is why someone picks it. No other IQ against K-quant
-measurement exists in `docs/model-ranking.md`, `docs/fit.md` or the bench store code
-(`docs/fit.md` holds IQ4_XS memory numbers, not speed). The refusal is the owner's policy,
-not a benchmark result; re-measure with `ml-stack-bench` before treating it as one.
+**Evidence, and its limits.** Qwen3.8-Flash-Next answering `plain` with thinking on and no
+draft head on Metal (`docs/architectures/qwen4exp.md`, `docs/report-2026-09-23.md`):
+`UD-IQ4_XS` took 70.1 s a question at 54% F1 over ten questions, `UD-Q4_K_XL` 43.7 s at 64%
+over nine. That is one model, one machine, one run each. The same report points the other
+way or shows the noise: the identical `UD-Q4_K_XL` asking also ran 27.6 s at 81% F1 over nine
+questions; `UD-IQ4_XS` `plain` thinking on over 34 questions ran 40.0 s at 59% (65.1 s at 55%
+in another run); `UD-IQ4_XS` `plain+tight` with thinking off scored 85% F1 at 36.6 s over nine
+questions, the best F1 the K-quant reached too. Run-to-run spread on one configuration is
+larger than the gap in the pair. The IQ4_XS build is 87.6G against 104.0G. No other
+IQ against K-quant speed measurement exists in `docs/model-ranking.md`, `docs/fit.md` or the
+bench store code. `docs/experiments/iq-vs-kquant-metal.md` is the pre-registered protocol
+that settles it.
 
-**How a file is judged IQ** (`ml_stack.serve.quant_guard.iq_quant`, header only, no tensor
-data read): its `general.file_type` is an IQ type, or IQ tensors hold more than half of the
-weight bytes over all shards. One IQ tensor does not make a file IQ: an unsloth
-`UD-Q4_K_XL` carries an IQ4_NL lookup table of about a quarter of its bytes and is served.
-The file name decides only for a model that is not a file on this machine yet
-(`hf:` references). The check runs in `ServerManager._start_server`, which every lease passes
-(`lease`, `serve`, `up`, the Broker's `start` and ask paths, bench, fleet, ingest).
+**How a file is judged IQ** (`ml_stack.serve.quant_guard.iq_quant`, header only): its
+`general.file_type` is an IQ type, or IQ tensors hold more than half of the weight bytes over
+all shards. One IQ tensor does not make a file IQ: an unsloth `UD-Q4_K_XL` carries an IQ4_NL
+lookup table of about a quarter of its bytes. The file name decides only for a model that is
+not a file here yet (`hf:` references). The check runs in `ServerManager._start_server`, which
+every lease passes (`lease`, `serve`, `up`, the Broker's `start` and ask paths, bench, fleet,
+ingest, the guard judge).
 
-**Override.** The person sets one of these, in their own process:
+**The mode is the person's.** No tool, request or model can change it. `serve_up` (MCP and
+chat) rejects an `--iq` word in `extra`, reports a strict refusal instead of starting a
+process, and `up` takes no abbreviation of its flags. The Broker wire drops an `iq` option, so
+a broker uses its own `ML_STACK_IQ`; a client's strict mode is applied in the client before the
+call, and a client's `off` or `warn` never reaches a broker. A spec or ask carrying `iq` is
+refused. `suggest`, `recommend` and the chat default rank an IQ build after an otherwise equal
+build on Apple silicon (a tie-break, never an exclusion) and its note says it may be slower on
+Metal.
 
-- `ML_STACK_ALLOW_IQ=1` in the environment;
-- `--allow-iq` on `ml-stack-serve up`;
-- `allow_iq=True` on `ServerManager.lease`, `serve` or `ops.up`.
+### Thinking, per use
 
-Each use logs one warning per process, records a sentinel event `serve.iq_override` (model,
-quant, who), marks the lease record, and `ml-stack-serve status` shows a `WARNING` line for
-the server for as long as it runs. The model is never swapped for another.
-
-Nothing a model or a request sends can set it: `serve_up` (MCP and chat) returns the refusal
-instead of starting a process and rejects an `--allow...` word in `extra`; `up` takes no
-abbreviation of its flags; a spec or ask on the Broker wire with an `allow_iq` field is
-refused, and an `allow_iq` option on the wire is dropped unless the broker was started with
-`ML_STACK_BROKER_ALLOW_IQ_LEASES=1`. To lease an IQ model through the machine's broker, start
-the broker with `ML_STACK_ALLOW_IQ=1`, or with the lease-option variable, or set
-`ML_STACK_BROKER_LOCAL=1`. `suggest`, `recommend` and the chat default rank IQ builds below
-every other build on Apple silicon and never offer one; `ml-stack-models files` marks them.
-The llama.cpp smoke test takes the smallest non-IQ model, and on a machine that holds only
-IQ models it leases with the override (recorded like any other) because it checks the build.
+`ml_stack.client.thinking` decides whether a request asks the model to think, from the
+person's `ML_STACK_THINK=off|on|auto` (default `auto`). Decisions (the decide, judge and guard
+logprob paths) never think. Agent turns and short answers think only when the person sets
+`on`; under `auto` a prompt thinks only when it contains a phrase that asks for reasoning
+("think step by step", "show your reasoning") or the use is `reasoning`. The agent loop and
+the logprob decider send the family's template flag (`enable_thinking` for Qwen and Gemma,
+`reasoning_effort` for gpt-oss) accordingly, and `ml-stack-serve up` prints the policy.
+`ml-stack-chat` sends `think=False` on every turn itself; a `/think` command and `--think`
+there, and the policy's header line, are not wired (chat.py was out of bounds for this
+change). A bench run's thinking is recorded as its thinking column (`--reasoning-budget`).
 
 ### The settings a model scored best with, for one kind of work
 
