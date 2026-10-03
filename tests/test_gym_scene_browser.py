@@ -69,3 +69,70 @@ def test_follow_orbit_sensor_toggle_and_whole_map_controls(scene_page):
     scene.get_by_label('Follow car',exact=True).check()
     page.wait_for_function("document.querySelector('gym-scene').follow")
     assert not errors
+
+
+def test_keyboard_agent_selection_survives_updates_and_reports_native_ids(scene_page):
+    page, errors = scene_page
+    page.evaluate("""() => {
+        const s=document.querySelector('gym-scene');
+        s.selectionEvents=[];
+        s.addEventListener('gym-agent-selection',e => s.selectionEvents.push(e.detail));
+        s.update({...s.pending,vehicles:[...s.pending.vehicles,
+          {id:'traffic-one',position:[25,3],heading:1.2,speed:8,controller:'IDM',role:'traffic'}],
+          robots:[{id:'carrier',x:38,y:15,direction:1,carrying:true}]});
+    }""")
+    page.locator('gym-scene canvas').click(position={'x':300,'y':200})
+    page.keyboard.press('ArrowRight')
+    assert page.locator('gym-scene').get_by_label('Selected agent').input_value() == 'vehicle-traffic-one'
+    assert 'traffic-one' in page.locator('.gym-selected-agent').inner_text()
+    assert 'Controller: IDM' in page.locator('.gym-selected-agent').inner_text()
+    assert 'Speed 8.0 m/s' in page.locator('.gym-selected-agent').inner_text()
+    page.evaluate("document.querySelector('gym-scene').update(document.querySelector('gym-scene').pending)")
+    assert page.locator('gym-scene').get_by_label('Selected agent').input_value() == 'vehicle-traffic-one'
+    page.keyboard.press('ArrowRight')
+    assert page.locator('gym-scene').get_by_label('Selected agent').input_value() == 'robot-carrier'
+    page.keyboard.press('ArrowLeft')
+    event = page.evaluate("document.querySelector('gym-scene').selectionEvents.at(-1)")
+    assert event['agent_id'] == 'traffic-one' and event['kind'] == 'vehicle'
+    page.evaluate("""() => {const s=document.querySelector('gym-scene');
+      s.update({...s.pending,vehicles:s.pending.vehicles.filter(a=>a.id!=='traffic-one')});} """)
+    assert page.locator('gym-scene').get_by_label('Selected agent').input_value() == 'robot-carrier'
+    page.evaluate("""() => {const s=document.querySelector('gym-scene');
+      s.update({...s.pending,vehicles:[],robots:[]});}""")
+    count = page.evaluate("document.querySelector('gym-scene').selectionEvents.length")
+    page.evaluate("document.querySelector('gym-scene').update(document.querySelector('gym-scene').pending)")
+    assert page.evaluate("document.querySelector('gym-scene').selectionEvents.length") == count
+    assert 'No agents' in page.locator('.gym-selected-agent').inner_text()
+    assert not errors
+
+
+def test_controls_help_shortcuts_and_input_route_boundaries(scene_page):
+    page, errors = scene_page
+    scene = page.locator('gym-scene')
+    controls = scene.get_by_role('button',name='Controls',exact=True)
+    controls.hover()
+    help_panel = scene.get_by_role('region',name='Simulation controls')
+    help_panel.wait_for()
+    assert 'Previous / next agent' in help_panel.inner_text()
+    assert 'Play / pause simulation' in help_panel.inner_text()
+    controls.focus()
+    page.keyboard.press('Escape')
+    assert not help_panel.is_visible()
+    page.locator('gym-scene canvas').click(position={'x':300,'y':200})
+    page.keyboard.press('?')
+    assert help_panel.is_visible()
+    page.keyboard.press('d')
+    assert not page.evaluate("document.querySelector('gym-scene').debugRays")
+    scene.get_by_label('Selected agent').focus()
+    page.keyboard.press('d')
+    assert not page.evaluate("document.querySelector('gym-scene').debugRays")
+    scene.get_by_role('button',name='Close controls',exact=True).click()
+    page.locator('gym-scene canvas').click(position={'x':300,'y':200})
+    page.keyboard.press('m')
+    assert not scene.get_by_label('Follow car',exact=True).is_checked()
+    page.keyboard.press('f')
+    assert scene.get_by_label('Follow car',exact=True).is_checked()
+    page.locator('fleet-nav nav a[href="#chat"]').click()
+    page.keyboard.press('d')
+    assert not page.evaluate("document.querySelector('gym-scene').debugRays")
+    assert not errors
