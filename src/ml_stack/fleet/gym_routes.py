@@ -9,6 +9,10 @@ from pathlib import Path
 
 from ml_stack.gym import catalogue, manager
 
+from .files import safe_relpath
+from .jobs import DaemonError
+from .request_fields import field, object_body
+
 
 class GymRoutes:
     """Environment catalogue, snapshots and session controls."""
@@ -33,10 +37,21 @@ class GymRoutes:
                 self.send(200, {"sessions": manager.list()})
                 return True
             if self.path == "/ui/gym/sessions" and self.method == "POST":
-                req = self.body()
-                self.send(201, manager.create(str(req.get("environment") or ""),
-                          config=req.get("config"), controller=str(req.get("controller") or "manual"),
-                          seed=int(req.get("seed", 0))))
+                req = object_body(self)
+                config = field(req, "config", dict, {})
+                world = field(config, "world", dict, {})
+                runner = self.ui.runner
+                if runner is not None:
+                    os.environ["ML_STACK_GYM_FILES_ROOT"] = str(runner.files_root)
+                if world.get("mode") == "manual":
+                    if runner is None:
+                        raise ValueError("Manual worlds require the daemon files root")
+                    for name in ("map_file", "net_file", "route_file"):
+                        if name in world:
+                            safe_relpath(runner.files_root, field(world, name, str))
+                self.send(201, manager.create(field(req, "environment", str, ""),
+                          config=config, controller=field(req, "controller", str, "manual"),
+                          seed=field(req, "seed", int, 0)))
                 return True
             prefix = "/ui/gym/sessions/"
             if self.path.startswith(prefix):
@@ -48,19 +63,20 @@ class GymRoutes:
                 elif self.method == "DELETE":
                     self.send(200, manager.close(sid))
                 elif self.method == "POST":
-                    req = self.body()
-                    self.send(200, manager.control(sid, str(req.get("command") or ""),
-                                                  payload=req.get("payload")))
+                    req = object_body(self)
+                    self.send(200, manager.control(sid, field(req, "command", str, ""),
+                                                  payload=field(req, "payload", dict, {})))
                 else:
                     self.send(405, {"error": "Use GET, POST or DELETE."})
                 return True
         except ImportError as exc:
             self.send(501, {"error": f"Install ml-stack Gym dependencies: {exc}"})
             return True
-        except (KeyError, ValueError, RuntimeError, OSError) as exc:
+        except (DaemonError, KeyError, ValueError, RuntimeError, OSError) as exc:
             self.send(400, {"error": str(exc)})
             return True
-        return super().route()
+        self.send(405, {"error": "Unsupported Gym route or method."})
+        return True
 
     def _gym_events(self, manager, sid: str) -> bool:
         snapshot = manager.get(sid)
