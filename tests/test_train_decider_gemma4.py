@@ -106,3 +106,27 @@ def test_a_whole_run_on_a_gemma_base_loads_and_decides(tiny_gemma, tmp_path):
     assert len(result.losses) == 4 and (out / "lora" / "adapter_model.safetensors").is_file()
     got = PointerDecider(out, device="cpu").decide("Is the number even?", "the number is 4", OPTS)
     assert sum(got.scores.values()) == pytest.approx(1.0) and got.choice in ("yes", "no")
+
+
+def test_the_net_scores_each_option_against_the_answer_position_with_a_padded_batch(tiny_gemma):
+    torch = pytest.importorskip("torch")
+    from transformers import AutoTokenizer
+
+    from ml_stack.decide.pointer import build_head, load_torso
+    from ml_stack.train.decider import build_net, collate, encode
+    torso = load_torso(tiny_gemma, None, "float32", "cpu")
+    tok = AutoTokenizer.from_pretrained(tiny_gemma, local_files_only=True)
+    head = build_head(torch, 32, 16)
+    net = build_net(torch, torso, head).eval()
+    cases = [tiny_cases(2)[0], tiny_cases(2)[1].__class__(
+        "Is the number even?", "the number is 1000 and a few more words to pad the batch out",
+        OPTS, "no")]
+    rows = [encode(tok, c, [0, 1], 4096) for c in cases]
+    assert len(rows[0]["ids"]) != len(rows[1]["ids"])
+    with torch.inference_mode():
+        batched = net(collate(torch, rows, [0, 0], "cpu"))
+        for i, r in enumerate(rows):
+            ids = torch.tensor([r["ids"]])
+            hidden = _hidden(torso, ids, torch.ones_like(ids))[0]
+            want = head(hidden[-1:], hidden[r["spots"]].unsqueeze(0))[0]
+            assert torch.allclose(batched[i], want, atol=1e-4)
