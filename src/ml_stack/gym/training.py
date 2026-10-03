@@ -28,6 +28,9 @@ def train(environment, config=None, timesteps=2048, seed=0, checkpoint=None):
 
     if timesteps < 1:
         raise ValueError("Training timesteps must be positive")
+    config = dict(config or {})
+    if environment == "car":
+        config.setdefault("steering_magnitude", .35)
     path = artifact_root() / ("training-" + uuid.uuid4().hex)
     path.mkdir(parents=True)
     env = make_environment(environment, config)
