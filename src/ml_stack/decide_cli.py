@@ -9,24 +9,27 @@ calibrate it, and compare backends.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
 from argparse import Namespace
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
-from ml_stack.decide import registry, router
+from ml_stack.decide import jevbench, registry, router
 from ml_stack.decide.calibrate import Calibration, fit
 from ml_stack.decide.cases import Case, fingerprint, read_cases, write_cases
 from ml_stack.decide.eval import Report, evaluate, score
 from ml_stack.decide.fetch import locate
 from ml_stack.decide.guards import guard_cases
 from ml_stack.decide.pins import STRANDS_V19
-from ml_stack.decide.types import DecideError, Option, options_of
+from ml_stack.decide.types import BackendUnavailable, DecideError, Decision, Option, options_of
 from ml_stack.files import write_json
 from ml_stack.log import say, warn
+from ml_stack.serve import broker_wire
 from ml_stack.train.decider_data import Plan, guard_cases_from_tools
 from ml_stack.train.holdout import by_group
 
@@ -159,6 +162,59 @@ def _bench(args: Namespace) -> int:
     return 0
 
 
+def _jevbench(args: Namespace) -> int:
+    if args.fetch:
+        for part in jevbench.PARTS:
+            say(f"{part.path}  {jevbench.locate(part, download=True)}  sha256 {part.sha256[:16]}")
+        say(f"{jevbench.REPO} at {jevbench.COMMIT}")
+        return 0
+    if not args.yes:
+        say("nothing run: this uses the GPU for the model-backed backends; add --yes")
+        return 0
+    cases = jevbench.load(args.tier)[:args.limit or None]
+    say(f"{len(cases)} JevBench public items ({jevbench.REPO} at {jevbench.COMMIT[:12]})")
+    results: dict[str, Any] = {"source": {"repo": jevbench.REPO, "commit": jevbench.COMMIT,
+                                          "data_hash": fingerprint(cases)}, "runs": {}}
+    for name in args.backend or ["rules"]:
+        try:
+            with _jevbench_decider(name, args) as decide:
+                outcomes = jevbench.run(decide, cases)
+        except BackendUnavailable as exc:
+            warn(f"{name}: skipped, {exc}")
+            continue
+        summary = jevbench.summarize(outcomes)
+        for why in sorted({o.error for o in outcomes if o.error})[:3]:
+            warn(f"{name}: an item failed: {why}")
+        say(jevbench.table(f"{name}:{next((o.decision.model for o in outcomes if o.decision), '')}",
+                           summary))
+        results["runs"][name] = summary
+    if args.out:
+        write_json(Path(args.out), results)
+    return 0
+
+
+@contextlib.contextmanager
+def _jevbench_decider(name: str, args: Namespace) -> Iterator[Callable[[Case], Decision]]:
+    """A function that answers one case, holding a Broker lease while a served model is used."""
+    if name == "rules":
+        yield lambda c: jevbench.first_option_rules(c).decide(c.question, c.state, c.options)
+    elif name == "pointer":
+        decider = router.build("pointer", router.Config(backend="pointer"))
+        yield lambda c: decider.decide(c.question, c.state, c.options)
+    elif name == "logprob":
+        if not args.gguf:
+            raise BackendUnavailable("logprob needs --gguf MODEL.gguf, served through the Broker")
+        grant = broker_wire.lease("jevbench", [args.gguf], spec={"context": args.context},
+                                  timeout=1800.0)
+        try:
+            decider = router.build("logprob", router.Config(backend="logprob", url=grant.base_url))
+            yield lambda c: decider.decide(c.question, c.state, c.options)
+        finally:
+            broker_wire.release(grant.lease)
+    else:
+        raise BackendUnavailable(f"jevbench runs rules, pointer or logprob, not {name!r}")
+
+
 def _export(args: Namespace) -> int:
     say(f"wrote {write_cases(args.out, guard_cases())} cases to {args.out}")
     return 0
@@ -251,6 +307,19 @@ def calibrate_cmd(args: Namespace) -> int:
 def bench_cmd(args: Namespace) -> int:
     """Compare backends."""
     return _guarded(_bench, args)
+
+
+@COMMANDS.command("jevbench", help="score backends on JevBench's public items (opt-in)", options=[
+    flag("--fetch", action="store_true", help="download the pinned public files, nothing else"),
+    option("yes"), flag("--backend", action="append", default=None,
+                        help="rules, pointer or logprob; repeat (default: rules)"),
+    flag("--gguf", default="", help="the model logprob serves, leased through the Broker"),
+    flag("--context", type=int, default=12288, help="context of the leased server"),
+    flag("--tier", action="append", default=[], choices=("easy", "original", "hard")),
+    flag("--limit", type=int, default=None), option("out")])
+def jevbench_cmd(args: Namespace) -> int:
+    """Score backends on JevBench's public items."""
+    return _guarded(_jevbench, args)
 
 
 @COMMANDS.command("export-cases", help="write the built-in guard cases as JSONL",
