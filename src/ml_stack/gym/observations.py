@@ -15,6 +15,8 @@ def decision_state(name, env, observation):
                           "position_m": json_value(vehicle.position)},
                      sensors={"lidar_normalized": json_value(sensor.cloud_points),
                               "lidar_range_m": vehicle.config["lidar"]["distance"]})
+        if hasattr(native, "stop_checkpoint"):
+            state["stop_rule"] = native.stop_checkpoint.state(vehicle.navigation.travelled_length)
     elif name == "warehouse":
         state.update(robots=[{"x": int(agent.x), "y": int(agent.y),
                               "direction": agent.dir.name,
