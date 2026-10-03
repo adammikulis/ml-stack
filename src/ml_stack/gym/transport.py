@@ -9,7 +9,7 @@ import sys
 import threading
 from pathlib import Path
 
-from ml_stack.platform import start_process
+from ml_stack.platform import start_process, terminate_process_group
 
 
 def interpreter():
@@ -77,4 +77,4 @@ class Process:
             return
 
     def terminate(self):
-        self.handle.terminate()
+        terminate_process_group(self.handle)
