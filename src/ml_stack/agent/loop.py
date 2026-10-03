@@ -33,6 +33,7 @@ from ml_stack.agent.events import (
 from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
 from ml_stack.agent.watched import Watch, resolve
+from ml_stack.client import thinking
 from ml_stack.client.tokens import estimate_tokens
 from ml_stack.guard import Unguarded, default, native, start
 from ml_stack.http import ServerError
@@ -252,6 +253,7 @@ class Agent:
         def work() -> Any:
             try:
                 return self.client.chat(list(messages), tools=schemas or None,
+                                        think=thinking.resolve(thinking.AGENT),
                                         on_delta=on_delta)
             except Cancelled:
                 return None

@@ -12,7 +12,7 @@ from ml_stack.gym.worlds import configure_world, schema
 def test_world_descriptors_expose_native_modes_without_universal_physics():
     assert schema('warehouse')['fields']['layout']['format'].startswith('RWARE ASCII')
     assert schema('traffic-driving')['modes'] == ['procedural', 'manual']
-    assert schema('car') is None
+    assert schema('car')['fields']['map_file']['format'] == 'MetaDrive PGMap metadata JSON'
 
 
 def test_warehouse_ascii_validation():
@@ -99,3 +99,63 @@ def test_native_sumo_generated_seed_and_manual_files(tmp_path, monkeypatch):
         env.close()
     with pytest.raises(ValueError, match='relative paths'):
         configure_world('traffic', {'world': {'mode': 'manual', 'net_file': '../escape', 'route_file': 'manual.rou.xml'}})
+
+
+@pytest.mark.slow
+def test_warehouse_task_resets_preserve_native_robots_and_clock():
+    pytest.importorskip('rware')
+    from ml_stack.gym.world_warehouse import make_warehouse_world
+
+    env = make_warehouse_world({'task_horizon': 2, 'max_steps': 2, 'world': {'seed': 11}})
+    try:
+        observation, info = env.reset(seed=100)
+        actors = tuple(map(id, env.native.agents))
+        for index in range(6):
+            observation, _, terminated, truncated, info = env.step([0, 0])
+            assert not terminated
+            assert info['world_steps'] == index + 1
+            if truncated:
+                current = observation.copy()
+                observation, reset = env.reset(seed=200 + index)
+                assert (observation == current).all()
+                assert reset['world_reset_count'] == 1
+                assert reset['world_steps'] == index + 1
+        assert actors == tuple(map(id, env.native.agents))
+        assert env.native.max_steps is None
+    finally:
+        env.close()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize('combined', [False, True])
+def test_traffic_task_resets_preserve_native_connection_and_replenish_demand(combined):
+    pytest.importorskip('sumo')
+    pytest.importorskip('sumo_rl')
+    if combined:
+        pytest.importorskip('metadrive')
+    from ml_stack.gym.world_traffic import make_traffic_world
+
+    env = make_traffic_world({'task_horizon': 2, 'num_seconds': 5,
+                              'world': {'seed': 4, 'demand_seconds': 60}}, combined=combined)
+    try:
+        observation, info = env.reset(seed=100)
+        connection = env.native.sumo
+        physics = getattr(env.native, 'physics', None)
+        for index in range(16):
+            observation, _, terminated, truncated, info = env.step(0)
+            assert not terminated
+            assert env.observation_space.contains(observation)
+            assert info['world_time'] == (index + 1) * 5
+            if truncated:
+                observation, reset = env.reset(seed=200 + index)
+                assert reset['world_reset_count'] == 1
+                assert env.native.sumo is connection
+                assert getattr(env.native, 'physics', None) is physics
+        assert info['continuing_demand_inserted'] > 0
+        assert any(name.startswith('studio-world-vehicle-') for name in info['active_actor_ids'])
+        assert info['world_time'] > 60
+        if combined:
+            assert env.native.physics.time == info['world_time']
+            assert set(env.native.physics.actors) == set(info['active_actor_ids'])
+    finally:
+        env.close()

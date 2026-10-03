@@ -130,6 +130,63 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server started with
 the wrong settings hands back a lease that cannot do what was asked of it.
 
+### IQ quantisations on Apple silicon
+
+A lease for an IQ-family GGUF (IQ1_S, IQ1_M, IQ2_XXS/XS/S/M, IQ3_XXS/XS/S/M, IQ4_NL, IQ4_XS)
+on a Mac with an arm64 CPU goes ahead with one warning per process: it MAY be slower and less
+accurate than a K-quant of the same model on Metal, the evidence is thin, and the K-quant
+builds of the same model found on disk are listed. Each such lease also emits a sentinel event
+`serve.iq_warning` (model, quant, who) and marks its lease record, and `ml-stack-serve status`
+shows a `WARNING` line for the server while it runs. Linux, Windows, CPU-only leases
+(`n_gpu_layers` 0) and engines other than llama.cpp are never affected.
+
+`ML_STACK_IQ=block|warn|off` (default `warn`) and `ml-stack-serve up --iq block|warn|off`
+set the mode, and `iq=` on `ServerManager.lease` and `serve` does the same for one lease.
+`block` refuses with `BlockedQuant` (`up` exits 3); `off` gives no warning and records nothing.
+
+**Evidence, and its limits.** Qwen3.8-Flash-Next answering `plain` with thinking on and no
+draft head on Metal (`docs/architectures/qwen4exp.md`, `docs/report-2026-09-23.md`):
+`UD-IQ4_XS` took 70.1 s a question at 54% F1 over ten questions, `UD-Q4_K_XL` 43.7 s at 64%
+over nine. That is one model, one machine, one run each. The same report points the other
+way or shows the noise: the identical `UD-Q4_K_XL` asking also ran 27.6 s at 81% F1 over nine
+questions; `UD-IQ4_XS` `plain` thinking on over 34 questions ran 40.0 s at 59% (65.1 s at 55%
+in another run); `UD-IQ4_XS` `plain+tight` with thinking off scored 85% F1 at 36.6 s over nine
+questions, the best F1 the K-quant reached too. Run-to-run spread on one configuration is
+larger than the gap in the pair. The IQ4_XS build is 87.6G against 104.0G. No other
+IQ against K-quant speed measurement exists in `docs/model-ranking.md`, `docs/fit.md` or the
+bench store code. `docs/experiments/iq-vs-kquant-metal.md` is the pre-registered protocol
+that settles it.
+
+**How a file is judged IQ** (`ml_stack.serve.quant_guard.iq_quant`, header only): its
+`general.file_type` is an IQ type, or IQ tensors hold more than half of the weight bytes over
+all shards. One IQ tensor does not make a file IQ: an unsloth `UD-Q4_K_XL` carries an IQ4_NL
+lookup table of about a quarter of its bytes. The file name decides only for a model that is
+not a file here yet (`hf:` references). The check runs in `ServerManager._start_server`, which
+every lease passes (`lease`, `serve`, `up`, the Broker's `start` and ask paths, bench, fleet,
+ingest, the guard judge).
+
+**The mode is the person's.** No tool, request or model can change it. `serve_up` (MCP and
+chat) rejects an `--iq` word in `extra`, reports a strict refusal instead of starting a
+process, and `up` takes no abbreviation of its flags. The Broker wire drops an `iq` option, so
+a broker uses its own `ML_STACK_IQ`; a client's strict mode is applied in the client before the
+call, and a client's `off` or `warn` never reaches a broker. A spec or ask carrying `iq` is
+refused. `suggest`, `recommend` and the chat default rank an IQ build after an otherwise equal
+build on Apple silicon (a tie-break, never an exclusion) and its note says it may be slower on
+Metal.
+
+### Thinking, per use
+
+`ml_stack.client.thinking` decides whether a request asks the model to think, from the
+person's `ML_STACK_THINK=off|on|auto` (default `auto`). Decisions (the decide, judge and guard
+logprob paths) never think. Agent turns and short answers think only when the person sets
+`on`; under `auto` a prompt thinks only when it contains a phrase that asks for reasoning
+("think step by step", "show your reasoning") or the use is `reasoning`. The agent loop and
+the logprob decider send the family's template flag (`enable_thinking` for Qwen and Gemma,
+`reasoning_effort` for gpt-oss) accordingly, and `ml-stack-serve up` prints the policy.
+`ml-stack-chat` sends `think=False` on every turn itself; a `/think` command and `--think`
+there, and the policy's header line, are not wired (chat.py was out of bounds for this
+change). A bench run's thinking is recorded as its thinking column (`--reasoning-budget`).
+
 ### The settings a model scored best with, for one kind of work
 
 The `Serving` above was typed out by hand, and every value in it came from a bench run

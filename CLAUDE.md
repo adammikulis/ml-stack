@@ -347,7 +347,7 @@ it before starting a run that will take hours.
 
 ## Driving a model on this machine
 
-Never point `ml-stack-claude`, `ml-stack-agent` or `ml-stack-do` at a checkout you are editing.
+Never point `ml-stack-claude`, `ml-stack-agent` or `ml-stack-chat` at a checkout you are editing.
 An agent with file access edits the files it finds, and a small model will happily rewrite
 `CLAUDE.md` because it was asked to say hello. Drive them in a scratch directory.
 

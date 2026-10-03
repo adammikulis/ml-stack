@@ -11,6 +11,7 @@ from ml_stack.contracts import recipes
 
 from .files import safe_relpath
 from .jobs import DaemonError
+from .request_fields import field, object_body
 
 PURPOSES = {
     "graph": "Serve the graph exploration workspace.", "store": "Inspect and manage graph stores.",
@@ -76,9 +77,9 @@ class WorkspaceRoutes:
                             "truncated": len(raw) > 1_000_000})
             return True
         if self.path == "/ui/workspace/file" and self.method == "POST":
-            req = self.body()
-            path = safe_relpath(root, str(req.get("path") or ""))
-            content = str(req.get("text") or "")
+            req = object_body(self)
+            path = safe_relpath(root, field(req, "path", str, ""))
+            content = field(req, "text", str, "")
             if len(content.encode()) > 10_000_000:
                 raise ValueError("Dataset upload limit is 10 MB; use ml-stack-peers for larger files.")
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +104,8 @@ class WorkspaceRoutes:
                 return True
             if self.method == "GET":
                 return self._job_detail(runner, job)
-        return super().route()
+        self.send(405, {"error": "Unsupported workspace route or method."})
+        return True
 
     def _files(self, root: Path) -> bool:
         rel = self.asked("path")
@@ -120,8 +122,8 @@ class WorkspaceRoutes:
         return True
 
     def _submit(self, root: Path) -> bool:
-        req = self.body()
-        command = str(req.get("command") or "")
+        req = object_body(self)
+        command = field(req, "command", str, "")
         if command not in {entry["name"] for entry in commands()}:
             raise ValueError("Choose an installed ml-stack command.")
         args = req.get("args", [])
@@ -130,12 +132,13 @@ class WorkspaceRoutes:
         if "--detach" in args:
             raise ValueError("Workspace jobs are monitored directly; remove --detach.")
         argv = [command, *args]
-        if req.get("preview"):
+        metadata = field(req, "metadata", dict, {})
+        name = field(req, "name", str, command)
+        if field(req, "preview", bool, False):
             self.send(200, {"argv": argv, "command": shlex.join(argv)})
             return True
         root.mkdir(parents=True, exist_ok=True)
-        job = self.ui.runner.submit(str(req.get("name") or command), argv, str(root))
-        metadata = req.get("metadata", {})
+        job = self.ui.runner.submit(name, argv, str(root))
         if isinstance(metadata, dict):
             (self.ui.runner.job_dir(job.id) / "workspace.json").write_text(json.dumps(metadata))
         self.send(202, job.public())

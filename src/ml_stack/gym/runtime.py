@@ -24,9 +24,20 @@ class SessionManager:
 
     def create(self, environment, config=None, controller="manual", seed=0):
         require(environment)
-        if controller not in {"manual", "random", "decider", "ppo"}:
-            raise ValueError("Choose manual, random, decider, or PPO at session creation")
-        if controller == "ppo" and not (config or {}).get("checkpoint"):
+        cfg = config or {}
+        world = cfg.get("simulation_mode") == "world"
+        if cfg.get("simulation_mode", "episode") not in {"world", "episode"}:
+            raise ValueError("Simulation mode must be world or episode")
+        if cfg.get("learning_mode", "frozen") not in {"online", "frozen"}:
+            raise ValueError("Learning mode must be online or frozen")
+        online = cfg.get("learning_mode", "frozen") == "online"
+        if controller not in {"manual", "random", "decider", "ppo", "native-idm"}:
+            raise ValueError("Unknown simulation controller")
+        if controller == "native-idm" and not (world and environment == "car"):
+            raise ValueError("Native IDM is available in the persistent car world")
+        if online and not (world and controller == "ppo"):
+            raise ValueError("Online learning requires PPO in a persistent world")
+        if controller == "ppo" and not online and not cfg.get("checkpoint"):
             raise ValueError("PPO controller requires a checkpoint in the session configuration")
         identifier = uuid.uuid4().hex
         updates = queue.Queue(maxsize=2)
@@ -59,7 +70,7 @@ class SessionManager:
             return [self.get(identifier) for identifier in self.sessions]
 
     def control(self, identifier, command, payload=None):
-        if command not in {"play", "pause", "step", "reset", "speed", "action", "controller"}:
+        if command not in {"play", "pause", "step", "reset", "speed", "action", "controller", "learning", "agent"}:
             raise ValueError(f"Unknown simulation command: {command}")
         with self.lock:
             session = self.sessions[identifier]

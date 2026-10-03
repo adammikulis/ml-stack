@@ -78,6 +78,8 @@ class _Server(socketserver.ThreadingTCPServer):
         if body.get("token") != self.token:
             return {"ok": False, "error": "wrong broker token"}
         op, pid = body.get("op"), int(body.get("pid") or 0)
+        if isinstance(body.get("options"), dict):
+            body["options"].pop("iq", None)
         if op == "ping":
             return {"ok": True, "pid": os.getpid()}
         if op == "lease":

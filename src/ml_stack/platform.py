@@ -15,6 +15,7 @@ from typing import Any
 
 __all__ = [
     "detached_kwargs",
+    "is_apple_silicon",
     "is_windows",
     "on_quit",
     "private_file",
@@ -33,6 +34,11 @@ CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", 1)
 def is_windows() -> bool:
     """Read when asked, never cached, so a test can say otherwise."""
     return _platform.system() == "Windows"
+
+
+def is_apple_silicon() -> bool:
+    """Read when asked: a Mac with an arm64 CPU, the machines llama.cpp's Metal backend runs on."""
+    return _platform.system() == "Darwin" and _platform.machine() == "arm64"
 
 
 def applescript_quote(text: str) -> str:
