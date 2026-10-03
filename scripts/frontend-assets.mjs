@@ -15,6 +15,8 @@ const files = [
   ['three', 'build/three.module.js', 'three.module.js'],
   ['three', 'build/three.core.js', 'three.core.js'],
   ['three', 'examples/jsm/controls/OrbitControls.js', 'OrbitControls.js'],
+  ['three', 'examples/jsm/environments/RoomEnvironment.js', 'RoomEnvironment.js'],
+  ['three', 'examples/jsm/geometries/RoundedBoxGeometry.js', 'RoundedBoxGeometry.js'],
 ];
 await mkdir(assets, { recursive: true });
 for (const [name, source, target] of files) {
