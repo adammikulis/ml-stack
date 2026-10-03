@@ -44,7 +44,15 @@ ml-stack-traind --root ~/.local/share/ml-stack-studio --gym-python /path/to/venv
 ```
 
 The launcher remembers that interpreter and keeps completed setup under the selected
-root. On later launches, use the same `--root` and omit `--gym-python`. An explicit
+root. On later launches, use the same `--root` and omit `--gym-python`:
+
+```sh
+ml-stack-traind --root ~/.local/share/ml-stack-studio
+```
+
+Changing the root selects a different workspace, with its own settings, setup state, files
+and conversations. Reusing the root preserves completed setup and the interpreter selection.
+An explicit
 `ML_STACK_GYM_PYTHON` overrides the saved selection; otherwise the saved interpreter
 takes precedence over the app's managed environment. A missing saved interpreter
 reports an error and asks you to select its new location.
@@ -61,26 +69,54 @@ reports an error and asks you to select its new location.
 Each simulator keeps its native task behavior. Gymnasium provides reset/step and space
 interfaces; it does not replace the simulator. The combined traffic environment synchronizes
 vehicle identities, coordinates, and clocks and feeds physical positions back to SUMO.
-Its viewport reports backend ownership and synchronization telemetry.
+Its viewport reports backend ownership and synchronization telemetry. The combined task
+uses SUMO's packaged single-intersection road network, rather than the car's winding-road map.
 The combined example supports one signalized intersection. Native MetaDrive IDM
 controllers drive its vehicles; the learned policy controls SUMO-RL signal phases.
 
-The car offers a native offscreen 3D camera and real lidar/lane sensor visualization. The
+The car opens in the Three.js sensor scene, with a selectable native offscreen 3D camera
+and native lidar/lane sensor visualization. Both viewports display simulator state; the
 camera is a preview: numeric sensor observations are the policy input. Warehouse and
 traffic views render authoritative state snapshots with Three.js. Warehouse movement is
 discrete; visual animation does not create extra simulator steps.
+
+The sensor scene uses Three.js `MeshPhysicalMaterial` for clearcoat paint, metal and glass,
+with environment reflections, tone mapping, sunlight and shadows. Native road geometry
+supplies asphalt, shoulders and lane markings. Grass, hills and trees are visual scenery;
+they add no simulator collisions or obstacles. Stop signs and stop lines follow the native
+stop-task metadata.
+
+Use **Follow car** for a chase camera; dragging the orbit controls turns follow off, and
+checking it again resumes tracking. **Whole map** fits the scene. **Sensor rays** toggles
+lidar lines: cyan marks clear range, coral marks detected surfaces and hit markers.
+**Heading / control** shows the native heading in blue and the normalized applied steering
+vector in gold. The steering vector shows the current action, rather than a predicted path.
+The **Viewport** selector switches to the native camera; **Native camera sensor lines**
+controls its simulator lidar and road-detector overlays. **Expand scene** enters fullscreen.
 
 Car seeds select native MetaDrive scenarios. Defaults cover seeds `0` through `19999`;
 configure `start_seed` and `num_scenarios` to change this range. Out-of-range seeds are
 rejected. The default car horizon is 1000 steps. Warehouse and traffic retain their finite
 native episode limits, configurable through environment settings.
+<<<<<<< HEAD
 Set car `map` to `SCSCS` for native straight/curve segments and `traffic_density` to
 `0.25` for surrounding native traffic. With `stop_signs: true`, a route checkpoint
 requires speed at or below 0.5 m/s for one second with the front bumper within three
 metres before its stop line. Compliance adds five reward points; crossing without stopping subtracts ten,
+=======
+The car form defaults to `map: "SCSCS"` for native straight/curve segments and `traffic_density: 0.25` for surrounding native traffic. With `stop_signs: true`, a route checkpoint
+requires speed at or below 0.5 m/s for one second with the front bumper between zero and
+three metres before its stop line. Compliance adds five reward points; crossing without stopping subtracts ten,
+>>>>>>> 08f496b (chore: document persistent gym launch and native sensor scene)
 once per checkpoint. The numeric policy observation adds distance, held time and
 compliance; named decision inputs and recordings also include this rule. These policies
 require checkpoints trained with the same stop-task configuration.
+
+The nine manual commands combine steering left/straight/right with brake/coast/drive.
+`steering_magnitude` defaults to `0.35` and must be greater than zero and at most one;
+the native throttle values are `-1`, `0` and `1`. Session and training manifests record
+the effective steering magnitude. PPO loading rejects a checkpoint trained with a
+different magnitude.
 `sensor_debug` controls the native camera's lidar and road detector overlays.
 The nine car actions use steering levels `-0.35`, `0`, `0.35` and braking/coasting/
 acceleration. `steering_magnitude` accepts values above zero through one; training and
@@ -92,7 +128,13 @@ network and route files. MetaDrive uses the pinned 0.4.3 source revision listed 
 
 ## Controllers and recordings
 
+Basic controls keep environment choice and common task settings visible. Additional
+native JSON and less common configuration sit in collapsed **Advanced** sections.
+
 Choose manual control, a seeded random baseline, a PPO checkpoint, or a decision model.
+Choose the controller and checkpoint first, then press **Apply controller** to change an
+existing session. Editing a checkpoint path alone does not change the running controller.
+The Live sessions selector reattaches to an active worker after a page reload.
 Pause, reset, single-step, and speed controls act on the worker. Speed sets the requested
 step rate; slow inference reduces the achieved rate. Simulation advancement waits for the
 controller decision.
