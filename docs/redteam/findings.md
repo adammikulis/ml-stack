@@ -97,3 +97,15 @@ runs the command it is given: a compromised peer runs commands on every machine 
 query-string or other-header token succeeded; 0 of 8 path-traversal forms reached a file outside the
 files root; 0 of 32 cross-session questions returned the other session's key; the slot-state endpoints
 did not contain it.
+
+## Judge hardening and the continuous evaluation (2026-10-03)
+
+- Found and fixed: JSON nested past the parser's depth raised `RecursionError` out of the judge screen; a
+  malformed `top_logprobs` entry or a NaN raised something other than `DecideError`; a first token that was
+  not a letter was accepted when 0.01% of its mass sat on letters (`MIN_MASS` 0.0001, now 0.5); a prompt
+  could be closed early with `</state>` or its full-width / zero-width spellings; prose past the 4th window
+  or the 200 000 character cap was never read yet the result passed untainted; a call over the decider's
+  size limit raised `ValueError` out of the call guard; a look-alike spelling of the `<untrusted>` fence
+  was not neutralised.
+- Open: with the real model, `json-with-prompt-in-value` passes the hardened judge (0 of 34 passed before the
+  defanging); instructions that are only two words (no sentence) are never sent to the judge.
