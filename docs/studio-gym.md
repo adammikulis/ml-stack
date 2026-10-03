@@ -98,16 +98,9 @@ Car seeds select native MetaDrive scenarios. Defaults cover seeds `0` through `1
 configure `start_seed` and `num_scenarios` to change this range. Out-of-range seeds are
 rejected. The default car horizon is 1000 steps. Warehouse and traffic retain their finite
 native episode limits, configurable through environment settings.
-<<<<<<< HEAD
-Set car `map` to `SCSCS` for native straight/curve segments and `traffic_density` to
-`0.25` for surrounding native traffic. With `stop_signs: true`, a route checkpoint
-requires speed at or below 0.5 m/s for one second with the front bumper within three
-metres before its stop line. Compliance adds five reward points; crossing without stopping subtracts ten,
-=======
 The car form defaults to `map: "SCSCS"` for native straight/curve segments and `traffic_density: 0.25` for surrounding native traffic. With `stop_signs: true`, a route checkpoint
 requires speed at or below 0.5 m/s for one second with the front bumper between zero and
 three metres before its stop line. Compliance adds five reward points; crossing without stopping subtracts ten,
->>>>>>> 08f496b (chore: document persistent gym launch and native sensor scene)
 once per checkpoint. The numeric policy observation adds distance, held time and
 compliance; named decision inputs and recordings also include this rule. These policies
 require checkpoints trained with the same stop-task configuration.
@@ -118,10 +111,6 @@ the native throttle values are `-1`, `0` and `1`. Session and training manifests
 the effective steering magnitude. PPO loading rejects a checkpoint trained with a
 different magnitude.
 `sensor_debug` controls the native camera's lidar and road detector overlays.
-The nine car actions use steering levels `-0.35`, `0`, `0.35` and braking/coasting/
-acceleration. `steering_magnitude` accepts values above zero through one; training and
-live inference must use the same steering strength. Session and training manifests
-record the effective strength.
 Session manifests record installed simulator versions and SHA256 hashes of the SUMO
 network and route files. MetaDrive uses the pinned 0.4.3 source revision listed in the
 `gym-driving` dependency; its installed package metadata records that source URL.
