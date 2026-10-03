@@ -6,7 +6,7 @@ import queue
 import sys
 import threading
 
-from ml_stack.gym.runtime import worker
+from ml_stack.gym.simulation import worker
 
 
 class Updates:
