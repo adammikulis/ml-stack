@@ -14,8 +14,11 @@ from ml_stack.interventions import Confirm
 from ml_stack.memory import recall as recalling
 from ml_stack.testing import injection_corpus as corpus
 from ml_stack.testing.fakes import reply_from
+from tests import memory_keys
 from tests.test_chat import registry
 from tests.test_memory import inject
+
+ring = memory_keys.ring
 
 pytestmark = pytest.mark.redteam
 
@@ -46,7 +49,7 @@ class Gullible:
 
 @pytest.mark.parametrize("text", TEXTS)
 def test_a_poisoned_stored_fact_changes_no_permission_and_stores_nothing(tmp_path, text):
-    store = memory.Store(tmp_path / "m" / "facts.json")
+    store = memory.Store(tmp_path / "m" / "graph.enc")
     inject(store, text)
     before = store.path.read_bytes()
     ran: list = []
@@ -71,8 +74,34 @@ def test_a_poisoned_stored_fact_changes_no_permission_and_stores_nothing(tmp_pat
 
 @pytest.mark.parametrize("text", TEXTS)
 def test_recall_of_a_poisoned_fact_is_one_fenced_block(tmp_path, text):
-    store = memory.Store(tmp_path / "m" / "facts.json")
+    store = memory.Store(tmp_path / "m" / "graph.enc")
     inject(store, text)
     block = recalling.render(store, store.facts())
     assert block.startswith("<untrusted source='memory'>") and block.count("</untrusted>") == 1
     assert block.endswith("\n</untrusted>") and block.count("<untrusted") == 1
+
+
+@pytest.mark.parametrize("text", TEXTS)
+def test_a_poisoned_entity_name_is_refused_or_stays_inside_the_fence(tmp_path, text):
+    store = memory.Store(tmp_path / "m" / "graph.enc")
+    try:
+        store.add("serves 64 slots", "result", entities=[f"topic:{text[:80]}", "model:Qwen3.8-Flash-Next"])
+    except memory.Refused:
+        assert store.facts() == []
+        return
+    block = recalling.render(store, store.facts())
+    assert block.startswith("<untrusted source='memory'>") and block.count("</untrusted>") == 1
+    assert block.endswith("\n</untrusted>") and block.count("<untrusted") == 1
+    body = block.splitlines()[2:-1]
+    assert len(body) == 1 and body[0].startswith("- [m0001] (")
+
+
+@pytest.mark.parametrize("text", TEXTS)
+def test_a_poisoned_query_reads_nothing_it_should_not_and_changes_nothing(tmp_path, text):
+    store = memory.Store(tmp_path / "m" / "graph.enc")
+    store.add("prefers short answers", "preference")
+    inject(store, text)
+    before = store.path.read_bytes()
+    found = memory.retrieve(store, text, embed=lambda _t: [1.0, 0.0])
+    assert recalling.render(store, found).count("</untrusted>") == 1
+    assert store.path.read_bytes() == before and len(store.facts()) == 2

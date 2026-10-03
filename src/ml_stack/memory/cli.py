@@ -12,7 +12,8 @@ from typing import Any
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.memory.facts import KINDS, SOURCES, Fact, Refused
-from ml_stack.memory.store import Store, Tampered
+from ml_stack.memory.store import FACT_LINKS, Store, Tampered
+from ml_stack.memory.vault import KeyUnavailable
 from ml_stack.sentinel.human import HumanRequired, require_person
 
 __all__ = ["COMMAND"]
@@ -25,7 +26,8 @@ def _line(store: Store, fact: Fact) -> str:
     why = store.stale(fact)
     day = time.strftime("%Y-%m-%d", time.gmtime(fact.last_confirmed))
     return (f"{fact.id}  {fact.kind:<10} {fact.source:<14} {day}  x{fact.confirm_count}"
-            f"{'  RE-CHECK' if why else ''}  {fact.text}")
+            f"{'  RE-CHECK' if why else ''}{'  ' + fact.state.upper() if fact.state != 'current' else ''}"
+            f"  {fact.text}")
 
 
 def _guarded(fn: Handler, *, writes: bool) -> Callable[[argparse.Namespace], int]:
@@ -39,8 +41,12 @@ def _guarded(fn: Handler, *, writes: bool) -> Callable[[argparse.Namespace], int
             warn(str(exc))
             return DENIED
         try:
-            return fn(args, Store())
-        except (Refused, Tampered, KeyError) as exc:
+            store = Store()
+            try:
+                return fn(args, store)
+            finally:
+                store.close()
+        except (Refused, Tampered, KeyUnavailable, KeyError, ValueError) as exc:
             warn(str(exc.args[0]) if isinstance(exc, KeyError) else str(exc))
             return 2
 
@@ -69,7 +75,9 @@ def _show(args: argparse.Namespace, store: Store) -> int:
 
 
 def _add(args: argparse.Namespace, store: Store) -> int:
-    fact = store.add(args.text, args.kind, args.source, model=args.model, person=True)
+    models = [f"model:{args.model}"] if args.model else []
+    fact = store.add(args.text, args.kind, args.source, entities=[*models, *(args.entity or ())],
+                     person=True)
     say(f"remembered {fact.id}")
     return 0
 
@@ -98,6 +106,23 @@ def _confirm(args: argparse.Namespace, store: Store) -> int:
     return 0
 
 
+def _edit(args: argparse.Namespace, store: Store) -> int:
+    say(f"edited {store.edit(args.id, args.text).id}")
+    return 0
+
+
+def _link(args: argparse.Namespace, store: Store) -> int:
+    store.link(args.id, args.rel, args.other, remove=args.cmd == "unlink")
+    say(f"{args.cmd} {args.id} {args.rel} {args.other}")
+    return 0
+
+
+def _rekey(args: argparse.Namespace, store: Store) -> int:
+    store.rekey()
+    say("re-encrypted under a new key; the old key is gone")
+    return 0
+
+
 def _export(args: argparse.Namespace, store: Store) -> int:
     say(json.dumps(store.export(), indent=2, sort_keys=True))
     return 0
@@ -111,23 +136,33 @@ def _stats(args: argparse.Namespace, store: Store) -> int:
 
 
 COMMAND = Group("ml-stack-memory",
-                "What the chat agent remembers across sessions: list, show, add, confirm and "
-                "forget facts, export them, and see the store's size and integrity. For a person "
-                "at a terminal; an agent's process is refused.")
+                "What the chat agent remembers across sessions, as an encrypted graph of facts "
+                "and the models, builds, settings and tasks they are about: list, show, add, edit, "
+                "confirm, link and forget facts, rekey the store, export it, and see its size and "
+                "integrity. For a person at a terminal; an agent's process is refused.")
 COMMAND.add("list", _guarded(_list, writes=False), help="every fact", options=[option("json")])
 COMMAND.add("show", _guarded(_show, writes=False), help="one fact in full",
             options=[flag("id")])
 COMMAND.add("add", _guarded(_add, writes=True), help="remember a fact you type",
             options=[flag("text"), flag("--kind", choices=KINDS, default="note"),
                      flag("--source", choices=SOURCES, default="user-said"),
-                     flag("--model", default="", help="the model it was learned with")])
+                     flag("--model", default="", help="the model it was learned with"),
+                     flag("--entity", action="append", help="what it is about, kind:name "
+                          "(model, build, setting, task, topic); repeat for several")])
 COMMAND.add("confirm", _guarded(_confirm, writes=True),
             help="mark a fact as checked under the build in use now", options=[flag("id")])
 COMMAND.add("forget", _guarded(_forget, writes=True), help="delete one fact, or all",
             options=[flag("id", nargs="?", default=""),
                      flag("--all", action="store_true", help="delete every fact and start a "
                           "new store"), option("yes")])
-COMMAND.add("export", _guarded(_export, writes=False), help="every fact as JSON")
+COMMAND.add("edit", _guarded(_edit, writes=True), help="change the text of a fact",
+            options=[flag("id"), flag("text")])
+for _name, _help in (("link", "join two facts"), ("unlink", "remove a link between two facts")):
+    COMMAND.add(_name, _guarded(_link, writes=True), help=_help,
+                options=[flag("id"), flag("rel", choices=FACT_LINKS), flag("other")])
+COMMAND.add("rekey", _guarded(_rekey, writes=True),
+            help="re-encrypt the store under a new key and drop the old one")
+COMMAND.add("export", _guarded(_export, writes=False), help="every fact as plain JSON on stdout: the only way text leaves the encrypted store")
 COMMAND.add("stats", _guarded(_stats, writes=False), help="size, limits, staleness, integrity",
             options=[option("json")])
 main = COMMAND.run
