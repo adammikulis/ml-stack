@@ -1,9 +1,4 @@
-"""The ``/ui/*`` route table: one mixin per screen, composed into `Router`.
-
-`Base` holds the request and how to answer it; each mixin answers the paths of one screen
-and hands anything else on. `Router.run` puts them in order: the page and its files, then
-setup and session, then everything a session is needed for.
-"""
+"""Authenticated UI routes composed from screen mixins."""
 
 from __future__ import annotations
 
@@ -23,9 +18,11 @@ from .discovery import (
     in_cluster,
     load_cluster_key,
 )
+from .gym_routes import GymRoutes
 from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .session import parse_cookie
+from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"
 
@@ -852,7 +849,8 @@ class JobRoutes:
 
 
 class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
-             ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
+             ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
+             WorkspaceRoutes, GymRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:
