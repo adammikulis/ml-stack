@@ -79,3 +79,9 @@ support seeded native RWARE lattice parameters and manual rectangular ASCII layo
 The per-example `world` configuration keeps native field names; world artifact manifests
 record resolved definitions, seeds, native versions and output hashes. World construction
 and simulation lifetime are separate controls. See [native world configuration](studio-gym.md#native-procedural-and-manual-worlds).
+
+Persistent warehouse and traffic worlds keep their native instance across learning-task
+boundaries. SUMO continues its clock and inserts continued demand through native TraCI;
+warehouse robots retain their identities and request queue. `task_horizon` limits learning
+steps, while `world_demand_period` sets continuing traffic demand in seconds. Construction,
+world lifetime and model update policy are separate settings.
