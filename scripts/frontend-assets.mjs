@@ -14,10 +14,12 @@ const files = [
   ['dompurify', 'dist/purify.min.js', 'purify.min.js'],
   ['three', 'build/three.module.js', 'three.module.js'],
   ['three', 'build/three.core.js', 'three.core.js'],
+  ['three', 'examples/jsm/controls/OrbitControls.js', 'OrbitControls.js'],
 ];
 await mkdir(assets, { recursive: true });
 for (const [name, source, target] of files) {
-  const text = await readFile(resolve(modules, name, source), 'utf8');
+  const text = (await readFile(resolve(modules, name, source), 'utf8'))
+    .replaceAll("from 'three'", "from './three.module.js'");
   const { code } = await transform(text, {
     minify: true, legalComments: 'inline', target: 'es2022',
   });
