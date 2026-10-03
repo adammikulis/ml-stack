@@ -1,18 +1,13 @@
 """The only module that talks to the operating system's keystore.
 
-One item per OS user (service ``ml-stack``) holds a random 32-byte master key. Every purpose
-(the memory vault, the fleet signing key, wrapped credentials) gets its own subkey: HKDF-SHA256
-over the master key, with the purpose label, the owner and an optional context in the
-``info``. `wrap` and `unwrap` seal bytes under a subkey with the purpose and owner as AAD.
+One item per OS user holds a random 32-byte master key. Each purpose (memory vault, fleet
+signing key, wrapped credentials) gets a subkey: HKDF-SHA256 over the master with the purpose,
+owner and context in ``info``; `wrap` and `unwrap` bind purpose and owner as AAD.
 
-Nothing here touches the keystore at import, construction, `status` or `pending_notice`. The
-master is read at most once per process and kept in memory until `lock`. Every backend call
-passes through one gate: a denial latch (process, plus a cooldown shared through a state
-file), an hourly ceiling shared through a state file, and a cross-process lock so processes
-that start together produce one prompt. A background process (no terminal, no desktop
-session, or ``ML_STACK_NONINTERACTIVE``) never creates the master and reads it only once a
-person has run ``ml-stack-security unlock``. Each backend call is a sentinel event with the
-purpose and the outcome, never a value.
+Nothing touches the keystore at import, construction or `status`. The master is read once per
+process. Every backend call passes a gate: denial latch, hourly ceiling, cross-process lock. A
+background process never creates the master and reads it only after ``ml-stack-security
+unlock``. Each backend call is a sentinel event (purpose, outcome), never a value.
 """
 
 from __future__ import annotations
@@ -39,7 +34,7 @@ from ml_stack.sentinel.events import Event, Severity
 
 __all__ = ["COOLDOWN_S", "ENV_NONINTERACTIVE", "NOTICE", "RATE_CEILING", "RATE_WINDOW_S",
            "UNLOCK_COMMAND", "Keystore", "KeystoreBusy", "KeystoreDenied", "KeystoreError",
-           "KeystoreLocked", "KeystoreMissing", "KeystoreUnavailable", "Wires", "default", "hkdf",
+           "KeystoreLocked", "KeystoreMissing", "KeystoreUnavailable", "Wires", "aead", "default", "hkdf",
            "interactive", "os_user", "scrypt_key"]
 
 SERVICE = "ml-stack"
@@ -139,8 +134,13 @@ def interactive() -> bool:
     return _desktop()
 
 
+def _fields(*parts: bytes) -> bytes:
+    """``parts`` joined so that no two different tuples give the same bytes."""
+    return b"".join(len(part).to_bytes(4, "big") + part for part in parts)
+
+
 def _aad(purpose: str, owner: str) -> bytes:
-    return b"ml-stack/keystore/v1\0" + purpose.encode() + b"\0" + owner.encode()
+    return _fields(b"ml-stack/keystore/v1", purpose.encode(), owner.encode())
 
 
 class Wires(NamedTuple):
@@ -365,23 +365,23 @@ class Keystore:
         or owner gives a different key. ``create=False`` raises `KeystoreMissing` rather than
         making a master."""
         master = self._master(purpose, create=create)
-        info = b"\0".join((purpose.encode(), owner.encode(), context))
+        info = _fields(purpose.encode(), owner.encode(), context)
         return hkdf(master, info)
 
     def wrap(self, purpose: str, owner: str, plain: bytes) -> bytes:
         """``plain`` encrypted under the subkey of ``purpose`` and ``owner``."""
-        aead = _aead(self.subkey(purpose, owner))
+        cipher = aead(self.subkey(purpose, owner))
         nonce = os.urandom(12)
-        return _MAGIC + nonce + aead.encrypt(nonce, plain, _aad(purpose, owner))
+        return _MAGIC + nonce + cipher.encrypt(nonce, plain, _aad(purpose, owner))
 
     def unwrap(self, purpose: str, owner: str, blob: bytes) -> bytes:
         """What `wrap` sealed for the same purpose and owner, else `KeystoreError`."""
         if not blob.startswith(_MAGIC) or len(blob) < len(_MAGIC) + 12 + 16:
             raise KeystoreError("not a wrapped value")
         from cryptography.exceptions import InvalidTag
-        aead = _aead(self.subkey(purpose, owner, create=False))
+        cipher = aead(self.subkey(purpose, owner, create=False))
         try:
-            return aead.decrypt(blob[4:16], blob[16:], _aad(purpose, owner))
+            return cipher.decrypt(blob[4:16], blob[16:], _aad(purpose, owner))
         except InvalidTag:
             raise KeystoreError("the wrapped value does not open under this purpose and owner") from None
 
@@ -446,7 +446,8 @@ def _parse(held: Any) -> bytes | None:
     return key if len(key) == 32 else None
 
 
-def _aead(key: bytes) -> Any:
+def aead(key: bytes) -> Any:
+    """AES-256-GCM under ``key``."""
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     except ImportError as exc:

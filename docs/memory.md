@@ -62,8 +62,11 @@ runs hostile text through every path).
   serving several people passes each its own `Setup(user=...)` from its own authentication.
   The key account, the path and the authenticated owner all differ per user and profile, so a
   copied file or a copied key does not open another user's store.
-- **Key.** 32 random bytes in the OS keystore through `keyring` (macOS Keychain, Linux Secret
-  Service) under the service `ml-stack-memory`, never in a file. With no usable keystore the
+- **Key.** A subkey of the user's master key (`docs/keystore.md`): HKDF-SHA256 over the master
+  with the purpose `memory`, the user, profile and directory, and the file's own salt, so a new
+  salt is a new key. The master lives in the OS keystore, never in a file. A store written by
+  an older version under a random key in the service `ml-stack-memory` is re-sealed on first
+  open and that item is deleted once every file reads back. With no usable keystore the
   store fails closed: reads see an empty, `locked` store, writes raise `KeyUnavailable` naming
   the fallback. The fallback is explicit: `ML_STACK_MEMORY_KEYS=passphrase` derives the key with
   scrypt from `$ML_STACK_MEMORY_PASSPHRASE` or a prompt on a terminal. A file records which mode
@@ -72,10 +75,11 @@ runs hostile text through every path).
   back to the previous copy (`recovered`), otherwise the store reads empty and refuses writes
   (`tampered`) until `ml-stack-memory forget --all`. Replacing the file with an older sealed
   copy made under the same key is not detected.
-- **Rekey.** `ml-stack-memory rekey` (person only) makes a new key, re-seals the store and the
-  previous copy under it and drops the old key; an interruption leaves both keys in the
-  keystore until the next rekey settles it. A version 1 file imported by the migration below
-  is sealed under the same key.
+- **Rekey.** `ml-stack-memory rekey` (person only) chooses a new salt, re-seals the store and
+  the previous copy under the key it gives, and the old key is no longer used; an interruption
+  leaves a file that still opens under its own salt. Old ciphertext still opens for whoever
+  holds the master key; `ml-stack-security keystore-reset` is what ends that. A version 1 file
+  imported by the migration below is sealed under the same key.
 
 Stats and `export` are the only places text leaves the store: `export` writes plain JSON to
 stdout when the person asks.

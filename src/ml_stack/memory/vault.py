@@ -230,10 +230,9 @@ def default_keys(user: str, profile: str, directory: str, stored: tuple[Path, ..
 
 def _aead(key: bytes) -> Any:
     try:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    except ImportError as exc:
+        return keystore.aead(key)
+    except keystore.KeystoreUnavailable as exc:
         raise KeyUnavailable("the memory store needs `pip install cryptography`") from exc
-    return AESGCM(key)
 
 
 def _kid(key: bytes) -> bytes:

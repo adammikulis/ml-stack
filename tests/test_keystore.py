@@ -111,7 +111,7 @@ def test_subkeys_differ_by_purpose_owner_and_context_and_repeat_exactly(tmp_path
             ks.subkey("credentials", "a")]
     assert len(set(keys)) == len(keys) and all(len(k) == 32 for k in keys)
     assert ks.subkey("memory", "a") == keys[0]
-    assert keystore.hkdf(master_of(counting), b"memory\0a\0") == keys[0]
+    assert keystore.hkdf(master_of(counting), keystore._fields(b"memory", b"a", b"")) == keys[0]
     assert master_of(counting) not in keys
 
 
@@ -138,6 +138,13 @@ def test_a_wrapped_value_opens_only_for_its_own_purpose_and_owner(tmp_path, coun
     with pytest.raises(InvalidTag):
         AESGCM(key).decrypt(blob[4:16], blob[16:], b"")
     assert AESGCM(key).decrypt(blob[4:16], blob[16:], keystore._aad("fleet-signing", "dir-1")) == CANARY
+
+
+def test_a_label_cannot_be_split_to_collide_with_another_purpose(tmp_path, counting):
+    ks = make(tmp_path)
+    assert ks.subkey("memory", "a\0b") != ks.subkey("memory\0a", "b")
+    assert ks.subkey("memory", "a", context=b"b") != ks.subkey("memory", "ab")
+    assert keystore._aad("memory", "a\0b") != keystore._aad("memory\0a", "b")
 
 
 # -- cache --------------------------------------------------------------------------------------

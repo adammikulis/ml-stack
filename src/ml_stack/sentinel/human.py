@@ -121,7 +121,7 @@ def _flatten(value: Any) -> str:
         text = json.dumps(value, ensure_ascii=True, default=str)
     except (TypeError, ValueError):
         text = str(value)
-    text = text.replace("\\", "").replace('"', " ").replace("'", " ")
+    text = text.replace("\\", "").replace('"', " ").replace("'", " ").replace(",", " ")
     return re.sub(r"\s+", " ", text).lower()
 
 
