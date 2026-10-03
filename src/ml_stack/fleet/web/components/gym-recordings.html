@@ -1,4 +1,4 @@
-<template><div class="workspace-card" id="recordings-panel"><h2>Recorded episodes and labels</h2><p class="intro">Review authoritative observations and assign native actions before exporting decision training data. Unreviewed steps stay out of the dataset.</p></div></template>
+<template><div class="workspace-card" id="recordings-panel"><h2>Recorded trajectories and labels</h2><p class="intro">Review authoritative observations and assign native actions before exporting decision training data. Unreviewed steps stay out of the dataset.</p></div></template>
 <script>
 (function () {
   const M = window.fleetModel, W = window.workspaceModel, E = M.el;
@@ -34,7 +34,7 @@
         this.recording.replaceChildren(...result.recordings.map(row =>
           E('option', { value: row.id }, row.id + ' · ' + M.fileSize(row.bytes))));
         if (selected) this.recording.value = selected;
-        this.note.textContent = result.recordings.length ? 'Choose a recording to review.' : 'Run a session to create an episode recording.';
+        this.note.textContent = result.recordings.length ? 'Choose a recording to review.' : 'Run a session to create a trajectory recording.';
       } catch (error) { W.status(this.note, error); }
     }
 
@@ -43,7 +43,7 @@
         const result = await W.api('/ui/gym/recordings/' + this.recording.value + '?offset=' + (this.offset || 0));
         this.rows = result.steps;
         this.steps.replaceChildren(...this.rows.map((row, index) => E('option', { value: index },
-          `Episode ${row.episode_id} · step ${row.sequence} · reward ${row.reward.toFixed(3)}${row.label ? ' · reviewed' : ''}`)));
+          `Trajectory ${row.episode_id} · step ${row.sequence} · reward ${row.reward.toFixed(3)}${row.label ? ' · reviewed' : ''}`)));
         this.note.textContent = this.rows.length + ' transitions on this page.';
         if (this.rows.length) await this.show();
       } catch (error) { W.status(this.note, error); }
