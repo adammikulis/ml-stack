@@ -45,6 +45,8 @@ class Fact:
     entities: list[str] = field(default_factory=list)
     state: str = "current"
     links: list[str] = field(default_factory=list)
+    realm: str = ""
+    """``user`` or ``project`` in a merged view; empty in a store's own facts."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)

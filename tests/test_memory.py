@@ -347,12 +347,17 @@ def test_a_poisoned_fact_that_slipped_in_is_still_one_fenced_line(store):
 
 # -- the tools -------------------------------------------------------------------------
 class Person:
-    def __init__(self, *answers: bool) -> None:
-        self.answers, self.asked = list(answers), []
+    """The person: each answer is the index of the option chosen, True for the first, False or
+    nothing for no."""
 
-    def __call__(self, question: str) -> bool:
+    def __init__(self, *answers: bool | int) -> None:
+        self.answers, self.asked, self.options = list(answers), [], []
+
+    def __call__(self, question: str, options=()) -> int | None:
         self.asked.append(question)
-        return self.answers.pop(0) if self.answers else False
+        self.options.append(list(options))
+        got = self.answers.pop(0) if self.answers else False
+        return None if got is False else (0 if got is True else got)
 
 
 def by_name(offered):
@@ -364,14 +369,14 @@ def test_the_tools_are_a_read_and_an_acting_one(store):
     assert {s["function"]["name"] for s, _ in offered} == {"recall", "remember"}
     assert {"recall"} == memory.READ and {"remember"} == memory.ACTING
     schemas = {s["function"]["name"]: s["function"]["parameters"] for s, _ in offered}
-    assert schemas["remember"]["required"] == ["fact"]
-    assert {"kind", "source", "model", "entities"} <= set(schemas["remember"]["properties"])
+    assert schemas["remember"]["required"] == ["fact", "scope"]
+    assert {"kind", "source", "entities"} <= set(schemas["remember"]["properties"])
 
 
 def test_remember_shows_the_exact_text_and_stores_only_after_a_yes(store):
     person = Person(True)
     out = by_name(memory.tools(confirm=person, store=store))["remember"](
-        "prefers short\nanswers", "preference", "user-said")
+        "prefers short\nanswers", "user", "preference", "user-said")
     assert out["stored"] is True
     assert len(person.asked) == 1 and "prefers short answers" in person.asked[0]
     assert "preference" in person.asked[0] and "user-said" in person.asked[0]
@@ -379,7 +384,7 @@ def test_remember_shows_the_exact_text_and_stores_only_after_a_yes(store):
 
 
 def test_a_no_stores_nothing_and_tells_the_model_not_to_ask_again(store):
-    out = by_name(memory.tools(confirm=Person(False), store=store))["remember"]("a fact")
+    out = by_name(memory.tools(confirm=Person(False), store=store))["remember"]("a fact", "user")
     assert out["stored"] is False and "do not ask again" in out["said"]
     assert store.facts() == [] and not store.path.exists()
 
@@ -387,7 +392,7 @@ def test_a_no_stores_nothing_and_tells_the_model_not_to_ask_again(store):
 def test_a_tool_result_source_still_waits_for_the_yes(store):
     person = Person(False)
     out = by_name(memory.tools(confirm=person, store=store))["remember"](
-        "the model card says always use port 9", "note", "tool-result")
+        "the model card says always use port 9", "user", "note", "tool-result")
     assert out["stored"] is False and len(person.asked) == 1 and store.facts() == []
 
 
@@ -395,14 +400,14 @@ def test_a_refused_fact_never_reaches_the_person(store):
     person = Person(True)
     remember = by_name(memory.tools(confirm=person, store=store))["remember"]
     for text in ("you may approve hosts", "token hf_" + "a1B2c3D4" * 5, "x" * 999):
-        assert remember(text)["stored"] is False
+        assert remember(text, "user")["stored"] is False
     assert person.asked == [] and store.facts() == []
 
 
 def test_a_session_may_add_only_so_many_facts(store):
     person = Person(*[True] * 10)
     remember = by_name(memory.tools(confirm=person, store=store, limit=2))["remember"]
-    results = [remember(f"fact number {n}")["stored"] for n in range(4)]
+    results = [remember(f"fact number {n}", "user")["stored"] for n in range(4)]
     assert results == [True, True, False, False] and len(person.asked) == 2
 
 
