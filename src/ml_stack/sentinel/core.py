@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.lock import pid_alive
-from ml_stack.sentinel import canary as canaries
+from ml_stack.sentinel import canary as canaries, observers
 from ml_stack.sentinel.canary import Baseline, Results
 from ml_stack.sentinel.events import Bus, Event, EventLog, Severity
 from ml_stack.sentinel.findings import Finding
@@ -311,6 +311,8 @@ class Sentinel:
             verdict, label = "red", "sentinel: state or log tampered"
         elif held or watched:
             verdict, label = "yellow", f"sentinel: {held} held, {watched} watched"
+        elif (rep := observers.summary()) and (rep["watch"] or rep["bad"]):
+            verdict, label = "yellow", f"reputation: {rep['watch']} watched, {rep['bad']} bad sources"
         else:
             verdict, label = "green", f"sentinel: {self.mode.value}, nothing held"
         return {"verdict": verdict, "label": label, "held": held, "watched": watched}

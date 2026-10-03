@@ -19,8 +19,9 @@ from ml_stack.memory import vault
 from ml_stack.reputation import model
 from ml_stack.reputation.model import Rec, State
 from ml_stack.reputation.sealed import SCHEMA_VERSION, SealedGraph
+from ml_stack.sentinel.observers import Gate
 
-__all__ = ["MAX_EVENTS", "MAX_SOURCES", "RECOVER_ENV", "Gate", "Ledger", "Standing"]
+__all__ = ["MAX_EVENTS", "MAX_SOURCES", "RECOVER_ENV", "Ledger", "Standing"]
 
 logger = logging.getLogger("ml_stack.reputation")
 MAX_SOURCES, MAX_EVENTS = 1000, 20
@@ -48,15 +49,6 @@ class Standing:
     last: float
     traits: dict[str, list[str]]
     events: list[list[Any]]
-
-
-@dataclass(frozen=True, slots=True)
-class Gate:
-    """Why a source is to be asked about or refused, and since when."""
-
-    state: str
-    reason: str
-    since: float
 
 
 def node_id(kind: str, key: str) -> str:
@@ -135,6 +127,7 @@ class Ledger:
                        "mentions": rec.clean, "attrs": rec.attrs()})
 
     def _event_node(self, g: GraphStore, rec: Rec, event: str, now: float, weight: float) -> None:
+        self._write(rec, g)
         ident = f"ev:{rec.kind}:{rec.key}:{int(now * 1000)}:{event}"
         g.upsert_node({"id": ident, "kind": "event", "label": event,
                        "attrs": {"ts": now, "weight": weight}})
@@ -252,9 +245,16 @@ class Ledger:
     # -- the person's ------------------------------------------------------------------
     def forget(self, kind: str, key: str) -> bool:
         """Delete one source and the events tied to it; true when it was held."""
-        gone = self.sealed.edit(lambda g: self._drop(g, kind, model.canonical(kind, key)))
-        self.sealed.edit(self._summary)
-        return bool(gone)
+        name = model.canonical(kind, key)
+        if self.standing(kind, name) is None:
+            return False
+
+        def run(g: GraphStore) -> bool:
+            gone = self._drop(g, kind, name)
+            self._summary(g)
+            return gone
+
+        return bool(self.sealed.edit(run))
 
     def forget_all(self) -> int:
         """Delete the whole store and its summary; returns how many sources were held."""

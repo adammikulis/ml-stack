@@ -7,6 +7,7 @@ from collections import Counter, OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ml_stack.sentinel import observers
 from ml_stack.sentinel.events import Severity
 from ml_stack.sentinel.findings import HEURISTIC, HIGH, Finding, finding
 
@@ -77,6 +78,7 @@ class PeerWatch:
         """Count one request outcome from ``peer``; a finding when a limit is crossed."""
         if outcome not in self.OUTCOMES:
             raise ValueError(f"unknown outcome {outcome!r}")
+        self._observe(peer, outcome)
         requests = self.windows.add(peer, "request")
         bad = (self.windows.add(peer, "bad") if outcome in ("bad_sig", "unsigned", "locked")
                else self.windows.count(peer, "bad"))
@@ -95,6 +97,13 @@ class PeerWatch:
             return self._once(peer, "rate", finding(
                 "peer.rate", Severity.WARNING, ("peer", peer), HEURISTIC, counts))
         return None
+
+    @staticmethod
+    def _observe(peer: str, outcome: str) -> None:
+        if outcome == "ok":
+            observers.clean("peer", peer)
+        elif outcome in ("bad_sig", "unsigned", "replay"):
+            observers.observe("peer", peer, "denial", scale=2.0 if outcome == "replay" else 1.0)
 
     def _once(self, peer: str, tag: str, found: Finding) -> Finding | None:
         """Report a condition once per window rather than once per request."""

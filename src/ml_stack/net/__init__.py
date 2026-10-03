@@ -22,11 +22,11 @@ from ml_stack.net.download import (
     download,
 )
 from ml_stack.net.pipeline import Ask, Pipeline, Reply, default, use
-from ml_stack.net.policy import NeedsApproval, Policy
+from ml_stack.net.policy import Distrusted, NeedsApproval, Policy
 from ml_stack.net.provenance import Provenance, recent
 from ml_stack.net.scan import Outcome, Scanner, ScanPolicy, ScanResult, scan_file
 
-__all__ = ["Ask", "Blocked", "ChecksumMismatch", "Hooks", "NeedsApproval", "NoDigest", "Outcome", "Pipeline",
+__all__ = ["Ask", "Blocked", "ChecksumMismatch", "Distrusted", "Hooks", "NeedsApproval", "NoDigest", "Outcome", "Pipeline",
            "Policy", "Provenance", "Reply", "ScanPolicy", "ScanResult", "Scanner", "Truncated",
            "Want", "default", "download", "get", "recent", "scan_file", "use"]
 

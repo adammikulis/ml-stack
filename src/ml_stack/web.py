@@ -42,7 +42,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack import net
+from ml_stack import net, reputation
 from ml_stack.home import cache, state
 from ml_stack.http import Refused, ServerError, check
 from ml_stack.markup import cut, extract
@@ -279,6 +279,7 @@ def _labelled(out: dict[str, Any], text: str, url: str, removed: int) -> dict[st
     """``out`` with its text cleaned, fenced and marked untrusted; the URLs in it are noted
     as found in fetched content."""
     item = untrusted.untrusted(text, url, next(_SERIAL), html_removed=removed)
+    reputation.page_read(url, item.text)
     untrusted.shared().page(item.text)
     out.update(text=item.fenced(), untrusted=True, origin=item.origin)
     if item.removed:
@@ -298,6 +299,7 @@ def read(url: str, *, limit: int = 6000, fetch: Callable[[str], str] | None = No
     Refuses anything ``check`` refuses, before fetching.
     """
     url = check(url)
+    reputation.install()
     if urllib.parse.urlsplit(url).path.lower().endswith(".pdf"):
         return _read_pdf(url, limit)
     fetch = fetch or _fetch
@@ -373,6 +375,7 @@ def look(url: str, *, limit: int = LOOK_CHARS, browse: Callable[[], Any] | None 
     refusal as the page. Raises ``BrowserUnavailable`` without playwright.
     """
     url = check(url)
+    reputation.install()
     browse = browse or _browse
     fetch_bytes = fetch_bytes or _fetch_bytes
     with browse() as page:
