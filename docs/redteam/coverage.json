@@ -1,10 +1,10 @@
 {
- "surfaces": 549,
+ "surfaces": 553,
  "by_status": {
-  "covered": 240,
+  "covered": 243,
   "partial": 206,
   "uncovered": 56,
-  "n/a": 47,
+  "n/a": 48,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 6,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 22,
+   "n/a": 23,
    "unmapped": 0
   },
   "context": {
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 27,
+   "covered": 28,
    "partial": 46,
    "uncovered": 0,
    "n/a": 0,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 29,
+   "covered": 30,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 41,
+   "covered": 42,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -711,6 +711,16 @@
     "tests/test_peer_pairing.py"
    ],
    "note": "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
+  },
+  {
+   "id": "cli:ml-stack-reputation",
+   "kind": "cli",
+   "source": "ml_stack.reputation.cli:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
    "id": "cli:ml-stack-security",
@@ -2013,6 +2023,21 @@
    "note": ""
   },
   {
+   "id": "egress:net/policy.py:Distrusted.__init__",
+   "kind": "egress",
+   "source": "net/policy.py:Distrusted.__init__",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_net_no_bypass.py",
+    "tests/test_httpguard.py",
+    "tests/test_net_download.py",
+    "tests/test_net_untrusted.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "egress:net/policy.py:Policy.admit",
    "kind": "egress",
    "source": "net/policy.py:Policy.admit",
@@ -2443,6 +2468,21 @@
    "id": "human:net/cli.py:scan_policy",
    "kind": "human",
    "source": "net/cli.py:scan_policy",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:reputation/cli.py:_guarded.run",
+   "kind": "human",
+   "source": "reputation/cli.py:_guarded.run",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -4447,6 +4487,20 @@
    "id": "parser:sentinel/honey.py",
    "kind": "parser",
    "source": "sentinel/honey.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_sentinel_store.py",
+    "tests/test_redteam_memory.py",
+    "tests/test_memory_vault.py::test_flipping_any_byte_of_the_ciphertext_or_header_is_detected"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:sentinel/observers.py",
+   "kind": "parser",
+   "source": "sentinel/observers.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",
