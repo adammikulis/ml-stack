@@ -1,7 +1,12 @@
 """Native road task compliance changes reward once per checkpoint."""
 
+import json
+import sys
 from types import SimpleNamespace
 
+import pytest
+
+from ml_stack.gym import training
 from ml_stack.gym.road_rules import StopCheckpoint, front_progress
 
 
@@ -39,3 +44,15 @@ def test_stop_outside_zone_cannot_satisfy_hold():
     assert stop.update(48, 0, .6) == 0
     assert stop.update(46, 0, .6) == 0
     assert stop.held == 0 and not stop.completed
+
+
+def test_car_checkpoint_rejects_changed_physical_action_strength(monkeypatch, tmp_path):
+    source = tmp_path / "policy.zip"
+    source.write_bytes(b"not loaded")
+    (tmp_path / "manifest.json").write_text(json.dumps({"config": {"steering_magnitude": 1.}}))
+    monkeypatch.setattr(training, "artifact_root", lambda: tmp_path)
+    monkeypatch.setitem(sys.modules, "stable_baselines3", SimpleNamespace(
+        PPO=SimpleNamespace(load=lambda *_args, **_kwargs: pytest.fail("mismatched policy loaded"))))
+    env = SimpleNamespace(unwrapped=SimpleNamespace(steering_magnitude=.35))
+    with pytest.raises(ValueError, match="steering_magnitude=1"):
+        training.load_policy(source, env)
