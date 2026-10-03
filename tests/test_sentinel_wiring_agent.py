@@ -12,6 +12,7 @@ import pytest
 
 from ml_stack import guard, sentinel
 from ml_stack.agent import Agent, Denied, Done, FunctionTools, unwatched
+from ml_stack.agent.watched import Watch
 from ml_stack.client import Client
 from ml_stack.sentinel import State, human
 from ml_stack.testing.tool_server import ToolCallingServer, Turn
@@ -93,12 +94,12 @@ def test_touching_a_decoy_freezes_the_session_and_the_run_ends(served) -> None:
     decoy = node.honey.decoys()[0]
     fake = served(call("read_file", path=decoy.path), call("web_fetch", url="http://127.0.0.1/x"),
                   Turn(text=("done",)))
-    agent = agent_for(fake, session="s-honey")
+    agent = agent_for(fake, sentinel=Watch(sentinel.default(), "s-honey"))
     events = run(agent)
     assert ran == [], "the decoy was read"
     assert any(isinstance(e, Denied) and "frozen" in e.reason for e in events), events
     assert node.store.state_of("session", "s-honey") == State.QUARANTINED
-    again = run(agent_for(served(Turn(text=("hi",))), session="s-honey"))
+    again = run(agent_for(served(Turn(text=("hi",))), sentinel=Watch(sentinel.default(), "s-honey")))
     assert isinstance(again[-1], Done) and again[-1].reason == "denied"
     assert "frozen" in again[-1].text
 
@@ -107,7 +108,7 @@ def test_a_decoy_value_in_a_tool_result_freezes_the_session(served) -> None:
     decoy_dir = sentinel.armed().honey.decoys()[0]
     leaked = Path(decoy_dir.path).read_text()
     fake = served(call("web_fetch", url="http://127.0.0.1/x"), Turn(text=("done",)))
-    run(agent_for(fake, leaked, session="s-leak"))
+    run(agent_for(fake, leaked, sentinel=Watch(sentinel.default(), "s-leak")))
     assert sentinel.default().store.state_of("session", "s-leak") == State.QUARANTINED
 
 
@@ -129,7 +130,7 @@ def test_a_first_run_plants_the_decoys_under_the_state_root_and_not_in_the_proje
 def test_a_quarantined_session_stays_frozen_until_a_person_releases_it(served) -> None:
     fake = served(call("read_file", path=sentinel.armed().honey.decoys()[0].path),
                   Turn(text=("x",)))
-    agent = agent_for(fake, session="s-rel")
+    agent = agent_for(fake, sentinel=Watch(sentinel.default(), "s-rel"))
     run(agent)
     node = sentinel.default()
     record = node.store.find("session", "s-rel")
@@ -138,7 +139,7 @@ def test_a_quarantined_session_stays_frozen_until_a_person_releases_it(served) -
     node.store.release(record.id, human.mint("release", record.id, typed=lambda _p: record.id,
                                              terminal=(True, True), env={}))
     again = served(Turn(text=("fine",)))
-    assert run(Agent(Client(again.base_url), tools(), session="s-rel"))[-1].reason == "answer"
+    assert run(Agent(Client(again.base_url), tools(), sentinel=Watch(sentinel.default(), "s-rel")))[-1].reason == "answer"
 
 
 def events_of(kind: str) -> list:
@@ -158,7 +159,7 @@ def test_running_without_sentinel_needs_a_reason_and_logs_it(served) -> None:
 def test_guard_off_is_also_the_opt_out_of_sentinel_and_is_logged(served) -> None:
     fake = served(call("read_file", path=sentinel.armed().honey.decoys()[0].path),
                   Turn(text=("x",)))
-    run(agent_for(fake, interventions=guard.off("a test of the marker"), session="s-off"))
+    run(agent_for(fake, interventions=guard.off("a test of the marker")))
     assert ran, "without sentinel the decoy was read"
     assert events_of("sentinel.opt_out")[-1].evidence["because"] == "a test of the marker"
-    assert sentinel.default().store.state_of("session", "s-off") == State.CLEAR
+    assert sentinel.default().store.records(kind="session") == []

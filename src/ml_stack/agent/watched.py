@@ -36,8 +36,8 @@ def unwatched(because: str) -> Unwatched:
 class Watch:
     """One agent's view of a sentinel, under the session name its findings carry."""
 
-    def __init__(self, node: Sentinel, session: str) -> None:
-        self.node, self.session = node, session
+    def __init__(self, node: Sentinel, session: str = "") -> None:
+        self.node, self.session = node, session or f"agent-{uuid4().hex[:10]}"
         self._gate = agent_gate(node)
 
     def frozen(self) -> str:
@@ -63,7 +63,7 @@ class Watch:
         return got.text if got.withheld else screened.text
 
 
-def resolve(interventions: Any, choice: Any, session: str) -> Watch | None:
+def resolve(interventions: Any, choice: Any) -> Watch | None:
     """The `Watch` an agent runs under: sentinel by default, none when the agent was given
     `unwatched` or ``guard.off`` (the opt-out is logged), none when sentinel's mode is off."""
     because = choice.because if isinstance(choice, Unwatched) \
@@ -71,7 +71,9 @@ def resolve(interventions: Any, choice: Any, session: str) -> Watch | None:
     if because:
         sentinel.opt_out(sentinel.default(), "an agent", because)
         return None
+    if isinstance(choice, Watch):
+        return choice
     node = choice if isinstance(choice, Sentinel) else sentinel.armed()
     if node.mode == sentinel.Mode.OFF:
         return None
-    return Watch(node, session or f"agent-{uuid4().hex[:10]}")
+    return Watch(node)

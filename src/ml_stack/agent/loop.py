@@ -106,22 +106,21 @@ class Agent:
     with ``interventions=guard.off(because=...)``, which is logged, and any other empty list is
     refused. ``confirm`` answers a `Confirm`, and without it a `Confirm` is a refusal.
 
-    Every tool call and tool result also goes through sentinel (``sentinel`` is a `Sentinel`, else
-    the node's own): a call it flags is held and refused, a result it flags is replaced by a
+    Every tool call and tool result also goes through sentinel (``sentinel`` is a `Sentinel` or a
+    `Watch` naming the session, else the node's own): a call it flags is held and refused, a result it flags is replaced by a
     placeholder. ``guard.off(because=...)`` and ``agent.unwatched(because=...)`` turn that off
-    and log the reason. ``session`` names the run in sentinel's findings.
+    and log the reason. A session sentinel froze runs no further.
     """
 
-    def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,
+    def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,  # noqa: PLR0913
                  auto_compact: Compaction | None = None,
-                 interventions: Sequence[Any] | None = None, sentinel: Any = None,
-                 session: str = "") -> None:
+                 interventions: Sequence[Any] | None = None, sentinel: Any = None) -> None:
         if interventions is not None and not interventions \
                 and not isinstance(interventions, Unguarded):
             raise ValueError("an empty interventions list turns the guard off silently; "
                              "use interventions=guard.off(because=...)")
         self._screen: list[Any] | None = None
-        self.watch: Watch | None = resolve(interventions, sentinel, session)
+        self.watch: Watch | None = resolve(interventions, sentinel)
         self.client = client
         self.tools = tools
         self.budget = budget or Budget()
@@ -178,8 +177,6 @@ class Agent:
             if not refused.reason:
                 async for event in self._decide(run, "before_model_call", refused):
                     yield event
-            if not refused.reason and self.watch:
-                refused.reason = self.watch.frozen()
             if refused.reason:
                 yield Done("denied", refused.reason, step - 1, calls, spent, messages)
                 return
@@ -308,6 +305,8 @@ class Agent:
         async for item in self._watching(run.decide(hook, run.context)):
             if isinstance(item, Gate):
                 out.reason = "" if item.allowed else getattr(item.verdict, "reason", "")
+                if not out.reason and self.watch:
+                    out.reason = self.watch.frozen()
             else:
                 yield item
 
