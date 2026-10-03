@@ -46,6 +46,14 @@ def start_process(argv, **kwargs):
     return subprocess.Popen(argv, **process_group_kwargs(), **kwargs)
 
 
+def terminate_process_group(proc):
+    """Terminate a child and its process group."""
+    if is_windows():
+        proc.terminate()
+    else:
+        os.killpg(proc.pid, signal.SIGTERM)
+
+
 def process_group_kwargs() -> dict[str, Any]:
     """The ``Popen`` keywords that put a child in a process group of its own.
 
