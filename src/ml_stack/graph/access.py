@@ -31,6 +31,7 @@ from typing import Any
 from ml_stack.files import promote
 from ml_stack.graph.snapshots import WAL_SUFFIX
 from ml_stack.lock import release, take
+from ml_stack.sentinel.watch import process_alive
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +63,7 @@ class Holder:
 
 def pid_alive(pid: int) -> bool:
     """Whether a process is running here. Asked, never assumed."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True          # it exists; it belongs to somebody else
-    except OSError:
-        return False
-    return True
+    return process_alive(pid)
 
 
 def lock_path(path: str | Path) -> Path:
