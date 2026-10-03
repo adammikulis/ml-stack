@@ -141,7 +141,7 @@ def test_an_empty_fact_is_refused(store):
 
 # -- sanitising on write ---------------------------------------------------------------
 def test_control_bidi_and_zero_width_characters_and_newlines_are_removed():
-    dirty = "build‮ A​ is\x00 fast\r\nand\x1b[31m stable ok"
+    dirty = "build\u202e A\u200b is\x00 fast\r\nand\x1b[31m stable\u2028ok"
     assert clean(dirty) == "build A is fast and [31m stable ok"
 
 
@@ -356,7 +356,7 @@ def by_name(offered):
 def test_the_tools_are_a_read_and_an_acting_one(store):
     offered = memory.tools(confirm=Person(), store=store)
     assert {s["function"]["name"] for s, _ in offered} == {"recall", "remember"}
-    assert memory.READ == {"recall"} and memory.ACTING == {"remember"}
+    assert {"recall"} == memory.READ and {"remember"} == memory.ACTING
     schemas = {s["function"]["name"]: s["function"]["parameters"] for s, _ in offered}
     assert schemas["remember"]["required"] == ["fact"]
     assert {"kind", "source", "model"} <= set(schemas["remember"]["properties"])

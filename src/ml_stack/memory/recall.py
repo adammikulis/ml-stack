@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 
 from ml_stack.graph.search import rrf
 from ml_stack.guard.untrusted import fenced
-from ml_stack.memory.facts import Fact
+from ml_stack.memory.facts import Fact, clean
 from ml_stack.memory.store import Store
 
 __all__ = ["HEADER", "TOKEN_BUDGET", "TOP_K", "render", "retrieve", "session_context"]
@@ -24,15 +24,16 @@ SOURCE = "memory"
 Embed = Callable[[str], Sequence[float]]
 
 _WORD = re.compile(r"[a-z0-9]+")
-_SUFFIXES = ("ing", "ed", "es", "ly", "s")
-_STOP = frozenset("a an the of to in on for and or is it this that with was are be at by as i".split())
+_SUFFIXES = ("ing", "est", "ers", "er", "ed", "es", "ly", "s")
+PREFIX = 4
+_STOP = frozenset(["a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "it", "this", "that", "with", "was", "are", "be", "at", "by", "as", "i"])
 
 
 def _stem(word: str) -> str:
     for suffix in _SUFFIXES:
         if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[: -len(suffix)]
-    return word
+            return word[: -len(suffix)][:PREFIX]
+    return word[:PREFIX]
 
 
 def _terms(text: str) -> list[str]:
@@ -64,7 +65,7 @@ def _meaning_ranking(facts: Sequence[Fact], query: str, embed: Embed) -> list[st
     try:
         wanted = embed(query)
         near = {f.id: _cosine(wanted, embed(f.text)) for f in facts}
-    except Exception:  # noqa: BLE001 - an embedder that is down is one fewer vote
+    except (OSError, ValueError, RuntimeError):
         return []
     return sorted((i for i, c in near.items() if c > 0.3), key=lambda i: (-near[i], i))
 
@@ -85,11 +86,11 @@ def _line(store: Store, fact: Fact) -> str:
     bits = [fact.kind, fact.source, f"confirmed {fact.confirm_count}x, last {when}"]
     for key in ("build", "model"):
         if fact.scope.get(key):
-            bits.append(f"{key} {fact.scope[key]}")
+            bits.append(f"{key} {clean(fact.scope[key])}")
     why = store.stale(fact)
     if why:
         bits.append(f"RE-CHECK: {why}")
-    return f"- [{fact.id}] ({'; '.join(bits)}) {fact.text}"
+    return f"- [{fact.id}] ({'; '.join(bits)}) {clean(fact.text)}"
 
 
 def render(store: Store, facts: Sequence[Fact], *, budget: int = TOKEN_BUDGET) -> str:

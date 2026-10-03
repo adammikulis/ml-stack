@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import platform
 import time
 from collections.abc import Callable
@@ -13,6 +12,7 @@ from ml_stack import home, lock
 from ml_stack.memory.facts import BUILD_BOUND, KINDS, SOURCES, STALE_DAYS, Fact, Refused, check
 from ml_stack.sentinel.human import protect
 from ml_stack.sentinel.sealed import SealedFile
+from ml_stack.serve.binary import managed_current
 
 __all__ = ["MAX_FACTS", "SCHEMA_VERSION", "Store", "Tampered", "current_scope", "stale_reason"]
 
@@ -27,8 +27,6 @@ class Tampered(RuntimeError):
 
 def current_scope() -> dict[str, str]:
     """The machine and the managed llama.cpp build in use now."""
-    from ml_stack.serve.binary import managed_current
-
     link = managed_current()
     build = link.resolve().name if link.exists() else ""
     return {"machine": platform.node(), "build": build}
@@ -97,11 +95,11 @@ class Store:
     # -- writing --------------------------------------------------------------------
     def _write(self, payload: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.path.parent, 0o700)
+        self.path.parent.chmod(0o700)
         self._file.save({"schema_version": SCHEMA_VERSION, **payload})
         for each in (self.path, self._file.prev, self._file.keyfile):
             if each.exists():
-                os.chmod(each, 0o600)
+                each.chmod(0o600)
 
     def _edit(self, change: Callable[[dict[str, Any], list[dict[str, Any]]], Any]) -> Any:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
