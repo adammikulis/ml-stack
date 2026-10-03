@@ -7,6 +7,8 @@ import subprocess
 import sys
 from importlib.util import find_spec
 
+from ml_stack.gym.worlds import schema
+
 CAR_ACTIONS = [f"{steer} {drive}" for steer in ("left", "straight", "right")
                for drive in ("brake", "coast", "accelerate")]
 ENVIRONMENTS = {
@@ -42,6 +44,8 @@ def catalogue():
         if name in {"traffic", "traffic-driving"} and not shutil.which("sumo") and find_spec("sumo") is None:
             missing.append("SUMO executable")
         entries.append({"id": name, **{k: v for k, v in spec.items() if k != "modules"},
+                        "world_schema": schema(name), "simulation_modes": ["episode", "world"],
+                        "supported_controllers": ["manual", "random", "decider", "ppo", *(["native-idm"] if name == "car" else [])],
                         "available": not missing, "missing": missing,
                         "install": f"pip install 'ml-stack[{spec['extra']}]'"})
     return entries
