@@ -151,7 +151,7 @@ request (each try is spent when the accepting side starts an exchange), each nee
 have pressed Accept, the code lives 120 s, and network jitter is orders of magnitude above the
 differences. A hardware-backed or constant-time PAKE would remove the question; none that is
 maintained and pure Python exists. It is pure Python with no version pin; it was run here on 3.13.5 (the
-project's) and 3.14; 3.11 and 3.12 were not run.
+project's) and 3.14; 3.12 was not run.
 
 The transcript binds **both certificate fingerprints**: they are `spake2`'s `idA` and `idB`, and
 the request id and nonce go in with the code, so an exchange replayed into another request, a
@@ -240,7 +240,7 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
    * `--dry-run` prints the commands, the remote script in full (145 lines) with its SHA-256 and
      the files with theirs, and runs and contacts nothing and touches no key;
    * the payload goes over the SSH connection on stdin as a tar of plain files; the remote
-     script (copied, then run) checks Python >= 3.11, macOS or Linux, not root, disk space, the
+     script (copied, then run) checks Python >= 3.12, macOS or Linux, not root, disk space, the
      manifest's **OpenSSH signature with `ssh-keygen -Y verify`** (the framing is written here,
      the Ed25519 signature is `cryptography`'s, and the real `ssh-keygen` verifies it in the
      tests; a pure-Python verifier would have been home-made crypto), that the key is the one
@@ -452,6 +452,10 @@ LAN, and no port is opened to the public internet.
 - **Names.** `fleet fetch NAME --from DEVICE:PORT` accepts the name of a paired device. Names
   are looked up in the peer list `tailscale status` reported and nowhere else: no DNS query for
   an arbitrary name is made.
+- **Where the tailnet is used.** Every path to a paired device goes through `routes.py`: peer-first
+  model downloads (a row from pairing names its device; the route is chosen when the pull starts),
+  `fleet fetch`, the `bootstrap --ssh` target and `fleet nearby`. In each, a public address is
+  refused and a TCP-only path (SSH) leans on the host key the owner confirmed.
 - **Without Tailscale** nothing changes: no command is run when `fleet devices` or `fetch`
   does not need the tailnet, and a device is `lan` or `unreachable`.
 
@@ -486,6 +490,22 @@ patterns reject it too), payload file names (read again through `safe_filename`)
 size check (the SHA-256 follows). The first campaign's three equivalent survivors (the context in the old transcript, the
 Content-Range check and the length check on a chunk) are the same kind; all are left in as depth.
 
+## Pairing and the peer book
+
+Pairing also tells each side how to reach the other's `fleet share`, so model downloads can ask
+that device first with no `fleet peers add` (docs/model-discovery.md, "Peers first"). The accepting
+machine's grant carries its share port (`listen --share-port`, default 8773; `--no-share` for none),
+its certificate, its manifest signing key and the request key for the asking device; the asking
+machine sends an offer with the same four things the other way, sealed under the exchange's key
+(`pake.Session.seal`; an offer whose tag does not verify is refused and nothing is stored). The
+certificate in either must be the one the exchange bound to the code, or no row is made. Rows go to
+`<state>/onboard/peers.json`; the asking side also records the accepting machine in its device list
+so that machine's requests are recognised (`pair --mine` marks it as yours, which is what lets it
+be given a gated model). `revoke` removes the device's rows. Where the paired device is reached
+(this network, then its tailnet address) is `routes.py`, also for `bootstrap --ssh` (the SSH host
+key is still what proves the machine) and `nearby` (a paired device that no beacon reached but
+whose pinned certificate answers on its tailnet address is listed with route `tailnet`).
+
 ## Commands
 
 ```
@@ -498,6 +518,8 @@ ml-stack fleet revoke NAME-OR-FINGERPRINT
 ml-stack fleet bootstrap --share DIR [--valid 10m]                 offer ml-stack on an address
 ml-stack fleet bootstrap --ssh [user@]host --share DIR [--dry-run] [--host-key-fingerprint SHA256:...]
 ml-stack fleet share --dir DIR [--sharing NAME=open|owner|never] [--licence NAME=ID,URL] [--source NAME=URL]
+ml-stack fleet share --models [--models-dir DIR ...] [--port 8773]  serve the model store
+ml-stack fleet peers [list|add|remove|on|off|limit]                the devices a model pull asks first
 ml-stack fleet fetch NAME... --from HOST:PORT                      fetch into staging (not installed)
 ml-stack fleet signing show|export FILE|rotate|revoke KEYID|confirm on|off|accept
 ```

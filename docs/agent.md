@@ -15,7 +15,7 @@ async with McpTools.stdio("python", ["-m", "my_server"]) as tools:      # or Mcp
         ...
 ```
 
-`McpTools` needs the `mcp` extra (mcp 2.2 or later, MCP revision 2026-07-28) and is built on `mcp.Client`, which negotiates the version itself: a stateless 2026-07-28 server and an older handshake server are both reached, and nothing here keeps a session id. `FunctionTools` takes `(schema, callable)` pairs or MCP-shaped
+`McpTools` needs the `mcp` extra (mcp 2.3 or later, MCP revision 2026-07-28) and is built on `mcp.Client`, which negotiates the version itself: a stateless 2026-07-28 server and an older handshake server are both reached, and nothing here keeps a session id. `FunctionTools` takes `(schema, callable)` pairs or MCP-shaped
 dicts with `{name: callable}`; any object with `list_tools()` and `call(name, arguments)`
 coroutines is a `ToolSource`.
 

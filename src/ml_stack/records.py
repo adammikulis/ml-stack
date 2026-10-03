@@ -11,7 +11,7 @@ import json
 import os
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from ml_stack import home
 from ml_stack.files import write_json
@@ -25,10 +25,7 @@ def _installed(path: Path) -> bool:
     return "site-packages" in path.parts or "dist-packages" in path.parts
 
 
-R = TypeVar("R")
-
-
-class Records(Generic[R]):
+class Records[R]:
     """Records of one kind: the file that ships with ml-stack, with this machine's own
     laid over it, keyed so a local record replaces the shipped one it supersedes."""
 
@@ -119,7 +116,7 @@ class Records(Generic[R]):
         return self.write(kept, where)
 
 
-class Document(Generic[R]):
+class Document[R]:
     """One record kept as a JSON object, at a path an environment variable may move."""
 
     def __init__(self, *, default: Callable[[], Path] | None = None, env: str = "",

@@ -186,6 +186,20 @@ class Devices:
             self._write(rows)
         return device
 
+    def add_accepter(self, fingerprint: str, name: str, address: str, *, secret: str,  # noqa: PLR0913 - all keywords
+                     mine: bool = False, shared_cluster_key: bool = False) -> Device:
+        """Record the machine that accepted this one (the asking side's record of a pairing).
+        ``secret`` is the key that machine signs its file requests with; ``mine`` only if the
+        person at this machine said the accepting one is theirs."""
+        with self._lock, only_one(self.path.with_suffix(".lock"), announce=lambda _m: None):
+            rows = [d for d in self._read() if d.fingerprint != fingerprint]
+            device = Device(fingerprint, clean(name) or "unnamed", "", address, self.clock(),
+                            shared_cluster_key=shared_cluster_key, mine=mine, secret=secret,
+                            tailnet_address=address if in_tailnet(address) else "")
+            rows.append(device)
+            self._write(rows)
+        return device
+
     def learn_tailnet(self, fingerprint: str, address: str, *, source: str) -> Device:
         """Record ``address`` as the tailnet address of a paired device. ``source`` must be an
         authenticated one (``pairing``, ``tailscale-verified``); an announcement is refused."""
