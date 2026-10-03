@@ -27,4 +27,4 @@ def native_provenance(environment, env):
         if value:
             path = Path(value).expanduser().resolve(strict=True)
             files[name] = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-    return {"versions": versions, "scenario_files": files}
+    return {"versions": versions, "scenario_files": files, "world": getattr(env, "world_provenance", None)}

@@ -6,6 +6,8 @@ from ml_stack.gym.values import json_value
 
 def decision_state(name, env, observation):
     """Describe the current controller observation without rendering media."""
+    if hasattr(env, "decision_state"):
+        return env.decision_state(observation)
     native = env.unwrapped
     state = {"environment": name, "native_observation": json_value(observation)}
     if name == "car":
