@@ -9,6 +9,7 @@ bytes already on disk.
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 import threading
 import time
@@ -18,10 +19,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack import home, http, hub, lock, net
-from ml_stack.hub import remote
+from ml_stack.hub import peers as peering, remote
 from ml_stack.hub.remote import GatedRepo, NotFound, RemoteFile
 from ml_stack.net.download import staged_part
 from ml_stack.units import human_bytes
+
+logger = logging.getLogger(__name__)
 
 CHUNK = 1 << 20
 MARGIN = 256 * 1024 * 1024
@@ -137,6 +140,8 @@ class _Meter:
         self.base, self.index, self.last, self.began = 0, 0, 0.0, time.monotonic()
         self.resumed = 0
         self.step = 0
+        self.cancel: CancelToken | None = None
+        self.session: peering.Session | None = None
 
     def send(self, phase: str, one: RemoteFile, got: int, *, force: bool = False) -> None:
         now = time.monotonic()
@@ -160,8 +165,27 @@ def _want(one: RemoteFile, auth: str) -> net.Want:
                     purpose="model download")
 
 
-def _fetch(parsed: remote.Ref, one: RemoteFile, final: Path, meter: _Meter,
-           cancel: CancelToken | None) -> None:
+def _from_peers(parsed: remote.Ref, one: RemoteFile, final: Path, meter: _Meter) -> bool:
+    """Try the paired devices for ``one``; True when ``final`` is in place. Whatever goes
+    wrong with them is a reason to ask the Hub, a cancel is not."""
+    cancel = meter.cancel
+    try:
+        return meter.session.fetch(  # type: ignore[union-attr]
+            peering.Wanted(parsed.repo, one.path, one.size, one.sha256), final,
+            cancelled=lambda: bool(cancel and cancel.cancelled),
+            progress=lambda done: meter.send("downloading", one, done),
+            phase=lambda name: meter.send(name, one, one.size, force=True))
+    except peering.Stopped as exc:
+        raise Cancelled(one.path) from exc
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("peers failed for %s, using the Hub: %s", one.path, exc)
+        return False
+
+
+def _fetch(parsed: remote.Ref, one: RemoteFile, final: Path, meter: _Meter) -> None:
+    if meter.session is not None and _from_peers(parsed, one, final, meter):
+        return
+    cancel = meter.cancel
     url, auth = _url(parsed, one), remote.token()
     meter.resumed += _staged(url, final)
     hooks = net.Hooks(cancel=cancel, progress=lambda done, _t: meter.send("downloading", one, done),
@@ -216,7 +240,7 @@ def _space(folder: Path, need: int) -> None:
 
 
 def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = None,
-         cancel: CancelToken | None = None) -> Path:
+         cancel: CancelToken | None = None, *, peers: bool | None = None) -> Path:
     """Download ``ref`` into ``dest`` and return the path of its first file.
 
     ``dest`` defaults to ``<store>/models/owner/repo``. Every shard of a sharded build comes
@@ -224,24 +248,38 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
     get a token), `NotEnoughSpace`, `ChecksumMismatch` or `Cancelled`; a cancelled or
     failed pull leaves ``<file>.part`` and the next pull of the same reference continues
     it. Two processes pulling the same file take turns.
+
+    Paired devices are asked first (``peers=False`` skips them; `ml_stack.hub.peers`): their
+    bytes count only if they hash to the Hub's own digest, else the Hub is used.
     """
     parsed, chosen = plan(ref)
     folder = destination(dest, parsed)
-    _bring(parsed, chosen, folder, on_progress, cancel)
+    _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
     return folder / chosen[0].path
 
 
-def _bring(parsed: remote.Ref, chosen: list[RemoteFile], folder: Path,
-           on_progress: Report | None, cancel: CancelToken | None) -> None:
+@dataclass(frozen=True, slots=True)
+class _Run:
+    """What the caller of a pull asked for besides the files."""
+
+    report: Report | None = None
+    cancel: CancelToken | None = None
+    peers: bool | None = None
+
+
+def _bring(parsed: remote.Ref, chosen: list[RemoteFile], folder: Path, run: _Run) -> None:
     _space(folder, sum(_remaining(parsed, folder / f.path, f) for f in chosen))
-    meter = _Meter(parsed.text, sum(f.size for f in chosen), len(chosen), on_progress)
+    meter = _Meter(parsed.text, sum(f.size for f in chosen), len(chosen), run.report)
+    meter.cancel = run.cancel
+    if any(not _present(folder / f.path, f) for f in chosen):
+        meter.session = peering.session(run.peers)
     for index, one in enumerate(chosen):
         meter.index = index
         final = folder / one.path
         final.parent.mkdir(parents=True, exist_ok=True)
         with lock.only_one(_lock_for(final), announce=lambda _t: None):
             if not _present(final, one):
-                _fetch(parsed, one, final, meter, cancel)
+                _fetch(parsed, one, final, meter)
         meter.base += one.size
         meter.send("done" if index == len(chosen) - 1 else "downloading", one, 0, force=True)
 
@@ -250,7 +288,7 @@ PICKLES = (".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".msgpack",
 
 
 def snapshot(repo: str, revision: str = "main", on_progress: Report | None = None,
-             cancel: CancelToken | None = None) -> Path:
+             cancel: CancelToken | None = None, *, peers: bool | None = None) -> Path:
     """Every file of ``repo`` but its pickle-based weights, in ``<store>/models/owner/repo``;
     returns that folder. For a repository that holds safetensors."""
     parsed = remote.Ref(repo, "", "", revision)
@@ -259,7 +297,7 @@ def snapshot(repo: str, revision: str = "main", on_progress: Report | None = Non
     if not chosen:
         raise NotFound(f"{repo} has no files")
     folder = destination(None, parsed)
-    _bring(parsed, chosen, folder, on_progress, cancel)
+    _bring(parsed, chosen, folder, _Run(on_progress, cancel, peers))
     return folder
 
 

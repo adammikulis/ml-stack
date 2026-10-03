@@ -149,6 +149,12 @@ own:
   refuses an address that is public (loopback, private, link-local and carrier-grade NAT pass).
   A `PeerSource` needs a pinned TLS context, or `http` to this machine only. A test removes the
   check and watches it fail, and another asserts neither module builds a default-trust client.
+- **Tailscale** (`fleet/tailnet.py`, `fleet/onboard/routes.py`). Detection runs only
+  `tailscale status --json` (bounded output and time, scrubbed environment, tailnet-range
+  addresses only, no auth field copied). `routes.py` checks a paired device's pinned certificate
+  over its LAN or tailnet address after `lan.py` has refused public addresses; a tailnet address
+  is a route, not a trust grant, and is learned only from the pairing exchange or a status peer
+  whose certificate matched, never from an announcement. See `docs/onboarding.md`.
 - **The red-team lab** (`redteam/tools.py`, `redteam/scenarios/fleet.py`,
   `redteam/scenarios/isolation.py`), which only connects to servers it started on 127.0.0.1.
 
@@ -241,7 +247,12 @@ terminal; manifests last three days), chunk by chunk, and are staged for the sca
 installed. A gated model goes only to the devices the owner marked as theirs, after their licence
 acceptance is on record; credentials never travel. Nothing pushes software to a machine that has none: the owner
 opens an offer on it and runs a short, pinned installer, or starts `bootstrap --ssh` with their own
-keys, a host key typed in full and a fixed script. What this does not cover:
+keys, a host key typed in full and a fixed script. Model downloads ask the paired devices before the
+Hub (`docs/model-discovery.md`, "Peers first"): the digest a file must have is the Hub's listing,
+never one a peer states; peers are reached only on private, loopback, link-local or tailnet
+addresses over pinned TLS; the serving device applies the sharing level and withholds a quarantined
+copy; a peer whose bytes fail a digest is dropped and reported to sentinel. Off with `--no-peers`,
+`ML_STACK_NO_PEERS=1` or `ml-stack fleet peers off`. What this does not cover:
 the pairing mathematics is Python integers (not constant time) and wants an independent review
 before a public release; the re-key flow, per-device credentials and SSH push are designed and
 not built.

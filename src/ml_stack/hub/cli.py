@@ -74,6 +74,8 @@ def _parser(extend: Callable[[Any], None] | None = None) -> argparse.ArgumentPar
                                        "serving them -- every shard of a sharded model")
     got.add_argument("refs", nargs="+", metavar="REF",
                      help="hf:owner/repo/file.gguf, one or more")
+    got.add_argument("--no-peers", action="store_true",
+                     help="do not ask paired devices first; download from the Hub (also ML_STACK_NO_PEERS=1)")
 
     shape = sub.add_parser("layout", help="the attention layout off a GGUF header: which "
                                           "layers hold a full cache, slide, recur or share "
@@ -140,7 +142,7 @@ def _card(args) -> int:
 def _fetch(args) -> int:
     """``ml-stack-models fetch``: every shard of each reference, with what came down."""
     for one in args.refs:
-        path = hub.fetch(one)
+        path = hub.fetch(one, peers=False if args.no_peers else None)
         total = 0
         for shard in hub.shards_beside(path):
             size = shard.stat().st_size if shard.exists() else 0

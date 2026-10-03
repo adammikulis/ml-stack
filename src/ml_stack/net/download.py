@@ -28,7 +28,8 @@ from ml_stack.net.scan import Outcome
 from ml_stack.safenames import safe_filename
 from ml_stack.sentinel.events import Event, Severity
 
-__all__ = ["Blocked", "Cancel", "ChecksumMismatch", "Hooks", "NoDigest", "Progress", "Truncated", "Want", "download", "staged_part",
+__all__ = ["Blocked", "Cancel", "ChecksumMismatch", "Hooks", "NoDigest", "Progress", "Truncated", "Want", "accept", "download",
+           "staged_part",
            "sweep"]
 
 logger = logging.getLogger(__name__)
@@ -246,19 +247,40 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
         staged = renamed
     if hooks.phase:
         hooks.phase("verifying")
+    return _finish(pipe, staged, final, want, Arrival(url, shown.url, shown.status,
+                                                      tuple(shown.redirects), shown.headers, host))
+
+
+@dataclass(frozen=True, slots=True)
+class Arrival:
+    """How a staged file got here: asked for ``url``, answered from ``final_url``."""
+
+    url: str
+    final_url: str
+    status: int
+    redirects: tuple[str, ...]
+    headers: dict[str, str]
+    host: str
+
+
+def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
+            arrival: Arrival) -> provenance.Provenance:
+    """The checks every file passes before it is kept: size, pinned SHA-256, format, scan; then
+    one promotion to ``final``. A file that fails goes to the hold."""
+    name, headers, url = safe_filename(final.name), arrival.headers, arrival.url
     digest, size = files.sha256_file(staged), staged.stat().st_size
-    served = shown.headers.get("content-type", "")
+    served = headers.get("content-type", "")
     note = provenance.Provenance(
-        url=url, final_url=shown.url, path=str(final), sha256=digest, size=size,
+        url=url, final_url=arrival.final_url, path=str(final), sha256=digest, size=size,
         kind=want.kind or sniff.expected_kind(name), fetched_at=provenance.stamp(),
-        status=shown.status, redirects=tuple(shown.redirects),
-        headers=provenance.subset(shown.headers), expected_sha256=want.sha256,
-        host_source=host)
+        status=arrival.status, redirects=arrival.redirects,
+        headers=provenance.subset(headers), expected_sha256=want.sha256,
+        host_source=arrival.host)
     if want.sha256 and digest != want.sha256.lower():
         raise _reject(pipe, staged, note, "sha256 differs from the pinned one", ChecksumMismatch)
     if want.size and size != want.size:
         raise _reject(pipe, staged, note, f"{size} bytes, expected {want.size}")
-    if want.verify is not None and (problem := want.verify(staged, shown.headers)):
+    if want.verify is not None and (problem := want.verify(staged, headers)):
         raise _reject(pipe, staged, note, problem)
     verdict = sniff.sniff(staged, want.kind or sniff.expected_kind(name), content_type=served)
     if not verdict.ok:
@@ -277,6 +299,19 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
     _event("net.download", "info", f"artifact:{digest}", {"url": url, "path": str(final),
                                                           "scan": why})
     return done
+
+
+def accept(staged: Path, dest: Path | str, want: Want, source: str,
+           pipeline: Pipeline | None = None) -> provenance.Provenance:
+    """A file that arrived by another road (a paired device on this network, ``source``
+    names it) put through the checks a download passes, with the same hold for one that fails
+    and the same promotion. ``want.sha256`` is the pin and must come from a source other than
+    the one that sent the bytes. The staged file is consumed."""
+    pipe = pipeline or default()
+    if want.require_digest and not want.sha256:
+        raise NoDigest(f"{Path(dest).name}: this file is refused without a pinned SHA-256")
+    return _finish(pipe, Path(staged), Path(dest), want,
+                   Arrival(source, source, 200, (), {}, source))
 
 
 def sweep(older_than_s: float = STALE_S) -> int:
