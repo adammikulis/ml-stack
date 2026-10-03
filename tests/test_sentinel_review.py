@@ -263,7 +263,7 @@ def test_an_agent_started_process_is_refused_and_releases_nothing(term, marker):
     assert state_of(held.id) == State.QUARANTINED and not releases()
 
 
-def test_stdin_that_is_not_a_terminal_is_refused():
+def test_stdin_that_is_not_a_terminal_prints_the_list_and_releases_nothing():
     held = seed_peer("10.0.0.1")
     master, slave = pty.openpty()
     done = subprocess.run([sys.executable, "-c", "import sys; from ml_stack.sentinel.cli import "
@@ -272,11 +272,11 @@ def test_stdin_that_is_not_a_terminal_is_refused():
                           timeout=60, check=False)
     os.close(slave)
     os.close(master)
-    assert done.returncode != 0 and "needs a terminal on stdin and stdout" in done.stderr
+    assert done.returncode == 0 and "needs a terminal" not in done.stderr
     assert state_of(held.id) == State.QUARANTINED and not releases()
 
 
-def test_stdout_that_is_not_a_terminal_is_refused():
+def test_stdout_that_is_not_a_terminal_prints_the_list_and_releases_nothing():
     held = seed_peer("10.0.0.1")
     master, slave = pty.openpty()
     done = subprocess.run([sys.executable, "-c", "import sys; from ml_stack.sentinel.cli import "
@@ -284,7 +284,7 @@ def test_stdout_that_is_not_a_terminal_is_refused():
                           capture_output=True, text=True, env=child_env(), timeout=60, check=False)
     os.close(slave)
     os.close(master)
-    assert done.returncode != 0 and "needs a terminal on stdin and stdout" in done.stderr
+    assert done.returncode == 0 and "needs a terminal" not in done.stderr
     assert state_of(held.id) == State.QUARANTINED and not releases()
 
 

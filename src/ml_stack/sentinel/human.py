@@ -14,7 +14,7 @@ from typing import Any
 
 from ml_stack import home
 
-__all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "mint_pressed", "protect", "require_person"]
+__all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "mint_clicked", "mint_pressed", "protect", "require_person"]
 
 AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 """Environment variables whose presence means an agent started this process."""
@@ -91,6 +91,21 @@ def mint_pressed(action: str, subject: str, *, pressed: Callable[[str], bool],
     for a release, which restores what was held; a purge still goes through `mint`."""
     require_person(action, terminal, env)
     if not pressed(f"{action} {subject}"):
+        raise HumanRequired(f"{action} not confirmed")
+    return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
+
+
+def mint_clicked(action: str, subject: str, *, answer: str, label: str,
+                 env: Mapping[str, str] | None = None) -> HumanGrant:
+    """A grant after a person pressed the dialog button ``label``: refused when the
+    environment carries an agent marker or when ``answer`` is not exactly ``label``. Only the
+    process that put the dialog up calls this, with what the dialog returned."""
+    env = os.environ if env is None else env
+    marked = [name for name in AGENT_MARKERS if env.get(name)]
+    if marked:
+        raise HumanRequired(f"{action} is for a person; this process was started by an agent "
+                            f"({marked[0]} is set)")
+    if not label or answer != label:
         raise HumanRequired(f"{action} not confirmed")
     return HumanGrant(action, subject, time.time() + GRANT_TTL_S, _MINT)
 

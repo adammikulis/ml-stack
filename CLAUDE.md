@@ -379,6 +379,8 @@ Owner's standing choices (2026-10-03); do not ask again.
 
 - **Default decider: Strands 2B** (`StrandsAgents/strands-decider-2B-hobson-v19`), chosen for its small size; revisit only against measured results (JevBench and our own sets). **Fine-tuned deciders are never committed**: datasets and weights stay in caches, the repo keeps recipes and metrics only.
 
+- **Persistent, relational state defaults to the graph** (`ml_stack.graph.GraphStore`, `docs/graph.md`): agent memory, knowledge about models, builds and tasks, ingested documents. Facts link to the things they are about, so recall can follow relations and use the hybrid search. A flat JSON file needs a stated reason (pure configuration, a tiny single-purpose cache); integrity sealing and tamper checks sit on top of the graph, not instead of it.
+
 ## Saying that something works
 
 Drive it the way a person does before you say it works: open the interface, click through the

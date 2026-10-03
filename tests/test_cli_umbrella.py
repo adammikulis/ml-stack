@@ -151,11 +151,11 @@ def test_help_lists_every_command_and_hands_a_named_one_its_own_help(capsys):
 
     assert cli.help_main([]) == 0
     out = capsys.readouterr().out
-    assert "bench" in out and "do" in out and "usage: ml-stack help" in out and "asks itself" not in out
+    assert "bench" in out and "chat" in out and "usage: ml-stack help" in out and "asks itself" not in out
     code = cli.help_main(["bench"])
     assert code == 0 and "usage: ml-stack-bench" in capsys.readouterr().out
-    assert cli.main(["help", "do"]) == 0
-    assert "usage: ml-stack-do" in capsys.readouterr().out
+    assert cli.main(["help", "chat"]) == 0
+    assert "usage: ml-stack-chat" in capsys.readouterr().out
     assert cli.help_main(["benc"]) == 2
     assert "not a command" in capsys.readouterr().err
     with pytest.raises(SystemExit):

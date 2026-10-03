@@ -64,7 +64,7 @@ is refused). A list replaces them: `[*guard.default(), hook, ...]` keeps them. E
 context)`, returning `Proceed()`, `Deny(reason)`, `Confirm(question, details)`, `Guide(message)` or
 `Rewrite(text, tainted=...)`. These are the types of `ml_stack.interventions`, the one mechanism
 the guard's rails, a decision model's tool-call check (`ml_stack.decide.guard`) and the
-`ml_stack.do` loop share; `docs/guardrails.md` lists the rails.
+`ml_stack.chat` loop share; `docs/guardrails.md` lists the rails.
 
 - `Deny` on a tool call is answered to the model as a tool error carrying the reason; on a model
   call or the invocation it ends the run with `Done("denied")`; on a tool result it replaces the

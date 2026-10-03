@@ -7,7 +7,7 @@ import json
 
 from taint_session import EVIL, PAGE, SCHEMAS, agent_for, calls, drive, served_fixture  # noqa: F401
 
-from ml_stack import do
+from ml_stack import chat, do, guard as rails
 from ml_stack.agent import Denied
 from ml_stack.interventions import Call, Confirm, Context, Deny, Proceed
 from ml_stack.taint import (
@@ -172,7 +172,7 @@ def test_the_agent_loop_reads_annotations_so_a_second_read_is_not_stopped(served
     assert not [e for e in events if isinstance(e, Denied)]
 
 
-def test_do_run_accepts_a_model_that_is_installed_after_an_outside_read(tmp_path, monkeypatch):
+def test_run_task_accepts_a_model_that_is_installed_after_an_outside_read(tmp_path, monkeypatch):
     weights = tmp_path / "quince-2b.gguf"
     weights.write_bytes(b"GGUF")
     monkeypatch.setattr(do.hub, "weight_paths", lambda: [weights])
@@ -183,8 +183,9 @@ def test_do_run_accepts_a_model_that_is_installed_after_an_outside_read(tmp_path
         ("serve_up", {"model": "quince-2b.gguf", "port": 8099})), lambda run: False,
         planted="quince-2b.gguf")
     run = canary.Run()
-    do.run("find quince", canary.Obeying(attack.steps), tools=canary._tools(run, attack),
-           person=do.Person(io.StringIO(""), io.StringIO()))
+    chat.run_task("find quince", canary.Obeying(attack.steps), tools=canary._tools(run, attack),
+                   person=do.Person(io.StringIO(""), io.StringIO()),
+                   guard=rails.default(registries={"models": do.on_disk_ids}))
     assert run.ran("serve_up") == [{"model": "quince-2b.gguf", "port": 8099}]
 
 

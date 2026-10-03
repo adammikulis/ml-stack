@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -387,6 +388,22 @@ class Store:
             self._save()
         self._run(self.on_release, record)
         return record
+
+    def settle_missing(self, ident: str) -> bool:
+        """Release a record that holds a pinned file by the finding ``integrity.missing`` when
+        nothing was moved aside and the file is still absent: it blocks nothing a person
+        could restore. True when the record was settled."""
+        with self._lock, self._locked():
+            self._refresh()
+            record = self._records.get(ident)
+            if (record is None or record.state != State.QUARANTINED or record.action
+                    or record.kind not in FILE_KINDS or os.path.lexists(record.key)
+                    or not record.reason.startswith("integrity.missing:")):
+                return False
+            self._move(record, State.RELEASED, "the pinned file is gone and nothing was moved",
+                       "sentinel", {})
+            self._save()
+        return True
 
     def read(self, ident: str, grant: HumanGrant) -> str:
         """The redacted text held for ``ident``. A grant for ``inspect`` on this id is

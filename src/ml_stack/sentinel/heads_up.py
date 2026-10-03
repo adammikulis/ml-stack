@@ -1,12 +1,13 @@
-"""A heads-up on the person's own screen when something is quarantined.
+"""The one dialog sentinel puts on the person's screen, with the buttons that deal with it.
 
-The notification has two real buttons: ``Review…`` opens a terminal running
-``ml-stack-security review``, and ``Dismiss`` does nothing. Nothing here can release, purge or
-answer a prompt: this module never touches a grant, a store method that changes a record, or
-the review screen's keys, and the only text it hands the desktop is the safe, bounded
-sentence from `explain`. At most one notice per subject per hour, and one burst notice when
-many are held at once. ``ML_STACK_SENTINEL_NOTIFY=off`` turns it off but needs
-``ML_STACK_SENTINEL_NOTIFY_BECAUSE``; the off is logged as an event.
+Only a quarantine that means something changed or was forged (`NEEDS_PERSON`) is asked
+about; a watch, a missing file or a person's own hold is not. One dialog is open at a time on
+the machine (a lock file beside the state, taken without waiting), a cooldown follows each,
+and everything held then is in it. ``Release`` releases exactly the subjects it lists, ``Keep
+held`` stops asking about them, ``Later`` asks again in a few hours. The release is the
+click: made by the process that put the dialog up, for the ids it listed, when the answer is
+exactly `RELEASE` and the environment has no agent marker (`human.mint_clicked`, called
+nowhere else). The text is fixed sentences from `explain` and names it has made safe.
 """
 
 from __future__ import annotations
@@ -15,136 +16,201 @@ import json
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from ml_stack import desktop
 from ml_stack.files import write_text
-from ml_stack.lock import only_one
-from ml_stack.sentinel import explain
+from ml_stack.lock import Busy, only_one
+from ml_stack.sentinel import explain, human
 from ml_stack.sentinel.events import Bus, Event, Severity
-from ml_stack.sentinel.launcher import open_review
-from ml_stack.sentinel.store import Record
+from ml_stack.sentinel.store import Record, State, Store
 
-__all__ = ["BECAUSE", "BUTTONS", "ENV", "HOUR_S", "HeadsUp", "Wires"]
+__all__ = ["BUTTONS", "COOLDOWN_S", "KEEP", "LATER", "LATER_S", "NEEDS_PERSON", "RELEASE",
+           "SETTLE_S", "SHOWN_MOST", "HeadsUp", "Wires", "needs_person"]
 
-ENV = "ML_STACK_SENTINEL_NOTIFY"
-BECAUSE = "ML_STACK_SENTINEL_NOTIFY_BECAUSE"
-REVIEW, DISMISS = "Review…", "Dismiss"
-BUTTONS = (DISMISS, REVIEW)
-"""The two buttons; the safe one first, so Escape and closing the window dismiss."""
+LATER, KEEP, RELEASE = "Later", "Keep held", "Release"
+BUTTONS = (LATER, KEEP, RELEASE)
+"""The three buttons; the safe one first, so Escape and closing the window mean Later."""
 
-HOUR_S = 3600.0
-BURST_AFTER = 3
-"""Individual notices allowed in a minute before the rest become one burst notice."""
+COOLDOWN_S = 600.0
+LATER_S = 4 * 3600.0
+SHOWN_MOST = 4
+SETTLE_S = 2.0
+"""Seconds a dialog waits after the first quarantine, so what arrives with it is in the same dialog."""
+
+NEEDS_PERSON = frozenset({
+    "integrity.content_changed", "integrity.binary_mismatch", "integrity.manifest_mismatch",
+    "integrity.link_retargeted", "peer.forged_traffic", "honey.token_seen", "honey.path_named",
+    "honey.tool_called", "honey.endpoint_hit", "guard.tainted", "guard.tainted_text",
+})
+"""Finding kinds whose quarantine can only be judged by a person; every other quarantine is
+shown by the status line and `ml-stack-security review` and never by a dialog."""
+
+_DECOY_REASONS = ("carries a decoy value", "model output")
+_ANSWERS = ("Release puts what is listed back in use. Keep held leaves it blocked and stops "
+            "asking. Later asks again in a few hours.")
 
 logger = logging.getLogger("ml_stack.sentinel")
-Choose = Callable[[str, str, tuple[str, str]], str]
+Choose = Callable[[str, str, tuple[str, ...]], str]
 
 
-def _in_thread(work: Callable[[], None]) -> None:
-    threading.Thread(target=work, name="sentinel-heads-up", daemon=True).start()
+def _in_thread(work: Callable[[], object]) -> None:
+    def settled() -> None:
+        time.sleep(SETTLE_S)
+        work()
+
+    threading.Thread(target=settled, name="sentinel-heads-up", daemon=True).start()
 
 
 class Wires(NamedTuple):
     """What a `HeadsUp` calls out to: ``choose`` shows the buttons and returns the label
-    pressed (None: the desktop's), ``opener`` opens the review window, ``spawn`` runs the
-    blocking dialog off the caller's thread."""
+    pressed (None: the desktop's), ``spawn`` runs the blocking dialog off the caller's thread,
+    ``env`` is the environment read for ``ML_STACK_NOTIFY`` and the agent markers (None: the
+    process's)."""
 
     choose: Choose | None = None
-    opener: Callable[[], bool] = open_review
-    spawn: Callable[[Callable[[], None]], None] = _in_thread
+    spawn: Callable[[Callable[[], object]], None] = _in_thread
+    env: Mapping[str, str] | None = None
+
+
+def needs_person(record: Record) -> bool:
+    """Whether a quarantined record is one a dialog may ask about."""
+    return explain.code_of(record) in NEEDS_PERSON or record.reason.startswith(_DECOY_REASONS)
 
 
 class HeadsUp:
-    """Raises the notification for a quarantine."""
+    """Raises the dialog for what is quarantined and needs a person."""
 
-    def __init__(self, state: Path, *, clock: Callable[[], float], bus: Bus | None = None,
-                 env: Mapping[str, str] | None = None, wires: Wires | None = None) -> None:
-        self.state, self.clock, self.bus = Path(state), clock, bus
+    def __init__(self, state: Path, *, clock: Callable[[], float], store: Store,
+                 bus: Bus | None = None, wires: Wires | None = None) -> None:
+        self.state, self.clock, self.store, self.bus = Path(state), clock, store, bus
+        self.choose, self.spawn, env = wires or Wires()
         self.env = os.environ if env is None else env
-        self.wires = wires or Wires()
-        self.choose, self.opener, self.spawn = self.wires
-        self._reported_off = False
+        self.lock = self.state.with_name("heads-up.lock")
 
-    # -- the hook ------------------------------------------------------------------
+    # -- when to ask ---------------------------------------------------------------
     def on_quarantine(self, record: Record) -> None:
-        """Store hook: tell the person unless it is off, rate-limited, or the person's own
-        doing. Never raises."""
+        """Store hook: ask about it unless it is a person's own doing or needs no person.
+        Never raises."""
         try:
             if record.history and record.history[-1].get("actor") == "human":
                 return
-            if self._off() or (self.choose is None and desktop.which_way() == "none"):
-                return
-            title, body = self._compose(record)
-            if title:
-                self._raise(title, body)
+            if needs_person(record) and self.enabled():
+                self.spawn(self.prompt)
         except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
             logger.warning("sentinel heads-up failed: %s", type(exc).__name__)
 
-    def _off(self) -> bool:
-        if self.env.get(ENV, "").strip().lower() != "off":
-            return False
-        because = self.env.get(BECAUSE, "").strip()
-        if not because:
-            return False
-        if not self._reported_off and self.bus is not None:
-            self._reported_off = True
-            self.bus.emit(Event("sentinel.notify_off", Severity.WARNING, "heads_up", "",
-                                {"because": because}, self.clock()))
-        return True
+    def poll(self) -> None:
+        """Ask again about what is still pending once the cooldown is over. Never raises."""
+        try:
+            if self.enabled() and self._pending(self._load(), everything=False):
+                self.spawn(self.prompt)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            logger.warning("sentinel heads-up failed: %s", type(exc).__name__)
 
-    # -- what to say, and whether it is time to -------------------------------------
-    def _compose(self, record: Record) -> tuple[str, str]:
-        now = self.clock()
-        item = explain.describe(record, 1, now)
-        with only_one(self.state.with_name(self.state.name + ".lock")):
-            memo = self._load(now)
-            subject = f"{record.kind}:{record.key}"[:200]
-            if subject in memo["subjects"]:
-                return "", ""
-            memo["subjects"][subject] = now
-            memo["recent"].append(now)
-            burst = len([t for t in memo["recent"] if now - t < 60]) > BURST_AFTER
-            if burst and now - memo["burst"] < HOUR_S:
-                self._save(memo)
-                return "", ""
-            if burst:
-                memo["burst"] = now
-            self._save(memo)
-        if burst:
-            return ("Several things were just quarantined",
-                    "ml-stack-security review lists them. Nothing has been released.")
-        return (f"ml-stack quarantined {item.name}", f"{item.why} {item.blocks}")
+    def enabled(self) -> bool:
+        """Whether a dialog may be shown now: ``ML_STACK_NOTIFY`` is read on every call."""
+        if self.choose is not None:
+            return self.env.get(desktop.ENV, "system").strip().lower() != "off"
+        return desktop.which_way(env=self.env) != "none"
 
-    def _load(self, now: float) -> dict[str, Any]:
+    # -- the dialog ----------------------------------------------------------------
+    def prompt(self) -> str:
+        """Put the dialog up if nobody else has, the cooldown is over and something is
+        pending; returns the label answered, or an empty string when nothing was shown."""
+        return self._single(everything=False)
+
+    def review(self) -> str:
+        """The same dialog for everything held, now, for a person who asked to see it."""
+        return self._single(everything=True)
+
+    def _single(self, *, everything: bool) -> str:
+        try:
+            with only_one(self.lock, wait=False, note="heads-up"):
+                return self._ask(everything)
+        except Busy:
+            return ""
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            logger.warning("sentinel heads-up failed: %s", type(exc).__name__)
+            return ""
+
+    def _ask(self, everything: bool) -> str:
+        now, memo = self.clock(), self._load()
+        if not self.enabled():
+            return ""
+        rows = self._pending(memo, everything=everything)
+        if not rows:
+            return ""
+        shown = rows[:SHOWN_MOST]
+        title, body = self._compose([explain.describe(r, n, now) for n, r in enumerate(shown, 1)],
+                                    len(rows))
+        memo["until"] = now + COOLDOWN_S
+        self._save(memo)
+        answer = (self.choose or self._desktop)(title, body, BUTTONS)
+        ids = tuple(r.id for r in shown)
+        if answer == RELEASE:
+            self._release(ids, answer)
+        elif answer == KEEP:
+            memo["kept"].update(dict.fromkeys(ids, now))
+        elif answer in (LATER, "timeout"):
+            memo["until"] = now + LATER_S
+        self._save(memo)
+        return str(answer)
+
+    def _desktop(self, title: str, body: str, buttons: tuple[str, ...]) -> str:
+        return desktop.choose(title, body, buttons, way=desktop.which_way(env=self.env))
+
+    def _compose(self, items: list[explain.Item], total: int) -> tuple[str, str]:
+        if total == 1:
+            return f"ml-stack is holding {items[0].name}", f"{items[0].why} {items[0].blocks} {_ANSWERS}"
+        names = "; ".join(f"{i.name} ({explain.short_code(i.code)})" for i in items)
+        more = f" {total - len(items)} more are not listed and stay held." if total > len(items) else ""
+        return (f"ml-stack is holding {total} things",
+                f"{names}.{more} Each is something that changed or was forged. {_ANSWERS}")
+
+    # -- the click -----------------------------------------------------------------
+    def _release(self, ids: tuple[str, ...], answer: str) -> None:
+        done: list[str] = []
+        try:
+            for ident in ids:
+                record = self.store.get(ident)
+                if record is None or record.state != State.QUARANTINED:
+                    continue
+                grant = human.mint_clicked("release", ident, answer=answer, label=RELEASE,
+                                           env=self.env)
+                self.store.release(ident, grant, "released by the dialog's Release button")
+                done.append(ident)
+        except human.HumanRequired as exc:
+            self._emit("sentinel.release_refused", {"why": str(exc)[:120]})
+        except (OSError, KeyError, ValueError) as exc:
+            logger.warning("sentinel heads-up release failed: %s", type(exc).__name__)
+        if done:
+            self._emit("sentinel.released_by_dialog", {"ids": done})
+
+    def _emit(self, kind: str, evidence: dict[str, Any]) -> None:
+        if self.bus is not None:
+            self.bus.emit(Event(kind, Severity.NOTICE, "heads_up", "", evidence, self.clock()))
+
+    # -- what is pending, and what was said ----------------------------------------
+    def _pending(self, memo: dict[str, Any], *, everything: bool) -> list[Record]:
+        if not everything and self.clock() < memo["until"]:
+            return []
+        rows = [r for r in self.store.records(state=State.QUARANTINED)
+                if everything or (needs_person(r) and r.id not in memo["kept"])]
+        return sorted(rows, key=lambda r: (r.updated, r.id), reverse=True)
+
+    def _load(self) -> dict[str, Any]:
         try:
             data = json.loads(self.state.read_text())
         except (OSError, ValueError):
             data = {}
-        subjects = {k: t for k, t in dict(data.get("subjects", {})).items()
-                    if isinstance(t, int | float) and now - t < HOUR_S}
-        recent = [t for t in data.get("recent", []) if isinstance(t, int | float) and now - t < 60]
-        burst = data.get("burst", 0.0)
-        return {"version": 1, "subjects": dict(list(subjects.items())[-200:]), "recent": recent,
-                "burst": burst if isinstance(burst, int | float) else 0.0}
+        until, kept = data.get("until", 0.0), data.get("kept", {})
+        return {"version": 2, "until": until if isinstance(until, int | float) else 0.0,
+                "kept": {k: t for k, t in kept.items() if isinstance(k, str)}
+                if isinstance(kept, dict) else {}}
 
     def _save(self, memo: dict[str, Any]) -> None:
         write_text(self.state, json.dumps(memo, sort_keys=True))
-
-    # -- the buttons ---------------------------------------------------------------
-    def _raise(self, title: str, body: str) -> None:
-        def ask() -> None:
-            try:
-                answer = (self.choose or _desktop)(title, body, BUTTONS)
-                if answer == REVIEW:
-                    self.opener()
-            except (OSError, ValueError, RuntimeError) as exc:
-                logger.warning("sentinel heads-up failed: %s", type(exc).__name__)
-
-        self.spawn(ask)
-
-
-def _desktop(title: str, body: str, buttons: tuple[str, str]) -> str:
-    return desktop.choose(title, body, buttons)

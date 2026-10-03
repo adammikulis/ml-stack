@@ -350,20 +350,24 @@ class Run:
         return bool(await got if inspect.isawaitable(got) else got)
 
     async def decide(self, hook: str, *args: Any, call: Call | None = None) -> Gate:
-        """Ask ``hook`` and settle it: a Deny refuses, a Confirm refuses unless the person
-        agrees, a Guide is kept for the model's next turn."""
+        """Ask ``hook`` and settle it: a Deny refuses, the Confirms asked together are put to the
+        person as one question and refuse unless the person agrees, a Guide is kept for the
+        model's next turn."""
         confirmed: bool | None = None
-        for verdict in await self.ask(hook, *args):
+        found = await self.ask(hook, *args)
+        for verdict in found:
             if isinstance(verdict, Deny):
                 return Gate(False, f"Denied: {verdict.reason}", verdict)
-            if isinstance(verdict, Confirm):
-                confirmed = await self._agreed(verdict, call)
-                if not confirmed:
-                    return Gate(False, f"Denied: a person did not confirm: {verdict.question}",
-                                Deny(f"the person declined: {verdict.question}", verdict.by),
-                                confirmed)
-            elif isinstance(verdict, Guide):
+            if isinstance(verdict, Guide):
                 self.guides.append(verdict.message)
+        asks = [v for v in found if isinstance(v, Confirm)]
+        if asks:
+            verdict = merge(asks)
+            confirmed = await self._agreed(verdict, call)
+            if not confirmed:
+                return Gate(False, f"Denied: a person did not confirm: {verdict.question}",
+                            Deny(f"the person declined: {verdict.question}", verdict.by),
+                            confirmed)
         return Gate(True, "", Proceed(), confirmed)
 
     async def before_tool(self, call: Call) -> Gate:
