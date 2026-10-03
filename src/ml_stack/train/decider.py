@@ -30,7 +30,7 @@ from ml_stack.decide.calibrate import fit_temperature, fit_temperature_ece, soft
 from ml_stack.decide.cases import Case, fingerprint
 from ml_stack.decide.fetch import locate
 from ml_stack.decide.pins import QWEN35_0_8B_BASE, STRANDS_V19, Checkpoint
-from ml_stack.decide.pointer import build_head, device_name, load_torso
+from ml_stack.decide.pointer import PointerDecider, build_head, device_name, load_torso
 from ml_stack.decide.sources import CONFIG, FORMAT, Source, question_key, strands_source
 from ml_stack.decide.types import DecideError
 from ml_stack.files import sha256_file, write_json
@@ -289,7 +289,6 @@ def baseline_of(spec: str, fit_cases: Sequence[Case], test: Sequence[Case], s: S
         rows = majority_rows(fit_cases, test)
         return "majority label", metrics.of_rows(
             rows, [c.label_index for c in test], floor=s.floor).public()
-    from ml_stack.decide.pointer import PointerDecider
     source: Checkpoint | Path = STRANDS_V19 if spec == "strands" else registry.find(spec)
     decider = PointerDecider(source, device=s.device, download=s.download)
     rows = []

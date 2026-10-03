@@ -54,11 +54,37 @@ def fit_temperature(rows: Sequence[Sequence[float]], labels: Sequence[int], *,
     return math.exp((a + b) / 2.0)
 
 
+BINS = 10
+
+
+def top_of(row: Sequence[float]) -> int:
+    """Index of the largest probability; the first of a tie."""
+    return max(range(len(row)), key=lambda i: (row[i], -i))
+
+
+def reliability(rows: Sequence[Sequence[float]], labels: Sequence[int], bins: int = BINS
+                ) -> list[dict[str, float]]:
+    """Per confidence bin: its range, how many cases fell in it, mean confidence and accuracy."""
+    held: list[list[tuple[float, bool]]] = [[] for _ in range(bins)]
+    for row, y in zip(rows, labels, strict=True):
+        top = top_of(row)
+        held[min(int(row[top] * bins), bins - 1)].append((row[top], top == y))
+    return [{"low": i / bins, "high": (i + 1) / bins, "n": len(b),
+             "confidence": sum(c for c, _ in b) / len(b),
+             "accuracy": sum(ok for _, ok in b) / len(b)} for i, b in enumerate(held) if b]
+
+
+def ece(rows: Sequence[Sequence[float]], labels: Sequence[int], bins: int = BINS) -> float:
+    """Expected calibration error: the bin-weighted gap between confidence and accuracy."""
+    total = len(rows)
+    return sum(b["n"] / total * abs(b["confidence"] - b["accuracy"])
+               for b in reliability(rows, labels, bins)) if total else 0.0
+
+
 def fit_temperature_ece(rows: Sequence[Sequence[float]], labels: Sequence[int], *,
                         low: float = 0.25, high: float = 8.0, steps: int = 80) -> float:
     """The temperature on a log grid that minimises expected calibration error, ties broken
     by NLL."""
-    from ml_stack.decide.eval import ece
     if len(rows) != len(labels):
         raise ValueError(f"{len(rows)} rows but {len(labels)} labels")
     grid = [math.exp(math.log(low) + (math.log(high) - math.log(low)) * i / (steps - 1))

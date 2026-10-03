@@ -9,10 +9,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ml_stack.decide.base import Decider
+from ml_stack.decide.calibrate import (  # noqa: F401  (moved there; still importable from here)
+    BINS,
+    ece,
+    reliability,
+    top_of,
+)
 from ml_stack.decide.cases import Case
 from ml_stack.decide.types import DecideError, Decision
 
-BINS = 10
 FLOOR = 0.8
 """The confidence under which an answer counts as abstained unless the caller says otherwise."""
 
@@ -23,30 +28,6 @@ def brier(rows: Sequence[Sequence[float]], labels: Sequence[int]) -> float:
         raise ValueError("no rows to score")
     return sum(sum((p - (1.0 if k == y else 0.0)) ** 2 for k, p in enumerate(row))
                for row, y in zip(rows, labels, strict=True)) / len(rows)
-
-
-def top_of(row: Sequence[float]) -> int:
-    """Index of the largest probability; the first of a tie."""
-    return max(range(len(row)), key=lambda i: (row[i], -i))
-
-
-def reliability(rows: Sequence[Sequence[float]], labels: Sequence[int], bins: int = BINS
-                ) -> list[dict[str, float]]:
-    """Per confidence bin: its range, how many cases fell in it, mean confidence and accuracy."""
-    held: list[list[tuple[float, bool]]] = [[] for _ in range(bins)]
-    for row, y in zip(rows, labels, strict=True):
-        top = top_of(row)
-        held[min(int(row[top] * bins), bins - 1)].append((row[top], top == y))
-    return [{"low": i / bins, "high": (i + 1) / bins, "n": len(b),
-             "confidence": sum(c for c, _ in b) / len(b),
-             "accuracy": sum(ok for _, ok in b) / len(b)} for i, b in enumerate(held) if b]
-
-
-def ece(rows: Sequence[Sequence[float]], labels: Sequence[int], bins: int = BINS) -> float:
-    """Expected calibration error: the bin-weighted gap between confidence and accuracy."""
-    total = len(rows)
-    return sum(b["n"] / total * abs(b["confidence"] - b["accuracy"])
-               for b in reliability(rows, labels, bins)) if total else 0.0
 
 
 def abstention_curve(rows: Sequence[Sequence[float]], labels: Sequence[int],
