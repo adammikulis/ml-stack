@@ -118,6 +118,17 @@ def test_a_head_shipped_with_the_weights_is_served_as_the_draft(cache, tmp_path,
     assert info.mtp == head.name
 
 
+@pytest.mark.parametrize("case", [("gemma4", None, "2"), ("gemma4", 5, "5"),
+                                  ("qwen35", None, None)])
+def test_the_draft_depth_follows_the_measured_architecture(cache, tmp_path, stop, case):
+    arch, asked, expect = case
+    model = a_gguf(snapshot(cache) / "Own-Q4_K_M.gguf", arch=arch, layer=True)
+    binary, manager = server(tmp_path)
+    info = leased(manager, model, spec_draft_max=asked)
+    stop(manager, info)
+    assert after(argv_of(binary), "--spec-draft-n-max") == expect
+
+
 def test_ml_stack_mtp_off_serves_without(cache, tmp_path, stop, monkeypatch):
     model = a_gguf(snapshot(cache) / "Own-Q4_K_M.gguf", layer=True)
     binary, manager = server(tmp_path)
@@ -230,6 +241,7 @@ def test_a_server_that_will_not_start_with_the_head_is_started_without(cache, tm
     stop(manager, info)
     assert "--spec-type" not in argv_of(real)
     assert info.mtp == "" and "would not start with it" in info.mtp_note
+    assert "one-command check" in info.mtp_note
     again = mtp.plan(ServerSpec(model=model), binary=wrapper)
     assert not again.active and "failed to start" in again.note
 

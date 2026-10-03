@@ -380,6 +380,7 @@ class ServerManager(Admitting):
             mtp.failed(spec.model, spec.draft, getattr(self.backend_for(spec), "binary", None))
             spec = replace(spec, draft=None, spec_type="", mtp=False)
             note = f"MTP off: the server would not start with it ({str(why).splitlines()[0]})"
+            note += "; docs/serving.md, 'Multi-token prediction', has the one-command check"
             (self.say or logger.warning)(f"port {spec.port}: {note}; starting without")
             info = replace(self.backend_for(spec).start(spec, lease=admitted, timeout=timeout,
                                                         **starting), mtp_note=note)

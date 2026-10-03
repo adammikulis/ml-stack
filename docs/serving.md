@@ -383,6 +383,70 @@ of one token (`max_tokens=1`), so there is nothing to draft, and in the build ch
 served drafted. The bench's no-head arms and `ml-stack-draft`'s `none` arm set `mtp=False` too, so
 a baseline is a baseline.
 
+#### What has been measured
+
+Draft depth: a model whose architecture is in `serve.mtp.DEPTH` is started at that depth
+unless the lease names one; every other model gets the server's own default (3). The table
+is `gemma4: 2` only.
+
+Measured on this repo's own runs (`ml-stack-bench` store, 2026-09-01 to 2026-09-06, Mac;
+`docs/report-2026-09-23.md`, "Draft heads, per model", and `docs/llama-cpp-per-request-speculative.md`).
+Speed is the head's seconds-per-question against the same model's undrafted run on the same
+build; accept is the share of drafted tokens kept. A head cannot change an answer, so the F1
+columns of the report are not evidence about speed. The report prints the build only for the
+fit records (gemma-4: `3466812`, the per-request-depth patch on b10751; Flash-Next:
+`92cedc867`, unsloth `b10715-mix-86bd2d3`); the draft rows carry none, and a `shared` head
+loads only on the fork.
+
+| model, head | depth | accept | speed against no head |
+| --- | --- | --- | --- |
+| Flash-Next UD-IQ4_XS, Q8_0 (shared or not) | n2 / n4 / n8 | 74-79% / 58-59% / 39-42% | 1.13-1.43x / 1.46-1.73x / 0.73-0.95x |
+| Flash-Next UD-Q4_K_XL, shared Q8_0 | n2 / n3 / n4 | 86-87% / 79-85% / 72-78% | 1.25-1.51x / 1.24-1.48x / 1.27-1.32x |
+| same | n5 / n6 / n7 / n8 | 68-73% / 61-62% / 59% / 54% | 1.29-1.51x / 1.28-1.60x / 1.14-1.74x / 0.99-1.07x |
+| gemma-4-E2B, Q4_0 | n2 / n4 | 69-82% / 54-67% | 1.15-1.29x / 0.99-1.30x |
+| gemma-4-E2B, per-request depth sweep (tokens/s) | n1 / n2 / n4 / n8 | 76 of 150 kept at n8 | 169.6 / 176.3 / 176.6 / 141.3 |
+| gemma-4-E4B, Q4_0 / Q8_0 / BF16 | n2 / n4 / n8 / n16 | 66-71% / 50-57% / 30-37% / 16-20% | 0.99-1.09x / 0.85-0.94x / 0.64-0.75x / 0.56-0.66x |
+| gemma-4-26B-A4B | n4 | 65-84% | no undrafted run: no speed |
+| Qwen3.8-27B, own layer | | | no drafted run: memory records only |
+| gpt-oss-120b / 20b, eagle3 (not MTP) | n2 / n4 | 42-65% | 0.71-0.82x, a loss; never selected by the default |
+
+Reading it: depth 8 and above lost or broke even everywhere it was tried; gemma-4 is best at
+2 (E2B flat from 2 to 4, E4B loses from 4 up), which is the one row of
+`DEPTH`. Flash-Next has no single best depth in these runs (n4 beats n2 on IQ4_XS, n2 to n7
+sit inside each other's spread on Q4_K_XL, the same depth varies 1.14-1.74x between runs),
+so it keeps the server's 3, which lies inside the good range. The E4B gain at n2 and the E2B
+gain are inside the report's own s/q noise. Head precision on gemma-4-E4B (Q4_0, Q8_0, BF16)
+is within 3% at equal accept, and shared against non-shared Flash-Next is within 1%, so the
+order "Q8_0, else the smallest" is not contradicted. No run compares an embedded layer with a
+detached head.
+
+Published or claimed elsewhere, not measured here (`docs/research/qwen38-flash-next-mtp.md`,
+2026-09-01):
+
+| source | what it says |
+| --- | --- |
+| llama.cpp #27836, M3 Max, Flash-Next IQ4_XS | 27.4 -> 37.2 tok/s (+36%, 89% accept) at n2; +42% (86%) at n3 |
+| unsloth fork PR #144, B200, Q4_K_XL | 1.67x, 66% accept; bf16 and Q8_0 heads equal; concurrency 8 is 0.81-0.87x |
+| a #144 comment, RTX PRO 6000 | 1.94x with the non-shared Q8_0 head, 8% faster than shared |
+| unsloth `MTP/README.md` | 1.3-1.7x at low concurrency, n2, not for concurrent serving |
+| #27836 thread, M5 Pro / M5 Max | -12% to +5% at n2-n3; +13-68% with n6 and `p-min 0.7` |
+| #27836 thread, Vulkan and dual-GPU CUDA | 2-4x slower despite 85-95% accept, until #28123 (rollback) |
+
+No in-repo run shows a multi-GPU or Vulkan loss, so there is no automatic off for them; the
+opt-outs above are the remedy. Concurrency above one slot is likewise published only.
+
+**Flash-Next on the managed build.** The tracked build `b11380` (`eec18f5d3`) contains the
+qwen4exp MTP graph (`llama_model_qwen4exp::graph_mtp`) and the `blk.N.nextn.hc_head_*`
+tensors, and has no `nextn_shared_target_tensors`, so it can run a head but cannot borrow the
+target's embeddings: the default offers it the non-shared `mtp-...-Q8_0.gguf` only. Whether it
+loads that head-only file as `-md` is not known without loading it. The one check, on a quiet
+machine (loads the 87G model once per arm):
+
+    ml-stack-draft Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf --depth 2 --depth 3 --depth 4
+
+An arm that cannot load prints the server's error; a loading head prints accept and speed
+against the no-head arm, which are the first numbers for this build.
+
 **A release lags master by an architecture or two.** Checked on this machine: the newest
 homebrew bottle (`brew outdated` empty) reads `gemma4` and `qwen3moe` but not `qwen4exp`, so
 Qwen3.8-Flash-Next exits with "unknown model architecture" on it. `ml-stack-serve build`
@@ -440,7 +504,7 @@ itself — `ml-stack-models files` prints it under the draft line it already rep
 publisher's warning is read before a load, not guessed at after one fails.
 
 **Some heads need a fork, and one chooser — told which binary will serve — decides.**
-Measured for real: every `mtp-` head under `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on
+Measured for real on 2026-09-01 (mainline `3466812`; the managed `b11380` is covered under "What has been measured"): every `mtp-` head under `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on
 mainline llama.cpp master with `check_tensor_dims: tensor 'output_hc_norm.weight' not
 found` — mainline loads a draft as a whole model, and those heads carry only the head,
 borrowing the trunk's embeddings from the target — and the repository's own `MTP/README.md`
@@ -482,8 +546,8 @@ Measured on this machine 2026-09-01, from the newest unsloth release
 --name unsloth`. `--build unsloth` then preflights Qwen3.8-Flash-Next
 (`UD-IQ4_XS`) with `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`, `--spec draft-mtp
 --spec-draft-n-max 2` cleanly — architecture, shards and every flag check pass — without
-ever serving it. For the later measurement itself (not yet run): unsloth's own recommended
-`--spec-draft-n-max` is 2, other reports found 3 or 6 better depending on platform and
+ever serving it. The measurement was run later (see "What has been measured"). Unsloth's own
+recommended `--spec-draft-n-max` is 2, other reports found 3 or 6 better depending on platform and
 `--spec-draft-p-min` (0.7 is the value used alongside them); `--ctx-checkpoints 0` is
 needed for a byte-identical comparison at all, because **greedy output with a head on is
 not byte-identical on Metal at n-max ≥ 3** (also seen on HIP) — so a bench comparing heads
