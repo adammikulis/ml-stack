@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -101,9 +101,10 @@ class Watch:
         """Tell sentinel that a rail refused the call, so it is held and counted. A refusal the
         guard logged as a Deny is counted by the log handler; any other (a Confirm nobody
         answered) is counted here."""
-        self.node.handle_all(self.node.rails.denied_call(self.session, rail, reason, tool,
-                                                         arguments, count=not logged))
+        rails = self.node.rails
+        self.node.handle_all(rails.parked_call(self.session, rail, reason, tool, arguments))
         if not logged:
+            self.node.handle_all(rails.counted(self.session, rail))
             self.node.note("session", self.session, "guard.denied")
 
     def shown(self, tool: str, original: str, screened: Screened) -> str:

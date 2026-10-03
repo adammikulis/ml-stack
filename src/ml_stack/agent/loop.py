@@ -206,8 +206,7 @@ class Agent:
             spent += _completion_tokens(reply)
             pending = self._pending(reply, index)
             text = reply.content or ""
-            if self.watch:
-                text = self.watch.said(text)
+            text = self.watch.said(text) if self.watch else text
             if not pending:
                 messages.append({"role": "assistant", "content": text})
                 yield Done("answer", text, step, calls, spent, messages)

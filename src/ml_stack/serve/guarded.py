@@ -11,8 +11,8 @@ from typing import Any
 from ml_stack import sentinel
 from ml_stack.sentinel import Sentinel
 from ml_stack.sentinel.adapters import broker_listener, serve_hooks
-from ml_stack.sentinel.servers import unmanaged_findings
 from ml_stack.sentinel.events import Event, Severity
+from ml_stack.sentinel.servers import unmanaged_findings
 from ml_stack.sentinel.watch import Scanner
 from ml_stack.serve import canaries, decoy
 from ml_stack.serve.backend import ServerFailed

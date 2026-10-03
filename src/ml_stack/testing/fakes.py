@@ -47,6 +47,7 @@ from ml_stack.serve.backend import (
 )
 from ml_stack.serve.manager import ServerManager, serve
 from ml_stack.serve.preflight import Check, Preflight, Report
+from ml_stack.testing.answers import answers_in
 
 __all__ = [
     "DRAFTING",
@@ -733,25 +734,6 @@ def _after(argv: list[str], names: tuple[str, ...]) -> str:
     return ""
 
 
-def _answers_in(where: Path) -> Callable[[dict[str, Any]], str]:
-    """The answer of a fake server process, read from ``answers.json`` in ``where`` at every
-    request, so a test changes how the model behaves while it runs: ``{"default": text,
-    "contains": {phrase in the last user message: text}}``."""
-    def answer(body: dict[str, Any]) -> str:
-        try:
-            spec = json.loads((where / "answers.json").read_text())
-        except (OSError, ValueError):
-            return "hello"
-        said = [str(m.get("content") or "") for m in body.get("messages") or []
-                if m.get("role") == "user"]
-        prompt = said[-1] if said else str(body.get("prompt") or "")
-        for phrase, text in (spec.get("contains") or {}).items():
-            if phrase in prompt:
-                return str(text)
-        return str(spec.get("default", "hello"))
-    return answer
-
-
 def serve_from_argv(argv: list[str], *, where: Path) -> int:
     """Serve `fake_llama_server` on the ``--port`` in ``argv`` until the process is killed.
 
@@ -769,7 +751,7 @@ def serve_from_argv(argv: list[str], *, where: Path) -> int:
                     context=int(context) if context.isdigit() else 4096,
                     slots=int(slots) if slots.isdigit() else 1,
                     draft=draft, spec_type=_after(argv, _FLAGS["spec_type"]),
-                    counted=DRAFTING if draft else None, answer=_answers_in(where))
+                    counted=DRAFTING if draft else None, answer=answers_in(where))
     port = _after(argv, _FLAGS["port"])
     FakeLlamaServer(served, port=int(port) if port.isdigit() else 8080)
     threading.Event().wait()
