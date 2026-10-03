@@ -104,8 +104,8 @@ class KeystoreKeys:
     mode = "keystore"
 
     def __init__(self, account: str, *, owner: str = "", files: tuple[Path, ...] = (),
-                 ks: keystore.Keystore | None = None) -> None:
-        self.account, self.owner, self.files = account, owner, files
+                 purpose: str = PURPOSE, ks: keystore.Keystore | None = None) -> None:
+        self.account, self.owner, self.files, self.purpose = account, owner, files, purpose
         self._ks = ks
 
     @property
@@ -114,7 +114,7 @@ class KeystoreKeys:
 
     def _derive(self, salt: bytes, *, create: bool) -> bytes:
         try:
-            return self.ks.subkey(PURPOSE, self.account, context=salt, create=create)
+            return self.ks.subkey(self.purpose, self.account, context=salt, create=create)
         except keystore.KeystoreMissing:
             return b""
         except keystore.KeystoreError as exc:
@@ -140,7 +140,7 @@ class KeystoreKeys:
         if ks.migrated(SERVICE, self.account) or not self.files:
             return []
         try:
-            held = ks.legacy_get(SERVICE, self.account, PURPOSE)
+            held = ks.legacy_get(SERVICE, self.account, self.purpose)
             if held is None:
                 ks.mark_migrated(SERVICE, self.account)
                 return []
@@ -149,7 +149,7 @@ class KeystoreKeys:
             if not all(self._rewrap(path, old) for path in self.files):
                 return old
             with contextlib.suppress(keystore.KeystoreError):
-                ks.legacy_drop(SERVICE, self.account, PURPOSE)
+                ks.legacy_drop(SERVICE, self.account, self.purpose)
                 ks.mark_migrated(SERVICE, self.account)
             return old
         except keystore.KeystoreError as exc:
@@ -216,7 +216,8 @@ def _ask(prompt: str) -> str:
     raise KeyUnavailable(f"the memory store is under a passphrase: set {PASSPHRASE_ENV} or run in a terminal")
 
 
-def default_keys(user: str, profile: str, directory: str, stored: tuple[Path, ...] = ()) -> Keys:
+def default_keys(user: str, profile: str, directory: str, stored: tuple[Path, ...] = (),
+                 purpose: str = PURPOSE) -> Keys:
     """The keys this process uses: the OS keystore, or a passphrase when ``$ML_STACK_MEMORY_KEYS``
     says ``passphrase``."""
     want = os.environ.get(KEYS_ENV, "keystore") or "keystore"
@@ -225,7 +226,8 @@ def default_keys(user: str, profile: str, directory: str, stored: tuple[Path, ..
     if want != "keystore":
         raise KeyUnavailable(f"{KEYS_ENV} is keystore or passphrase")
     where = hashlib.sha256(directory.encode()).hexdigest()[:12]
-    return KeystoreKeys(f"{user}/{profile}/{where}", owner=f"{user}|{profile}", files=tuple(stored))
+    return KeystoreKeys(f"{user}/{profile}/{where}", owner=f"{user}|{profile}", files=tuple(stored),
+                        purpose=purpose)
 
 
 def _aead(key: bytes) -> Any:

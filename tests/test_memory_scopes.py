@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack import do, home, memory
-from ml_stack.memory import cli, project as projects, recall as recalling, store as storing
+from ml_stack.memory import cli, project as projects, recall as recalling, store as storing, vault
 from ml_stack.memory.facts import Refused
 from tests import memory_keys
 from tests.test_memory import Person, by_name, inject
@@ -362,15 +362,22 @@ def test_forget_all_asks_which_scope(person, capsys, monkeypatch, tmp_path):  # 
     assert len(memory.Memory.open(explicit=proj).user.facts()) == 1
 
 
-def test_rekey_moves_the_user_store_and_every_project_store_to_one_new_key(person, tmp_path, ring):  # noqa: F811
+def test_rekey_moves_the_user_store_and_every_project_store_to_a_new_key_each(person, tmp_path, ring):  # noqa: F811
     a, b = str(repo(tmp_path, "alpha")), str(repo(tmp_path, "beta"))
     for proj in (a, b):
         cli.main(["add", f"fact in {Path(proj).name}", "--scope", "project", "--project", proj])
     cli.main(["add", "likes tea", "--scope", "user", "--project", a])
-    before = dict(ring.held)
+
+    def salts() -> dict[str, bytes]:
+        files = sorted((home.state("memory")).rglob("graph.enc"))
+        return {str(f): vault.header(f.read_bytes())[1] for f in files}
+
+    before, held = salts(), dict(ring.held)
+    assert len(before) == 3
     assert cli.main(["rekey", "--project", a]) == 0
-    assert ring.held != before and len(ring.held) == 1
-    assert "previous" not in json.loads(next(iter(ring.held.values())))
+    after = salts()
+    assert after.keys() == before.keys() and all(after[k] != before[k] for k in before)
+    assert ring.held == held and len(ring.held) == 1
     for proj in (a, b):
         got = memory.Memory.open(explicit=proj)
         assert got.project.status == "ok" and [f.text for f in got.project.facts()] == [f"fact in {Path(proj).name}"]

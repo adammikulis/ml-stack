@@ -529,6 +529,39 @@ def test_a_signing_key_move_cut_off_after_the_old_item_went_still_signs(tmp_path
     assert json.loads(keys.meta_path.read_text())["store"] == "keystore"
 
 
+def test_the_reputation_ledger_is_keyed_under_its_own_purpose_and_migrates_too(tmp_path, counting):
+    from ml_stack.reputation.sealed import SealedGraph
+
+    ledger = SealedGraph(tmp_path / "r" / "graph.enc")
+    ledger.edit(lambda g: g.upsert_node({"id": "source:a", "kind": "source", "label": "a"}))
+    bus = Bus()
+    ks = keystore.default()
+    ks._bus = bus
+    ks.lock()
+    again = SealedGraph(tmp_path / "r" / "graph.enc")
+    assert again.graph().has("source:a") and again.status == "ok"
+    assert {e.subject for e in bus.recent(kind="keystore")} == {"purpose:reputation"}
+    assert again.keys.keys(b"s" * 16) != vault.default_keys(again.user, "reputation", str((tmp_path / "r").resolve())).keys(b"s" * 16)
+    old = as_an_older_version_wrote_it_files(again, counting)
+    keystore._DEFAULTS.clear()
+    assert SealedGraph(tmp_path / "r" / "graph.enc").graph().has("source:a")
+    assert (vault.SERVICE, again.keys.account) not in counting.held
+    assert old
+
+
+def as_an_older_version_wrote_it_files(ledger, ring) -> bytes:
+    old = os.urandom(32)
+    for each in (ledger.path, ledger.prev):
+        if each.exists():
+            blob = each.read_bytes()
+            _, salt = vault.header(blob)
+            plain, _ = vault.open_blob(blob, ledger.keys.keys(salt), owner=ledger.owner)
+            each.write_bytes(vault.seal_blob(plain, old, mode="keystore", salt=salt, owner=ledger.owner))
+    ring.set_password(vault.SERVICE, ledger.keys.account, json.dumps({"current": base64.b64encode(old).decode()}))
+    (home.state("keystore") / "legacy.json").unlink(missing_ok=True)
+    return old
+
+
 # -- no secret anywhere ---------------------------------------------------------------------------
 
 

@@ -1,8 +1,8 @@
 {
- "surfaces": 553,
+ "surfaces": 552,
  "by_status": {
-  "covered": 243,
-  "partial": 206,
+  "covered": 246,
+  "partial": 202,
   "uncovered": 56,
   "n/a": 48,
   "unmapped": 0
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 30,
+   "covered": 33,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -59,7 +59,7 @@
   },
   "keystore": {
    "covered": 3,
-   "partial": 4,
+   "partial": 0,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -2405,6 +2405,21 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:keystore.py:Keystore._ensure_dir",
+   "kind": "human",
+   "source": "keystore.py:Keystore._ensure_dir",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:memory/cli.py:_guarded.run",
    "kind": "human",
    "source": "memory/cli.py:_guarded.run",
@@ -2465,9 +2480,39 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:net/cli.py:keystore_reset",
+   "kind": "human",
+   "source": "net/cli.py:keystore_reset",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:net/cli.py:scan_policy",
    "kind": "human",
    "source": "net/cli.py:scan_policy",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:net/cli.py:unlock",
+   "kind": "human",
+   "source": "net/cli.py:unlock",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -2810,64 +2855,21 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
-   "id": "keystore:credentials/__init__.py:<module>",
-   "kind": "keystore",
-   "source": "credentials/__init__.py:<module>",
-   "trust": "the process environment and the files on disk",
-   "attacker": "a failure path leaks, downgrades or overwrites a secret",
-   "status": "covered",
-   "tests": [
-    "tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
-    "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
-    "tests/test_credentials.py",
-    "tests/test_redteam_human_floor.py::test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code",
-    "tests/test_no_real_keychain.py"
-   ],
-   "note": ""
-  },
-  {
-   "id": "keystore:credentials/__init__.py:_from_keyring",
-   "kind": "keystore",
-   "source": "credentials/__init__.py:_from_keyring",
-   "trust": "the process environment and the files on disk",
-   "attacker": "a failure path leaks, downgrades or overwrites a secret",
-   "status": "covered",
-   "tests": [
-    "tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
-    "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
-    "tests/test_credentials.py",
-    "tests/test_redteam_human_floor.py::test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code",
-    "tests/test_no_real_keychain.py"
-   ],
-   "note": ""
-  },
-  {
-   "id": "keystore:fleet/onboard/signing.py:<module>",
-   "kind": "keystore",
-   "source": "fleet/onboard/signing.py:<module>",
-   "trust": "the process environment and the files on disk",
-   "attacker": "a failure path leaks, downgrades or overwrites a secret",
-   "status": "partial",
-   "tests": [
-    "tests/test_onboard_ssh.py",
-    "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
-    "tests/test_no_real_keychain.py"
-   ],
-   "note": "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
-  },
-  {
    "id": "keystore:fleet/onboard/signing.py:SigningKeys._drop",
    "kind": "keystore",
    "source": "fleet/onboard/signing.py:SigningKeys._drop",
    "trust": "the process environment and the files on disk",
    "attacker": "a failure path leaks, downgrades or overwrites a secret",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_onboard_ssh.py",
+    "tests/test_keystore.py::test_the_fleet_signing_key_moves_into_a_wrapped_file_and_the_old_item_goes",
+    "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_wrap_is_finished_by_the_next_call",
+    "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_old_item_went_still_signs",
+    "tests/test_onboard_signing.py",
     "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
     "tests/test_no_real_keychain.py"
    ],
-   "note": "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
+   "note": "the wrapped key unwraps only for its purpose and directory; a refusing keystore leaves the old item and the record unchanged"
   },
   {
    "id": "keystore:fleet/onboard/signing.py:SigningKeys._get",
@@ -2875,43 +2877,34 @@
    "source": "fleet/onboard/signing.py:SigningKeys._get",
    "trust": "the process environment and the files on disk",
    "attacker": "a failure path leaks, downgrades or overwrites a secret",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_onboard_ssh.py",
+    "tests/test_keystore.py::test_the_fleet_signing_key_moves_into_a_wrapped_file_and_the_old_item_goes",
+    "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_wrap_is_finished_by_the_next_call",
+    "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_old_item_went_still_signs",
+    "tests/test_onboard_signing.py",
     "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
     "tests/test_no_real_keychain.py"
    ],
-   "note": "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
+   "note": "the wrapped key unwraps only for its purpose and directory; a refusing keystore leaves the old item and the record unchanged"
   },
   {
-   "id": "keystore:fleet/onboard/signing.py:SigningKeys._put",
+   "id": "keystore:keystore.py:<module>",
    "kind": "keystore",
-   "source": "fleet/onboard/signing.py:SigningKeys._put",
-   "trust": "the process environment and the files on disk",
-   "attacker": "a failure path leaks, downgrades or overwrites a secret",
-   "status": "partial",
-   "tests": [
-    "tests/test_onboard_ssh.py",
-    "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
-    "tests/test_no_real_keychain.py"
-   ],
-   "note": "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
-  },
-  {
-   "id": "keystore:memory/vault.py:<module>",
-   "kind": "keystore",
-   "source": "memory/vault.py:<module>",
+   "source": "keystore.py:<module>",
    "trust": "the process environment and the files on disk",
    "attacker": "a failure path leaks, downgrades or overwrites a secret",
    "status": "covered",
    "tests": [
+    "tests/test_keystore.py",
+    "tests/test_keystore_gate.py",
+    "tests/test_redteam_keystore.py",
     "tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
     "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
     "tests/test_credentials.py",
-    "tests/test_redteam_human_floor.py::test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code",
     "tests/test_no_real_keychain.py"
    ],
-   "note": ""
+   "note": "refusal, rate ceiling, background process, other-purpose key, label collision, master in no file or log"
   },
   {
    "id": "listener:fleet/daemon.py:main",

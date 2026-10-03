@@ -12,7 +12,7 @@
 
 [ratchet]
 uncovered = 56
-partial = 206
+partial = 202
 
 # -- the human-only floor ------------------------------------------------------------------
 [[group]]
@@ -265,20 +265,27 @@ status = "n/a"
 note = "fixed scripts that read the battery, focus or login item; no text from outside"
 
 [[group]]
-match = ["keystore:memory/*", "keystore:credentials/*"]
+match = ["keystore:keystore.py:*"]
 status = "covered"
-tests = ["tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
+tests = ["tests/test_keystore.py",
+         "tests/test_keystore_gate.py",
+         "tests/test_redteam_keystore.py",
+         "tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
          "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
          "tests/test_credentials.py",
-         "tests/test_redteam_human_floor.py::test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code",
          "tests/test_no_real_keychain.py"]
+note = "refusal, rate ceiling, background process, other-purpose key, label collision, master in no file or log"
 
 [[group]]
 match = ["keystore:fleet/onboard/signing.py:*"]
-status = "partial"
-tests = ["tests/test_onboard_ssh.py", "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
+status = "covered"
+tests = ["tests/test_keystore.py::test_the_fleet_signing_key_moves_into_a_wrapped_file_and_the_old_item_goes",
+         "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_wrap_is_finished_by_the_next_call",
+         "tests/test_keystore.py::test_a_signing_key_move_cut_off_after_the_old_item_went_still_signs",
+         "tests/test_onboard_signing.py",
+         "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
          "tests/test_no_real_keychain.py"]
-note = "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
+note = "the wrapped key unwraps only for its purpose and directory; a refusing keystore leaves the old item and the record unchanged"
 
 # -- text that reaches a model -------------------------------------------------------------
 [[group]]

@@ -12,7 +12,7 @@ conventions, decisions and their reasons, what worked or failed in that reposito
 |---|---|---|
 | about | the person and the machine, true in every project | one project |
 | file | `<state>/memory/u-<user hash>/<profile>/graph.enc` | `<state>/memory/u-<user hash>/<profile>/projects/<project key>/graph.enc` |
-| sealed with | the user's key, owner `uid:login\|profile` | the same key, owner `uid:login\|profile\|project:<project key>` |
+| sealed with | the user's key, owner `uid:login\|profile` | a key cut for the same user and its own salt, owner `uid:login\|profile\|project:<project key>` |
 | who reads it | this user, in every session | this user, in sessions in that project |
 
 **Which project.** `--project PATH` if given, else the git toplevel above the working directory,
