@@ -82,6 +82,10 @@ Each step records the observation supplied to the controller, decision, applied 
 reward, next observation, termination flags, episode ID, and sequence. Reset starts a new
 episode while sequence numbers keep increasing. An inference failure or abstention pauses
 the simulator and exposes the reason. No action is applied for an abstained decision.
+Decision models receive named specialist state alongside the native numeric observation;
+the exact model input appears in `decision.state`. PPO receives the numeric observation.
+Camera previews remain in the live stream and are omitted from saved trajectories by
+default. Set `record_frames` to `true` to save separate PNG files with frame references.
 
 ```sh
 ml-stack-gym run car --controller manual --action 5 --steps 100 \
@@ -134,7 +138,7 @@ ml-stack-gym export /path/to/session/trajectory.jsonl reviews.jsonl cases.jsonl
 ```
 
 Export includes only explicitly reviewed transitions and uses the observation before the
-action. Labels must name offered actions. Episode groups keep related transitions together
+action, preserving the exact named controller state when recorded. Labels must name offered actions. Episode groups keep related transitions together
 when splitting training/evaluation data. The output uses the existing labelled decision
 dataset format and can feed [decision fine-tuning](decision-models.md). A trained pointer
 directory can then be selected as the live Gym controller.
