@@ -320,7 +320,8 @@ cluster key** (losing one is not losing the other). `onboard/signing.py`:
 * **Export, rotation and revocation need a person at a terminal** (a human grant that follows
   sentinel's rule: stdin and stdout are terminals, no agent marker in the environment, the
   person types the key id back; it is kept as `onboard/human.py` until sentinel is merged).
-  The commands are `ml-stack fleet signing show|export|rotate|revoke|confirm|accept`. An agent
+  The commands are `ml-stack fleet devices [--learn] [--port P]                         paired devices: lan, tailnet or unreachable; Tailscale found or not
+ml-stack fleet signing show|export|rotate|revoke|confirm|accept`. An agent
   has no path to the key.
 * **Manifests are short-lived** (3 days) and carry a serial that may not go backwards.
 * **New devices pin the public key at pairing**; its fingerprint is printed on both machines
@@ -422,6 +423,42 @@ def watch_onboarding(bus, sentinel, Event, Severity):
   `fleet-onboard` extra.
 * A request whose dialog is still open when the owner answers in the terminal (or the reverse)
   is answered once: the second answer finds the request already closed and is dropped.
+
+## Devices on other networks (Tailscale)
+
+If this machine already runs Tailscale, a paired device that is not on the local network is
+reached over the tailnet. The tailnet is a route and nothing else: pairing, the pinned
+certificate, the signed manifest and the signed requests decide who is trusted, exactly as on a
+LAN, and no port is opened to the public internet.
+
+- **Detection** (`fleet/tailnet.py`) is read-only. It looks for the `tailscale` command (on
+  `PATH`, or the macOS app's copy) and runs `tailscale status --json`, never anything else (a
+  test records the arguments of every call). Output is capped at 1 MiB and 3 seconds, the child
+  gets the environment without secret-looking variables, and only these fields are copied out:
+  state, this device's tailnet addresses, and per peer its host name, MagicDNS name, tailnet
+  addresses and online flag. Auth URLs, keys and tokens in the output are never read into a
+  result or a log. An address outside 100.64.0.0/10 and fd7a:115c:a1e0::/48 is dropped; names
+  are reduced to printable text.
+- **Reaching a device** (`fleet/onboard/routes.py`): the address it was paired from is tried
+  first (`lan`), then its tailnet address (`tailnet`), then nothing (`unreachable`). Each try
+  is a TLS connection that must present the device's pinned certificate, after the usual check
+  that the address is not public (`lan.py`; tailnet ranges pass, public addresses never do).
+  A tailnet peer is a candidate when it is online and goes by the device's name; a peer that
+  merely has the same name but another certificate is not reached.
+- **Where a tailnet address comes from.** From the pairing exchange (a device that paired over
+  the tailnet), or from `fleet devices --learn`: a status peer is stored for a device only after
+  its certificate matched there. An announcement (`nearby`) never sets one; `learn_tailnet`
+  refuses any other source.
+- **Names.** `fleet fetch NAME --from DEVICE:PORT` accepts the name of a paired device. Names
+  are looked up in the peer list `tailscale status` reported and nowhere else: no DNS query for
+  an arbitrary name is made.
+- **Without Tailscale** nothing changes: no command is run when `fleet devices` or `fetch`
+  does not need the tailnet, and a device is `lan` or `unreachable`.
+
+Not done: installing Tailscale, logging in or starting it, Funnel or Serve, ACL management, exit
+nodes, a daemon that listens on the tailnet interface only, and checking the caller's tailnet
+identity (the pinned certificate and the signed requests are what is checked). Other overlays
+(WireGuard, Headscale) work as plain addresses.
 
 ## Tests and mutation checks
 

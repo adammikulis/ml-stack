@@ -16,11 +16,23 @@ from urllib.parse import urlsplit
 
 from ml_stack.httpguard import allowed_address
 
-__all__ = ["NotLocal", "require_local", "require_local_url"]
+__all__ = ["NotLocal", "in_tailnet", "require_local", "require_local_url"]
+
+TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
+TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 
 
 class NotLocal(OSError):
     """The address is on the public internet; onboarding does not go there."""
+
+
+def in_tailnet(address: str) -> bool:
+    """Whether ``address`` is in the range Tailscale assigns (100.64.0.0/10, fd7a:115c:a1e0::/48)."""
+    try:
+        ip = ipaddress.ip_address(address.strip("[]").split("%")[0])
+    except ValueError:
+        return False
+    return ip in (TAILNET_V4 if ip.version == 4 else TAILNET_V6)
 
 
 def require_local(host: str, port: int = 0) -> None:
