@@ -122,6 +122,22 @@ World construction is configured under `config.world`. Its `mode` is `procedural
 random seed. World construction does not determine episode limits or reset behavior;
 those belong to the runtime's simulation mode and native task configuration.
 
+With `simulation_mode: "world"`, warehouse, traffic and traffic-driving initialize their
+native environment once. `task_horizon` bounds a learning task in controller steps; its
+reset returns the current observation without restarting the native world. SUMO time stays
+monotonic and warehouse robots retain their identities and ongoing request queue. Native
+SUMO vehicles still arrive and depart; actor identity is not held artificially after arrival.
+Traffic's initial routes are followed by continued demand through native TraCI `route.add`
+and `vehicle.add`, sampling the loaded route templates with the world seed. Override
+`world_demand_period` to set the continuing vehicle interval in seconds. The resolved
+native route templates and interval are recorded in `continuing-demand.json`. The
+SUMO/MetaDrive bridge retains the same physics instance across learning-task boundaries.
+Warehouse time is reported in native discrete steps, rather than physical seconds.
+
+With `simulation_mode: "episode"`, the bounded native episode behavior remains available
+for isolated training and evaluation. Model update policy is selected separately through
+`learning_mode`; world construction does not train a model.
+
 For traffic and traffic-driving, procedural construction runs SUMO's maintained
 `netgenerate` and `randomTrips.py` tools. It creates one signal-controlled intersection
 with attached approach roads. The seed selects road length and reproducible demand;
