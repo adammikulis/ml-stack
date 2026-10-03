@@ -30,6 +30,7 @@ from pdfminer.layout import (
     LTAnno,
     LTChar,
     LTContainer,
+    LTCurve,
     LTImage,
     LTTextContainer,
     LTTextLine,
@@ -273,7 +274,8 @@ class Reader:
             ids[page.pageid] = number
             x0, y0, x1, y1 = (float(v) for v in page.mediabox)
             box = Box(x0, y0, abs(x1 - x0), abs(y1 - y0))
-            record: dict[str, Any] = {"width": box.width, "height": box.height, "blocks": [], "images": []}
+            record: dict[str, Any] = {"width": box.width, "height": box.height, "blocks": [], "images": [],
+                                      "strokes": 0}
             out.append(record)
             if limit is None or self.chars < limit:  # past the limit pages are counted, not laid out
                 itp.reset()
@@ -293,6 +295,8 @@ class Reader:
                 if self.images <= self.lim["max_images"]:
                     png, w, h = self.png(item) if self.request["images"] else ("", 0, 0)
                     record["images"].append({"bbox": box.rect(item), "png": png, "w": w, "h": h})
+            elif isinstance(item, LTCurve):  # a stroked or filled path: a line, a rectangle, a curve
+                record["strokes"] += 1
             elif isinstance(item, LTContainer):
                 self.collect(item, record, box)
 
