@@ -1,7 +1,7 @@
 {
- "surfaces": 546,
+ "surfaces": 549,
  "by_status": {
-  "covered": 237,
+  "covered": 240,
   "partial": 206,
   "uncovered": 56,
   "n/a": 47,
@@ -9,7 +9,7 @@
  },
  "by_kind": {
   "chat-tool": {
-   "covered": 26,
+   "covered": 28,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 40,
+   "covered": 41,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -378,6 +378,34 @@
    "id": "chat-tool:plan",
    "kind": "chat-tool",
    "source": "chat.py:plan",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_roles.py::test_every_role_by_every_tool_never_includes_the_person_only_floor",
+    "tests/test_redteam_chat.py",
+    "tests/test_roles.py::test_a_tainted_acting_call_asks_once_and_the_question_names_the_taint"
+   ],
+   "note": ""
+  },
+  {
+   "id": "chat-tool:recall",
+   "kind": "chat-tool",
+   "source": "chat.py:recall",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_roles.py::test_every_role_by_every_tool_never_includes_the_person_only_floor",
+    "tests/test_redteam_chat.py",
+    "tests/test_roles.py::test_a_tainted_acting_call_asks_once_and_the_question_names_the_taint"
+   ],
+   "note": ""
+  },
+  {
+   "id": "chat-tool:remember",
+   "kind": "chat-tool",
+   "source": "chat.py:remember",
    "trust": "tool arguments written by a model that may have read hostile text",
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "covered",
@@ -4133,6 +4161,20 @@
    "id": "parser:memory/migrate.py",
    "kind": "parser",
    "source": "memory/migrate.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_sentinel_store.py",
+    "tests/test_redteam_memory.py",
+    "tests/test_memory_vault.py::test_flipping_any_byte_of_the_ciphertext_or_header_is_detected"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:memory/project.py",
+   "kind": "parser",
+   "source": "memory/project.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",

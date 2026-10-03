@@ -309,8 +309,8 @@ def find_tools(found: dict[str, Surface]) -> None:
     from ml_stack import chat, do, mcp
     for tool in mcp.TOOLS:
         add(found, "mcp-tool", tool.name, f"mcp.py:{tool.name}")
-    session = chat.Chat(None, do.Person(io.StringIO(""), io.StringIO("")), role="operator",
-                        extension=chat.extensions())
+    person = do.Person(io.StringIO(""), io.StringIO(""))
+    session = chat.Chat(None, person, role="operator", extension=chat.extensions(person))
     for spec, _ in session.offered:
         add(found, "chat-tool", spec["function"]["name"], f"chat.py:{spec['function']['name']}")
 
