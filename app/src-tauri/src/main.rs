@@ -3,6 +3,8 @@
 
 mod daemon;
 mod settings;
+#[cfg(test)]
+mod security_tests;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
