@@ -12,7 +12,7 @@ from test_ingest import EMPTY, a_model
 
 from ml_stack import ingest
 
-pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
 
 GOLD = Path(__file__).parent / "fixtures" / "extraction-gold.json"
 

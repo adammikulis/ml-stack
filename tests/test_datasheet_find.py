@@ -49,10 +49,11 @@ def polite():
 
 
 def make_pdf(text):
-    pymupdf = pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
-    doc = pymupdf.open()
-    doc.new_page().insert_text((50, 80), text, fontsize=11)
-    return doc.tobytes()
+    from ml_stack.redteam.minipdf import Doc
+
+    doc = Doc()
+    doc.page().text(50, 80, text, size=11)
+    return doc.to_bytes()
 
 
 def engine_for(lan, *paths):

@@ -34,7 +34,7 @@ async def run(lab: Lab, report: Report, options: Options) -> None:
 
 def _pdf() -> bool:
     try:
-        import fitz  # noqa: F401
+        import pdfminer  # noqa: F401
     except ImportError:
         return False
     return True

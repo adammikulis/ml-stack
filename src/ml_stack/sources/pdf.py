@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack.net.pdfread import Limits, engine, load
 from ml_stack.sources.units import (
     MAX_TOKENS,
     Chapter,
@@ -84,14 +85,38 @@ _BOLD = re.compile(r"bold|black|heavy|semibold", re.IGNORECASE)
 _SPACE = re.compile(r"[ \t]+")
 
 
+BOOK_LIMITS = Limits(max_bytes=512 * 1024 * 1024, max_pages=5000, max_out=768 * 1024 * 1024,
+                     timeout_s=1800.0, memory_bytes=8 * 1024 ** 3, max_page_chars=20000)
+"""What reading a book may use: a textbook is large, so these are wide, and still bounded. The
+reader runs in a child process (`ml_stack.net.pdfread`); a PDF that crosses one is refused
+with `PdfRefused`, never half read."""
+
+
 def _pymupdf() -> Any:
+    """MuPDF, for the features only it has (pin tables, page pictures) and for the engine a
+    person chose by name. Never imported unless asked for: it is AGPL-3.0, so an installed copy
+    is not enough, ``ML_STACK_PDF_ENGINE=pymupdf`` has to say so."""
+    if engine() != "pymupdf":
+        raise RuntimeError(
+            "this feature (datasheet pin tables, page pictures) needs the MuPDF engine, which is "
+            "AGPL-3.0 and opt-in: pip install 'ml-stack[pdf-agpl]' and set "
+            "ML_STACK_PDF_ENGINE=pymupdf")
     try:
         import pymupdf
     except ImportError as exc:  # pragma: no cover - depends on what is installed
         raise ImportError(
-            "reading a PDF needs pymupdf: pip install 'ml-stack[pdf]'"
+            "this needs MuPDF (pymupdf), which is AGPL-3.0 and is not part of ml-stack[pdf]: "
+            "pip install 'ml-stack[pdf-agpl]' and read its licence first"
         ) from exc
     return pymupdf
+
+
+def _open(where: Path, *, images: bool, max_width: int) -> tuple[Any, Any]:
+    """``(pymupdf or None, document)`` read by the engine in use (`ml_stack.net.pdfread.engine`)."""
+    if engine() == "pymupdf":
+        pymupdf = _pymupdf()
+        return pymupdf, pymupdf.open(str(where))
+    return None, load(where, limits=BOOK_LIMITS, images=images, max_width=max_width)
 
 
 # -- reading a page into lines ------------------------------------------------------------
@@ -115,7 +140,9 @@ def _lines(page: Any, number: int) -> list[_Line]:
         if block.get("type") != 0:
             continue
         for line in block.get("lines") or ():
-            spans = line.get("spans") or ()
+            spans = [s for s in line.get("spans") or () if not s.get("hidden")]
+            if not spans:
+                continue
             text = _SPACE.sub(" ", "".join(s.get("text", "") for s in spans)).strip()
             if not text:
                 continue
@@ -140,6 +167,8 @@ def _bold_terms(page: Any, body: float) -> list[str]:
             continue
         for line in block.get("lines") or ():
             for span in line.get("spans") or ():
+                if span.get("hidden"):
+                    continue
                 text = _SPACE.sub(" ", str(span.get("text") or "")).strip(" ,;:")
                 size = round(float(span.get("size") or 0.0), 1)
                 if not text or abs(size - body) > 0.6 or not _BOLD.search(str(span.get("font"))):
@@ -241,6 +270,8 @@ def _paragraphs(lines: Iterable[_Line], furniture: set[str]) -> list[tuple[str, 
 def _render(pymupdf: Any, doc: Any, xref: int, max_width: int) -> tuple[bytes, int, int]:
     """One embedded image as PNG bytes, no wider than ``max_width``. Empty on anything odd."""
     try:
+        if pymupdf is None:
+            return doc.image_png(*xref)
         pix = pymupdf.Pixmap(doc, xref)
         if pix.n - pix.alpha >= 4 or pix.alpha:          # CMYK or transparency: to plain RGB
             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
@@ -262,9 +293,9 @@ def _figures(pymupdf: Any, doc: Any, page: Any, number: int, captions: Sequence[
     """
     out: list[Figure] = []
     for order, entry in enumerate(page.get_images(full=True)):
-        xref = int(entry[0])
+        xref = int(entry[0]) if pymupdf is not None else (number - 1, order)
         try:
-            boxes = page.get_image_rects(xref)
+            boxes = page.get_image_rects(xref if pymupdf is not None else order)
         except Exception:  # noqa: BLE001 - an image the page cannot place is still an image
             boxes = []
         bottom = max((float(b.y1) for b in boxes), default=0.0)
@@ -378,9 +409,8 @@ def read(path: str | Path, *, images: bool = False, max_width: int = IMAGE_WIDTH
     anyway. ``chapter`` reads one chapter and leaves the rest of the book unread -- the
     smoke run, and the only way to try a book without paying for all of it.
     """
-    pymupdf = _pymupdf()
     where = Path(path).expanduser()
-    doc = pymupdf.open(str(where))
+    pymupdf, doc = _open(where, images=images, max_width=max_width)
     try:
         return _read(pymupdf, doc, where, images=images, max_width=max_width, chapter=chapter)
     finally:

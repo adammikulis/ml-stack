@@ -77,7 +77,7 @@ def make_pdf(pymupdf, text):
 
 
 def test_reading_a_pdf_url_gives_its_text_and_keeps_the_file(lan):
-    pymupdf = pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+    pymupdf = pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
     lan.file("/ds.pdf", make_pdf(pymupdf, "ACME1234 buck converter, 3 A"), "application/pdf")
     got = web.read(f"{lan.base}/ds.pdf")
     assert "ACME1234 buck converter" in got["text"]

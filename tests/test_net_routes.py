@@ -84,7 +84,7 @@ def test_a_search_result_may_be_read_and_an_invented_address_may_not(lan):
 
 
 def pdf_with_hidden_text(tmp_path):
-    pymupdf = pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+    pymupdf = pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
     doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((72, 72), "ACME1234 buck converter, 3 A", fontsize=11)
