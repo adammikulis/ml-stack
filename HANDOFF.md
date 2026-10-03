@@ -69,8 +69,9 @@ capability; every line is something that already exists not being what it says.
   subscriber.
 - [ ] **An unpinned model is trusted at its first start** (pinned then, source `first-use`).
   Pinning at download (issue 31, signed manifests) is not done.
-- [ ] **Hashing at every start is the only check** for a pinned model; a 30 GB file on a cold
-  disk costs the start tens of seconds. No quick path.
+- [ ] **A file edited in place with size and mtime restored is caught only by the next deep scan
+  round**, not at start (the start skips the hash when path, size, mtime and inode match the last
+  full verification).
 
 ### Serving: one broker, one request at a time per pool
 - [ ] **Run `tests/test_serve_real_llama.py` on a card with nothing else on it** (`pytest

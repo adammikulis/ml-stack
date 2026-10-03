@@ -83,6 +83,6 @@ def verify(model: object, *, state_file: Path, stop: Callable[[int], Any]) -> No
         node.bus.emit(Event("model.pinned_first_use", Severity.NOTICE, "serve", f"model:{path}",
                             {"name": path.name}, node.clock()))
         return
-    if not node.verify_before_load(path):
+    if not node.verify_before_load(path, cached=True):
         raise SentinelRefused(f"{path.name} does not match its pin and is quarantined by "
                               f"sentinel; the file was moved aside")

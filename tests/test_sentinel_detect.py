@@ -179,13 +179,28 @@ def test_guarded_mode_watches_heuristics_and_enforce_acts_on_them(tmp_path, mode
 
 def test_off_ignores_everything_and_says_so(tmp_path, models, monkeypatch):
     monkeypatch.setenv("ML_STACK_SENTINEL", "off")
+    monkeypatch.setenv("ML_STACK_SENTINEL_BECAUSE", "a test of the switch")
     node = Sentinel(tmp_path / "s", roots=[models])
     path = _model(models)
     node.manifest.pin(path, "model")
     path.write_bytes(b"tampered")
     assert node.verify_before_load(path) is True and not node.store.records()
-    assert any(e.kind == "sentinel.off" for e in node.bus.recent())
+    assert any(e.kind == "sentinel.opt_out" and e.evidence["because"] == "a test of the switch"
+               for e in node.bus.recent())
+    assert node.status()["off_because"] == "a test of the switch"
     assert node.screen("x", "tool:a").text == "x"
+
+
+def test_off_without_a_reason_is_ignored_and_logged(tmp_path, models, monkeypatch):
+    monkeypatch.setenv("ML_STACK_SENTINEL", "off")
+    monkeypatch.delenv("ML_STACK_SENTINEL_BECAUSE", raising=False)
+    node = Sentinel(tmp_path / "s", roots=[models])
+    assert node.mode != Mode.OFF
+    assert any(e.kind == "sentinel.off_refused" for e in node.bus.recent())
+    path = _model(models)
+    node.manifest.pin(path, "model")
+    path.write_bytes(b"tampered")
+    assert node.verify_before_load(path) is False
 
 
 def test_only_a_person_changes_the_mode(node):

@@ -234,3 +234,106 @@ def test_the_fleet_daemon_quarantines_a_peer_that_forges_requests(tmp_path):
         runner.shutdown()
         httpd.shutdown()
         httpd.server_close()
+
+
+def counting_hashes(monkeypatch):
+    from ml_stack.sentinel import integrity
+
+    seen: list[str] = []
+    real = integrity.sha256_file
+
+    def counted(path, *a, **k):
+        seen.append(str(path))
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(integrity, "sha256_file", counted)
+    return seen
+
+
+def start_check(manager, model):
+    from ml_stack.serve import guarded
+
+    guarded.verify(model, state_file=manager.state_file, stop=manager.reclaim)
+
+
+def test_an_unchanged_pinned_model_is_not_read_again_at_the_next_start(
+        manager, model, monkeypatch):
+    sentinel.default().manifest.pin(model, "model", source="test")
+    seen = counting_hashes(monkeypatch)
+    start_check(manager, model)
+    assert len(seen) == 1, "the first start verifies the file in full"
+    start_check(manager, model)
+    start_check(manager, model)
+    assert len(seen) == 1, "an unchanged file was hashed again"
+
+
+def test_a_one_byte_edit_with_the_same_size_is_caught_at_the_next_start(manager, model):
+    sentinel.default().manifest.pin(model, "model", source="test")
+    start_check(manager, model)
+    before = model.stat().st_mtime_ns
+    with model.open("r+b") as fh:
+        fh.seek(100)
+        fh.write(b"\x07")
+    os.utime(model, ns=(before + 5_000_000_000, before + 5_000_000_000))
+    with pytest.raises(SentinelRefused, match="pin"):
+        start_check(manager, model)
+
+
+def test_an_edit_that_restores_size_and_mtime_passes_the_start_and_fails_the_deep_scan(
+        manager, model):
+    node = sentinel.default()
+    node.manifest.pin(model, "model", source="test")
+    start_check(manager, model)
+    stamp = model.stat().st_mtime_ns
+    with model.open("r+b") as fh:
+        fh.seek(100)
+        fh.write(b"\x07")
+    os.utime(model, ns=(stamp, stamp))
+    start_check(manager, model)
+    assert node.store.state_of("model", str(model)) == State.CLEAR
+    assert node.scan(deep=False) == []
+    assert [f.event.kind for f in node.scan(deep=True)] == ["integrity.content_changed"]
+    assert node.store.state_of("model", str(model)) == State.QUARANTINED
+
+
+def test_a_replaced_file_with_the_same_size_and_mtime_is_hashed_again(manager, model):
+    node = sentinel.default()
+    node.manifest.pin(model, "model", source="test")
+    start_check(manager, model)
+    stamp = model.stat().st_mtime_ns
+    swap = model.with_name("swap.bin")
+    swap.write_bytes(b"GGUF" + b"\x09" * 4096)
+    os.utime(swap, ns=(stamp, stamp))
+    swap.replace(model)
+    with pytest.raises(SentinelRefused, match="pin"):
+        start_check(manager, model)
+
+
+def test_sentinel_off_is_honoured_only_with_a_reason(model, monkeypatch, capsys):
+    from ml_stack.sentinel import Sentinel
+
+    monkeypatch.setenv("ML_STACK_SENTINEL", "off")
+    monkeypatch.delenv("ML_STACK_SENTINEL_BECAUSE", raising=False)
+    refused = Sentinel(home.home() / "x1")
+    assert refused.mode != sentinel.Mode.OFF
+    assert list(refused.bus.recent(kind="sentinel.off_refused"))
+    monkeypatch.setenv("ML_STACK_SENTINEL_BECAUSE", "benchmarking the bare loop")
+    off = Sentinel(home.home() / "x2")
+    assert off.mode == sentinel.Mode.OFF
+    got = off.bus.recent(kind="sentinel.opt_out")
+    assert got[-1].evidence["because"] == "benchmarking the bare loop"
+    sentinel._DEFAULT.clear()
+    security_status(argparse.Namespace(json=False))
+    out = capsys.readouterr().out
+    assert "mode: off" in out and "off_because: benchmarking the bare loop" in out
+
+
+def test_a_longer_file_with_the_mtime_restored_is_caught_at_the_next_start(manager, model):
+    sentinel.default().manifest.pin(model, "model", source="test")
+    start_check(manager, model)
+    stamp = model.stat().st_mtime_ns
+    with model.open("ab") as fh:
+        fh.write(b"\x00")
+    os.utime(model, ns=(stamp, stamp))
+    with pytest.raises(SentinelRefused, match="pin"):
+        start_check(manager, model)

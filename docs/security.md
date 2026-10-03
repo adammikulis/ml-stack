@@ -290,6 +290,10 @@ no more than what its tests show:
   on first use), and a held model or server cannot be leased or restarted until a person
   releases it. The Broker and fleet daemons scan every pin on a timer
   (`ML_STACK_SENTINEL_SCAN`), and `ml-stack security status` says whether that loop is armed.
+  Switching sentinel (`ML_STACK_SENTINEL=off`) or the scan off needs a reason in
+  `ML_STACK_SENTINEL_BECAUSE` / `ML_STACK_SENTINEL_SCAN_BECAUSE`; without one the switch is
+  ignored and logged. A start skips re-hashing a model whose size, mtime and inode are
+  unchanged since its last full check; an in-place edit that restores them waits for a deep scan.
   `docs/sentinel.md`, "What is armed by default", lists what is not wired.
 - **The event log is hash-chained** and `ml-stack security verify` finds edits, cuts and
   reordering; the head can be written down elsewhere.
