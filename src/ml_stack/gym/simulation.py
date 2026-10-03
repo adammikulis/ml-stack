@@ -13,6 +13,7 @@ from ml_stack.decide.sources import local_source
 from ml_stack.gym.adapters import actions, json_value, make_environment, render_state
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.paths import artifact_root
+from ml_stack.gym.provenance import native_provenance
 from ml_stack.gym.training import load_policy
 
 
@@ -85,7 +86,6 @@ class Simulation:
         self.settings = settings
         self.path = artifact_root() / settings["id"]
         self.path.mkdir(parents=True, exist_ok=True)
-        (self.path / "manifest.json").write_text(json.dumps(settings))
         config = dict(settings["config"])
         self.record_frames = bool(config.pop("record_frames", False))
         checkpoint = config.pop("checkpoint", None)
@@ -93,6 +93,10 @@ class Simulation:
         if self.environment == "car":
             config.setdefault("render_preview", True)
         self.env = make_environment(self.environment, config)
+        settings.update(native_provenance(self.environment, self.env))
+        settings.setdefault("model", checkpoint if self.controller == "ppo" else None)
+        settings.setdefault("device", "cpu")
+        (self.path / "manifest.json").write_text(json.dumps(settings))
         if self.controller == "ppo":
             if not checkpoint:
                 self.env.close()
@@ -103,12 +107,20 @@ class Simulation:
                       "sequence": 0, "episode_id": 0, "controller": self.controller, "observation": None,
                       "action": None, "decision": None, "reward": 0., "terminated": False,
                       "truncated": False, "info": {}, "frame": None, "error": None,
-                      "actions": self.names, "trajectory_path": str(self.path / "trajectory.jsonl")}
+                      "actions": self.names, "config": dict(settings["config"]), "seed": self.seed,
+                      "model": settings["model"], "device": settings["device"],
+                      "manual_action": self.manual, "speed": self.speed,
+                      "trajectory_path": str(self.path / "trajectory.jsonl")}
         self.reset({})
 
     def reset(self, payload):
         self.running = False
-        self.observation, info = self.env.reset(seed=int(payload.get("seed", self.seed)))
+        seed = int(payload.get("seed", self.seed))
+        self.observation, info = self.env.reset(seed=seed)
+        self.seed = seed
+        self.settings["seed"] = seed
+        self.state["seed"] = seed
+        (self.path / "manifest.json").write_text(json.dumps(self.settings))
         self.state["episode_id"] += 1
         self.state["sequence"] += 1
         self.state.update(status="paused", observation=json_value(self.observation), info=json_value(info),
@@ -162,11 +174,13 @@ class Simulation:
             self.state["status"] = "paused"
         elif command == "speed":
             self.speed = max(0.1, min(60., float(payload["speed"])))
+            self.state["speed"] = self.speed
         elif command == "action":
             selected = int(payload["action"])
             if not 0 <= selected < len(self.names):
                 raise ValueError("Invalid manual action")
             self.manual = selected
+            self.state["manual_action"] = selected
         elif command == "controller":
             controller = payload["controller"]
             if controller not in {"manual", "random", "ppo", "decider"}:
@@ -180,6 +194,11 @@ class Simulation:
             self.settings.update(controller=controller, device="cpu",
                                  model=payload.get("decision_checkpoint", STRANDS) if controller == "decider"
                                  else payload.get("checkpoint", ""))
+            for field in ("checkpoint", "decision_checkpoint"):
+                if field in payload:
+                    self.settings["config"][field] = payload[field]
+            self.state["config"] = dict(self.settings["config"])
+            self.state.update(model=self.settings["model"], device=self.settings["device"])
             (self.path / "manifest.json").write_text(json.dumps(self.settings))
         elif command == "reset":
             self.reset(payload)
@@ -229,4 +248,3 @@ def publish(updates, state):
         except queue.Empty:
             return
         updates.put_nowait(json_value(state))
-
