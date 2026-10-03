@@ -1,11 +1,6 @@
 <style>
 gym-scene { position:relative; display:block; overflow:hidden; background:#9fc5dc; }
 gym-scene canvas { display:block; width:100%; height:100%; }
-.gym-view-controls { position:absolute; top:12px; left:12px; z-index:2; display:flex; gap:10px;
-  flex-wrap:wrap; align-items:center; padding:8px 12px; background:rgba(17,31,36,.88);
-  color:#fff; border:1px solid #ffffff30; border-radius:10px; font-size:11px; }
-.gym-view-controls label { display:flex; gap:5px; align-items:center; margin:0; color:inherit; font-size:11px; }
-.gym-view-controls button { width:auto; margin:0; padding:3px 8px; font-size:11px; }
 .gym-scene-legend { position:absolute; bottom:12px; left:12px; padding:7px 10px;
   background:rgba(17,31,36,.88); color:#e6f0f2; border-radius:8px; font-size:10px; pointer-events:none; }
 </style>
@@ -37,6 +32,7 @@ gym-scene canvas { display:block; width:100%; height:100%; }
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = T.PCFSoftShadowMap;
         this.renderer.domElement.setAttribute('aria-label', 'Native simulator geometry with live sensor debug rays');
+        this.renderer.domElement.tabIndex = 0;
         this.append(this.renderer.domElement);
         const environment = new room.RoomEnvironment();
         const generator = new T.PMREMGenerator(this.renderer);
@@ -73,25 +69,13 @@ gym-scene canvas { display:block; width:100%; height:100%; }
     }
 
     toolbar() {
-      const bar = document.createElement('div');
-      bar.className = 'gym-view-controls';
-      const toggle = (label, field) => {
-        const input = document.createElement('input');
-        input.type = 'checkbox'; input.checked = this[field];
-        input.onchange = () => { this[field] = input.checked; if (this.pending) this.update(this.pending); };
-        const holder = document.createElement('label');
-        holder.append(input, label); bar.append(holder);
-        return input;
-      };
-      this.followInput = toggle('Follow car', 'follow');
-      toggle('Sensor rays', 'debugRays'); toggle('Heading / control', 'debugVectors');
-      const fit = document.createElement('button');
-      fit.textContent = 'Whole map'; fit.onclick = () => { this.follow = false; this.followInput.checked = false; this.frameMap(); };
-      bar.append(fit);
+      this.toolbarControls = document.createElement('gym-scene-controls');
+      this.append(this.toolbarControls);
+      this.toolbarControls.connect(this);
       const legend = document.createElement('div');
       legend.className = 'gym-scene-legend';
       legend.textContent = 'Cyan: clear ray · Coral: detected surface · Blue: heading · Gold: applied steering · Scenery is visual';
-      this.append(bar, legend);
+      this.append(legend);
     }
 
     disconnectedCallback() {
@@ -271,7 +255,7 @@ gym-scene canvas { display:block; width:100%; height:100%; }
       if (mapKey !== this.mapKey) {
         this.mapKey = mapKey;
         for (const mesh of this.meshes.values()) this.dispose(mesh);
-        this.objects.clear(); this.meshes.clear(); this.focusKey = null;
+        this.objects.clear(); this.meshes.clear();
         this.landscape(state);
         for (const road of state.roads || []) this.keep('road-' + road.id, () => this.road(road), [0, 0]);
         this.frameMap();
@@ -283,11 +267,11 @@ gym-scene canvas { display:block; width:100%; height:100%; }
           vehicle.position || [vehicle.x, vehicle.y], this.heading(vehicle, state));
         const dimensions = vehicle.dimensions || (vehicle.length ? vehicle : null);
         if (dimensions) mesh.scale.set(dimensions.width / 1.8, dimensions.height / 1.51, dimensions.length / 4.5);
-        if (vehicle.ego || vehicle.id === state.vehicle?.id || !this.focusKey || (state.lidar?.origin && Math.hypot(mesh.userData.target.x - state.lidar.origin[0], mesh.userData.target.z - state.lidar.origin[1]) < .1)) this.focusKey = key;
+
       }
       for (const [index, robot] of (state.robots || []).entries()) {
         const mesh = this.keep('robot-' + (robot.id ?? index), () => this.car(0xe4ad45),
-          robot.position || [robot.x, robot.y], (robot.direction || 0) * Math.PI / 2);
+          robot.position || [robot.x, robot.y], [Math.PI,0,-Math.PI/2,Math.PI/2][robot.direction || 0]);
         mesh.scale.set(.4, .4, .2);
       }
       for (const [index, shelf] of (state.shelves || []).entries()) this.keep('shelf-' + index,
@@ -307,11 +291,39 @@ gym-scene canvas { display:block; width:100%; height:100%; }
             [(a[0]+b[0])/2,(a[1]+b[1])/2,.06],Math.atan2(b[0]-a[0],b[1]-a[1]));
         }
       }
+      this.updateAgents(state);
       this.sensorLines(state);
       this.vectors(state);
       for (const [key, mesh] of this.meshes) if (!mesh.userData.seen) {
         this.objects.remove(mesh); this.dispose(mesh); this.meshes.delete(key);
       }
+    }
+
+    updateAgents(state) {
+      const previousIndex = this.agents?.findIndex(a => a.key === this.focusKey) ?? -1;
+      this.agents = [
+        ...(state.vehicles || []).map((actor,index) => ({actor,index,kind:'vehicle',id:String(actor.id ?? index),key:'vehicle-'+(actor.id ?? index)})),
+        ...(state.robots || []).map((actor,index) => ({actor,index,kind:'robot',id:String(actor.id ?? index),key:'robot-'+(actor.id ?? index)})),
+      ];
+      if (!this.agents.some(a => a.key === this.focusKey) && (this.focusKey || this.agents.length)) {
+        const ego = this.agents.find(a => a.actor.ego || a.actor.id === state.vehicle?.id);
+        this.selectAgent((previousIndex >= 0 ? this.agents[previousIndex % this.agents.length] : ego || this.agents[0])?.key,false);
+      }
+      this.toolbarControls.update(this.agents,this.agents.find(a => a.key === this.focusKey));
+    }
+
+    selectAgent(key,follow = true) {
+      const agent = this.agents?.find(a => a.key === key);
+      this.focusKey = agent?.key || null;
+      if (agent && follow) this.followInput.checked = this.follow = true;
+      this.toolbarControls.update(this.agents || [],agent);
+      this.dispatchEvent(new CustomEvent('gym-agent-selection',{bubbles:true,detail:{agent_id:agent?.id || null,kind:agent?.kind,index:agent?.index}}));
+    }
+
+    cycleAgent(direction) {
+      if (!this.agents?.length) return;
+      const index = this.agents.findIndex(a => a.key === this.focusKey);
+      this.selectAgent(this.agents[(index+direction+this.agents.length)%this.agents.length].key);
     }
 
     sensorLines(state) {
@@ -345,8 +357,11 @@ gym-scene canvas { display:block; width:100%; height:100%; }
     vectors(state) {
       if (!this.debugVectors) return;
       const T = this.T;
-      for (const [index, vehicle] of (state.vehicles || []).entries()) {
-        const position = vehicle.position || [vehicle.x, vehicle.y], yaw = this.heading(vehicle, state);
+      const actors = [...(state.vehicles || []), ...(state.robots || []).map((robot,index) =>
+        ({...robot,id:'robot-'+(robot.id ?? index),robot:true}))];
+      for (const [index, vehicle] of actors.entries()) {
+        const position = vehicle.position || [vehicle.x, vehicle.y];
+        const yaw = vehicle.robot ? [Math.PI,0,-Math.PI/2,Math.PI/2][vehicle.direction || 0] : this.heading(vehicle, state);
         const direction = new T.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
         const arrow = this.keep('heading-' + (vehicle.id ?? index), () => new T.ArrowHelper(direction,
           new T.Vector3(), 6, 0x4daaff, 1, .5), [position[0], position[1], 1.8]);
