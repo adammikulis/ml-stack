@@ -356,6 +356,27 @@ ingest, a model you just drove. Add the files you changed, by name. (2026-09-04:
 driven in the primary checkout deleted two paragraphs of this file and changed a heading;
 `git add -A` swept it into an unrelated commit.)
 
+## Which models to test with, and the defaults the owner wants
+
+Owner's standing choices (2026-10-03); do not ask again.
+
+- **Live tests and demos use the newest Qwen family** (Qwen3.8 at the time of writing; look at
+  what `ml-stack-models list` and the Hugging Face cache actually hold and name the exact id in
+  the report) **and Qwen3.8-Flash-Next**, which the owner rates highly. Do not use gpt-oss: it is
+  too old. Old results stay as history, not as a matrix row.
+- **MTP (multi-token prediction) draft heads are on by default** whenever the served model has a
+  matching trusted head and the managed llama.cpp build supports it; there is a documented
+  opt-out, and paths that cannot use it (one-token decisions, logprob scoring if incompatible)
+  turn it off themselves. See `docs/serving.md`.
+- **llama.cpp tracks the bleeding edge** through the managed head builds
+  (`docs/llama-cpp-tracking.md`), not a pinned stable release.
+- **Decision models should be as easy to call locally as hosted ones.** The target is the shape
+  people know from Jev-style decision models: give a state and closed questions, get typed
+  answers with probabilities, no text generation. The owner's decider is
+  `StrandsAgents/strands-decider-2B-hobson-v19` (Qwen3.5-2B base). Treat a gap in
+  `docs/decision-models.md` against that bar as a defect worth an issue; the gap analysis lives
+  in the issue tracker, not in a private note.
+
 ## Saying that something works
 
 Drive it the way a person does before you say it works: open the interface, click through the
