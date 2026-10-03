@@ -9,6 +9,9 @@ import pytest
 
 from ml_stack.memory import cli
 from ml_stack.memory.store import Store
+from tests import memory_keys
+
+ring = memory_keys.ring
 
 
 class Tty:
@@ -79,8 +82,8 @@ def test_forget_all_asks_first_and_stats_reports_tampering(person, monkeypatch, 
     store.add("a fact")
     monkeypatch.setattr("builtins.input", lambda _: "n")
     assert cli.main(["forget", "--all"]) == 1 and len(store.facts()) == 1
-    store.path.write_text("{}")
-    store.path.with_name("facts.json.prev").unlink(missing_ok=True)
+    store.path.write_bytes(b"{}")
+    store.prev.unlink(missing_ok=True)
     assert cli.main(["stats"]) == 1
     monkeypatch.setattr("builtins.input", lambda _: "y")
     assert cli.main(["forget", "--all"]) == 0 and Store().status == "fresh"
