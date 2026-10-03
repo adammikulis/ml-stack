@@ -164,7 +164,7 @@ def test_extra_readiness_requires_selected_dependencies(monkeypatch):
     metadata['Provides-Extra'] = 'gym-driving'
     dist = SimpleNamespace(metadata=metadata, requires=[
         'packaging>=24.2', 'gymnasium>=1.0; extra == "gym-driving"',
-        'metadrive-simulator @ git+https://example.invalid/native.git@abc; extra == "gym-driving"',
+        'metadrive-simulator @ git+https://example.invalid/native.git@abc ; extra == "gym-driving"',
         'rware; extra == "gym-warehouse"'])
     monkeypatch.setattr(environment.metadata, 'distribution', lambda name: dist)
     library = next(lib for lib in CATALOG if lib.name == 'gym-driving')
@@ -196,7 +196,7 @@ def test_managed_metadata_controls_extra_readiness(tmp_path, monkeypatch):
     env = Environment(tmp_path)
     env.python.parent.mkdir(parents=True)
     env.python.write_text('managed')
-    requirement = 'metadrive-simulator @ git+https://example.invalid/native.git@abc; extra == "gym-driving"'
+    requirement = 'metadrive-simulator @ git+https://example.invalid/native.git@abc ; extra == "gym-driving"'
     payload = {'installed': [
         {'metadata': {'name': 'ml-stack', 'version': '0.3', 'provides_extra': ['gym-driving'],
                       'requires_dist': [requirement]}},
