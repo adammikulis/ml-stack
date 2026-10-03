@@ -59,7 +59,8 @@ def test_each_source_is_found_when_it_is_the_only_one(isolated, monkeypatch):
 def test_the_order_is_argument_then_environment_then_named_file_then_file_then_keychain(
         isolated, monkeypatch, ring):
     ring.set_password("ml-stack", "WIDGET_KEY", "from-keychain")
-    assert credentials.get("WIDGET_KEY") == "from-keychain"
+    with credentials.probing_legacy():
+        assert credentials.get("WIDGET_KEY") == "from-keychain"
     _stored(isolated, 'WIDGET_KEY = "from-file"\n')
     assert credentials.get("WIDGET_KEY") == "from-file"
     monkeypatch.setenv("WIDGET_KEY_FILE", str(_file(isolated / "m", "from-mount")))
@@ -298,11 +299,25 @@ def test_the_keychain_is_used_only_when_asked_for(isolated, ring):
 
 def test_an_item_an_older_version_kept_moves_into_the_wrapped_file_and_is_deleted(isolated, ring):
     ring.set_password("ml-stack", "WIDGET_KEY", SECRET)
-    assert credentials.get("WIDGET_KEY") == SECRET
+    with credentials.probing_legacy():
+        assert credentials.get("WIDGET_KEY") == SECRET
     assert ("ml-stack", "WIDGET_KEY") not in ring.held
     assert credentials.get("WIDGET_KEY") == SECRET
     for each in (isolated / "home").rglob("*"):
         assert not each.is_file() or SECRET.encode() not in each.read_bytes(), each
+
+
+def test_an_ordinary_lookup_never_reads_the_keystore_for_an_old_item(isolated, ring):
+    """Library code asking for a credential must not probe the OS keystore (each probe is a real call,
+    a prompt on some machines); only a person's own command (`probing_legacy`) looks for an old item."""
+    ring.set_password("ml-stack", "WIDGET_KEY", SECRET)
+    calls = []
+    for name in ("get_password", "set_password", "delete_password"):
+        original = getattr(ring, name)
+        setattr(ring, name, lambda *a, _o=original, _n=name, **k: calls.append(_n) or _o(*a, **k))
+    assert credentials.get("WIDGET_KEY") is None and credentials.get("OTHER_KEY") is None
+    assert calls == []
+    assert ("ml-stack", "WIDGET_KEY") in ring.held
 
 
 def test_status_and_list_never_touch_the_keystore(isolated, ring):

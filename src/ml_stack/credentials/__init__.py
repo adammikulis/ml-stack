@@ -13,7 +13,7 @@ import contextlib
 import logging
 import os
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -142,9 +142,28 @@ def _open(name: str) -> str | None:
         return None
 
 
+_probing_legacy = False
+"""True only while a person's own command runs (`probing_legacy`): library code that merely asks for a
+credential never reads the OS keystore, because most names never had an item there and every
+probe is a real keystore call (a prompt on some machines)."""
+
+
+@contextlib.contextmanager
+def probing_legacy() -> Iterator[None]:
+    """Let credential lookups inside this block look for an item an older version kept in the OS keystore."""
+    global _probing_legacy
+    before, _probing_legacy = _probing_legacy, True
+    try:
+        yield
+    finally:
+        _probing_legacy = before
+
+
 def _migrate(name: str) -> None:
     """Move an item an older version kept in the OS keystore into the wrapped file, once; the
-    old item is deleted after the wrapped value reads back equal."""
+    old item is deleted after the wrapped value reads back equal. Only inside `probing_legacy`."""
+    if not _probing_legacy:
+        return
     ks = keystore.default()
     if ks.migrated(KEYRING_SERVICE, name):
         return

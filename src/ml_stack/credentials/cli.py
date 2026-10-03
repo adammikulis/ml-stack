@@ -24,7 +24,8 @@ KEYCHAIN = flag("--keychain", action="store_true",
 def _guarded(run):
     def inside(args: argparse.Namespace) -> int:
         try:
-            return run(args)
+            with credentials.probing_legacy():     # a person's own command: an old keychain item may be moved
+                return run(args)
         except credentials.CredentialError as exc:
             warn(f"ml-stack credentials: {exc}")
             return 1

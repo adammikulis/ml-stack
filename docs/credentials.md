@@ -19,8 +19,9 @@ Nothing else in the library reads `HF_TOKEN` or an API key from the environment 
    saved by `huggingface-cli login` is found without copying it.
 6. the values stored with `--keychain`: wrapped under a subkey of the keystore master key
    (`docs/keystore.md`), kept in `~/.ml-stack/keystore/credentials.json`. A lookup that finds
-   nothing there reads no keystore item; an item an older version stored one per name is moved
-   in on first lookup and deleted once the wrapped copy reads back
+   nothing there reads no keystore item. An item an older version stored one per name is moved
+   in, and deleted once the wrapped copy reads back, only by a command a person runs
+   (`ml-stack credentials ...`); library code asking for a credential never probes the keystore
 7. nothing: `get` returns `None`, or raises `CredentialError` with `required=True`
 
 A source that exists but cannot be trusted raises `CredentialError` instead of being skipped.
