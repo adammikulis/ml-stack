@@ -28,7 +28,7 @@ from ml_stack.decide.cases import Case, fingerprint, read_cases, write_cases
 from ml_stack.decide.eval import FLOOR, Report, evaluate, score
 from ml_stack.decide.fetch import locate
 from ml_stack.decide.guards import guard_cases
-from ml_stack.decide.pins import STRANDS_V19
+from ml_stack.decide.pins import BASES, STRANDS_V19
 from ml_stack.decide.types import BackendUnavailable, DecideError, Decision, Option, options_of
 from ml_stack.files import write_json
 from ml_stack.log import say, warn
@@ -237,7 +237,7 @@ def _jevbench_decider(name: str, args: Namespace) -> Iterator[Callable[[Case], D
     if name == "rules":
         yield lambda c: jevbench.first_option_rules(c).decide(c.question, c.state, c.options)
     elif name == "pointer":
-        decider = router.build("pointer", router.Config(backend="pointer"))
+        decider = router.build("pointer", router.Config(backend="pointer", pointer=args.decider))
         yield lambda c: decider.decide(c.question, c.state, c.options)
     elif name == "logprob":
         if not args.gguf:
@@ -291,7 +291,7 @@ def _check(args: Namespace) -> int:
 
 
 def _fetch(args: Namespace) -> int:
-    ck = STRANDS_V19
+    ck = BASES[args.base] if args.base else STRANDS_V19
     say(f"{ck.name}: {len(ck.files)} files, {ck.total_bytes / 1e9:.2f} GB, licence {ck.licence}")
     if not args.yes:
         say("nothing downloaded; add --yes to fetch and verify them")
@@ -363,6 +363,8 @@ def bench_cmd(args: Namespace) -> int:
     option("yes"), flag("--backend", action="append", default=None,
                         help="rules, pointer or logprob; repeat (default: rules)"),
     flag("--gguf", default="", help="the model logprob serves, leased through the Broker"),
+    flag("--decider", default="", help="a registered decider or directory for pointer "
+                                       "(default: the released checkpoint)"),
     flag("--context", type=int, default=12288, help="context of the leased server"),
     flag("--tier", action="append", default=[], choices=("easy", "original", "hard")),
     flag("--limit", type=int, default=None), option("out")])
@@ -407,8 +409,9 @@ def check_cmd(args: Namespace) -> int:
     return _check(args)
 
 
-@COMMANDS.command("fetch", help="download the pinned pointer checkpoint",
-                  options=[option("yes")])
+@COMMANDS.command("fetch", help="download the pinned pointer checkpoint or a pinned base",
+                  options=[option("yes"), flag("--base", default="", choices=sorted(BASES),
+                                               help="a pinned base model instead of the checkpoint")])
 def fetch_cmd(args: Namespace) -> int:
     """Download the pinned pointer checkpoint."""
     return _guarded(_fetch, args)

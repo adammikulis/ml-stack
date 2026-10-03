@@ -34,7 +34,7 @@ def _base(value: str) -> Checkpoint | Path:
 def _settings(args: Namespace) -> Settings:
     return Settings(
         name=args.name, base=_base(args.base), init=STRANDS_V19 if args.init == "strands" else None,
-        steps=args.steps, batch_size=args.batch_size, lr=args.lr, seed=args.seed,
+        steps=args.steps, batch_size=args.batch_size, max_tokens=args.max_tokens, lr=args.lr, seed=args.seed,
         device=args.device, download=args.download, baseline=args.baseline,
         allow_worse=args.allow_worse, replace=args.replace, wait_s=args.wait,
         floor=args.floor, allow_repo=args.allow_in_repo, lora=Lora(args.rank, 2 * args.rank, 0.05, DEFAULT_TARGETS))
@@ -109,6 +109,8 @@ OPTIONS = [
     flag("--steps", type=int, default=60), flag("--batch-size", type=int, default=4),
     flag("--lr", type=float, default=2e-4), flag("--seed", type=int, default=0),
     flag("--rank", type=int, default=16),
+    flag("--max-tokens", type=int, default=1024,
+         help="the longest prompt a case may render to; longer cases are refused"),
     flag("--init", choices=("strands",), default=None,
          help="continue from the released checkpoint instead of a fresh adapter"),
     flag("--device", default="auto"),

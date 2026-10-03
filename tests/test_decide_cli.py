@@ -96,3 +96,9 @@ def test_fetch_without_yes_downloads_nothing(capsys):
     assert main(["fetch"]) == 0
     out = capsys.readouterr().out
     assert "Apache-2.0" in out and "nothing downloaded" in out
+
+
+def test_fetch_names_a_pinned_base_and_downloads_nothing_without_yes(capsys):
+    assert main(["fetch", "--base", "gemma-4-e2b"]) == 0
+    out = capsys.readouterr().out
+    assert "gemma-4-e2b: 4 files, 10.28 GB" in out and "nothing downloaded" in out
