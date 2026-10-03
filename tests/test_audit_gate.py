@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -51,6 +52,23 @@ def test_the_redteam_attack_step_compares_with_the_committed_baseline_and_cannot
     baseline = run.split("--against")[1].split()[0]
     assert (ROOT / baseline).is_file()
     assert "chat" not in run.split("--scenarios")[1].split()[0], "a gullible stub always loses the chat scenario"
+
+
+def test_the_weekly_redteam_run_gates_the_deterministic_scenarios_against_a_committed_baseline():
+    step = step_with("redteam.yml", "redteam", "ml_stack.redteam run")
+    run = " ".join(step["run"].split())
+    scenarios = run.split("--scenarios")[1].split()[0].split(",")
+    assert {"extraction", "fleet", "sentinel"} <= set(scenarios)
+    assert not {"chat", "loop", "compaction", "isolation"} & set(scenarios)
+    baseline = run.split("--against")[1].split()[0]
+    assert baseline.startswith("docs/redteam/baseline-deterministic") and (ROOT / baseline).is_file()
+    assert "--ttd-tolerance" in run and "--success-tolerance" in run
+    doc = yaml.safe_load((WORKFLOWS / "redteam.yml").read_text(encoding="utf-8"))
+    assert "cron" in doc[True]["schedule"][0]
+    for job in doc["jobs"].values():
+        for one in job["steps"]:
+            if "uses" in one:
+                assert re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", one["uses"]), f"not pinned: {one['uses']}"
 
 
 def test_every_workflow_is_still_scheduled():
