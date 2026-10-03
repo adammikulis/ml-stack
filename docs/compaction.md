@@ -59,8 +59,8 @@ Cancelling the task that drives `run` or `compact_now` leaves the message list a
 list is replaced only when a compaction has finished.
 
 `Compacting(client, Compaction(...), on_event=...)` wraps any client with a `chat` method and
-compacts the `messages` it is handed before each call. `ml-stack-do --auto-compact
-[--context-size N]` uses it. The MCP tool `conversation_compact` fits a chat saved as JSON.
+compacts the `messages` it is handed before each call. `ml-stack-chat` uses it
+(`--no-compact` turns it off, `--context-size N` sets the window). The MCP tool `conversation_compact` fits a chat saved as JSON.
 
 ## The transcript
 

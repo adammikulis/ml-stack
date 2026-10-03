@@ -148,9 +148,11 @@ reading and how long is left; `--resume` starts where a killed run stopped.
 `ml-stack-jobs wait ingest` blocks until it has ended, so the next step is `wait && next`
 rather than a loop you wrote by hand.
 
-`ml-stack-do "..."` takes the task in words instead: a model on your own hardware, holding
-every command here as a tool, asks what the task leaves open, prints a plan, waits for the
-go, runs it and says where the results are. `ml-stack-mcp` hands the same functions to an
+`ml-stack-chat "..."` takes the task in words instead: a model on your own hardware, holding
+the serving, download and benchmark commands here as tools, asks what the task leaves open,
+prints a plan, waits for the go, runs the calls that plan names and says where the results
+are; bare `ml-stack-chat` is the same agent as a conversation, and `--role` sets what it may do
+(`docs/agent-roles.md`). `ml-stack-mcp` hands the same functions to an
 agent over MCP, and anything long returns a log and a pid rather than blocking the call.
 
 ## Pictures and speech

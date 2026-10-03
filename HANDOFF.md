@@ -249,7 +249,7 @@ across `src/`.
   Worth doing next in this order: `ml-stack-setup`
   and `ml-stack-doctor` (one module, two entry points), `ml-stack-ingest`,
   `ml-stack-models`, `ml-stack-store`, `ml-stack-speech`, `ml-stack-train-run`,
-  `ml-stack-train-tools`, `ml-stack-do`, `ml-stack-claude`, `ml-stack-agent`,
+  `ml-stack-train-tools`, `ml-stack-chat`, `ml-stack-claude`, `ml-stack-agent`,
   `ml-stack-graph`, `ml-stack-audit`, `ml-stack-suite`, `ml-stack-fleet`,
   `ml-stack-peers`, `ml-stack-traind`. A command whose row in the README's table changes
   is a change to `ml_stack.cli.reference` and `scripts/reference --write`.

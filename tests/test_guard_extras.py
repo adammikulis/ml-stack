@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import do, guard as rails, mcp
+from ml_stack import chat, do, guard as rails, mcp
 from ml_stack.interventions import Call, Context, Deny, Proceed, Rewrite
 from ml_stack.testing import ScriptedModel
 
@@ -75,7 +75,7 @@ def test_the_do_loop_withholds_a_tool_result_nemo_blocks_and_the_model_never_see
     tools = do.command_tools([mcp.Tool("models_find", "find", models_find)], files=[],
                              fetch=lambda *_: {})
     model = ScriptedModel([("models_find", {"words": "q"})], answer="ok")
-    do.run("find q", model, tools=tools, person=do.Person(io.StringIO(""), io.StringIO()),
+    chat.run_task("find q", model, tools=tools, person=do.Person(io.StringIO(""), io.StringIO()),
                  guard=rails.default(extra=[rail]))
     told = model.told()
     assert seen == ["q"] and "withheld by the nemo rail" in told

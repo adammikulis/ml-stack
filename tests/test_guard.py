@@ -306,7 +306,7 @@ class Withhold(Base):
 def test_a_result_a_rail_denies_never_reaches_the_model():
     import io
 
-    from ml_stack import do, mcp
+    from ml_stack import chat, do, mcp
     from ml_stack.testing import ScriptedModel
 
     def models_find(words: str) -> dict:
@@ -316,14 +316,17 @@ def test_a_result_a_rail_denies_never_reaches_the_model():
                              fetch=lambda *_: {})
     model = ScriptedModel([("models_find", {"words": "q"})], answer="ok")
     out = io.StringIO()
-    do.run("find q", model, tools=tools, person=do.Person(io.StringIO(""), out),
+    chat.run_task("find q", model, tools=tools, person=do.Person(io.StringIO(""), out),
            guard=[Withhold()])
     assert "[withheld by the withhold rail: nope]" in model.told()
     assert "SECRET-LISTING" not in model.told()
 
 
 def test_the_system_prompt_tells_the_model_what_the_fence_means():
-    from ml_stack import do
+    import io
 
-    for yes in (False, True):
-        assert g.NOTICE in do.system_for(yes)
+    from ml_stack import chat, do
+
+    for task in (False, True):
+        sess = chat.Chat(None, do.Person(io.StringIO(), io.StringIO()), task=task)
+        assert g.NOTICE in sess.system()
