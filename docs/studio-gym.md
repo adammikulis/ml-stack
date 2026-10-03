@@ -37,6 +37,18 @@ Set `ML_STACK_GYM_PYTHON` to an installed Python interpreter to run simulator wo
 outside the current process. `ML_STACK_CACHE` moves recordings and checkpoints together
 with the other ml-stack caches. Their default location is `~/.cache/ml_stack/gym`.
 
+Reuse an existing simulator installation without installing it again:
+
+```sh
+ml-stack-traind --root ~/.local/share/ml-stack-studio --gym-python /path/to/venv/bin/python
+```
+
+The launcher remembers that interpreter and keeps completed setup under the selected
+root. On later launches, use the same `--root` and omit `--gym-python`. An explicit
+`ML_STACK_GYM_PYTHON` overrides the saved selection; otherwise the saved interpreter
+takes precedence over the app's managed environment. A missing saved interpreter
+reports an error and asks you to select its new location.
+
 ## Environments and ownership
 
 | Environment ID | Simulation ownership | Control |
