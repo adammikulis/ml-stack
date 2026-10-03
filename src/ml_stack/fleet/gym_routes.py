@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 
 from ml_stack.gym import catalogue, manager
 
@@ -17,8 +18,14 @@ class GymRoutes:
             return super().route()
         try:
             environment = self.ui.environment
-            if environment is not None and environment.exists and not os.environ.get("ML_STACK_GYM_PYTHON"):
-                manager.configure(environment.python)
+            if not os.environ.get("ML_STACK_GYM_PYTHON"):
+                saved = getattr(getattr(self.ui, "settings", None), "gym_python", "")
+                if saved:
+                    if not Path(saved).is_file():
+                        raise ValueError("Saved Gym interpreter is missing; select an existing interpreter with --gym-python")
+                    manager.configure(saved)
+                elif environment is not None and environment.exists:
+                    manager.configure(environment.python)
             if self.path == "/ui/gym/catalogue" and self.method == "GET":
                 self.send(200, {"environments": catalogue()})
                 return True
