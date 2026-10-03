@@ -21,6 +21,7 @@ def configure_world(environment, config, seed=0):
     seed = cfg.pop('world_seed', seed)
     if environment == 'warehouse':
         native, provenance = import_module('ml_stack.gym.warehouse_world').build(world, seed)
+        cfg.setdefault('request_queue_size', native['n_agents'])
     elif environment in {'traffic', 'traffic-driving'}:
         cfg = traffic_defaults(cfg)
         native, provenance = import_module('ml_stack.gym.traffic_world').build(world, seed)
