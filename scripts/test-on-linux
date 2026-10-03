@@ -42,10 +42,7 @@ consulted; the image is public and needs no login.
 HELP
 }
 
-# Queue for workers in the machine-wide budget, then run again holding the lease.
-if [ -z "${DEV_TEST_WORKERS:-}" ] && [ "${1:-}" != "-h" ] && [ "${1:-}" != "--help" ]; then
-  exec python3 "$REPO/scripts/testslots.py" run --want 4 --min 2 --label "ml-stack: test-on-linux" -- "$0" "$@"
-fi
+ORIGINAL_ARGS=("$@")
 
 SINGLE=""
 REBUILD=""
@@ -69,6 +66,13 @@ if ! docker info >/dev/null 2>&1; then
   echo "scripts/test-on-linux: \`docker info\` failed, so there is no Linux to run in." >&2
   echo "Start Docker Desktop, or install docker, and run it again." >&2
   exit 2
+fi
+
+# Queue for workers in the machine-wide budget, then run again holding the lease.
+if [ -z "${DEV_TEST_WORKERS:-}" ]; then
+  rm -rf "$DCFG" "$STAGE"
+  trap - EXIT
+  exec python3 "$REPO/scripts/testslots.py" run --want 4 --min 2 --label "ml-stack: test-on-linux" -- "$0" "${ORIGINAL_ARGS[@]}"
 fi
 
 git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
