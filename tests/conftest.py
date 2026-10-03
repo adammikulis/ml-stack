@@ -502,6 +502,37 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
 
 
+REAL_KEYSTORES = (("macOS", "Keyring"), ("SecretService", "Keyring"), ("Windows", "WinVaultKeyring"),
+                  ("kwallet", "DBusKeyring"))
+"""The `keyring` backends that talk to the machine's own keystore: (module, class)."""
+
+
+def refuse_the_real_keystore(*_args, **_kwargs):
+    raise RuntimeError("a test reached the real OS keystore: install a fake keyring backend "
+                       "(tests/memory_keys.py or tests/onboard_support.py) before it runs")
+
+
+def real_keystore_classes() -> list[type]:
+    """The real keystore backends that can be imported here."""
+    import importlib
+
+    found: list[type] = []
+    for module, name in REAL_KEYSTORES:
+        with contextlib.suppress(Exception):
+            found.append(getattr(importlib.import_module(f"keyring.backends.{module}"), name))
+    return found
+
+
+@pytest.fixture(autouse=True)
+def _no_real_keychain(monkeypatch):
+    """No test may read, write or delete an item in the person's own keystore. The real backends
+    refuse, so a test that forgot its fake fails loudly instead of prompting for (or storing)
+    hundreds of Keychain items. Fakes installed through keyring's own interface are untouched."""
+    for backend in real_keystore_classes():
+        for method in ("get_password", "set_password", "delete_password"):
+            monkeypatch.setattr(backend, method, refuse_the_real_keystore)
+
+
 @pytest.fixture(autouse=True)
 def _no_internet(monkeypatch, tmp_path):
     """Every fetch goes through a pipeline that cannot leave this machine.
