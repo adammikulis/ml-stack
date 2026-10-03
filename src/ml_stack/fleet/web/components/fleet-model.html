@@ -1,6 +1,6 @@
 <!-- fleet-model: the daemon's routes, the pieces every screen builds out of, and which screen is showing -->
 <style>
-cluster-view, chat-view, models-view, settings-view, fit-view { display: contents; }
+cluster-view, chat-view, models-view, settings-view, fit-view, data-view, training-view, gym-view, benchmarks-view, tools-view { display: contents; }
 [hidden] { display: none !important; }
 </style>
 <script>
@@ -99,7 +99,9 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   };
 
   // ------------------------------------------------------------- which screen is showing
-  const IN_APP = ["cluster", "chat", "models", "settings", "fit"];
+  const IN_APP = ["chat", "models", "data", "training", "gym", "benchmarks", "cluster", "tools", "settings", "fit"];
+  const available = (name) => IN_APP.includes(name) && !!document.querySelector(`${name}-view`);
+  M.requestedRoute = "";
   const watchers = [];
   M.route = "";
   M.group = "";
@@ -107,12 +109,31 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   M.signInMessage = "";
 
   /** Show one screen by name, and tell every component that is watching. */
-  M.go = function (name) {
+  M.go = function (name, remember = true) {
+    if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && available(M.requestedRoute)) {
+      name = M.requestedRoute;
+    }
+    if (IN_APP.includes(name) && !available(name)) name = available("cluster") ? "cluster" : "fit";
+    if (IN_APP.includes(name)) {
+      M.requestedRoute = name;
+      if (remember && location.hash !== `#${name}`) history.pushState(null, "", `#${name}`);
+    }
     M.route = name;
     const app = document.getElementById("app");
     if (app) app.hidden = !IN_APP.includes(name);
     for (const fn of watchers) fn(name);
+    const workspace = document.getElementById("workspace");
+    if (workspace && IN_APP.includes(name)) workspace.scrollTop = 0;
   };
+
+  function followLocation() {
+    const name = location.hash.slice(1);
+    if (!available(name)) return;
+    M.requestedRoute = name;
+    if (IN_APP.includes(M.route) && M.route !== name) M.go(name, false);
+  }
+  window.addEventListener("popstate", followLocation);
+  window.addEventListener("hashchange", followLocation);
 
   /** Run `fn` whenever the screen changes, and now if one is already showing. */
   M.onRoute = function (fn) {
@@ -140,9 +161,12 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
 
   /** What to show when the page opens: setup, sign in, or a screen. */
   M.boot = async function () {
-    const asked = location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster";
+    const hash = location.hash.slice(1);
+    const asked = available(hash) ? hash
+      : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster");
     const opened = document.querySelector(`${asked}-view`) ? asked
       : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
+    M.requestedRoute = opened;
     const setup = await M.api("/ui/setup");
     M.inCluster = !!setup.needs_password;
     if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
