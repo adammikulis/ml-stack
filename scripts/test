@@ -128,7 +128,7 @@ def main() -> int:
     parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy"])
     parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
-    parser.add_argument("-n", "--workers", type=int, default=4)
+    parser.add_argument("-n", "--workers", type=int, default=8)
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
