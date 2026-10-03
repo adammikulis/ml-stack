@@ -22,6 +22,7 @@ for (const [name, source, target] of files) {
     .replaceAll("from 'three'", "from './three.module.js'");
   const { code } = await transform(text, {
     minify: true, legalComments: 'inline', target: 'es2022',
+    supported: { 'template-literal': false },
   });
   await writeFile(resolve(assets, target), code);
 }
