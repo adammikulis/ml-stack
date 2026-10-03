@@ -2,6 +2,7 @@
 
 import math
 
+from ml_stack.gym.road_rules import front_progress
 from ml_stack.gym.values import json_value
 
 
@@ -35,7 +36,7 @@ def geometry(native):
                  "last_action": json_value(obj.last_action)}
                 for key, obj in native.engine.get_objects().items() if isinstance(obj, BaseVehicle)]
     stop = getattr(native, "stop_checkpoint", None)
-    stop_state = stop.state(vehicle.navigation.travelled_length) if stop else None
+    stop_state = stop.state(front_progress(native)) if stop else None
     rule_sensors = [{"name": "upcoming stop", "value": stop_state["distance_m"], "unit": "m"},
                     {"name": "stop hold", "value": stop_state["held_seconds"], "unit": "s"},
                     {"name": "stop compliance", "value": stop_state["state"], "unit": "status"}] if stop_state else []
