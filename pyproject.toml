@@ -172,6 +172,8 @@ ml-stack-graph = "ml_stack.graph.serve:main"
 ml-stack-do = "ml_stack.do:main"
 # a conversation with a served model that operates ml-stack, asking before it changes anything
 ml-stack-chat = "ml_stack.chat:main"
+# what the chat agent remembers across sessions: list, add, forget, export
+ml-stack-memory = "ml_stack.memory.cli:main"
 # what a draft head is worth for one model: no head, then the head at each depth
 ml-stack-draft = "ml_stack.draft:main"
 ml-stack-help = "ml_stack.cli:help_main"
