@@ -1,22 +1,25 @@
-<!-- chat-view: the kept conversations, and one put to whatever is serving a model -->
 <template>
   <main class="chatmain" id="chat" hidden>
-    <div class="chats" id="chat-list"></div>
+    <aside class="chats" aria-label="Conversations">
+      <div class="chat-heading"><h1>Conversations</h1><button class="ghost small" id="chat-new">New chat</button></div>
+      <div class="chat-search"><label for="chat-search">Search conversations</label>
+        <input type="search" id="chat-search" placeholder="Search messages…"></div>
+      <div id="chat-list"></div>
+    </aside>
     <div class="talk">
       <div class="pickrow" id="chat-pickrow" hidden>
-        <label for="model">Model</label>
-        <select id="model"></select>
+        <label for="model">Model</label><select id="model"></select>
       </div>
       <div class="hint" id="chat-none" hidden>
-        No model is running yet. Start one on the Models screen, or leave another
-        machine on your network serving one.
+        No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your fleet.
       </div>
-      <div class="messages" id="chat-messages"></div>
-      <div id="chat-note"></div>
+      <div class="messages" id="chat-messages" aria-label="Chat messages" role="log"></div>
+      <div id="chat-note" role="status"></div>
       <div class="askrow" id="chat-askrow" hidden>
-        <textarea id="ask" rows="3" placeholder="Ask it something"></textarea>
-        <button id="chat-send">Send</button>
+        <textarea id="ask" rows="3" placeholder="Message your model…" aria-label="Message"></textarea>
+        <button id="chat-send">Send</button><button class="ghost" id="chat-stop" hidden>Stop</button>
       </div>
+      <div class="chat-hint">⌘ / Ctrl + Enter to send · Conversations are saved on this machine</div>
     </div>
   </main>
 </template>
@@ -40,127 +43,218 @@
       this.askrow = this.querySelector("#chat-askrow");
       this.input = this.querySelector("#ask");
       this.send = this.querySelector("#chat-send");
+      this.stop = this.querySelector("#chat-stop");
+      this.newChat = this.querySelector("#chat-new");
+      this.search = this.querySelector("#chat-search");
       this.open = null;
+      this.messages = [];
+      this.searchEpoch = 0;
+      this.loadEpoch = 0;
       this.send.onclick = () => this.ask();
+      this.stop.onclick = () => this.request?.abort();
+      this.newChat.onclick = () => {
+        if (this.request) return;
+        this.open = null;
+        this.loadEpoch++;
+        this.input.value = "";
+        this.messages = [];
+        this.welcome();
+        this.note.replaceChildren();
+        this.paintList();
+        this.input.focus();
+      };
+      this.search.oninput = () => {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => this.paintList(), 180);
+      };
       this.input.onkeydown = (e) => {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.ask(); }
       };
       M.onRoute((route) => {
         const on = route === "chat";
         this.box.hidden = !on;
-        if (on) this.draw();
+        if (on && !this.request) this.draw();
       });
+      this.welcome();
     }
 
-    /** One message in the transcript; returns the node the reply streams into. */
+    welcome() {
+      this.list.replaceChildren(el("div", { class: "chat-welcome" },
+        el("strong", {}, "What would you like to explore?"),
+        "Chat with a model on this machine or anywhere in your fleet."));
+    }
+
+    renderBody(node, text) {
+      node.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }),
+        { USE_PROFILES: { html: true } });
+      node.classList.add("markdown");
+    }
+
     say(role, text) {
-      const node = el("div", { class: `msg ${role}` }, text);
+      const body = el("div", { class: "message-body" });
+      this.renderBody(body, text);
+      const copy = el("button", { class: "ghost copy-message", "aria-label": `Copy ${role} message`,
+        onclick: async () => {
+          try { await navigator.clipboard.writeText(body.dataset.text || text); copy.textContent = "Copied"; }
+          catch { copy.textContent = "Copy unavailable"; }
+        } }, "Copy");
+      const node = el("div", { class: `msg ${role}` },
+        el("span", { class: "speaker" }, role === "user" ? "You" : "Assistant"), body, copy);
+      body.dataset.text = text;
       this.list.append(node);
       this.list.scrollTop = this.list.scrollHeight;
-      return node;
+      return body;
     }
 
     async draw() {
-      const where = await api("/ui/chat");
-      if (M.refused(where)) return;
-      const available = where.models || [];
-      this.picker.replaceChildren(...available.map((m) =>
-        el("option", { value: m.model }, m.local ? m.model : `${m.model} — on ${m.peer}`)));
-      this.pickrow.hidden = !available.length;
-      this.askrow.hidden = !available.length;
-      this.none.hidden = !!available.length;
-      await this.paintList();
-      if (this.open) this.load(this.open);
+      try {
+        const where = await api("/ui/chat");
+        if (M.refused(where)) return;
+        if (!where.ok) throw new Error(where.error || "Could not read the serving models.");
+        const available = where.models || [];
+        const selected = this.picker.value;
+        this.picker.replaceChildren(...available.map((m) =>
+          el("option", { value: m.model }, m.local ? m.model : `${m.model} — on ${m.peer}`)));
+        if (available.some((m) => m.model === selected)) this.picker.value = selected;
+        this.pickrow.hidden = !available.length;
+        this.askrow.hidden = !available.length;
+        this.none.hidden = !!available.length;
+        await this.paintList();
+        if (this.open) await this.load(this.open);
+      } catch (error) { this.showError(error.message); }
+    }
+
+    showError(message) {
+      this.note.replaceChildren(el("div", { class: "err" }, message));
     }
 
     async paintList() {
-      const saved = await api("/ui/conversations");
-      const rows = saved.conversations || [];
-      this.sidebar.replaceChildren(
-        el("button", { class: "ghost small",
-          onclick: () => { this.open = null; this.list.replaceChildren(); this.paintList(); } },
-          "New chat"),
-        ...rows.map((c) =>
+      const epoch = ++this.searchEpoch;
+      try {
+        const saved = await api(`/ui/conversations?q=${encodeURIComponent(this.search.value.trim())}`);
+        if (epoch !== this.searchEpoch || M.refused(saved)) return;
+        if (!saved.ok) throw new Error(saved.error || "Could not read conversations.");
+        const rows = saved.conversations || [];
+        this.sidebar.replaceChildren(...rows.map((c) =>
           el("div", { class: `chatrow${c.id === this.open ? " on" : ""}` },
-            el("a", { href: "#",
-              onclick: (e) => { e.preventDefault(); this.load(c.id).then(() => this.paintList()); } },
-              c.title || "New chat"),
-            el("button", { class: "ghost small",
+            el("a", { href: "#chat", onclick: (e) => {
+              e.preventDefault(); if (!this.request) this.load(c.id).then(() => this.paintList());
+            } }, c.title || "New chat"),
+            el("button", { class: "ghost small", "aria-label": `Delete ${c.title || "chat"}`,
               onclick: async () => {
-                await api(`/ui/conversations/${c.id}`, { method: "DELETE" });
-                if (this.open === c.id) { this.open = null; this.list.replaceChildren(); }
+                if (this.request) return;
+                const removed = await api(`/ui/conversations/${c.id}`, { method: "DELETE" });
+                if (!removed.ok) return this.showError(removed.error || "Could not delete the conversation.");
+                if (this.open === c.id) { this.open = null; this.messages = []; this.welcome(); }
                 this.paintList();
               } }, "Delete"))));
+        if (!rows.length) this.sidebar.append(el("p", { class: "hint" },
+          this.search.value.trim() ? "No conversations match your search." : "Your conversations will appear here."));
+      } catch (error) { this.showError(error.message); }
     }
 
     async load(id) {
-      this.open = id;
-      const one = await api(`/ui/conversations/${id}`);
-      this.list.replaceChildren();
-      for (const m of one.messages || []) this.say(m.role, m.content);
-      if (one.model) this.picker.value = one.model;
+      if (this.request) return;
+      const epoch = ++this.loadEpoch;
+      try {
+        const one = await api(`/ui/conversations/${id}`);
+        if (epoch !== this.loadEpoch || M.refused(one)) return;
+        if (!one.ok) throw new Error(one.error || "Could not open the conversation.");
+        this.open = id;
+        this.messages = one.messages || [];
+        this.list.replaceChildren();
+        for (const m of this.messages) this.say(m.role, m.content);
+        if (!this.messages.length) this.welcome();
+        if (one.model) this.picker.value = one.model;
+        this.note.replaceChildren();
+      } catch (error) { this.showError(error.message); }
     }
 
     async ask() {
       const text = this.input.value.trim();
-      if (!text) return;
+      if (!text || !this.picker.value || this.request) return;
+      this.request = new AbortController();
       this.list.setAttribute("aria-busy", "true");
-      this.input.value = "";
       this.note.replaceChildren();
-      this.send.disabled = true;
+      this.send.hidden = true;
+      this.stop.hidden = false;
+      this.newChat.disabled = this.picker.disabled = true;
+      let reply;
       try {
         if (!this.open) {
-          const made = await api("/ui/conversations", { method: "POST",
+          const made = await api("/ui/conversations", { method: "POST", signal: this.request.signal,
             body: JSON.stringify({ model: this.picker.value }) });
+          if (M.refused(made)) return;
+          if (!made.ok) throw new Error(made.error || "Could not start the conversation.");
           this.open = made.id;
         }
+        this.input.value = "";
+        this.list.querySelector(".chat-welcome")?.remove();
         this.say("user", text);
-        const reply = this.say("assistant", "");
-        const r = await fetch("/ui/chat", { method: "POST", headers: M.headers,
-          body: JSON.stringify({ conversation: this.open, model: this.picker.value,
-            messages: [{ role: "user", content: text }] }) });
+        reply = this.say("assistant", "");
+        const messages = [...this.messages, { role: "user", content: text }];
+        const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
+          body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages }) });
         if (!r.ok) {
           const why = await r.json().catch(() => ({}));
-          reply.remove();
-          this.note.replaceChildren(el("div", { class: "err" },
-            why.error || "That did not go through."));
-          return;
+          if (r.status === 401) M.signIn();
+          throw new Error(why.error || "The model could not answer. Try sending again.");
         }
+        this.messages = messages;
         await this.stream(r, reply);
+      } catch (error) {
+        if (error.name === "AbortError") this.note.textContent = "Generation stopped.";
+        else this.showError(error.message || "The connection to the model ended.");
+        if (reply && !reply.dataset.text) reply.closest(".msg").remove();
+        if (error.name !== "AbortError" && !reply?.dataset.text) this.input.value = text;
       } finally {
+        if (reply?.dataset.text) {
+          this.renderBody(reply, reply.dataset.text);
+          this.messages.push({ role: "assistant", content: reply.dataset.text });
+        }
+        this.request = null;
         this.list.removeAttribute("aria-busy");
-        this.send.disabled = false;
+        this.send.hidden = false;
+        this.stop.hidden = true;
+        this.newChat.disabled = this.picker.disabled = false;
         this.paintList();
       }
     }
 
-    /** Put each piece of the answer on the screen as it arrives. */
     async stream(r, reply) {
       const reader = r.body.getReader();
       const decode = new TextDecoder();
       let pending = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        pending += decode.decode(value, { stream: true });
-        const lines = pending.split("\n");
-        pending = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const frame = line.slice(5).trim();
-          if (!frame || frame === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(frame);
-            for (const c of parsed.choices || []) {
-              const piece = c.delta?.content || c.message?.content;
-              if (piece) {
-                reply.append(document.createTextNode(piece));
-                this.list.scrollTop = this.list.scrollHeight;
-              }
-            }
-          } catch { /* a half-arrived frame catches up next read */ }
+      const consume = (line) => {
+        if (!line.startsWith("data:")) return;
+        const frame = line.slice(5).trim();
+        if (!frame || frame === "[DONE]") return;
+        let parsed;
+        try { parsed = JSON.parse(frame); } catch { return; }
+        if (parsed.error) throw new Error(parsed.error.message || parsed.error);
+        for (const c of parsed.choices || []) {
+          const piece = c.delta?.content || c.message?.content;
+          if (piece) {
+            const nearEnd = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 100;
+            reply.dataset.text += piece;
+            reply.textContent = reply.dataset.text;
+            reply.classList.remove("markdown");
+            if (nearEnd) this.list.scrollTop = this.list.scrollHeight;
+          }
         }
-      }
+      };
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          pending += decode.decode(value, { stream: true });
+          const lines = pending.split("\n");
+          pending = lines.pop();
+          for (const line of lines) consume(line);
+        }
+        pending += decode.decode();
+        if (pending.trim()) consume(pending);
+      } finally { reader.releaseLock(); }
     }
   }
   customElements.define("chat-view", ChatView);
