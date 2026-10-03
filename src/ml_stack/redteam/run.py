@@ -18,7 +18,7 @@ from typing import Any
 
 from ml_stack.hub import located
 from ml_stack.redteam import daemon, pyrit_bridge
-from ml_stack.redteam.lab import lab
+from ml_stack.redteam.lab import lab, own_home
 from ml_stack.redteam.report import Report
 from ml_stack.redteam.scenarios import NAMES, Options
 from ml_stack.redteam.stub import StubModel
@@ -96,7 +96,8 @@ def execute(plan: Plan, command: str = "") -> Report:
         "scenarios": ",".join(plan.scenarios)})
     with _model(plan) as (url, name, port), tempfile.TemporaryDirectory(prefix="redteam-d-") as root:
         report.meta["model"] = name
-        with daemon.running(Path(root), port, name) as served, lab(
+        # the daemon builds its sentinel when it starts, so the home is swapped before it, not only inside lab()
+        with own_home(Path(root) / "machine-state"), daemon.running(Path(root), port, name) as served, lab(
                 model_url=url, model_name=name, served=served) as one:
             asyncio.run(_scenarios(plan, one, report))
     return report

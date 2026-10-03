@@ -3,12 +3,14 @@ host names, and the guard that keeps every connection on this machine."""
 
 from __future__ import annotations
 
+import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack import home
 from ml_stack.redteam.daemon import Running
 from ml_stack.redteam.egress import local_only
 from ml_stack.redteam.evidence import Canary, Honeypot, Pages, secret_for
@@ -46,6 +48,23 @@ class Lab:
 
 
 @contextmanager
+def own_home(path: Path) -> Iterator[Path]:
+    """Point ``ML_STACK_HOME`` at ``path`` for the block and put the old value back after. The lab forges requests, plants
+    decoys and rotates keys, and every one of those lands in whatever home is current: without this the red-team
+    command quarantined 127.0.0.1 in the real sentinel store and left key backups beside the real cluster key."""
+    path.mkdir(parents=True, exist_ok=True)
+    before = os.environ.get(home.ROOT_ENV)
+    os.environ[home.ROOT_ENV] = str(path)
+    try:
+        yield path
+    finally:
+        if before is None:
+            os.environ.pop(home.ROOT_ENV, None)
+        else:
+            os.environ[home.ROOT_ENV] = before
+
+
+@contextmanager
 def lab(*, model_url: str = "", model_name: str = "", seed: str = "redteam",
         served: Running | None = None) -> Iterator[Lab]:
     """A `Lab` for the block: servers up, aliases resolving, connections confined to this
@@ -54,6 +73,7 @@ def lab(*, model_url: str = "", model_name: str = "", seed: str = "redteam",
         stack.enter_context(local_only())
         stack.enter_context(dns_aliases())
         scratch = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="redteam-")))
+        stack.enter_context(own_home(scratch / "machine-state"))   # the attacks quarantine peers and write key backups: never in the real home
         pages, honeypot = Pages(), Honeypot()
         stack.callback(pages.close)
         stack.callback(honeypot.close)

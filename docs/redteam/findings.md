@@ -135,3 +135,7 @@ did not contain it.
   this very screen); that costs one confirmation on a state-changing call, not a withheld result. The two
   short-order patterns are English only; a two-word order in another language depends on the model's score alone.
   A single word is never judged.
+
+## The red-team command used the real home (found and fixed)
+
+`python -m ml_stack.redteam run` ran its fleet daemon and attacks in whatever `ML_STACK_HOME` was current. Run by hand it quarantined `127.0.0.1` in the real sentinel store (30 forged requests) and left a decoy `.env`, `cluster.key.old` and `credentials.toml.bak` in the real `~/.ml-stack`. The tests were isolated, so the suite did not show it. The run now swaps `ML_STACK_HOME` for a directory inside its scratch space from before the daemon starts (`redteam.lab.own_home`), and `tests/test_redteam_lab_home.py` runs the command with a throwaway `HOME` and fails if anything appears under it.
