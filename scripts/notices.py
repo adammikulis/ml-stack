@@ -29,8 +29,26 @@ DISALLOWED = re.compile(
 """Terms that do not belong in a bundle distributed under Apache-2.0."""
 
 
+LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
+    ("socksio", "1.0.0"): (
+        "MIT",
+        "socksio-1.0.0.dist-info/LICENSE is the MIT License (Copyright (c) 2019 Seth Michael Larson, "
+        "https://github.com/sethmlarson/socksio) and the METADATA classifier says 'License :: OSI Approved :: MIT "
+        "License'; only the legacy License: field is the literal 'UNKNOWN'",
+    ),
+}
+"""Packages whose metadata does not state a licence, keyed by (canonical name, exact version).
+
+Each entry names the licence and where the claim was verified. The exact version is part of the key so an upgrade
+has to be looked at again; this is not an allow-list of licences.
+"""
+
+
 def _license_of(dist: metadata.Distribution) -> str:
     md = dist.metadata
+    override = LICENSE_OVERRIDES.get((canonicalize_name(md["Name"]), dist.version))
+    if override:
+        return override[0]
     expr = md.get("License-Expression")
     if expr:
         return expr.strip()

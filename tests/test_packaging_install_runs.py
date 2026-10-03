@@ -21,6 +21,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 from ml_stack.fleet.launch import already_running
 from ml_stack.installed import STANDARD, extras
@@ -289,7 +290,24 @@ def wheelhouse(into: Path) -> Path:
     for module, version in versions.items():
         stand_in_wheel(into, module.replace("_", "-"), version, module)
     wheel_of_installed(into, "packaging")
+    # Whatever else the library asks for unconditionally must be on the disk too, or `--no-index`
+    # cannot resolve ml-stack itself (psutil became a core requirement after this was written, and
+    # the offline install then quietly fell back to ml-stack alone). Read from the wheel, not guessed.
+    for requirement in core_requirements(wheel()):
+        if requirement.name not in ("packaging", *(m.replace("_", "-") for m in versions)):
+            floor = next(iter(requirement.specifier)).version
+            stand_in_wheel(into, requirement.name, floor, requirement.name.replace("-", "_"))
     return into
+
+
+def core_requirements(built: Path) -> list[Requirement]:
+    """The requirements the built wheel has no extra for."""
+    with zipfile.ZipFile(built) as whl:
+        meta = next(n for n in whl.namelist() if n.endswith(".dist-info/METADATA"))
+        text = whl.read(meta).decode("utf-8")
+    found = [Requirement(line.split(":", 1)[1].strip())
+             for line in text.splitlines() if line.startswith("Requires-Dist:")]
+    return [r for r in found if r.marker is None]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="install.ps1 is the Windows installer")

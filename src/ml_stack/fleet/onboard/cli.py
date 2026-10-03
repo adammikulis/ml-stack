@@ -30,14 +30,17 @@ from ml_stack.log import say, warn
 from ml_stack.units import parse_duration
 
 from ..discovery import Membership, _write_memberships as write_memberships, memberships, primary_ip
+from ..tailnet import detect
 from ..tls import TlsUnavailable, identity, pinned_context
 from . import nearby as near
 from .bootstrap import BootstrapServer, Terms
+from .devices_cli import add_devices, cmd_devices
 from .manifest import ManifestError, RotationAnnounced, Signer, key_fingerprint, verify
 from .notify import compose, compose_code, pick
 from .pairing import DEFAULT_PORT, Grant, Hooks, PairError, PairingClient, PairingServer
 from .peers_cli import add_peers, cmd_peers
 from .requests import Devices, Refused, Request, Requests, State, short
+from .routes import resolve
 from .share_cli import add_share, cmd_share
 from .signing import KeyStoreError, SigningKeys
 from .signing_cli import add_signing, cmd_signing, confirm_signing
@@ -54,7 +57,7 @@ from .transfer import (
 __all__ = ["add_commands", "adopt", "run"]
 
 COMMANDS = ("nearby", "pair", "listen", "requests", "accept", "decline", "revoke", "bootstrap",
-            "share", "fetch", "signing", "peers")
+            "share", "fetch", "signing", "devices", "peers")
 
 
 def state_dir(args: argparse.Namespace) -> Path:
@@ -133,6 +136,7 @@ def add_commands(sub: Any) -> None:
                                                    "a wildcard)")
 
     add_share(sub, common)
+    add_devices(sub, common)
     add_peers(sub, common)
     add_signing(sub, common)
 
@@ -388,6 +392,11 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         _emit(args, {"error": "pair with a machine first, and name HOST:PORT"},
               "error: pair with a machine first, and name HOST:PORT")
         return 2
+    try:
+        host = resolve(host, int(port), Devices(directory / "devices.json"), detect)
+    except OSError as exc:
+        _emit(args, {"error": str(exc)}, f"error: {exc}")
+        return 2
     secret = macauth.derive(base64.urlsafe_b64decode(trust["device_secret"])) \
         if trust.get("device_secret") else macauth.derive(held[0].key)
     peer = PeerSource(f"https://{host}:{port}", secret,
@@ -425,7 +434,7 @@ def run(args: argparse.Namespace) -> int:
     fn = {"nearby": cmd_nearby, "pair": cmd_pair, "listen": cmd_listen,
           "requests": cmd_requests, "accept": cmd_accept, "decline": cmd_decline,
           "revoke": cmd_revoke, "bootstrap": cmd_bootstrap, "share": cmd_share,
-          "fetch": cmd_fetch, "signing": cmd_signing,
+          "fetch": cmd_fetch, "signing": cmd_signing, "devices": cmd_devices,
           "peers": cmd_peers}[args.cmd]
     return fn(args)
 

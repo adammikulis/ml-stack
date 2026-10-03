@@ -149,6 +149,12 @@ own:
   refuses an address that is public (loopback, private, link-local and carrier-grade NAT pass).
   A `PeerSource` needs a pinned TLS context, or `http` to this machine only. A test removes the
   check and watches it fail, and another asserts neither module builds a default-trust client.
+- **Tailscale** (`fleet/tailnet.py`, `fleet/onboard/routes.py`). Detection runs only
+  `tailscale status --json` (bounded output and time, scrubbed environment, tailnet-range
+  addresses only, no auth field copied). `routes.py` checks a paired device's pinned certificate
+  over its LAN or tailnet address after `lan.py` has refused public addresses; a tailnet address
+  is a route, not a trust grant, and is learned only from the pairing exchange or a status peer
+  whose certificate matched, never from an announcement. See `docs/onboarding.md`.
 - **The red-team lab** (`redteam/tools.py`, `redteam/scenarios/fleet.py`,
   `redteam/scenarios/isolation.py`), which only connects to servers it started on 127.0.0.1.
 

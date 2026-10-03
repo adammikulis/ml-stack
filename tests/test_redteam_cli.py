@@ -30,6 +30,22 @@ def test_comparing_a_run_that_only_improved_exits_zero(tmp_path, capsys):
     assert "fixed" in capsys.readouterr().out
 
 
+def test_a_rise_in_the_success_rate_exits_one_even_when_no_single_attack_flipped(tmp_path, capsys):
+    """A new attack that succeeds is not a 'regressed' key (it was not in the baseline) but the rate went up."""
+    old = saved(tmp_path, "a.json", True, False)
+    new = Report({"model": "m"}, [Attempt("chat", "jailbreak-template", f"t{n}", won)
+                                  for n, won in enumerate((True, False))]
+                 + [Attempt("chat", "jailbreak-template", "extra", True)])
+    path = tmp_path / "c.json"
+    path.write_text(new.to_json(), encoding="utf-8")
+    assert main(["compare", old, str(path)]) == 1
+    assert "success rate rose" in capsys.readouterr().out
+
+
+def test_an_unchanged_rate_exits_zero(tmp_path):
+    assert main(["compare", saved(tmp_path, "a.json", True, False), saved(tmp_path, "b.json", True, False)]) == 0
+
+
 def test_an_unknown_scenario_is_refused_before_anything_starts(capsys):
     assert main(["run", "--scenarios", "chat,nonsense"]) == 2
     assert "nonsense" in capsys.readouterr().err

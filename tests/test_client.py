@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import ClassVar
 
 import pytest
@@ -643,18 +644,34 @@ class TestHealth:
 class TestRetry:
     def test_retries_a_local_500_and_succeeds(self, server):
         """Local servers commonly answer 500 to a request that overlaps another."""
+        # A request that is not this test's (another worker's stale poller can land on a port
+        # that was just handed to this server) is answered 404 and counted nowhere: only the
+        # requests carrying this test's own model name are the attempts under test.
+        mine = f"retry-{uuid.uuid4().hex}"
         state = {"calls": 0}
+        strangers: list[bytes] = []
 
         def handler(method: str, path: str, body: bytes):
+            try:
+                ours = json.loads(body).get("model") == mine
+            except ValueError:
+                ours = False
+            if not ours:
+                strangers.append(body)
+                return 404, b"not for this test"
             state["calls"] += 1
             if state["calls"] < 3:
                 return 500, b"busy"
             return json_reply({"data": [{"embedding": [0.1, 0.2]}]})
 
         instance = server(handler)
-        vectors = embed("hello", base_url=instance.base_url, tries=3)
+        # one stranger on purpose, so the isolation above is exercised every run, not only under load
+        with pytest.raises(ServerError):
+            embed("someone else", base_url=instance.base_url, model="not-mine", tries=1)
+        assert len(strangers) == 1 and state["calls"] == 0
+        vectors = embed("hello", base_url=instance.base_url, model=mine, tries=3)
         assert vectors == [[0.1, 0.2]]
-        assert state["calls"] == 3
+        assert state["calls"] == 3, f"strangers on this port: {strangers}"
 
     def test_never_retries_a_4xx(self, server):
         """The request is wrong and will stay wrong; hammering only delays the report."""

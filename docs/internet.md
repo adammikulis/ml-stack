@@ -105,7 +105,7 @@ the last is never reported as clean.
 | ClamAV | `clamdscan --no-summary --fdpass` when its daemon answers, else `clamscan --no-summary`. Exit 0 is clean, 1 a signature matched, 2 an error. Files over 2000 MB are an error (the scanner's limit). A database older than a week is a warning. | macOS, ClamAV 1.5.4 installed with `brew install clamav`: the EICAR string is found |
 | Windows Defender | `MpCmdRun.exe -Scan -ScanType 3 -File <path> -DisableRemediation`. Exit 0 is clean, 2 a threat. | command line and exit codes against a stand-in; not run on Windows |
 | macOS | says `no malware scanner on macOS; install ClamAV (brew install clamav) for scanning`, adds the `com.apple.quarantine` flag and, for executables, what `spctl --assess` says, labelled as Gatekeeper and not a malware scan | macOS |
-| Hash reputation | opt-in (`ML_STACK_NET_HASH_LOOKUP=1` and `VIRUSTOTAL_API_KEY` in the credentials module). Only the SHA-256 is sent. An unknown hash is not clean. | against a local server |
+| Hash reputation | the `HashLookup` class takes a key (`VIRUSTOTAL_API_KEY` in the credentials module). It is not in `default_scanners()` and no environment variable or command turns it on yet. Only the SHA-256 is sent. An unknown hash is not clean. | against a local server |
 
 Whether a file nobody could scan is kept is a policy per category, `ml-stack-security
 scan-policy`: executables and archives are refused, data files and model weights are kept with
@@ -127,5 +127,5 @@ machine has. `scan-policy` shows or sets the unscanned-file policy.
 
 State: `net/approvals.jsonl`, `net/downloads.jsonl`, `net/scan-policy.json`, `net/staging/`
 under the state root. `ML_STACK_NET_ALLOW_HOSTS`, `ML_STACK_NET_UNSCANNED`
-(`archive:warn,model:allow`), `ML_STACK_NET_SCAN_MODELS` and `ML_STACK_NET_HASH_LOOKUP` set the
+(`archive:warn,model:allow`) and `ML_STACK_NET_SCAN_MODELS` set the
 same things for one run.

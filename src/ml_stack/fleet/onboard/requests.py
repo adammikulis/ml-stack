@@ -27,6 +27,7 @@ from ml_stack.lock import only_one
 from ml_stack.platform import private_file
 
 from .events import BUS, Bus
+from .lan import in_tailnet
 
 __all__ = ["Device", "Devices", "Limits", "Refused", "Request", "Requests", "State", "clean"]
 
@@ -129,6 +130,12 @@ class Device:
     """Whether the owner said this device is theirs, as against another person's."""
     secret: str = ""
     """The key this device signs its file requests with (urlsafe base64); private file."""
+    tailnet_address: str = ""
+    """Where this device is on the tailnet, learned only from the pairing exchange or from a
+    Tailscale peer whose certificate matched this device's (`routes.learn`)."""
+
+
+AUTHENTICATED_SOURCES = frozenset({"pairing", "tailscale-verified"})
 
 
 @dataclass(slots=True)
@@ -173,10 +180,28 @@ class Devices:
             device = Device(request.fingerprint, request.name, request.hostname,
                             request.address, self.clock(),
                             shared_cluster_key=shared_cluster_key, mine=bool(request.mine),
-                            secret=secret)
+                            secret=secret,
+                            tailnet_address=request.address if in_tailnet(request.address) else "")
             rows.append(device)
             self._write(rows)
         return device
+
+    def learn_tailnet(self, fingerprint: str, address: str, *, source: str) -> Device:
+        """Record ``address`` as the tailnet address of a paired device. ``source`` must be an
+        authenticated one (``pairing``, ``tailscale-verified``); an announcement is refused."""
+        if source not in AUTHENTICATED_SOURCES:
+            raise ValueError(f"a tailnet address is not taken from {source!r}")
+        if not in_tailnet(address):
+            raise ValueError(f"{address!r} is not a tailnet address")
+        with self._lock, only_one(self.path.with_suffix(".lock"), announce=lambda _m: None):
+            rows = self._read()
+            hit = next((d for d in rows if d.fingerprint == fingerprint
+                        and d.status == "active"), None)
+            if hit is None:
+                raise KeyError(fingerprint)
+            hit.tailnet_address = address
+            self._write(rows)
+        return hit
 
     def revoked(self, fingerprint: str) -> bool:
         return any(d.fingerprint == fingerprint and d.status == "revoked" for d in self.all())
