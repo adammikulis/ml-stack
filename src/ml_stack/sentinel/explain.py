@@ -36,6 +36,7 @@ WHY: dict[str, str] = {
     "integrity.content_changed": "A pinned file's contents changed since it was pinned.",
     "integrity.missing": "A pinned file is gone.",
     "integrity.unreadable": "A pinned file can no longer be read.",
+    "integrity.binary_mismatch": "The managed llama.cpp server program is not the one that was built (its hash differs from the recorded one), so it was moved aside and not started.",
     "integrity.link_retargeted": "A pinned link now points somewhere else than when it was pinned.",
     "tools.mix_shift": "This session's mix of tool calls changed sharply from its own usual.",
     "abuse.resource": "This caller used far more calls, bytes or time than a caller normally does.",
