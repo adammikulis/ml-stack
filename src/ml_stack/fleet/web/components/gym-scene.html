@@ -1,117 +1,178 @@
+<style>
+gym-scene { position:relative; display:block; overflow:hidden; background:#9fc5dc; }
+gym-scene canvas { display:block; width:100%; height:100%; }
+.gym-view-controls { position:absolute; top:12px; left:12px; z-index:2; display:flex; gap:10px;
+  flex-wrap:wrap; align-items:center; padding:8px 12px; background:rgba(17,31,36,.88);
+  color:#fff; border:1px solid #ffffff30; border-radius:10px; font-size:11px; }
+.gym-view-controls label { display:flex; gap:5px; align-items:center; margin:0; color:inherit; font-size:11px; }
+.gym-view-controls button { width:auto; margin:0; padding:3px 8px; font-size:11px; }
+.gym-scene-legend { position:absolute; bottom:12px; left:12px; padding:7px 10px;
+  background:rgba(17,31,36,.88); color:#e6f0f2; border-radius:8px; font-size:10px; pointer-events:none; }
+</style>
 <script>
 (function () {
   class GymScene extends HTMLElement {
     async connectedCallback() {
       if (this.wired) return;
       this.wired = true;
+      this.follow = this.debugRays = this.debugVectors = true;
       try {
-        const [T, orbit] = await Promise.all([
+        const [T, orbit, room, rounded] = await Promise.all([
           import('/ui/ml-ui/three.module.js'), import('/ui/ml-ui/OrbitControls.js'),
+          import('/ui/ml-ui/RoomEnvironment.js'), import('/ui/ml-ui/RoundedBoxGeometry.js'),
         ]);
         if (!this.isConnected) return;
         this.T = T;
+        this.RoundedBox = rounded.RoundedBoxGeometry;
         this.scene = new T.Scene();
-        this.scene.background = new T.Color(0x151f2b);
-        this.scene.fog = new T.FogExp2(0x151f2b, .002);
-        this.camera = new T.PerspectiveCamera(45, 1, .1, 3000);
+        this.scene.background = new T.Color(0xa9ccdf);
+        this.scene.fog = new T.Fog(0xa9ccdf, 140, 500);
+        this.camera = new T.PerspectiveCamera(54, 1, .1, 1800);
         this.camera.position.set(20, 25, 20);
-        this.renderer = new T.WebGLRenderer({ antialias: true });
+        this.renderer = new T.WebGLRenderer({ antialias:true });
         this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        this.renderer.outputColorSpace = T.SRGBColorSpace;
+        this.renderer.toneMapping = T.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.05;
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = T.PCFSoftShadowMap;
+        this.renderer.domElement.setAttribute('aria-label', 'Native simulator geometry with live sensor debug rays');
         this.append(this.renderer.domElement);
+        const environment = new room.RoomEnvironment();
+        const generator = new T.PMREMGenerator(this.renderer);
+        this.environmentMap = generator.fromScene(environment, .04);
+        this.scene.environment = this.environmentMap.texture;
+        this.scene.environmentIntensity = .65;
+        environment.dispose();
+        generator.dispose();
         this.controls = new orbit.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.maxPolarAngle = Math.PI * .48;
-        this.scene.add(new T.HemisphereLight(0xc2e4ff, 0x5d5146, 2.5));
-        const sun = new T.DirectionalLight(0xffefda, 3);
-        sun.position.set(30, 70, 25);
-        sun.castShadow = true;
-        sun.shadow.mapSize.set(2048, 2048);
-        Object.assign(sun.shadow.camera, { left: -100, right: 100, top: 100, bottom: -100 });
-        this.scene.add(sun);
-        const floor = this.box([2000, .05, 2000], 0x263341);
-        floor.position.y = -.08;
-        floor.receiveShadow = true;
-        this.scene.add(floor);
-        this.scene.add(new T.GridHelper(200, 100, 0x43566b, 0x314152));
+        this.controls.minDistance = 5;
+        this.controls.maxDistance = 450;
+        this.controls.addEventListener('start', () => { this.follow = false; this.followInput.checked = false; });
+        this.scene.add(new T.HemisphereLight(0xc7e5ff, 0x52683b, 1.5));
+        this.sun = new T.DirectionalLight(0xffeed5, 3.2);
+        this.sun.castShadow = true;
+        this.sun.shadow.mapSize.set(2048, 2048);
+        this.sun.shadow.bias = -.0002;
+        this.sun.shadow.normalBias = .03;
+        Object.assign(this.sun.shadow.camera, { left:-65, right:65, top:65, bottom:-65, near:1, far:250 });
+        this.scene.add(this.sun, this.sun.target);
         this.objects = new T.Group();
-        this.scene.add(this.objects);
+        this.scenery = new T.Group();
+        this.scene.add(this.objects, this.scenery);
         this.meshes = new Map();
+        this.toolbar();
         this.resize = new ResizeObserver(() => this.fit());
         this.resize.observe(this);
         this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
         this.animate();
         if (this.pending) this.update(this.pending);
-      } catch (error) {
-        this.textContent = '3D renderer unavailable: ' + error.message;
-      }
+      } catch (error) { this.textContent = '3D renderer unavailable: ' + error.message; }
+    }
+
+    toolbar() {
+      const bar = document.createElement('div');
+      bar.className = 'gym-view-controls';
+      const toggle = (label, field) => {
+        const input = document.createElement('input');
+        input.type = 'checkbox'; input.checked = this[field];
+        input.onchange = () => { this[field] = input.checked; if (this.pending) this.update(this.pending); };
+        const holder = document.createElement('label');
+        holder.append(input, label); bar.append(holder);
+        return input;
+      };
+      this.followInput = toggle('Follow car', 'follow');
+      toggle('Sensor rays', 'debugRays'); toggle('Heading / control', 'debugVectors');
+      const fit = document.createElement('button');
+      fit.textContent = 'Whole map'; fit.onclick = () => { this.follow = false; this.followInput.checked = false; this.frameMap(); };
+      bar.append(fit);
+      const legend = document.createElement('div');
+      legend.className = 'gym-scene-legend';
+      legend.textContent = 'Cyan: clear ray · Coral: detected surface · Blue: heading · Gold: applied steering · Scenery is visual';
+      this.append(bar, legend);
     }
 
     disconnectedCallback() {
       cancelAnimationFrame(this.animation);
-      this.resize?.disconnect();
-      this.controls?.dispose();
-      this.dispose(this.scene);
-      this.renderer?.dispose();
+      this.resize?.disconnect(); this.controls?.dispose();
+      this.dispose(this.scene); this.environmentMap?.dispose(); this.renderer?.dispose();
     }
 
     dispose(object) {
       object?.traverse(node => {
         node.geometry?.dispose();
+        node.material?.map?.dispose();
         if (Array.isArray(node.material)) node.material.forEach(material => material.dispose());
         else node.material?.dispose();
       });
     }
 
-    box(size, color) {
+    box(size, color, physical = false) {
       const T = this.T;
-      const mesh = new T.Mesh(new T.BoxGeometry(...size),
-        new T.MeshStandardMaterial({ color, roughness: .65, metalness: .15 }));
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      const material = physical ? new T.MeshPhysicalMaterial({ color, metalness:.65, roughness:.22,
+        clearcoat:1, clearcoatRoughness:.12, ior:1.5 }) : new T.MeshStandardMaterial({ color, roughness:.88 });
+      const geometry = physical ? new this.RoundedBox(...size, 3, Math.min(...size) * .16) : new T.BoxGeometry(...size);
+      const mesh = new T.Mesh(geometry, material);
+      mesh.castShadow = mesh.receiveShadow = true;
       return mesh;
     }
 
     car(color) {
       const T = this.T, car = new T.Group();
-      const chassis = this.box([1.8, .5, 4.5], color);
-      chassis.position.y = .55;
-      car.add(chassis);
-      const cabin = this.box([1.55, .65, 2.2], 0x264455);
-      cabin.position.set(0, 1.1, -.3);
-      car.add(cabin);
-      for (const x of [-.95, .95]) for (const z of [-1.4, 1.4]) {
-        const wheel = new T.Mesh(new T.CylinderGeometry(.35, .35, .24, 16),
-          new T.MeshStandardMaterial({ color: 0x172029, roughness: .9 }));
-        wheel.rotation.z = Math.PI / 2;
-        wheel.position.set(x, .35, z);
-        wheel.castShadow = true;
+      const body = this.box([1.8, .52, 4.5], color, true);
+      body.position.y = .63; car.add(body);
+      const hood = this.box([1.7, .18, 1.25], color, true);
+      hood.position.set(0, .95, 1.25); car.add(hood);
+      const glass = this.box([1.5, .62, 2.1], 0x172e3a, true);
+      glass.material.metalness = .2; glass.material.roughness = .12;
+      glass.position.set(0, 1.13, -.2); car.add(glass);
+      const roof = this.box([1.45, .08, 1.35], color, true);
+      roof.position.set(0, 1.47, -.35); car.add(roof);
+      for (const x of [-.97, .97]) for (const z of [-1.43, 1.43]) {
+        const wheel = new T.Mesh(new T.CylinderGeometry(.36, .36, .23, 24),
+          new T.MeshStandardMaterial({ color:0x151b20, roughness:.92 }));
+        wheel.rotation.z = Math.PI / 2; wheel.position.set(x, .36, z); wheel.castShadow = true;
         car.add(wheel);
+        const hub = new T.Mesh(new T.CylinderGeometry(.21, .21, .245, 12),
+          new T.MeshStandardMaterial({ color:0x9aabb5, metalness:.9, roughness:.25 }));
+        hub.rotation.z = Math.PI / 2; hub.position.copy(wheel.position); car.add(hub);
       }
-      for (const x of [-.55, .55]) {
-        const lamp = this.box([.35, .12, .08], 0xfff4b0);
-        lamp.position.set(x, .65, 2.26);
-        car.add(lamp);
+      for (const x of [-.6, .6]) {
+        const front = this.box([.45, .13, .06], 0xf5f5de);
+        front.material.emissive.set(0xfff2ce); front.material.emissiveIntensity = 1.5;
+        front.position.set(x, .76, 2.27); car.add(front);
+        const rear = this.box([.4, .12, .06], 0xdf2a32);
+        rear.material.emissive.set(0x9e0d18); rear.position.set(x, .76, -2.27); car.add(rear);
+        const mirror = this.box([.18, .1, .28], color, true);
+        mirror.position.set(Math.sign(x) * .95, 1.12, .45); car.add(mirror);
       }
+      const grille = this.box([1.2, .16, .04], 0x17242b);
+      grille.position.set(0, .5, 2.28); car.add(grille);
       return car;
     }
 
-    robot(carrying) {
-      const robot = this.car(carrying ? 0xeeb85b : 0x51bec6);
-      robot.scale.set(.42, .42, .2);
-      return robot;
+    stopSign() {
+      const T = this.T, group = new T.Group();
+      const pole = this.box([.075,2.4,.075],0xa5afb3); pole.position.y = 1.2; group.add(pole);
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#bc3031'; ctx.fillRect(0,0,128,128);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.strokeRect(7,7,114,114);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 36px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('STOP',64,77);
+      const texture = new T.CanvasTexture(canvas); texture.colorSpace = T.SRGBColorSpace;
+      const sign = new T.Mesh(new T.CircleGeometry(.55,8).rotateZ(Math.PI/8),new T.MeshStandardMaterial({map:texture,roughness:.7,side:T.DoubleSide}));
+      sign.position.y = 2.2; group.add(sign);
+      return group;
     }
 
     keep(key, create, position, heading = 0) {
       const T = this.T;
       let mesh = this.meshes.get(key);
       if (!mesh) {
-        mesh = create();
-        mesh.position.set(position[0] || 0, position[2] || 0, position[1] || 0);
-        mesh.rotation.y = heading;
-        this.meshes.set(key, mesh);
-        this.objects.add(mesh);
+        mesh = create(); mesh.position.set(position[0] || 0, position[2] || 0, position[1] || 0);
+        mesh.rotation.y = heading; this.meshes.set(key, mesh); this.objects.add(mesh);
       }
       mesh.userData.seen = true;
       mesh.userData.target = new T.Vector3(position[0] || 0, position[2] || 0, position[1] || 0);
@@ -119,97 +180,200 @@
       return mesh;
     }
 
+    heading(vehicle, state) {
+      const value = Number(vehicle.heading || 0);
+      return (vehicle.heading_unit || state.heading_unit) === 'radians' ? Math.PI / 2 - value : value * Math.PI / 180;
+    }
+
+    road(road) {
+      const T = this.T, group = new T.Group(), width = road.width || 3.5;
+      const points = road.points || [];
+      const asphalt = [], verge = [], paint = [];
+      const strip = (out, a, b, left, right, y) => {
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const nx = -(b[1] - a[1]) / length, nz = (b[0] - a[0]) / length;
+        const vertex = (p, side) => [p[0] + nx * side, y, p[1] + nz * side];
+        out.push(...vertex(a,left), ...vertex(b,left), ...vertex(a,right),
+          ...vertex(a,right), ...vertex(b,left), ...vertex(b,right));
+      };
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (!length) continue;
+        strip(verge, a, b, -width / 2 - .4, width / 2 + .4, .01);
+        strip(asphalt, a, b, -width / 2, width / 2, .035);
+        for (const [index, side] of [-1,1].entries()) {
+          const kind = String(road.line_types?.[index] || 'CONTINUOUS');
+          if (kind.includes('NONE')) continue;
+          const offset = side * (width / 2 - .14);
+          if (kind.includes('BROKEN')) {
+            for (let d = 0; d < length; d += 5) {
+              const start = a.map((v,k) => v + (b[k]-v) * d / length);
+              const end = a.map((v,k) => v + (b[k]-v) * Math.min(d+2.5,length) / length);
+              strip(paint, start, end, offset-.045, offset+.045, .041);
+            }
+          } else strip(paint, a, b, offset-.045, offset+.045, .041);
+        }
+      }
+      for (const [vertices,color] of [[verge,0xa79577],[asphalt,0x343d42],[paint,0xf2ead4]]) {
+        const geometry = new T.BufferGeometry();
+        geometry.setAttribute('position', new T.Float32BufferAttribute(vertices,3));
+        geometry.computeVertexNormals();
+        const mesh = new T.Mesh(geometry,new T.MeshStandardMaterial({ color, roughness:.95, side:T.DoubleSide }));
+        mesh.receiveShadow = true; group.add(mesh);
+      }
+      return group;
+    }
+
+    landscape(state) {
+      const T = this.T;
+      this.dispose(this.scenery); this.scenery.clear();
+      const bounds = new T.Box3();
+      for (const road of state.roads || []) for (const p of road.points || []) bounds.expandByPoint(new T.Vector3(p[0], 0, p[1]));
+      if (bounds.isEmpty()) bounds.set(new T.Vector3(-20, 0, -20), new T.Vector3(20, 0, 20));
+      this.mapBounds = bounds.clone();
+      const size = bounds.getSize(new T.Vector3()), center = bounds.getCenter(new T.Vector3());
+      const grass = this.box([size.x + 90, .2, size.z + 90], 0x718b4e);
+      grass.position.copy(center); grass.position.y = -.2; this.scenery.add(grass);
+      for (let i = 0; i < 14; i++) {
+        const theta = i * Math.PI * 2 / 14;
+        const hill = new T.Mesh(new T.SphereGeometry(1, 24, 12), new T.MeshStandardMaterial({ color:i % 2 ? 0x82985d : 0x677c43, roughness:1 }));
+        hill.scale.set(18 + i % 4 * 7, 5 + i % 3 * 3, 16 + i % 5 * 4);
+        hill.position.set(center.x + Math.cos(theta) * (size.x / 2 + 34), -4,
+          center.z + Math.sin(theta) * (size.z / 2 + 34));
+        hill.receiveShadow = true; this.scenery.add(hill);
+      }
+      const occupied = new Set(), trees = [];
+      for (const road of state.roads || []) for (let i = 0; i < (road.points || []).length - 1; i += 6) {
+        const a = road.points[i], b = road.points[i + 1], heading = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        for (const side of [-1, 1]) {
+          const x = a[0] - Math.sin(heading) * side * ((road.width || 3.5) / 2 + 10);
+          const z = a[1] + Math.cos(heading) * side * ((road.width || 3.5) / 2 + 10);
+          const cell = Math.round(x / 7) + ':' + Math.round(z / 7);
+          if (occupied.has(cell)) continue; occupied.add(cell);
+          trees.push([x,z]);
+        }
+      }
+      const matrix = new T.Matrix4();
+      for (const [geometry,color,height] of [[new T.BoxGeometry(.32,3,.32),0x746045,1.5],
+        [new T.IcosahedronGeometry(1.9,1),0x3e6748,3.6], [new T.IcosahedronGeometry(1.4,1),0x527947,4.7]]) {
+        const mesh = new T.InstancedMesh(geometry,new T.MeshStandardMaterial({color,roughness:1}),trees.length);
+        trees.forEach(([x,z],i) => mesh.setMatrixAt(i,matrix.makeTranslation(x,height,z)));
+        mesh.castShadow = mesh.receiveShadow = true; this.scenery.add(mesh);
+      }
+    }
+
     update(state) {
       this.pending = state;
       if (!this.objects) return;
       const T = this.T;
-      if (state.environment !== this.environment) {
-        this.environment = state.environment;
+      const mapKey = state.environment + ':' + (state.roads || []).map(r => [r.id,r.width,r.points?.[0],r.points?.at(-1)].join(',')).join('|');
+      if (mapKey !== this.mapKey) {
+        this.mapKey = mapKey;
         for (const mesh of this.meshes.values()) this.dispose(mesh);
-        this.objects.clear();
-        this.meshes.clear();
-        this.framed = false;
+        this.objects.clear(); this.meshes.clear(); this.focusKey = null;
+        this.landscape(state);
+        for (const road of state.roads || []) this.keep('road-' + road.id, () => this.road(road), [0, 0]);
+        this.frameMap();
       }
-      for (const mesh of this.meshes.values()) mesh.userData.seen = false;
-      for (const road of state.roads || []) {
-        const points = road.points || [];
-        for (let i = 1; i < points.length; i++) {
-          const a = points[i - 1], b = points[i];
-          const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-          this.keep('road-' + road.id + '-' + i, () => this.box([road.width || 3, .04, length], 0x39424b),
-            [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, -.025], Math.atan2(b[0] - a[0], b[1] - a[1]));
-        }
-      }
-      for (const [index, goal] of (state.goals || []).entries()) {
-        this.keep('goal-' + index, () => this.box([.9, .05, .9], 0x42b981), goal);
-      }
-      for (const [index, shelf] of (state.shelves || []).entries()) {
-        this.keep('shelf-' + (shelf.id ?? index), () => {
-          const group = new T.Group();
-          for (const y of [.35, 1, 1.65]) {
-            const layer = this.box([.85, .15, .85], 0x8293a5);
-            layer.position.y = y;
-            group.add(layer);
-          }
-          for (const x of [-.35, .35]) for (const z of [-.35, .35]) {
-            const post = this.box([.07, 1.8, .07], 0x4b6378);
-            post.position.set(x, .9, z);
-            group.add(post);
-          }
-          return group;
-        }, shelf.position || [shelf.x, shelf.y]);
+      for (const [key, mesh] of this.meshes) mesh.userData.seen = key.startsWith('road-');
+      for (const [index, vehicle] of (state.vehicles || []).entries()) {
+        const key = 'vehicle-' + (vehicle.id ?? index);
+        const mesh = this.keep(key, () => this.car(vehicle.ego ? 0x168d91 : 0x487ad2),
+          vehicle.position || [vehicle.x, vehicle.y], this.heading(vehicle, state));
+        const dimensions = vehicle.dimensions || (vehicle.length ? vehicle : null);
+        if (dimensions) mesh.scale.set(dimensions.width / 1.8, dimensions.height / 1.51, dimensions.length / 4.5);
+        if (vehicle.ego || vehicle.id === state.vehicle?.id || !this.focusKey || (state.lidar?.origin && Math.hypot(mesh.userData.target.x - state.lidar.origin[0], mesh.userData.target.z - state.lidar.origin[1]) < .1)) this.focusKey = key;
       }
       for (const [index, robot] of (state.robots || []).entries()) {
-        const mesh = this.keep('robot-' + (robot.id ?? index), () => this.robot(robot.carrying),
-          robot.position || [robot.x, robot.y], robot.heading ?? ((robot.direction || 0) * Math.PI / 2));
-        mesh.children[0].material.color.set(robot.carrying ? 0xeeb85b : 0x51bec6);
+        const mesh = this.keep('robot-' + (robot.id ?? index), () => this.car(0xe4ad45),
+          robot.position || [robot.x, robot.y], (robot.direction || 0) * Math.PI / 2);
+        mesh.scale.set(.4, .4, .2);
       }
-      for (const [index, vehicle] of (state.vehicles || []).entries()) {
-        const heading = Number(vehicle.heading || 0) *
-          ((vehicle.heading_unit || state.heading_unit) === 'radians' ? 1 : Math.PI / 180);
-        this.keep('vehicle-' + (vehicle.id ?? index), () => this.car(0x57b5eb),
-          vehicle.position || [vehicle.x, vehicle.y], heading);
-      }
+      for (const [index, shelf] of (state.shelves || []).entries()) this.keep('shelf-' + index,
+        () => this.box([.85, 1.7, .85], 0x879995), shelf.position || [shelf.x, shelf.y]);
+      for (const [index, goal] of (state.goals || []).entries()) this.keep('goal-' + index,
+        () => this.box([.9, .06, .9], 0x30a382), goal);
       for (const light of state.lights || []) {
-        if (!light.position && !Number.isFinite(light.x)) continue;
-        const mesh = this.keep('light-' + light.id, () => this.box([.3, 2.5, .3], 0xe66b65),
-          light.position || [light.x, light.y], 0);
-        mesh.material.color.set(String(light.state).includes('G') ? 0x4cda93 : 0xe66b65);
+        if (!light.position) continue;
+        const mesh = this.keep('light-' + light.id, () => this.box([.3, 2.5, .3], 0xde4b42), light.position);
+        mesh.material.color.set(/[gG]/.test(light.state) ? 0x41c980 : 0xde4b42);
       }
-      this.sensors(state.lidar);
+      for (const sign of state.stop_signs || []) {
+        this.keep('stop-'+sign.id, () => this.stopSign(), sign.position, this.heading(sign,state));
+        if (sign.stop_line?.length === 2) {
+          const [a,b] = sign.stop_line, length = Math.hypot(b[0]-a[0],b[1]-a[1]);
+          this.keep('stop-line-'+sign.id, () => this.box([.3,.025,length],0xf7f3df),
+            [(a[0]+b[0])/2,(a[1]+b[1])/2,.06],Math.atan2(b[0]-a[0],b[1]-a[1]));
+        }
+      }
+      this.sensorLines(state);
+      this.vectors(state);
       for (const [key, mesh] of this.meshes) if (!mesh.userData.seen) {
-        this.objects.remove(mesh);
-        this.dispose(mesh);
-        this.meshes.delete(key);
-      }
-      if (!this.framed && this.objects.children.length) {
-        const bounds = new T.Box3().setFromObject(this.objects);
-        const center = bounds.getCenter(new T.Vector3());
-        const span = Math.max(10, bounds.getSize(new T.Vector3()).length());
-        this.controls.target.copy(center);
-        this.camera.position.copy(center).add(new T.Vector3(span * .6, span * .8, span * .6));
-        this.camera.lookAt(center);
-        this.framed = true;
+        this.objects.remove(mesh); this.dispose(mesh); this.meshes.delete(key);
       }
     }
 
-    sensors(lidar) {
-      if (!lidar?.origin || !lidar.endpoints) return;
-      const T = this.T, points = [];
-      for (const endpoint of lidar.endpoints) {
-        points.push(new T.Vector3(lidar.origin[0], .5, lidar.origin[1]),
-          new T.Vector3(endpoint[0], .5, endpoint[1]));
+    sensorLines(state) {
+      this.dataset.rayCount = this.dataset.hitCount = '0';
+      if (!this.debugRays) return;
+      const rays = [];
+      if (state.lidar?.origin) (state.lidar.endpoints || []).forEach((end, i) => rays.push({ start:state.lidar.origin,
+        end, hit:state.lidar.distances_m?.[i] < state.lidar.range_m * .995 }));
+      for (const vehicle of state.vehicles || []) (vehicle.sensors?.rays || []).forEach((ray, i) => rays.push({ ...ray,
+        hit:vehicle.sensors.lidar?.[i] < .995 }));
+      if (!rays.length) return;
+      const T = this.T, points = [], colors = [], hits = [];
+      for (const ray of rays) {
+        const color = new T.Color(ray.hit ? 0xff7662 : 0x31dfd4);
+        points.push(...[ray.start, ray.end].flatMap(p => [p[0], .65, p[1]]));
+        colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+        if (ray.hit) hits.push(ray.end[0], .65, ray.end[1]);
       }
-      const mesh = this.keep('lidar', () => new T.LineSegments(new T.BufferGeometry(),
-        new T.LineBasicMaterial({ color: 0x5be7cf, transparent: true, opacity: .25 })), [0, 0]);
-      mesh.geometry.setFromPoints(points);
+      const line = this.keep('sensor-rays', () => new T.LineSegments(new T.BufferGeometry(),
+        new T.LineBasicMaterial({ vertexColors:true, transparent:true, opacity:.48, depthWrite:false })), [0, 0]);
+      line.geometry.setAttribute('position', new T.Float32BufferAttribute(points, 3));
+      line.geometry.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
+      line.geometry.computeBoundingSphere();
+      const markers = this.keep('sensor-hits', () => new T.Points(new T.BufferGeometry(),
+        new T.PointsMaterial({ color:0xff987e, size:.19, sizeAttenuation:true })), [0, 0]);
+      markers.geometry.setAttribute('position', new T.Float32BufferAttribute(hits, 3));
+      markers.geometry.computeBoundingSphere();
+      this.dataset.rayCount = String(rays.length); this.dataset.hitCount = String(hits.length / 3);
+    }
+
+    vectors(state) {
+      if (!this.debugVectors) return;
+      const T = this.T;
+      for (const [index, vehicle] of (state.vehicles || []).entries()) {
+        const position = vehicle.position || [vehicle.x, vehicle.y], yaw = this.heading(vehicle, state);
+        const direction = new T.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const arrow = this.keep('heading-' + (vehicle.id ?? index), () => new T.ArrowHelper(direction,
+          new T.Vector3(), 6, 0x4daaff, 1, .5), [position[0], position[1], 1.8]);
+        arrow.setDirection(direction); arrow.setLength(6, 1, .5);
+        const action = vehicle.last_action || vehicle.action;
+        if (Array.isArray(action) && Number.isFinite(action[0])) {
+          const applied = direction.clone().addScaledVector(new T.Vector3(Math.cos(yaw),0,-Math.sin(yaw)), action[0]).normalize();
+          const control = this.keep('control-' + (vehicle.id ?? index), () => new T.ArrowHelper(applied,
+            new T.Vector3(), 4, 0xffcc66, .8, .4), [position[0], position[1], 1.9]);
+          control.setDirection(applied); control.setLength(4, .8, .4);
+        }
+      }
+    }
+
+    frameMap() {
+      if (!this.mapBounds) return;
+      const T = this.T, center = this.mapBounds.getCenter(new T.Vector3());
+      const size = this.mapBounds.getSize(new T.Vector3()), span = Math.max(20, size.x, size.z);
+      this.controls.target.copy(center);
+      this.camera.position.copy(center).add(new T.Vector3(span * .35, span * .7, span * .45));
+      this.camera.lookAt(center);
     }
 
     fit() {
       if (!this.renderer) return;
       const width = this.clientWidth || 640, height = this.clientHeight || 420;
-      this.renderer.setSize(width, height, false);
-      this.camera.aspect = width / height;
+      this.renderer.setSize(width, height, false); this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
     }
 
@@ -219,13 +383,20 @@
       if (this.hidden || this.closest('[hidden]')) return;
       for (const mesh of this.meshes.values()) {
         if (!mesh.userData.target) continue;
-        mesh.position.lerp(mesh.userData.target, this.reduced.matches ? 1 : .2);
-        const difference = Math.atan2(Math.sin(mesh.userData.heading - mesh.rotation.y),
-          Math.cos(mesh.userData.heading - mesh.rotation.y));
-        mesh.rotation.y += difference * (this.reduced.matches ? 1 : .2);
+        mesh.position.lerp(mesh.userData.target, this.reduced.matches ? 1 : .24);
+        const difference = Math.atan2(Math.sin(mesh.userData.heading - mesh.rotation.y), Math.cos(mesh.userData.heading - mesh.rotation.y));
+        if (mesh.type !== 'ArrowHelper') mesh.rotation.y += difference * (this.reduced.matches ? 1 : .24);
       }
-      this.controls.update();
-      this.renderer.render(this.scene, this.camera);
+      const ego = this.meshes.get(this.focusKey);
+      if (this.follow && ego) {
+        const T = this.T, forward = new T.Vector3(Math.sin(ego.rotation.y), 0, Math.cos(ego.rotation.y));
+        const target = ego.position.clone().addScaledVector(forward, 11); target.y = 1;
+        const behind = ego.position.clone().addScaledVector(forward, -12); behind.y = 7.5;
+        this.controls.target.lerp(target, this.reduced.matches ? 1 : .12);
+        this.camera.position.lerp(behind, this.reduced.matches ? 1 : .12);
+      }
+      if (ego) { this.sun.position.copy(ego.position).add(new this.T.Vector3(-35, 70, 25)); this.sun.target.position.copy(ego.position); }
+      this.controls.update(); this.renderer.render(this.scene, this.camera);
     }
   }
   customElements.define('gym-scene', GymScene);
