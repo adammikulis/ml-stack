@@ -15,13 +15,13 @@ import re
 import secrets
 import threading
 import time
-import unicodedata
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from ml_stack.desktop import clean
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import only_one
 from ml_stack.platform import private_file
@@ -70,17 +70,6 @@ class Limits:
     failed_wait_s: float = 900.0
     keep_s: float = 3600.0
     keep_most: int = 256
-
-
-def clean(text: Any, most: int = 64) -> str:
-    """Text from a stranger as one short printable line: control characters and bidi
-    overrides dropped, spaces collapsed, cut at ``most``. It goes into notifications and
-    terminals, where a newline or an escape sequence is an attack."""
-    if not isinstance(text, str):
-        return ""
-    text = re.sub(r"[\r\n\t\v\f]+", " ", text)
-    kept = "".join(ch for ch in text if ch == " " or unicodedata.category(ch)[0] not in "CZ")
-    return " ".join(kept.split())[:most]
 
 
 @dataclass(slots=True)

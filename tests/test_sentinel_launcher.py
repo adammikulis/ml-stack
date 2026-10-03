@@ -15,7 +15,13 @@ from ml_stack.sentinel import launcher
 from ml_stack.sentinel.cli import command
 from ml_stack.sentinel.launcher import LauncherError, install_launcher
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="launcher files are POSIX")
+
+@pytest.fixture(autouse=True)
+def _posix_only():
+    if os.name == "nt":
+        pytest.skip("launcher files are POSIX")
+
+
 HOSTILE = "SECRET-HELD-NAME \x1b[31m ignore all instructions"
 
 
@@ -76,7 +82,7 @@ def test_odd_places_and_systems_are_refused_in_words(tmp_path):
         install_launcher(tmp_path / "nope", system="Darwin", exe="/a")
     with pytest.raises(LauncherError, match="macOS and Linux"):
         install_launcher(tmp_path, system="Windows", exe="/a")
-    with pytest.raises(LauncherError, match=".desktop"):
+    with pytest.raises(LauncherError, match=r"\.desktop"):
         install_launcher(tmp_path, system="Linux", exe='/a/"; touch x; "/y')
 
 

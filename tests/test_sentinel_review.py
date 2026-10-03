@@ -6,10 +6,9 @@ then reopens the store to see what changed. Nothing about the sentinel is mocked
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import pty
-import re
 import select
 import subprocess
 import sys
@@ -18,12 +17,23 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import pty
+except ImportError:                                 # Windows: the tests skip themselves
+    pty = None
+
 from ml_stack import home, sentinel
 from ml_stack.sentinel import human
 from ml_stack.sentinel.cli import command
 from ml_stack.sentinel.store import State
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="the interactive review is POSIX-only")
+
+@pytest.fixture(autouse=True)
+def _posix_only():
+    if os.name == "nt":
+        pytest.skip("the interactive review is POSIX-only")
+
+
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
@@ -59,10 +69,8 @@ class Term:
 
     def pump(self, wait: float) -> None:
         if select.select([self.master], [], [], wait)[0]:
-            try:
+            with contextlib.suppress(OSError):
                 self.text += os.read(self.master, 65536).decode("utf-8", errors="replace")
-            except OSError:
-                pass
 
     def send(self, keys: str) -> None:
         os.write(self.master, keys.encode())

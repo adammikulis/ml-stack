@@ -154,6 +154,68 @@ raises. Only `quarantined -> released` and purge are human-only.
 Every transition is an audited event with a reason and evidence references (ids and
 digests, never secrets or raw content).
 
+## Reviewing what is held
+
+`ml-stack-security review` is one screen with every held subject, quarantined and watched,
+newest first: a number, the kind, a short name (a file's name, an address, a port; never the
+raw key), how long ago, why in a sentence, what it blocks ("Requests from this machine are
+refused", "This model cannot be leased or started", "This session is frozen") and what to do
+about it ("Watch only. Release to stop watching; nothing changes for anything else.").
+
+```
+ml-stack-security review   1 held, 1 watched
+
+> 1  QUARANTINED peer 127.0.0.1   3 min ago
+  2  WATCH       server :51089   1 h ago
+
+  why:    This machine sent requests with a forged or replayed signature, which no honest ml-stack peer does.
+  blocks: Requests from this machine are refused.
+  next:   Keep it held unless you know this is a false alarm; releasing puts it back in use.
+
+1-9 select   r release   k keep   d details   R release all watched   p purge   q quit
+```
+
+| Key | What it does |
+|---|---|
+| `1`-`9`, arrows | select an item |
+| `r`, then `y` | release the selected item: shows what it unblocks, one confirming key, no id to retype; any other key cancels |
+| `k` | keep: change nothing, go to the next |
+| `d` | details: the escaped record, its history and event log, and the exact `quarantine show/release/purge` commands |
+| `R`, then `y` | stop watching every item that is only watched, after one confirmation; quarantined items are never touched |
+| `p` | purge: deletes what is held, and still needs the id typed in full |
+| `q` | quit |
+
+`review --list` and `review --json` print the same table anywhere, inside an agent too:
+viewing is not privileged. `status` and `chip` name what is held ("2 held: peer 127.0.0.1
+(forged traffic), server :51089 (unmanaged). Review them: ml-stack-security review").
+Everything printed from a record (names, reasons, peers, paths, arguments) is untrusted: it
+is secret-masked, control, bidi and invisible characters become visible escapes such as
+`\x1b` and `‮`, and every field is length-bounded. The sentence for each finding kind
+is `explain.WHY`, and `tests/test_sentinel_explain.py` reads the detectors and fails when a
+kind has none.
+
+The interactive screen needs a POSIX terminal. It refuses, before drawing anything, when
+stdin or stdout is not a terminal or when `CLAUDECODE`, `ML_STACK_AGENT` or
+`ML_STACK_NONINTERACTIVE` is set, and exits 2 with the reason. Elsewhere use `--list` and
+`quarantine release ID`.
+
+**One click.** `ml-stack-security review --install-launcher [--dir ~/Desktop] [--force]`
+writes `Review quarantine.command` (macOS) or `Review quarantine.desktop` (Linux), mode
+0700, never over an existing file without `--force`. It is a fixed template holding only the
+absolute path of the installed `ml-stack-security`, run in a login shell; it changes no
+directory, activates no environment and carries no held text. Double-click it to get a
+Terminal outside any agent.
+
+**A heads-up.** When something is quarantined (not merely watched) a desktop dialog appears
+with two buttons, `Dismiss` and `Review…`; `Review…` opens a terminal running the screen. It
+never releases anything, shows only the sentence from `explain` and a bounded escaped name,
+raises at most one notice per subject per hour and folds a flood into one burst notice, and
+does nothing for a hold you made by hand. `ML_STACK_SENTINEL_NOTIFY=off` turns it off and
+needs `ML_STACK_SENTINEL_NOTIFY_BECAUSE`; without a reason the switch is ignored, and an off
+is logged as `sentinel.notify_off`. `ML_STACK_NOTIFY=console|off` (the onboarding switch)
+also silences it. Where no dialog can be shown (no desktop, Windows) nothing is raised and
+`status` still names what is held.
+
 ## Policy: what acts on its own
 
 Modes, chosen by a person:
