@@ -30,6 +30,7 @@ from ml_stack.sentinel.store import (
     placeholder,
     sentinel_dir,
 )
+from ml_stack.sentinel.watch import scanner_state
 
 __all__ = ["ENV", "Screened", "Sentinel"]
 
@@ -305,7 +306,8 @@ class Sentinel:
                 "decoys": len(self.honey.decoys()),
                 "log_ok": None if chain is None else chain.ok,
                 "log_records": 0 if chain is None else chain.records,
-                "last_scan": self.last_scan}
+                "last_scan": self.last_scan,
+                "scanner": scanner_state(self.root, self.clock())}
 
 
 def _summary(evidence: Mapping[str, Any]) -> str:

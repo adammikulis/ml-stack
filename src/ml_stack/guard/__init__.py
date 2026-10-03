@@ -34,7 +34,10 @@ BUILTIN = ("untrusted", "secrets", "tool-policy", "taint")
 
 
 class Unguarded(list):  # type: ignore[type-arg]
-    """The empty list `off` returns: the marker that a loop is meant to run without rails."""
+    """The empty list `off` returns: the marker that a loop is meant to run without rails.
+    ``because`` is the reason it was given."""
+
+    because: str = ""
 
 
 def rails(*, without: Iterable[str] = (), because: str = "",
@@ -67,7 +70,9 @@ def default(extra: Sequence[Any] = (), *, screen: Sequence[Any] = (),
 def off(because: str) -> Unguarded:
     """No rails at all; needs a ``because`` and is logged and printed. It is the only empty
     list an `Agent` accepts as its ``rails``."""
-    return Unguarded(rails(without=BUILTIN, because=because))
+    marker = Unguarded(rails(without=BUILTIN, because=because))
+    marker.because = because.strip()
+    return marker
 
 
 def start(items: Sequence[Any], *, offered: Sequence[Mapping[str, Any]] = (), task: str = "",
