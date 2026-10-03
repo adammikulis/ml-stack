@@ -330,3 +330,14 @@ def test_a_question_from_the_server_reaches_the_confirm_handler(served, answer, 
     assert request.question == "Really delete /tmp/x?" and request.name == "elicitation"
     assert next(e for e in events if isinstance(e, ToolResult)).text == outcome
     assert asked == (["Really delete /tmp/x?"] if answer else [])
+
+
+def test_an_agent_turn_asks_for_no_thinking_unless_the_person_set_it(served, monkeypatch) -> None:
+    monkeypatch.delenv("ML_STACK_THINK", raising=False)
+    fake = served(Turn(text=("done",)))
+    collect(agent_for(fake))
+    assert fake.bodies[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    monkeypatch.setenv("ML_STACK_THINK", "on")
+    again = served(Turn(text=("done",)))
+    collect(agent_for(again))
+    assert again.bodies[0]["chat_template_kwargs"] == {"enable_thinking": True}

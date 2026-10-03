@@ -103,6 +103,7 @@ class Snapshot:
     verdict: str = ""
     reason: str = ""
     log: str | None = None
+    iq_warning: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +238,7 @@ def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None =
         load_s=_float_or_none(entry.get("load_s")),
         warmup_s=_float_or_none(entry.get("warmup_s")),
         log=str(entry["log"]) if entry.get("log") else None,
+        iq_warning=str(entry["iq_warning"]) if entry.get("iq_warning") else None,
         drafting=(drafting_of(url, (served or {}).get(port) or {}, params,
                               str(entry.get("mtp_note") or ""))
                   if served is not None and port in served else None),

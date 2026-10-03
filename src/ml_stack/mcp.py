@@ -41,6 +41,7 @@ from ml_stack.client import Client
 from ml_stack.decide import router
 from ml_stack.home import state
 from ml_stack.log import say
+from ml_stack.serve import quant_guard
 from ml_stack.workspace import tools as workspace_tools
 
 __all__ = [
@@ -235,6 +236,10 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
     when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``. ``escalate``
     grows a server already up on ``port`` with fewer than ``parallel`` slots rather than
     refusing, keeping every live conversation."""
+    if why := quant_guard.blocked_message(model):
+        return {"started": False, "blocked": why}
+    if any(str(one).startswith("--iq") for one in extra or []):
+        raise ValueError("the IQ mode is a person's to set, not a tool argument")
     argv = ["up", _not_an_option(model, "model"), "--port", str(port), "--parallel",
             str(parallel)]
     if context:

@@ -104,3 +104,11 @@ def test_batch_and_async_forms_agree_with_the_single_call(server):
     many = d.decide_many([Request("q", "s", ["x", "y"]), Request("q", "s", ["x", "y"])])
     later = asyncio.run(d.adecide("q", "s", ["x", "y"]))
     assert [m.scores for m in many] == [one.scores, one.scores] and later.scores == one.scores
+
+
+def test_a_decision_stays_unthinking_whatever_the_person_set(server, monkeypatch):
+    monkeypatch.setenv("ML_STACK_THINK", "on")
+    seen: list[dict] = []
+    fake = server(logprob_handler(lambda u: {"A": 0.5, "B": 0.5}, seen=seen))
+    LogprobDecider(Chat(fake.base_url)).decide("q", "s", ["x", "y"])
+    assert seen[0]["chat_template_kwargs"] == {"enable_thinking": False}
