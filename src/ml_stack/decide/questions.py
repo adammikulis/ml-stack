@@ -3,7 +3,6 @@ probabilities by the router's backends."""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -16,7 +15,6 @@ __all__ = ["Answer", "Question", "choice", "decide", "noul", "prepare", "score"]
 
 NO, YES = "no", "yes"
 FAILURES = (DecideError, ValueError, OSError, RuntimeError)
-ANSWER_TAG = re.compile(r"</?\s*answer\b[^>\n]*>?", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,8 +79,8 @@ class Answer:
 
 
 def prepare(state: State) -> str:
-    """The state as text a prompt can carry: clipped, defanged, and without ``<answer>`` tags."""
-    return ANSWER_TAG.sub("[tag removed]", defang(clip(text_of(state), "state")))
+    """The state as text a prompt can carry: clipped and defanged."""
+    return defang(clip(text_of(state), "state"))
 
 
 def _answer(name: str, q: Question, d: Decision) -> Answer:

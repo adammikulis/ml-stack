@@ -29,21 +29,23 @@ is left of it would turn noise into a verdict."""
 LOOPBACK_NAMES = frozenset({"localhost", "ip6-localhost"})
 
 
-STATE_TAGS = re.compile(r"</?\s*(?:state|options?|question)\b[^>\n]*>?", re.I)
+STATE_TAGS = re.compile(r"<\s*/?\s*(?:state|options?|question|answer)\b[^>\n]*>?", re.I)
 HEADERS = re.compile(
     r"^([ \t>|]*)((?:options?|question|answer|response|reply|verdict|decision|judge|system|"
     r"assistant|user|human|state|tool result|user request|tool call)\s*:|[A-Za-z][.):]\s)",
     re.I | re.M)
-CONTROLS = re.compile(r"[^\S\n\t ]|[\x00-\x08\x0b-\x1f\x7f]")
+CONTROLS = re.compile(r"[^\S\n\t ]")
+DROPPED = re.compile(r"[\x00-\x08\x0e-\x1f\x7f]")
 
 
 def closed(text: str) -> str:
     """``text`` that cannot close the ``<state>`` block it is put in: look-alike characters
     folded to the ones they imitate (NFKC), invisible and control characters removed, and the
-    prompt's own tags replaced."""
+    prompt's own tags (``state``, ``option(s)``, ``question``, ``answer``, any spacing or case)
+    replaced."""
     folded = unicodedata.normalize("NFKC", text)
     folded = "".join(c for c in folded if unicodedata.category(c) != "Cf")
-    return STATE_TAGS.sub("[tag removed]", CONTROLS.sub(" ", folded))
+    return STATE_TAGS.sub("[tag removed]", CONTROLS.sub(" ", DROPPED.sub("", folded)))
 
 
 def defang(text: str) -> str:
