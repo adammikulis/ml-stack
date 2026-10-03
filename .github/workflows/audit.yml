@@ -1,5 +1,6 @@
 name: audit
-# Report only: findings go to the job summary and never fail a build.
+# pip-audit gates: a known vulnerability in the shipped extras fails the job unless .github/pip-audit-allow.json
+# accepts it (with a reason and an expiry date). npm and cargo audit are still report-only.
 on:
   schedule:
     - cron: "11 6 * * 1"
@@ -24,12 +25,13 @@ jobs:
         with:
           python-version: "3.13"
       - name: audit the packages a full install asks pip for
-        continue-on-error: true
         run: |
           python -m pip install pip-audit
-          python -m pip install ".[store,hub,web,plot,graph]"
-          pip-audit --desc on 2>&1 | tee pip-audit.txt
+          python -m pip install ".[store,hub,web,plot,graph,serve]"
+          pip-audit --desc on --format json --output pip-audit.json || true
+          pip-audit --desc on 2>&1 | tee pip-audit.txt || true
           { echo '### pip-audit'; echo '```'; cat pip-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          python scripts/audit_gate.py pip-audit.json
 
   npm-audit:
     runs-on: ubuntu-latest
