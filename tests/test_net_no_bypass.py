@@ -58,6 +58,9 @@ ALLOWED: dict[str, str] = {
                                  "(fleet/onboard/lan.py)",
     "fleet/onboard/pairing.py": "the pairing exchange with a device on this network, confirmed "
                                 "by a code and the certificate fingerprint (fleet/onboard/lan.py)",
+    "fleet/onboard/routes.py": "asks a paired device's address for its certificate; a public address "
+                               "is refused first and only the pinned certificate counts "
+                               "(fleet/onboard/lan.py)",
     "redteam/scenarios/fleet.py": "the lab's own servers on 127.0.0.1",
     "redteam/scenarios/isolation.py": "the lab's own servers on 127.0.0.1",
     "redteam/tools.py": "the lab's page server and honeypot on 127.0.0.1",
