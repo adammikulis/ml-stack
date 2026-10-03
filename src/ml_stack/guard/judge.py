@@ -17,7 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from ml_stack.decide.base import Decider
-from ml_stack.decide.types import DecideError, Option
+from ml_stack.decide.logprob import defang
+from ml_stack.decide.types import Option
 from ml_stack.guard.untrusted import unfenced
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Rewrite, Verdict
 
@@ -41,6 +42,10 @@ NO_TASK = "look things up with the tools and tell me what you find"
 
 MIN_CHARS = 12
 WINDOW = 1500
+MAX_TEXT = 200_000
+"""The most of a result the judge looks at, however large it is; the rest is not read and the
+result is marked as only partly read."""
+MAX_TASK = 1000
 WORDS = re.compile(r"\S+")
 PLAIN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['\u2019,.;:!?()\"-])*$")
 
@@ -49,7 +54,8 @@ PLAIN = re.compile(r"^[^\W\d_](?:[^\W\d_]|['\u2019,.;:!?()\"-])*$")
 class Judgement:
     """What the judge made of one text. ``score`` is the probability of an injection (the
     highest over its windows); ``skipped`` says why nothing was asked; ``error`` why the model
-    could not answer."""
+    could not answer; ``cut`` that some of the text was never read (over ``MAX_TEXT`` or beyond
+    the last window)."""
 
     score: float = 0.0
     judged: int = 0
@@ -58,6 +64,7 @@ class Judgement:
     skipped: str = ""
     error: str = ""
     windows: int = 1
+    cut: bool = False
 
 
 def _prose(line: str) -> bool:
@@ -139,9 +146,11 @@ class Judge:
 
     def judge(self, text: str, task: str = "") -> Judgement:
         """The `Judgement` of ``text`` read as a tool result for the request ``task``."""
-        body = free_text(text)
+        over = len(text) > MAX_TEXT
+        body = free_text(text[:MAX_TEXT])
         if len(body) < MIN_CHARS:
             return Judgement(skipped="no sentences to judge")
+        task = task.strip()[:MAX_TASK]
         key = hashlib.sha256(f"{task}\x00{body}".encode()).hexdigest()
         if key in self.seen:
             self.seen.move_to_end(key)
@@ -149,6 +158,7 @@ class Judge:
         began = self.clock()
         top, error = 0.0, ""
         pieces = _windows(body)
+        cut = over or len(pieces) > self.max_windows
         for piece in pieces[: self.max_windows]:
             if self.clock() - began > self.budget_s:
                 error = "out of time"
@@ -156,14 +166,15 @@ class Judge:
             try:
                 self.asked += 1
                 got = self.decider.decide(
-                    QUESTION, f"User request: {task or NO_TASK}\nTool result:\n{piece}", OPTIONS)
-            except DecideError as exc:
-                error = str(exc)
+                    QUESTION, f"User request: {defang(task) or NO_TASK}\nTool result:\n"
+                              f"{defang(piece)}", OPTIONS)
+            except Exception as exc:  # whatever goes wrong, the text is not cleared
+                error = str(exc) or type(exc).__name__
                 break
             top = max(top, got.scores["yes"])
         ms = (self.clock() - began) * 1000.0
         result = Judgement(top, len(body), ms, False, "", error,
-                           min(len(pieces), self.max_windows))
+                           min(len(pieces), self.max_windows), cut)
         if not error:
             self.seen[key] = result
             while len(self.seen) > self.cache:
@@ -199,6 +210,8 @@ class TextScreen(Base):
         if got.score >= self.taint:
             return Rewrite(result, f"may be an instruction (judge {got.score:.2f})", True,
                            self.name)
+        if got.cut:
+            return Rewrite(result, "the judge read only the first part of it", True, self.name)
         return Proceed()
 
     def close(self) -> None:
