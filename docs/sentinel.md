@@ -241,15 +241,28 @@ A process that does nothing about sentinel gets this (tests: `tests/test_sentine
 | Stop hooks | `serve_hooks` is registered with the manager's lease file on first use: quarantining a `model` or a `server` stops the servers ml-stack recorded for it (`ServerManager.reclaim`). A process not in the lease file is never touched. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
 | Broker daemon and fleet daemon | A scan loop in a daemon thread: every pin and decoy once at start (hashing every file), then every `ML_STACK_SENTINEL_SCAN` seconds (default 300), hashing everything every twelfth round. It writes a sealed heartbeat `scanner.json`; `ml-stack security status` reports `scanner: armed, pid N, every Ns` or `NOT ARMED (reason)`, and is armed when a process beat within three intervals and did not stop it. | `ML_STACK_SENTINEL_SCAN=off` together with `ML_STACK_SENTINEL_SCAN_BECAUSE="..."`. `off` without a reason is ignored (the scan runs at the default and `sentinel.scan_off_refused` is logged); with one it logs `sentinel.opt_out`. A number sets the cadence in seconds. |
 | Fleet daemon | The request authenticator is wrapped by `watch_authenticator`: forged, replayed and locked-out requests count against the sender's address, and an address sentinel holds is refused. | `ML_STACK_SENTINEL=off` with `ML_STACK_SENTINEL_BECAUSE`. |
+| Behavioural canaries, in the Broker daemon's and the fleet daemon's scan loop | After each scan, every served model that is due is asked six fixed probes (a product, a capital, a JSON object, an exact word, a refusal and a benign recipe) three times each at temperature 0, at most 64 tokens per answer: 18 short requests per model per round, default once an hour (`ML_STACK_SENTINEL_CANARY`, seconds). The Broker daemon asks through a lease on the running server (never starting another; a lease that would is let go), the fleet daemon over the lease file's servers without one. A server that is processing is skipped, and the requests queue behind real traffic in the machine's request gate. The first healthy round records the baseline, sealed in `canaries.json` and keyed by model path and pin, so a replaced file gets a new baseline. A fall of the pooled pass rate by 0.15, or pass-rate intervals that no longer overlap, puts the model on `watch`; intervals apart together with a fall of 0.25 (or four probes moved) is a hard drift, confirmed by a second run straight after, and quarantines the model (moved aside, its servers stopped, restored by a person). | `ML_STACK_SENTINEL_CANARY=off` together with `ML_STACK_SENTINEL_CANARY_BECAUSE="..."`; `off` without a reason is ignored (`sentinel.canary_off_refused`); with one it logs `sentinel.opt_out`. |
+| Guard events, aggregated to a score per session or caller | Every denial the guard logs for a running agent (`GuardLogHandler`, attached when the first `Agent` is watched, reading the session of the agent whose context is current), a call refused because a Confirm went unanswered, every sandbox event of a run while a session has a tool in flight (`sandbox_listener`, called from `sandbox.run`), every refused lease and every resource-limit hit of a Broker caller (`broker_listener`, called from `Broker.lease` and `start`) adds its weight (`sentinel/score.py`: denial 1, sandbox denial 2, refused lease 2, resource limit 3, sandbox timeout 0.5) to the subject over a 600 s window. At 3 the subject is on `watch`; at 10 it is quarantined (a frozen session, a blocked caller; `Broker.lease` refuses a blocked caller) in `guarded` and `enforce` mode, and only watched in `observe`. This is a threshold, so it can be wrong: a person releases, which also starts the count again. Listeners ml-stack did not start are reported once each (`unmanaged_findings`) and only watched. | `ML_STACK_SENTINEL=off` with a reason, or the agent opt-outs above. There is no separate switch for the score. |
+| Model output, compaction summaries | The final reply of a watched agent is screened before it is stored or returned: a decoy value, held content or a secret-shaped string in it is labelled in `guarded` mode (a `[sentinel: ...]` line in front of the text, event `output.suspect`) and held as a message with a placeholder in `enforce`. A decoy value also freezes the session. A compaction summary goes through `screen_memory`: one that repeats held content or carries a decoy value is quarantined as a `memory` and replaced by nothing, so the compaction falls back to its other strategies and the summary is never fed back. Rewording defeats the held-content check. | The agent opt-outs above, or `ML_STACK_SENTINEL=off` with a reason. |
+| Child processes | `scrub_env` leaves any variable named as a quarantined `credential` out of the environment of the sandbox's child (`sandbox.run`), a detached job (`jobs.detach`), a model server (`serve.backend.launch`) and an MCP server launched by `agent.confined`. An environment passed as `None` (inherit) is not scrubbed. | `ML_STACK_SENTINEL=off` with a reason. |
+| MCP connect | `McpTools.__aenter__` asks `mcp_allowed(label)`: a server that is quarantined is not connected (`McpBlocked`). Nothing quarantines an MCP server on its own yet: a person or an embedding program does that. | `ML_STACK_SENTINEL=off` with a reason. |
+| Decoy endpoint, in the Broker daemon and the fleet daemon | A listener on 127.0.0.1 and an ephemeral port, the onboarding servers' shared handler, answering any path with an obviously fake credentials document. Its address is written only to `credentials.endpoint` under `ML_STACK_HOME` (and is a decoy value, so naming it in a tool call, result or reply is caught as the other decoys are). A request to it is a high-confidence `honey.endpoint_hit`: every session with a tool call running at that moment is quarantined (the only attribution a loopback request has; two sessions running tools together are both frozen), and with none running the hit is recorded against `caller:unattributed-decoy-hit`. | `ML_STACK_SENTINEL_DECOY=off` with `ML_STACK_SENTINEL_DECOY_BECAUSE="..."`; without a reason it is ignored and `sentinel.decoy_off_refused` is logged. |
 
-Not armed, because nothing calls it: model output is not screened (`screen_model` has no
-sentinel hook); `screen_memory` is not called by compaction or the summariser; canaries are
-never scheduled (`baseline` and `canary` are called by hand and by tests); `scrub_env` is not
-applied where a child process is started; `mcp_allowed` is not asked when an MCP server is
-connected; `broker_listener`, `sandbox_listener`, `GuardLogHandler` and the unmanaged-server
-findings are not attached to anything shipped; a plain process that only calls
-`serve.serve()` gets the start-time checks but no scan loop (the loop lives in the daemons).
-An in-process `Agent` run in a process that is not a daemon has no scan loop either.
+Not armed: a plain process that only calls `serve.serve()` gets the start-time checks but no
+scan loop, canaries or decoy listener (they live in the daemons); an in-process `Agent` run in a
+process that is not a daemon has no scan loop either, and no decoy listener, so a decoy endpoint
+hit cannot happen there. The canaries judge a model only against how it answered when the
+baseline was recorded: a model that was already wrong then passes, and a model that behaves
+differently only on inputs outside the six probes passes. Nothing quarantines an MCP server on
+its own. `taint.subscribe` has no sentinel subscriber. The score and the decoy attribution are
+thresholds and a guess about which tool made a request; a person releases both.
+False-alarm measurement: `tests/test_sentinel_decoy_endpoint.py` replays a corpus of 48
+scripted legitimate agent runs (8 shapes of conversation times 6 tasks; 72 tool calls; plain
+answers, fetches, file reads, arithmetic, parallel calls, a corrected unknown tool) through the
+real Agent loop with the decoy listener, the guard tap and the output screen armed, and asserts
+no decoy hit, no decoy event, no session on watch and nothing quarantined. The corpus is small
+and written for this test; it bounds nothing about a real day of use. The canaries have no such
+corpus: their false-alarm control is the temperature-0 floor and the confirming second run.
 `honey.file_read`, `file_changed` and `file_gone` only watch.
 Start-time verification skips the hash when the file's resolved path, size, mtime and inode
 are those recorded at its last full verification against the same pin, and its size equals the
@@ -267,13 +280,13 @@ deep rounds (about an hour at the default cadence) the window is open. The windo
 | sealed files, quarantine store, state machine, retention, text hold, file move and restore | `sealed.py`, `store.py`, `moves.py` | built, tested, mutation-checked |
 | human grants, agent surface check | `human.py` | built, tested, mutation-checked |
 | model, binary, artifact, config pins; load-time and periodic checks | `integrity.py`, `Sentinel.verify_before_load`, `scan`, `start` | built, tested |
-| canaries and drift | `canary.py` | built; run against scripted models and two real GGUFs |
+| canaries and drift | `canary.py`, `serve/canaries.py` | built; scheduled in the daemons' scan loop, tested against real fake-llama processes whose answers change while they run; also run against two real GGUFs |
 | peer outcomes, flapping, version and binary mismatch, tool mix, resource use | `rates.py` | built, tested on synthetic clocks |
 | guard-rail verdicts to findings, held messages, parked calls, tainted text | `rails.py`, `Sentinel.screen` | built; tested against the real `Guard` on the integration branch |
 | derived memory: summaries that repeat held text, memories of a frozen session | `Sentinel.screen_memory`, `register_derived` | built, tested |
-| decoys | `honey.py` | built, tested |
-| suspect credentials withheld from child environments | `Sentinel.scrub_env` | built, tested; the caller must use it when it starts a child |
-| unmanaged listeners, changed server executable | `servers.py` | built; takes the finder's output and a pid-to-executable function |
+| decoys | `honey.py`, `serve/decoy.py` | built, tested (files, tokens, tools, endpoint) |
+| suspect credentials withheld from child environments | `Sentinel.scrub_env` | built, tested; applied at the four spawn helpers |
+| unmanaged listeners, changed server executable | `servers.py` | built; unmanaged listeners are reported by the Broker's adoption, the changed-executable check is not scheduled |
 | hooks that stop a server or a model's servers | `adapters.serve_hooks` | built, tested with real processes |
 | status mark | `Sentinel.chip`, `ml-stack security chip` | built; not yet drawn by the page |
 | `ml-stack security` | `cli.py` | built, tested |

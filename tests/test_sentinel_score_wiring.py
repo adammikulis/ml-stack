@@ -17,7 +17,7 @@ from ml_stack.client import Client
 from ml_stack.sandbox import Limits
 from ml_stack.sentinel import State, human
 from ml_stack.sentinel.score import QUARANTINE_AT, WATCH_AT
-from ml_stack.interventions import Call as GuardCall, Deny, Run
+from ml_stack.interventions import Call as GuardCall, Deny, Proceed, Run
 from ml_stack.serve import LlamaServerBackend, ServerManager
 from ml_stack.serve.broker import Ask, Broker, BrokerError
 from ml_stack.serve.leases import recorded_servers
@@ -175,9 +175,34 @@ def test_guard_denials_of_something_that_is_not_an_agent_are_not_counted() -> No
     Watch(node, "s-tapped")          # the tap is attached once a watch exists
 
     class Rail:
-        def before_tool(self, _call):
+        def before_tool_call(self, _call):
             return Deny("no", "rail")
 
     asyncio.run(Run([Rail()]).before_tool(GuardCall("x", {})))
     assert node.score.windows.count("session:none", "score") == 0
     assert node.score.value("session", "s-tapped") == 0
+
+
+class NoWipe:
+    """A rail that flatly denies `wipe`: the guard logs a Deny, not a Confirm."""
+
+    def before_tool_call(self, call):
+        return Deny("wipe is not allowed here", "nowipe") if call.name == "wipe" else Proceed()
+
+
+def test_flat_denials_by_a_rail_are_counted_from_the_guards_log() -> None:
+    node = sentinel.default()
+    fake = ToolCallingServer([
+        Turn(calls=tuple(call("wipe", path=f"/y{n}") for n in range(12))), Turn(text=("done",))])
+    try:
+        agent = Agent(Client(fake.base_url),
+                      FunctionTools([FETCH, WIPE], {"web_fetch": lambda url: "x", "wipe": wipe}),
+                      interventions=[NoWipe()], sentinel=Watch(node, "s-flat"))
+
+        async def go() -> list:
+            return [e async for e in agent.run("clean up")]
+        asyncio.run(go())
+    finally:
+        fake.close()
+    assert node.store.state_of("session", "s-flat") == State.QUARANTINED
+    assert node.score.value("session", "s-flat") >= QUARANTINE_AT
