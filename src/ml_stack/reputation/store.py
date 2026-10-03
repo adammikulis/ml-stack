@@ -3,7 +3,6 @@ tied to its source, scores kept in the source's attributes."""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -68,9 +67,9 @@ class Ledger:
     the store, after a source diverges. ``flush_s`` is how long clean runs wait to be written."""
 
     def __init__(self, path: Path | None = None, *, clock: Callable[[], float] = time.time,
-                 keys: vault.Keys | None = None, user: str | None = None,
+                 keys: vault.Keys | None = None,
                  on_notice: Callable[[], None] | None = None, flush_s: float = FLUSH_S) -> None:
-        self.sealed = SealedGraph(path, user=user, keys=keys)
+        self.sealed = SealedGraph(path, keys=keys)
         self.clock, self.on_notice, self.flush_s = clock, on_notice, flush_s
         self._pending: dict[tuple[str, str], float] = {}
         self._flushed = clock()
@@ -153,8 +152,8 @@ class Ledger:
         held = [Rec.from_attrs(n["attrs"]) for n in g.nodes("source")]
         counts = {s.value: sum(r.state == s for r in held) for s in State}
         counts["notices"] = sum(r.notice == "queued" for r in held)
-        files.write_text(self.path.with_name("summary.json"),
-                         json.dumps({"schema_version": SCHEMA_VERSION, **counts}, sort_keys=True))
+        files.write_json(self.path.with_name("summary.json"), files.versioned(counts, SCHEMA_VERSION),
+                         indent=None)
 
     def _edit(self, steps: list[Step]) -> list[Any]:
         """Apply each ``(kind, key, change)`` to its source (made when new) in one sealed write."""

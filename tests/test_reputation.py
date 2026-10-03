@@ -115,7 +115,7 @@ def test_waiting_never_restores_a_source_only_a_clean_run_does(ledger, clock, mo
     ledger.observe("host", "good.example", "hash_change")
     clock.advance(400 * DAY)
     assert ledger.standing("host", "good.example").state == "watch"
-    for n in range(model.RECOVER_CLEAN):
+    for _ in range(model.RECOVER_CLEAN):
         assert ledger.standing("host", "good.example").state == "watch"
         ledger.clean("host", "good.example")
         clock.advance(model.CLEAN_GAP_S + 1)
@@ -152,11 +152,11 @@ def test_names_are_canonical_and_bad_names_are_refused(ledger):
 
 
 def test_the_store_is_bounded(ledger, clock):
-    for n in range(MAX_EVENTS + 5):
+    for _ in range(MAX_EVENTS + 5):
         ledger.observe("host", "noisy.example", "denial")
         clock.advance(model.DEDUP_S + 1)
     g = ledger.sealed.graph()
-    assert len([n for n in g.nodes("event")]) <= MAX_EVENTS
+    assert len(g.nodes("event")) <= MAX_EVENTS
     for n in range(MAX_SOURCES + 3):
         ledger.clean("peer", f"p{n}")
     assert len(ledger.sources()) <= MAX_SOURCES
@@ -214,7 +214,7 @@ def test_one_dialog_with_a_real_button_and_no_stacking(tmp_path, ledger, clock):
     ledger.observe("host", "good.example", "hash_change")
     ledger.observe("host", "other.example", "cert_or_key_change")
     assert len(desk.shown) == 1
-    title, body, buttons = desk.shown[0]
+    _, body, buttons = desk.shown[0]
     assert buttons == BUTTONS and BLOCK in buttons and "good.example" in body
     assert note.prompt() == "" and len(desk.shown) == 1
     assert ledger.standing("host", "good.example").notice == "done"

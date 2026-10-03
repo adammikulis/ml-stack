@@ -10,9 +10,12 @@ from typing import Any, Protocol
 
 from ml_stack import home
 
-__all__ = ["Gate", "Observer", "clean", "gate", "install", "installed", "observe", "line", "summary", "trait", "uninstall"]
+__all__ = ["FAILURES", "Gate", "Observer", "clean", "gate", "install", "installed", "line", "observe",
+           "summary", "trait", "uninstall"]
 
 logger = logging.getLogger("ml_stack.reputation")
+FAILURES = (OSError, ValueError, RuntimeError, TypeError, KeyError, AttributeError)
+"""What an observation point swallows: a ledger that is locked, full or gone never breaks a fetch."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +60,7 @@ def _safely(call: str, *args: object, **kw: object) -> None:
         return
     try:
         getattr(_ACTIVE, call)(*args, **kw)
-    except Exception as exc:  # noqa: BLE001 - an observation never breaks what it watches
+    except FAILURES as exc:
         logger.warning("reputation %s failed: %s", call, type(exc).__name__)
 
 
@@ -82,7 +85,7 @@ def gate(kind: str, key: str) -> Gate | None:
         return None
     try:
         return _ACTIVE.gate(kind, key)
-    except Exception:  # noqa: BLE001
+    except FAILURES:
         return None
 
 

@@ -51,6 +51,10 @@ class ChecksumMismatch(Blocked):
     """The file's SHA-256 is not the pinned one."""
 
 
+class ScanHit(Blocked):
+    """A scanner flagged the file, or none could clear it."""
+
+
 class NoDigest(Refused):
     """A download that must be pinned to a digest was asked for without one."""
 
@@ -202,8 +206,9 @@ def _promote(staged: Path, dest: Path) -> None:
 
 
 def _reject(pipe: Pipeline, staged: Path, note: provenance.Provenance, reason: str,
-            error: type[Blocked] = Blocked, event: str = "denial") -> Blocked:
-    observed.rejected(note.url, note.sha256, "hash_change" if error is ChecksumMismatch else event)
+            error: type[Blocked] = Blocked) -> Blocked:
+    observed.rejected(note.url, note.sha256,
+                      {ChecksumMismatch: "hash_change", ScanHit: "scan_hit"}.get(error, "denial"))
     held = pipe.hold.hold(staged, reason, {"url": note.url, "sha256": note.sha256,
                                             "kind": note.kind, "reason": reason})
     provenance.record(replace(note, outcome="held", reason=reason, path=held))
@@ -289,7 +294,8 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
     summary = pipe.scan_policy.scan(staged, verdict.kind, pipe.scanners)
     keep, why = pipe.scan_policy.decide(verdict.kind, summary, allow_unscanned=want.allow_unscanned)
     if not keep:
-        raise _reject(pipe, staged, note, why, event="scan_hit")
+        hit = any(r.outcome == Outcome.INFECTED for r in summary.results)
+        raise _reject(pipe, staged, note, why, ScanHit if hit else Blocked)
     warnings = (*verdict.warnings, *(w for r in summary.results for w in r.warnings),
                 *(r.detail for r in summary.results if r.outcome == Outcome.NO_SCANNER))
     _promote(staged, final)
