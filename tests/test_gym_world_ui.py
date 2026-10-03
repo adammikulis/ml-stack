@@ -74,3 +74,17 @@ def test_learning_switch_preserves_world_and_restores_settings(gym_page):
     assert result['restored']['learning_mode'] == 'online'
     assert result['calls'] == [{'command': 'learning', 'payload': {'mode': 'frozen'}}]
     assert not errors
+
+
+def test_applying_online_ppo_creates_policy_without_resetting_world(gym_page):
+    page, errors = gym_page
+    result = page.evaluate("""async () => {
+      const g=document.querySelector('gym-view');g.session='persistent';g.controller.value='ppo';
+      g.worldOptions.learning.value='online';g.checkpoint.value='';
+      const calls=[];g.control=async(command,payload)=>calls.push({command,payload});
+      await g.apply();g.session=null;return calls;
+    }""")
+    assert len(result) == 1 and result[0]['command'] == 'controller'
+    assert result[0]['payload']['learning_mode'] == 'online'
+    assert result[0]['payload']['checkpoint'] == ''
+    assert not errors
