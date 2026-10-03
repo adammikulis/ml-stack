@@ -46,7 +46,10 @@ exfiltration; resource exhaustion (huge tool results, runaway loops).
 |---|---|---|
 | a guard rail denies or marks a tool call or text as tainted | reliable that the rail fired, heuristic that it was an attack | a held message or a parked tool call; a person releases it |
 | repeated denies in one session within a window | heuristic | session frozen read-only; person unfreezes |
-| tool-call mix far from the session's baseline (total variation distance) | heuristic, weak | watch state only, never auto-quarantine |
+| tool-call mix far from the session's baseline (total variation distance of the latest 40 calls from the session's first 100) | heuristic, weak | watch state only, never auto-quarantine |
+
+Measured on 200 simulated days (7 sessions of ~430 calls over 6 tools, evenly and skewed): the first settings (baseline 50, window 30) put a benign session on watch on about 1 day in 14; baseline 100 and window 40 do so on none of the 200, and a session that turns to a single tool is still noticed within one window (40 calls). The test corpus is fixed in `tests/test_sentinel_benign.py`, not read from the docs.
+
 | text identical (normalised fingerprint) to content already held | reliable | none beyond the first hold |
 | a secret pattern in model output or tool arguments | reliable pattern, heuristic intent | credential marked suspect, rotation prompt |
 | tool-result size, call count, wall time per session beyond limits | reliable as a count | tool disabled until released |

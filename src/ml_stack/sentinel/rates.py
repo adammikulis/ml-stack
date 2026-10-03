@@ -134,7 +134,7 @@ def total_variation(a: Counter[str], b: Counter[str]) -> float:
 class ToolMix:
     """Compares the tools a session calls now with the first calls it made."""
 
-    def __init__(self, *, baseline_calls: int = 50, window: int = 30,
+    def __init__(self, *, baseline_calls: int = 100, window: int = 40,
                  threshold: float = 0.5) -> None:
         self.baseline_calls, self.window, self.threshold = baseline_calls, window, threshold
         self._base: dict[str, Counter[str]] = {}

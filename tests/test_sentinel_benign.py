@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 import random
-from pathlib import Path
 
 import pytest
 
@@ -13,7 +12,16 @@ from ml_stack.sentinel import Mode, Sentinel, State
 from ml_stack.sentinel.honey import Honey
 from ml_stack.sentinel.rates import PeerLimits, PeerWatch
 
-DOCS = Path(__file__).resolve().parent.parent / "docs"
+# a fixed corpus: this test used to read docs/*.md, so editing a document changed which tool mix the random
+# draws produced and could tip a heuristic over its threshold for reasons unrelated to the code under test
+PARAGRAPHS = [
+    f"The {thing} reports its {measure} for each pool, and a request waits in the queue until a slot frees up "
+    f"on {where}, which takes about {n} seconds on an idle machine."
+    for n, (thing, measure, where) in enumerate(
+        (a, b, c) for a in ("server", "broker", "benchmark", "estimator", "catalogue")
+        for b in ("memory use", "token rate", "queue depth", "load time")
+        for c in ("the first device", "a paired device", "the local machine"))
+]
 TOOLS = ["models_find", "serve_status", "read_file", "web_search", "bench_run", "jobs_status"]
 
 
@@ -27,8 +35,7 @@ def node(tmp_path):
 
 def test_a_day_of_ordinary_use_quarantines_nothing_even_in_enforce_mode(node, tmp_path):
     rng = random.Random(11)
-    paragraphs = [p for doc in sorted(DOCS.glob("*.md")) for p in doc.read_text().split("\n\n")
-                  if len(p.split()) >= 8]
+    paragraphs = PARAGRAPHS
     models = tmp_path / "models"
     models.mkdir()
     files = []

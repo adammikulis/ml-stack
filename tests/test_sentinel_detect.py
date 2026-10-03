@@ -607,6 +607,28 @@ def test_the_default_tool_mix_watch_stays_quiet_on_steady_random_use_and_sees_a_
         alarms += sum(bool(mix.note(f"s{session}", rng.choice(tools))) for _ in range(600))
     assert alarms == 0
     mix = ToolMix()
-    for _ in range(50):
+    for _ in range(mix.baseline_calls):
         mix.note("s", rng.choice(tools))
-    assert any(mix.note("s", "shell") for _ in range(30))
+    assert any(mix.note("s", "shell") for _ in range(mix.window))
+
+
+def test_the_default_tool_mix_watch_raises_no_false_alarm_over_a_hundred_seeded_days():
+    """A day is 7 sessions of ~430 calls drawn from 6 tools, evenly or skewed. At the old 50/30 settings about
+    one day in fourteen had a benign session on watch; at the defaults none of these 200 days does."""
+    tools = ["models_find", "serve_status", "read_file", "web_search", "bench_run", "jobs_status"]
+    for skew in ([1, 1, 1, 1, 1, 1], [5, 3, 3, 2, 1, 1]):
+        for seed in range(100):
+            rng = random.Random(seed)
+            mix = ToolMix()
+            for step in range(7 * 430):
+                assert mix.note(f"s{step % 7}", rng.choices(tools, skew)[0]) is None, (seed, skew, step)
+
+
+def test_a_session_that_turns_to_one_tool_is_noticed_within_one_window_of_the_defaults():
+    rng = random.Random(1)
+    tools = ["models_find", "serve_status", "read_file", "web_search", "bench_run", "jobs_status"]
+    mix = ToolMix()
+    for _ in range(mix.baseline_calls):
+        mix.note("s", rng.choice(tools))
+    seen = next((i for i in range(1, 3 * mix.window) if mix.note("s", "bench_run")), None)
+    assert seen is not None and seen <= mix.window
