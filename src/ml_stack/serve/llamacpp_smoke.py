@@ -72,7 +72,7 @@ def run(binary: Path, model: Path | None = None, *, timeout: float = 300.0,
         try:
             info = manager.lease(ServerSpec(model=model, port=free_port(), context=512,
                                             slot_save_path=slots), timeout=timeout)
-        except Exception as exc:  # noqa: BLE001 - any failure to start is a failed smoke test
+        except (RuntimeError, OSError, ValueError) as exc:
             result.add("lease", False, f"{type(exc).__name__}: {exc}"[:600])
             return result
         try:
@@ -88,7 +88,7 @@ def _checks(result: Result, base: str, slots: Path, say: Callable[[str], None]) 
         say(f"  smoke: {name}")
         try:
             return result.add(name, True, check())
-        except Exception as exc:  # noqa: BLE001 - the failure is the result
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError, IndexError) as exc:
             return result.add(name, False, f"{type(exc).__name__}: {exc}"[:600])
 
     def health() -> str:

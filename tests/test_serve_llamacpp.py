@@ -27,9 +27,6 @@ from ml_stack.serve.build_paths import BuildFailed, builds_dir, current_link, ro
 from ml_stack.serve.llamacpp_smoke import Result
 from tests.llamacpp_site import UpstreamSite, toolchain
 
-pytestmark = pytest.mark.skipif(shutil.which("cmake") is None or shutil.which("git") is None,
-                                reason="needs cmake and git")
-
 
 def passes(binary_path, model=None, say=None):
     return Result([("health", True, "ok")])
@@ -41,6 +38,8 @@ def refuses(binary_path, model=None, say=None):
 
 @pytest.fixture
 def site(tmp_path, monkeypatch):
+    if shutil.which("cmake") is None or shutil.which("git") is None:
+        pytest.skip("needs cmake and git")
     monkeypatch.setenv("GIT_SSL_NO_VERIFY", "1")
     made = UpstreamSite(tmp_path / "up")
     yield made
