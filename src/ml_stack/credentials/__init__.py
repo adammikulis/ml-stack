@@ -1,15 +1,8 @@
-"""Credentials: one resolver for every token and key this library needs.
-
-`get(name)` looks in order at the explicit argument, the environment variable ``NAME``, the
-file named by ``NAME_FILE``, the credentials file, Hugging Face's own token file for
-``HF_TOKEN``, and the OS keychain when ``keyring`` is installed. Values are never logged or
-put in an exception; `describe` and `status` say where a credential came from, not what it is.
-"""
+"""Credentials from explicit inputs, environment, files, and configured keychain entries."""
 
 from __future__ import annotations
 
 import contextlib
-import logging
 import os
 import tomllib
 from collections.abc import Callable
@@ -17,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.credentials import keychain as keystore
 from ml_stack.credentials.environment import child_environment
 from ml_stack.credentials.reading import (
     INSECURE_ENV,
@@ -26,14 +20,15 @@ from ml_stack.credentials.reading import (
     valid_name,
 )
 from ml_stack.credentials.writing import write
+from ml_stack.files import read_json, write_json
+from ml_stack.platform import private_file
 
 __all__ = ["FILE_ENV", "INSECURE_ENV", "CredentialError", "Secret", "child_environment",
            "describe", "file_path", "get", "set", "status", "unset"]
 
-logger = logging.getLogger(__name__)
 
 FILE_ENV = "ML_STACK_CREDENTIALS_FILE"
-KEYRING_SERVICE = "ml-stack"
+KEYRING_SERVICE = keystore.SERVICE
 HF_NAMES = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 KNOWN = ("HF_TOKEN", "ANTHROPIC_API_KEY")
 
@@ -118,14 +113,35 @@ def _keyring() -> Any | None:
 
 
 def _from_keyring(name: str) -> str | None:
+    if name not in _keychain_names():
+        return None
+    return _read_keyring(name)
+
+
+def _keychain_names() -> dict[str, bool]:
+    names = read_json(home.state("keychain-credentials.json"), {})
+    return names if isinstance(names, dict) else {}
+
+
+def _mark_keychain(name: str, present: bool) -> None:
+    names = _keychain_names()
+    if present:
+        names[name] = True
+    else:
+        names.pop(name, None)
+    path = home.state("keychain-credentials.json")
+    write_json(path, names)
+    private_file(path)
+
+
+def _read_keyring(name: str) -> str | None:
     backend = _keyring()
     if backend is None:
         return None
     try:
-        value = backend.get_password(KEYRING_SERVICE, name)
-    except (backend.errors.KeyringError, OSError) as exc:
-        logger.debug("keyring unavailable: %s", type(exc).__name__)
-        return None
+        value = keystore.perform(backend, "get", name)
+    except keystore.KeychainError as exc:
+        raise CredentialError(str(exc)) from None
     return clean(value, "the keychain entry") if value else None
 
 
@@ -138,26 +154,32 @@ SOURCES: tuple[tuple[str, Callable[[str], str | None]], ...] = (
 )
 
 
-def _lookup(name: str) -> tuple[str, str] | None:
+def _lookup(name: str, *, keychain: bool | None = None) -> tuple[str, str] | None:
     names = HF_NAMES if name in HF_NAMES else (name,)
     for source, reader in SOURCES:
+        if source == "keychain" and keychain is False:
+            continue
         for alias in names:
-            found = reader(alias)
+            found = _read_keyring(alias) if source == "keychain" and keychain is True else reader(alias)
             if found:
                 return source, found
     return None
 
 
-def get(name: str, explicit: str | None = None, *, required: bool = False) -> Secret | None:
+def get(name: str, explicit: str | None = None, *, required: bool = False,
+        keychain: bool | None = None) -> Secret | None:
     """The credential ``name``: ``explicit`` if given, else the first source that holds it.
 
     None when nothing does, or `CredentialError` when ``required``. A source that exists but
     cannot be trusted (a file other users can read) raises rather than being skipped.
+    ``keychain=True`` explicitly retries an OS lookup; automatic lookups use enrolled names.
     """
     valid_name(name)
     if explicit is not None and explicit.strip():
         return Secret(clean(explicit, "the explicit value"))
-    found = _lookup(name)
+    if keychain is True:
+        keystore.retry()
+    found = _lookup(name, keychain=keychain)
     if found is not None:
         return Secret(found[1])
     if required:
@@ -172,9 +194,14 @@ def status(name: str) -> dict[str, Any]:
     exists but cannot be used. Never the value."""
     valid_name(name)
     try:
-        found = _lookup(name)
+        found = _lookup(name, keychain=False)
     except CredentialError as exc:
         return {"present": False, "source": None, "error": str(exc)}
+    if found is None and any(alias in _keychain_names() for alias in (HF_NAMES if name in HF_NAMES else (name,))):
+        row = {"present": True, "source": "keychain", "checked": False}
+        if keystore.blocked():
+            row["error"] = keystore.HELP
+        return row
     return {"present": found is not None, "source": found[0] if found else None}
 
 
@@ -183,7 +210,7 @@ def describe() -> list[dict[str, Any]]:
     whether that source can be used. Never a value."""
     names = list(KNOWN)
     with contextlib.suppress(CredentialError):
-        names += sorted({*_entries(file_path())} - {*names})
+        names += sorted({*_entries(file_path()), *_keychain_names()} - {*names})
     return [{"name": name, **status(name)} for name in names]
 
 
@@ -195,7 +222,12 @@ def set(name: str, value: str, *, keychain: bool = False) -> str:
         backend = _keyring()
         if backend is None:
             raise CredentialError("the keychain needs: pip install keyring")
-        backend.set_password(KEYRING_SERVICE, name, value)
+        keystore.retry()
+        try:
+            keystore.perform(backend, "set", name, value)
+        except keystore.KeychainError as exc:
+            raise CredentialError(str(exc)) from None
+        _mark_keychain(name, True)
         return "keychain"
     path = file_path()
     entries = _entries(path)
@@ -212,9 +244,13 @@ def unset(name: str, *, keychain: bool = False) -> bool:
         if backend is None:
             return False
         try:
-            backend.delete_password(KEYRING_SERVICE, name)
-        except backend.errors.PasswordDeleteError:
+            keystore.retry()
+            deleted = keystore.perform(backend, "delete", name)
+        except keystore.KeychainError as exc:
+            raise CredentialError(str(exc)) from None
+        if deleted is False:
             return False
+        _mark_keychain(name, False)
         return True
     path = file_path()
     entries = _entries(path)

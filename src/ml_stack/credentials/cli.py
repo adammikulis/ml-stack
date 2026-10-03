@@ -63,6 +63,8 @@ def listing(args: argparse.Namespace) -> int:
         return 0
     for row in rows:
         state = row["source"] if row["present"] else row.get("error", "not set")
+        if row.get("checked") is False:
+            state = row.get("error", "keychain configured; accessed when the credential is used")
         say(f"{row['name']:<24} {'set' if row['present'] else 'unset':<6} {state}")
     return 0
 

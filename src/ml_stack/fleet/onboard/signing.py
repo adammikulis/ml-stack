@@ -15,16 +15,17 @@ A hardware key (a signing device that never releases the key) is the designed ne
 from __future__ import annotations
 
 import base64
-import contextlib
 import hashlib
 import json
 import os
+import tempfile
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import read_json, write_json
+from ml_stack.credentials import keychain as keystore
+from ml_stack.files import promote, read_json, write_json
 from ml_stack.log import warn
 from ml_stack.platform import private_file
 
@@ -120,10 +121,12 @@ class SigningKeys:
     # -- the public record --
     def meta(self) -> dict[str, Any]:
         """What is known without the secret, creating the key on first use."""
+        return self.peek() or self._create()
+
+    def peek(self) -> dict[str, Any]:
+        """Return existing public metadata without accessing or creating a secret."""
         doc = read_json(self.meta_path, {})
-        if isinstance(doc, dict) and doc.get("key_id"):
-            return doc
-        return self._create()
+        return doc if isinstance(doc, dict) and doc.get("key_id") else {}
 
     @property
     def public(self) -> bytes:
@@ -143,7 +146,10 @@ class SigningKeys:
         raw = signer.private_raw()
         if keyring_usable():
             import keyring
-            keyring.set_password(SERVICE, self.account, base64.b64encode(raw).decode())
+            try:
+                keystore.perform(keyring, "set", self.account, base64.b64encode(raw).decode())
+            except keystore.KeychainError as exc:
+                raise KeyStoreError(str(exc)) from None
             return "keyring"
         seal_file(self.file_path, raw, self.passphrase("passphrase for the new signing key: "))
         message = (f"no OS keystore here: the signing key is encrypted with your passphrase in "
@@ -158,7 +164,10 @@ class SigningKeys:
                 raise KeyStoreError("the signing key is in the OS keystore, which is not "
                                     "available in this session")
             import keyring
-            held = keyring.get_password(SERVICE, self.account)
+            try:
+                held = keystore.perform(keyring, "get", self.account)
+            except keystore.KeychainError as exc:
+                raise KeyStoreError(str(exc)) from None
             if not held:
                 raise KeyStoreError("the OS keystore has no signing key for this directory")
             return Signer.from_raw(base64.b64decode(held))
@@ -167,8 +176,10 @@ class SigningKeys:
     def _drop(self, store: str) -> None:
         if store == "keyring" and keyring_usable():
             import keyring
-            with contextlib.suppress(keyring.errors.PasswordDeleteError):
-                keyring.delete_password(SERVICE, self.account)
+            try:
+                keystore.perform(keyring, "delete", self.account)
+            except keystore.KeychainError as exc:
+                raise KeyStoreError(str(exc)) from None
         elif store == "file":
             self.file_path.unlink(missing_ok=True)
 
@@ -238,8 +249,15 @@ class SigningKeys:
 
     def _put_after(self, previous: str, new: Signer) -> str:
         """Store ``new`` where the old key was (replacing it)."""
-        self._drop(previous)
-        return self._put(new)
+        if previous == "keyring":
+            if not keyring_usable():
+                raise KeyStoreError("The existing signing key's OS keystore is unavailable")
+            return self._put(new)
+        with tempfile.TemporaryDirectory(dir=self.directory) as directory:
+            target = Path(directory) / "signing.key.enc"
+            seal_file(target, new.private_raw(), self.passphrase("signing key passphrase: "))
+            promote(target, self.file_path)
+        return "file"
 
     def revoke(self, grant: HumanGrant, key_id: str) -> list[str]:
         """Name a key as no longer trusted; manifests carry the list from then on."""

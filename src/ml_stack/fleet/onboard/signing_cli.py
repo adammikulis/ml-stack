@@ -51,8 +51,11 @@ def cmd_signing(args: argparse.Namespace) -> int:
 
 
 def _run(args: argparse.Namespace, keys: SigningKeys, directory: Path) -> int:
-    doc = keys.meta()
+    doc = keys.peek() if args.action in {"show", "accept"} else keys.meta()
     if args.action == "show":
+        if not doc:
+            _emit(args, {"present": False}, "no signing key is configured")
+            return 0
         _emit(args, {"key_id": doc["key_id"], "store": doc["store"], "public": doc["public"],
                      "rotations": len(doc["rotations"]), "revoked": doc["revoked"],
                      "confirm_before_signing": doc["confirm"]},

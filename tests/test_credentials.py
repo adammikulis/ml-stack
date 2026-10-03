@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from ml_stack import credentials
-from ml_stack.credentials import CredentialError, Secret, cli as credentials_cli
+from ml_stack.credentials import CredentialError, Secret, cli as credentials_cli, keychain
 
 SECRET = "tok-4f9a1c7e2b8d6035a1c97e"
 
@@ -46,6 +46,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
     monkeypatch.setattr(credentials, "_keyring", lambda: None)
+    monkeypatch.setattr(keychain, "_BLOCKED", False)
     return tmp_path
 
 
@@ -79,8 +80,8 @@ def test_each_source_is_found_when_it_is_the_only_one(isolated, monkeypatch):
 def test_the_order_is_argument_then_environment_then_named_file_then_file_then_keychain(
         isolated, monkeypatch):
     chain = MemoryKeychain()
-    chain.set_password("ml-stack", "WIDGET_KEY", "from-keychain")
     monkeypatch.setattr(credentials, "_keyring", lambda: chain)
+    credentials.set("WIDGET_KEY", "from-keychain", keychain=True)
     assert credentials.get("WIDGET_KEY") == "from-keychain"
     _stored(isolated, 'WIDGET_KEY = "from-file"\n')
     assert credentials.get("WIDGET_KEY") == "from-file"

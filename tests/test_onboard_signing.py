@@ -9,14 +9,16 @@ import keyring
 import pytest
 from onboard_support import FileKeyring, Recorder
 
+from ml_stack.credentials import keychain
 from ml_stack.fleet.onboard import manifest as mf, signing
 from ml_stack.fleet.onboard.human import HumanRequired, mint
 from ml_stack.fleet.onboard.signing import KeyStoreError, SigningKeys
 
 
 @pytest.fixture(autouse=True)
-def needs_cryptography():
+def needs_cryptography(monkeypatch):
     pytest.importorskip("cryptography")
+    monkeypatch.setattr(keychain, "_BLOCKED", False)
 
 
 @pytest.fixture
