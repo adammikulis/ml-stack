@@ -15,7 +15,11 @@
   GPL, AGPL, LGPL or unknown licence in the packages a bundle ships. The same check runs in CI as the `licenses` job.
 - `python -m build` then `twine check dist/*`; the wheel carries `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md` under `dist-info/licenses`.
 - `gitleaks git --log-opts="--all" .` reports no leaks; `python -m pytest`; `scripts/budgets`.
-- `audit.yml` (weekly, report only) lists known vulnerabilities in the Python, npm and Cargo dependencies.
+- `audit.yml` (weekly and on lockfile changes) fails on a known vulnerability in the Python, npm and Cargo dependencies
+  unless `.github/pip-audit-allow.json` accepts it (reason, expiry; `scripts/audit_gate.py`).
+- `python scripts/sbom.py --out sbom.cdx.json` (run in an environment with the extras installed) writes the CycloneDX SBOM
+  that every release produces: `release.yml` runs it in a clean venv, checks it with `--check` and uploads it as `sbom`; the
+  publish job attaches it to the GitHub release. It lists the packages `scripts/notices.py` lists, plus the Cargo.lock crates.
 
 ## PyPI trusted publishing
 

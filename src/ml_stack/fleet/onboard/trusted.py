@@ -1,17 +1,8 @@
-"""The signed file lists this machine has accepted, kept so a model can be checked against
-them when it is loaded.
+"""The signed file lists this machine accepted, kept for the load-time check (docs/sentinel.md).
 
-A list is accepted (`TrustedLists.ingest`) only when it verifies under a key that was pinned
-by a person (pairing, or this machine's own signing key), is not expired and has a serial no
-lower than the highest one already accepted for that key: an older list cannot be served
-again. The newest accepted list per key, with that high-water serial, is kept in a sealed file
-under sentinel's state (an edit made outside the program is noticed). At load,
-`TrustedLists.lookup` re-verifies each kept list against the keys pinned *now* (a revoked or
-removed key stops counting) and returns the entries that name a file.
-
-Expiry bounds how long a list may be fetched, not how long bytes already held may be checked
-against it, so lookup does not apply it; the serial high-water mark is the replay defence.
-Needs ``cryptography`` (without it no list verifies and nothing here applies).
+`TrustedLists.ingest` keeps a list only if a key a person pinned signed it, it has not expired and its serial is not
+below the highest kept for that key (replay). `lookup` verifies each kept list again under the keys pinned now, so an
+un-paired or revoked key stops counting. Expiry is not applied at lookup: it bounds fetching, not checking held bytes.
 """
 
 from __future__ import annotations
@@ -56,13 +47,12 @@ def _key(text: Any) -> bytes | None:
 def pinned_keys(directory: Path | None = None) -> tuple[list[bytes], list[str]]:
     """``(keys, revoked key ids)`` a person pinned on this machine: the owner's key of each
     paired peer, the key in ``trust.json`` and this machine's own signing key."""
-    from .peerfirst import PeerBook
-
     where = Path(directory) if directory else home.state("onboard")
     keys: list[bytes] = []
     revoked: list[str] = []
-    for row in PeerBook(where / "peers.json").rows():
-        if (k := _key(row.get("signing_key"))) is not None:
+    peers = read_json(where / "peers.json", {})
+    for row in peers.get("peers", []) if isinstance(peers, dict) else []:
+        if isinstance(row, dict) and (k := _key(row.get("signing_key"))) is not None:
             keys.append(k)
     for name in ("trust.json", "signing.json"):
         doc = read_json(where / name, {})

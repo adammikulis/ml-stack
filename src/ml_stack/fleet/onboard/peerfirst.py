@@ -38,7 +38,6 @@ from .. import tls
 from .events import BUS, Bus
 from .manifest import Entry, Manifest, ManifestError, verify
 from .sharing import NEVER
-from .trusted import remember
 from .transfer import (
     Cancelled,
     Downloader,
@@ -47,6 +46,7 @@ from .transfer import (
     TransferError,
     fetch_manifest,
 )
+from .trusted import remember
 
 __all__ = ["PeerBook", "PeerSession", "quarantine_veto", "session"]
 

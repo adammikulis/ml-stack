@@ -261,6 +261,20 @@ def test_a_stored_list_whose_key_is_no_longer_pinned_stops_counting(tmp_path):
     assert load(path) == ""
 
 
+def test_a_list_signed_by_a_key_that_was_revoked_since_stops_counting(tmp_path):
+    signer = Signer.generate()
+    key = pin_owner_key(signer)
+    path = where("listed.gguf")
+    body = gguf_bytes(extra=300)
+    path.write_bytes(body + b"!")
+    TrustedLists().ingest(listing(signer, 2, entry_for(path, body)), key)
+    trust = home.state("onboard") / "trust.json"
+    doc = json.loads(trust.read_text(encoding="utf-8"))
+    trust.write_text(json.dumps({**doc, "revoked": [signer.key_id]}), encoding="utf-8")
+    assert load(path) == ""
+    assert pins()[str(path)].source == "first-use"
+
+
 def test_a_signed_list_expires_for_fetching_but_still_checks_held_bytes(tmp_path):
     signer = Signer.generate()
     key = pin_owner_key(signer)
@@ -270,6 +284,7 @@ def test_a_signed_list_expires_for_fetching_but_still_checks_held_bytes(tmp_path
     stale = signer.sign([entry_for(path, body)], serial=4, valid_s=1, now=time.time() - 10)
     with pytest.raises(ManifestError, match="expired"):
         TrustedLists().ingest(stale, key)
-    fresh = signer.sign([entry_for(path, body)], serial=4, valid_s=3600)
+    fresh = signer.sign([entry_for(path, body)], serial=4, valid_s=1)
     TrustedLists().ingest(fresh, key)
+    time.sleep(1.2)                                       # the list lapses; the bytes it vouched for stay checked
     assert load(path) == "verified by manifest serial 4"

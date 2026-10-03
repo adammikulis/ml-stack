@@ -45,7 +45,6 @@ from .share_cli import add_share, cmd_share
 from .signing import KeyStoreError, SigningKeys
 from .signing_cli import add_signing, cmd_signing, confirm_signing
 from .ssh_cli import add_ssh, cmd_ssh
-from .trusted import remember
 from .transfer import (
     Downloader,
     NotShareable,
@@ -54,6 +53,7 @@ from .transfer import (
     TransferError,
     fetch_manifest,
 )
+from .trusted import remember
 
 __all__ = ["add_commands", "adopt", "run"]
 
