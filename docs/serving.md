@@ -339,6 +339,50 @@ Where the n-gram table lives depends on the kind. `ngram-simple`, `ngram-map-k`,
 and nothing touches the disk. `ngram-cache` is the exception: `--lookup-cache` is written as
 it generates, so what was learnt answering one question can speculate the next.
 
+### Multi-token prediction
+
+A model is served with multi-token prediction (`--spec-type draft-mtp`) whenever it has a
+prediction layer and the build can use it, through `ServerManager.lease`, `serve()`, the
+Broker and `ml-stack-serve up` alike. The lease says what it did: `ServerInfo.mtp` is
+`embedded`, a head's file name, or empty, `ServerInfo.mtp_note` is the one-line reason, the
+lease record keeps both, and `ml-stack-serve status` prints the head with the share of
+drafted tokens the model kept (read from the server's `/metrics`).
+
+Where the layer comes from, in order:
+
+1. **The weights carry it.** Tensors named `blk.N.nextn.*` in the GGUF (Qwen3.8-27B,
+   Qwen3.5-2B-MTP): `--spec-type draft-mtp` and no second file.
+2. **A head file beside the weights.** `hub.heads_for` lists the `mtp-` files in the model's
+   own Hub repository (any snapshot, `MTP/` folder) or the same folder on disk; a head that
+   borrows the target's embeddings (`shared`) counts only when the serving build is a fork
+   that loads one. Among those, the `Q8_0` head, else the smallest, whose header passes
+   `serve.mtp.mismatch`: same architecture, embedding width, block count (or one more),
+   tokenizer model and prefix, vocabulary size, and a prediction layer in the head.
+3. **Trust.** A head from any other repository is not used unless sentinel holds a pin a
+   download made for it (`source` other than `first-use`). A head the default picks is
+   checked against its sentinel pin before the weights load; a mismatch quarantines it as it
+   does a model, and the lease goes on without it. A head named with `draft=` is checked the
+   same way and a mismatch refuses the lease.
+
+Served without, with the reason in `mtp_note` and the log, never as a failure:
+
+| reason | why |
+| --- | --- |
+| `ML_STACK_MTP=off` (also `0`, `no`, `false`, `none`) | the machine-wide opt-out |
+| `ServerSpec(mtp=False)`, `Serving(mtp=False)`, `up --no-mtp`, `up --draft none`, `up --spec none` | the per-lease opt-out |
+| `--spec-type` has no `draft-mtp` in this build's `--help` | the build cannot |
+| `draft`, `spec_type` or tree decoding already chosen by the caller | the caller's choice stands |
+| `slot_save_path` set, or a lease that may escalate | slot save writes the target's cache and tokens only (`llama_state_seq_save_file(ctx_tgt, ...)`), so a restored slot would draft from nothing |
+| embedding server, MLX engine | nothing to draft |
+| the server exits while loading with the head | started again without it for this lease, and not tried again for that model and build in this process |
+
+The guard's judge lease (`guard/native.py`) asks for `mtp=False`: it reads the probabilities
+of one token (`max_tokens=1`), so there is nothing to draft, and in the build checked
+(`b11380`) tokens accepted from a draft carry no `logprobs` (`TODO: set result.probs` in
+`server-context.cpp`), so any scoring that reads more than the first token must not be
+served drafted. The bench's no-head arms and `ml-stack-draft`'s `none` arm set `mtp=False` too, so
+a baseline is a baseline.
+
 **A release lags master by an architecture or two.** Checked on this machine: the newest
 homebrew bottle (`brew outdated` empty) reads `gemma4` and `qwen3moe` but not `qwen4exp`, so
 Qwen3.8-Flash-Next exits with "unknown model architecture" on it. `ml-stack-serve build`
