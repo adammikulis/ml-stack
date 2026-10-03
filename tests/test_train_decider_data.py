@@ -109,9 +109,11 @@ def test_registering_records_the_directory_under_its_name_and_replaces_a_repeat(
     registry.register(first)
     assert registry.find("guard") == first.resolve()
     again = make_dir(tmp_path / "two", "guard")
-    registry.register(again)
-    assert [r["path"] for r in registry.listing()] == [str(again.resolve())]
-    assert registry.listing()[0]["data_hash"] == "abc"
+    with pytest.raises(DecideError, match="already registered"):
+        registry.register(again)
+    registry.register(again, replace=True)
+    assert [r["path"] for r in registry.listing() if r["name"] == "guard"] == [str(again.resolve())]
+    assert registry.find("guard.prev") == first.resolve()
 
 
 def test_a_registered_directory_that_is_gone_is_not_listed(tmp_path):
