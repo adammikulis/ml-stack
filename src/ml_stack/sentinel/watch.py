@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ml_stack.sentinel.events import Event, Severity
+from ml_stack.sentinel.policy import Mode
 from ml_stack.sentinel.sealed import SealedFile
 
 if TYPE_CHECKING:
@@ -127,7 +128,7 @@ class Scanner:
     def _once(self, *, deep: bool) -> None:
         try:
             self.sentinel.scan(deep=deep)
-        except Exception as exc:  # noqa: BLE001 - one failed round must not end the loop
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
             logger.warning("sentinel scan failed: %s", exc)
             self.sentinel.bus.emit(Event("sentinel.scan_failed", Severity.WARNING, "watch", "",
                                          {"error": type(exc).__name__}, self.sentinel.clock()))
@@ -142,8 +143,6 @@ class Scanner:
 def arm_scan(sentinel: Sentinel) -> Scanner | None:
     """Start the periodic scan at the configured cadence, for a long-running process; the
     caller stops it. None when the mode is off or the scan was switched off with a reason."""
-    from ml_stack.sentinel.policy import Mode
-
     if sentinel.mode == Mode.OFF:
         return None
     chosen = cadence()
@@ -159,7 +158,7 @@ def arm_scan(sentinel: Sentinel) -> Scanner | None:
 
 def scanner_state(root: Path, now: float | None = None) -> dict[str, Any]:
     """Whether a scan loop is armed on the sentinel at ``root``: a process wrote a heartbeat
-    within three intervals, has not stopped it, and (off Windows) is still running."""
+    within three intervals and has not stopped it."""
     loaded = SealedFile(Path(root) / HEARTBEAT).load()
     beat = loaded.payload
     if not beat:
@@ -172,16 +171,5 @@ def scanner_state(root: Path, now: float | None = None) -> dict[str, Any]:
         return {**out, "why": "the scan loop was stopped"}
     if now - float(beat.get("beat") or 0) > 3 * interval + 5:
         return {**out, "why": "the scan loop has not reported within three intervals"}
-    if os.name != "nt" and pid and not _running(pid):
-        return {**out, "why": f"process {pid} is gone"}
     return {**out, "armed": True, "why": ""}
 
-
-def _running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True

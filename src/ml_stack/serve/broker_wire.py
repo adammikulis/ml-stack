@@ -24,6 +24,7 @@ from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
+from ml_stack.serve import guarded
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
 from ml_stack.serve.events import Caller, Growth
@@ -203,6 +204,7 @@ def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> i
         with only_one(home.state("broker.lock"), wait=False, announce=say):
             broker = Broker(idle_s=idle_s)
             broker.say = lambda line: say(line, flush=True)
+            scanner = guarded.arm(broker.manager)
             adopted = broker.adopt()
             server = _Server(broker)
             write_json(record_path(), {"pid": os.getpid(), "port": server.server_address[1],
@@ -218,6 +220,8 @@ def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> i
                 server.serve_forever()
             finally:
                 done.set()
+                if scanner is not None:
+                    scanner.stop()
                 server.server_close()
                 if _record().get("pid") == os.getpid():
                     record_path().unlink(missing_ok=True)

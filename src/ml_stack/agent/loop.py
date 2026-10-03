@@ -105,11 +105,7 @@ class Agent:
     list replaces them, so ``[*guard.default(), mine]`` keeps them; running without any says so
     with ``interventions=guard.off(because=...)``, which is logged, and any other empty list is
     refused. ``confirm`` answers a `Confirm`, and without it a `Confirm` is a refusal.
-
-    Every tool call and tool result also goes through sentinel (``sentinel`` is a `Sentinel` or a
-    `Watch` naming the session, else the node's own): a call it flags is held and refused, a result it flags is replaced by a
-    placeholder. ``guard.off(because=...)`` and ``agent.unwatched(because=...)`` turn that off
-    and log the reason. A session sentinel froze runs no further.
+    Sentinel screens calls and results; ``sentinel=unwatched(because=...)`` or ``guard.off`` opts out.
     """
 
     def __init__(self, client: Chats, tools: ToolSource, *, budget: Budget | None = None,  # noqa: PLR0913

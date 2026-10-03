@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, macauth
+from ml_stack import home, macauth, sentinel
 from ml_stack.files import write_text
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
@@ -389,6 +389,7 @@ def serve_forever(root: Path | str | None = None,
         raise KeyboardInterrupt(f"signal {signum}")
 
     on_quit(_quit)
+    scanner = sentinel.arm_scan(sentinel.armed())
     # A server this machine was told to stop when nobody is using it (`ml-stack-serve
     # limits --idle`). Without one, nothing is watched and nothing is stopped.
     from contextlib import ExitStack
@@ -418,6 +419,8 @@ def serve_forever(root: Path | str | None = None,
         pass
     finally:
         reclaiming.close()
+        if scanner is not None:
+            scanner.stop()
         _stop_advertisers(advertisers)
         if advertiser is not None:
             advertiser.stop()
