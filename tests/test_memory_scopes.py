@@ -33,8 +33,10 @@ def repo(tmp_path: Path, name: str, origin: str = "") -> Path:
 
 
 @pytest.fixture
-def mem(tmp_path) -> memory.Memory:
-    return memory.Memory.open(explicit=repo(tmp_path, "alpha"))
+def mem(tmp_path):
+    opened = memory.Memory.open(explicit=repo(tmp_path, "alpha"))
+    yield opened
+    opened.close()
 
 
 def state_bytes() -> list[tuple[Path, bytes]]:

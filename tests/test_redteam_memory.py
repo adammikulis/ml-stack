@@ -108,18 +108,28 @@ def test_a_poisoned_query_reads_nothing_it_should_not_and_changes_nothing(tmp_pa
 
 
 # -- project memory is untrusted too ----------------------------------------------------
-def project_memory(tmp_path, text):
+@pytest.fixture
+def project_memory(tmp_path):
+    """Opens a memory whose project holds a planted fact; every graph it loaded is released after."""
     from tests.test_memory_scopes import repo
 
-    mem = memory.Memory.open(explicit=repo(tmp_path, "alpha"))
-    mem.user.add("prefers short answers", "preference")
-    inject(mem.project, text)
-    return mem
+    opened = []
+
+    def make(sub, text):
+        mem = memory.Memory.open(explicit=repo(tmp_path / sub, "alpha"))
+        opened.append(mem)
+        mem.user.add("prefers short answers", "preference")
+        inject(mem.project, text)
+        return mem
+
+    yield make
+    for each in opened:
+        each.close()
 
 
 @pytest.mark.parametrize("text", TEXTS)
-def test_a_poisoned_project_fact_reaches_the_model_as_one_labelled_fenced_line(tmp_path, text):
-    mem = project_memory(tmp_path, text)
+def test_a_poisoned_project_fact_reaches_the_model_as_one_labelled_fenced_line(project_memory, text):
+    mem = project_memory("a", text)
     for block in (memory.session_context(None, store=mem.merged()),
                   memory.session_context(text, store=mem.merged()),
                   recalling.render(mem.merged(), memory.retrieve(mem.merged(), text, embed=lambda _t: [1.0, 0.0]))):
@@ -130,10 +140,10 @@ def test_a_poisoned_project_fact_reaches_the_model_as_one_labelled_fenced_line(t
 
 
 @pytest.mark.parametrize("text", TEXTS)
-def test_a_poisoned_project_memory_changes_no_role_permission_or_tool(tmp_path, text):
+def test_a_poisoned_project_memory_changes_no_role_permission_or_tool(project_memory, text):
     from ml_stack import rules as saved
 
-    mem = project_memory(tmp_path / "w", text)
+    mem = project_memory("w", text)
     before = {p: p.read_bytes() for p in (mem.user.path, mem.project.path)}
     ran: list = []
     person = do.Person(io.StringIO("n\n" * 40), io.StringIO())
@@ -153,8 +163,8 @@ def test_a_poisoned_project_memory_changes_no_role_permission_or_tool(tmp_path, 
 
 
 @pytest.mark.parametrize("text", TEXTS)
-def test_a_fact_copied_from_a_project_file_is_refused_or_waits_for_the_person(tmp_path, text):
-    mem = project_memory(tmp_path / "x", "an ordinary note")
+def test_a_fact_copied_from_a_project_file_is_refused_or_waits_for_the_person(project_memory, text):
+    mem = project_memory("x", "an ordinary note")
     before = mem.project.path.read_bytes()
     asked = []
     remember = {s["function"]["name"]: f for s, f in memory.tools(

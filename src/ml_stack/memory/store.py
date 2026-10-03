@@ -39,6 +39,8 @@ __all__ = ["FACT_LINKS", "MAX_FACTS", "MAX_LINKS", "RELATIONS", "SCHEMA_VERSION"
            "current_scope", "stale_reason"]
 
 SCHEMA_VERSION = 2
+DB_BYTES = 1 << 30
+"""Address space the in-memory engine reserves for one memory graph."""
 MAX_LINKS = 8
 CLOSE = 0.65
 """Similarity (cosine 0.3) a hit found only by meaning must reach."""
@@ -235,7 +237,7 @@ class Store:
 
     @staticmethod
     def _build(snap: dict[str, Any]) -> GraphStore:
-        g = GraphStore(":memory:")
+        g = GraphStore(":memory:", max_db_size=DB_BYTES)
         g.write({"nodes": snap.get("nodes", []), "edges": snap.get("edges", [])})
         g.put_doc("memory", {"next": int(snap.get("next", 1))})
         for ident, vector in (snap.get("embeddings") or {}).items():

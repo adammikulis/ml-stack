@@ -18,9 +18,22 @@ from tests.test_memory_scopes import repo
 ring = memory_keys.ring
 
 
+@pytest.fixture(autouse=True)
+def released():
+    """Every memory opened by ``make`` is closed after the test."""
+    opened.clear()
+    yield
+    for each in opened:
+        each.close()
+
+
+opened: list[memory.Memory] = []
+
+
 def make(tmp_path, script, stdin="", *, role="operator", plant=()):
     proj = repo(tmp_path, "alpha")
     mem = memory.Memory.open(explicit=proj)
+    opened.append(mem)
     mem.user.add("Prefers short answers with no filler", "preference")
     mem.project.add("Run the staging flag before every release", "note")
     for text in plant:

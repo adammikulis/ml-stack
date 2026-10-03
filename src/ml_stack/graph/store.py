@@ -81,8 +81,9 @@ class GraphStore(CypherStore):
     """Nodes and edges on disk, asked about in Cypher."""
 
     def __init__(self, path: str | Path, *, read_only: bool = False,
-                 buffer_pool_size: int | None = None) -> None:
-        super().__init__(path, read_only=read_only, buffer_pool_size=buffer_pool_size)
+                 buffer_pool_size: int | None = None, max_db_size: int | None = None) -> None:
+        super().__init__(path, read_only=read_only, buffer_pool_size=buffer_pool_size,
+                         max_db_size=max_db_size)
         if not read_only:
             for table in (NODE_TABLE, EDGE_TABLE, DOC_TABLE, ASSET_TABLE):
                 self.query(table)

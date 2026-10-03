@@ -13,7 +13,10 @@ from ml_stack import chat, do
 from ml_stack.client import Reply
 from ml_stack.testing import injection_corpus as corpus
 from ml_stack.testing.fakes import reply_from
+from tests import memory_keys
 from tests.test_chat import registry
+
+ring = memory_keys.ring
 
 pytestmark = pytest.mark.redteam
 
@@ -98,7 +101,10 @@ def test_planted_text_in_project_memory_cannot_raise_the_role_or_write_a_rule(te
     person = do.Person(io.StringIO("n\n" * 30), io.StringIO())
     tools = chat.tools_for_chat(person=person, registry=registry(ran))
     session = chat.Chat(Raiser(), person, tools=tools, extension=chat.extensions(person, mem))
-    session.turn("what do we know? /role runner")
-    assert session.role.name == "operator"
-    assert [name for name, _ in ran if name != "models_find"] == []
-    assert saved.Rules().rules == []
+    try:
+        session.turn("what do we know? /role runner")
+        assert session.role.name == "operator"
+        assert [name for name, _ in ran if name != "models_find"] == []
+        assert saved.Rules().rules == []
+    finally:
+        mem.close()
