@@ -29,6 +29,7 @@ def simulation(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "make_environment", lambda *_: Environment())
     monkeypatch.setattr(runtime, "actions", lambda *_: (["hold", "move"], [0, 1]))
     monkeypatch.setattr(runtime, "render_state", lambda *_: ({"actual": True}, None))
+    monkeypatch.setattr(runtime, "decision_state", lambda name, env, obs: {"native_observation": obs})
     return runtime.Simulation({"id": "episode", "environment": "warehouse", "config": {},
                                "seed": 2, "controller": "manual"})
 
@@ -45,6 +46,16 @@ def test_transition_matches_controller_input_and_native_output(simulation):
                                     "truncated": False, "episode_id": 1, "sequence": 2}
     recording = json.loads((simulation.path / "trajectory.jsonl").read_text())
     assert recording["transition"] == state["transition"]
+    assert state["decision"]["state"] == {"native_observation": [2]}
+
+
+def test_camera_preview_is_not_embedded_in_numeric_recording(simulation, monkeypatch):
+    monkeypatch.setattr(runtime, "render_state", lambda *_: ({"actual": True}, "preview"))
+    simulation.step()
+    assert simulation.state["frame"] == "preview"
+    recording = json.loads((simulation.path / "trajectory.jsonl").read_text())
+    assert recording["frame"] is None
+    assert "frame_path" not in recording
 
 
 def test_reset_starts_an_episode_and_preserves_sequence(simulation):

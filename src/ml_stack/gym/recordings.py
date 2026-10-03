@@ -23,7 +23,8 @@ def export_reviewed(trajectory, reviews, output):
         if key not in labels:
             continue
         cases.append(Case(question="Choose the next safe environment action",
-                          state=transition["observation"], options=options_of(row["actions"]),
+                          state=row.get("decision", {}).get("state", transition["observation"]),
+                          options=options_of(row["actions"]),
                           label=labels.pop(key), id=f"{session}:{key[0]}:{key[1]}",
                           group=f"{session}:{key[0]}", tags=("gym", str(row["environment"]))))
     if labels:
