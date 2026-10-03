@@ -78,7 +78,7 @@ vision = ["numpy>=1.24", "pillow>=10.0"]
 # pdfminer.six (MIT), which gives text with the font it was set in -- how a heading is found in a
 # PDF with no outline -- and the position of every picture; Pillow renders the pictures. The
 # reading runs in a bounded child process (`ml_stack.net.pdfread`).
-pdf = ["pdfminer.six>=20240706", "pillow>=10.0"]
+pdf = ["pdfminer.six>=20260107", "pillow>=10.0"]
 # MuPDF is AGPL-3.0 (or Artifex's commercial licence): a network service built on it must offer
 # its source. It is NOT in `pdf`, `all` or `redteam`; install it only on purpose, and select it
 # with ML_STACK_PDF_ENGINE=pymupdf. The datasheet pin tables and page pictures need it.
