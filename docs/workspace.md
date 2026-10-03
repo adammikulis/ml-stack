@@ -73,7 +73,7 @@ and a convenience second.
 
 ### Decisions
 
-* **No daemon for 0.3.0.** A hostile process of the same user is documented as not defended
+* **No daemon.** A hostile process of the same user is documented as not defended
   (see "What this does not do"). The core is a library over a state directory plus a CLI and MCP tools. Callers
   are processes of one user on one machine, so a socket would add a listener and signed requests
   without adding a boundary: the token never crosses a wire. A loopback daemon with `macauth`

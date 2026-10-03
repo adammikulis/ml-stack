@@ -8,7 +8,7 @@
 | Slot save/restore around a relaunch | present | `ml_stack.serve.escalation` |
 | Slot dumps with a guard file refusing a different model, context, slot count or build | added | `ml_stack.serve.slotdump`, `ml-stack-serve slots` |
 | Config discovery | not ported | project-specific |
-| Tool-calling loop over MCP tools (`agent_loop.py`, `tool_bridge.py`, `mcp_client.py`) | partial: `ml-stack-do` had a synchronous loop | `ml_stack.agent` |
+| Tool-calling loop over MCP tools (`agent_loop.py`, `tool_bridge.py`, `mcp_client.py`) | partial: `ml-stack-chat` runs a synchronous loop | `ml_stack.agent` |
 | Schema validation before dispatch, repair of malformed arguments | added | `ml_stack.agent.schema` |
 | Result summarisation (`feedback.py`) | added as a hook | `Agent(summarise=...)`, `Budget.max_result_chars` |
 | Context counting and compaction | added | `ml_stack.agent.compact`, `docs/compaction.md` |
