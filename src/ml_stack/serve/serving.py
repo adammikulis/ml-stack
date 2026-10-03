@@ -105,6 +105,9 @@ class Serving:
     # that lives inside the weights -- `--spec-type draft-mtp` with no `-md` -- can only be
     # asked for this way.
     spec_type: str = ""
+    # False serves without multi-token prediction; None leaves it to `serve.mtp`, which
+    # serves a model's own MTP head whenever one is found, trusted and loadable.
+    mtp: bool | None = None
     mmproj: str = ""                    # the vision projector, so the model can see
     reasoning_budget: int | None = None  # tokens a turn may think for; 0 turns it off
     mlock: bool = False                 # hold the weights in memory rather than let them page
@@ -156,6 +159,8 @@ class Serving:
         if (self.draft or self.spec_type) and self.draft_cache_type:
             out["spec_draft_type_k"], out["spec_draft_type_v"] = \
                 split_cache_type(self.draft_cache_type)
+        if self.mtp is False:
+            out["mtp"] = False
         if self.mmproj:
             out["mmproj"] = self.mmproj
         if self.reasoning_budget is not None:

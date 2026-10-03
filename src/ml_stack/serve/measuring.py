@@ -21,7 +21,7 @@ def _load_log(spec, *, backend=None, timeout: float | None = None) -> str:
     same way, by the same preflight, before anything is spawned.
     """
     manager = ServerManager(backend or LlamaServerBackend())
-    info = manager.lease(spec, timeout=timeout)
+    info = manager.lease(replace(spec, mtp=bool(spec.mtp)), timeout=timeout)
     try:
         if info.adopted:
             raise ServerFailed(

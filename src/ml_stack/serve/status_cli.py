@@ -98,8 +98,10 @@ def _drafting_lines(drafting: ops.Drafting | None) -> list[str]:
     if drafting is None:
         return []
     if not drafting.loaded:
-        return ["  drafting no draft head -- every token is written by the model itself"]
-    named = [drafting.head or "a head the command line does not name"]
+        return ["  drafting no draft head -- " + (drafting.note
+                or "every token is written by the model itself")]
+    named = [drafting.head or ("the weights' own MTP layer" if drafting.spec_type == "draft-mtp"
+                               else "a head the command line does not name")]
     if drafting.spec_type:
         named.append(drafting.spec_type)
     if drafting.ahead is not None:

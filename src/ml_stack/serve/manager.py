@@ -20,7 +20,7 @@ from ml_stack.files import write_json
 from ml_stack.hub import free_memory, installed_for, room as machine_room
 from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
-from ml_stack.serve import admission, exit_guard, guarded, unmanaged
+from ml_stack.serve import admission, exit_guard, guarded, mtp, unmanaged
 from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
@@ -29,8 +29,10 @@ from ml_stack.serve.backend import (
     ServerFailed,
     ServerInfo,
     ServerSpec,
+    UnknownFlag,
     default_slot_save_path,
 )
+from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.escalation import (
     Escalating,
     plan_for,
@@ -219,11 +221,13 @@ class ServerManager(Admitting):
         """
         how = how or Starting()
         roam, escalate, anyway = how.roam, how.escalate, how.anyway
-        spec = self._permitted(spec, escalate)
+        told = say or self.say or logger.info
+        spec, drafting = self._with_mtp(self._permitted(spec, escalate), escalate)
+        if drafting.note:
+            (told if drafting.worth_saying else logger.info)(f"port {spec.port}: {drafting.note}")
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
 
-        told = say or self.say or logger.info
         self._sweep_orphans(spec.port, told)
         with self._port_lock(spec.port):
             entry = self._load().get(str(spec.port))
@@ -290,6 +294,8 @@ class ServerManager(Admitting):
                 raise
 
             self._unavailable_until.pop(spec.port, None)
+            if not info.mtp_note:
+                info = replace(info, mtp_note=drafting.note)
             if not info.adopted:
                 self._record(spec, info)
             return info
@@ -324,6 +330,24 @@ class ServerManager(Admitting):
             raise ServerFailed(refused)
         return spec
 
+    def _with_mtp(self, spec: ServerSpec, escalate: bool) -> tuple[ServerSpec, mtp.Plan]:
+        """``spec`` with the MTP head it is served with by default, and the plan that chose it.
+
+        A head the default picked is verified against sentinel's pin like the weights; one
+        that fails is left out and the lease goes on without it.
+        """
+        try:
+            binary = self.backend_for(spec).binary  # type: ignore[attr-defined]
+        except (BinaryNotFound, OSError, AttributeError):
+            binary = None
+        chosen = mtp.plan(spec, binary=binary, escalate=escalate)
+        if chosen.draft:
+            try:
+                guarded.verify(chosen.draft, state_file=self.state_file, stop=self.reclaim)
+            except guarded.SentinelRefused as refused:
+                chosen = mtp.Plan(note=f"MTP off: {refused}", loud=True)
+        return mtp.applied(spec, chosen), chosen
+
     def _launch(self, spec: ServerSpec, *, timeout: float, on_event: Event | None = None,
                 anyway: bool = False, reuse: bool = False, **starting: Any) -> ServerInfo:
         """Start ``spec``, telling ``on_event`` when the load begins and ends.
@@ -341,12 +365,28 @@ class ServerManager(Admitting):
                 f"that measurement and this one. Wait for it to finish, stop it with "
                 f"'ml-stack-bench stop', or pass --anyway to load beside it.")
         guarded.verify(spec.model, state_file=self.state_file, stop=self.reclaim)
+        if spec.draft and spec.mtp is not True:
+            guarded.verify(spec.draft, state_file=self.state_file, stop=self.reclaim)
         emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               slots=max(1, int(spec.parallel or 1)))
         admitted = self._admitted(spec, on_event=on_event, reuse=reuse, load_s=timeout)
         if isinstance(admitted, ServerInfo):
             return admitted
-        info = self.backend_for(spec).start(spec, lease=admitted, timeout=timeout, **starting)
+        try:
+            info = self.backend_for(spec).start(spec, lease=admitted, timeout=timeout, **starting)
+        except (ServerFailed, UnknownFlag) as why:
+            if spec.mtp is not True:
+                raise
+            mtp.failed(spec.model, spec.draft, getattr(self.backend_for(spec), "binary", None))
+            spec = replace(spec, draft=None, spec_type="", mtp=False)
+            note = f"MTP off: the server would not start with it ({str(why).splitlines()[0]})"
+            (self.say or logger.warning)(f"port {spec.port}: {note}; starting without")
+            info = replace(self.backend_for(spec).start(spec, lease=admitted, timeout=timeout,
+                                                        **starting), mtp_note=note)
+        else:
+            if spec.mtp is True:
+                info = replace(info, mtp=Path(str(spec.draft)).name if spec.draft else "embedded",
+                               mtp_note=f"MTP on: {spec.spec_type}")
         emit(on_event, "ready", port=spec.port, load_s=info.load_s, warmup_s=info.warmup_s)
         return info
 
@@ -633,6 +673,8 @@ class ServerManager(Admitting):
             "est_bytes": (self._mine.get(str(spec.port)) or {}).get("est_bytes", 0),
             "embedding": bool(spec.embedding),
             "mmproj": bool(spec.mmproj),
+            "mtp": info.mtp,
+            "mtp_note": info.mtp_note,
             "context": int(spec.context),
             "parallel": int(spec.parallel or 1),
             "base_url": info.base_url,

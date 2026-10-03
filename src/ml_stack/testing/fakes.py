@@ -737,11 +737,12 @@ def _after(argv: list[str], names: tuple[str, ...]) -> str:
 def serve_from_argv(argv: list[str], *, where: Path) -> int:
     """Serve `fake_llama_server` on the ``--port`` in ``argv`` until the process is killed.
 
-    ``--help`` prints `LLAMA_SERVER_HELP` and returns instead. The argv it was launched
-    with is written to ``argv.json`` in ``where``, for a test asserting on a command line.
+    ``--help`` prints ``help.txt`` from ``where``, else `LLAMA_SERVER_HELP`, and returns
+    instead. The argv it was launched with is written to ``argv.json`` in ``where``.
     """
     if "--help" in argv:
-        sys.stdout.write(LLAMA_SERVER_HELP)
+        stated = where / "help.txt"
+        sys.stdout.write(stated.read_text() if stated.is_file() else LLAMA_SERVER_HELP)
         return 0
     (where / "argv.json").write_text(json.dumps(argv))
     context = _after(argv, _FLAGS["context"])
@@ -790,14 +791,17 @@ def _interpreter() -> str:
         else sys.executable
 
 
-def fake_llama_binary(where: Path, *, name: str = "llama-server") -> Path:
-    """An executable in ``where`` that answers ``--help`` and then really serves.
+def fake_llama_binary(where: Path, *, name: str = "llama-server",
+                      help_text: str | None = None) -> Path:
+    """An executable in ``where`` that answers ``--help`` with ``help_text`` and then serves.
 
     Started for real by ``Popen``, it binds the ``--port`` it was given, presents to a
     process scan as ``llama-server``, and answers everything `FakeLlamaServer` answers
     for the model, context, slots and draft head its command line named.
     """
     path = where / name
+    if help_text is not None:
+        (where / "help.txt").write_text(help_text)
     path.write_text(_LAUNCHER.format(python=sys.executable, interpreter=_interpreter(),
                                      root=str(_import_root())))
     path.chmod(0o755)

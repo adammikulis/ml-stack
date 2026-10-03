@@ -125,7 +125,7 @@ def drafted_by(config: Any, head: str) -> Any:
     """``config`` serving ``head``: a path or ``hf:`` reference, "" for none, or `EMBEDDED`."""
     if head == EMBEDDED:
         return config.over(draft="", spec_type="draft-mtp")
-    return config.over(draft=str(head or ""), spec_type="")
+    return config.over(draft=str(head or ""), spec_type="", mtp=False if not head else None)
 
 
 class NotLoaded(RuntimeError):

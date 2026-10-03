@@ -75,6 +75,7 @@ class Drafting:
     ahead: int | None = None             # tokens it guesses per verification pass
     metrics: bool | None = None          # whether the server answers /metrics
     counted: Speculative | None = None   # its counters since it came up
+    note: str = ""                       # why multi-token prediction is on or off, from its lease
 
     @property
     def loaded(self) -> bool:
@@ -191,7 +192,7 @@ def _float_or_none(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any) -> Drafting:
+def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any, note: str = "") -> Drafting:
     """The draft head a server was started with, and the counters it reports for it."""
     metrics = params.raw.get("endpoint_metrics") if params is not None else None
     head = str(entry.get("draft") or "")
@@ -199,7 +200,8 @@ def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any) -> Draftin
     return Drafting(head=Path(head).name if head else "",
                     spec_type=str(entry.get("spec_type") or ""),
                     ahead=_int_or_none(entry.get("draft_max")),
-                    metrics=None if metrics is None else bool(metrics), counted=counted)
+                    metrics=None if metrics is None else bool(metrics), counted=counted,
+                    note=note)
 
 
 def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None = None
@@ -235,7 +237,8 @@ def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None =
         load_s=_float_or_none(entry.get("load_s")),
         warmup_s=_float_or_none(entry.get("warmup_s")),
         log=str(entry["log"]) if entry.get("log") else None,
-        drafting=(drafting_of(url, (served or {}).get(port) or {}, params)
+        drafting=(drafting_of(url, (served or {}).get(port) or {}, params,
+                              str(entry.get("mtp_note") or ""))
                   if served is not None and port in served else None),
     )
 
