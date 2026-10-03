@@ -1,5 +1,38 @@
 # Handoff
 
+## Current state (2026-10-03)
+
+What the docs now describe as in place: `ml-stack-chat` (roles `reader`, `operator`, `runner`, saved
+Always/Never rules; `ml-stack-do` is gone), graph-based encrypted agent memory per user and per
+project (`ml-stack-memory`), source reputation (`ml-stack-reputation`), the one OS keystore item
+(`ml-stack-security unlock`, `keystore`, `keystore-reset`), the single click-to-release sentinel
+dialog (`ML_STACK_NOTIFY`), MTP draft heads on by default, the typed `decide()` API with
+`ml-stack-decide train`, `eval` and `jevbench`, and the auto worker budget in `scripts/test`.
+`docs/assistant-security.md` is the contract for new integrations and says what is not built.
+
+Open, and known limits (each is a task or a gap, not a done item):
+
+- [ ] **No real OS keystore prompt has been driven by hand.** Tests use fakes and the real-keystore
+  guard stays on; what a person sees on a first Keychain prompt is as documented in `docs/keystore.md`
+  and unobserved.
+- [ ] **The macOS desktop-session heuristic is a guess.** `keystore` and the dialog decide whether a
+  person could answer a prompt from a terminal or `DISPLAY`/`WAYLAND_DISPLAY`-style signals; on macOS
+  that is an approximation not checked on a real login, SSH or launchd session.
+- [ ] **`ml-stack-memory rekey` changes the file's salt.** A copy of a store made before a rekey
+  stays sealed under the old salt and key.
+- [ ] **Reputation hooks exist only in processes that call `reputation.install()`.** A process that
+  does not call it records nothing about the sources it deals with.
+- [ ] **The IQ-on-Metal refusal rests on thin evidence.** One model, one machine, nine and ten
+  questions (`docs/serving.md`); the pre-registered re-measurement is pending.
+- [ ] **Grant ledger, connector credential broker, a hard outward-send rule and the "what can it do
+  now" listing are not built** (`docs/assistant-security.md`, "Order of work").
+- [ ] **Not run for this tidy:** `scripts/test-on-linux`, Windows, the slow tier, any model-backed
+  test. Docs were checked against code and the docs tests, not by driving the app.
+
+The sections below are earlier state and may describe items since finished; read them against
+`git log` before acting.
+
+
 **Every item here is a task.** A finished task is deleted, not marked done — what exists and
 why is in `README.md`, `docs/`, the code and `git log`. Each carries the context to pick it
 up cold. Rules: invented names only, everywhere (`tests/known-fixtures.txt`, or a rule in

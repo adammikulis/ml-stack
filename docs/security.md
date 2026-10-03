@@ -1,11 +1,12 @@
 # Security
 
 What ml-stack trusts, what it exposes, and what each kind of attacker can do. Reviewed
-2026-10-02 on `agent/hardening` and carried onto the 0.3.0 integration branch; the fix for each
+2026-10-02 on `agent/hardening` and carried onto the integration branch; the fix for each
 finding is the commit named in the table. Other documents: `docs/credentials.md` (tokens and
 keys), `docs/fleet.md` (the daemon), `docs/serving.md` and `docs/serve-admission.md` (model
 servers and the broker), `docs/guardrails.md` and `docs/taint.md` (the agent's rails),
-`docs/sentinel.md` (what watches for all of it).
+`docs/sentinel.md` (what watches for all of it), `docs/assistant-security.md` (the design contract
+for anything that acts for a person, with what is built and what is not).
 
 ## The model
 
@@ -295,17 +296,10 @@ not built.
 These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-stack issue
 #18).
 
-- **`web.py`, the scraper's browser and `ingest/run.py`** still use `http.check` (resolve, then
-  fetch) rather than `httpguard.fetch`. A page redirect or sub-request inside the browser is
-  unchecked.
-- **`hub/` calls `huggingface_hub` without `token=`** so `ML_STACK_CREDENTIALS_FILE` and the
-  keychain do not reach a download there.
 - **Windows:** the mode and ownership checks on credential files do not apply, `icacls` is
   best effort, and the exit watchdog was not run on Windows.
 - **`scripts/test-on-linux`** needs Docker's daemon; `docs/INTEGRATION-REPORT.md` says whether it
-  ran for the 0.3.0 integration.
-- **`agent/lan-onboarding` and `agent/internet-pipeline`** are separate branches, not part of this
-  document until they land.
+  ran for that integration.
 
 ## Sentinel
 
