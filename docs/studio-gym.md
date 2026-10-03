@@ -115,6 +115,54 @@ Session manifests record installed simulator versions and SHA256 hashes of the S
 network and route files. MetaDrive uses the pinned 0.4.3 source revision listed in the
 `gym-driving` dependency; its installed package metadata records that source URL.
 
+## Native procedural and manual worlds
+
+World construction is configured under `config.world`. Its `mode` is `procedural` or
+`manual`, and its `seed` records the world definition independently of the controller's
+random seed. World construction does not determine episode limits or reset behavior;
+those belong to the runtime's simulation mode and native task configuration.
+
+For traffic and traffic-driving, procedural construction runs SUMO's maintained
+`netgenerate` and `randomTrips.py` tools. It creates one signal-controlled intersection
+with attached approach roads. The seed selects road length and reproducible demand;
+`arm_length`, `lanes`, `vehicle_period` and `demand_seconds` override those parameters.
+The combined traffic-driving task keeps its one-intersection constraint. Procedural
+construction generates new native network and route files, rather than selecting the
+packaged intersection.
+
+```json
+{"world":{"mode":"procedural","seed":4,"arm_length":180,"lanes":1,"vehicle_period":3,"demand_seconds":3600}}
+```
+
+For manual traffic worlds, upload standalone native SUMO network and routes XML into
+Data, then supply paths relative to the daemon files root. Both traffic tasks require
+exactly one signal-controlled intersection. Imported XML cannot contain external includes,
+entities or document types; paths cannot escape the files root. The selected files are
+copied into the world artifact directory before use.
+
+```json
+{"world":{"mode":"manual","seed":4,"net_file":"worlds/junction.net.xml","route_file":"worlds/demand.rou.xml"}}
+```
+
+RWARE procedural worlds use its native lattice generator. The seed chooses odd
+`shelf_columns`, `shelf_rows` and `column_height`; specifying these fields fixes the
+native dimensions. `n_agents` selects one to four robots. Manual mode accepts RWARE's
+rectangular ASCII layout: `x` denotes shelves, `.` aisles and `g` delivery goals.
+
+```json
+{"world":{"mode":"manual","seed":4,"n_agents":2,"layout":".......\n.xx.xx.\n.......\n.g...g."}}
+```
+
+World artifacts live under `gym/worlds` in the ml-stack cache. `world.json` records the
+backend, resolved definition, seed, native package version and SHA256 hashes of the
+network/routes or warehouse layout. Generated warehouse layouts are persisted as ASCII
+from RWARE's native grid. Matching definitions reuse their generated files; the same
+SUMO seed and parameters reproduce network and route content across fresh directories.
+
+Native references: [SUMO netgenerate](https://sumo.dlr.de/docs/netgenerate.html),
+[SUMO randomTrips](https://sumo.dlr.de/docs/Tools/Trip.html), and
+[RWARE custom layouts](https://github.com/semitable/robotic-warehouse#custom-layout).
+
 ## Controllers and recordings
 
 Basic controls keep environment choice and common task settings visible. Additional
