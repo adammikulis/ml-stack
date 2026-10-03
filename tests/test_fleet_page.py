@@ -340,7 +340,7 @@ class TestTheSettingsView:
         page.wait_for_selector("#cluster-joined .row")
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
                            ("Models", "#models-here h2"),
-                           ("Settings", "#settings-removal label.opt"),
+                           ("Settings", "#settings-save"),
                            ("Capacity", "table.fit tbody tr"),
                            ("Fleet", "#cluster-sweep .searchrow")):
             page.click(f"nav.tabs a:has-text('{tab}')")
@@ -352,6 +352,7 @@ class TestTheSettingsView:
     def test_the_remove_section_lists_what_would_go(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")
+        page.locator("#settings-advanced summary").click()
         page.wait_for_selector("#settings-removal label.opt")
         assert "cannot be undone" not in page.locator("#settings-removal").inner_text()
         page.click("#settings-removal button.danger")
