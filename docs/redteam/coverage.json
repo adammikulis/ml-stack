@@ -1,10 +1,10 @@
 {
- "surfaces": 551,
+ "surfaces": 563,
  "by_status": {
   "covered": 247,
-  "partial": 202,
+  "partial": 213,
   "uncovered": 54,
-  "n/a": 48,
+  "n/a": 49,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 6,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 23,
+   "n/a": 24,
    "unmapped": 0
   },
   "context": {
@@ -87,7 +87,7 @@
   },
   "route": {
    "covered": 43,
-   "partial": 61,
+   "partial": 70,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -101,7 +101,7 @@
   },
   "spawn": {
    "covered": 13,
-   "partial": 64,
+   "partial": 66,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -633,6 +633,16 @@
     "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking"
    ],
    "note": ""
+  },
+  {
+   "id": "cli:ml-stack-gym",
+   "kind": "cli",
+   "source": "ml_stack.gym.cli:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
   },
   {
    "id": "cli:ml-stack-help",
@@ -5033,6 +5043,51 @@
    "note": ""
   },
   {
+   "id": "route:fleet/gym_routes.py:/ui/gym*",
+   "kind": "route",
+   "source": "fleet/gym_routes.py:GymRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/gym_routes.py:/ui/gym/catalogue",
+   "kind": "route",
+   "source": "fleet/gym_routes.py:GymRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/gym_routes.py:/ui/gym/sessions",
+   "kind": "route",
+   "source": "fleet/gym_routes.py:GymRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
    "id": "route:fleet/onboard/bootstrap.py:manifest",
    "kind": "route",
    "source": "fleet/onboard/bootstrap.py:BootstrapServer.dispatch",
@@ -5760,6 +5815,96 @@
     "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/*",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/commands",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/file",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/files",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/jobs",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/recipes",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+   ],
+   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
   },
   {
    "id": "route:graph/completions.py:handle_completion",
@@ -6922,6 +7067,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:gym/catalog.py:catalogue",
+   "kind": "spawn",
+   "source": "gym/catalog.py:catalogue",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:hub/memory.py:machine_room",
    "kind": "spawn",
    "source": "hub/memory.py:machine_room",
@@ -7058,6 +7215,18 @@
    "id": "spawn:platform.py:private_file",
    "kind": "spawn",
    "source": "platform.py:private_file",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:platform.py:start_process",
+   "kind": "spawn",
+   "source": "platform.py:start_process",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",
