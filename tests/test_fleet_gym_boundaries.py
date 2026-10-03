@@ -11,7 +11,8 @@ from ml_stack.fleet import gym_recording_routes, gym_routes, workspace_routes
 
 
 @pytest.fixture
-def daemon(tmp_path):
+def daemon(tmp_path, monkeypatch):
+    monkeypatch.setenv("ML_STACK_GYM_FILES_ROOT", str(tmp_path / "untrusted-root"))
     server = Serving(tmp_path)
     try:
         yield server
