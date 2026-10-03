@@ -63,6 +63,8 @@ nav.tabs { display: flex; flex-direction: column; gap: 24px; overflow-y: auto; }
 .workspace-header { grid-column: 2; padding: 18px 32px; border-bottom: 1px solid var(--line);
                     display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .workspace-header .eyebrow, .workspace-header strong { display: block; }
+.app:not(:has(fleet-nav)) { display:flex; flex-direction:column; }
+.app:not(:has(fleet-nav)) .skip-link { display:none; }
 .workspace-header strong { font-size: 16px; margin-top: 2px; }
 .header-hint { color: var(--muted); font-size: 12px; }
 .workspace { grid-column: 2; min-width: 0; outline: none; }
