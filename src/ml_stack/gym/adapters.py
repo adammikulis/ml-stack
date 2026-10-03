@@ -6,6 +6,7 @@ import itertools
 from pathlib import Path
 
 from ml_stack.gym.catalog import CAR_ACTIONS, require
+from ml_stack.gym.cosim import make_cosim
 from ml_stack.gym.driving import geometry as driving_geometry
 from ml_stack.gym.traffic import traffic_defaults
 from ml_stack.gym.values import json_value
@@ -19,7 +20,7 @@ def make_environment(name, config=None):
 
     cfg = dict(config or {})
     if name == "traffic-driving":
-        raise RuntimeError("The combined traffic-driving adapter is not installed")
+        return make_cosim(cfg)
     if name == "car":
         from metadrive import MetaDriveEnv
 
