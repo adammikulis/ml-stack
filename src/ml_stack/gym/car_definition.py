@@ -25,7 +25,8 @@ def build(world, seed):
         saved = json.loads(source.read_text())
         if not isinstance(saved.get("block_sequence"), list) or not isinstance(saved.get("map_config"), dict):
             raise ValueError("Manual car map requires native block_sequence and map_config JSON")
-        cfg = {"map": 3, "map_config": {**saved["map_config"], "type": "pg_map_file", "config": saved["block_sequence"]}}
+        native_config = {key: value for key, value in saved["map_config"].items() if key != "seed"}
+        cfg = {"map_config": {**native_config, "type": "pg_map_file", "config": saved["block_sequence"]}}
         files = {"map_file": source}
     else:
         raise ValueError("Car world mode must be procedural or manual")

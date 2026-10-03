@@ -11,10 +11,10 @@ from ml_stack.decide.pins import STRANDS
 from ml_stack.decide.pointer import PointerDecider
 from ml_stack.decide.sources import local_source
 from ml_stack.gym.adapters import actions, json_value, make_environment, render_state
+from ml_stack.gym.live_learning import create_policy, learn_rollout
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.paths import artifact_root
 from ml_stack.gym.provenance import native_provenance
-from ml_stack.gym.training import load_policy
 
 
 class DecisionHeld(RuntimeError):
@@ -77,6 +77,9 @@ class Simulation:
         self.environment = settings["environment"]
         self.seed = settings["seed"]
         self.controller = settings["controller"]
+        self.world = settings["config"].get("simulation_mode", "episode") == "world"
+        self.learning_mode = settings["config"].get("learning_mode", "frozen")
+        self.control_revision = 0
         if self.environment == "car":
             settings["config"].setdefault("steering_magnitude", .35)
         self.running, self.speed, self.manual, self.policy = False, 10., 3 if self.environment == "car" else 0, None
@@ -94,16 +97,18 @@ class Simulation:
         config.pop("decision_checkpoint", None)
         if self.environment == "car":
             config.setdefault("render_preview", True)
-        self.env = make_environment(self.environment, config)
+        self.env = make_environment(self.environment, config, self.seed)
+        self.observation, initial_info = self.env.reset(seed=self.seed)
         settings.update(native_provenance(self.environment, self.env))
-        settings.setdefault("model", checkpoint if self.controller == "ppo" else None)
+        settings.setdefault("model", checkpoint if self.controller == "ppo" else
+                            "MetaDrive IDM" if self.controller == "native-idm" else None)
         settings.setdefault("device", "cpu")
         (self.path / "manifest.json").write_text(json.dumps(settings))
         if self.controller == "ppo":
-            if not checkpoint:
+            if not checkpoint and not (self.world and self.learning_mode == "online"):
                 self.env.close()
                 raise ValueError("PPO controller requires a checkpoint in the session configuration")
-            self.policy = load_policy(checkpoint, self.env)
+            self.policy = create_policy(self, checkpoint)
         self.names, self.native_actions = actions(self.environment, self.env)
         self.state = {"id": settings["id"], "environment": self.environment, "status": "starting",
                       "sequence": 0, "episode_id": 0, "controller": self.controller, "observation": None,
@@ -112,13 +117,21 @@ class Simulation:
                       "actions": self.names, "config": dict(settings["config"]), "seed": self.seed,
                       "model": settings["model"], "device": settings["device"],
                       "manual_action": self.manual, "speed": self.speed,
+                      "simulation_mode": "world" if self.world else "episode", "learning_mode": self.learning_mode,
+                      "policy_version": 0, "training_timesteps": 0, "optimizer_updates": 0,
                       "trajectory_path": str(self.path / "trajectory.jsonl")}
-        self.reset({})
+        self.reset({}, initial_info)
 
-    def reset(self, payload):
+    def reset(self, payload, initial_info=None):
+        self.control_revision += 1
         self.running = False
         seed = int(payload.get("seed", self.seed))
-        self.observation, info = self.env.reset(seed=seed)
+        if self.world and seed != self.seed:
+            raise ValueError("Create a new world to change its seed")
+        if initial_info is None:
+            self.observation, info = self.env.reset(seed=seed)
+        else:
+            info = initial_info
         self.seed = seed
         self.settings["seed"] = seed
         self.state["seed"] = seed
@@ -128,6 +141,7 @@ class Simulation:
         self.state.update(status="paused", observation=json_value(self.observation), info=json_value(info),
                           reward=0., action=None, decision=None, terminated=False, truncated=False, error=None)
         self.state.pop("transition", None)
+        self.state["agent_id"] = info.get("ego_actor_id")
         geometry, frame = render_state(self.environment, self.env)
         self.state["info"]["render"] = geometry
         self.state["frame"] = frame
@@ -139,8 +153,19 @@ class Simulation:
             return
         named = decision_state(self.environment, self.env, self.observation)
         choices = self.names, self.native_actions, self.env.np_random, named
-        action, decision = select_action(self.controller, self.observation, choices, self.manual, self.policy)
+        if self.controller == "native-idm":
+            action, decision = None, {"state": named, "choice": "Native IDM driving", "probabilities": None,
+                                      "model": "MetaDrive IDM", "backend": "MetaDrive", "latency_ms": 0.}
+        else:
+            action, decision = select_action(self.controller, self.observation, choices, self.manual, self.policy)
+        self.advance(action, decision)
+
+    def advance(self, action, decision):
+        """Record one native step from the supplied controller action."""
         previous = json_value(self.observation)
+        if self.controller == "ppo" and self.policy is not None:
+            self.state.update(training_timesteps=self.policy.num_timesteps,
+                              optimizer_updates=self.policy._n_updates)
         self.observation, reward, terminated, truncated, info = self.env.step(action)
         self.state.update(sequence=self.state["sequence"] + 1, observation=json_value(self.observation),
                           action=json_value(action), decision=decision, reward=float(reward),
@@ -152,9 +177,17 @@ class Simulation:
                                     "episode_id": self.state["episode_id"], "sequence": self.state["sequence"]}
         geometry, frame = render_state(self.environment, self.env)
         self.state["info"]["render"], self.state["frame"] = geometry, frame
+        self.state["applied_native_control"] = info.get("applied_native_control")
+        self.state["agent_id"] = info.get("ego_actor_id")
         if terminated or truncated:
-            self.running = False
-            self.state["status"] = "completed"
+            if self.world:
+                self.observation, task_info = self.env.reset()
+                self.state.update(observation=json_value(self.observation), terminated=False, truncated=False,
+                                  episode_id=self.state["episode_id"] + 1)
+                self.state["info"].update(task_info)
+            else:
+                self.running = False
+                self.state["status"] = "completed"
         recorded = {**self.state, "frame": None}
         if self.record_frames and frame:
             frames = self.path / "frames"
@@ -164,6 +197,40 @@ class Simulation:
             recorded["frame_path"] = str(target)
         with (self.path / "trajectory.jsonl").open("a") as handle:
             handle.write(json.dumps(json_value(recorded)) + "\n")
+
+    def change_controller(self, payload):
+        controller = payload["controller"]
+        if controller not in {"manual", "random", "ppo", "decider", "native-idm"}:
+            raise ValueError("Unknown controller")
+        if controller == "native-idm" and not (self.world and self.environment == "car"):
+            raise ValueError("Native IDM requires a persistent car world")
+        if controller == "ppo":
+            mode = payload.get("learning_mode", self.learning_mode)
+            if mode not in {"online", "frozen"} or (mode == "online" and not self.world):
+                raise ValueError("Online PPO requires a persistent world")
+            policy = create_policy(self, payload.get("checkpoint"), mode)
+            self.policy = policy
+            self.learning_mode = mode
+            self.state["learning_mode"] = mode
+            self.settings["config"]["learning_mode"] = mode
+        elif controller == "decider":
+            self.policy = decision_controller(payload.get("decision_checkpoint"))
+        self.controller = controller
+        if controller != "ppo":
+            self.learning_mode = "frozen"
+            self.state["learning_mode"] = "frozen"
+            self.settings["config"]["learning_mode"] = "frozen"
+        self.state["controller"] = controller
+        self.settings.update(controller=controller, device="cpu",
+                             model=payload.get("decision_checkpoint", STRANDS) if controller == "decider"
+                             else "MetaDrive IDM" if controller == "native-idm"
+                             else payload.get("checkpoint", ""))
+        for field in ("checkpoint", "decision_checkpoint"):
+            if field in payload:
+                self.settings["config"][field] = payload[field]
+        self.state["config"] = dict(self.settings["config"])
+        self.state.update(model=self.settings["model"], device=self.settings["device"])
+        (self.path / "manifest.json").write_text(json.dumps(self.settings))
 
     def command(self, command, payload):
         if command == "play":
@@ -184,27 +251,34 @@ class Simulation:
             self.manual = selected
             self.state["manual_action"] = selected
         elif command == "controller":
-            controller = payload["controller"]
-            if controller not in {"manual", "random", "ppo", "decider"}:
-                raise ValueError("Unknown controller")
-            if controller == "ppo":
-                self.policy = load_policy(payload["checkpoint"], self.env)
-            elif controller == "decider":
-                self.policy = decision_controller(payload.get("decision_checkpoint"))
-            self.controller = controller
-            self.state["controller"] = controller
-            self.settings.update(controller=controller, device="cpu",
-                                 model=payload.get("decision_checkpoint", STRANDS) if controller == "decider"
-                                 else payload.get("checkpoint", ""))
-            for field in ("checkpoint", "decision_checkpoint"):
-                if field in payload:
-                    self.settings["config"][field] = payload[field]
-            self.state["config"] = dict(self.settings["config"])
-            self.state.update(model=self.settings["model"], device=self.settings["device"])
+            self.change_controller(payload)
+        elif command == "learning":
+            mode = payload["mode"]
+            if mode not in {"online", "frozen"}:
+                raise ValueError("Learning mode must be online or frozen")
+            if mode == "online" and not (self.world and self.controller == "ppo"):
+                raise ValueError("Online learning requires PPO in a persistent world")
+            self.learning_mode = mode
+            self.state["learning_mode"] = mode
+            self.settings["config"]["learning_mode"] = mode
+            self.state["config"]["learning_mode"] = mode
             (self.path / "manifest.json").write_text(json.dumps(self.settings))
+        elif command == "agent":
+            if not self.world or not hasattr(self.env, "select_agent"):
+                raise ValueError("This environment does not expose individually controllable agents")
+            self.observation, info = self.env.select_agent(payload["agent_id"])
+            self.control_revision += 1
+            self.state.update(observation=json_value(self.observation), decision=None, action=None)
+            self.state["reward"] = None
+            self.state["agent_id"] = info.get("ego_actor_id")
+            geometry, frame = render_state(self.environment, self.env)
+            self.state["info"].update(info, render=geometry)
+            self.state["frame"] = frame
         elif command == "reset":
             self.reset(payload)
         elif command == "step":
+            if self.controller == "ppo" and self.learning_mode == "online":
+                raise ValueError("Switch to frozen mode before single stepping PPO")
             self.step()
 
 
@@ -214,6 +288,10 @@ def worker(settings, commands, updates):
         simulation = Simulation(settings)
         publish(updates, simulation.state)
         while True:
+            if simulation.running and simulation.controller == "ppo" and simulation.learning_mode == "online":
+                if not learn_rollout(simulation, commands, updates, publish):
+                    break
+                continue
             try:
                 command, payload = commands.get(timeout=1 / simulation.speed if simulation.running else .2)
             except queue.Empty:
