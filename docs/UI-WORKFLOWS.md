@@ -70,3 +70,12 @@ See [Studio and live Gym](studio-gym.md) for native ownership, the winding-road 
 recordings, and the PPO/decision-model training loop. In the combined traffic-driving
 example, MetaDrive IDM drives vehicles and learned policies control SUMO-RL signal phases
 at one intersection.
+
+## World construction
+
+Traffic and combined traffic-driving worlds support native SUMO procedural generation
+(one controlled intersection) and manual network/routes XML from Data. Warehouse worlds
+support seeded native RWARE lattice parameters and manual rectangular ASCII layouts.
+The per-example `world` configuration keeps native field names; world artifact manifests
+record resolved definitions, seeds, native versions and output hashes. World construction
+and simulation lifetime are separate controls. See [native world configuration](studio-gym.md#native-procedural-and-manual-worlds).
