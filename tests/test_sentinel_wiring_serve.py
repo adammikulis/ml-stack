@@ -214,6 +214,22 @@ def test_the_broker_daemon_runs_the_scan_and_stops_it_on_exit(model):
     assert not watch.scanner_state(root)["armed"]
 
 
+def test_a_fresh_heartbeat_from_a_process_that_is_gone_is_not_armed(tmp_path):
+    """A daemon killed before it could write its stopped beat must not read as armed for three intervals."""
+    from ml_stack.sentinel.sealed import SealedFile
+
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait(timeout=30)
+    now = time.time()
+    SealedFile(tmp_path / watch.HEARTBEAT).save(
+        {"pid": done.pid, "interval_s": 60.0, "deep_every": 12, "started": now, "beat": now, "running": True})
+    gone = watch.scanner_state(tmp_path, now)
+    assert not gone["armed"] and "gone" in gone["why"], gone
+    SealedFile(tmp_path / watch.HEARTBEAT).save(
+        {"pid": os.getpid(), "interval_s": 60.0, "deep_every": 12, "started": now, "beat": now, "running": True})
+    assert watch.scanner_state(tmp_path, now)["armed"]          # the same beat from a live process is armed
+
+
 def test_the_fleet_daemon_quarantines_a_peer_that_forges_requests(tmp_path):
     root = tmp_path / "traind"
     (root / "files").mkdir(parents=True)

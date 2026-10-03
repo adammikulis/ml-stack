@@ -32,6 +32,11 @@ class Pin:
     link: str
     source: str
     pinned_at: float
+    origin: str = ""
+    """Where a pulled file came from (its URL, or ``peer:<name>``); empty for other pins."""
+    digest_from: str = ""
+    """``expected`` when the digest is one the download was verified against (the Hub's, the
+    release's, a signed manifest's); ``computed`` when it is that of the bytes as they arrived."""
 
     def to_json(self) -> dict[str, Any]:
         return {f: getattr(self, f) for f in self.__slots__}
@@ -69,6 +74,22 @@ class Manifest:
         self._save(pins)
         return made
 
+    def pin_verified(self, path: Path | str, kind: str, sha256: str, source: str,
+                     **notes: str) -> Pin:
+        """Record ``sha256`` for ``path`` without hashing it again: for a file whose digest a
+        download already checked (or, with ``digest_from="computed"``, that the caller hashed
+        itself). ``notes`` are ``origin`` and ``digest_from``."""
+        if kind not in FILE_KINDS:
+            raise ValueError(f"cannot pin a {kind!r}")
+        where = Path(path).expanduser()
+        size, mtime, inode, link = _state(where)
+        made = Pin(str(where), kind, sha256.lower(), size, mtime, inode, link, source,
+                   self.clock(), **notes)
+        pins = self.pins()
+        pins[str(where)] = made
+        self._save(pins)
+        return made
+
     def unpin(self, path: Path | str) -> bool:
         pins = self.pins()
         gone = pins.pop(str(Path(path).expanduser()), None)
@@ -81,7 +102,7 @@ class Manifest:
         size, mtime, inode, link = _state(Path(pin.path))
         pins = self.pins()
         pins[pin.path] = Pin(pin.path, pin.kind, pin.sha256, size, mtime, inode, link,
-                             pin.source, pin.pinned_at)
+                             pin.source, pin.pinned_at, pin.origin, pin.digest_from)
         self._save(pins)
 
 

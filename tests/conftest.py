@@ -27,6 +27,24 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+
+
+def _no_shadowing_tests_package() -> None:
+    """The repo's ``tests`` has no ``__init__.py`` (a namespace package), so a REGULAR ``tests`` package in
+    site-packages always wins the import, whatever the order of ``sys.path``: some wheels (confusables, ecoji) ship
+    their own test files as a top-level ``tests/``. Say so in plain words instead of 'No module named tests.x'."""
+    import importlib.util
+
+    spec = importlib.util.find_spec("tests")
+    where = [str(p) for p in (spec.submodule_search_locations or [])] if spec else []
+    if spec and spec.origin and not any(Path(p).resolve() == REPO / "tests" for p in where):
+        raise pytest.UsageError(
+            f"a package named 'tests' at {spec.origin} shadows this repo's tests/ (wheels such as confusables and "
+            "ecoji ship one by mistake); remove that directory from site-packages (it holds only their own unit "
+            "tests), or run in a virtual environment")
+
+
+_no_shadowing_tests_package()
 os.environ.setdefault("MLSTACK_GUARD_JUDGE", "off")
 sys.path.insert(0, str(REPO / "src"))
 os.environ["HF_HUB_OFFLINE"] = "1"
