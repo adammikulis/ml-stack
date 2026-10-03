@@ -17,7 +17,7 @@ from ml_stack.decide import pointer_prompt
 from ml_stack.decide.base import Asked, BaseDecider
 from ml_stack.decide.calibrate import Calibration
 from ml_stack.decide.pins import STRANDS_V19, Checkpoint
-from ml_stack.decide.sources import Source, local_source, strands_source
+from ml_stack.decide.sources import Source, local_source, strands_source, temperature_for
 from ml_stack.decide.types import BackendUnavailable, DecideError
 
 MAX_TOKENS = 4096
@@ -135,7 +135,7 @@ class PointerDecider(BaseDecider):
             head = build_head(torch, state["q.weight"].shape[1], files.pointer_dim)
             head.load_state_dict(state)
             head = head.to(device).float().eval()
-            self._loaded = (tok, torso, head, device, files.temperature,
+            self._loaded = (tok, torso, head, device, files,
                             {"device": device, "dtype": files.dtype})
 
     def probabilities(self, asked: Asked) -> tuple[list[float], dict[str, Any]]:
@@ -143,7 +143,8 @@ class PointerDecider(BaseDecider):
         torch = _torch()
         if self._loaded is None:
             raise DecideError("the pointer model did not load")
-        tok, torso, head, device, temperature, info = self._loaded
+        tok, torso, head, device, files, info = self._loaded
+        temperature = temperature_for(files, asked.question)
         rendered = pointer_prompt.render(asked.question, asked.state, asked.options)
         enc = tok(rendered.text, return_offsets_mapping=True, add_special_tokens=False,
                   return_tensors="pt")

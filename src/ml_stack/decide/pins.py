@@ -91,3 +91,9 @@ QWEN35_0_8B_BASE = Checkpoint(
     ),
     "Apache-2.0",
 )
+
+
+QWEN35_2B_BASE = Checkpoint("qwen3.5-2b-base", STRANDS_V19.base_files, "Apache-2.0")
+
+BASES = {c.name: c for c in (QWEN35_0_8B_BASE, QWEN35_2B_BASE)}
+"""The pinned base models a decider can be trained on, by the name `--base` takes."""

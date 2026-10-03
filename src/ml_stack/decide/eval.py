@@ -13,6 +13,8 @@ from ml_stack.decide.cases import Case
 from ml_stack.decide.types import DecideError, Decision
 
 BINS = 10
+FLOOR = 0.8
+"""The confidence under which an answer counts as abstained unless the caller says otherwise."""
 
 
 def brier(rows: Sequence[Sequence[float]], labels: Sequence[int]) -> float:
@@ -87,6 +89,8 @@ class Report:
     reliability: list[dict[str, float]]
     abstention: list[dict[str, float]]
     by_tag: dict[str, dict[str, float]] = field(default_factory=dict)
+    floor: float = FLOOR
+    abstain_rate: float = 0.0
 
     def public(self) -> dict[str, Any]:
         """A JSON-ready dict."""
@@ -96,10 +100,12 @@ class Report:
         """One line: the headline numbers."""
         return (f"{self.backend}:{self.model} n={self.n} err={self.errors} "
                 f"acc={self.accuracy:.3f} brier={self.brier:.3f} ece={self.ece:.3f} "
+                f"abstain@{self.floor:g}={self.abstain_rate:.3f} "
                 f"p50={self.latency_ms['p50']:.1f}ms p95={self.latency_ms['p95']:.1f}ms")
 
 
-def score(decisions: Sequence[Decision], cases: Sequence[Case], *, errors: int = 0) -> Report:
+def score(decisions: Sequence[Decision], cases: Sequence[Case], *, errors: int = 0,
+          floor: float = FLOOR) -> Report:
     """A `Report` for decisions already made, one per case in order."""
     if not decisions:
         raise DecideError("nothing was answered; there is nothing to score")
@@ -119,10 +125,11 @@ def score(decisions: Sequence[Decision], cases: Sequence[Case], *, errors: int =
         latency_ms={"mean": sum(lat) / len(lat), "p50": percentile(lat, 0.5),
                     "p95": percentile(lat, 0.95), "p99": percentile(lat, 0.99)},
         reliability=reliability(rows, labels), abstention=abstention_curve(rows, labels),
-        by_tag={t: {"n": len(v), "accuracy": sum(v) / len(v)} for t, v in sorted(tags.items())})
+        by_tag={t: {"n": len(v), "accuracy": sum(v) / len(v)} for t, v in sorted(tags.items())},
+        floor=floor, abstain_rate=sum(max(r) < floor for r in rows) / len(rows))
 
 
-def evaluate(decider: Decider, cases: Sequence[Case]) -> Report:
+def evaluate(decider: Decider, cases: Sequence[Case], *, floor: float = FLOOR) -> Report:
     """Run ``decider`` over ``cases`` one at a time and score it.
 
     A case the decider raises `DecideError` on is counted in ``errors`` and left out of the
@@ -136,4 +143,4 @@ def evaluate(decider: Decider, cases: Sequence[Case]) -> Report:
             kept.append(case)
         except DecideError:
             continue
-    return score(made, kept, errors=len(cases) - len(kept))
+    return score(made, kept, errors=len(cases) - len(kept), floor=floor)

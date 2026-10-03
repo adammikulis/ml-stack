@@ -13,6 +13,7 @@ import json
 import os
 import sys
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +21,14 @@ from ml_stack.command import Group, flag, option
 from ml_stack.decide import registry, router
 from ml_stack.decide.calibrate import Calibration, fit
 from ml_stack.decide.cases import Case, fingerprint, read_cases, write_cases
-from ml_stack.decide.eval import Report, evaluate, score
+from ml_stack.decide.eval import FLOOR, Report, evaluate, score
 from ml_stack.decide.fetch import locate
 from ml_stack.decide.guards import guard_cases
 from ml_stack.decide.pins import STRANDS_V19
 from ml_stack.decide.types import DecideError, Option, options_of
 from ml_stack.files import write_json
 from ml_stack.log import say, warn
+from ml_stack.train import decider_cli as trainer
 from ml_stack.train.decider_data import Plan, guard_cases_from_tools
 from ml_stack.train.holdout import by_group
 
@@ -106,10 +108,16 @@ def _ask(args: Namespace) -> int:
 
 def _reports(args: Namespace, cases: list[Case], config: router.Config) -> list[Report]:
     out = []
+    for given in getattr(args, "decider", None) or []:
+        pointer = "" if given == "strands" else given
+        decider = router.build("pointer", replace(config, backend="pointer", pointer=pointer))
+        out.append(evaluate(decider, cases, floor=args.floor))
+    if getattr(args, "decider", None):
+        return out
     for name in _backends(args, max(len(c.options) for c in cases), config):
         decider = router.build(name, config)
         decider.decide(cases[0].question, cases[0].state, cases[0].options)
-        out.append(evaluate(decider, cases))
+        out.append(evaluate(decider, cases, floor=getattr(args, "floor", FLOOR)))
     return out
 
 
@@ -229,6 +237,10 @@ def ask(args: Namespace) -> int:
 
 @COMMANDS.command("eval", help="score backends on labelled cases", options=[
     *CASES,
+    flag("--decider", action="append", default=None, metavar="NAME",
+         help="a registered decider, a decider directory or `strands`; repeat to compare"),
+    flag("--floor", type=float, default=FLOOR,
+         help="confidence under which an answer counts as abstained"),
     option("out"), *SERVER])
 def evaluate_cmd(args: Namespace) -> int:
     """Score backends on labelled cases."""
@@ -267,6 +279,13 @@ def export_cmd(args: Namespace) -> int:
 def make_cmd(args: Namespace) -> int:
     """Synthesise guard cases from a tool list."""
     return _guarded(_make, args)
+
+
+@COMMANDS.command("train", help="fine-tune, calibrate, register and score a decider",
+                  options=trainer.OPTIONS)
+def train_cmd(args: Namespace) -> int:
+    """Fine-tune a decider from labelled cases."""
+    return trainer.run(args)
 
 
 @COMMANDS.command("list", help="the trained deciders on this machine")

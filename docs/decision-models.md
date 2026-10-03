@@ -12,7 +12,7 @@ needs a sentence or a plan.
                         abstain_below=0.7)
     got.choice, got.confidence, got.scores, got.abstained, got.latency_ms
 
-`ml-stack-decide ask|eval|calibrate|bench|list|make-cases|export-cases|check-cases|fetch`
+`ml-stack-decide ask|train|eval|calibrate|bench|list|make-cases|export-cases|check-cases|fetch`
 is the command; `POST /decide` on the daemon (same bearer token as every route, 256 KB body
 limit) and the `decide` MCP tool call the same router.
 
@@ -100,6 +100,93 @@ the training cases more than a new project's calls would; this is a pipeline che
 a direction, not a quality claim. A fresh adapter on Qwen3.5-0.8B-Base for 30 steps reached
 0.398 (the three questions pooled; a floor), in 87 s. The model card each run writes says
 which kind of run it was.
+
+## Train your own
+
+The released model is `StrandsAgents/strands-decider-2B-hobson-v19` from Strands Labs, the
+open-source lab of the Strands Agents project at AWS (announcement:
+<https://strandsagents.com/blog/introducing-strands-decider/>; code:
+github.com/strands-labs/strands-decider). It is a rank-16 LoRA and a pointer head on
+Qwen3.5-2B, scored on JevBench, and its training data, scripts and weights are released for
+fine-tuning. Its three question kinds are `noul` (yes/no), `choice` and `score`, and it is
+calibrated by a temperature per kind. `ml-stack-decide train` is this package's own
+re-implementation of that recipe for a few hundred of your own cases; it does not run the
+released scripts (the reference recipe is about 11 hours on one RTX 3090 for the full corpus).
+
+    ml-stack-decide train --data tickets.jsonl --name tickets --dry-run
+    ml-stack-decide train --data tickets.jsonl --eval held-out.jsonl --name tickets \
+        --base qwen3.5-2b-base --baseline strands --steps 300
+    ml-stack-decide eval held-out.jsonl --decider tickets --decider strands
+
+**Data.** One JSON object per line (the format `export-cases` writes):
+
+    {"id": "t1", "question": "Which team?", "state": "payouts failing for 3 days",
+     "options": {"billing": "payments", "tech": "outages"}, "label": "billing",
+     "group": "customer-17", "kind": "choice"}
+
+`question`, `state`, `options` (names, or names with descriptions) and `label` (one of the
+option names) are required. `group` keeps related cases on one side of every split (cases
+without one are grouped with the cases that say the same thing); `kind` is `noul`, `choice`
+or `score` and defaults to `noul` for two options, `choice` otherwise. `--data guards` is the
+built-in guard set.
+
+**What `train` does, in order**
+1. Checks the file: every line parses and its label is one of its options; fewer than 40 cases,
+   a single label, or the same case under two labels is an error; fewer than 500 cases, one
+   label over 90%, labels under 5 cases, repeated cases and repeated ids are warnings
+   (`--dry-run` prints these and the split sizes, and stops).
+2. Refuses a bad `--name` (lower-case letters, digits, `.`, `_`, `-`), a name already
+   registered (see `--replace`), an `--out` that has files in it, and an `--out` inside a git
+   work tree (`--allow-in-repo`): trained weights and data are never committed. The default
+   `--out` is under the state directory.
+3. Splits by whole group into train, calibration (15%) and test (25%), the same way for the
+   same `--seed`. With `--eval FILE` the test cases are that file instead, and the run stops if
+   any of its cases (same question, state and options, ignoring case and spacing) or groups
+   also appear in `--data`.
+4. Holds the GPU: a claim named `gpu-training` at the Broker (visible in `ml-stack-serve
+   status`). A model server held by another process, or another training run, refuses the
+   hold; `--wait SECONDS` waits for the claim. A `--device cpu` run holds nothing.
+5. Scores the baseline on the test cases: `auto` is the released checkpoint when `--init
+   strands` and otherwise the training-set majority label; also `strands`, `majority`, `none`
+   or the name of a registered decider.
+6. Trains the LoRA and the head (options shuffled every pass), then fits a temperature on the
+   calibration cases: one over all of them and one per kind that has 20 or more. A fit on 50 or
+   more cases minimises ECE (as the upstream recipe does, because an NLL fit can leave a binary
+   head badly calibrated); a smaller one minimises NLL. A trained decider applies the
+   temperature of the kind its question had in training.
+7. Writes `decider.json` (hashes, temperatures), `manifest.json`, `model_card.md` and the
+   safetensors files, scores the test cases (accuracy, Brier, ECE, accuracy and rate of
+   abstaining at confidence 0.8, `--floor` to change it) and puts the baseline's numbers beside
+   them in the card.
+8. Refuses to register a decider whose accuracy is below, or Brier above, the baseline's on the
+   test cases (the directory is still written, `manifest.json` says `registered: false`);
+   `--allow-worse` registers it anyway. Otherwise it registers the name and pins the weights
+   and config in the sentinel (source `trained:NAME`), so a changed file is a finding.
+
+`--replace` re-registers a name that is taken; the old entry and its directory stay, under
+`NAME.prev`. `ml-stack-decide eval FILE --decider NAME` scores a registered decider (or
+`strands`, or a directory) on any labelled file with the same metrics, repeatable to compare.
+The same metrics are in `ml_stack.decide.metrics` for other runners.
+
+**Untrusted data.** Labels, ids, groups and text are only ever data: nothing from the file
+becomes a path (the name and `--out` come from the command line), a command or a pickle
+(weights are safetensors; a directory with a `.bin`, `.pt` or `.pkl` file is not loaded), and
+the card prints only a reduced character set. Never commit the file you trained on.
+
+**Honest limits**
+- Time and memory are not measured for this command. The measured runs are above: 30 steps on
+  Qwen3.5-0.8B-Base in 87 s, and 120 steps continuing the released 2B checkpoint in 364 s,
+  both on one Apple-silicon GPU. The 2B base needs about 4.7 GB of weights plus activations;
+  nothing here checks that it fits next to a served model, and a held server refuses the run.
+- A few hundred cases check the pipeline; they do not support a quality claim, and the card
+  says so. A model trained on your cases is calibrated on cases like them and on nothing else.
+- The baseline check compares point estimates on the test cases; with 60 test cases a gap of
+  a few points is noise.
+- It trains the head and one rank-16 LoRA; it does not resume, shard or train on several
+  GPUs, and a case over 1024 tokens is refused.
+- A temperature cannot change which option wins, only how sure the decider says it is.
+- The real-model path has been run here only on a random 2-layer model on CPU (the tests); the
+  same code on Qwen3.5 was last run by the earlier `ml-stack-train-decider` measurements above.
 
 ## Licences
 
