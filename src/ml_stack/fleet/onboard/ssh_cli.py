@@ -12,7 +12,10 @@ from typing import Any
 from ml_stack import home
 from ml_stack.log import say, warn
 
+from ..tailnet import detect
 from .human import HumanRequired
+from .requests import Devices
+from .routes import ssh_address
 from .signing import KeyStoreError, SigningKeys
 from .signing_cli import confirm_signing
 from .ssh import (
@@ -56,6 +59,13 @@ def _typed_fingerprint(args: argparse.Namespace):
 def cmd_ssh(args: argparse.Namespace) -> int:
     try:
         target = parse_target(args.ssh, args.ssh_port)
+        state = Path(args.state) if getattr(args, "state", "") else home.state("onboard")
+        try:
+            routed = ssh_address(target.host, target.port, Devices(state / "devices.json"), detect)
+        except OSError as exc:
+            raise SshRefused(str(exc)) from None
+        if routed != target.host:
+            target = parse_target(f"{target.user}@{routed}" if target.user else routed, target.port)
         share = Path(args.share) if args.share else None
         if share is None or not share.is_dir():
             raise SshRefused("--share DIR with the wheel to install")

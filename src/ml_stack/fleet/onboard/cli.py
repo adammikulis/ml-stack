@@ -15,7 +15,6 @@ import base64
 import contextlib
 import getpass
 import json
-import os
 import platform
 import socket
 import sys
@@ -37,10 +36,20 @@ from .bootstrap import BootstrapServer, Terms
 from .devices_cli import add_devices, cmd_devices
 from .manifest import ManifestError, RotationAnnounced, Signer, key_fingerprint, verify
 from .notify import compose, compose_code, pick
-from .pairing import DEFAULT_PORT, Grant, Hooks, PairError, PairingClient, PairingServer
+from .pairing import (
+    DEFAULT_PORT,
+    DEFAULT_SHARE_PORT,
+    Grant,
+    Hooks,
+    Offer,
+    PairError,
+    PairingClient,
+    PairingServer,
+)
+from .peerlearn import forget, learn_from_grant, learn_from_offer, new_secret
 from .peers_cli import add_peers, cmd_peers
 from .requests import Devices, Refused, Request, Requests, State, short
-from .routes import resolve
+from .routes import beyond_the_lan, resolve
 from .share_cli import add_share, cmd_share
 from .signing import KeyStoreError, SigningKeys
 from .signing_cli import add_signing, cmd_signing, confirm_signing
@@ -67,6 +76,14 @@ def state_dir(args: argparse.Namespace) -> Path:
 
 def _emit(args: argparse.Namespace, document: dict[str, Any], text: str) -> None:
     say(json.dumps(document, indent=1, default=str) if args.json else text)
+
+
+def _share_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--share-port", type=int, default=DEFAULT_SHARE_PORT,
+                   help="the port 'fleet share' runs on here: the other machine records it as "
+                        "this one's share address")
+    p.add_argument("--no-share", action="store_true",
+                   help="this machine shares nothing: the other machine records no share address")
 
 
 def add_commands(sub: Any) -> None:
@@ -98,6 +115,7 @@ def add_commands(sub: Any) -> None:
                                               "interface)")
     p.add_argument("--no-cluster", action="store_true",
                    help="pair the device without giving it this machine's cluster key")
+    _share_args(p)
 
     p = common(sub.add_parser("pair", help="ask a machine to let this one join"))
     p.add_argument("--host", required=True)
@@ -106,6 +124,9 @@ def add_commands(sub: Any) -> None:
                                               "when omitted)")
     p.add_argument("--wait", default="5m", help="how long to wait for the owner to accept")
     p.add_argument("--name", default="")
+    _share_args(p)
+    p.add_argument("--mine", action="store_true",
+                   help="the machine being asked is yours: it may be given your gated models")
 
     common(sub.add_parser("requests", help="join requests waiting for an answer"))
     for verb, text in (("accept", "say yes to a request and show its code"),
@@ -184,9 +205,17 @@ def cmd_nearby(args: argparse.Namespace) -> int:
         found = near.Browser(transport).listen(args.timeout)
     finally:
         transport.close()
-    known = {d.fingerprint: d for d in Devices(state_dir(args) / "devices.json").all()}
+    devices = Devices(state_dir(args) / "devices.json")
+    known = {d.fingerprint: d for d in devices.all()}
     rows = [{**n.public(), "paired": None if n.fingerprint not in known else (
         "yours" if known[n.fingerprint].mine else "another person's")} for n in found]
+    tailnet = detect() if known else None
+    if tailnet is not None and tailnet.up:      # a beacon never crosses a tailnet
+        for far in beyond_the_lan(devices, {n.fingerprint for n in found}, tailnet, DEFAULT_PORT):
+            rows.append({"name": far.name, "address": far.address, "port": DEFAULT_PORT,
+                         "fingerprint": far.fingerprint, "fingerprint_short": short(far.fingerprint),
+                         "route": far.route.value,
+                         "paired": "yours" if known[far.fingerprint].mine else "another person's"})
     lines = [f"{r['name']}  {r['address']}:{r['port']}  certificate {r['fingerprint_short']}"
              + (f"  paired, {r['paired']}" if r["paired"] else "") for r in rows] \
         or ["no machine is open to pairing"]
@@ -202,13 +231,20 @@ def cmd_listen(args: argparse.Namespace) -> int:
     held = memberships()
     signer_pub = base64.b64encode(SigningKeys(directory).public).decode()
 
+    share_port = 0 if args.no_share else args.share_port
+    me = socket.gethostname()[:40]
+
     def grant(_request: Request) -> Grant:
-        secret = base64.urlsafe_b64encode(os.urandom(32)).decode()
+        secret = new_secret()
         if args.no_cluster or not held:
-            return Grant(certificate=ident.beacon, signing_key=signer_pub, device_secret=secret)
+            return Grant(certificate=ident.beacon, signing_key=signer_pub, device_secret=secret,
+                         share_port=share_port, name=me)
         m = held[0]
         return Grant(group=m.group, key=m.key.decode(), salt=m.salt, certificate=ident.beacon,
-                     signing_key=signer_pub, device_secret=secret)
+                     signing_key=signer_pub, device_secret=secret, share_port=share_port, name=me)
+
+    def learned(request: Request, offer: Offer) -> None:
+        learn_from_offer(directory, request, offer)
 
     def tell(request: Request) -> None:
         """Ask the owner with real buttons, off the request's own thread; the answer goes
@@ -234,7 +270,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
                                   destinations=where or None,
                                   group=None if where else near.DEFAULT_GROUP,
                                   bind="127.0.0.1" if where else "")
-    with PairingServer(requests, ident, Hooks(grant, tell), address=(host, args.port)) as server:
+    with PairingServer(requests, ident, Hooks(grant, tell, learned), address=(host, args.port)) as server:
         announcer = near.Announcer(transport, near.Presence(
             socket.gethostname()[:40], socket.gethostname()[:60],
             f"{platform.system()} {platform.machine()}", server.port, ident.fingerprint))
@@ -308,12 +344,26 @@ def cmd_revoke(args: argparse.Namespace) -> int:
         _emit(args, {"error": str(exc)}, f"error: {exc}")
         return 2
     rotate = gone.shared_cluster_key
+    dropped = forget(state_dir(args), gone)
     _emit(args, {"revoked": gone.fingerprint, "name": gone.name,
-                 "cluster_key_rotation_needed": rotate},
+                 "cluster_key_rotation_needed": rotate, "peers_removed": dropped},
           f"revoked {gone.name} ({short(gone.fingerprint)}): it cannot ask to join again."
           + (" It holds the cluster key, so the cluster key must be changed on every machine "
              "to lock it out (not automated yet; see docs/onboarding.md)." if rotate else ""))
     return 0
+
+
+def _offer(directory: Path, ident: Any, args: argparse.Namespace, secret: str) -> Offer:
+    """How the machine that accepts can reach this one's share. Without a share port, or with
+    no signing key to be had here, the offer says so and no row is made for it over there."""
+    if args.no_share:
+        return Offer()
+    try:
+        key = base64.b64encode(SigningKeys(directory).public).decode()
+    except (KeyStoreError, OSError) as exc:
+        warn(f"not offering a share address: {exc}")
+        return Offer()
+    return Offer(args.share_port, ident.beacon, key, secret)
 
 
 def cmd_pair(args: argparse.Namespace) -> int:
@@ -332,11 +382,14 @@ def cmd_pair(args: argparse.Namespace) -> int:
             return 1
         code = args.code or (getpass.getpass("code shown on the other machine: ")
                              if sys.stdin.isatty() else sys.stdin.readline().strip())
-        grant = client.finish(code)
+        mine_secret = new_secret()
+        grant = client.finish(code, _offer(directory, ident, args, mine_secret))
     except PairError as exc:
         _emit(args, {"error": str(exc), "tries_left": exc.tries_left}, f"error: {exc}")
         return 2
     joined = adopt(grant, directory)
+    learn_from_grant(directory, grant, host=args.host, server_fingerprint=client.server_fingerprint,
+                     my_secret=mine_secret, mine=args.mine)
     key_id = key_fingerprint(base64.b64decode(grant.signing_key)) if grant.signing_key else ""
     _emit(args, {"paired": True, "request": request_id, "joined_cluster": joined,
                  "server_fingerprint": client.server_fingerprint, "signing_key": key_id},

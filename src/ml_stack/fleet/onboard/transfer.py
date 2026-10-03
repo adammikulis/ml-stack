@@ -23,7 +23,7 @@ import ssl
 import threading
 import time
 import urllib.parse
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,11 +38,12 @@ from .events import BUS, Bus
 from .lan import require_local_url
 from .manifest import Entry, Manifest
 from .requests import Device
-from .sharing import NEVER, Access, Licences, decide
+from .sharing import NEVER, OPEN, Access, Licences, decide
+from .throughput import Limiter, Rolling
 from .web import Call, Listener, Reply, json_reply
 
 __all__ = ["Cancelled", "Downloader", "NotShareable", "PeerSource", "Settings", "Share", "ShareServer",
-           "TransferError", "Withheld", "fetch_manifest", "mac_gate"]
+           "TooSlow", "TransferError", "Withheld", "fetch_manifest", "mac_gate"]
 
 API = "/onboard/v1"
 RESERVE = 1 << 30
@@ -66,6 +67,10 @@ class Cancelled(TransferError):
     """The caller stopped the transfer; verified chunks stay on disk for the next try."""
 
 
+class TooSlow(TransferError):
+    """The peers together stayed under the floor for a whole window."""
+
+
 class Withheld(TransferError):
     """A peer refused the file under the owner's sharing rules (not a lie: it is not struck)."""
 
@@ -83,6 +88,11 @@ class Share:
     withhold: Callable[[Entry], str] | None = None
     """Says why an entry is not to be served right now (``''`` when it may be): the serving
     machine's own veto, for example a copy sentinel holds in quarantine."""
+    paths: Mapping[str, Path] | None = None
+    """Where each entry's file is, when they are not all directly under ``root`` (the model
+    store: many folders). Every path is resolved at the time of the request and must lie inside
+    one of ``roots`` (``root`` does not count); a link that leaves them is not followed."""
+    roots: tuple[Path, ...] = ()
 
 
 def mac_gate(cluster_secret: str, devices: Callable[[], Iterable[Device]] = lambda: (),
@@ -122,6 +132,31 @@ def file_stream(path: Path, start: int, length: int) -> Iterator[bytes]:
             yield piece
 
 
+def confined(path: Path, roots: Iterable[Path]) -> Path:
+    """``path`` with every link followed, if the result lies inside one of ``roots`` (themselves
+    resolved); `Unsafe` when it does not (a symlink or ``..`` that leaves the model roots)."""
+    try:
+        real = path.resolve(strict=True)
+    except OSError as exc:
+        raise Unsafe(f"{path.name} is not here: {exc}") from None
+    for root in roots:
+        top = root.resolve()
+        if real == top or top in real.parents:
+            return real
+    raise Unsafe(f"{path.name} is outside the shared folders")
+
+
+def entry_path(share: Share, entry: Entry) -> Path:
+    """Where ``entry``'s file is on this machine: under ``root`` by its name, or at the path
+    the share lists for it, which must stay inside the roots."""
+    if share.paths is None:
+        return safe_join(share.root, entry.name)
+    listed = share.paths.get(entry.name)
+    if listed is None:
+        raise Unsafe(f"{entry.name} is not listed")
+    return confined(listed, share.roots)
+
+
 def serve_file(share: Share, name: str, range_header: str, bus: Bus, access: Access) -> Reply:
     """The reply for one ranged GET of ``name``: 206 with the span, or why not."""
     try:
@@ -135,7 +170,7 @@ def serve_file(share: Share, name: str, range_header: str, bus: Bus, access: Acc
                  file=entry.name, level=entry.sharing, reason=reason)
         return json_reply(403, {"error": reason})
     try:
-        path = safe_join(share.root, entry.name)
+        path = entry_path(share, entry)
         if not path.is_file() or path.stat().st_size != entry.size:
             raise OSError
         start, end = requested_range(range_header)
@@ -148,7 +183,12 @@ def serve_file(share: Share, name: str, range_header: str, bus: Bus, access: Acc
         return Reply(416, b'{"error":"range not satisfiable"}',
                      {"Content-Range": f"bytes */{entry.size}"}, "application/json")
     length = last - start + 1
-    return Reply(206, headers={"Content-Range": f"bytes {start}-{last}/{entry.size}"},
+    headers = {"Content-Range": f"bytes {start}-{last}/{entry.size}"}
+    row = share.licences.accepted(entry) if share.licences and entry.sharing != OPEN else None
+    if row is not None:       # tells the downloading device whose acceptance it relies on
+        headers |= {"X-Licence-Accepted-By": str(row.get("by", ""))[:64],
+                    "X-Licence-Accepted-At": str(row.get("at", ""))[:32]}
+    return Reply(206, headers=headers,
                  stream=file_stream(path, start, length), length=length)
 
 
@@ -211,8 +251,23 @@ class PeerSource:
     lies: int = field(default=0, repr=False)
     """Answers that were wrong, as against merely missing."""
     banned: bool = field(default=False, repr=False)
+    limit_bps: float = 0.0
+    """The most bytes a second to ask of this peer (0: no limit)."""
+    streams: int = 0
+    """The most requests in flight at once to this peer (0: the transfer's setting)."""
+    limiter: Limiter | None = field(default=None, repr=False, init=False)
+    slots: threading.Semaphore | None = field(default=None, repr=False, init=False)
+    accepted: dict[str, str] = field(default_factory=dict, repr=False, init=False)
+    """Who accepted the licence of the last gated file this peer served, and when (what the
+    peer said; it is a record of what was relied on, not a proof)."""
+    moved: list[float] = field(default_factory=lambda: [0.0, 0.0], repr=False, init=False)
+    """``[bytes, seconds]`` this peer has delivered, for the rate kept in the peer book."""
 
     def __post_init__(self) -> None:
+        if self.limit_bps > 0:
+            self.limiter = Limiter(self.limit_bps)
+        if self.streams > 0:
+            self.slots = threading.Semaphore(self.streams)
         parts = urllib.parse.urlsplit(self.base_url)
         if parts.scheme == "https" and self.context is None:
             raise TransferError("a peer is reached over TLS pinned to its certificate")
@@ -220,6 +275,11 @@ class PeerSource:
             raise TransferError(f"a peer is reached over https, not {parts.scheme or 'nothing'}")
         if parts.scheme == "http" and (parts.hostname or "") not in ("127.0.0.1", "::1", "localhost"):
             raise TransferError("plain http is for a peer on this machine only")
+
+
+def _plain(text: str) -> str:
+    """A header value as a short printable string, for a record a person reads."""
+    return "".join(c for c in text if c.isprintable())[:64]
 
 
 def _disk_free(path: Path) -> int:
@@ -242,9 +302,12 @@ class Settings:
     """Asked between chunks; true stops the transfer with `Cancelled`."""
     progress: Callable[[int], None] | None = None
     """Called with the bytes of the file verified so far, after each chunk."""
-    deadline_s: float = 0.0
-    """Seconds the whole transfer may take (0: no limit); a peer too slow to finish in time
-    ends it with a `TransferError` so the caller can go elsewhere."""
+    floor_bps: float = 0.0
+    """The slowest the transfer as a whole may be (0: no floor). Below it for a whole
+    ``window_s`` ends it with `TooSlow`, so the caller can go elsewhere."""
+    window_s: float = 10.0
+    streams: int = 2
+    """Requests in flight at once to one peer, unless the peer has its own limit."""
 
 
 def fetch_manifest(peer: PeerSource, timeout: float = 20.0) -> bytes:
@@ -326,17 +389,19 @@ class Downloader:
             if index not in done:
                 todo.put(index)
         failure: list[TransferError] = []
-        began = time.monotonic()
         got = [len(done) * entry.chunk_size]
+        window = Rolling(self.cfg.window_s)
 
         def work() -> None:
             while not failure:
                 if self.cfg.cancel is not None and self.cfg.cancel():
                     failure.append(Cancelled(entry.name))
                     return
-                if self.cfg.deadline_s and time.monotonic() - began > self.cfg.deadline_s:
-                    failure.append(TransferError(f"{entry.name}: too slow, gave up after "
-                                                 f"{self.cfg.deadline_s:.0f} s"))
+                lately = window.rate() if self.cfg.floor_bps else None
+                if lately is not None and lately < self.cfg.floor_bps:
+                    failure.append(TooSlow(f"{entry.name}: {lately / 1024:.0f} KiB/s for "
+                                           f"{self.cfg.window_s:.0f} s, under the floor of "
+                                           f"{self.cfg.floor_bps / 1024:.0f} KiB/s"))
                     return
                 try:
                     index = todo.get_nowait()
@@ -353,6 +418,7 @@ class Downloader:
                         fh.write(data)
                     done.add(index)
                     got[0] += len(data)
+                    window.add(len(data))
                     if self.cfg.progress is not None:
                         self.cfg.progress(min(got[0], entry.size))
                     who = peer.name or peer.base_url
@@ -438,6 +504,26 @@ class Downloader:
                               peer=peer.name or peer.base_url, file=entry.name, reason=why)
 
     def _get(self, peer: PeerSource, entry: Entry, start: int, want: int) -> bytes:
+        """One ranged request, within the peer's stream and bandwidth limits; what it delivered
+        and how long it took is added to ``peer.moved``."""
+        if peer.slots is None:
+            with self._lock:
+                if peer.slots is None:
+                    peer.slots = threading.Semaphore(max(1, self.cfg.streams))
+        with peer.slots:
+            if peer.limiter is not None:
+                peer.limiter.wait(want, self._stopped)
+            began = time.monotonic()
+            data = self._request(peer, entry, start, want)
+            with self._lock:
+                peer.moved[0] += len(data)
+                peer.moved[1] += time.monotonic() - began
+            return data
+
+    def _stopped(self) -> bool:
+        return self.cfg.cancel is not None and self.cfg.cancel()
+
+    def _request(self, peer: PeerSource, entry: Entry, start: int, want: int) -> bytes:
         url = f"{peer.base_url}{API}/files/{urllib.parse.quote(entry.name)}"
         parts = urllib.parse.urlsplit(url)
         require_local_url(url)
@@ -465,6 +551,10 @@ class Downloader:
                     f"bytes {start}-{start + want - 1}/{entry.size}":
                 raise TransferError("answered a different range than asked")
             data = response.read(want + 1)
+            by, at = response.getheader("X-Licence-Accepted-By"), response.getheader(
+                "X-Licence-Accepted-At")
+            if by:
+                peer.accepted = {"by": _plain(by), "at": _plain(at or "")}
         finally:
             with contextlib.suppress(OSError):
                 conn.close()

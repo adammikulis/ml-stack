@@ -35,10 +35,12 @@ from .lan import require_local
 from .requests import Refused, Request, Requests, State
 from .web import Call, Listener, Reply, json_reply
 
-__all__ = ["DEFAULT_PORT", "Grant", "Hooks", "PairError", "PairingClient", "PairingServer",
-           "context_for", "fingerprint_of"]
+__all__ = ["DEFAULT_PORT", "DEFAULT_SHARE_PORT", "Grant", "Hooks", "Offer", "PairError",
+           "PairingClient", "PairingServer", "context_for", "fingerprint_of"]
 
 DEFAULT_PORT = 8772
+DEFAULT_SHARE_PORT = 8773
+"""Where ``fleet share`` listens unless told otherwise, and what pairing records for a device that shares."""
 MOST_BODY = 16 * 1024
 MOST_EXCHANGES = 32
 API = "/onboard/v1/requests"
@@ -76,11 +78,17 @@ class Grant:
     device_secret: str = ""
     """What this device signs its file requests with, so the owner's machine knows which device
     asks (urlsafe base64 of 32 random bytes)."""
+    share_port: int = 0
+    """The port this machine's ``fleet share`` listens on (0: it shares nothing, so there is no
+    share address to record)."""
+    name: str = ""
+    """What this machine calls itself, for the peer book."""
 
     def encode(self) -> bytes:
         return json.dumps({"v": 1, "group": self.group, "key": self.key, "salt": self.salt,
                            "certificate": self.certificate, "signing_key": self.signing_key,
-                           "device_secret": self.device_secret},
+                           "device_secret": self.device_secret, "share_port": self.share_port,
+                           "name": self.name},
                           sort_keys=True, separators=(",", ":")).encode()
 
     @classmethod
@@ -89,7 +97,43 @@ class Grant:
         if not isinstance(data, dict) or data.get("v") != 1:
             raise PairError("the grant is in a format this version does not know")
         return cls(**{k: str(data.get(k, "")) for k in
-                      ("group", "key", "salt", "certificate", "signing_key", "device_secret")})
+                      ("group", "key", "salt", "certificate", "signing_key", "device_secret",
+                       "name")}, share_port=_port(data.get("share_port")))
+
+
+def _port(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        and 0 < value < 65536 else 0
+
+
+@dataclass(frozen=True, slots=True)
+class Offer:
+    """What the asking machine tells the accepting one once the code has been proved: how to
+    reach its ``fleet share`` and what to check it with. Sent sealed under the exchange's key
+    (`pake.Session.seal`), so it is as authentic as the pairing; an offer whose tag does not
+    verify is refused and nothing is recorded."""
+
+    share_port: int = 0
+    certificate: str = ""
+    signing_key: str = ""
+    device_secret: str = ""
+    """What the accepting machine signs its file requests to this one with."""
+
+    def encode(self) -> bytes:
+        return b"offer:" + json.dumps(
+            {"v": 1, "share_port": self.share_port, "certificate": self.certificate,
+             "signing_key": self.signing_key, "device_secret": self.device_secret},
+            sort_keys=True, separators=(",", ":")).encode()
+
+    @classmethod
+    def decode(cls, raw: bytes) -> Offer:
+        if not raw.startswith(b"offer:"):
+            raise PairError("not an offer")
+        data = json.loads(raw[len(b"offer:"):])
+        if not isinstance(data, dict) or data.get("v") != 1:
+            raise PairError("the offer is in a format this version does not know")
+        return cls(_port(data.get("share_port")),
+                   *(str(data.get(k, "")) for k in ("certificate", "signing_key", "device_secret")))
 
 
 @dataclass(slots=True)
@@ -99,6 +143,8 @@ class Hooks:
 
     grant: Callable[[Request], Grant]
     notify: Callable[[Request], None] | None = None
+    learned: Callable[[Request, Offer], None] | None = None
+    """Called with the asking machine's `Offer` after it paired, when it sent one that verified."""
 
 
 class PairingServer:
@@ -165,7 +211,10 @@ class PairingServer:
             return 200, {"message": self.exchange(request_id,
                                                   str(call.json(MOST_BODY).get("message")))}
         if call.method == "POST" and action == "confirm":
-            return 200, self.confirm(request_id, str(call.json(MOST_BODY).get("confirmation")))
+            body = call.json(MOST_BODY)
+            sealed = {"offer": str(body["offer"]), "offer_tag": str(body.get("offer_tag") or "")} \
+                if body.get("offer") else {}
+            return 200, self.confirm(request_id, str(body.get("confirmation")), **sealed)
         raise Refused(404, "no such request")
 
     def submit(self, info: dict[str, Any], client: str) -> dict[str, Any]:
@@ -195,7 +244,18 @@ class PairingServer:
             self._sessions[request_id] = session
         return session.message
 
-    def confirm(self, request_id: str, confirmation: str) -> dict[str, Any]:
+    def _offer(self, raw: str, tag: str, session: pake.Session) -> Offer:
+        """The asker's offer, if it is sealed under this exchange's key; `Refused` otherwise."""
+        try:
+            payload = base64.b64decode(raw, validate=True)
+            if not session.open(payload, tag):
+                raise Refused(403, "the offer does not carry the exchange's tag")
+            return Offer.decode(payload)
+        except (ValueError, PairError):
+            raise Refused(400, "the offer is malformed") from None
+
+    def confirm(self, request_id: str, confirmation: str, offer: str = "",
+                offer_tag: str = "") -> dict[str, Any]:
         with self._lock:
             session = self._sessions.pop(request_id, None)
         if session is None:
@@ -207,10 +267,13 @@ class PairingServer:
             left = self.requests.wrong(request_id)
             raise Refused(403, f"wrong code; {left} tries left" if left else
                           "wrong code; the request is closed")
+        asker = self._offer(offer, offer_tag, session) if offer else None
         grant = self.hooks.grant(request)
         payload = grant.encode()
         self.requests.paired(request_id, shared_cluster_key=bool(grant.key),
                              secret=grant.device_secret)
+        if asker is not None and self.hooks.learned is not None:
+            self.hooks.learned(request, asker)
         return {"confirmation": session.confirmation(),
                 "grant": base64.b64encode(payload).decode(), "tag": session.seal(payload)}
 
@@ -293,9 +356,10 @@ class PairingClient:
                 return state
             time.sleep(poll_s)
 
-    def finish(self, code: str) -> Grant:
-        """Prove the code and receive the grant. `PairError` for a wrong code, with
-        ``tries_left``, or for a machine that fails to prove it knew the code too."""
+    def finish(self, code: str, offer: Offer | None = None) -> Grant:
+        """Prove the code and receive the grant, sending ``offer`` (how to reach this machine's
+        share) sealed under the exchange. `PairError` for a wrong code, with ``tries_left``, or
+        for a machine that fails to prove it knew the code too."""
         code = re.sub(r"\s", "", code)
         try:
             session = pake.start_initiator(
@@ -311,8 +375,11 @@ class PairingClient:
             session.receive(str(body.get("message")))
         except pake.Bad as exc:
             raise PairError(f"bad message from the machine: {exc}") from None
-        status, body = self._call("POST", f"{API}/{self.request_id}/confirm",
-                                  {"confirmation": session.confirmation()})
+        sent: dict[str, Any] = {"confirmation": session.confirmation()}
+        if offer is not None:
+            raw = offer.encode()
+            sent |= {"offer": base64.b64encode(raw).decode(), "offer_tag": session.seal(raw)}
+        status, body = self._call("POST", f"{API}/{self.request_id}/confirm", sent)
         if status != 200:
             message = str(body.get("error", f"status {status}"))
             left = re.search(r"(\d+) tries left", message)

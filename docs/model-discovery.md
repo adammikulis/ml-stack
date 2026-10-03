@@ -126,9 +126,18 @@ token goes to the endpoint and not to the CDN host it redirects to.
 
 By default a pull asks the devices you paired before it goes to the Hub, on the local network
 or at an address you stored (a VPN or overlay such as a tailnet; never a public one). The
-stored devices are the peer book (`<state>/onboard/peers.json`, managed by `ml-stack fleet
-peers add NAME --url https://host:port --certificate ... --signing-key ... [--device-secret ...]`,
-`remove`, `on`, `off`). For each file of the pull the session asks every peer for its signed
+stored devices are the peer book (`<state>/onboard/peers.json`, the `PeerBook` of
+`ml_stack.hub.peerbook`). **Pairing fills it**: when two devices pair (`fleet listen` / `fleet
+pair`), each keeps the other's share address (the address the pairing used and the share port,
+`--share-port`, default 8773), pinned certificate, owner signing key and request key, learned from
+the grant and from an offer sealed under the exchange, so it is as authentic as the pairing; a
+device started with `--no-share` has no share address and no row is made for it. Revoking a
+device removes its rows. `ml-stack fleet peers add NAME --url https://host:port --certificate ...
+--signing-key ... [--device-secret ...]` stays as the manual path for a device paired some other
+way, with `remove`, `on` and `off`. A row that came from pairing names its device, and its route
+is chosen when the pull starts: the address on this network, else its tailnet address
+(`fleet/onboard/routes.py`), each answering with the pinned certificate; a revoked device is not
+asked. For each file of the pull the session asks every peer for its signed
 manifest (over TLS pinned to that device's certificate), keeps the peers whose manifest lists
 that very file (name, size and digest), orders them by how fast they answered, and fetches the
 file chunk by chunk, resumably, from several at once. `on_progress`, `CancelToken` and the
@@ -148,9 +157,33 @@ and a critical `onboard.peer.bad_copy` event goes to the bus and to sentinel; th
 a device you marked as yours and only after you recorded accepting that licence on the serving
 device (who, when, which licence; keep it with `ml-stack fleet share`), `open` goes to any
 paired device. A copy that sentinel holds in quarantine on the serving device is not served.
-Credentials such as `HF_TOKEN` never leave a device. A peer that has no copy, refuses, is
-unreachable or stalls costs a few seconds at most (each answer has 4 s, a whole transfer
-`30 s + size / 2 MiB/s`) and the pull continues from the Hub.
+Credentials such as `HF_TOKEN` never leave a device. A peer that has no copy, refuses or is
+unreachable costs a few seconds at most (each answer has 4 s) and the pull continues from the Hub.
+
+**Speed.** Each peer's rate is measured (bytes completed per second, kept in the peer book and
+blended with earlier transfers); peers are ranked by it, unmeasured ones first so that they get
+measured. A peer gets at most two requests at a time, and an optional bandwidth cap:
+`ml-stack fleet peers limit [NAME] [--rate 20MiB/s] [--streams N] [--metered on|off]` (no NAME
+means every peer; `--rate off` and `--streams 0` remove a limit; `--metered on` means the link to
+that device costs per byte, so it is not asked and the Hub is used). When the transfer as a whole
+stays under 2 MiB/s for a 15 s window it is given up, the partial bytes are kept for a resume and
+the Hub is used.
+
+**Serving the model store.** `ml-stack fleet share --models [--models-dir DIR ...]` serves the
+GGUF and safetensors files `ml-stack-models list` shows (or only those under the `--models-dir`
+folders), by file name with the repository, size and sha256, under the sharing levels above.
+Nothing outside the model roots is served: each path is resolved at every request and a symlink
+or `..` that leaves the roots is refused; a copy sentinel holds is neither listed nor served. A
+model is `owner` unless `--sharing NAME=open` (or `REPO=open`) says it is not gated, so by default
+it goes only to your own devices and only once you accepted its licence on this machine (the
+licence is the repository unless `--licence` says otherwise; you confirm it once at a terminal).
+The manifest is signed with the owner key and its serial only rises.
+
+**What the downloading device keeps.** An append-only local record
+(`<state>/onboard/peer-downloads.jsonl`, `ml_stack.hub.origins`): when, which file (name, size,
+sha256), which peer, and for an `owner` model the acceptance it relied on (the licence, who
+accepted it and when, as the serving device reported it). `ml-stack-models list` shows it in the
+FROM column and in `--json` as `from_peer`.
 
 **Turning it off.** `ml-stack-models pull --no-peers` or `fetch --no-peers` (or
 `pull(..., peers=False)`) for one pull; `ML_STACK_NO_PEERS=1` for a shell; `ml-stack fleet peers off`
