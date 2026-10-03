@@ -128,7 +128,8 @@ def main() -> int:
     parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy"])
     parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
-    parser.add_argument("-n", "--workers", type=int, default=4)
+    parser.add_argument("-n", "--workers", type=int, default=0,
+                        help="xdist workers: a ceiling, or 0 = auto (default): what the machine can spare, a fair share when others are queued")
     parser.add_argument("--base", default=BASE, help="branch quick diffs against")
     parser.add_argument("--slow", action="store_true", help="quick: include slow tests")
     parser.add_argument("--explain", action="store_true", help="quick: say what selected what")
@@ -136,8 +137,8 @@ def main() -> int:
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
-    with testslots.lease(max(1, args.workers), label=f"ml-stack: {args.tier}") as got:
-        args.workers = min(args.workers, got.workers)
+    with testslots.lease(max(0, args.workers), label=f"ml-stack: {args.tier}") as got:
+        args.workers = got.workers if args.workers <= 0 else min(args.workers, got.workers)
         if args.tier == "quick":
             return quick(args, rest)
         return run(pytest_command(args.workers, *tiers[args.tier], *rest))

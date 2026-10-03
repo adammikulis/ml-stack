@@ -39,6 +39,8 @@ arrays = ["numpy>=1.24"]
 torch = ["torch>=2.14"]
 transformers = ["transformers>=5.17"]
 mlx = ["mlx>=0.32.2"]
+# `ml_stack.memory`: the agent's facts are encrypted with AES-256-GCM under a key in the OS keystore
+memory = ["cryptography>=50", "keyring>=24"]
 # `ml_stack.spec`: tree speculative decoding over mlx-lm's hybrid models, which it drives
 # through their own layer classes
 spec = ["mlx>=0.32.2", "mlx-lm>=0.31.3", "mlx-vlm>=0.7.1", "numpy>=1.24", "huggingface_hub>=1.32"]

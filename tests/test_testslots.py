@@ -189,3 +189,38 @@ def test_a_killed_heavy_test_frees_its_lane(tmp_path):
     holder.send_signal(signal.SIGKILL)
     assert waiter.wait(timeout=30) == 0
     holder.wait(timeout=10)
+
+
+def _grants(tmp_path):
+    return {r["label"]: r["workers"] for r in _records(tmp_path)}
+
+
+def test_an_auto_run_on_an_idle_machine_gets_the_whole_budget(tmp_path):
+    """`want=0` is auto: a lone run is not capped by a default; the load-aware budget is the only limit."""
+    assert _spawn(tmp_path, 12, 0, 0.1, "alone").wait(timeout=60) == 0
+    assert _grants(tmp_path) == {"alone": 12}
+
+
+def test_an_auto_run_takes_only_what_a_busy_machine_can_spare(tmp_path):
+    holder = _spawn(tmp_path, 14, 8, 1.5, "holder")
+    time.sleep(0.5)
+    auto = _spawn(tmp_path, 14, 0, 0.1, "auto")
+    assert holder.wait(timeout=60) == 0 and auto.wait(timeout=60) == 0
+    got = _grants(tmp_path)
+    assert got["holder"] == 8 and got["auto"] == 6, got      # 14 - 8 in use: neither the whole budget nor a fixed default
+
+
+def test_a_fixed_want_is_still_a_ceiling_not_a_target(tmp_path):
+    assert _spawn(tmp_path, 12, 4, 0.1, "fixed").wait(timeout=60) == 0
+    assert _grants(tmp_path) == {"fixed": 4}
+
+
+def test_queued_auto_runs_share_instead_of_the_first_taking_everything(tmp_path):
+    blocker = _spawn(tmp_path, 10, 10, 1.2, "blocker")
+    time.sleep(0.4)
+    a = _spawn(tmp_path, 10, 0, 0.4, "a")
+    time.sleep(0.1)
+    b = _spawn(tmp_path, 10, 0, 0.4, "b")
+    assert all(p.wait(timeout=60) == 0 for p in (blocker, a, b))
+    got = _grants(tmp_path)
+    assert got["a"] == 5 and got["b"] == 5, got               # both waiting when the blocker ended: half each

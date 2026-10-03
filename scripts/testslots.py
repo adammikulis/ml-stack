@@ -150,12 +150,18 @@ class Lease:
 @contextlib.contextmanager
 def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True)
           ) -> Iterator[Lease]:
-    """Wait for `minimum`..`want` workers of the shared budget; yield what was granted. Released on exit or death."""
-    want = max(1, int(want))
-    minimum = max(1, min(int(minimum if minimum is not None else min(2, want)), want))
+    """Wait for `minimum`..`want` workers of the shared budget; yield what was granted. Released on exit or death.
+
+    ``want=0`` is *auto*: take what the machine can spare, never more than a fair share when other runs are
+    running or queued (budget / runs). A lone run on an idle machine gets the whole load-aware budget; the budget
+    itself falls with the load, so a busy machine grants less. A fixed ``want`` is a ceiling, not a target."""
+    auto = int(want) <= 0
+    want = 0 if auto else max(1, int(want))
+    minimum = max(1, int(minimum if minimum is not None else 2)) if auto \
+        else max(1, min(int(minimum if minimum is not None else min(2, want)), want))
     if os.environ.get("DEV_TEST_SLOTS", "").lower() == "off":
         say("testslots: queue disabled by DEV_TEST_SLOTS=off")
-        yield Lease(want, 0.0)
+        yield Lease(want or max(1, (os.cpu_count() or 4) // 2), 0.0)
         return
     d = slots_dir()
     path = d / f"{time.time_ns()}-{os.getpid()}.slot"
@@ -176,7 +182,11 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                 used = sum(s.granted for s in slots)
                 head = waiting[0].path if waiting else None
                 if head == path and cap - used >= minimum:
-                    granted = min(want, cap - used)
+                    if auto:
+                        runs = len([x for x in slots if x.granted > 0]) + len(waiting)
+                        granted = min(cap - used, max(minimum, cap // max(1, runs)))
+                    else:
+                        granted = min(want, cap - used)
                     me["granted"] = granted
                     path.write_text(json.dumps(me))
                     break
@@ -186,7 +196,7 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                                    f"({used} in use); see `python scripts/testslots.py status`")
             if time.time() - last_note > 20:
                 last_note = time.time()
-                say(f"testslots: waiting for {minimum}-{want} workers ({used}/{cap} in use, "
+                say(f"testslots: waiting for {minimum}-{want or 'auto'} workers ({used}/{cap} in use, "
                     f"{len(ahead)} run(s) ahead: {', '.join(map(str, ahead)) or 'none'})")
             time.sleep(0.4)
         yield Lease(granted, time.time() - t0)
@@ -244,7 +254,7 @@ def _run_command(argv: list[str]) -> int:
     import argparse
     import subprocess
     ap = argparse.ArgumentParser(prog="testslots run")
-    ap.add_argument("--want", type=int, default=4)
+    ap.add_argument("--want", type=int, default=0, help="workers wanted as a ceiling (0 = auto: what the machine can spare, a fair share)")
     ap.add_argument("--min", dest="minimum", type=int, default=None)
     ap.add_argument("--label", default="command")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -274,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     for s in st["running"]:
         print(f"  running  {s['granted']:>2}  pid {s['pid']:<7} {s['label']}")
     for s in st["waiting"]:
-        print(f"  waiting  {s['minimum']}-{s['want']}  pid {s['pid']:<7} {s['label']}")
+        print(f"  waiting  {s['minimum']}-{s['want'] or 'auto'}  pid {s['pid']:<7} {s['label']}")
     return 0
 
 

@@ -12,12 +12,14 @@ from ml_stack.guard.untrusted import fold, injection_markers
 from ml_stack.sentinel.human import agent_may
 from ml_stack.sentinel.redaction import redact
 
-__all__ = ["BUILD_BOUND", "KINDS", "MAX_FACT_CHARS", "SOURCES", "STALE_DAYS", "Fact", "Refused",
+__all__ = ["BUILD_BOUND", "KINDS", "MAX_FACTS", "MAX_FACT_CHARS", "SOURCES", "STALE_DAYS", "STATES", "Fact", "Refused",
            "check", "clean"]
 
 KINDS = ("preference", "machine", "result", "note")
 SOURCES = ("user-said", "agent-observed", "tool-result")
 MAX_FACT_CHARS = 400
+MAX_FACTS = 300
+STATES = ("current", "superseded")
 BUILD_BOUND = frozenset({"machine", "result"})
 """Kinds that describe a particular llama.cpp build and go stale when it changes."""
 STALE_DAYS = {"machine": 90.0, "result": 30.0}
@@ -40,6 +42,11 @@ class Fact:
     last_confirmed: float
     confirm_count: int = 1
     scope: dict[str, str] = field(default_factory=dict)
+    entities: list[str] = field(default_factory=list)
+    state: str = "current"
+    links: list[str] = field(default_factory=list)
+    realm: str = ""
+    """``user`` or ``project`` in a merged view; empty in a store's own facts."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,11 +58,13 @@ class Fact:
             scope = {str(k): str(v) for k, v in dict(row.get("scope") or {}).items()}
             fact = cls(str(row["id"]), str(row["text"]), str(row["kind"]), str(row["source"]),
                        float(row["created"]), float(row["last_confirmed"]),
-                       int(row.get("confirm_count", 1)), scope)
+                       int(row.get("confirm_count", 1)), scope,
+                       [str(e) for e in row.get("entities") or []], str(row.get("state", "current")),
+                       [str(x) for x in row.get("links") or []])
         except (KeyError, TypeError, ValueError) as exc:
             raise Refused(f"a stored fact is malformed ({exc})") from exc
-        if fact.kind not in KINDS or fact.source not in SOURCES:
-            raise Refused("a stored fact has an unknown kind or source")
+        if fact.kind not in KINDS or fact.source not in SOURCES or fact.state not in STATES:
+            raise Refused("a stored fact has an unknown kind, source or state")
         return fact
 
 
