@@ -123,6 +123,17 @@ def test_a_quarantined_model_cannot_be_leased_until_a_person_releases_it(broker,
     broker.release(grant.lease)
 
 
+def test_a_quarantined_model_is_not_shared_from_a_server_that_is_still_up(broker, model):
+    first = broker.lease(ask(model), timeout=30)
+    node = sentinel.default()
+    node.store.on_quarantine["model"] = []
+    node.store.quarantine(("model", str(model)), "seen misbehaving", {}, Holding())
+    assert pid_exists(broker.servers[first.port].pid)
+    with pytest.raises(BrokerError, match="quarantined"):
+        broker.lease(ask(model), timeout=30)
+    assert len(broker.servers[first.port].holders) == 1
+
+
 def test_quarantining_a_model_stops_the_servers_started_for_it(broker, manager, model):
     grant = broker.lease(ask(model), timeout=30)
     pid = broker.servers[grant.port].pid
