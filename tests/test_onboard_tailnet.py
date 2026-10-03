@@ -55,7 +55,7 @@ def fake(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
     monkeypatch.setattr(tailnet, "MAC_APP_CLI", str(tmp_path / "no-such-app"))
 
-    class Fake:
+    class Script:
         def say(self, doc=None, mode=""):
             (bin_dir / "out.json").write_text(doc if isinstance(doc, str) else json.dumps(doc))
             (bin_dir / "mode").write_text(mode)
@@ -66,7 +66,7 @@ def fake(tmp_path, monkeypatch):
 
         def env(self):
             return (bin_dir / "env.log").read_text()
-    return Fake()
+    return Script()
 
 
 def test_a_running_client_gives_the_addresses_and_the_peers(fake):
