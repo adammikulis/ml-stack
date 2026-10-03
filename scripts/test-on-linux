@@ -88,7 +88,7 @@ fi
 
 # --init: without a real pid 1 the suite's own parent is pid 0, and a server owned by a
 # process that does not exist is an orphan to stop.
-exec docker run --rm -i --init \
+docker run --rm -i --init \
   ${PLATFORM:+--platform "$PLATFORM"} \
   -v "$STAGE/repo":/src:ro \
   -v "$VOLUME":/venv \
