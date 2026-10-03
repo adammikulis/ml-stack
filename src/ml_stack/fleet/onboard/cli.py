@@ -45,6 +45,7 @@ from .share_cli import add_share, cmd_share
 from .signing import KeyStoreError, SigningKeys
 from .signing_cli import add_signing, cmd_signing, confirm_signing
 from .ssh_cli import add_ssh, cmd_ssh
+from .trusted import remember
 from .transfer import (
     Downloader,
     NotShareable,
@@ -406,6 +407,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         manifest = verify(raw, base64.b64decode(trust["signing_key"]),
                           min_serial=int(trust.get("serial", 0)),
                           revoked_keys=trust.get("revoked", []))
+        remember(raw, base64.b64decode(trust["signing_key"]))
         staged = []
         for name in args.names:
             got = Downloader(manifest, [peer], Path(args.into) if args.into
