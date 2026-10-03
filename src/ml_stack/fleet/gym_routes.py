@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import time
 
+from ml_stack.gym import catalogue, manager
+
 
 class GymRoutes:
     """Environment catalogue, snapshots and session controls."""
@@ -13,9 +15,14 @@ class GymRoutes:
         if not self.path.startswith("/ui/gym"):
             return super().route()
         try:
-            from ml_stack.gym import catalogue, manager
+            environment = self.ui.environment
+            if environment is not None and environment.exists:
+                manager.configure(environment.python)
             if self.path == "/ui/gym/catalogue" and self.method == "GET":
                 self.send(200, {"environments": catalogue()})
+                return True
+            if self.path == "/ui/gym/sessions" and self.method == "GET":
+                self.send(200, {"sessions": manager.list()})
                 return True
             if self.path == "/ui/gym/sessions" and self.method == "POST":
                 req = self.body()

@@ -7,6 +7,8 @@ import json
 import shlex
 from pathlib import Path
 
+from ml_stack.contracts import recipes
+
 from .files import safe_relpath
 from .jobs import DaemonError
 
@@ -54,7 +56,6 @@ class WorkspaceRoutes:
     def _workspace(self) -> bool:
         runner = self.ui.runner
         if self.path == "/ui/workspace/recipes" and self.method == "GET":
-            from ml_stack.contracts import recipes
             self.send(200, {"recipes": recipes()})
             return True
         if self.path == "/ui/workspace/commands" and self.method == "GET":
