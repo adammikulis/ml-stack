@@ -14,6 +14,12 @@ def load_policy(checkpoint, env=None):
     source = Path(checkpoint).expanduser().resolve(strict=True)
     if not source.is_relative_to(artifact_root().resolve()):
         raise ValueError("Only checkpoints in the local Gym artifact directory may be loaded")
+    manifest_path = source.parent / "manifest.json"
+    if env is not None and hasattr(env.unwrapped, "steering_magnitude") and manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text())
+        trained = float(manifest.get("config", {}).get("steering_magnitude", 1.))
+        if trained != env.unwrapped.steering_magnitude:
+            raise ValueError(f"Car checkpoint requires steering_magnitude={trained}; use its training configuration")
     return PPO.load(source, env=env, device="cpu")
 
 
