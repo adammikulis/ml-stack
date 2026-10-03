@@ -139,3 +139,8 @@ did not contain it.
 ## The red-team command used the real home (found and fixed)
 
 `python -m ml_stack.redteam run` ran its fleet daemon and attacks in whatever `ML_STACK_HOME` was current. Run by hand it quarantined `127.0.0.1` in the real sentinel store (30 forged requests) and left a decoy `.env`, `cluster.key.old` and `credentials.toml.bak` in the real `~/.ml-stack`. The tests were isolated, so the suite did not show it. The run now swaps `ML_STACK_HOME` for a directory inside its scratch space from before the daemon starts (`redteam.lab.own_home`), and `tests/test_redteam_lab_home.py` runs the command with a throwaway `HOME` and fails if anything appears under it.
+
+## The pointer prompt put the raw state between its tags (found and fixed)
+
+`pointer_prompt.render` wrote the state between `<state>` and `</state>` as given, so a state containing `</state>`, `<question type="choice">` or `<answer>` changed the structure the pointer decider reads; only callers that ran `prepare()` first were safe, and `answer` was not in the shared tag pattern. `render` now passes the state through `closed()` itself, `answer` is in `STATE_TAGS`, the pattern allows space around the slash (`< / STATE >`), and `closed()` deletes control characters instead of replacing them with a space. Not covered: homoglyphs that NFKC leaves alone (Cyrillic or Greek letters inside a tag name), HTML-entity spellings (`&lt;/state&gt;`), and the question and option text, which callers define. `echoes_prompt` now also flags a tool result containing an `<answer>` tag. Tests: `tests/test_decide_questions.py` (22 spellings through the pointer prompt, the logprob prompt, the guard judge and the guard states).
+

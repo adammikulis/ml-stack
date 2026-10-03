@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ml_stack.decide.logprob import closed
 from ml_stack.decide.types import Option
 
 HEADER = "Select exactly one option."
@@ -20,10 +21,10 @@ class Rendered:
 def render(question: str, state: str, options: tuple[Option, ...]) -> Rendered:
     """The prompt for a choice question: the state, then the numbered options, then ``<answer>``.
 
-    Each option is one line, ``1. name - description``, with whitespace in the description
+    The state goes through ``closed`` first. Each option is one line, ``1. name - description``, with whitespace in the description
     collapsed so that a line is a span.
     """
-    prefix = (f"<state>\n{state}\n</state>\n"
+    prefix = (f"<state>\n{closed(state)}\n</state>\n"
               f'<question type="choice">\n{HEADER}\n{question}\n<options>\n')
     lines, spans, cursor = [], [], len(prefix)
     for i, option in enumerate(options):
