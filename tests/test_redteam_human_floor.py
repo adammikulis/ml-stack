@@ -169,8 +169,8 @@ def test_no_tool_an_agent_is_offered_is_a_human_only_action():
     from ml_stack import chat, do, mcp
     floor = ("quarantine", "purge", "rekey", "approve", "mint", "revoke", "rotate", "baseline",
              "unquarantine", "forget", "signing", "scan_policy", "sentinel", "security")
-    session = chat.Chat(None, do.Person(io.StringIO(""), io.StringIO("")), role="runner",
-                        extension=chat.extensions())
+    person = do.Person(io.StringIO(""), io.StringIO(""))
+    session = chat.Chat(None, person, role="runner", extension=chat.extensions(person))
     offered = [s["function"]["name"] for s, _ in session.offered] + [t.name for t in mcp.TOOLS]
     named = [n for n in offered if any(word in n.lower() for word in floor)]
     assert named == []
