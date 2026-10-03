@@ -24,6 +24,9 @@ from ml_stack.httpguard import Refused
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
 
+METADRIVE_SOURCE = ("metadrive-simulator @ git+https://github.com/metadriverse/"
+                    "metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db")
+
 PYTHON = "3.13"
 STANDALONE = ("https://api.github.com/repos/astral-sh/"
               "python-build-standalone/releases/latest")
@@ -84,10 +87,10 @@ CATALOG: tuple[Library, ...] = (
             ("ml-stack[decide-pointer]",), size_mb=500),
     Library("gym", "All live environments",
             "MetaDrive, RWARE, SUMO-RL and Stable-Baselines3 including traffic-driving co-simulation.",
-            ("ml-stack[gym]",), size_mb=1400),
+            ("ml-stack[gym]", METADRIVE_SOURCE), size_mb=1400),
     Library("gym-driving", "Smart car · MetaDrive",
             "Native 3D driving, lidar, traffic and vehicle dynamics.",
-            ("ml-stack[gym-driving]",), size_mb=800),
+            ("ml-stack[gym-driving]", METADRIVE_SOURCE), size_mb=800),
     Library("gym-warehouse", "Warehouse · RWARE",
             "Cooperative warehouse robot environments.",
             ("ml-stack[gym-warehouse]",), size_mb=30),
