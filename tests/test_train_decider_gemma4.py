@@ -13,12 +13,14 @@ from ml_stack.decide import pointer_prompt
 from ml_stack.decide.pins import BASES, GEMMA4_E2B
 from tests.test_train_decider import OPTS, run_tiny, tiny_cases
 
-TEXT = dict(vocab_size=300, vocab_size_per_layer_input=300, hidden_size=32, intermediate_size=64,
-            num_hidden_layers=6, num_attention_heads=4, num_key_value_heads=1, head_dim=8,
-            global_head_dim=16, hidden_size_per_layer_input=8, num_kv_shared_layers=2,
-            layer_types=["sliding_attention"] * 2 + ["full_attention"]
-            + ["sliding_attention"] * 2 + ["full_attention"],
-            sliding_window=8, max_position_embeddings=512, use_double_wide_mlp=True)
+TEXT = {
+    "vocab_size": 300, "vocab_size_per_layer_input": 300, "hidden_size": 32,
+    "intermediate_size": 64, "num_hidden_layers": 6, "num_attention_heads": 4,
+    "num_key_value_heads": 1, "head_dim": 8, "global_head_dim": 16,
+    "hidden_size_per_layer_input": 8, "num_kv_shared_layers": 2,
+    "layer_types": ["sliding_attention"] * 2 + ["full_attention"]
+    + ["sliding_attention"] * 2 + ["full_attention"],
+    "sliding_window": 8, "max_position_embeddings": 512, "use_double_wide_mlp": True}
 
 
 @pytest.fixture
@@ -42,11 +44,11 @@ def tiny_gemma(tmp_path):
     text = {**TEXT, "vocab_size": len(words), "vocab_size_per_layer_input": len(words)}
     config = transformers.Gemma4Config(
         text_config=text,
-        vision_config=dict(hidden_size=16, intermediate_size=32, num_hidden_layers=1,
-                           num_attention_heads=2, num_key_value_heads=2, head_dim=8,
-                           global_head_dim=8),
-        audio_config=dict(hidden_size=16, num_hidden_layers=1, num_attention_heads=2,
-                          output_proj_dims=16, conv_kernel_size=5))
+        vision_config={"hidden_size": 16, "intermediate_size": 32, "num_hidden_layers": 1,
+                       "num_attention_heads": 2, "num_key_value_heads": 2, "head_dim": 8,
+                       "global_head_dim": 8},
+        audio_config={"hidden_size": 16, "num_hidden_layers": 1, "num_attention_heads": 2,
+                      "output_proj_dims": 16, "conv_kernel_size": 5})
     transformers.Gemma4ForConditionalGeneration(config).save_pretrained(str(base))
     return base
 
@@ -130,3 +132,95 @@ def test_the_net_scores_each_option_against_the_answer_position_with_a_padded_ba
             hidden = _hidden(torso, ids, torch.ones_like(ids))[0]
             want = head(hidden[-1:], hidden[r["spots"]].unsqueeze(0))[0]
             assert torch.allclose(batched[i], want, atol=1e-4)
+
+
+def _step_grads(tiny_gemma, micros, *, checkpoint):
+    """Adapter and head gradients of one optimiser step over ``micros`` (rate 0, nothing moves)."""
+    import torch
+
+    from ml_stack.decide.pointer import build_head, load_torso
+    from ml_stack.train.decider import (
+        DeciderStep,
+        _loss,
+        attach_features,
+        build_net,
+        checkpoint_activations,
+    )
+    from ml_stack.train.lora import Lora
+    torch.manual_seed(0)
+    plain = load_torso(tiny_gemma, None, "float32", "cpu")
+    from ml_stack.train.decider import Settings
+    assert checkpoint_activations(plain, Settings(grad_checkpoint=checkpoint), "cpu") == checkpoint
+    torso = attach_features(plain, Lora(4, 8, 0.0, ("q_proj", "v_proj", "gate_proj")))
+    for name, p in torso.named_parameters():
+        if "lora_B" in name:
+            torch.nn.init.normal_(p, std=0.1)
+    net = build_net(torch, torso, build_head(torch, 32, 16))
+    opt = torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=0.0)
+    step = DeciderStep(net, opt, _loss)
+    loss, applied = step(micros)
+    assert applied
+    grads = {n: p.grad.clone() for n, p in net.named_parameters() if p.grad is not None}
+    return loss, grads, step
+
+
+def _rows(tiny_gemma):
+    from transformers import AutoTokenizer
+
+    from ml_stack.decide.cases import Case
+    from ml_stack.train.decider import encode
+    tok = AutoTokenizer.from_pretrained(tiny_gemma, local_files_only=True)
+    out = []
+    for i in range(4):
+        case = Case("Is the number even?", "the number is " + "1000 " * (i * 3) + str(i), OPTS,
+                    "yes" if i % 2 == 0 else "no")
+        out.append((encode(tok, case, [0, 1], 4096), case.label_index))
+    return out
+
+
+def _micros(rows, size):
+    import torch
+
+    from ml_stack.train.decider import collate
+    return [collate(torch, [r for r, _ in rows[k:k + size]], [y for _, y in rows[k:k + size]],
+                    "cpu") for k in range(0, len(rows), size)]
+
+
+def test_checkpointed_gradients_equal_plain_ones_through_shared_kv_layers(tiny_gemma):
+    import torch
+    rows = _rows(tiny_gemma)
+    plain_loss, plain, _ = _step_grads(tiny_gemma, _micros(rows, 4), checkpoint=False)
+    ckpt_loss, ckpt, _ = _step_grads(tiny_gemma, _micros(rows, 4), checkpoint=True)
+    assert plain_loss == pytest.approx(ckpt_loss, abs=1e-5)
+    assert plain.keys() == ckpt.keys() and any(float(g.abs().sum()) > 0 for g in plain.values())
+    for name in plain:
+        assert torch.allclose(plain[name], ckpt[name], atol=1e-5, rtol=1e-4), name
+
+
+def test_accumulating_micro_batches_equals_one_larger_batch(tiny_gemma):
+    import torch
+    rows = _rows(tiny_gemma)
+    whole_loss, whole, _ = _step_grads(tiny_gemma, _micros(rows, 4), checkpoint=False)
+    for size in (2, 1):
+        loss, got, _ = _step_grads(tiny_gemma, _micros(rows, size), checkpoint=False)
+        assert loss == pytest.approx(whole_loss, abs=1e-5)
+        for name in whole:
+            assert torch.allclose(whole[name], got[name], atol=1e-4, rtol=1e-3), (size, name)
+
+
+def test_a_step_draws_batch_times_accum_cases_ordered_by_length(tiny_gemma):
+    from transformers import AutoTokenizer
+
+    from ml_stack.train.decider import Settings, draw
+    tok = AutoTokenizer.from_pretrained(tiny_gemma, local_files_only=True)
+    s = Settings(batch_size=2, accum=3, max_tokens=4096)
+    micros = draw(tiny_cases(), tok, s, "cpu", 0)
+    assert [m["ids"].shape[0] for m in micros] == [2, 2, 2]
+    lengths = [int(n) for m in micros for n in m["mask"].sum(1)]
+    assert lengths == sorted(lengths)
+    assert draw(tiny_cases(), tok, s, "cpu", 0)[0]["ids"].tolist() == micros[0]["ids"].tolist()
+
+
+def test_the_step_reports_its_memory_for_the_metrics_log(tiny_gemma):
+    *_, step = _step_grads(tiny_gemma, _micros(_rows(tiny_gemma), 2), checkpoint=False)
+    assert set(step.metrics()) == {"peak_gb", "driver_gb"}

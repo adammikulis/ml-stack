@@ -45,7 +45,7 @@ from ml_stack.train.lora import (
     trainable_parameters,
 )
 from ml_stack.train.schedule import warmup_cosine
-from ml_stack.train.step import TorchStep
+from ml_stack.train.step import TorchStep, is_finite
 from ml_stack.train.trainer import Trainer
 
 __all__ = ["Result", "Settings", "check_inputs", "train"]
@@ -72,6 +72,10 @@ class Settings:
     device: str = "auto"
     dtype: str = "bfloat16"
     max_tokens: int = 1024
+    accum: int = 1
+    """Micro-batches of ``batch_size`` cases per optimiser step."""
+    grad_checkpoint: bool | None = None
+    """Recompute activations in the backward pass; ``None`` is on for every device but the CPU."""
     calibrate_fraction: float = 0.15
     test_fraction: float = 0.25
     download: bool = False
@@ -158,6 +162,15 @@ def attach_features(model: Any, lora: Lora) -> Any:
     return peft.get_peft_model(model, config)
 
 
+def checkpoint_activations(model: Any, s: Settings, device: str) -> bool:
+    """Turn on gradient checkpointing for ``model`` when the settings and device ask for it."""
+    if not (device != "cpu" if s.grad_checkpoint is None else s.grad_checkpoint):
+        return False
+    inner = model.get_base_model() if hasattr(model, "get_base_model") else model
+    inner.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    return True
+
+
 def build_net(torch: Any, torso: Any, head: Any) -> Any:
     """The module a run trains: torso, then the pointer head over its hidden states."""
     nn = torch.nn
@@ -181,17 +194,67 @@ def build_net(torch: Any, torso: Any, head: Any) -> Any:
 
 
 class DeciderStep(TorchStep):
-    """A torch step that sets each group's rate from its ``scale`` and checkpoints only what
-    trains."""
+    """A torch step over a list of micro-batches whose gradients add up to one optimiser step,
+    that sets each group's rate from its ``scale`` and checkpoints only what trains."""
 
     name = "torch"
+    peak = 0
 
     def learning_rate(self, lr: float) -> None:
         for group in self.opt.param_groups:
             group["lr"] = lr * group.get("scale", 1.0)
 
+    def __call__(self, batch: list[dict[str, Any]]) -> tuple[float, bool]:
+        torch = _torch()
+        self.model.train()
+        self.opt.zero_grad(set_to_none=True)
+        total = sum(len(b["labels"]) for b in batch)
+        value, self.peak = 0.0, 0
+        for micro in batch:
+            loss = self.loss(self.model, micro) * (len(micro["labels"]) / total)
+            self.peak = max(self.peak, allocated_bytes(torch))
+            value += float(loss.detach())
+            if not is_finite(value):
+                return value, False
+            loss.backward()
+        if self.clip:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+        self.opt.step()
+        return value, True
+
+    def metrics(self) -> dict[str, float]:
+        """Device memory in GB: the most allocated after a forward pass this step, and what the
+        driver holds."""
+        return {"peak_gb": round(self.peak / 1e9, 2),
+                "driver_gb": round(driver_bytes(_torch()) / 1e9, 2)}
+
     def parameters(self) -> dict[str, Any]:
         return {k: v.detach().cpu() for k, v in self.model.named_parameters() if v.requires_grad}
+
+
+def allocated_bytes(torch: Any) -> int:
+    """Bytes the tensors on the accelerator occupy now (0 on the CPU)."""
+    if torch.cuda.is_available():
+        return int(torch.cuda.memory_allocated())
+    return int(torch.mps.current_allocated_memory()) if torch.backends.mps.is_available() else 0
+
+
+def driver_bytes(torch: Any) -> int:
+    """Bytes the accelerator's driver holds for this process (0 on the CPU)."""
+    if torch.cuda.is_available():
+        return int(torch.cuda.memory_reserved())
+    return int(torch.mps.driver_allocated_memory()) if torch.backends.mps.is_available() else 0
+
+
+def release_memory() -> None:
+    """Collect garbage and hand cached accelerator memory back."""
+    import gc
+    torch = _torch()
+    gc.collect()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def _loss(model: Any, batch: dict[str, Any]) -> Any:
@@ -423,13 +486,33 @@ def load_model(s: Settings, device: str) -> Loaded:
     tok = AutoTokenizer.from_pretrained(tok_dir, local_files_only=True, trust_remote_code=False)
     if start is not None:
         torso = load_torso(base_dir, start.lora_dir, s.dtype, device, trainable=True)
+        checkpoint_activations(torso, s, device)
         state = load_file(str(start.head))
         head = build_head(torch, state["q.weight"].shape[1], start.pointer_dim)
         head.load_state_dict(state)
     else:
-        torso = attach_features(load_torso(base_dir, None, s.dtype, device), s.lora)
+        plain = load_torso(base_dir, None, s.dtype, device)
+        checkpoint_activations(plain, s, device)
+        torso = attach_features(plain, s.lora)
         head = build_head(torch, torso.config.hidden_size, 256)
     return Loaded(tok, tok_dir, build_net(torch, torso, head.to(device).float()), start)
+
+
+def draw(cases: Sequence[Case], tok: Any, s: Settings, device: str, step: int
+         ) -> list[dict[str, Any]]:
+    """The micro-batches of one optimiser step: ``batch_size * accum`` cases drawn with their
+    options shuffled, ordered by length so a short case is not padded to a long one's width."""
+    rng = random.Random(s.seed * 1_000_003 + step)  # noqa: S311
+    rows, labels = [], []
+    for c in (cases[rng.randrange(len(cases))] for _ in range(s.batch_size * s.accum)):
+        order = list(range(len(c.options)))
+        rng.shuffle(order)
+        rows.append(encode(tok, c, order, s.max_tokens))
+        labels.append(order.index(c.label_index))
+    ranked = sorted(range(len(rows)), key=lambda i: len(rows[i]["ids"]))
+    return [collate(_torch(), [rows[i] for i in ranked[k:k + s.batch_size]],
+                    [labels[i] for i in ranked[k:k + s.batch_size]], device)
+            for k in range(0, len(ranked), s.batch_size)]
 
 
 def fit_model(loaded: Loaded, cases: Sequence[Case], s: Settings, out: Path, device: str
@@ -442,21 +525,12 @@ def fit_model(loaded: Loaded, cases: Sequence[Case], s: Settings, out: Path, dev
                                    {"params": list(net.head.parameters()),
                                     "scale": s.head_lr_scale}], lr=s.lr, weight_decay=0.0)
 
-    def batch(step: int) -> dict[str, Any]:
-        rng = random.Random(s.seed * 1_000_003 + step)  # noqa: S311
-        rows, labels = [], []
-        for c in (cases[rng.randrange(len(cases))] for _ in range(s.batch_size)):
-            order = list(range(len(c.options)))
-            rng.shuffle(order)
-            rows.append(encode(tok, c, order, s.max_tokens))
-            labels.append(order.index(c.label_index))
-        return collate(torch, rows, labels, device)
-
     trainer = Trainer(net, optimizer, _loss, out=out / "run",
                       step=DeciderStep(net, optimizer, _loss, clip_grad_norm=1.0))
-    report = trainer.fit(batch, steps=s.steps, schedule=warmup_cosine(
-        s.lr, total_steps=s.steps, warmup_steps=max(1, s.steps // 10)), resume=False,
-        write_checkpoints=False, log_every=1)
+    report = trainer.fit(
+        lambda step: draw(cases, tok, s, device, step), steps=s.steps,
+        schedule=warmup_cosine(s.lr, total_steps=s.steps, warmup_steps=max(1, s.steps // 10)),
+        resume=False, write_checkpoints=False, log_every=1)
     shutil.copy(out / "run" / "metrics.jsonl", out / "train_log.jsonl")
     shutil.rmtree(out / "run", ignore_errors=True)
     return [h["loss"] for h in report.history]
@@ -553,6 +627,7 @@ def train(cases: Sequence[Case], out: Path | str, settings: Settings | None = No
             else gpu.hold(f"train decider {s.name}", wait_s=s.wait_s))
     with hold:
         base_name, base = baseline_of(spec, fit_cases, test_cases, s)
+        release_memory()
         _torch().manual_seed(s.seed)
         loaded = load_model(s, device)
         say(f"training {trainable_parameters(loaded.net)} parameters on {len(fit_cases)} cases "

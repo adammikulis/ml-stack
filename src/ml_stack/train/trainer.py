@@ -256,8 +256,9 @@ class Trainer:
                 if on_step is not None:
                     on_step(step, loss)
                 if log_every and step % log_every == 0:
+                    extra = getattr(self.step, "metrics", dict)()
                     log.step(step, loss=loss, lr=rate,
-                             steps_per_s=round(throughput.per_second, 3))
+                             steps_per_s=round(throughput.per_second, 3), **extra)
                     report.history.append({"step": step, "loss": loss, "lr": rate})
 
                 if next_eval is not None and eval_every and (step + 1) % eval_every == 0:
