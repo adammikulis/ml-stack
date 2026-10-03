@@ -1,5 +1,6 @@
 """Native simulation workers and recorded controller telemetry."""
 
+import base64
 import json
 import logging
 import queue
@@ -10,6 +11,7 @@ from ml_stack.decide.pins import STRANDS
 from ml_stack.decide.pointer import PointerDecider
 from ml_stack.decide.sources import local_source
 from ml_stack.gym.adapters import actions, json_value, make_environment, render_state
+from ml_stack.gym.observations import decision_state
 from ml_stack.gym.paths import artifact_root
 from ml_stack.gym.training import load_policy
 
@@ -35,9 +37,10 @@ def decision_controller(checkpoint=None):
 
 def select_action(controller, observation, choices, manual, policy=None):
     """Select an action and record its decision inputs."""
-    names, native_actions, rng = choices
+    names, native_actions, rng, *named = choices
     began = time.perf_counter()
     detail = {"observation": json_value(observation), "probabilities": None}
+    detail["state"] = named[0] if named else detail["observation"]
     if controller == "manual":
         selected = manual
     elif controller == "random":
@@ -51,7 +54,7 @@ def select_action(controller, observation, choices, manual, policy=None):
     elif controller == "decider":
         if policy is None:
             raise ValueError("Decision controller is not loaded")
-        answer = policy.decide("Choose the next safe environment action", detail["observation"], names)
+        answer = policy.decide("Choose the next safe environment action", detail["state"], names)
         detail.update(probabilities=dict(answer.scores), model=answer.model, backend=answer.backend,
                       abstained=answer.abstained)
         if answer.abstained:
@@ -84,6 +87,7 @@ class Simulation:
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / "manifest.json").write_text(json.dumps(settings))
         config = dict(settings["config"])
+        self.record_frames = bool(config.pop("record_frames", False))
         checkpoint = config.pop("checkpoint", None)
         config.pop("decision_checkpoint", None)
         if self.environment == "car":
@@ -119,7 +123,8 @@ class Simulation:
             self.running = False
             self.state["status"] = "completed"
             return
-        choices = self.names, self.native_actions, self.env.np_random
+        named = decision_state(self.environment, self.env, self.observation)
+        choices = self.names, self.native_actions, self.env.np_random, named
         action, decision = select_action(self.controller, self.observation, choices, self.manual, self.policy)
         previous = json_value(self.observation)
         self.observation, reward, terminated, truncated, info = self.env.step(action)
@@ -136,8 +141,15 @@ class Simulation:
         if terminated or truncated:
             self.running = False
             self.state["status"] = "completed"
+        recorded = {**self.state, "frame": None}
+        if self.record_frames and frame:
+            frames = self.path / "frames"
+            frames.mkdir(exist_ok=True)
+            target = frames / f"{self.state['episode_id']}-{self.state['sequence']}.png"
+            target.write_bytes(base64.b64decode(frame))
+            recorded["frame_path"] = str(target)
         with (self.path / "trajectory.jsonl").open("a") as handle:
-            handle.write(json.dumps(json_value(self.state)) + "\n")
+            handle.write(json.dumps(json_value(recorded)) + "\n")
 
     def command(self, command, payload):
         if command == "play":
@@ -217,5 +229,4 @@ def publish(updates, state):
         except queue.Empty:
             return
         updates.put_nowait(json_value(state))
-
 
