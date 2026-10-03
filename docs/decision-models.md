@@ -228,6 +228,19 @@ the card prints only a reduced character set. Never commit the file you trained 
 - The real-model path has been run here only on a random 2-layer model on CPU (the tests); the
   same code on Qwen3.5 was last run by the earlier `ml-stack-train-decider` measurements above.
 
+### A Gemma 4 base
+
+`--base gemma-4-e2b` trains on `google/gemma-4-E2B` (the base, not the `-it` model; Apache-2.0
+per its card, pinned at commit `d29ff6b`, one 10.25 GB `model.safetensors`). The torso is the
+text decoder `Gemma4Model.language_model`: the checkpoint is multimodal and
+`Gemma4ForCausalLM` does not map its `model.language_model.*` weights, so it would train on a
+randomly initialised decoder without an error. The pointer reads the post-norm last hidden
+state; the LoRA targets are the same seven projection names (layers that share another
+layer's KV have no `k_proj`/`v_proj`). `ml-stack-decide fetch --base gemma-4-e2b --yes`
+downloads it; `--max-tokens 4096` lifts the per-case limit for document-length states.
+`jevbench --backend pointer --decider NAME` scores a trained decider. No result for this base
+has been measured yet; the tests run a random 6-layer Gemma 4 on CPU.
+
 ## Licences
 
 | part | licence | how it is used |
@@ -235,6 +248,7 @@ the card prints only a reduced character set. Never commit the file you trained 
 | strands-decider code, github.com/strands-labs/strands-decider | Apache-2.0 (LICENSE; GitHub reports the same) | read for the architecture; none of it is copied |
 | checkpoint `StrandsAgents/strands-decider-2B-hobson-v19` | Apache-2.0 (card metadata and LICENSE.md) | downloaded on request, pinned by commit, size and SHA-256; not redistributed |
 | base `Qwen/Qwen3.5-2B-Base` | Apache-2.0 (card and LICENSE) | same; the release is a LoRA on this model (the post's base is Qwen3.5-2B, not Qwen2.5) |
+| base `google/gemma-4-E2B` | Apache-2.0 (card metadata; `ai.google.dev/gemma/apache_2`, which also links a prohibited-use policy) | same |
 | base `Qwen/Qwen3.5-0.8B-Base` | Apache-2.0 | the default base for `ml-stack-train-decider` |
 | training data of the checkpoint | 29 public Hub datasets plus two author releases and teacher outputs from Qwen3.5-4B, each under its own licence; its `data/sources.md` lists them | not read or redistributed here; read that file before using the checkpoint where the data's terms matter |
 | this package | Apache-2.0 | a re-implementation of the described architecture and prompt layout; see `NOTICE` |

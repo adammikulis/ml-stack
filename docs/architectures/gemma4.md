@@ -20,3 +20,15 @@ From the E4B header (`unsloth/gemma-4-E4B-it-qat-GGUF`, UD-Q4_K_XL). Memory figu
 - Its card asks for temperature 1.0 "across all use cases"; the runs above are greedy.
 - Over 100 questions, served with the head at length 2 and a q8_0 cache: E4B 40% F1 at
   3.1 s/q, E2B 30% at 1.5 s/q.
+
+## As a pointer-decider torso
+
+E2B as read from `google/gemma-4-E2B` `config.json`: 35 layers, hidden size 1536, 8 heads with
+1 KV head, sliding window 512, `num_kv_shared_layers 20`, per-layer input embeddings (256),
+vocabulary 262144 and `Gemma4ForConditionalGeneration` as the architecture. A text-only
+hidden-state forward is `Gemma4Model.from_pretrained(dir).language_model(...)`
+(`Gemma4TextModel`); `ml_stack.decide.pointer.load_torso` does this for `gemma-4-e2b`. The
+tokenizer has no `<answer>` special token, so the pointer prompt's tags are ordinary text.
+Verified on a random tiny config: hidden states differ by position, right padding does not
+change them, and the language weights equal the checkpoint's. Not yet run on the real E2B
+weights or on a GPU.
