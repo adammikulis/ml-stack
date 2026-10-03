@@ -340,6 +340,15 @@ def test_a_resume_id_is_an_id_and_nothing_else(bad):
         chat.Session.load(bad)
 
 
+def test_an_id_cannot_climb_out_of_the_chat_folder_to_a_file_that_reads_as_a_chat():
+    outside = chat.Session.folder().parent / "outside.json"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text(json.dumps({"schema_version": 1, "messages": [
+        {"role": "user", "content": "planted"}]}))
+    with pytest.raises(LookupError, match="not a chat id"):
+        chat.Session.load("../outside")
+
+
 def test_resume_with_nothing_saved_says_so():
     with pytest.raises(LookupError, match="no saved chat"):
         chat.Session.load("last")
