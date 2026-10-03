@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -68,9 +69,14 @@ def test_the_runner_says_which_command_told_it_docker_is_missing(tmp_path):
     fake.mkdir()
     (fake / "docker").write_text("#!/bin/sh\nexit 1\n")
     (fake / "docker").chmod(0o755)
+    marker = tmp_path / "broker-called"
+    (fake / "python3").write_text("#!/bin/sh\nprintf called > " + shlex.quote(str(marker)) + "\nexit 97\n")
+    (fake / "python3").chmod(0o755)
     done = subprocess.run([str(RUNNER), "-q"], capture_output=True, text=True,
-                          env={**os.environ, "PATH": f"{fake}:{os.environ['PATH']}"})
+                          env={**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "DEV_TEST_WORKERS": ""},
+                          timeout=10)
     assert done.returncode == 2, done.stdout
+    assert not marker.exists(), "Docker preflight must complete before acquiring test workers"
     assert "`docker info` failed" in done.stderr, done.stderr
 
 
