@@ -210,7 +210,7 @@ def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path
     """The whole path, driven the way a run drives it: a document, a fold that re-reads it
     for the text, a store, and a model that reads a cited entry and quotes the passage."""
     pytest.importorskip("ladybug", reason="ml-stack[store]")
-    pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+    pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
     from ml_stack.graph.looking import tools_for
     from ml_stack.ingest.ask import graph_of
     from ml_stack.sources import pdf

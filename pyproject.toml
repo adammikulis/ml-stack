@@ -75,11 +75,15 @@ web = ["ddgs>=9", "trafilatura>=2"]
 # ml-stack-models fetch and hub.located read and fill the Hub cache through this
 hub = ["huggingface_hub>=1.32"]
 vision = ["numpy>=1.24", "pillow>=10.0"]
-# a book is a source like any other: `ml_stack.sources.pdf` reads one into sections,
-# and renders its figures, through MuPDF -- no other reader gives both text with the
-# font it was set in (which is how a heading is found in a PDF with no outline) and
-# the embedded images
-pdf = ["pymupdf>=1.24"]
+# a book is a source like any other: `ml_stack.sources.pdf` reads one into sections through
+# pdfminer.six (MIT), which gives text with the font it was set in -- how a heading is found in a
+# PDF with no outline -- and the position of every picture; Pillow renders the pictures. The
+# reading runs in a bounded child process (`ml_stack.net.pdfread`).
+pdf = ["pdfminer.six>=20240706", "pillow>=10.0"]
+# MuPDF is AGPL-3.0 (or Artifex's commercial licence): a network service built on it must offer
+# its source. It is NOT in `pdf`, `all` or `redteam`; install it only on purpose, and select it
+# with ML_STACK_PDF_ENGINE=pymupdf. The datasheet pin tables and page pictures need it.
+pdf-agpl = ["pymupdf>=1.24"]
 # `ml-stack-bench animate`: a comparison of builds as an animated graphic
 viz = ["manim>=0.19"]
 # `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's

@@ -120,10 +120,12 @@ class Toolbox:
             http.check(url)
         reply = self._fetch(url)
         if reply.body[:5] == b"%PDF-":
-            import fitz
+            from io import BytesIO
 
-            with fitz.open(stream=reply.body, filetype="pdf") as document:
-                return "\n".join(page.get_text() for page in document)
+            from pdfminer.high_level import extract_text
+
+            # raw on purpose, like the HTML arm below: every character in the file, hidden or not
+            return extract_text(BytesIO(reply.body))
         html = reply.body.decode("utf-8", "replace")
         if "markdown" in str(reply.headers.get("Content-Type", "")):
             return html

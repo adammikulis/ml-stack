@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.net.pdfread import engine, load
+from ml_stack.net.pdftext import PAGE_LIMITS
 from ml_stack.sources.pdf import _pymupdf
 
 PIN_PAGE = re.compile(r"pin\s+(description|function|configuration|definition|assignment)s?|"
@@ -66,19 +68,36 @@ def _clean(cell: Any) -> str:
     return " ".join(str(cell or "").split())
 
 
-def text(path: str | Path, *, limit: int | None = None) -> tuple[str, str, int]:
-    """``(title, text, page_count)`` of a PDF: the text of its pages in order, cut at ``limit``
-    characters when given. The title is the metadata title or ""."""
-    pymupdf = _pymupdf()
-    with pymupdf.open(str(Path(path).expanduser())) as doc:
-        out: list[str] = []
+def _read_pages(path: str | Path, limit: int | None) -> tuple[str, list[str], int]:
+    """``(title, page texts, page_count)`` by the engine in use: the default (pdfminer, in a
+    bounded child) or, when asked for by name, MuPDF."""
+    where = Path(path).expanduser()
+    if engine() == "pymupdf":
+        with _pymupdf().open(str(where)) as doc:
+            out: list[str] = []
+            size = 0
+            for page in doc:
+                out.append(page.get_text())
+                size += len(out[-1])
+                if limit is not None and size >= limit:
+                    break
+            return _clean((doc.metadata or {}).get("title")), out, doc.page_count
+    with load(where, limits=PAGE_LIMITS, text_limit=limit) as doc:
+        out = []
         size = 0
         for page in doc:
             out.append(page.get_text())
             size += len(out[-1])
             if limit is not None and size >= limit:
                 break
-        return _clean((doc.metadata or {}).get("title")), "".join(out)[:limit], doc.page_count
+        return _clean(doc.metadata.get("title")), out, doc.page_count
+
+
+def text(path: str | Path, *, limit: int | None = None) -> tuple[str, str, int]:
+    """``(title, text, page_count)`` of a PDF: the text of its pages in order, cut at ``limit``
+    characters when given. The title is the metadata title or ""."""
+    title, pages, count = _read_pages(path, limit)
+    return title, "".join(pages)[:limit], count
 
 
 def _squash(value: str) -> str:
@@ -93,10 +112,8 @@ def part_match(path: str | Path, part: str) -> tuple[float, bool]:
     something else matches 0. Under five characters nothing counts. Case, spacing and dashes
     are ignored.
     """
-    pymupdf = _pymupdf()
     wanted = _squash(part)
-    with pymupdf.open(str(Path(path).expanduser())) as doc:
-        pages = [_squash(page.get_text()) for page in doc]
+    pages = [_squash(body) for body in _read_pages(path, None)[1]] or [""]
     for size in range(len(wanted), MIN_PART - 1, -1):
         head = wanted[:size]
         if any(head in body for body in pages):

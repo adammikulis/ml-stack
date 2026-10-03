@@ -5,7 +5,10 @@ title or in the text layer of a PDF."""
 from __future__ import annotations
 
 from html import escape
+from textwrap import fill
 from typing import Any
+
+from ml_stack.redteam.minipdf import Doc
 
 __all__ = ["VARIANTS", "build", "variants"]
 
@@ -49,13 +52,11 @@ VARIANTS = variants()
 
 
 def _pdf(payload: str) -> bytes:
-    import fitz
-
-    document = fitz.open()
-    page = document.new_page()
-    page.insert_text((72, 72), f"{TITLE}\n\n{ARTICLE}", fontsize=10)
-    page.insert_text((72, 780), payload, fontsize=1, color=(1, 1, 1))
-    return bytes(document.tobytes())
+    document = Doc()
+    page = document.page()
+    page.text(72, 72, f"{TITLE}\n\n{fill(ARTICLE, 70)}", size=10)
+    page.text(72, 580, payload, size=1, color=(1, 1, 1))
+    return document.to_bytes()
 
 
 def build(variant: str, payload: str) -> tuple[str, bytes]:

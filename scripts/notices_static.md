@@ -5,7 +5,7 @@ These are never bundled and never installed by default. They are imported only w
 | Extra | Package | Licence | Effect |
 |---|---|---|---|
 | `speech` | piper-tts | GPL-3.0-or-later | `ml_stack.speech.tts` imports `piper` at run time. ml-stack does not distribute piper. Distributing a build of ml-stack together with piper would have to satisfy the GPL for the combination. |
-| `pdf` (also in `all`) | pymupdf (MuPDF) | AGPL-3.0 or commercial | `ml_stack.sources.pdf` imports `pymupdf` at run time. Offering a service built on it over a network triggers the AGPL for that service. |
+| `pdf-agpl` (in neither `all` nor `redteam`) | pymupdf (MuPDF) | AGPL-3.0 or commercial | Opt-in engine only: `ML_STACK_PDF_ENGINE=pymupdf` makes `ml_stack.sources.pdf` and `ml_stack.net.pdftext` import `pymupdf`, and the datasheet pin tables and page pictures need it. The default `pdf` extra reads with pdfminer.six (MIT) and Pillow. Offering a service built on pymupdf over a network triggers the AGPL for that service. |
 
 Other optional extras (`torch`, `transformers`, `peft`, `mlx*`, `manim`, `spacy`, `presidio-analyzer`, `playwright`,
 `lm-eval` and others) are permissively licensed at the top level, but their own dependencies are not inventoried

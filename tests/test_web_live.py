@@ -18,7 +18,7 @@ def test_a_datasheet_is_found_downloaded_and_read(tmp_path):
     if not os.environ.get("MLSTACK_NET"):
         pytest.skip("set MLSTACK_NET=1 to reach the real internet")
     pytest.importorskip("ddgs", reason="ml-stack[web]")
-    pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+    pytest.importorskip("pymupdf", reason="pymupdf is the test-only PDF writer here (AGPL, opt-in): pip install pymupdf")
     got = find("TPS62130", "Texas Instruments", dest=tmp_path)
     assert got.matched == 1.0 and got.pages > 10
     assert {"SW", "PG", "FB"} <= {p.name for p in datasheet.pin_tables(got.path)}

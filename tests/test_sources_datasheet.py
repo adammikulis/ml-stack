@@ -16,8 +16,12 @@ ROW_H = 22
 
 
 @pytest.fixture
-def pymupdf():
-    return pytest.importorskip("pymupdf", reason="ml-stack[pdf]")
+def pymupdf(monkeypatch):
+    """The pin tables and page pictures are MuPDF-only: the engine is asked for by name, and the
+    test is skipped where the AGPL extra is not installed (the default install does not carry it)."""
+    module = pytest.importorskip("pymupdf", reason="MuPDF (AGPL, opt-in): pip install 'ml-stack[pdf-agpl]'")
+    monkeypatch.setenv("ML_STACK_PDF_ENGINE", "pymupdf")
+    return module
 
 
 def grid(page, top, rows):
