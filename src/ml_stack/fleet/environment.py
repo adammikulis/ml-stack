@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import platform
-import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
+from importlib import metadata
 from pathlib import Path
 from typing import Any
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from ml_stack import net
 from ml_stack.files import promote
@@ -77,6 +79,24 @@ CATALOG: tuple[Library, ...] = (
     Library("huggingface", "Hugging Face models",
             "Starting from a downloaded model rather than from scratch.",
             ("transformers>=4.40", "datasets>=2.19"), size_mb=300),
+    Library("decide-pointer", "Decision models",
+            "CPU pointer-head inference, trained checkpoints and the Strands 2B decision model. Download model weights in Tools.",
+            ("ml-stack[decide-pointer]",), size_mb=500),
+    Library("gym", "All live environments",
+            "MetaDrive, RWARE, SUMO-RL and Stable-Baselines3 including traffic-driving co-simulation.",
+            ("ml-stack[gym]",), size_mb=1400),
+    Library("gym-driving", "Smart car · MetaDrive",
+            "Native 3D driving, lidar, traffic and vehicle dynamics.",
+            ("ml-stack[gym-driving]",), size_mb=800),
+    Library("gym-warehouse", "Warehouse · RWARE",
+            "Cooperative warehouse robot environments.",
+            ("ml-stack[gym-warehouse]",), size_mb=30),
+    Library("gym-traffic", "Traffic · SUMO-RL",
+            "Traffic simulation and reinforcement-learning signal control.",
+            ("ml-stack[gym-traffic]",), size_mb=250),
+    Library("gym-rl", "Reinforcement learning · Stable-Baselines3",
+            "PPO training, checkpoints and policy evaluation.",
+            ("ml-stack[gym-rl]",), size_mb=300),
     Library("telemetry", "Temperature and clocks",
             "Reporting this machine's temperature and GPU clock.",
             ("metal-smi>=1.1.0",), size_mb=5, default=True,
@@ -227,36 +247,34 @@ class Environment:
     # -- what is in it --------------------------------------------------
     def daemon_installed(self) -> dict[str, str]:
         """Package name to version, for what the daemon's own interpreter can import."""
-        from importlib import metadata
         out: dict[str, str] = {}
         for dist in metadata.distributions():
             name = dist.metadata.get("Name") if dist.metadata else None
             if name:
-                out[name.lower()] = dist.version
+                out[canonicalize_name(name)] = dist.version
         return out
 
     def installed(self) -> dict[str, str]:
-        """Package name to version, for what a job run here can import.
-
-        A frozen app runs jobs in this environment alone; a checkout also runs them on its own
-        interpreter, whose distributions are merged in.
-        """
-        have = {} if getattr(sys, "frozen", False) else self.daemon_installed()
+        """Package versions available to the managed job interpreter."""
         if not self.exists:
-            return have
+            return {}
         try:
-            out = self.pip(["list", "--format=json"], timeout=60)
+            out = self.pip(["inspect", "--local"], timeout=60)
         except (OSError, subprocess.SubprocessError):
-            return have
+            return {}
         if out.returncode != 0:
-            return have
-        with contextlib.suppress(ValueError, KeyError, TypeError):
-            have.update({p["name"].lower(): p["version"] for p in json.loads(out.stdout)})
-        return have
+            return {}
+        try:
+            rows = json.loads(out.stdout)["installed"]
+            self._cache["metadata"] = {canonicalize_name(row["metadata"]["name"]): row["metadata"] for row in rows}
+            self._cache["direct_urls"] = {canonicalize_name(row["metadata"]["name"]): row.get("direct_url") for row in rows}
+            return {canonicalize_name(row["metadata"]["name"]): row["metadata"]["version"] for row in rows}
+        except (ValueError, KeyError, TypeError):
+            return {}
 
     def has(self, library: Library) -> bool:
         have = self.installed()
-        return all(_base(spec) in have for spec in library.packages)
+        return _library_installed(library, have, self._cache)
 
     def state(self, vendor: str = "") -> dict[str, Any]:
         have = self.installed()
@@ -268,7 +286,7 @@ class Environment:
             "libraries": [
                 {"name": lib.name, "title": lib.title, "blurb": lib.blurb,
                  "size_mb": lib.size_mb, "default": lib.default,
-                 "installed": all(_base(s) in have for s in lib.packages),
+                 "installed": _library_installed(lib, have, self._cache),
                  "version": have.get(_base(lib.packages[0]), "")}
                 for lib in catalog_for(vendor)
             ],
@@ -302,12 +320,21 @@ class Environment:
     def uninstall(self, names: list[str]) -> dict[str, Any]:
         wanted = {lib.name: lib for lib in CATALOG}
         done: dict[str, Any] = {}
+        have = self.installed()
+        protected = {canonicalize_name(req.name)
+                     for lib in CATALOG if lib.name not in names and _library_installed(lib, have, self._cache)
+                     for spec in lib.packages for req in (_requirements(spec, self._cache.get("metadata")) or [])}
         for name in names:
             lib = wanted.get(name)
             if lib is None or not self.exists:
                 done[name] = {"ok": False, "error": "not installed"}
                 continue
-            out = self.pip(["uninstall", "-y", *(_base(s) for s in lib.packages)])
+            requirements = [req for spec in lib.packages for req in (_requirements(spec, self._cache.get("metadata")) or [])]
+            packages = sorted({canonicalize_name(req.name) for req in requirements} - protected)
+            if not packages:
+                done[name] = {"ok": True, "kept_shared": True}
+                continue
+            out = self.pip(["uninstall", "-y", *packages])
             done[name] = ({"ok": True} if out.returncode == 0
                           else {"ok": False, "error": _last_error(out.stderr)})
         return done
@@ -317,7 +344,7 @@ class Environment:
 
 
 def _base(spec: str) -> str:
-    return re.split(r"[<>=!~\[]", spec, maxsplit=1)[0].strip().lower()
+    return canonicalize_name(Requirement(spec).name)
 
 
 def _last_error(stderr: str) -> str:
@@ -326,3 +353,56 @@ def _last_error(stderr: str) -> str:
         if "error" in line.lower():
             return line.strip()[:200]
     return (lines[-1][:200] if lines else "failed")
+
+
+def _requirements(spec: str, installed_metadata=None) -> list[Requirement] | None:
+    requirement = Requirement(spec)
+    if not requirement.extras:
+        return [requirement]
+    if installed_metadata is not None:
+        info = installed_metadata.get(canonicalize_name(requirement.name))
+        if info is None:
+            return None
+        provided = set(info.get("provides_extra", []))
+        requires = info.get("requires_dist", [])
+    else:
+        try:
+            distribution = metadata.distribution(requirement.name)
+        except metadata.PackageNotFoundError:
+            return None
+        provided = set(distribution.metadata.get_all("Provides-Extra", []))
+        requires = distribution.requires or []
+    if not requirement.extras <= provided:
+        return None
+    dependencies = [Requirement(text) for text in requires]
+    return [requirement, *(dependency for dependency in dependencies
+             if dependency.marker is None or any(dependency.marker.evaluate({"extra": extra})
+                                                 for extra in requirement.extras))]
+
+
+def _library_installed(library: Library, have: dict[str, str], cache=None) -> bool:
+    cache = cache or {}
+    for spec in library.packages:
+        requirements = _requirements(spec, cache.get("metadata"))
+        if requirements is None:
+            return False
+        for requirement in requirements:
+            version = have.get(canonicalize_name(requirement.name))
+            if version is None or version not in requirement.specifier:
+                return False
+            if requirement.url and not _direct_matches(requirement, cache.get("direct_urls", {})):
+                return False
+    return True
+
+
+def _direct_matches(requirement: Requirement, urls) -> bool:
+    direct = urls.get(canonicalize_name(requirement.name)) or {}
+    expected = requirement.url or ""
+    if expected.startswith("git+"):
+        base, separator, revision = expected.removeprefix("git+").rpartition("@")
+        if not separator:
+            return False
+        vcs = direct.get("vcs_info", {})
+        return (direct.get("url") == base and vcs.get("vcs") == "git"
+                and revision == vcs.get("commit_id"))
+    return direct.get("url") == expected
