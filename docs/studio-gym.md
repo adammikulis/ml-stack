@@ -50,6 +50,8 @@ Each simulator keeps its native task behavior. Gymnasium provides reset/step and
 interfaces; it does not replace the simulator. The combined traffic environment synchronizes
 vehicle identities, coordinates, and clocks and feeds physical positions back to SUMO.
 Its viewport reports backend ownership and synchronization telemetry.
+The combined example supports one signalized intersection. Native MetaDrive IDM
+controllers drive its vehicles; the learned policy controls SUMO-RL signal phases.
 
 The car offers a native offscreen 3D camera and real lidar/lane sensor visualization. The
 camera is a preview: numeric sensor observations are the policy input. Warehouse and
@@ -60,6 +62,9 @@ Car seeds select native MetaDrive scenarios. Defaults cover seeds `0` through `1
 configure `start_seed` and `num_scenarios` to change this range. Out-of-range seeds are
 rejected. The default car horizon is 1000 steps. Warehouse and traffic retain their finite
 native episode limits, configurable through environment settings.
+Session manifests record installed simulator versions and SHA256 hashes of the SUMO
+network and route files. MetaDrive uses the pinned 0.4.3 source revision listed in the
+`gym-driving` dependency; its installed package metadata records that source URL.
 
 ## Controllers and recordings
 
