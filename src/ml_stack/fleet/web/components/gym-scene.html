@@ -160,8 +160,9 @@
         }, shelf.position || [shelf.x, shelf.y]);
       }
       for (const [index, robot] of (state.robots || []).entries()) {
-        this.keep('robot-' + (robot.id ?? index), () => this.robot(robot.carrying),
+        const mesh = this.keep('robot-' + (robot.id ?? index), () => this.robot(robot.carrying),
           robot.position || [robot.x, robot.y], robot.heading ?? ((robot.direction || 0) * Math.PI / 2));
+        mesh.children[0].material.color.set(robot.carrying ? 0xeeb85b : 0x51bec6);
       }
       for (const [index, vehicle] of (state.vehicles || []).entries()) {
         const heading = Number(vehicle.heading || 0) *
@@ -215,7 +216,7 @@
     animate() {
       if (!this.isConnected) return;
       this.animation = requestAnimationFrame(() => this.animate());
-      if (this.hidden) return;
+      if (this.hidden || this.closest('[hidden]')) return;
       for (const mesh of this.meshes.values()) {
         if (!mesh.userData.target) continue;
         mesh.position.lerp(mesh.userData.target, this.reduced.matches ? 1 : .2);
