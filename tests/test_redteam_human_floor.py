@@ -13,6 +13,7 @@ import pty
 import select
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -75,7 +76,11 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
                              stderr=slave, close_fds=True)
     os.close(slave)
     heard, typed = b"", False
+    end = time.monotonic() + 30
     while child.poll() is None:
+        if time.monotonic() > end:
+            child.kill()
+            raise AssertionError(f"{argv} waited for input: {heard!r}")
         if not select.select([master], [], [], 0.2)[0]:
             continue
         try:
