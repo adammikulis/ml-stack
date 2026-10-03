@@ -47,7 +47,9 @@ def catalogue():
                         "world_schema": schema(name), "simulation_modes": ["episode", "world"],
                         "supported_controllers": ["manual", "random", "decider", "ppo", *(["native-idm"] if name == "car" else [])],
                         "available": not missing, "missing": missing,
-                        "install": f"pip install 'ml-stack[{spec['extra']}]'"})
+                        "install": f"pip install 'ml-stack[{spec['extra']}]'" +
+                                   ("; install the pinned MetaDrive source from docs/studio-gym.md"
+                                    if "metadrive" in spec["modules"] else "")})
     return entries
 
 
