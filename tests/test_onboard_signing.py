@@ -9,6 +9,7 @@ import keyring
 import pytest
 from onboard_support import FileKeyring, Recorder
 
+from ml_stack import keystore as keystore_module
 from ml_stack.fleet.onboard import manifest as mf, signing
 from ml_stack.fleet.onboard.human import HumanRequired, mint
 from ml_stack.fleet.onboard.signing import KeyStoreError, SigningKeys
@@ -62,14 +63,16 @@ def holds_secret(tmp_path, signer_raw):
 def test_the_default_home_of_the_key_is_the_keystore_and_no_file_holds_it(tmp_path, keystore):
     keys, rec, said = keys_in(tmp_path)
     doc = keys.meta()
-    assert doc["store"] == "keyring" and said == []
-    raw = mf.Signer.from_raw(base64.b64decode(json.loads(keystore.read_text())[
-        f"{signing.SERVICE}/{keys.account}"])).private_raw()
+    assert doc["store"] == "keystore" and said == []
+    raw = keys._get("keystore").private_raw()
     assert holds_secret(tmp_path, raw) == []
-    assert not keys.file_path.exists()
+    assert keys.wrapped_path.exists() and not keys.file_path.exists()
+    held = json.loads(keystore.read_text())
+    assert list(held) == [f"{signing.SERVICE}/{keystore_module.default().account}"]
+    assert all(raw not in base64.b64decode(v[3:]) for v in held.values())
     assert (tmp_path / "state" / "signing.json").stat().st_mode & 0o077 == 0
     assert base64.b64decode(doc["public"]) == keys.public and doc["key_id"] == keys.key_id
-    assert rec.of("onboard.signing.created")[0].evidence == {"store": "keyring"}
+    assert rec.of("onboard.signing.created")[0].evidence == {"store": "keystore"}
 
 
 def test_signing_is_automatic_and_the_manifest_is_short_lived(tmp_path, keystore):
@@ -145,7 +148,8 @@ def test_rotating_needs_a_person_and_the_old_key_announces_the_new_one(tmp_path,
     assert moved.value.new_public == keys.public
     assert mf.verify(raw, keys.public).key_id == keys.key_id      # once a person has pinned it
     held = json.loads(keystore.read_text())
-    assert len([k for k in held if k.endswith(keys.account)]) == 1   # the old secret is gone
+    assert list(held) == [f"{signing.SERVICE}/{keystore_module.default().account}"]   # only the master is in the keystore
+    assert keys.wrapped_path.exists()
     assert rec.of("onboard.signing.rotated")[0].severity == "warning"
 
 

@@ -534,6 +534,14 @@ def _no_real_keychain(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _keystore_has_a_person(monkeypatch):
+    """The keystore treats a test as a session with a person present, whatever the host has."""
+    from ml_stack import keystore
+
+    monkeypatch.setattr(keystore, "interactive", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _no_internet(monkeypatch, tmp_path):
     """Every fetch goes through a pipeline that cannot leave this machine.
 

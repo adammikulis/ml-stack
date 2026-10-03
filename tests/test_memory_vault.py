@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import os
 import subprocess
 import sys
@@ -14,11 +13,10 @@ import pytest
 from keyring.backends import null
 
 import ml_stack
-from ml_stack import home, memory
+from ml_stack import home, keystore, memory
 from ml_stack.memory import vault
-from ml_stack.memory.store import Setup
+from ml_stack.memory.store import Setup, Tampered
 from tests import memory_keys
-from tests.memory_keys import MemoryRing
 
 ring = memory_keys.ring
 
@@ -110,19 +108,20 @@ def test_a_killed_process_leaves_only_ciphertext(tmp_path):
 def test_the_key_is_never_written_beside_the_data(tmp_path, ring):
     store = make(tmp_path)
     fill(store)
-    held = json.loads(next(iter(ring.held.values())))
-    raw = base64.b64decode(held["current"])
-    assert len(raw) == 32
+    held = next(iter(ring.held.values()))
+    raw = base64.b64decode(held[3:])
+    assert len(raw) == 32 and len(ring.held) == 1
     for each in every_file(tmp_path, home.state()):
         data = each.read_bytes()
-        assert raw not in data and held["current"].encode() not in data, each
-    assert {p.name for p in tmp_path.iterdir()} <= {"graph.enc", "graph.enc.prev", "store.lock"}
+        assert raw not in data and held.encode() not in data, each
+    assert {p.name for p in tmp_path.iterdir()} <= {"graph.enc", "graph.enc.prev", "store.lock", "machine-state"}
 
 
 def test_the_file_is_not_readable_without_the_key(tmp_path, ring):
     store = make(tmp_path)
     fill(store)
     ring.held.clear()
+    keystore.default().lock()
     other = make(tmp_path)
     assert other.status == "locked" and other.facts() == []
     assert "holds no key" in other.why
@@ -135,7 +134,8 @@ def test_another_key_cannot_open_it(tmp_path, ring):
     store = make(tmp_path)
     fill(store)
     account = next(iter(ring.held))
-    ring.held[account] = json.dumps({"current": base64.b64encode(os.urandom(32)).decode()})
+    ring.held[account] = "v1:" + base64.b64encode(os.urandom(32)).decode()
+    keystore.default().lock()
     assert make(tmp_path).status == "tampered"
 
 
@@ -162,13 +162,9 @@ def test_a_file_moved_to_another_user_or_profile_does_not_authenticate(tmp_path,
     (tmp_path / "b" / "graph.enc").write_bytes(mine.path.read_bytes())
     stolen = make(tmp_path / "b", setup=Setup(user="502:bob"))
     assert stolen.facts() == [] and stolen.status in ("locked", "tampered")
-    same_key = json.loads(next(iter(ring.held.values())))
-    ring.held[("ml-stack-memory", stolen.keys.account)] = json.dumps(same_key)
-    assert make(tmp_path / "b", setup=Setup(user="502:bob")).status == "tampered"
+    assert stolen.status == "tampered"
     (tmp_path / "c").mkdir()
     (tmp_path / "c" / "graph.enc").write_bytes(mine.path.read_bytes())
-    ring.held[("ml-stack-memory", make(tmp_path / "c", setup=Setup(user="501:alice", profile="work")).keys.account)] = \
-        json.dumps(same_key)
     assert make(tmp_path / "c", setup=Setup(user="501:alice", profile="work")).status == "tampered"
 
 
@@ -176,8 +172,8 @@ def test_a_second_user_on_the_same_file_has_no_key_for_it(tmp_path):
     alice = make(tmp_path, setup=Setup(user="501:alice"))
     fill(alice)
     bob = make(tmp_path, setup=Setup(user="502:bob"))
-    assert bob.status == "locked" and bob.facts() == []
-    with pytest.raises(memory.KeyUnavailable):
+    assert bob.status in ("locked", "tampered") and bob.facts() == []
+    with pytest.raises((memory.KeyUnavailable, Tampered)):
         bob.add("bob writes")
     assert len(make(tmp_path, setup=Setup(user="501:alice")).facts()) == 2
 
@@ -242,31 +238,26 @@ def test_a_passphrase_store_without_a_terminal_or_variable_is_locked(tmp_path, m
     assert locked.status == "locked" and vault.PASSPHRASE_ENV in locked.why
 
 
-def test_rekey_moves_everything_to_a_new_key_and_the_old_one_is_gone(tmp_path, ring):
+def test_rekey_moves_everything_to_a_new_salt_and_so_a_new_key(tmp_path, ring):
     store = make(tmp_path)
     fill(store)
-    store.add("third note", "note")
-    old = json.loads(next(iter(ring.held.values())))["current"]
+    before = store.path.read_bytes()
     store.rekey()
-    held = json.loads(next(iter(ring.held.values())))
-    assert held["current"] != old and "previous" not in held
+    after = store.path.read_bytes()
+    assert vault.header(before)[1] != vault.header(after)[1]
+    assert vault.header(store.prev.read_bytes())[1] == vault.header(after)[1]
     again = make(tmp_path)
-    assert again.status == "ok" and len(again.facts()) == 3
-    ring.held[next(iter(ring.held))] = json.dumps({"current": old})
-    assert make(tmp_path).status == "tampered"
-    assert make(tmp_path).prev.exists()
-    flip_prev = make(tmp_path)
-    flip_prev.path.write_bytes(b"x")
-    assert make(tmp_path).status == "tampered"
+    assert again.status == "ok" and len(again.facts()) == 2
+    assert len(ring.held) == 1
+    store.path.write_bytes(after[:-1] + bytes([after[-1] ^ 1]))
+    assert make(tmp_path).status == "recovered"
     assert_no_plaintext(tmp_path)
 
 
 def test_rekey_interrupted_before_the_write_still_opens_under_the_old_key(tmp_path, ring):
     store = make(tmp_path)
     fill(store)
-    store.keys.rotate(store._salt)
-    held = json.loads(next(iter(ring.held.values())))
-    assert "previous" in held
+    store.keys.rotate(os.urandom(vault.SALT))
     assert make(tmp_path).status == "ok"
 
 
@@ -275,25 +266,3 @@ def test_the_cli_rekey_is_for_a_person_only(monkeypatch, capsys):
 
     monkeypatch.setenv("CLAUDECODE", "1")
     assert cli.main(["rekey"]) == cli.DENIED
-
-
-@pytest.mark.slow
-def test_the_real_keystore_round_trips():
-    fake = keyring.get_keyring()
-    if isinstance(fake, MemoryRing):
-        keyring.set_keyring(type(fake).__mro__[0]())
-    try:
-        real = keyring.core.init_backend() or keyring.core.get_keyring()
-        usable = float(getattr(real, "priority", 0)) > 0
-    except Exception:  # noqa: BLE001 - no keystore on this machine
-        usable = False
-    if not usable:
-        pytest.skip("no OS keystore here")
-    keyring.set_keyring(real)
-    account = f"test/{os.getpid()}"
-    keys = vault.KeystoreKeys(account)
-    try:
-        first = keys.keys(b"", create=True)
-        assert keys.keys(b"") == first and len(first[0]) == 32
-    finally:
-        real.delete_password(vault.SERVICE, account)

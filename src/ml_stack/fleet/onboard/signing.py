@@ -1,9 +1,9 @@
 """Where the cluster's Ed25519 signing key lives, and who may do what with it.
 
 The key is generated on the controller and is a different key from the cluster key, so losing
-one is not losing the other. It is kept in the operating system's keystore through `keyring`
-(macOS Keychain, Windows Credential Manager, Linux Secret Service). With no usable keystore it
-is kept in a file encrypted under a passphrase (scrypt, ChaCha20-Poly1305, from `cryptography`,
+one is not losing the other. It is kept in a file wrapped under a subkey of the user's master
+key in the operating system's keystore (`ml_stack.keystore`). With no usable keystore it is
+kept in a file encrypted under a passphrase (scrypt, ChaCha20-Poly1305, from `cryptography`,
 mode 0600) with a warning; there is no plaintext path. Signing is automatic. Exporting,
 rotating or revoking a key, and turning on confirm-before-signing, need a `HumanGrant`.
 
@@ -15,7 +15,6 @@ A hardware key (a signing device that never releases the key) is the designed ne
 from __future__ import annotations
 
 import base64
-import contextlib
 import hashlib
 import json
 import os
@@ -24,7 +23,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import read_json, write_json
+from ml_stack import keystore
+from ml_stack.files import read_json, write_json, writing
 from ml_stack.log import warn
 from ml_stack.platform import private_file
 
@@ -32,10 +32,10 @@ from .events import BUS, Bus
 from .human import HumanGrant
 from .manifest import VALID_S, Carried, Entry, Signer
 
-__all__ = ["UNLOCK_ENV", "KeyStoreError", "SigningKeys", "keyring_usable", "open_file",
-           "seal_file"]
+__all__ = ["UNLOCK_ENV", "KeyStoreError", "SigningKeys", "open_file", "seal_file"]
 
 SERVICE = "ml-stack"
+PURPOSE = "fleet-signing"
 UNLOCK_ENV = "ML_STACK_SIGNING_PASSPHRASE"
 SCHEMA_VERSION = 1
 SCRYPT_N = 1 << 15
@@ -45,21 +45,8 @@ class KeyStoreError(RuntimeError):
     """The signing key cannot be stored, found or used."""
 
 
-def keyring_usable() -> bool:
-    """Whether `keyring` has a real backend here (not the null or failing one)."""
-    try:
-        import keyring
-    except ImportError:
-        return False
-    try:
-        return float(getattr(keyring.get_keyring(), "priority", 0)) > 0
-    except (keyring.errors.KeyringError, AttributeError, TypeError, ValueError, OSError):
-        return False
-
-
 def _kdf(passphrase: str, salt: bytes, n: int) -> bytes:
-    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-    return Scrypt(salt=salt, length=32, n=n, r=8, p=1).derive(passphrase.encode())
+    return keystore.scrypt_key(passphrase, salt, n)
 
 
 def seal_file(path: Path, raw: bytes, passphrase: str) -> None:
@@ -110,10 +97,13 @@ class SigningKeys:
     """The signing key of the state directory ``directory``."""
 
     def __init__(self, directory: Path, *, passphrase: Callable[[str], str] = _ask_passphrase,
-                 bus: Bus = BUS, say: Callable[[str], None] = warn) -> None:
+                 bus: Bus = BUS, say: Callable[[str], None] = warn,
+                 ks: keystore.Keystore | None = None) -> None:
         self.directory, self.passphrase, self.bus, self.say = Path(directory), passphrase, bus, say
+        self._ks = ks
         self.meta_path = self.directory / "signing.json"
         self.file_path = self.directory / "signing.key.enc"
+        self.wrapped_path = self.directory / "signing.key.wrapped"
         self.account = "onboard-signing-" + hashlib.sha256(
             str(self.directory.resolve()).encode()).hexdigest()[:12]
 
@@ -139,12 +129,25 @@ class SigningKeys:
         private_file(self.meta_path)
 
     # -- the secret --
+    @property
+    def ks(self) -> keystore.Keystore:
+        return self._ks or keystore.default()
+
+    def _wrap(self, raw: bytes) -> None:
+        blob = self.ks.wrap(PURPOSE, self.account, raw)
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with writing(self.wrapped_path) as tmp:
+            tmp.write_bytes(blob)
+            tmp.chmod(0o600)
+
     def _put(self, signer: Signer) -> str:
         raw = signer.private_raw()
-        if keyring_usable():
-            import keyring
-            keyring.set_password(SERVICE, self.account, base64.b64encode(raw).decode())
-            return "keyring"
+        if self.ks.available():
+            try:
+                self._wrap(raw)
+            except keystore.KeystoreError as exc:
+                raise KeyStoreError(str(exc)) from exc
+            return "keystore"
         seal_file(self.file_path, raw, self.passphrase("passphrase for the new signing key: "))
         message = (f"no OS keystore here: the signing key is encrypted with your passphrase in "
                    f"{self.file_path}; anyone with that file and the passphrase can sign")
@@ -154,21 +157,51 @@ class SigningKeys:
 
     def _get(self, store: str) -> Signer:
         if store == "keyring":
-            if not keyring_usable():
-                raise KeyStoreError("the signing key is in the OS keystore, which is not "
-                                    "available in this session")
-            import keyring
-            held = keyring.get_password(SERVICE, self.account)
-            if not held:
-                raise KeyStoreError("the OS keystore has no signing key for this directory")
-            return Signer.from_raw(base64.b64decode(held))
+            return self._migrate()
+        if store == "keystore":
+            try:
+                return Signer.from_raw(self.ks.unwrap(PURPOSE, self.account, self.wrapped_path.read_bytes()))
+            except FileNotFoundError:
+                raise KeyStoreError("the wrapped signing key for this directory is missing") from None
+            except keystore.KeystoreError as exc:
+                raise KeyStoreError(str(exc)) from exc
         return Signer.from_raw(open_file(self.file_path, self.passphrase("signing key passphrase: ")))
 
+    def _migrate(self) -> Signer:
+        """Move a key an older version left in the OS keystore into the wrapped file. The old
+        item is deleted once the file unwraps to the key the record names, and the record
+        changes last, so an interrupted move is finished by the next call."""
+        meta = read_json(self.meta_path, {})
+        try:
+            signer = self._wrapped_signer(meta.get("key_id"))
+            if signer is None:
+                held = self.ks.legacy_get(SERVICE, self.account, PURPOSE)
+                if not held:
+                    raise KeyStoreError("the OS keystore has no signing key for this directory")
+                raw = base64.b64decode(held)
+                self._wrap(raw)
+                signer = self._wrapped_signer(Signer.from_raw(raw).key_id)
+                if signer is None:
+                    raise KeyStoreError("the wrapped signing key did not read back")
+            self.ks.legacy_drop(SERVICE, self.account, PURPOSE)
+            self._write({**meta, "store": "keystore"})
+            return signer
+        except keystore.KeystoreError as exc:
+            raise KeyStoreError(str(exc)) from exc
+
+    def _wrapped_signer(self, key_id: object) -> Signer | None:
+        """The wrapped key when the file exists and is the key ``key_id``."""
+        try:
+            signer = Signer.from_raw(self.ks.unwrap(PURPOSE, self.account, self.wrapped_path.read_bytes()))
+        except (FileNotFoundError, ValueError):
+            return None
+        return signer if signer.key_id == key_id else None
+
     def _drop(self, store: str) -> None:
-        if store == "keyring" and keyring_usable():
-            import keyring
-            with contextlib.suppress(keyring.errors.PasswordDeleteError):
-                keyring.delete_password(SERVICE, self.account)
+        if store == "keyring":
+            self.ks.legacy_drop(SERVICE, self.account, PURPOSE)
+        elif store == "keystore":
+            self.wrapped_path.unlink(missing_ok=True)
         elif store == "file":
             self.file_path.unlink(missing_ok=True)
 

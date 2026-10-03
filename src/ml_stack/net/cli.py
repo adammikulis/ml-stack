@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files
+from ml_stack import files, keystore
 from ml_stack.command import flag, option
 from ml_stack.log import say, warn
 from ml_stack.net import policy, provenance
@@ -149,6 +149,49 @@ def scan_policy(args: argparse.Namespace) -> int:
         current.save()
     data = vars_of(current)
     return _out(args, data, lambda: [f"{k}: {v}" for k, v in data.items()])
+
+
+@COMMANDS.command("unlock", help="create ml-stack's one keystore key (a person at a terminal); background "
+                  "processes may read it afterwards", options=(JSON,))
+def unlock(args: argparse.Namespace) -> int:
+    """Make the master key if there is none, clear a refusal, and let background processes read it."""
+    try:
+        human.require_person("unlock")
+    except human.HumanRequired as exc:
+        warn(f"ml-stack security: {exc}")
+        return 2
+    store = keystore.Keystore(wires=keystore.Wires(interactive=lambda: True))
+    try:
+        made = store.provision()
+    except keystore.KeystoreError as exc:
+        warn(f"ml-stack security: {exc}")
+        return 1
+    return _out(args, {"created": made, **store.status()},
+                lambda: ["created the keystore key" if made else "the keystore key was already there",
+                         "background ml-stack processes can now use it"])
+
+
+@COMMANDS.command("keystore", help="the keystore state: provisioned, refused, operations this hour "
+                  "(never touches the keystore)", options=(JSON,))
+def keystore_status(args: argparse.Namespace) -> int:
+    """Print the state files' view of the keystore."""
+    data = keystore.default().status()
+    return _out(args, data, lambda: [f"{k}: {v}" for k, v in data.items()])
+
+
+@COMMANDS.command("keystore-reset", help="delete the keystore key; everything wrapped under it "
+                  "becomes unreadable", options=())
+def keystore_reset(args: argparse.Namespace) -> int:
+    """Delete the master key after a person types the account name back."""
+    store = keystore.default()
+    try:
+        human.mint("keystore-reset", store.user)
+        store.reset()
+    except (human.HumanRequired, keystore.KeystoreError) as exc:
+        warn(f"ml-stack security: {exc}")
+        return 2
+    say("the keystore key is deleted")
+    return 0
 
 
 def vars_of(value: ScanPolicy) -> dict[str, Any]:

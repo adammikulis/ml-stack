@@ -1,9 +1,10 @@
-"""Encryption at rest for the memory store: AES-256-GCM, a per-user key in the OS keystore (or,
+"""Encryption at rest for the memory store: AES-256-GCM, a subkey of the user's master key in the OS keystore (or,
 when the person asks for it, derived from a passphrase), and the identity a store belongs to."""
 
 from __future__ import annotations
 
 import base64
+import contextlib
 import getpass
 import hashlib
 import hmac
@@ -12,7 +13,10 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
+
+from ml_stack import files, keystore, lock
 
 __all__ = [
     "KEYS_ENV",
@@ -32,6 +36,7 @@ __all__ = [
 ]
 
 SERVICE = "ml-stack-memory"
+PURPOSE = "memory"
 KEYS_ENV = "ML_STACK_MEMORY_KEYS"
 PASSPHRASE_ENV = "ML_STACK_MEMORY_PASSPHRASE"  # noqa: S105 - the name of a variable
 PROFILE_ENV = "ML_STACK_MEMORY_PROFILE"
@@ -85,73 +90,100 @@ class Keys(Protocol):
     def settle(self) -> None: ...
 
 
-def _keyring() -> Any:
-    try:
-        import keyring
-    except ImportError as exc:
-        raise KeyUnavailable("the memory store needs `pip install keyring cryptography` "
-                             f"({KEYS_ENV}=passphrase uses a passphrase instead)") from exc
-    try:
-        usable = float(getattr(keyring.get_keyring(), "priority", 0)) > 0
-    except (keyring.errors.KeyringError, AttributeError, TypeError, ValueError, OSError):
-        usable = False
-    if not usable:
-        raise KeyUnavailable("this machine has no usable OS keystore (macOS Keychain, Linux "
-                             "Secret Service), so the memory store stays locked. For a person at "
-                             f"a terminal: set {KEYS_ENV}=passphrase, and the store is encrypted "
-                             "under a passphrase asked for each time")
-    return keyring
+def _locked(exc: keystore.KeystoreError) -> KeyUnavailable:
+    if isinstance(exc, keystore.KeystoreUnavailable):
+        return KeyUnavailable(f"{exc}, so the memory store stays locked. For a person at a "
+                              f"terminal: set {KEYS_ENV}=passphrase")
+    return KeyUnavailable(str(exc))
 
 
 class KeystoreKeys:
-    """The key kept in the OS keystore under ``account``, with the one before it during a rekey."""
+    """The store key: a subkey of the user's master key (`ml_stack.keystore`), cut for this
+    account and the store's own salt, so a new salt is a new key."""
 
     mode = "keystore"
 
-    def __init__(self, account: str) -> None:
-        self.account = account
+    def __init__(self, account: str, *, owner: str = "", files: tuple[Path, ...] = (),
+                 ks: keystore.Keystore | None = None) -> None:
+        self.account, self.owner, self.files = account, owner, files
+        self._ks = ks
 
-    def _read(self) -> dict[str, str]:
-        ring = _keyring()
-        try:
-            held = ring.get_password(SERVICE, self.account)
-        except ring.errors.KeyringError as exc:
-            raise KeyUnavailable(f"the OS keystore refused the memory key ({type(exc).__name__})") from exc
-        try:
-            doc = json.loads(held) if held else {}
-        except ValueError:
-            doc = {}
-        return doc if isinstance(doc, dict) else {}
+    @property
+    def ks(self) -> keystore.Keystore:
+        return self._ks or keystore.default()
 
-    def _write(self, doc: dict[str, str]) -> None:
-        ring = _keyring()
+    def _derive(self, salt: bytes, *, create: bool) -> bytes:
         try:
-            ring.set_password(SERVICE, self.account, json.dumps(doc))
-        except ring.errors.KeyringError as exc:
-            raise KeyUnavailable(f"the OS keystore would not keep the memory key ({type(exc).__name__})") from exc
+            return self.ks.subkey(PURPOSE, self.account, context=salt, create=create)
+        except keystore.KeystoreMissing:
+            return b""
+        except keystore.KeystoreError as exc:
+            raise _locked(exc) from exc
 
     def keys(self, salt: bytes, *, create: bool = False) -> list[bytes]:
-        doc = self._read()
-        if not doc.get("current"):
-            if not create:
-                return []
-            self._write({"current": base64.b64encode(os.urandom(32)).decode()})
-            doc = self._read()
-        return [base64.b64decode(doc[k]) for k in ("current", "previous") if doc.get(k)]
+        older = self._migrate()
+        key = self._derive(salt, create=create)
+        return [*([key] if key else []), *older]
 
     def rotate(self, salt: bytes, new: bytes | None = None) -> bytes:
-        """Make a new key current, remembering the old one until ``settle``."""
-        doc = self._read()
-        key = new or os.urandom(32)
-        self._write({"current": base64.b64encode(key).decode(),
-                     **({"previous": doc["current"]} if doc.get("current") else {})})
-        return key
+        """The key for the fresh ``salt`` the store chose."""
+        return new or self._derive(salt, create=True)
 
     def settle(self) -> None:
-        """Forget the previous key, once everything is written under the current one."""
-        doc = self._read()
-        doc.pop("previous", None)
-        self._write(doc)
+        return None
+
+    def _migrate(self) -> list[bytes]:
+        """Re-wrap a store kept under the random key an older version left in the keystore,
+        then delete that item once every file reads back under the new key. Returns the old
+        keys while the bytes a caller already holds may still be under them."""
+        ks = self.ks
+        if ks.migrated(SERVICE, self.account) or not self.files:
+            return []
+        try:
+            held = ks.legacy_get(SERVICE, self.account, PURPOSE)
+            if held is None:
+                ks.mark_migrated(SERVICE, self.account)
+                return []
+            doc = json.loads(held)
+            old = [base64.b64decode(doc[k]) for k in ("current", "previous") if doc.get(k)]
+            if not all(self._rewrap(path, old) for path in self.files):
+                return old
+            with contextlib.suppress(keystore.KeystoreError):
+                ks.legacy_drop(SERVICE, self.account, PURPOSE)
+                ks.mark_migrated(SERVICE, self.account)
+            return old
+        except keystore.KeystoreError as exc:
+            raise _locked(exc) from exc
+        except (ValueError, KeyError, TypeError):
+            return []
+
+    def _rewrap(self, path: Path, old: list[bytes]) -> bool:
+        """Whether ``path`` is absent or now opens under the new key."""
+        with lock.only_one(path.parent / "store.lock", timeout=10, announce=lambda _m: None):
+            try:
+                blob = path.read_bytes()
+            except FileNotFoundError:
+                return True
+            mode, salt = header(blob)
+            if mode != "keystore":
+                return True
+            fresh = self._derive(salt, create=True)
+            try:
+                open_blob(blob, [fresh], owner=self.owner)
+                return True
+            except BadSeal:
+                pass
+            try:
+                plain, _ = open_blob(blob, old, owner=self.owner)
+            except BadSeal:
+                return False
+            with files.writing(path) as tmp:
+                tmp.write_bytes(seal_blob(plain, fresh, mode="keystore", salt=salt, owner=self.owner))
+                tmp.chmod(0o600)
+            try:
+                return open_blob(path.read_bytes(), [fresh], owner=self.owner)[0] == plain
+            except BadSeal:
+                return False
 
 
 class PassphraseKeys:
@@ -163,8 +195,7 @@ class PassphraseKeys:
         self.ask, self._next = ask, None
 
     def _derive(self, salt: bytes, prompt: str) -> bytes:
-        from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-        return Scrypt(salt=salt, length=32, n=SCRYPT_N, r=8, p=1).derive(self.ask(prompt).encode())
+        return keystore.scrypt_key(self.ask(prompt), salt, SCRYPT_N)
 
     def keys(self, salt: bytes, *, create: bool = False) -> list[bytes]:
         return [self._derive(salt, "memory passphrase: ")]
@@ -185,7 +216,7 @@ def _ask(prompt: str) -> str:
     raise KeyUnavailable(f"the memory store is under a passphrase: set {PASSPHRASE_ENV} or run in a terminal")
 
 
-def default_keys(user: str, profile: str, directory: str) -> Keys:
+def default_keys(user: str, profile: str, directory: str, stored: tuple[Path, ...] = ()) -> Keys:
     """The keys this process uses: the OS keystore, or a passphrase when ``$ML_STACK_MEMORY_KEYS``
     says ``passphrase``."""
     want = os.environ.get(KEYS_ENV, "keystore") or "keystore"
@@ -194,7 +225,7 @@ def default_keys(user: str, profile: str, directory: str) -> Keys:
     if want != "keystore":
         raise KeyUnavailable(f"{KEYS_ENV} is keystore or passphrase")
     where = hashlib.sha256(directory.encode()).hexdigest()[:12]
-    return KeystoreKeys(f"{user}/{profile}/{where}")
+    return KeystoreKeys(f"{user}/{profile}/{where}", owner=f"{user}|{profile}", files=tuple(stored))
 
 
 def _aead(key: bytes) -> Any:

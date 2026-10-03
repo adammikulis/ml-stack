@@ -146,7 +146,8 @@ class Store:
         self.prev = self.path.with_name(self.path.name + ".prev")
         self.clock, self.scope = clock, scope
         self.owner = f"{self.user}|{self.profile}"
-        self.keys = setup.keys or vault.default_keys(self.user, self.profile, str(self.path.parent.resolve()))
+        self.keys = setup.keys or vault.default_keys(self.user, self.profile, str(self.path.parent.resolve()),
+                                                       (self.path, self.prev))
         self._g: GraphStore | None = None
         self._stamp: tuple[str, str] | None = None
         self._status, self._why, self._salt = "fresh", "", os.urandom(vault.SALT)
@@ -520,8 +521,7 @@ class Store:
     def rekey(self) -> None:
         """Re-encrypt the store and its previous copy under a new key, then drop the old key."""
         def change(g: GraphStore) -> None:
-            if self.keys.mode == "passphrase":
-                self._salt = os.urandom(vault.SALT)
+            self._salt = os.urandom(vault.SALT)
             self._next_key = self.keys.rotate(self._salt)
 
         try:
