@@ -95,5 +95,28 @@ QWEN35_0_8B_BASE = Checkpoint(
 
 QWEN35_2B_BASE = Checkpoint("qwen3.5-2b-base", STRANDS_V19.base_files, "Apache-2.0")
 
-BASES = {c.name: c for c in (QWEN35_0_8B_BASE, QWEN35_2B_BASE)}
+GEMMA4_E2B_REPO = "google/gemma-4-E2B"
+GEMMA4_E2B_REV = "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f"
+
+
+def _gemma(name: str, sha: str, size: int) -> Pin:
+    return Pin(GEMMA4_E2B_REPO, GEMMA4_E2B_REV, name, sha, size)
+
+
+GEMMA4_E2B = Checkpoint(
+    "gemma-4-e2b",
+    (
+        _gemma("config.json",
+               "e5faef0dd1a8f2437f6010721146b85433eaa90e679ef011e803c7ffefae73b8", 4914),
+        _gemma("model.safetensors",
+               "76dc84a5a805a2c8b91e9ccc00b8dbf8f4a99bf0d56ab25832f6e6addd4f7f57", 10246621918),
+        _gemma("tokenizer.json",
+               "12bac982b793c44b03d52a250a9f0d0b666813da566b910c24a6da0695fd11e6", 32170070),
+        _gemma("tokenizer_config.json",
+               "12754e3442e47c1a1c55d550b617fc47ae227e8156ed1b1de0d8428195768b5c", 906),
+    ),
+    "Apache-2.0",
+)
+
+BASES = {c.name: c for c in (QWEN35_0_8B_BASE, QWEN35_2B_BASE, GEMMA4_E2B)}
 """The pinned base models a decider can be trained on, by the name `--base` takes."""

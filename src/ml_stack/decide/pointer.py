@@ -75,7 +75,13 @@ def load_torso(base_dir: Path, lora_dir: Path | None, dtype: str, device: str, *
                                                   trust_remote_code=False)
     cls = (transformers.Qwen3_5ForCausalLM if cfg.model_type in ("qwen3_5", "qwen3_5_text")
            else None)
-    if cls is None:
+    if cfg.model_type == "gemma4":
+        # Gemma4ForCausalLM does not map `model.language_model.*` and would leave it random.
+        full = transformers.Gemma4Model.from_pretrained(
+            base_dir, dtype=getattr(torch, dtype), local_files_only=True,
+            trust_remote_code=False, use_safetensors=True)
+        torso = full.language_model
+    elif cls is None:
         torso = transformers.AutoModel.from_pretrained(
             base_dir, dtype=getattr(torch, dtype), local_files_only=True,
             trust_remote_code=False, use_safetensors=True)
