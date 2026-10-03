@@ -23,6 +23,15 @@ TEXT = {
     "sliding_window": 8, "max_position_embeddings": 512, "use_double_wide_mlp": True}
 
 
+@pytest.fixture(autouse=True)
+def _never_the_real_home():
+    """Fails a test that would train into the real state root: it runs outside tests/conftest.py,
+    which moves the root."""
+    from ml_stack import home
+    if home.home() == home.user_home() / ".ml-stack":
+        pytest.fail(f"{home.home()} is the real state root; run this under tests/conftest.py")
+
+
 @pytest.fixture
 def tiny_gemma(tmp_path):
     """A random 6-layer multimodal Gemma 4 and a word-level tokenizer, saved as a base."""
@@ -246,3 +255,24 @@ def test_checkpointing_is_on_by_default_for_an_accelerator_and_off_on_the_cpu(ti
     assert torso.gradient_checkpointing is False
     assert checkpoint_activations(torso, Settings(), "mps") is True
     assert torso.gradient_checkpointing is True
+
+
+def test_the_whole_run_test_refuses_to_run_where_it_would_pin_into_the_real_home(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    copy = tmp_path / "outside" / "test_gemma_run_copy.py"
+    copy.parent.mkdir()
+    copy.write_text(Path(__file__).read_text())
+    account = tmp_path / "account"
+    account.mkdir()
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k not in ("ML_STACK_HOME", "ML_STACK_CACHE")}
+    env.update(HOME=str(account), PYTHONPATH=f"{root}:{root / 'src'}")
+    got = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xdist",
+         "--rootdir", str(copy.parent), str(copy), "-k", "whole_run_on_a_gemma"],
+        cwd=copy.parent, env=env, capture_output=True, text=True, timeout=300, check=False)
+    assert got.returncode != 0 and "is the real state root" in got.stdout
+    assert list(account.rglob("*")) == []
