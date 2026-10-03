@@ -8,6 +8,7 @@ from pathlib import Path
 from ml_stack.gym.catalog import CAR_ACTIONS, require
 from ml_stack.gym.cosim import make_cosim
 from ml_stack.gym.driving import geometry as driving_geometry
+from ml_stack.gym.road_rules import stop_environment
 from ml_stack.gym.traffic import traffic_defaults
 from ml_stack.gym.values import json_value
 
@@ -47,14 +48,21 @@ def make_environment(name, config=None):
         cfg.setdefault("num_scenarios", 20000)
         cfg.setdefault("start_seed", 0)
         cfg.setdefault("horizon", 1000)
+        debug = cfg.pop("sensor_debug", True)
+        stop_signs = cfg.pop("stop_signs", False)
+        if not isinstance(debug, bool) or not isinstance(stop_signs, bool):
+            raise ValueError("sensor_debug and stop_signs must be booleans")
         if cfg.pop("render_preview", False):
             from metadrive.obs.state_obs import LidarStateObservation
             cfg.update(image_observation=True, agent_observation=LidarStateObservation,
                        sensors={"main_camera": ()}, window_size=(960, 540), show_interface=False,
                        show_terrain=False)
-            cfg["vehicle_config"] = {**cfg.get("vehicle_config", {}), "show_lidar": True,
-                                     "show_side_detector": True, "show_lane_line_detector": True}
-        return Driving(MetaDriveEnv(cfg))
+            vehicle_config = dict(cfg.get("vehicle_config", {}))
+            for flag in ("show_lidar", "show_side_detector", "show_lane_line_detector"):
+                vehicle_config.setdefault(flag, debug)
+            cfg["vehicle_config"] = vehicle_config
+        env = Driving(MetaDriveEnv(cfg))
+        return stop_environment(env) if stop_signs else env
     if name == "warehouse":
         import rware  # noqa: F401
 

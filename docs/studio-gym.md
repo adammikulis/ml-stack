@@ -74,6 +74,14 @@ Car seeds select native MetaDrive scenarios. Defaults cover seeds `0` through `1
 configure `start_seed` and `num_scenarios` to change this range. Out-of-range seeds are
 rejected. The default car horizon is 1000 steps. Warehouse and traffic retain their finite
 native episode limits, configurable through environment settings.
+Set car `map` to `SCSCS` for native straight/curve segments and `traffic_density` to
+`0.25` for surrounding native traffic. With `stop_signs: true`, a route checkpoint
+requires speed at or below 0.5 m/s for one second within eight metres before its stop
+line. Compliance adds five reward points; crossing without stopping subtracts ten,
+once per checkpoint. The numeric policy observation adds distance, held time and
+compliance; named decision inputs and recordings also include this rule. These policies
+require checkpoints trained with the same stop-task configuration.
+`sensor_debug` controls the native camera's lidar and road detector overlays.
 Session manifests record installed simulator versions and SHA256 hashes of the SUMO
 network and route files. MetaDrive uses the pinned 0.4.3 source revision listed in the
 `gym-driving` dependency; its installed package metadata records that source URL.
