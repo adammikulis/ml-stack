@@ -3,6 +3,7 @@
 import base64
 import io
 import itertools
+from importlib import import_module
 from pathlib import Path
 
 from ml_stack.gym.catalog import CAR_ACTIONS, require
@@ -11,15 +12,40 @@ from ml_stack.gym.driving import geometry as driving_geometry
 from ml_stack.gym.road_rules import stop_environment
 from ml_stack.gym.traffic import traffic_defaults
 from ml_stack.gym.values import json_value
+from ml_stack.gym.worlds import configure_world
 
 
-def make_environment(name, config=None):
+def make_environment(name, config=None, seed=0):
     """Create a native environment with training-compatible actions."""
     require(name)
+    cfg = dict(config or {})
+    mode = cfg.pop("simulation_mode", "episode")
+    cfg.pop("learning_mode", None)
+    if mode not in {"episode", "world"}:
+        raise ValueError("simulation_mode must be episode or world")
+    provenance = None
+    if "world" in cfg and (mode == "episode" or name == "car"):
+        cfg, provenance = configure_world(name, cfg, seed)
+    if mode == "world":
+        if name == "car":
+            env = import_module("ml_stack.gym.car_world").make_car_world(cfg)
+        elif name == "warehouse":
+            env = import_module("ml_stack.gym.world_warehouse").make_warehouse_world(cfg, seed)
+        else:
+            env = import_module("ml_stack.gym.world_traffic").make_traffic_world(cfg, seed, combined=name == "traffic-driving")
+    else:
+        env = _episode_environment(name, cfg)
+    if provenance:
+        env.world_provenance = provenance
+    return env
+
+
+def _episode_environment(name, config):
+    """Construct one bounded native Gym environment."""
     import gymnasium as gym
     import numpy as np
 
-    cfg = dict(config or {})
+    cfg = dict(config)
     if name == "traffic-driving":
         return make_cosim(cfg)
     if name == "car":
@@ -113,6 +139,10 @@ def actions(name, env):
 def render_state(name, env):
     """Return native geometry and a PNG frame when available."""
     native = env.unwrapped
+    if hasattr(env, "render_state"):
+        geometry = env.render_state()
+        frame = native.main_camera.perceive(to_float=False) if native.main_camera is not None else None
+        return geometry, png_frame(frame)
     if name == "traffic-driving":
         return native.geometry(), None
     if name == "car":
@@ -136,9 +166,14 @@ def render_state(name, env):
                     "lights": [{"id": key, "state": connection.trafficlight.getRedYellowGreenState(key)}
                                for key in connection.trafficlight.getIDList()]}
         frame = None
+    return geometry, png_frame(frame)
+
+
+def png_frame(frame):
+    """Encode an available native camera frame."""
     if frame is None:
-        return geometry, None
+        return None
     from PIL import Image
     output = io.BytesIO()
     Image.fromarray(frame).save(output, format="PNG")
-    return geometry, base64.b64encode(output.getvalue()).decode("ascii")
+    return base64.b64encode(output.getvalue()).decode("ascii")
