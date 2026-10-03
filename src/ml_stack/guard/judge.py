@@ -91,7 +91,7 @@ def free_text(text: str) -> str:
     if stripped[:1] in "[{":
         try:
             return "\n".join(_strings(json.loads(stripped)))
-        except ValueError:
+        except (ValueError, RecursionError):  # not JSON, or nested too deep to walk: read as text
             pass
     return stripped if any(_prose(line) for line in stripped.splitlines()) else ""
 
@@ -198,7 +198,10 @@ class TextScreen(Base):
         self.log: list[tuple[str, Judgement]] = []
 
     def after_tool_call(self, call: Call, result: str, context: Context) -> Verdict:
-        got = self.judge.judge(unfenced(result), context.task)
+        try:
+            got = self.judge.judge(unfenced(result), context.task)
+        except Exception as exc:  # noqa: BLE001 a judge that breaks has not cleared the text
+            got = Judgement(error=f"{type(exc).__name__}: {exc}"[:200])
         self.log.append((call.name, got))
         if got.skipped:
             return Proceed()

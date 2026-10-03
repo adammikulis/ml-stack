@@ -153,10 +153,14 @@ class LogprobDecider(BaseDecider):
         except (KeyError, IndexError, TypeError) as exc:
             raise DecideError(f"{self.base_url} returned no log-probabilities; the server must "
                               "support `logprobs` on /v1/chat/completions") from exc
-        mass = letter_probabilities(top, count)
-        total = sum(mass)
-        if total < MIN_MASS:
-            first = top[0].get("token") if top else None
+        try:
+            mass = letter_probabilities(top, count)
+            total = sum(mass)
+        except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+            raise DecideError(f"{self.base_url} returned log-probabilities that are not "
+                              f"tokens with numbers: {type(exc).__name__}") from exc
+        if not total >= MIN_MASS:  # also true of NaN
+            first = top[0].get("token") if top and isinstance(top[0], dict) else None
             raise DecideError("the model's first token was not one of the option letters "
                               f"(it was {first!r})")
         self.model = self.model or str(reply.get("model", ""))

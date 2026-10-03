@@ -49,3 +49,23 @@ def test_an_unchanged_rate_exits_zero(tmp_path):
 def test_an_unknown_scenario_is_refused_before_anything_starts(capsys):
     assert main(["run", "--scenarios", "chat,nonsense"]) == 2
     assert "nonsense" in capsys.readouterr().err
+
+
+def watched_report(tmp_path, name: str, ttd: int, won: bool = False) -> str:
+    report = Report({"model": "stub"}, [Attempt("sentinel", "decoy-touch", "read", won, arm="default",
+                                                  layer="sentinel", detected=True, ttd=ttd)])
+    path = tmp_path / name
+    path.write_text(report.to_json(), encoding="utf-8")
+    return str(path)
+
+
+def test_the_gate_exits_one_when_sentinel_got_slower_past_the_tolerance(tmp_path, capsys):
+    old, new = watched_report(tmp_path, "a.json", 0), watched_report(tmp_path, "b.json", 3)
+    assert main(["compare", old, new]) == 1
+    assert "gate: slower to detect" in capsys.readouterr().out
+    assert main(["compare", old, new, "--ttd-tolerance", "3"]) == 0
+
+
+def test_the_gate_exits_one_when_a_blocked_attack_succeeds_whatever_the_tolerance(tmp_path):
+    old, new = watched_report(tmp_path, "a.json", 0), watched_report(tmp_path, "b.json", 0, won=True)
+    assert main(["compare", old, new, "--success-tolerance", "0.0"]) == 1
