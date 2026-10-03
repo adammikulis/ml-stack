@@ -1,5 +1,7 @@
 # Working with a graph
 
+The graph is the default store for anything persistent that has relations: the chat agent's memory (`docs/memory.md`), ingested documents (`docs/ingest.md`), what is known about models and builds. Reach for a flat file only for pure configuration or a tiny single-purpose cache.
+
 A graph here is a mapping with `nodes` and `edges` and nothing else agreed in advance —
 what a project calls its kinds and its relations is the project's business.
 
