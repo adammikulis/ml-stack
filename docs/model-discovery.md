@@ -122,6 +122,40 @@ destination is checked first (`NotEnoughSpace`). A gated or private repository r
 `GatedRepo` saying to accept the licence and set `HF_TOKEN`. `HF_ENDPOINT` moves the endpoint; the
 token goes to the endpoint and not to the CDN host it redirects to.
 
+### Peers first
+
+By default a pull asks the devices you paired before it goes to the Hub, on the local network
+or at an address you stored (a VPN or overlay such as a tailnet; never a public one). The
+stored devices are the peer book (`<state>/onboard/peers.json`, managed by `ml-stack fleet
+peers add NAME --url https://host:port --certificate ... --signing-key ... [--device-secret ...]`,
+`remove`, `on`, `off`). For each file of the pull the session asks every peer for its signed
+manifest (over TLS pinned to that device's certificate), keeps the peers whose manifest lists
+that very file (name, size and digest), orders them by how fast they answered, and fetches the
+file chunk by chunk, resumably, from several at once. `on_progress`, `CancelToken` and the
+sentinel events work as for a Hub pull.
+
+**What is trusted.** Not the peer. The digest a file must have is the Hub's own listing
+(fetched through `ml_stack.net`); a peer whose manifest lists the file with another digest is
+not used, and a digest a peer states never replaces the pin. Only when the listing carries no
+digest does an entry of a manifest signed by your own pinned manifest key supply it. Every
+chunk is checked against the signed manifest, the whole file against the pin, and the result
+goes through the same format check, scan and quarantine as an internet download. A peer that
+sends bytes failing a digest is dropped for the rest of the pull, the partial bytes are deleted,
+and a critical `onboard.peer.bad_copy` event goes to the bus and to sentinel; the Hub is used.
+
+**Who may have what** is decided by the device that serves the file, not by the one asking:
+`never` (the licence forbids copies) is refused, `owner` (gated or licensed models) goes only to
+a device you marked as yours and only after you recorded accepting that licence on the serving
+device (who, when, which licence; keep it with `ml-stack fleet share`), `open` goes to any
+paired device. A copy that sentinel holds in quarantine on the serving device is not served.
+Credentials such as `HF_TOKEN` never leave a device. A peer that has no copy, refuses, is
+unreachable or stalls costs a few seconds at most (each answer has 4 s, a whole transfer
+`30 s + size / 2 MiB/s`) and the pull continues from the Hub.
+
+**Turning it off.** `ml-stack-models pull --no-peers` or `fetch --no-peers` (or
+`pull(..., peers=False)`) for one pull; `ML_STACK_NO_PEERS=1` for a shell; `ml-stack fleet peers off`
+for the machine. Nothing is contacted when it is off.
+
 `search(query, Filters(max_bytes, quant, owner, gated, limit, files))` returns `Repo` rows with
 their files; `Repo.builds()` is `(build, bytes, shards, quantization)` per build. Tests run
 against `ml_stack.testing.fakehub`.

@@ -31,8 +31,6 @@ from ml_stack.hub import peers as hub_peers, transfer as pulling
 from ml_stack.sentinel.store import Holding
 from ml_stack.testing.fakehub import fake_hub
 
-pytest.importorskip("cryptography")
-
 MIB = 1 << 20
 CHUNK = 256 * 1024
 REF = "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"
@@ -41,6 +39,11 @@ GOOD = blob(3 * MIB, 1)
 SHA = hashlib.sha256(GOOD).hexdigest()
 CLUSTER = "k" * 32
 HELPER = Path(__file__).parent / "peer_serve.py"
+
+
+@pytest.fixture(autouse=True)
+def needs_cryptography():
+    pytest.importorskip("cryptography")
 
 
 @pytest.fixture

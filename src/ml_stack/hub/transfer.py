@@ -249,10 +249,8 @@ def pull(ref: str, dest: str | Path | None = None, on_progress: Report | None = 
     failed pull leaves ``<file>.part`` and the next pull of the same reference continues
     it. Two processes pulling the same file take turns.
 
-    Paired devices are asked first (``peers=False``, ``ML_STACK_NO_PEERS=1`` or
-    ``ml-stack fleet peers off`` skip them): a device that has the file hands it over only if
-    its bytes hash to the Hub's own digest, and otherwise the Hub is used. See
-    `ml_stack.hub.peers`.
+    Paired devices are asked first (``peers=False`` skips them; `ml_stack.hub.peers`): their
+    bytes count only if they hash to the Hub's own digest, else the Hub is used.
     """
     parsed, chosen = plan(ref)
     folder = destination(dest, parsed)

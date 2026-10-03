@@ -1,28 +1,15 @@
 """Model files from the owner's paired devices before the internet (docs/model-discovery.md).
 
-``hub.pull`` asks `session()` for the peers of one pull. For each file it wants, the session
-asks every device in the peer book (`PeerBook`: a device on this network or at an address the
-owner stored, reached over TLS pinned to its certificate) for its signed manifest, and uses
-the devices whose manifest lists that very file. Trust, in order:
-
-* What the bytes must hash to is the **pin**: the sha256 of the Hub's own listing (fetched
-  through ``ml_stack.net``), handed in as `Wanted.sha256`. A digest a peer states can never
-  replace it: a manifest entry that names the wanted file with another digest is ignored, and
-  is not a reason to download from that peer. Only when the listing carries no digest is the
-  digest of an entry in a manifest that verified under the owner's pinned signing key used.
-* The manifest tells the chunk digests, so one bad chunk is found as it arrives; the whole file
-  is hashed against the pin before it is let into the store, and goes through the same format
-  check, scan and quarantine as an internet download (`ml_stack.net.download.accept`).
-* A peer that sends bytes that fail a digest is marked bad for the rest of the pull, the partial
-  bytes are thrown away and a critical event goes to the bus and to sentinel.
-* Who may have what is the serving device's rule (`sharing.py`): ``never`` is refused,
-  ``owner`` goes to the owner's own devices once the licence acceptance is on record, ``open`` to
-  any paired device. A copy sentinel holds in quarantine is not served (`quarantine_veto`).
-* Connections go through `lan.require_local`: private, loopback, link-local and tailnet addresses,
-  never a public one.
-
-Anything that goes wrong (no peer has it, refused, slow, unreachable, a bad copy) answers
-False, and the Hub is used.
+``hub.pull`` asks `session()`. For each file the session asks every device in the `PeerBook`
+(TLS pinned to its certificate, `lan.require_local` addresses only) for its signed manifest and
+uses those that list that very file. The digest the bytes must have is the **pin**, the Hub
+listing's sha256 in `Wanted`; a digest a peer states never replaces it (only without any
+listing digest does a manifest entry signed by the owner's pinned key supply one). Chunks are
+checked against the manifest, the whole file against the pin, then it passes the net scan and
+quarantine (`net.download.accept`). A peer that sends a bad byte is dropped for the pull, the
+partial file is deleted and a critical event goes to the bus and to sentinel. Sharing levels
+and quarantine are enforced by the serving device (`sharing.py`, `quarantine_veto`).
+Anything that goes wrong answers False and the Hub is used.
 """
 
 from __future__ import annotations
@@ -38,13 +25,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, macauth
+from ml_stack import home, macauth, sentinel
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import peers as hub_peers
 from ml_stack.net import Blocked, Want, sniff
 from ml_stack.net.download import accept
 from ml_stack.net.hold import staging_dir
 from ml_stack.platform import private_file
+from ml_stack.sentinel.events import Event, Severity
 
 from .. import tls
 from .events import BUS, Bus
@@ -125,8 +113,6 @@ def quarantine_veto(entry: Entry) -> str:
     """The serving side's veto: why a file sentinel holds in quarantine is not handed out.
     A download is quarantined under its sha256 (`ml_stack.net.hold`)."""
     try:
-        from ml_stack import sentinel
-
         if sentinel.default().store.blocked("artifact", f"download:{entry.sha256}"):
             return "this copy is in quarantine on the serving device"
     except (OSError, ImportError, ValueError) as exc:
@@ -142,9 +128,6 @@ class _Relay(Bus):
         event = super().emit(kind, severity, subject, **evidence)
         BUS.emit(kind, severity, subject, **evidence)
         try:
-            from ml_stack import sentinel
-            from ml_stack.sentinel.events import Event, Severity
-
             sentinel.default().bus.emit(Event(kind, Severity.parse(severity), "onboard", subject,
                                               dict(evidence), event.ts))
         except (OSError, ImportError, ValueError) as exc:
