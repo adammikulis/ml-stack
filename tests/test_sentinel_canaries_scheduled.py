@@ -14,7 +14,7 @@ import pytest
 
 from ml_stack import home, sentinel
 from ml_stack.sentinel import State, canary, human, watch
-from ml_stack.serve import LlamaServerBackend, ServerManager, canaries
+from ml_stack.serve import LlamaServerBackend, ServerManager, canaries, guarded
 from ml_stack.serve.broker import Ask, Broker
 from ml_stack.serve.leases import recorded_servers
 from ml_stack.serve.process import kill_process_tree
@@ -181,3 +181,21 @@ def test_off_needs_a_reason_and_is_logged(monkeypatch) -> None:
     assert [e.kind for e in node.bus.recent(kind="sentinel.opt_out")]
     monkeypatch.delenv("ML_STACK_SENTINEL_CANARY")
     assert canaries.schedule(node, lambda: []).interval_s == watch.CANARY_INTERVAL_S
+
+
+def test_what_the_broker_arms_schedules_the_canaries_and_the_decoy(broker, served, model,
+                                                                   monkeypatch) -> None:
+    node = sentinel.default()
+    monkeypatch.setenv(watch.ENV_SCAN, "3600")
+    armed = guarded.arm(broker.manager, broker)
+    try:
+        assert armed.scanner is not None and armed.decoy is not None
+        assert armed.scanner.rounds, "the canary round is not in the scan loop"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and node.baselines.get(
+                canaries._key(node, str(model))) is None:
+            time.sleep(0.1)
+        assert node.baselines.get(canaries._key(node, str(model))) is not None
+        assert (home.home() / "credentials.endpoint").exists()
+    finally:
+        armed.stop()
