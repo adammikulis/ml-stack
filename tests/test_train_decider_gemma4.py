@@ -290,3 +290,21 @@ def test_gemma_prompts_start_with_the_bos_token_and_the_positions_still_find_the
     row = encode(tok, tiny_cases(2)[0], [0, 1], 4096)
     assert row["ids"][0] == bos and row["ids"].count(bos) == 1
     assert [tok.convert_ids_to_tokens(row["ids"][i]) for i in row["spots"]] == ["is", "not"]
+
+
+def test_the_cached_strands_tokenizer_gives_the_same_ids_with_and_without_special_tokens():
+    from transformers import AutoTokenizer
+
+    from ml_stack.decide.fetch import locate
+    from ml_stack.decide.pins import STRANDS_V19
+    from ml_stack.decide.types import BackendUnavailable
+    pin = next(p for p in STRANDS_V19.files if p.filename == "tokenizer.json")
+    try:
+        path = locate(pin)
+    except BackendUnavailable:
+        pytest.skip("the Strands tokenizer is not downloaded")
+    tok = AutoTokenizer.from_pretrained(path.parent, local_files_only=True)
+    text = pointer_prompt.render("Is it?", "state text", tiny_cases(2)[0].options).text
+    on = tok(text, add_special_tokens=True, return_offsets_mapping=True)
+    off = tok(text, add_special_tokens=False, return_offsets_mapping=True)
+    assert on["input_ids"] == off["input_ids"] and on["offset_mapping"] == off["offset_mapping"]

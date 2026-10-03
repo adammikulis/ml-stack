@@ -118,5 +118,28 @@ GEMMA4_E2B = Checkpoint(
     "Apache-2.0",
 )
 
-BASES = {c.name: c for c in (QWEN35_0_8B_BASE, QWEN35_2B_BASE, GEMMA4_E2B)}
+FUNCTIONGEMMA_REPO = "google/functiongemma-270m-it"
+FUNCTIONGEMMA_REV = "39eccb091651513a5dfb56892d3714c1b5b8276c"
+
+
+def _fg(name: str, sha: str, size: int) -> Pin:
+    return Pin(FUNCTIONGEMMA_REPO, FUNCTIONGEMMA_REV, name, sha, size)
+
+
+FUNCTIONGEMMA_270M = Checkpoint(
+    "functiongemma-270m-it",
+    (
+        _fg("config.json",
+            "a27aebbe2b4dd4be03e8907349eff4354f90ce265c980509218686be93a9abb6", 1323),
+        _fg("model.safetensors",
+            "af4f8a7c4c5eb82291759fd828720c7bcfcb92a5274556d13dde3caccf5f427b", 536223056),
+        _fg("tokenizer.json",
+            "cab06510581429a52484f103c9df074578506a025c40db1197d3625041566ca7", 33384901),
+        _fg("tokenizer_config.json",
+            "105f9a5740d9be1c455c4979f50ac0d60d9df8b2056498d8ab9a8cdfbdebb4a8", 1155716),
+    ),
+    "Gemma Terms of Use (card metadata license: gemma)",
+)
+
+BASES = {c.name: c for c in (QWEN35_0_8B_BASE, QWEN35_2B_BASE, GEMMA4_E2B, FUNCTIONGEMMA_270M)}
 """The pinned base models a decider can be trained on, by the name `--base` takes."""
