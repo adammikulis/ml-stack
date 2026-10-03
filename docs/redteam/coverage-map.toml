@@ -60,6 +60,18 @@ note = "the loopback route (reads, and one person-only post), live follow and ch
 
 # -- HTTP routes and handlers --------------------------------------------------------------
 [[group]]
+match = ["route:fleet/gym_routes.py:*", "route:fleet/workspace_routes.py:*"]
+status = "partial"
+count = 9
+tests = [
+  "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
+  "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
+  "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
+  "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff",
+]
+note = "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+
+[[group]]
 match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
 status = "partial"
 tests = [
