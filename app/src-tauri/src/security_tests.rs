@@ -2,7 +2,7 @@ use tauri::ipc::Origin;
 
 #[test]
 fn capabilities_reject_remote_shell_and_foreign_windows() {
-    let mut context = tauri::generate_context!();
+    let mut context: tauri::Context<tauri::Wry> = tauri::generate_context!();
     let authority = context.runtime_authority_mut();
     let local = Origin::Remote {
         url: "http://127.0.0.1:8770/ui/".parse().unwrap(),
