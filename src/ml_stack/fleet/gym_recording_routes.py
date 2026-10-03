@@ -11,6 +11,7 @@ from ml_stack.gym.recordings import export_reviewed
 
 from .files import safe_relpath
 from .jobs import DaemonError
+from .request_fields import field, object_body
 
 
 class GymRecordingRoutes:
@@ -24,16 +25,19 @@ class GymRecordingRoutes:
             root = artifact_root()
             tail = self.path[len(prefix):].strip("/").split("/")
             if tail == [""] and self.method == "GET":
-                files = sorted(root.glob("*/trajectory.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+                files = sorted((p for p in root.glob("*/trajectory.jsonl")
+                                if p.resolve().is_relative_to(root.resolve())),
+                               key=lambda p: p.stat().st_mtime, reverse=True)
                 self.send(200, {"recordings": [{"id": p.parent.name, "bytes": p.stat().st_size,
                     "modified": p.stat().st_mtime} for p in files[:200]]})
                 return True
             path = safe_relpath(root, tail[0])
-            trajectory = path / "trajectory.jsonl"
+            trajectory = safe_relpath(root, tail[0] + "/trajectory.jsonl")
+            safe_relpath(root, tail[0] + "/reviews.jsonl")
             if not trajectory.exists():
                 self.send(404, {"error": "No such recorded episode."})
                 return True
-            if self.method == "GET":
+            if self.method == "GET" and tail[1:] in ([], ["frame"]):
                 return self._recording_read(path, trajectory, tail[1:])
             if self.method == "POST" and tail[1:] == ["review"]:
                 return self._recording_review(path, trajectory)
@@ -42,7 +46,8 @@ class GymRecordingRoutes:
         except (ImportError, DaemonError, ValueError, OSError, KeyError) as exc:
             self.send(400, {"error": str(exc)})
             return True
-        return super().route()
+        self.send(405, {"error": "Unsupported recording route or method."})
+        return True
 
     def _recording_read(self, path, trajectory, rest) -> bool:
         rows = []
@@ -85,9 +90,9 @@ class GymRecordingRoutes:
         return True
 
     def _recording_review(self, path, trajectory) -> bool:
-        req = self.body()
-        key = int(req["episode_id"]), int(req["sequence"])
-        label = str(req["label"])
+        req = object_body(self)
+        key = field(req, "episode_id", int), field(req, "sequence", int)
+        label = field(req, "label", str)
         found = False
         with trajectory.open() as source:
             for line in source:
@@ -112,7 +117,7 @@ class GymRecordingRoutes:
         runner = self.ui.runner
         if runner is None:
             raise ValueError("Start the daemon job queue to export training datasets.")
-        rel = str(self.body().get("path") or f"datasets/gym-{path.name}.jsonl")
+        rel = field(object_body(self), "path", str, f"datasets/gym-{path.name}.jsonl")
         output = safe_relpath(runner.files_root, rel)
         if output.exists():
             raise ValueError("Choose a new dataset filename.")
