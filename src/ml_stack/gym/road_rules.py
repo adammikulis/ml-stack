@@ -3,9 +3,31 @@
 from ml_stack.gym.values import json_value
 
 
-def front_progress(native):
+def front_progress(native, vehicle=None):
     """Locate the vehicle's front bumper along its native route."""
-    return native.agent.navigation.travelled_length + native.agent.LENGTH / 2
+    vehicle = vehicle or native.agent
+    return vehicle.navigation.travelled_length + vehicle.LENGTH / 2
+
+
+def checkpoint_on_route(native, vehicle=None):
+    """Place a stop line on a vehicle's native route ahead of its bumper."""
+    vehicle = vehicle or native.agent
+    navigation = vehicle.navigation
+    desired = min(navigation.total_length - 4, max(min(75., navigation.total_length * .35),
+                                                front_progress(native, vehicle) + 12))
+    offset = 0.
+    for start, end in zip(navigation.checkpoints[:-1], navigation.checkpoints[1:], strict=True):
+        lanes = native.current_map.road_network.graph[start][end]
+        lane = lanes[0]
+        if offset + lane.length >= desired:
+            longitudinal = desired - offset
+            width = lane.width_at(longitudinal)
+            position = lane.position(longitudinal, -width / 2 - 2)
+            line = [lane.position(longitudinal, -width / 2),
+                    lane.position(longitudinal, (len(lanes) - .5) * width)]
+            return StopCheckpoint(desired, position, float(lane.heading_theta_at(longitudinal)), line)
+        offset += lane.length
+    raise RuntimeError("Native route has no lane available for a stop checkpoint")
 
 
 class StopCheckpoint:
@@ -65,22 +87,7 @@ def stop_environment(env):
         def reset(self, **kwargs):
             observation, info = self.env.reset(**kwargs)
             native = self.unwrapped
-            navigation = native.vehicle.navigation
-            desired = min(75., navigation.total_length * .35)
-            offset = 0.
-            for start, end in zip(navigation.checkpoints[:-1], navigation.checkpoints[1:], strict=True):
-                lanes = native.current_map.road_network.graph[start][end]
-                lane = lanes[0]
-                if offset + lane.length >= desired:
-                    longitudinal = desired - offset
-                    position = lane.position(longitudinal, -lane.width_at(longitudinal) / 2 - 2)
-                    heading = lane.heading_theta_at(longitudinal)
-                    width = lane.width_at(longitudinal)
-                    line = [lane.position(longitudinal, -width / 2),
-                            lane.position(longitudinal, (len(lanes) - .5) * width)]
-                    native.stop_checkpoint = StopCheckpoint(desired, position, float(heading), line)
-                    break
-                offset += lane.length
+            native.stop_checkpoint = checkpoint_on_route(native)
             return self.augment(observation), info
 
         def step(self, action):
