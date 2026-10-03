@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -162,7 +162,7 @@ def run(argv: Sequence[str], policy: Policy, *,  # noqa: PLR0913 - one keyword p
     try:
         proc = subprocess.Popen(
             full, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(policy.env), cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=HOOKS.environment(policy.env), cwd=cwd,
             start_new_session=True, preexec_fn=_limits(limits))
     except OSError as exc:
         raise SandboxUnavailable(f"{policy.name}: could not start {argv[0]}: {exc}") from exc
@@ -206,10 +206,32 @@ def _diagnose(when: str, result: Result) -> bool:
     return when == "failure" and (result.returncode != 0 or bool(result.stderr))
 
 
+class Hooks:
+    """What watches every run: ``events`` hears each event, ``scrub`` filters the environment a
+    child gets. Set by the node's sentinel (`ml_stack.sentinel.default`) so that sandbox imports
+    nothing from it."""
+
+    def __init__(self) -> None:
+        self.events: Events | None = None
+        self.scrub: Callable[[Mapping[str, str]], dict[str, str]] | None = None
+
+    def watch(self, events: Events | None,
+              scrub: Callable[[Mapping[str, str]], dict[str, str]] | None) -> None:
+        self.events, self.scrub = events, scrub
+
+    def environment(self, env: Mapping[str, str]) -> dict[str, str]:
+        return self.scrub(env) if self.scrub is not None else dict(env)
+
+
+HOOKS = Hooks()
+
+
 def _emitter(on_event: Events | None) -> Callable[..., None]:
+    """Reports to the caller's ``on_event`` and to whatever watches every run (the sentinel)."""
     def emit(event: str, **fields: object) -> None:
-        if on_event is not None:
-            with contextlib.suppress(Exception):
-                on_event(event, dict(fields))
+        for call in (HOOKS.events, on_event):
+            if call is not None:
+                with contextlib.suppress(Exception):
+                    call(event, dict(fields))
     return emit
 

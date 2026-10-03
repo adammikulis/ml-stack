@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import home, sentinel
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
 from ml_stack.serve import confined as confinement, exit_guard
@@ -490,7 +490,8 @@ def launch(  # noqa: PLR0913 - the independent facts of one spawn; a bundle type
     port = lease.port
     started_at = time.monotonic()
     with log_path.open("wb") as log_handle:
-        process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT, env=env,
+        process = subprocess.Popen(argv, stdout=log_handle, stderr=subprocess.STDOUT,
+                                   env=sentinel.default().scrub_env(env),
                                    cwd=cwd, **process_group_kwargs())
     if lease.stop_on_exit:
         exit_guard.protect(process.pid)

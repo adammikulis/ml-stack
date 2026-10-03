@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import secrets
 import string
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,7 @@ class Honey:
         """Write the decoy files if they are not there; returns all decoys. A file a person
         already has under one of the names is left alone and not used."""
         have = {d.id: d for d in self.decoys()}
+        endpoint = [have["endpoint"]] if "endpoint" in have else []
         specs = {
             "env": (".env", lambda v: f"HF_TOKEN={v}\n", _make("hf_", 34)),
             "creds": ("credentials.toml.bak",
@@ -79,8 +81,31 @@ class Honey:
             path.write_text(render(value), encoding="utf-8")
             path.chmod(0o600)
             out.append(Decoy(ident, str(path), value, path.stat().st_mtime_ns))
-        self._file.save({"decoys": [asdict(d) for d in out]})
+        self._file.save({"decoys": [asdict(d) for d in [*out, *endpoint]]})
         return out
+
+    def plant_endpoint(self, url: str) -> Decoy:
+        """Write the decoy file that names the decoy listener's address (``url``), replacing
+        the one a former listener left. The address is the decoy's value, so it is also a
+        sighting wherever it appears in a tool call, a tool result or a model reply."""
+        path = self.directory / "credentials.endpoint"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'[metadata]\nurl = "{url}"\n', encoding="utf-8")
+        path.chmod(0o600)
+        decoy = Decoy("endpoint", str(path), url, path.stat().st_mtime_ns)
+        kept = [asdict(d) for d in self.decoys() if d.id != "endpoint"]
+        self._file.save({"decoys": [*kept, asdict(decoy)]})
+        return decoy
+
+    def endpoint_hit(self, path: str, sessions: Sequence[str]) -> list[Finding]:
+        """A request reached the decoy listener at ``path``. High confidence: nothing legitimate
+        knows the address. The finding is against each session that had a tool running at the
+        time (the only way a request on loopback can be attributed), else against an
+        unattributed subject."""
+        subjects = [("session", s) for s in sessions] or [("caller", "unattributed-decoy-hit")]
+        return [finding("honey.endpoint_hit", Severity.CRITICAL, subject, HIGH,
+                        {"decoy": "endpoint", "path": path[:80], "attributed": bool(sessions)})
+                for subject in subjects]
 
     def remove(self) -> int:
         """Delete the decoy files this install planted; returns how many went."""

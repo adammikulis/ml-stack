@@ -11,6 +11,7 @@ A server put up with ``ml-stack-serve up`` is held by itself until it is taken d
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -18,7 +19,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ from ml_stack import gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
-from ml_stack.serve import guarded, unmanaged
+from ml_stack.serve import canaries, guarded, unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
@@ -181,6 +182,7 @@ class Broker:
         #: lease -> (pid, cores, since) for the test runners sharing this machine's cores
         self.cores: dict[str, tuple[int, int, float]] = {}
         self.cpus = os.cpu_count() or 1
+        self._unmanaged_told: set[int] = set()
         self._cond = threading.Condition()
 
     # ------------------------------------------------------------------ servers by spec
@@ -203,6 +205,7 @@ class Broker:
         caller = caller or Caller()
         options = dict(options or {})
         if why := guarded.blocked(spec.model):
+            guarded.report("refused", caller=caller.label or f"pid-{caller.pid}", why="model held")
             raise guarded.SentinelRefused(why)
         manager = self._manager_for(options)
         how = Starting(**{k: v for k, v in options.items() if k != "backend"})
@@ -273,8 +276,13 @@ class Broker:
         loads a second copy of one of them. A card somebody else is measuring is waited on
         like any other holder, so a measurement is never spoiled and never refuses a lease
         that could have had its turn."""
+        caller = ask.label or f"pid-{ask.pid}"
+        if why := guarded.caller_blocked(caller):
+            raise BrokerError(why)
+        guarded.report("lease", caller=caller, purpose=ask.purpose)
         allowed = tuple(m for m in ask.models if not guarded.blocked(m))
         if not allowed:
+            guarded.report("refused", caller=caller, why="model held by sentinel")
             raise BrokerError(guarded.blocked(ask.models[0]))
         ask = replace(ask, models=allowed)
         self.adopt()
@@ -565,6 +573,9 @@ class Broker:
         for proc in self.scan():
             if proc["port"] not in known and not proc["defunct"]:
                 taken = self._take_in(proc)
+                if not taken and proc["port"] not in self._unmanaged_told:
+                    self._unmanaged_told.add(proc["port"])
+                    guarded.unmanaged_seen([proc])
                 found.append(Held(port=proc["port"], model=proc["model"], pid=proc["pid"],
                                   ours=False, unmanaged=not taken, weight=proc["rss"],
                                   idle_since=now))
@@ -593,6 +604,29 @@ class Broker:
         self.say(f"port {proc['port']}: adopted pid {seen.pid} serving {seen.model} "
                  f"({unmanaged.ENV}=auto)")
         return True
+
+    def canary_targets(self) -> list[canaries.Target]:
+        """The servers this broker started and holds, each to be asked through a lease so the
+        broker knows who is using it. A lease that would start another server is let go unused."""
+        out = []
+        for one in self.snapshot()["servers"]:
+            if one["ours"] and not one["unmanaged"] and not one["loading"]:
+                out.append(canaries.Target(str(one["model"]), self._canary_lease(one)))
+        return out
+
+    def _canary_lease(self, one: dict[str, Any]) -> Callable[[], Any]:
+        @contextlib.contextmanager
+        def using() -> Iterator[str]:
+            grant = self.lease(Ask(purpose=one["purpose"] or "chat", models=(one["model"],),
+                                   pid=os.getpid(), label="sentinel-canary"),
+                               timeout=canaries.LEASE_WAIT_S)
+            try:
+                if grant.port != one["port"]:
+                    raise BrokerError("the canary lease was for another server")
+                yield grant.base_url
+            finally:
+                self.release(grant.lease)
+        return using
 
     def supervising(self) -> bool:
         """Whether anything is the broker's to look after: a server of ours, a held or loading

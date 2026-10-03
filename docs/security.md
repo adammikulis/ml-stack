@@ -327,6 +327,22 @@ no more than what its tests show:
   ignored and logged. A start skips re-hashing a model whose size, mtime and inode are
   unchanged since its last full check; an in-place edit that restores them waits for a deep scan.
   `docs/sentinel.md`, "What is armed by default", lists what is not wired.
+- **Repeated small signals add up.** Guard denials of a running agent, sandbox refusals during
+  its tool calls, refused leases and resource-limit hits of a Broker caller are scored per
+  session or caller: watch at 3, quarantine (a frozen session, a blocked caller) at 10 within
+  ten minutes, released only by a person. Another session or caller is unaffected.
+- **A model's reply is labelled (or, in `enforce`, held) when it carries a decoy value, held
+  content or a secret-shaped string; a poisoned compaction summary is held and not fed back;
+  a quarantined credential's variable is left out of the children the sandbox, `jobs.detach`,
+  the server launcher and the MCP launcher start; a quarantined MCP server is not connected.**
+- **A decoy HTTP endpoint on loopback** (Broker and fleet daemons) turns any request to it into
+  a high-confidence event and freezes the sessions that had a tool running. Its address is only
+  in `credentials.endpoint` under the state root. Off: `ML_STACK_SENTINEL_DECOY=off` with
+  `ML_STACK_SENTINEL_DECOY_BECAUSE`.
+- **Served models are probed on a schedule** (default hourly, 18 short requests each) against the
+  answers recorded the first time: a drift is a watch, a large confirmed one quarantines the
+  model. Off: `ML_STACK_SENTINEL_CANARY=off` with `ML_STACK_SENTINEL_CANARY_BECAUSE`. It
+  detects change, not a model that was bad at the start.
 - **The event log is hash-chained** and `ml-stack security verify` finds edits, cuts and
   reordering; the head can be written down elsewhere.
 - **A model that answers a fixed probe set differently from how it did at install is

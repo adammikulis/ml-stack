@@ -47,6 +47,7 @@ from ml_stack.serve.backend import (
 )
 from ml_stack.serve.manager import ServerManager, serve
 from ml_stack.serve.preflight import Check, Preflight, Report
+from ml_stack.testing.answers import answers_in
 
 __all__ = [
     "DRAFTING",
@@ -750,7 +751,7 @@ def serve_from_argv(argv: list[str], *, where: Path) -> int:
                     context=int(context) if context.isdigit() else 4096,
                     slots=int(slots) if slots.isdigit() else 1,
                     draft=draft, spec_type=_after(argv, _FLAGS["spec_type"]),
-                    counted=DRAFTING if draft else None)
+                    counted=DRAFTING if draft else None, answer=answers_in(where))
     port = _after(argv, _FLAGS["port"])
     FakeLlamaServer(served, port=int(port) if port.isdigit() else 8080)
     threading.Event().wait()

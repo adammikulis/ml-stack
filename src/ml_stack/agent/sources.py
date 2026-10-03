@@ -12,9 +12,10 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from ml_stack import sentinel
 from ml_stack.agent.confined import Options, confine
 
-__all__ = ["FunctionTools", "McpAuthError", "McpTools", "ToolOutput", "ToolSource"]
+__all__ = ["FunctionTools", "McpAuthError", "McpBlocked", "McpTools", "ToolOutput", "ToolSource"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +95,10 @@ Elicit = Callable[[str, dict[str, Any]], Awaitable[Any]]
 no values, or a false value to decline."""
 
 Progress = Callable[[float, float | None, str | None], Awaitable[None]]
+
+
+class McpBlocked(RuntimeError):
+    """Sentinel holds this MCP server (quarantined, or not allowed), so it is not connected."""
 
 
 class McpTools:
@@ -197,6 +202,9 @@ class McpTools:
     async def __aenter__(self) -> McpTools:
         from mcp import Client
 
+        if not sentinel.default().mcp_allowed(self._label):
+            raise McpBlocked(f"{self._label} is held by sentinel and is not connected; a person "
+                             "releases it with `ml-stack-security release`")
         opened = False
         try:
             self._client = Client(self._transport(self), elicitation_callback=self._elicited)

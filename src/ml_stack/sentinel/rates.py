@@ -40,6 +40,10 @@ class Windows:
         self._trim(slot, self.clock())
         return sum(w for _, w in slot)
 
+    def forget(self, key: str, what: str) -> None:
+        """Drop everything counted for ``what`` under ``key``."""
+        self._seen.pop((key, what), None)
+
     def _trim(self, slot: deque[tuple[float, int]], now: float) -> None:
         while slot and now - slot[0][0] > self.window_s:
             slot.popleft()

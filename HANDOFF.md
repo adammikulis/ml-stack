@@ -57,16 +57,18 @@ capability; every line is something that already exists not being what it says.
 - [x] **A bare `Agent`, the Broker (`_launch`, `lease`, `start`), the Broker and fleet daemons
   (scan loop, decoys, authenticator watch) use sentinel by default**, with a logged opt-out that
   needs a reason. Tests in `tests/test_sentinel_wiring_*.py` fail when the wiring is removed.
-- [ ] **Model output, summaries and compaction are not screened by sentinel** (`screen_model`,
-  `screen_memory`), `scrub_env` is not applied when a child process starts, and `mcp_allowed`
-  is not asked when an MCP server connects.
-- [ ] **Canaries are never scheduled.** `Sentinel.canary` runs by hand and in tests; nothing
-  runs it after a model is pinned or changes.
-- [ ] **The scan loop lives in the daemons only.** A library user who calls `serve.serve()` or
-  runs an `Agent` in a script gets start-time checks and no timer.
-- [ ] **`broker_listener`, `sandbox_listener`, `GuardLogHandler` and the unmanaged-server
-  findings are attached to nothing shipped**, and `taint.subscribe` still has no sentinel
-  subscriber.
+- [x] **Model output, compaction summaries, `scrub_env` at the spawn helpers, `mcp_allowed` at
+  connect, behavioural canaries in the daemons' scan loop, aggregated guard events
+  (`GuardLogHandler`, `broker_listener`, `sandbox_listener`, unmanaged listeners) and a loopback
+  decoy endpoint are wired.** Tests: `tests/test_sentinel_canaries_scheduled.py`,
+  `test_sentinel_score_wiring.py`, `test_sentinel_screens_wired.py`,
+  `test_sentinel_decoy_endpoint.py`, each checked by breaking the wire.
+- [ ] **Still not wired:** the scan loop, canaries and decoy listener live in the daemons only (a
+  library user who calls `serve.serve()` or runs an `Agent` in a script gets start-time checks
+  and the per-session score, no timer and no decoy endpoint); nothing quarantines an MCP server
+  on its own; `exe_mismatches` is not scheduled; `taint.subscribe` has no sentinel subscriber;
+  an environment passed as `None` (inherit) is not scrubbed; the canary baseline is the model's
+  own first answers, and the false-alarm corpus for the decoy endpoint is 48 scripted runs.
 - [ ] **A model ml-stack did not pull is trusted at its first start** (pinned then, source `first-use`, logged).
   A model it pulled (`gguf`, `safetensors`, through `net.download` / `net.accept`) is pinned at pull with
   `source=pull`, and a signed manifest accepted from a peer must agree with the file at load (docs/sentinel.md,

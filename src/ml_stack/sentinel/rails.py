@@ -30,6 +30,9 @@ class RailWatch:
     def __init__(self, *, deny_limit: int = 5, window_s: float = 300.0,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.deny_limit = deny_limit
+        self.tapped = False
+        """True when a `GuardLogHandler` already counts every denial the guard logs, so the
+        calls that hold a denied text or call do not count it a second time."""
         self.windows = Windows(window_s, clock=clock)
 
     def denied_text(self, session: str, rail: str, reason: str, source: str, text: str,
@@ -39,16 +42,27 @@ class RailWatch:
         out = [finding("guard.text_denied", Severity.WARNING, ("message", f"{session}:{digest}"), HIGH,
                        {"rail": rail, "reason": reason, "source": source, "bytes": len(text)},
                        text=text)]
-        return out + self._count(session, rail)
+        return out + ([] if self.tapped else self._count(session, rail))
 
     def denied_call(self, session: str, rail: str, reason: str, tool: str,
                     arguments: Mapping[str, Any] | None) -> list[Finding]:
-        """A rail refused a tool call: park it with its arguments, and count the denial."""
+        """A rail refused a tool call: park it with its arguments, and count the denial unless a
+        log handler counts every denial already (`tapped`)."""
+        return self.parked_call(session, rail, reason, tool, arguments) \
+            + ([] if self.tapped else self._count(session, rail))
+
+    def parked_call(self, session: str, rail: str, reason: str, tool: str,
+                    arguments: Mapping[str, Any] | None) -> list[Finding]:
+        """Park a refused tool call with its arguments, without counting the denial."""
         body = json.dumps({"tool": tool, "arguments": arguments}, default=str, sort_keys=True)
         digest = hashlib.sha256(body.encode()).hexdigest()[:12]
-        out = [finding("guard.call_denied", Severity.WARNING, ("tool_call", f"{session}:{tool}:{digest}"), HIGH,
-                       {"rail": rail, "reason": reason, "tool": tool}, text=body)]
-        return out + self._count(session, rail)
+        return [finding("guard.call_denied", Severity.WARNING,
+                        ("tool_call", f"{session}:{tool}:{digest}"), HIGH,
+                        {"rail": rail, "reason": reason, "tool": tool}, text=body)]
+
+    def counted(self, session: str, rail: str) -> list[Finding]:
+        """Count one denial against ``session`` now."""
+        return self._count(session, rail)
 
     def tainted(self, session: str, rail: str, reason: str) -> list[Finding]:
         """A rail marked the session's context as carrying outside instructions. It is

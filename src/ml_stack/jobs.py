@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import sentinel
 from ml_stack.command import Group, flag
 from ml_stack.home import expand, state
 from ml_stack.lock import Busy
@@ -171,7 +172,7 @@ def detach(module: str, argv: Sequence[str], *, log: Path, lines: Sequence[str] 
         out.flush()
         child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
                                  stderr=subprocess.STDOUT,
-                                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                                 env=sentinel.default().scrub_env({**os.environ, "PYTHONUNBUFFERED": "1"}),
                                  **detached_kwargs())
     if kind:
         record(kind, pid=child.pid, argv=rest, log=str(log), started=started, home=home)
