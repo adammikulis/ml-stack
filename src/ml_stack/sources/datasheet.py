@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.net.pdfread import engine, load
+from ml_stack.net.pdfrender import render_pages
 from ml_stack.net.pdftext import PAGE_LIMITS
 from ml_stack.sources.pdf import _pymupdf
 
@@ -219,25 +220,32 @@ def pin_tables(path: str | Path, *, pages: int | None = None) -> list[Pin]:
 def outline_pages(path: str | Path) -> list[Outline]:
     """Pages that probably draw the package outline or the recommended land pattern, best
     first. A page scores for the section phrases in its text and for how much vector drawing
-    it carries; ``page`` is 1-based."""
-    pymupdf = _pymupdf()
+    it carries; ``page`` is 1-based. Works with the default engine (the visible text and the
+    count of stroked paths pdfminer lays out) and with MuPDF."""
     found: list[Outline] = []
-    with pymupdf.open(str(Path(path).expanduser())) as doc:
-        for index in range(doc.page_count):
-            page = doc[index]
-            body = page.get_text().lower()
-            drawn = len(page.get_drawings()) >= DRAWING_STROKES
-            for kind, phrases in SECTIONS.items():
-                hits = [weight for phrase, weight in phrases if phrase in body]
-                if drawn and any(weight >= STRONG for weight in hits):
-                    found.append(Outline(index + 1, kind, sum(hits) + 3,
-                                         _heading(page, phrases)))
+    for index, (shown, strokes) in enumerate(_text_and_strokes(path)):
+        body = shown.lower()
+        drawn = strokes >= DRAWING_STROKES
+        for kind, phrases in SECTIONS.items():
+            hits = [weight for phrase, weight in phrases if phrase in body]
+            if drawn and any(weight >= STRONG for weight in hits):
+                found.append(Outline(index + 1, kind, sum(hits) + 3, _heading(shown, phrases)))
     return sorted(found, key=lambda o: (-o.score, o.page))
 
 
-def _heading(page: Any, phrases: tuple[tuple[str, int], ...]) -> str:
+def _text_and_strokes(path: str | Path) -> list[tuple[str, int]]:
+    """``(visible text, stroked paths)`` of each page by the engine in use."""
+    where = Path(path).expanduser()
+    if engine() == "pymupdf":
+        with _pymupdf().open(str(where)) as doc:
+            return [(page.get_text(), len(page.get_drawings())) for page in doc]
+    with load(where, limits=PAGE_LIMITS) as doc:
+        return [(page.get_text(), len(page.get_drawings())) for page in doc]
+
+
+def _heading(shown: str, phrases: tuple[tuple[str, int], ...]) -> str:
     """The first line of the page that holds one of the section phrases."""
-    for line in page.get_text().splitlines():
+    for line in shown.splitlines():
         if any(phrase in line.lower() for phrase, _ in phrases):
             return _clean(line)[:120]
     return ""
@@ -259,8 +267,18 @@ def _drawing_box(page: Any, pymupdf: Any) -> Any:
 
 
 def render(path: str | Path, page: int, *, crop: bool = True, dpi: int = 150) -> bytes:
-    """PNG bytes of a 1-based page, cropped to its drawing when ``crop``, no wider than
-    ``MAX_PX`` pixels (the resolution drops before the width goes over)."""
+    """PNG bytes of a 1-based page, cropped to its content when ``crop``, no wider than
+    ``MAX_PX`` pixels (the resolution drops before the width goes over).
+
+    The default engine is PDFium (permissive, extra ``pdf-render``) in a bounded child
+    (`ml_stack.net.pdfrender`); it crops to the box around everything drawn or written on the
+    page. ``ML_STACK_PDF_ENGINE=pymupdf`` renders with MuPDF instead and crops to the vector
+    drawing only, leaving the page's text out of the box.
+    """
+    if engine() != "pymupdf":
+        (done,) = render_pages(path, [page], dpi=dpi, crop=crop, max_width=MAX_PX,
+                               pad_pt=CROP_PAD_PT)
+        return done.png
     pymupdf = _pymupdf()
     with pymupdf.open(str(Path(path).expanduser())) as doc:
         held = doc[page - 1]

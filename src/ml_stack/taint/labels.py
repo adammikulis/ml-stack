@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Generic, TypeVar
 
 __all__ = ["Label", "Labelled", "Level", "join"]
-
-T = TypeVar("T")
 
 
 class Level(IntEnum):
@@ -37,7 +34,7 @@ def join(*labels: Label) -> Label:
 
 
 @dataclass(frozen=True, slots=True)
-class Labelled(Generic[T]):
+class Labelled[T]:
     """``value`` and the label it carries."""
 
     value: T

@@ -170,3 +170,18 @@ def held_by(what: str | Path) -> str:
         return ""
     finally:
         os.close(handle)
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process is running here. Asked, never assumed."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True          # it exists; it belongs to somebody else
+    except OSError:
+        return False
+    return True

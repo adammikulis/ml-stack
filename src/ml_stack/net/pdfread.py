@@ -87,19 +87,27 @@ def load(path: str | Path, *, limits: Limits | None = None, images: bool = False
         raise PdfRefused(f"the file is {size} bytes, over {limits.max_bytes}")
     request = {"path": str(where), "images": images, "max_width": max_width,
                "text_limit": text_limit, "limits": limits.__dict__}
+    return Pdf(run_child(CHILD, request, timeout_s=limits.timeout_s, max_out=limits.max_out))
+
+
+def run_child(script: Path, request: dict[str, Any], *, timeout_s: float, max_out: int
+              ) -> dict[str, Any]:
+    """Run ``script`` by path (``-P``) in a scrubbed child with ``request`` as JSON on stdin and
+    return its JSON answer; raises :class:`PdfRefused` for a kill on time, an answer over
+    ``max_out`` bytes, an ``{"error": ...}`` answer, or a child that stopped without one."""
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "SYSTEMROOT", "TMPDIR", "TEMP")}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     with tempfile.TemporaryFile() as out:
         try:
             done = subprocess.run(
-                [sys.executable, "-P", str(CHILD)], input=json.dumps(request).encode(),
-                stdout=out, stderr=subprocess.PIPE, timeout=limits.timeout_s, check=False, env=env,
+                [sys.executable, "-P", str(script)], input=json.dumps(request).encode(),
+                stdout=out, stderr=subprocess.PIPE, timeout=timeout_s, check=False, env=env,
                 cwd=tempfile.gettempdir())
         except subprocess.TimeoutExpired as exc:
-            raise PdfRefused(f"reading took more than {limits.timeout_s:g} s") from exc
+            raise PdfRefused(f"reading took more than {timeout_s:g} s") from exc
         end = out.seek(0, 2)
-        if end > limits.max_out:
-            raise PdfRefused(f"the reading is {end} bytes, over {limits.max_out}")
+        if end > max_out:
+            raise PdfRefused(f"the reading is {end} bytes, over {max_out}")
         out.seek(0)
         raw = out.read()
     try:
@@ -109,7 +117,7 @@ def load(path: str | Path, *, limits: Limits | None = None, images: bool = False
         raise PdfRefused(f"the reader stopped (exit {done.returncode}): {tail[0][:200]}") from None
     if "error" in answer:
         raise PdfRefused(str(answer["error"]))
-    return Pdf(answer)
+    return answer  # type: ignore[no-any-return]
 
 
 class _Rect:
@@ -138,6 +146,10 @@ class _Page:
         lines = ["".join(s["text"] for s in line["spans"] if not s.get("hidden"))
                  for block in blocks for line in block["lines"]]
         return "\n".join(lines) + "\n"
+
+    def get_drawings(self) -> list[None]:
+        """One placeholder per stroked or filled path on the page (the count is what is used)."""
+        return [None] * int(self._data.get("strokes", 0))
 
     def images(self) -> list[dict[str, Any]]:
         return list(self._data["images"])

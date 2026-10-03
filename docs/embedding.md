@@ -2,7 +2,7 @@
 
 `ml_stack.serve` starts, adopts and stops `llama-server`; `ml_stack.client` talks to it over
 HTTP. Both import nothing outside the standard library, `packaging` and `psutil`, read no file and
-open no socket when imported. The package runs on Python 3.11 to 3.14; the app's own environment is 3.13.
+open no socket when imported. The package runs on Python 3.12 to 3.14; the app's own environment is 3.13.
 
 ```
 pip install "ml-stack @ git+https://github.com/adammikulis/ml-stack"
