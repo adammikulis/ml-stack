@@ -334,6 +334,27 @@ def test_all_and_redteam_pull_in_no_agpl_package():
         names = closure(extra, table)
         assert not names & {"pymupdf", "fitz", "pymupdf4llm"}, f"{extra} pulls MuPDF: {names}"
     assert "pdfminer.six" in closure("pdf", table)
+    assert closure("pdf-render", table) == {"pypdfium2", "pillow"} <= closure("pdf", table)
+    assert "pypdfium2" in closure("all", table) and "pypdfium2" in closure("redteam", table)
+
+
+def test_pdfium_and_the_licences_of_the_binary_it_ships_are_permissive():
+    """Page rendering is in `all` and `redteam`, so what pypdfium2 carries must be BSD/Apache.
+    Its wheel bundles the PDFium binary and, per library inside it, that library's licence."""
+    try:
+        dist = metadata.distribution("pypdfium2")
+    except metadata.PackageNotFoundError:
+        pytest.skip("pip install 'ml-stack[pdf-render]'")
+    claim = dist.metadata.get("License-Expression") or dist.metadata.get("License") or ""
+    assert "BSD-3-Clause" in claim and "Apache-2.0" in claim and not AGPL.search(claim), claim
+    files = {str(f): f for f in dist.files or ()}
+    licences = {name.rsplit("/", 1)[-1]: f for name, f in files.items() if "licenses/" in name}
+    assert {"pdfium.txt", "Apache-2.0.txt", "BSD-3-Clause.txt"} <= set(licences)
+    assert "Redistribution and use in source and binary forms" in dist.locate_file(licences["pdfium.txt"]).read_text()
+    for name, f in licences.items():
+        text = dist.locate_file(f).read_text(errors="replace")
+        for banned in ("GNU AFFERO", "GNU LESSER", "GNU LIBRARY"):
+            assert banned not in text.upper(), f"{name} carries {banned}"
 
 
 def test_the_installed_packages_of_those_extras_carry_no_copyleft_licence():

@@ -16,16 +16,24 @@ part number, reads its pin table and finds its package pages.
 | A file with a provenance record | `ml_stack.scrape.download.download(url, dest, Wanted(...))` | none |
 | A part's datasheet | `ml_stack.datasheet.find(part, manufacturer)` | `web`, `pdf` |
 | Pin table as rows | `ml_stack.sources.datasheet.pin_tables(pdf)` | `pdf-agpl` (MuPDF) |
-| Package outline and land-pattern pages, as PNG crops | `outline_pages(pdf)`, `render(pdf, page)` | `pdf-agpl` (MuPDF) |
+| Package outline and land-pattern pages, as PNG crops | `outline_pages(pdf)`, `render(pdf, page)` | `pdf` (pdfminer.six + PDFium) |
 
 **PDF engine and licence.** The `pdf` extra reads PDFs with pdfminer.six (MIT) and Pillow, in a child
 process with hard bounds (`ml_stack.net.pdfread`): a file over 32 MiB, over 1,500 pages, a stream that
 inflates past 48 MiB, text past 24 M characters or a read past 90 s is refused with a clear
 `PdfRefused`, as is an encrypted or unparseable file. Text that a reader cannot see (invisible render
 mode, white, under 2 pt, fully transparent, off the page, in a layer that is switched off) is dropped
-and counted. MuPDF is AGPL-3.0, so it is not in `pdf`, `all` or `redteam`: `pip install 'ml-stack[pdf-agpl]'`
-and `ML_STACK_PDF_ENGINE=pymupdf` select it, and the datasheet pin tables and page pictures only work
-with it. An installed copy is never used unless that variable names it.
+and counted. Pages are rendered to PNG by PDFium (pypdfium2, Apache-2.0/BSD-3-Clause; the `pdf-render` part of
+`pdf`) in a second child started by file path with `-P` in a scrubbed environment
+(`ml_stack.net.pdfrender`): at most 8 pages per call, a page side of at most 5,000 pt, 16 M pixels per
+page, 150 M declared picture pixels, 32 MiB of PNG, 2 GiB resident memory (a watchdog, because macOS
+does not enforce an address-space limit) and 60 s are the bounds; past any the file is refused with
+`PdfRefused`. A crop is the box around everything on the page that is not white. Outline-page
+detection reads the visible text and the count of stroked paths that pdfminer lays out. MuPDF is
+AGPL-3.0, so it is not in `pdf`, `all` or `redteam`: `pip install 'ml-stack[pdf-agpl]'` and
+`ML_STACK_PDF_ENGINE=pymupdf` select it, and only the datasheet pin tables need it (with it,
+`render` also crops to the vector drawing alone). An installed copy is never used unless that
+variable names it.
 
 Model tools, as `(schema, callable)` pairs for `converse` (and loadable by name as
 `python:ml_stack.web:tools` and `python:ml_stack.datasheet:tools`): `web_search` (with `page`),
