@@ -362,7 +362,7 @@ Owner's standing choices (2026-10-03); do not ask again.
 
 - **Live tests and demos use the newest Qwen family** (Qwen3.8 at the time of writing; look at
   what `ml-stack-models list` and the Hugging Face cache actually hold and name the exact id in
-  the report) **and Qwen3.8-Flash-Next**, which the owner rates highly. Do not use gpt-oss: it is
+  the report) **and Qwen3.8-Flash-Next**, which the owner rates highly. For large-model tests use only Flash-Next (about 6B effective parameters, much faster than the dense 27B); do not run the 27B. In general prefer mixture-of-experts (MoE) models for day-to-day testing: far fewer active parameters, so faster. Do not use gpt-oss: it is
   too old. Old results stay as history, not as a matrix row.
 - **MTP (multi-token prediction) draft heads are on by default** whenever the served model has a
   matching trusted head and the managed llama.cpp build supports it; there is a documented
@@ -376,6 +376,8 @@ Owner's standing choices (2026-10-03); do not ask again.
   `StrandsAgents/strands-decider-2B-hobson-v19` (Qwen3.5-2B base). Treat a gap in
   `docs/decision-models.md` against that bar as a defect worth an issue; the gap analysis lives
   in the issue tracker, not in a private note.
+
+- **Default decider: Strands 2B** (`StrandsAgents/strands-decider-2B-hobson-v19`), chosen for its small size; revisit only against measured results (JevBench and our own sets). **Fine-tuned deciders are never committed**: datasets and weights stay in caches, the repo keeps recipes and metrics only.
 
 ## Saying that something works
 

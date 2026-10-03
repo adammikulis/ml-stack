@@ -130,7 +130,7 @@ def arms_for(head: str, *, depths: Sequence[int], caches: Sequence[str] = (),
     ``caches`` adds one arm per cache type for the head's own KV cache; those are decided
     at the best depth, so they are added by `_cache_arms` once the depths have run.
     """
-    out = [Arm("none", {"draft": "", "spec_type": "", "draft_n_max": None})]
+    out = [Arm("none", {"draft": "", "spec_type": "", "draft_n_max": None, "mtp": False})]
     for depth in depths:
         out.append(Arm(f"head@n{depth}",
                        {"draft": head, "spec_type": spec_type, "draft_n_max": int(depth)}))

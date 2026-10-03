@@ -106,11 +106,14 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
     """The spec ``up`` was asked for, before 'auto' is answered."""
     kv = str(getattr(args, "kv", "") or "")
     draft_k, draft_v = split_cache_type(str(getattr(args, "draft_kv", "") or ""))
+    draft = str(getattr(args, "draft", "") or "")
+    plain = draft.lower() == "none" or str(getattr(args, "spec", "") or "").lower() == "none"
     return ServerSpec(
         model=model, port=args.port, context=args.context, parallel=args.parallel,
-        draft=str(getattr(args, "draft", "") or "") or None,
+        draft=None if plain else draft or None,
+        mtp=False if plain or not getattr(args, "mtp", True) else None,
         mmproj=str(getattr(args, "mmproj", "") or "") or None,
-        spec_type=str(getattr(args, "spec", "") or ""),
+        spec_type="" if plain else str(getattr(args, "spec", "") or ""),
         cache_type_k=kv, cache_type_v=kv,
         spec_draft_type_k=draft_k, spec_draft_type_v=draft_v,
         kv_unified=getattr(args, "kv_unified", None),
@@ -224,6 +227,10 @@ OPTIONS_UP = [
               "a smaller cache here costs acceptance and never correctness. The types "
               "this build takes are in its --help; f16 is its default. One value sets "
               "both halves, K/V sets them apart"),
+    flag("--mtp", action=argparse.BooleanOptionalAction, default=True,
+         help="serve the model's own multi-token-prediction head when it has one that is "
+              "trusted and loads (the default; ML_STACK_MTP=off turns it off everywhere). "
+              "--no-mtp, --draft none and --spec none serve without"),
     flag("--draft", default="", metavar="MODEL_OR_AUTO",
          help="a small model to guess ahead, which the large one checks in one pass -- "
               "a path, an hf: reference, or 'auto' to use the draft head shipped beside "

@@ -16,6 +16,46 @@ needs a sentence or a plan.
 is the command; `POST /decide` on the daemon (same bearer token as every route, 256 KB body
 limit) and the `decide` MCP tool call the same router.
 
+## Named questions about one state
+
+`ml_stack.decide.questions` takes a state and a set of named questions and returns one typed
+answer per name, each with probabilities.
+
+    from ml_stack.decide import router
+    from ml_stack.decide.questions import choice, decide, noul, score
+
+    got = decide(
+        "payouts have failed for 3 days and I want to cancel",
+        {"urgent": noul("Is this urgent?"),
+         "team": choice("Which team owns this?", ["billing", "sales", "tech"]),
+         "anger": score("How angry is the customer?", 1, 5)},
+        config=router.Config(backend="logprob", url="http://127.0.0.1:8080"),
+        abstain_below=0.6)
+    got["urgent"].p_true      # float in [0, 1]
+    got["team"].scores        # {"billing": ..., "sales": ..., "tech": ...}, sums to 1
+    got["anger"].expected     # float in [1, 5]; got["anger"].scores holds the probability of each of 1..5
+
+The same from a shell, with `--json` printing `{name: answer}`:
+
+    ml-stack-decide ask --state "payouts have failed for 3 days" --backend logprob \
+        --noul urgent="Is this urgent?" \
+        --choice team="Which team owns this?:billing,sales,tech" \
+        --score anger="How angry is the customer?:1..5" --json
+
+- `noul` is a yes/no question: `p_true` is the probability of `yes`. `choice` is one answer among
+  named options. `score` is an integer scale `lo..hi`: `scores` holds the probability of each
+  value and `expected` is their probability-weighted sum.
+- A question that cannot be answered (the server is down, the model's first token is not an option
+  letter, a scale wider than the backend takes, a state over the size limit) gives an `Answer`
+  with `abstained=True`, `choice=None` and `error` set; the other answers are unaffected. The CLI
+  exits 1 when any answer failed.
+- The state is clipped and run through the logprob backend's `defang` (look-alikes folded, prompt
+  tags and label-like line starts neutralised) and has `<answer>` tags removed, whichever backend
+  answers.
+- Each question is a separate model call: questions about one state share no computation yet, so
+  ten questions cost ten calls.
+- This returns categories, probabilities and an expected value. It does not write text.
+
 ## Backends
 
 | backend | what runs | needs | options |

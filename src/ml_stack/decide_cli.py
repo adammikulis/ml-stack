@@ -2,6 +2,8 @@
 calibrate it, and compare backends.
 
     ml-stack-decide ask "Which team?" --state "payouts failing" --option billing --option sales
+    ml-stack-decide ask --state "payouts failing" --noul urgent="Is this urgent?" \\
+        --choice team="Which team?:billing,sales,tech" --score anger="How angry?:1..5" --json
     ml-stack-decide eval guards --backend logprob --url http://127.0.0.1:8080
     ml-stack-decide calibrate guards --backend logprob --isotonic --out calibration.json
     ml-stack-decide bench guards --backend logprob --backend embed
@@ -18,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
-from ml_stack.decide import registry, router
+from ml_stack.decide import questions, registry, router
 from ml_stack.decide.calibrate import Calibration, fit
 from ml_stack.decide.cases import Case, fingerprint, read_cases, write_cases
 from ml_stack.decide.eval import FLOOR, Report, evaluate, score
@@ -90,7 +92,35 @@ def _cases(args: Namespace) -> list[Case]:
     return found[:args.limit] if args.limit else found
 
 
+def _ask_named(args: Namespace) -> int:
+    if args.question or args.option:
+        raise ValueError("--noul, --choice and --score cannot be combined with a question or "
+                         "--option")
+    asked = questions.parse_all(args.noul, args.choice, args.score)
+    got = questions.decide(_text(args.state), asked, config=_config(args),
+                           abstain_below=args.abstain_below)
+    if args.json:
+        say(json.dumps({n: a.public() for n, a in got.items()}))
+    for name, a in got.items():
+        if args.json:
+            continue
+        if a.error:
+            say(f"{name}: ABSTAINED  error: {a.error}")
+            continue
+        extra = (f"  p_true {a.p_true:.3f}" if a.p_true is not None
+                 else f"  expected {a.expected:.3f}" if a.expected is not None else "")
+        say(f"{name}: {a.choice}  (certainty {a.certainty:.3f}, {a.backend})" + extra
+            + ("  ABSTAINED" if a.abstained else ""))
+        for label, p in a.scores.items():
+            say(f"  {label:<24} {p:.3f}")
+    return 1 if any(a.error for a in got.values()) else 0
+
+
 def _ask(args: Namespace) -> int:
+    if args.noul or args.choice or args.score:
+        return _ask_named(args)
+    if not args.question or not args.option:
+        raise ValueError("ask needs a question and at least two --option, or --noul/--choice/--score")
     config = _config(args)
     opts = options_of([_option(o) for o in args.option])
     name = _backends(args, len(opts), config)[0]
@@ -225,9 +255,16 @@ COMMANDS = Group(
     allow_abbrev=False)
 
 
-@COMMANDS.command("ask", help="pose one question", options=[
-    flag("question"), flag("--state", default="", help="the situation: text, @file or - (stdin)"),
-    flag("--option", action="append", default=[], required=True, metavar="NAME[=DESCRIPTION]"),
+@COMMANDS.command("ask", help="pose a question, or named yes/no, choice and score questions", options=[
+    flag("question", nargs="?", default="", help="one question, answered among the --option values"),
+    flag("--state", default="", help="the situation: text, @file or - (stdin)"),
+    flag("--option", action="append", default=[], metavar="NAME[=DESCRIPTION]"),
+    flag("--noul", action="append", default=[], metavar="NAME=QUESTION",
+         help="a yes/no question; the answer carries p_true"),
+    flag("--choice", action="append", default=[], metavar="NAME=QUESTION:OPT1,OPT2",
+         help="a question with one answer among the options"),
+    flag("--score", action="append", default=[], metavar="NAME=QUESTION:LO..HI",
+         help="an integer scale; the answer carries the expected value"),
     flag("--abstain-below", type=float, default=None, help="flag answers under this probability"),
     option("json"), *SERVER])
 def ask(args: Namespace) -> int:
