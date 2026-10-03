@@ -11,10 +11,7 @@ ml-stack's cache. Opt-in: nothing here runs in a default test tier, and a run us
 
 Accuracy is the argmax of the decider's own distribution against the item's label, an item the
 decider could not answer counting as wrong (JevBench's rule, which ``eval.evaluate`` does not
-share: it leaves such items out). Calibration (Brier, ECE) is over the answered items.
-
-    ml-stack-decide jevbench --fetch
-    ml-stack-decide jevbench --yes --backend rules --backend pointer --gguf MODEL.gguf
+share: it leaves such items out). Calibration (Brier, ECE) is over the answered items. Commands: docs/decision-models.md.
 """
 
 from __future__ import annotations
