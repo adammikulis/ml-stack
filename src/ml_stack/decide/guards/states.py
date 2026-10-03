@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from ml_stack.decide.guards.scope import HOSTS, PROJECT
+from ml_stack.decide.logprob import defang
 from ml_stack.decide.types import Option
 
 QUESTIONS: dict[str, tuple[str, tuple[Option, ...]]] = {
@@ -48,7 +49,7 @@ def destructive_state(request: str, tool: str, args: dict) -> str:
 
 def grounded_state(request: str, output: str, tool: str, args: dict) -> str:
     """The state text for the grounded question."""
-    seen = output or "(none yet)"
+    seen = defang(output) if output else "(none yet)"
     return (f"User request: {request}\nRecent tool output (untrusted): {seen}\n"
             f"Tool call: {call_text(tool, args)}")
 

@@ -77,11 +77,15 @@ vision = ["numpy>=1.24", "pillow>=10.0"]
 # a book is a source like any other: `ml_stack.sources.pdf` reads one into sections through
 # pdfminer.six (MIT), which gives text with the font it was set in -- how a heading is found in a
 # PDF with no outline -- and the position of every picture; Pillow renders the pictures. The
-# reading runs in a bounded child process (`ml_stack.net.pdfread`).
-pdf = ["pdfminer.six>=20260107", "pillow>=10.0"]
+# reading runs in a bounded child process (`ml_stack.net.pdfread`). Pages are rendered to PNG by
+# PDFium (pypdfium2: Apache-2.0/BSD-3-Clause, one 3-4 MB wheel with no dependencies) in a second
+# bounded child (`ml_stack.net.pdfrender`); `pdf-render` is that part alone, and `pdf` includes it.
+pdf-render = ["pypdfium2>=4.30", "pillow>=10.0"]
+pdf = ["pdfminer.six>=20260107", "pillow>=10.0", "ml-stack[pdf-render]"]
 # MuPDF is AGPL-3.0 (or Artifex's commercial licence): a network service built on it must offer
 # its source. It is NOT in `pdf`, `all` or `redteam`; install it only on purpose, and select it
-# with ML_STACK_PDF_ENGINE=pymupdf. The datasheet pin tables and page pictures need it.
+# with ML_STACK_PDF_ENGINE=pymupdf. Only the datasheet pin tables need it now: page pictures and
+# outline pages work with the permissive `pdf` extra.
 pdf-agpl = ["pymupdf>=1.24"]
 # `ml-stack-bench animate`: a comparison of builds as an animated graphic
 viz = ["manim>=0.19"]

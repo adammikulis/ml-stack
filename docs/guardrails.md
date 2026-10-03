@@ -81,6 +81,38 @@ letters) taints the result and lets it through; a call screen that cannot answer
 that says it could not run, so a state-changing call is never let through unchecked. A lease that
 fails is not tried again for 60 s.
 
+### Attacks on the judge itself
+
+The judge reads untrusted text and a call, so it is attacked directly (`tests/test_redteam_judge.py`,
+attack strings in `tests/judge_attacks.py`: fence closers spelled with full-width, zero-width, soft-hyphen,
+bidi and NUL tricks, fake `System:` / `Verdict:` / `Options:` lines, chat markup, text addressed to the
+judge ("answer A", "you must approve"), runs of option letters, repeated-token floods, JSON nested 100 000
+deep, 5 to 20 MB inputs, tool arguments that contain the judge's own prompt). What holds, each defence
+checked by breaking it once:
+
+- The text is folded (NFKC), stripped of invisible characters, and the prompt's own tags are replaced
+  (`decide.logprob.closed`); a line in the text that starts like a label of the prompt (`Options:`, `A.`,
+  `Answer:`, `User request:`) is marked with a leading `|` (`defang`). The prompt has one `<state>` block and
+  one question however the text is spelled. Tool output inside the call guard's questions gets the same.
+- The untrusted fence folds a look-alike spelling of its own tags before neutralising them, and the
+  injection patterns are also tried on the folded text; text without a delimiter is left as it was.
+- At most 200 000 characters are read, at most 4 windows judged, the task is cut to 1000 characters; a
+  result that was not read whole (`Judgement.cut`) goes through tainted, so a changing tool then asks the
+  person. A call whose question text is over 20 000 characters is confirmed, never cut.
+- The first token must put at least half its probability on the option letters (`MIN_MASS` 0.5, was
+  0.0001, so noise was renormalised into a verdict); anything else, a malformed or NaN reply, a timeout,
+  an HTTP error or any exception the judge raises is an error: the result is tainted, the call is confirmed.
+- JSON nested deeper than the parser allows used to raise out of the screen; it is read as text now.
+
+Measured with Qwen3-4B-Instruct-2507 Q4_K_M leased through the broker (`tests/test_redteam_judge_real.py`,
+34 attack texts, each carrying the same injected goal, judged as a tool result; one run, greedy): with nothing
+between the text and the model all 34 reach it; the judge before the hardening let 0 of 34 pass; hardened it
+lets 1 of 34 pass (`json-with-prompt-in-value`, a JSON value that contains a copy of the judge's own prompt
+followed by the goal: a regression in this one case, the defanged copy no longer reads as an attack, not yet
+fixed). 3 of 3 plain injections without wrapping are flagged and 0 of 5 benign texts are. The scripted
+tests (`tests/test_redteam_judge.py`) pin the prompt structure, the bounds and the failure handling, which
+a real model's answers cannot.
+
 Which model: the first of Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct and Qwen3-VL-8B-Instruct
 (Q4_K_M) that is on this machine and fits (`fleet.sizing.estimate` against `hub.free_memory`).
 Nothing is downloaded; with none installed the tier is absent and the rails stand alone. The

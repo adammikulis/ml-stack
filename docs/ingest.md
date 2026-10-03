@@ -22,7 +22,7 @@ ml-stack-ingest migrate --out ./sources.ladybug   # a store from the books era b
 ml-stack-ingest stop                              # end the run, after it folds what it read
 ```
 
-`ml_stack.sources.pdf` does the reading (pdfminer.six, MIT, in a bounded child process; `ML_STACK_PDF_ENGINE=pymupdf` with the AGPL `pdf-agpl` extra reads with MuPDF instead). `read(path)` gives a `Document` of `Chapter`s of
+`ml_stack.sources.pdf` does the reading (pdfminer.six, MIT, in a bounded child process, with figures and datasheet pages drawn by PDFium in another; `ML_STACK_PDF_ENGINE=pymupdf` with the AGPL `pdf-agpl` extra reads with MuPDF instead). `read(path)` gives a `Document` of `Chapter`s of
 `Section`s: a publisher's PDF carries an outline (`doc.get_toc()`) and that is believed, and
 a book printed to PDF by a browser has none, so the headings are found by the way they are
 set -- a section heading is numbered `N.M` and set larger than the body, a chapter opens with

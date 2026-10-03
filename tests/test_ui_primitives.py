@@ -191,6 +191,54 @@ class TestGallery:
         assert labels == definition["labels"] == LABELS
         assert js["yellowAt"] == THRESHOLDS.yellow_at and js["redAt"] == THRESHOLDS.red_at
 
+    @pytest.mark.parametrize("share,verdict", [(0.5, "green"), (0.79, "green"), (0.86, "yellow"),
+                                               (0.94, "yellow"), (0.97, "red"), (1.4, "red")])
+    def test_a_real_estimate_meters_output_draws_its_segments_capacity_and_verdict(
+            self, gallery, tmp_path, share, verdict):
+        """The element is fed `estimate.meters()` of a real estimate of a real (header-only)
+        GGUF, as the daemon sends it, and nothing else: the rendered verdict must be the
+        estimator's, and the segments and capacity what the estimate said."""
+        from conftest import write_gguf
+        from test_serve_estimate import dense
+
+        from ml_stack.hub.probe import GIB, MachineMemory
+        from ml_stack.serve import estimate as est
+
+        path = write_gguf(tmp_path / "m.gguf", dense(layers=16, train=65536))
+        got = est.estimate(path, est.Setup(context=8192, flash_attn=True))
+        reserve = 2 * GIB
+        machine = MachineMemory(64 * GIB, int(reserve + got.total_bytes / share), False, 0, (),
+                                "Linux")
+        (bar,) = est.meters(got, machine, reserve)
+        assert bar.verdict == verdict            # the estimator itself, before the element
+        page, errors = gallery()
+        seen = page.evaluate("""(bar) => {
+          const m = document.createElement('ml-meter');
+          m.setAttribute('label', 'Memory');
+          m.setAttribute('format', 'bytes');
+          m.segments = bar.segments;             // no `verdict`: the element works it out
+          m.capacity = bar.capacity_bytes;
+          document.body.append(m);
+          return new Promise((r) => setTimeout(() => {
+            const root = m.shadowRoot, track = root.querySelector('[role=meter]');
+            r({ cls: root.firstElementChild.className,
+                chip: root.querySelector('ml-chip').getAttribute('verdict'),
+                widths: [...track.querySelectorAll('.seg')].map((s) => s.style.width),
+                max: track.getAttribute('aria-valuemax'), now: track.getAttribute('aria-valuenow'),
+                legend: [...root.querySelectorAll('.legend li')].length });
+          }, 80));
+        }""", bar.as_dict())
+        assert errors == []
+        assert f"v-{bar.verdict}" in seen["cls"].split() and seen["chip"] == bar.verdict
+        assert ("over" in seen["cls"].split()) == (bar.used_bytes > bar.capacity_bytes)
+        assert float(seen["max"]) == bar.capacity_bytes
+        total = sum(s["value"] for s in bar.segments)
+        assert float(seen["now"]) == pytest.approx(min(total, bar.capacity_bytes), abs=1)
+        scale = max(bar.capacity_bytes, total)
+        assert len(seen["widths"]) == len(bar.segments) == seen["legend"]
+        for width, part in zip(seen["widths"], bar.segments, strict=True):
+            assert float(width.rstrip("%")) == pytest.approx(part["value"] / scale * 100, abs=1e-3)
+
     def test_a_property_set_before_the_element_exists_is_kept(self, gallery):
         page, _ = gallery()
         text = page.evaluate("""() => {

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import re
 import string
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
@@ -20,8 +22,35 @@ from ml_stack.http import ServerError, request_json
 LETTERS = string.ascii_uppercase
 SYSTEM = ("You answer multiple-choice questions about a situation. "
           "Reply with only the letter of the chosen option.")
-MIN_MASS = 1e-4
+MIN_MASS = 0.5
+"""The share of the first token's probability that must sit on the option letters. A model that
+puts most of it elsewhere (a flooded or confused prompt) gave no answer, and renormalising what
+is left of it would turn noise into a verdict."""
 LOOPBACK_NAMES = frozenset({"localhost", "ip6-localhost"})
+
+
+STATE_TAGS = re.compile(r"</?\s*(?:state|options?|question)\b[^>\n]*>?", re.I)
+HEADERS = re.compile(
+    r"^([ \t>|]*)((?:options?|question|answer|response|reply|verdict|decision|judge|system|"
+    r"assistant|user|human|state|tool result|user request|tool call)\s*:|[A-Za-z][.):]\s)",
+    re.I | re.M)
+CONTROLS = re.compile(r"[^\S\n\t ]|[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def closed(text: str) -> str:
+    """``text`` that cannot close the ``<state>`` block it is put in: look-alike characters
+    folded to the ones they imitate (NFKC), invisible and control characters removed, and the
+    prompt's own tags replaced."""
+    folded = unicodedata.normalize("NFKC", text)
+    folded = "".join(c for c in folded if unicodedata.category(c) != "Cf")
+    return STATE_TAGS.sub("[tag removed]", CONTROLS.sub(" ", folded))
+
+
+def defang(text: str) -> str:
+    """``closed`` text from outside, in which a line that starts like the prompt's own labels
+    (``Options:``, ``A.``, ``Answer:``) is marked with a leading ``|`` so it cannot pass for
+    one."""
+    return HEADERS.sub(lambda m: f"{m.group(1)}| {m.group(2)}", closed(text))
 
 
 def render(question: str, state: str, options: tuple[Option, ...]) -> str:
@@ -29,7 +58,7 @@ def render(question: str, state: str, options: tuple[Option, ...]) -> str:
     lines = [f"{LETTERS[i]}. {o.name}" + (f" - {' '.join(o.description.split())}"
                                           if o.description else "")
              for i, o in enumerate(options)]
-    return (f"<state>\n{state}\n</state>\n\nQuestion: {question}\n\nOptions:\n"
+    return (f"<state>\n{closed(state)}\n</state>\n\nQuestion: {question}\n\nOptions:\n"
             + "\n".join(lines) + "\n\nAnswer with the letter only.")
 
 
@@ -124,10 +153,14 @@ class LogprobDecider(BaseDecider):
         except (KeyError, IndexError, TypeError) as exc:
             raise DecideError(f"{self.base_url} returned no log-probabilities; the server must "
                               "support `logprobs` on /v1/chat/completions") from exc
-        mass = letter_probabilities(top, count)
-        total = sum(mass)
-        if total < MIN_MASS:
-            first = top[0].get("token") if top else None
+        try:
+            mass = letter_probabilities(top, count)
+            total = sum(mass)
+        except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+            raise DecideError(f"{self.base_url} returned log-probabilities that are not "
+                              f"tokens with numbers: {type(exc).__name__}") from exc
+        if not total >= MIN_MASS:  # also true of NaN
+            first = top[0].get("token") if top and isinstance(top[0], dict) else None
             raise DecideError("the model's first token was not one of the option letters "
                               f"(it was {first!r})")
         self.model = self.model or str(reply.get("model", ""))

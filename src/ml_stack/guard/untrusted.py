@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from ml_stack.interventions import Base, Call, Context, Rewrite, Verdict
 
@@ -41,13 +42,23 @@ NEUTRAL = (
 )
 
 
+def fold(text: str) -> str:
+    """``text`` with look-alike characters folded to the ones they imitate (NFKC) and invisible
+    format characters (zero width, soft hyphen, bidi controls) removed."""
+    return "".join(c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf")
+
+
 def injection_markers(text: str) -> list[str]:
     """The names of the injection patterns ``text`` matches."""
-    return [name for name, pattern in MARKERS if pattern.search(text)]
+    folded = fold(text)
+    return [name for name, pattern in MARKERS if pattern.search(text) or pattern.search(folded)]
 
 
 def fenced(text: str, source: str) -> str:
     """``text`` inside the untrusted fence, its own fence tags and chat markup neutralised."""
+    folded = fold(text)
+    if folded != text and any(p.search(folded) and not p.search(text) for p, _ in NEUTRAL):
+        text = folded  # a delimiter spelled with look-alikes or hidden characters: read as it looks
     for pattern, repl in NEUTRAL:
         text = pattern.sub(repl, text)
     return f"{OPEN.format(source=source)}\n{text}\n{CLOSE}"

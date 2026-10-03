@@ -10,7 +10,14 @@ from pathlib import Path
 from ml_stack.command import Group, flag
 from ml_stack.log import say, warn
 from ml_stack.redteam import corpus
-from ml_stack.redteam.report import Report, compare, markdown, success_rates
+from ml_stack.redteam.report import (
+    DEFAULT_TTD_TOLERANCE,
+    Report,
+    compare,
+    gate,
+    markdown,
+    success_rates,
+)
 from ml_stack.redteam.run import DEFAULT_MODEL, Plan, execute
 from ml_stack.redteam.scenarios import NAMES, Options
 
@@ -22,7 +29,18 @@ COMMANDS = Group(
     "and only installed models are used.", allow_abbrev=False)
 
 
-def _regressions(old: Report, new: Report) -> int:
+TOLERANCES = [
+    flag("--success-tolerance", type=float, default=0.0,
+         help="the attack-success rate may rise by this much (absolute) before the gate fails; "
+              "0 for the deterministic scenarios"),
+    flag("--ttd-tolerance", type=int, default=DEFAULT_TTD_TOLERANCE,
+         help="sentinel may take this many more tool calls than the baseline to notice an attack "
+              "before the gate fails"),
+]
+
+
+def _regressions(old: Report, new: Report, success: float = 0.0,
+                 ttd: int = DEFAULT_TTD_TOLERANCE) -> int:
     got = compare(old, new)
     for label in ("regressed", "fixed", "new", "gone"):
         for target, attack_class, attack_id, arm in got[label]:
@@ -31,7 +49,10 @@ def _regressions(old: Report, new: Report) -> int:
     before, after, attempts = success_rates(old, new)
     if after > before:
         say(f"success rate rose from {before:.4f} to {after:.4f} over {attempts} attempts")
-    return 1 if got["regressed"] or after > before else 0
+    worse = gate(old, new, success_tolerance=success, ttd_tolerance=ttd)
+    for line in worse:
+        say(f"gate: {line}")
+    return 1 if worse else 0
 
 
 @COMMANDS.command("run", help="run scenarios and write a report", options=[
@@ -42,7 +63,9 @@ def _regressions(old: Report, new: Report) -> int:
     flag("--limit", type=int, help="most attempts per attack class (smoke runs)"),
     flag("--out", type=Path, default=Path("redteam-report"), help="write OUT.json and OUT.md"),
     flag("--against", type=Path,
-         help="a previous report; exit 1 if an attack it blocked now succeeds or the success rate rose"),
+         help="a previous report; exit 1 if an attack it blocked now succeeds, the success rate "
+              "rose past --success-tolerance, or sentinel got slower than --ttd-tolerance"),
+    *TOLERANCES,
 ])
 def _run(args: argparse.Namespace) -> int:
     names = tuple(n for n in args.scenarios.split(",") if n)
@@ -54,13 +77,15 @@ def _run(args: argparse.Namespace) -> int:
     args.out.with_suffix(".json").write_text(report.to_json(), encoding="utf-8")
     args.out.with_suffix(".md").write_text(markdown(report), encoding="utf-8")
     say(markdown(report))
-    return _regressions(Report.load(args.against), report) if args.against else 0
+    return (_regressions(Report.load(args.against), report, args.success_tolerance,
+                         args.ttd_tolerance) if args.against else 0)
 
 
 @COMMANDS.command("compare", help="compare two reports",
-                  options=[flag("old", type=Path), flag("new", type=Path)])
+                  options=[flag("old", type=Path), flag("new", type=Path), *TOLERANCES])
 def _compare(args: argparse.Namespace) -> int:
-    return _regressions(Report.load(args.old), Report.load(args.new))
+    return _regressions(Report.load(args.old), Report.load(args.new), args.success_tolerance,
+                        args.ttd_tolerance)
 
 
 @COMMANDS.command("corpus", help="check the attack texts against their recorded hashes")
