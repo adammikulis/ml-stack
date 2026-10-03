@@ -68,32 +68,21 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
     return { key: "cpu", text: `${d.cpus || "?"} CPU` };
   };
 
-  // What a conversation costs to keep in memory. Two tensors per layer, per token, at
-  // two bytes each; the shape below is a 27B-class model, which is what most people end
-  // up running. A smaller model costs proportionally less.
   const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
-  const KV_MB_PER_TOKEN = 2 * 48 * 8 * 128 * 2 / (1024 * 1024);
 
-  M.ctxRam = (tokens) => {
-    const mb = tokens * KV_MB_PER_TOKEN;
-    return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
-  };
-
-  M.ctxWords = (n) => (n >= 1024 ? `${Math.round(n / 1024)}k tokens` : `${n} tokens`);
-
-  /** The slider for how much a conversation reads, and what it costs. */
   M.contextPicker = function (start, onPick) {
     const slider = M.ui("ml-slider", {
-      label: "how much it reads", stops: CTX_STEPS,
+      label: "Context length", stops: CTX_STEPS,
       value: CTX_STEPS.includes(start) ? start : 8192,
-      hint: "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
-        + "smaller one costs less." });
+      hint: "Maximum tokens in the model's context. Larger contexts require more memory." });
     slider.id = "ctx";
     const paint = (n) => {
-      slider.valueText = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of memory`;
+      slider.valueText = `${new Intl.NumberFormat().format(n)} tokens`;
       onPick(n);
     };
-    slider.addEventListener("input", (e) => paint(e.detail.value));
+    slider.addEventListener("input", (e) => {
+      if (Number.isFinite(e.detail?.value)) paint(e.detail.value);
+    });
     paint(slider.value);
     return el("div", { class: "meter" }, slider);
   };

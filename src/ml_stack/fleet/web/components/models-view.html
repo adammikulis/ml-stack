@@ -53,6 +53,10 @@
     async draw() {
       const m = await api("/ui/models");
       if (M.refused(m)) return;
+      if (!m.ok) {
+        this.note.replaceChildren(el("div", { class:"err" }, m.error || "Could not read the model library."));
+        return;
+      }
       if (this.box.hidden) return;
       const run = await api("/ui/serving");
       const running = new Set((run.running || []).flatMap((x) => x.models || []));
@@ -72,7 +76,7 @@
                 ? el("button", { class: "ghost small",
                     onclick: () => this.halt(portOf(x.name)) }, "Stop")
                 : el("button", { class: "ghost small",
-                    onclick: () => this.serve(x.name) }, "Run"))
+                    onclick: () => this.serve(x.name) }, "Serve model"))
             : el("span", { class: "label" }, "here")));
       this.querySelector("#models-here").replaceChildren(
         el("h2", {}, "On this machine"),
@@ -94,12 +98,12 @@
       const coming = (m.getting || []).filter((g) => g.state !== "done");
       const getting = this.querySelector("#models-getting");
       getting.hidden = !coming.length;
-      getting.replaceChildren(el("h2", {}, "Coming in"), ...coming.map(bar));
+      getting.replaceChildren(el("h2", {}, "Downloads"), ...coming.map(bar));
 
       const unfinished = this.querySelector("#models-unfinished");
       unfinished.hidden = !(m.unfinished || []).length;
       unfinished.replaceChildren(
-        el("h2", {}, "Started, not finished"),
+        el("h2", {}, "Incomplete downloads"),
         el("div", { class: "hint" },
           "Asking for the same model again picks up where it stopped."),
         ...(m.unfinished || []).map((x) =>
@@ -132,7 +136,12 @@
     }
 
     async halt(port) {
-      await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
+      const stopped = await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
+      if (!stopped.ok) {
+        this.note.replaceChildren(el("div", { class:"err" }, stopped.error || "Could not stop the model server."));
+        return;
+      }
+      this.note.replaceChildren();
       this.draw();
     }
 
@@ -226,7 +235,7 @@
                 el("span", {}, el("b", {}, x.name),
                   el("span", { class: "why" }, bits.join(" · "))),
                 el("button", { class: "ghost small",
-                  onclick: () => this.get(x.file, x.ref, x.draft_ref) }, "Get"));
+                  onclick: () => this.get(x.file, x.ref, x.draft_ref) }, "Download"));
             })
           : [el("div", { class: "hint" }, "No family is ticked.")]),
         el("div", { class: "pager" },
