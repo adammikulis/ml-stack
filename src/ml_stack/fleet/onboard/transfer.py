@@ -21,6 +21,7 @@ import queue
 import shutil
 import ssl
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
@@ -40,7 +41,7 @@ from .requests import Device
 from .sharing import NEVER, Access, Licences, decide
 from .web import Call, Listener, Reply, json_reply
 
-__all__ = ["Downloader", "NotShareable", "PeerSource", "Settings", "Share", "ShareServer",
+__all__ = ["Cancelled", "Downloader", "NotShareable", "PeerSource", "Settings", "Share", "ShareServer",
            "TransferError", "Withheld", "fetch_manifest", "mac_gate"]
 
 API = "/onboard/v1"
@@ -61,6 +62,10 @@ class NotShareable(TransferError):
         self.source = source
 
 
+class Cancelled(TransferError):
+    """The caller stopped the transfer; verified chunks stay on disk for the next try."""
+
+
 class Withheld(TransferError):
     """A peer refused the file under the owner's sharing rules (not a lie: it is not struck)."""
 
@@ -75,6 +80,9 @@ class Share:
     manifest: Manifest
     licences: Licences | None = None
     """The owner's record of licences accepted, which ``owner`` files need."""
+    withhold: Callable[[Entry], str] | None = None
+    """Says why an entry is not to be served right now (``''`` when it may be): the serving
+    machine's own veto, for example a copy sentinel holds in quarantine."""
 
 
 def mac_gate(cluster_secret: str, devices: Callable[[], Iterable[Device]] = lambda: (),
@@ -120,7 +128,8 @@ def serve_file(share: Share, name: str, range_header: str, bus: Bus, access: Acc
         entry = share.manifest.entry(safe_filename(name))
     except (KeyError, Unsafe):
         return json_reply(404, {"error": "no such file"})
-    reason = decide(entry, access, share.licences)
+    reason = decide(entry, access, share.licences) or \
+        (share.withhold(entry) if share.withhold else "")
     if reason:
         bus.emit("onboard.transfer.withheld", "notice", f"device:{access.device}",
                  file=entry.name, level=entry.sharing, reason=reason)
@@ -229,6 +238,13 @@ class Settings:
     timeout: float = 20.0
     free: Callable[[Path], int] = _disk_free
     bus: Bus = BUS
+    cancel: Callable[[], bool] | None = None
+    """Asked between chunks; true stops the transfer with `Cancelled`."""
+    progress: Callable[[int], None] | None = None
+    """Called with the bytes of the file verified so far, after each chunk."""
+    deadline_s: float = 0.0
+    """Seconds the whole transfer may take (0: no limit); a peer too slow to finish in time
+    ends it with a `TransferError` so the caller can go elsewhere."""
 
 
 def fetch_manifest(peer: PeerSource, timeout: float = 20.0) -> bytes:
@@ -310,9 +326,18 @@ class Downloader:
             if index not in done:
                 todo.put(index)
         failure: list[TransferError] = []
+        began = time.monotonic()
+        got = [len(done) * entry.chunk_size]
 
         def work() -> None:
             while not failure:
+                if self.cfg.cancel is not None and self.cfg.cancel():
+                    failure.append(Cancelled(entry.name))
+                    return
+                if self.cfg.deadline_s and time.monotonic() - began > self.cfg.deadline_s:
+                    failure.append(TransferError(f"{entry.name}: too slow, gave up after "
+                                                 f"{self.cfg.deadline_s:.0f} s"))
+                    return
                 try:
                     index = todo.get_nowait()
                 except queue.Empty:
@@ -327,6 +352,9 @@ class Downloader:
                         fh.seek(index * entry.chunk_size)
                         fh.write(data)
                     done.add(index)
+                    got[0] += len(data)
+                    if self.cfg.progress is not None:
+                        self.cfg.progress(min(got[0], entry.size))
                     who = peer.name or peer.base_url
                     self.fetched_from[who] = self.fetched_from.get(who, 0) + len(data)
                     if len(done) % 16 == 0:

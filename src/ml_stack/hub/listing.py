@@ -152,7 +152,7 @@ def build_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str,
                                         or name.rsplit("/", 1)[-1] == build)]
 
 
-def fetch(reference: str) -> Path:
+def fetch(reference: str, *, peers: bool | None = None) -> Path:
     """Download an `hf:` reference into ml-stack's model store, without serving it.
 
     A sharded model's *every* shard comes down, not only the one named: the file given is
@@ -166,7 +166,7 @@ def fetch(reference: str) -> Path:
         raise ValueError(f"{reference!r} should look like hf:owner/repo/file.gguf")
     repo, name = parts
     try:
-        pull(f"hf:{repo}/{name}")
+        pull(f"hf:{repo}/{name}", peers=peers)
     except remote.NotFound as exc:
         raise ValueError(str(exc)) from exc
     except remote.RemoteError as exc:
