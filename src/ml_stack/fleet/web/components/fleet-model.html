@@ -168,6 +168,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
     M.requestedRoute = opened;
     const setup = await M.api("/ui/setup");
+    M.group = setup.group || "";
     M.inCluster = !!setup.needs_password;
     if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
     if (!setup.needs_password) return M.go(opened);
