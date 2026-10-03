@@ -7,6 +7,7 @@ import argparse
 import json
 
 from ml_stack import hub
+from ml_stack.client import thinking
 from ml_stack.command import flag, option
 from ml_stack.log import say, warn
 from ml_stack.serve import build, ops, quant_guard
@@ -337,8 +338,8 @@ def cmd_up(args: argparse.Namespace) -> int:
         say(f"  reading pictures with {str(spec.mmproj).rsplit('/', 1)[-1]}")
     if spec.spec_type:
         say(f"  guessing ahead by {spec.spec_type}")
-    if told:
-        say(f"  {told}")
+    for line in filter(None, (told, thinking.policy())):
+        say(f"  {line}")
     return 0
 
 

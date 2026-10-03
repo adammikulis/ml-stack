@@ -297,6 +297,9 @@ def test_ml_stack_serve_up_takes_the_mode_and_exits_3_when_strict(
 
     assert run("--iq", "block") == 3
     assert "blocked" in capsys.readouterr().err
-    assert run() == 0
-    assert sentinel.default().bus.recent(kind="serve.iq_warning")
-    manager.stop_all()
+    try:
+        assert run() == 0
+        assert sentinel.default().bus.recent(kind="serve.iq_warning")
+    finally:
+        for entry in json.loads(manager.state_file.read_text()).values():
+            kill_process_tree(entry["pid"])
