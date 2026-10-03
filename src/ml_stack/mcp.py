@@ -570,7 +570,7 @@ def sdk_available() -> bool:
 
 def build_sdk_server() -> Any:
     """An ``MCPServer`` carrying the same tools, with their behaviour hints and structured
-    results; needs ``pip install 'ml-stack[mcp]'`` (mcp 2.2 or later)."""
+    results; needs ``pip install 'ml-stack[mcp]'`` (mcp 2.3 or later)."""
     from mcp.server.mcpserver import MCPServer
     from mcp_types import ToolAnnotations
 

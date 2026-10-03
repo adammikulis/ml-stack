@@ -151,7 +151,7 @@ request (each try is spent when the accepting side starts an exchange), each nee
 have pressed Accept, the code lives 120 s, and network jitter is orders of magnitude above the
 differences. A hardware-backed or constant-time PAKE would remove the question; none that is
 maintained and pure Python exists. It is pure Python with no version pin; it was run here on 3.13.5 (the
-project's) and 3.14; 3.11 and 3.12 were not run.
+project's) and 3.14; 3.12 was not run.
 
 The transcript binds **both certificate fingerprints**: they are `spake2`'s `idA` and `idB`, and
 the request id and nonce go in with the code, so an exchange replayed into another request, a
@@ -240,7 +240,7 @@ Nobody pushes software to them. Opt-in paths, ranked by ease and then by safety:
    * `--dry-run` prints the commands, the remote script in full (145 lines) with its SHA-256 and
      the files with theirs, and runs and contacts nothing and touches no key;
    * the payload goes over the SSH connection on stdin as a tar of plain files; the remote
-     script (copied, then run) checks Python >= 3.11, macOS or Linux, not root, disk space, the
+     script (copied, then run) checks Python >= 3.12, macOS or Linux, not root, disk space, the
      manifest's **OpenSSH signature with `ssh-keygen -Y verify`** (the framing is written here,
      the Ed25519 signature is `cryptography`'s, and the real `ssh-keygen` verifies it in the
      tests; a pure-Python verifier would have been home-made crypto), that the key is the one
