@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 
 from ml_stack.gym import catalogue, manager
@@ -16,7 +17,7 @@ class GymRoutes:
             return super().route()
         try:
             environment = self.ui.environment
-            if environment is not None and environment.exists:
+            if environment is not None and environment.exists and not os.environ.get("ML_STACK_GYM_PYTHON"):
                 manager.configure(environment.python)
             if self.path == "/ui/gym/catalogue" and self.method == "GET":
                 self.send(200, {"environments": catalogue()})
