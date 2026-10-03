@@ -122,3 +122,29 @@ and of a plain function.
 Python `>=3.10,<3.15`, which covers the interpreters ml-stack runs on. `pyproject.toml` leaves it
 out of `all`; `tests/test_redteam_*.py` that need it are marked `redteam` and deselected unless
 `--redteam` is given.
+
+## Coverage
+
+`scripts/redteam_coverage.py` finds every surface where outside input reaches a model, a tool, a
+process, a path or the network, by AST over `src/ml_stack`: route paths and HTTP handlers, MCP
+and chat tools (read from the live registries), slash commands, console scripts, subprocess
+spawns, listeners, outbound requests, human-only grants, desktop and key-store calls, dicts that
+build model messages, and input parsers. `docs/redteam/coverage.json` is its output (id, kind,
+source, trust level, what the attacker wants, status, tests, note).
+
+`docs/redteam/coverage-map.toml` says which test covers each surface. A `[[group]]` has fnmatch
+patterns over surface ids (first match wins, so exact rows go above globs), a `status`
+(`covered`, `partial`, `uncovered`, `n/a`), the `tests` (`path` or `path::test_name`) and a `note`
+(required for `uncovered`, `n/a`). `count` pins how many surfaces the patterns match.
+
+Adding a surface: write the red-team test, then add the stanza the failure message prints.
+
+    python3 scripts/redteam_coverage.py --check    # the gate
+    python3 scripts/redteam_coverage.py --write    # regenerate coverage.json
+    python3 scripts/redteam_coverage.py --list uncovered
+
+The gate (also `tests/test_redteam_coverage.py`) fails when a surface has no row, a row matches
+nothing or miscounts, a named test is gone, `coverage.json` is stale, or the `uncovered` or
+`partial` count is above the `[ratchet]` in the map. A count below it fails until the ratchet is
+lowered in the same commit, so the numbers only fall. Open holes found by the tests are strict
+xfails listed in `docs/redteam/findings.md`.

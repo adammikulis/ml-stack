@@ -1,0 +1,339 @@
+# Which red-team test covers each surface `scripts/redteam_coverage.py` finds.
+#
+# A surface id is `kind:name`. A group matches ids with fnmatch patterns and the first group
+# that matches wins, so exact rows go above the globs. `count` pins how many surfaces the
+# patterns match: the gate fails when it moves, so a new surface under a glob is looked at.
+#
+# status   covered    a test feeds hostile input to the real component and checks the outcome
+#          partial    some of the hostile inputs are tested; the note says which are not
+#          uncovered  no test attacks it; the note says what the attacker wants there
+#          n/a        nothing untrusted reaches it; the note says why
+# tests    `path` or `path::test_name`; the gate fails when either is gone.
+
+[ratchet]
+uncovered = 56
+partial = 206
+
+# -- the human-only floor ------------------------------------------------------------------
+[[group]]
+match = ["human:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+  "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+  "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+  "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+]
+note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+
+# -- HTTP routes and handlers --------------------------------------------------------------
+[[group]]
+match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
+status = "partial"
+tests = [
+  "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
+  "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
+  "tests/test_fleet_framing.py",
+]
+note = "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+
+[[group]]
+match = ["route:fleet/framing.py:*"]
+status = "covered"
+tests = ["tests/test_fleet_framing.py"]
+
+[[group]]
+match = ["route:fleet/routes.py:*", "handler:fleet/ui.py:*"]
+status = "partial"
+tests = [
+  "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
+  "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
+  "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
+  "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in",
+]
+note = "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+
+[[group]]
+match = ["route:fleet/onboard/pairing.py:*", "handler:fleet/onboard/pairing.py:*"]
+status = "covered"
+tests = [
+  "tests/test_peer_pairing.py::test_an_offer_whose_tag_is_not_the_exchanges_is_refused_and_nothing_is_learned",
+  "tests/test_onboard_pairing.py",
+]
+
+[[group]]
+match = ["route:fleet/onboard/bootstrap.py:*", "handler:fleet/onboard/bootstrap.py:*",
+         "handler:fleet/onboard/transfer.py:*"]
+status = "covered"
+tests = ["tests/test_onboard_bootstrap.py", "tests/test_onboard_transfer.py"]
+
+[[group]]
+match = ["route:fleet/onboard/signing_cli.py:*"]
+status = "covered"
+tests = ["tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent"]
+
+[[group]]
+match = ["route:fleet/onboard/peers_cli.py:*"]
+status = "partial"
+tests = ["tests/test_peer_first.py"]
+note = "peer-book verbs add, remove, on, off and limit take a name and an address typed by the person; hostile names are tested only through the dialog"
+
+[[group]]
+match = ["route:graph/*", "handler:graph/serve.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking",
+  "tests/test_graph_serve.py::test_a_path_that_climbs_out_of_the_export_root_is_a_404",
+]
+
+[[group]]
+match = ["route:sentinel/*"]
+status = "partial"
+tests = ["tests/test_sentinel_wiring_serve.py"]
+note = "the catch-all that holds a served request; its hold decision is tested, hostile framing is not"
+
+[[group]]
+match = ["handler:net/pdfchild.py:*"]
+status = "covered"
+tests = ["tests/test_pdf_engine.py"]
+
+# -- tools an agent can call ---------------------------------------------------------------
+[[group]]
+match = ["mcp-tool:workspace_*"]
+status = "covered"
+tests = [
+  "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+  "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+  "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+]
+
+[[group]]
+match = ["mcp-tool:speech_say", "mcp-tool:fleet_join"]
+status = "uncovered"
+tests = ["tests/test_redteam_mcp.py::test_speech_say_writes_only_inside_the_state_directory"]
+note = "open hole F10/F11: a model-supplied output path and a model-supplied cluster passphrase; strict xfail in the test file, see docs/redteam/findings.md"
+
+[[group]]
+match = ["mcp-tool:*"]
+status = "partial"
+tests = [
+  "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
+  "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
+  "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
+  "tests/test_redteam_mcp.py::test_every_tool_that_changes_something_says_so_in_its_hints",
+]
+note = "the protocol edge, argument types, flag smuggling and honest hints are attacked for every tool; the semantic arguments of each tool (decide state text, doctor repos) are not"
+
+[[group]]
+match = ["chat-tool:*"]
+status = "covered"
+tests = [
+  "tests/test_roles.py::test_every_role_by_every_tool_never_includes_the_person_only_floor",
+  "tests/test_redteam_chat.py",
+  "tests/test_roles.py::test_a_tainted_acting_call_asks_once_and_the_question_names_the_taint",
+]
+
+[[group]]
+match = ["slash-command:*"]
+status = "covered"
+tests = [
+  "tests/test_roles.py::test_an_answer_to_a_question_is_not_a_slash_command",
+  "tests/test_roles.py::test_text_from_the_model_or_a_tool_cannot_raise_the_role",
+  "tests/test_roles.py::test_a_rule_is_never_created_by_text_the_model_or_a_tool_produced",
+]
+
+# -- command line --------------------------------------------------------------------------
+[[group]]
+match = ["cli:ml-stack-security", "cli:ml-stack-memory", "cli:ml-stack-workspace"]
+status = "covered"
+tests = [
+  "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+  "tests/test_sentinel_redteam.py::test_the_command_line_refuses_release_under_an_agent_even_with_a_terminal",
+]
+
+[[group]]
+match = ["cli:ml-stack-mcp"]
+status = "covered"
+tests = ["tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing"]
+
+[[group]]
+match = ["cli:ml-stack-graph"]
+status = "covered"
+tests = ["tests/test_redteam_graph_serve.py::test_the_page_server_answers_hostile_requests_without_failing_or_leaking"]
+
+[[group]]
+match = ["cli:ml-stack-chat", "cli:ml-stack-agent"]
+status = "partial"
+tests = ["tests/test_roles.py", "tests/test_redteam_chat.py"]
+note = "roles, rules and the taint rail are attacked; hostile --resume session files are tested only for shape in tests/test_chat.py"
+
+[[group]]
+match = ["cli:ml-stack-traind", "cli:ml-stack-fleet", "cli:ml-stack-peers"]
+status = "partial"
+tests = ["tests/test_redteam_fleet.py", "tests/test_peer_pairing.py"]
+note = "the daemon's handler and the pairing exchange are attacked; the join and peer-book argument parsing are not"
+
+[[group]]
+match = ["cli:ml-stack-credentials"]
+status = "covered"
+tests = ["tests/test_credentials.py::test_a_name_that_is_not_a_name_is_refused",
+         "tests/test_credentials.py::test_a_symlink_out_of_the_config_directory_is_refused"]
+
+[[group]]
+match = ["cli:*"]
+status = "n/a"
+note = "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+
+# -- processes -----------------------------------------------------------------------------
+[[group]]
+match = ["spawn:sandbox/*", "spawn:net/*"]
+status = "covered"
+tests = ["tests/test_sandbox_redteam.py", "tests/test_pdf_engine.py", "tests/test_net_scan.py"]
+
+[[group]]
+match = ["spawn:checks.py:ask"]
+status = "covered"
+tests = ["tests/test_redteam_spawn.py::test_the_only_shell_line_is_one_the_person_was_shown_and_confirmed"]
+
+[[group]]
+match = ["spawn:jobs.py:detach", "spawn:serve/backend.py:launch", "spawn:bench/queue.py:*",
+         "spawn:fleet/measuring.py:detach_bench"]
+status = "covered"
+tests = [
+  "tests/test_redteam_spawn.py::test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell",
+  "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
+]
+
+[[group]]
+match = ["spawn:*"]
+status = "partial"
+tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]
+note = "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+
+# -- listeners -----------------------------------------------------------------------------
+[[group]]
+match = ["listener:fleet/daemon.py:*", "listener:fleet/discovery.py:*",
+         "listener:fleet/onboard/nearby.py:*"]
+status = "partial"
+tests = ["tests/test_redteam_fleet.py", "tests/test_onboard_tailnet.py"]
+note = "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
+
+[[group]]
+match = ["listener:graph/serve.py:*"]
+status = "covered"
+tests = ["tests/test_redteam_graph_serve.py::test_the_page_server_listens_on_loopback_only"]
+
+[[group]]
+match = ["listener:serve/broker_wire.py:*"]
+status = "partial"
+tests = ["tests/test_guard_native.py"]
+note = "the lease broker on loopback: its wire is exercised by the guard tests, a hostile frame is not sent"
+
+[[group]]
+match = ["listener:*"]
+status = "n/a"
+note = "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+
+# -- network egress ------------------------------------------------------------------------
+[[group]]
+match = ["egress:net/*", "egress:httpguard.py:*", "egress:http.py:*", "egress:web.py:*",
+         "egress:fleet/models.py:*", "egress:ingest/run.py:*"]
+status = "covered"
+tests = ["tests/test_net_no_bypass.py", "tests/test_httpguard.py", "tests/test_net_download.py",
+         "tests/test_net_untrusted.py"]
+
+[[group]]
+match = ["egress:fleet/onboard/*"]
+status = "covered"
+tests = ["tests/test_onboard_tailnet.py", "tests/test_onboard_transfer.py"]
+
+[[group]]
+match = ["egress:*"]
+status = "partial"
+tests = ["tests/test_net_no_bypass.py"]
+note = "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+
+# -- desktop and key stores ----------------------------------------------------------------
+[[group]]
+match = ["desktop:desktop.py:*", "desktop:fleet/onboard/notify.py:*"]
+status = "covered"
+tests = ["tests/test_redteam_dialog.py", "tests/test_onboard_notify.py"]
+
+[[group]]
+match = ["desktop:*"]
+status = "n/a"
+note = "fixed scripts that read the battery, focus or login item; no text from outside"
+
+[[group]]
+match = ["keystore:memory/*", "keystore:credentials/*"]
+status = "covered"
+tests = ["tests/test_memory_vault.py::test_no_keystore_fails_closed_without_writing_a_key",
+         "tests/test_memory_vault.py::test_the_key_is_never_written_beside_the_data",
+         "tests/test_credentials.py",
+         "tests/test_redteam_human_floor.py::test_the_os_keystore_is_reached_only_from_the_vault_signing_and_credentials_code",
+         "tests/test_no_real_keychain.py"]
+
+[[group]]
+match = ["keystore:fleet/onboard/signing.py:*"]
+status = "partial"
+tests = ["tests/test_onboard_ssh.py", "tests/test_redteam_human_floor.py::test_building_the_signing_keys_never_asks_the_keystore",
+         "tests/test_no_real_keychain.py"]
+note = "the signing key's storage failure paths (keychain refuses, key file unreadable) are not driven"
+
+# -- text that reaches a model -------------------------------------------------------------
+[[group]]
+match = ["context:chat.py", "context:agent/loop.py", "context:agent/compact.py",
+         "context:agent/summarise.py"]
+status = "covered"
+tests = ["tests/test_redteam_chat.py", "tests/test_redteam_loop.py", "tests/test_taint_flows.py"]
+
+[[group]]
+match = ["context:decide/logprob.py", "context:vision/*"]
+status = "covered"
+tests = ["tests/test_redteam_judge.py", "tests/test_decide_questions.py"]
+
+[[group]]
+match = ["context:graph/*", "context:ingest/extract.py"]
+status = "uncovered"
+note = "a note, page or document the graph or ingest reads is put in the model's prompt; no test plants an instruction in a source and checks what the model's reply can do"
+
+[[group]]
+match = ["context:*"]
+status = "n/a"
+note = "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+
+# -- parsers and readers of files, pages and messages --------------------------------------
+[[group]]
+match = ["parser:net/*", "parser:web.py", "parser:sources/html.py", "parser:taint/*",
+         "parser:guard/*", "parser:hub/modelfile.py"]
+status = "covered"
+tests = ["tests/test_net_untrusted.py", "tests/test_pdf_engine.py",
+         "tests/test_hub_modelfile.py::test_every_hostile_header_is_refused_quickly",
+         "tests/test_redteam_judge.py"]
+
+[[group]]
+match = ["parser:workspace/*"]
+status = "covered"
+tests = ["tests/test_workspace_bus.py", "tests/test_workspace_rules.py"]
+
+[[group]]
+match = ["parser:sentinel/*", "parser:memory/*"]
+status = "covered"
+tests = ["tests/test_sentinel_store.py", "tests/test_redteam_memory.py",
+         "tests/test_memory_vault.py::test_flipping_any_byte_of_the_ciphertext_or_header_is_detected"]
+
+[[group]]
+match = ["parser:fleet/onboard/*"]
+status = "covered"
+tests = ["tests/test_onboard_manifest.py", "tests/test_peer_pairing.py", "tests/test_onboard_pairing.py"]
+
+[[group]]
+match = ["parser:hub/*", "parser:ingest/*", "parser:sources/*", "parser:media/*",
+         "parser:speech/*", "parser:scrape/*", "parser:vision/*"]
+status = "uncovered"
+note = "a crafted model-repository listing, card, document, mailbox, WAV or archive reaches the reader; only tests/test_hub_modelfile.py attacks one"
+
+[[group]]
+match = ["parser:*"]
+status = "uncovered"
+note = "files the product wrote for itself (stores, caches, snapshots, case files) are read back; a hand-edited or planted file is not tried"
