@@ -292,6 +292,7 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
     warnings = (*verdict.warnings, *(w for r in summary.results for w in r.warnings),
                 *(r.detail for r in summary.results if r.outcome == Outcome.NO_SCANNER))
     _promote(staged, final)
+    _pin_pulled(final, verdict.kind, want, digest, arrival)
     done = replace(note, kind=verdict.kind, scan=why,
                    scanners=tuple(r.scanner for r in summary.results),
                    warnings=tuple(dict.fromkeys(warnings)))
@@ -299,6 +300,34 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
     _event("net.download", "info", f"artifact:{digest}", {"url": url, "path": str(final),
                                                           "scan": why})
     return done
+
+
+PINNED_KINDS = {"gguf": "model", "safetensors": "model"}
+"""Kinds of file that are pinned in sentinel's store the moment they are kept."""
+
+
+def _pin_pulled(final: Path, kind: str, want: Want, digest: str, arrival: Arrival) -> None:
+    """Record a model that ml-stack itself brought in in sentinel's sealed store, so that
+    serving it later is a check against what arrived, not a first-use trust. Runs only after
+    every check passed and the file was promoted; ``digest`` is that of the staged bytes
+    (equal to ``want.sha256`` when one was pinned), nothing is hashed again. A failure to
+    record is logged and does not undo the download: the file then falls back to first-use."""
+    what = PINNED_KINDS.get(kind)
+    if what is None:
+        return
+    try:
+        node = sentinel.default()
+        if node.mode == sentinel.Mode.OFF:
+            return
+        node.manifest.pin_verified(final, what, digest, source="pull", origin=arrival.final_url,
+                                   digest_from="expected" if want.sha256 else "computed")
+        node.bus.emit(Event("model.pinned_at_pull", Severity.INFO, "net", f"model:{final}",
+                            {"name": final.name, "sha256": digest, "origin": arrival.final_url,
+                             "digest_from": "expected" if want.sha256 else "computed"},
+                            time.time()))
+    except (OSError, ValueError) as exc:
+        logger.warning("%s was kept but could not be pinned (it will be pinned on first use): %s",
+                       final.name, exc)
 
 
 def accept(staged: Path, dest: Path | str, want: Want, source: str,

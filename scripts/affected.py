@@ -196,8 +196,8 @@ def select(root: Path, changed: list[str], deleted: frozenset[str] = frozenset()
         module = module_of(rel)
         if rel in EVERYTHING or (rel in deleted and module):
             out.unmapped.append(rel)
-        elif name in INERT or (rel.endswith(".md") and not mentioning(root, rel, tests)):
-            out.ignored.append(rel)
+        elif name in INERT or ((rel.endswith(".md") or rel.startswith(".github/")) and not mentioning(root, rel, tests)):
+            out.ignored.append(rel)               # no test names it, so it cannot change a result (CI config, CODEOWNERS ...)
         elif module:
             hit = reach({module}, reverse, depth)
             for dependant in sorted(hit):

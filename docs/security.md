@@ -216,6 +216,17 @@ dependencies and the `store`, `hub`, `web`, `plot`, `graph`, `scrape`, `vision`,
 vulnerabilities. There is no lockfile to audit, and `metal-smi` has no Linux distribution to
 resolve.
 
+### Supply chain gates
+
+`audit.yml` fails on a known vulnerability in the Python extras (pip-audit), `app/package-lock.json` (npm audit) and
+`app/src-tauri/Cargo.lock` (cargo audit), through `scripts/audit_gate.py` and the expiring allow-list
+`.github/pip-audit-allow.json`; nothing in the workflow is `continue-on-error`, a report the tool did not produce fails
+the job, and `tests/test_supply_chain_audit.py` parses the workflow YAML and runs the gate on recorded reports of all
+three formats. `release.yml` builds `sbom.cdx.json` (CycloneDX 1.5, `scripts/sbom.py`, offline: the installed extras and the
+`Cargo.lock` crates with their registry checksums) and attaches it to the release. Actions in both workflows are pinned to a
+commit. Not covered: npm packages are not in the SBOM, and the audits need the advisory databases, so they run on the
+runner, not here.
+
 ## Reviewed and clean
 
 - Deserialization: no `pickle`, `marshal`, `yaml.load`, `torch.load`, `eval` or `exec` of data
@@ -297,8 +308,10 @@ no more than what its tests show:
   is parked and counted, one that names a decoy or a sentinel path is refused, and a result
   that is held or carries a decoy value is replaced. Running without it takes
   `unwatched(because=...)` or `guard.off(because=...)` and is logged.
-- **A server is started only for a model that matches its pin** (a model with no pin is pinned
-  on first use), and a held model or server cannot be leased or restarted until a person
+- **A server is started only for a model that matches its pin** (a model ml-stack pulled is pinned
+  at pull time, `source=pull`; a model it did not pull is pinned on first use and logged as such; a signed
+  owner manifest that this machine accepted and that names the file must agree with it, else the file is
+  quarantined and an older manifest is refused), and a held model or server cannot be leased or restarted until a person
   releases it. The Broker and fleet daemons scan every pin on a timer
   (`ML_STACK_SENTINEL_SCAN`), and `ml-stack security status` says whether that loop is armed.
   Switching sentinel (`ML_STACK_SENTINEL=off`) or the scan off needs a reason in
