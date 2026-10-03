@@ -70,7 +70,7 @@
           run.can_serve
             ? (running.has(x.name)
                 ? el("button", { class: "ghost small",
-                    onclick: () => this.halt(portOf(x.name)) }, "Stop")
+                    onclick: () => this.halt(portOf(x.name)) }, "Stop server")
                 : el("button", { class: "ghost small",
                     onclick: () => this.serve(x.name) }, "Serve model"))
             : el("span", { class: "label" }, "here")));
