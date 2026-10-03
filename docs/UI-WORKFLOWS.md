@@ -45,3 +45,16 @@ Command review produces the exact argv without running it. Help is executed as a
 Detached execution is rejected so the runner retains lifecycle ownership. Jobs use the daemon's
 existing capacity and resource gate; failures, output, structured metrics and cancellation remain
 visible in the run inspector.
+
+## Reviewed decision datasets
+
+The Gym recording panel lists persisted native trajectories. Open a recording, inspect its exact
+pre-action observation and decision, and choose a native action label. Uncertain steps can be
+skipped. Labels are keyed by episode and sequence, and may be updated before export. Export
+includes reviewed transitions only, with episode grouping preserved for train/test isolation.
+The exported JSONL path is handed directly to the decision-model training form. Load the trained
+checkpoint directory into a live decision controller to test it on fresh scenarios.
+
+Gym dependencies install through Settings' managed environment and the environment catalog's
+Install button. Readiness reflects the managed interpreter's package versions and the wheel's
+selected extra requirements. The daemon's own packages are reported separately from job readiness.
