@@ -5,6 +5,7 @@ a tool, the chat or the unlock command. Run with --redteam."""
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 
 import pytest
@@ -104,10 +105,8 @@ def test_a_hostile_label_does_not_change_which_key_comes_out(counting):
 
 def test_a_loop_of_requests_is_stopped_at_the_ceiling(counting):
     for _ in range(500):
-        try:
+        with contextlib.suppress(keystore.KeystoreBusy):
             person_ks().subkey("memory", "a")
-        except keystore.KeystoreBusy:
-            pass
     assert len(counting.calls) == keystore.RATE_CEILING
 
 
