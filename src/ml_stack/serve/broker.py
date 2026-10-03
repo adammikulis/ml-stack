@@ -208,7 +208,8 @@ class Broker:
             guarded.report("refused", caller=caller.label or f"pid-{caller.pid}", why="model held")
             raise guarded.SentinelRefused(why)
         manager = self._manager_for(options)
-        how = Starting(**{k: v for k, v in options.items() if k != "backend"})
+        how = Starting(**{**{k: v for k, v in options.items() if k != "backend"},
+                          "who": caller.label or who()})
         info = manager._start_server(spec, timeout=timeout, how=how, on_event=caller.on_event,
                                      say=caller.say)
         return self._held_by(info, spec, caller.pid or os.getpid(), caller.label or who())
@@ -425,7 +426,8 @@ class Broker:
     def _start(self, waiting: Waiting, placeholder: Held) -> Grant:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
-            info = self.manager._start_server(spec, how=Starting(roam=False))
+            info = self.manager._start_server(
+                spec, how=Starting(roam=False, who=waiting.ask.label))
         except Measuring:
             with self._cond:
                 self.servers.pop(placeholder.port, None)

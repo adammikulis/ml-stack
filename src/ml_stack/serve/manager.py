@@ -20,7 +20,7 @@ from ml_stack.files import write_json
 from ml_stack.hub import free_memory, installed_for, room as machine_room
 from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
-from ml_stack.serve import admission, exit_guard, guarded, mtp, unmanaged
+from ml_stack.serve import admission, exit_guard, guarded, mtp, quant_guard, unmanaged
 from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
@@ -100,7 +100,8 @@ BESIDE_HEADROOM = 0.8
 class Starting:
     """How a lease may be satisfied: ``roam`` lets it be served on another port, ``escalate``
     lets a server with too few slots be grown, ``anyway`` starts it during a measurement,
-    and the rest are the checks the start runs."""
+    ``allow_iq`` serves an IQ quantisation on Apple silicon, ``who`` names the asker, and the
+    rest are the checks the start runs."""
 
     roam: bool = True
     check_flags: bool = True
@@ -108,6 +109,8 @@ class Starting:
     warmup_request: bool = True
     escalate: bool = False
     anyway: bool = False
+    allow_iq: bool = False
+    who: str = ""
 
     def checks(self) -> dict[str, bool]:
         """The checks a start runs, as the keyword arguments a backend takes."""
@@ -140,6 +143,7 @@ class ServerManager(Admitting):
         stop_on_exit: bool = True,
     ) -> None:
         self.stop_on_exit = stop_on_exit
+        self.allow_iq = False
         self.backend = backend or LlamaServerBackend()
         self.tree: ServerBackend = MlxTreeBackend()
         self.state_file = state_file or lease_file()
@@ -187,7 +191,7 @@ class ServerManager(Admitting):
     def lease(self, spec: ServerSpec, *, timeout: float | None = None,
               roam: bool = True, check_flags: bool = True, preflight: bool = True,
               warmup_request: bool = True, escalate: bool = False, anyway: bool = False,
-              on_event: Event | None = None,
+              allow_iq: bool = False, on_event: Event | None = None,
               say: Callable[[str], None] | None = None) -> ServerInfo:
         """A healthy server for ``spec``, from the broker: one already up that fits, else a
         new one when the machine has the memory for it. The broker waits for memory and
@@ -198,7 +202,8 @@ class ServerManager(Admitting):
         :meth:`_start_server`.
         """
         spec = reusing_installed(spec)
-        how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway)
+        how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway,
+                       allow_iq or self.allow_iq or quant_guard.overridden())
         info = self.broker.start(spec, Caller(on_event=on_event, say=say or self.say),
                                  timeout=timeout, options=asdict(how))
         if info.lease:
@@ -222,7 +227,9 @@ class ServerManager(Admitting):
         how = how or Starting()
         roam, escalate, anyway = how.roam, how.escalate, how.anyway
         told = say or self.say or logger.info
-        spec, drafting = self._with_mtp(self._permitted(spec, escalate), escalate)
+        spec = self._permitted(spec, escalate)
+        iq = self._quant_guard(spec, how)
+        spec, drafting = self._with_mtp(spec, escalate)
         if drafting.note:
             (told if drafting.worth_saying else logger.info)(f"port {spec.port}: {drafting.note}")
         resolved_timeout = (
@@ -297,8 +304,16 @@ class ServerManager(Admitting):
             if not info.mtp_note:
                 info = replace(info, mtp_note=drafting.note)
             if not info.adopted:
-                self._record(spec, info)
+                self._record(spec, info, iq=iq)
             return info
+
+    def _quant_guard(self, spec: ServerSpec, how: Starting) -> quant_guard.IqQuant | None:
+        """The IQ quantisation ``spec`` is when the override lets it through; `BlockedQuant`
+        when it is one on Apple silicon and nobody allowed it. llama.cpp specs only."""
+        if self.backend_for(spec) is not self.backend:
+            return None
+        return quant_guard.enforce(spec.model, gpu_layers=spec.n_gpu_layers, allow=how.allow_iq,
+                                   who=how.who)
 
     def _permitted(self, spec: ServerSpec, escalate: bool) -> ServerSpec:
         """``spec`` as it will be started, or `ServerFailed` when the port was just given up
@@ -663,7 +678,8 @@ class ServerManager(Admitting):
         return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file),
                      stop_on_exit=self.stop_on_exit)
 
-    def _record(self, spec: ServerSpec, info: ServerInfo) -> None:
+    def _record(self, spec: ServerSpec, info: ServerInfo,
+                iq: quant_guard.IqQuant | None = None) -> None:
         self._mine[str(spec.port)] = {
             "port": info.port,
             "pid": info.pid,
@@ -684,6 +700,7 @@ class ServerManager(Admitting):
             "started": started_at(info.pid),
             "cmdline": cmdline_digest(info.pid),
             **({"log": str(info.log_path)} if info.log_path else {}),
+            **({"iq_override": iq.name} if iq is not None else {}),
         }
         forget_server(info.base_url)
         if info.process is not None:
@@ -775,13 +792,14 @@ def serve(
     roam: bool = True,
     escalate: bool = False,
     anyway: bool = False,
+    allow_iq: bool = False,
     on_event: Event | None = None,
     say: Callable[[str], None] | None = None,
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:
     """Run a server for the duration of the block, yielding its ``ServerInfo``.
 
-    ``roam``, ``escalate``, ``anyway``, ``on_event`` and ``say`` go to
+    ``roam``, ``escalate``, ``anyway``, ``allow_iq``, ``on_event`` and ``say`` go to
     :meth:`ServerManager.lease`.
     """
     manager = manager or default_manager()
@@ -792,7 +810,7 @@ def serve(
         **spec_kwargs,  # type: ignore[arg-type]
     )
     info = manager.lease(spec, timeout=timeout, roam=roam, escalate=escalate,
-                         anyway=anyway, on_event=on_event, say=say)
+                         anyway=anyway, allow_iq=allow_iq, on_event=on_event, say=say)
     try:
         yield info
     finally:

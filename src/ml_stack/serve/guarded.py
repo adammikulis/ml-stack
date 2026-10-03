@@ -25,8 +25,8 @@ from ml_stack.serve.leases import recorded_servers
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Armed", "SentinelRefused", "arm", "blocked", "caller_blocked", "register", "report",
-           "start", "unmanaged_seen", "verify"]
+__all__ = ["Armed", "SentinelRefused", "arm", "blocked", "caller_blocked", "file_of", "register",
+           "report", "start", "unmanaged_seen", "verify"]
 
 
 class SentinelRefused(ServerFailed):
@@ -36,7 +36,7 @@ class SentinelRefused(ServerFailed):
 _HOOKED: weakref.WeakKeyDictionary[Sentinel, set[str]] = weakref.WeakKeyDictionary()
 
 
-def _file(model: object) -> Path | None:
+def file_of(model: object) -> Path | None:
     """The model file ``model`` names, or None when it is not a file on this machine."""
     try:
         path = Path(str(model)).expanduser()
@@ -167,7 +167,7 @@ def verify(model: object, *, state_file: Path, stop: Callable[[int], Any]) -> st
         return ""
     if why := blocked(model):
         raise SentinelRefused(why)
-    path = _file(model)
+    path = file_of(model)
     if path is None:
         return ""
     pin = node.manifest.pins().get(str(path))

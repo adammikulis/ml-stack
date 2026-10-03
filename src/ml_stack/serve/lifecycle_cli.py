@@ -14,6 +14,7 @@ from ml_stack.serve.backend import ServerFailed, ServerSpec, UnknownFlag, parse_
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.ops import Refused
 from ml_stack.serve.profile import ASK, WORKLOADS, profile_for, resolved
+from ml_stack.serve.quant_guard import BlockedQuant
 from ml_stack.serve.serving import said_cache, split_cache_type
 from ml_stack.serve.weights import DEFAULT_TIMEOUT_S
 
@@ -255,6 +256,9 @@ OPTIONS_UP = [
          help="start the server even while a measurement holds this card; both its "
               "timings and anything measured through this server are then two models "
               "sharing a GPU"),
+    flag("--allow-iq", action="store_true",
+         help="serve an IQ-family quantisation on Apple silicon, which is refused by "
+              "default; the override is warned about and recorded"),
 ]
 
 
@@ -280,6 +284,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     chosen = str(getattr(args, "binary", "") or "")
     manager = ops.manager_for(chosen, str(getattr(args, "build", "") or ""))
     extra = tuple(profile.extra_args) if profile is not None else ()
+    manager.allow_iq = bool(getattr(args, "allow_iq", False))
     resolved_spec = ops.resolve_spec(_asked_spec(args, model, extra), manager=manager)
     for note in resolved_spec.notes:
         warn(note)
@@ -306,7 +311,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         return 2
     except (ServerFailed, BinaryNotFound, OSError) as exc:
         warn(f"error: {exc}")
-        return 2
+        return 3 if isinstance(exc, BlockedQuant) else 2
 
     info, told = started.info, started.announced
     if args.json:

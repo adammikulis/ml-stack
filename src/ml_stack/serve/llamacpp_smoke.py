@@ -11,7 +11,9 @@ from pathlib import Path
 from ml_stack import home
 from ml_stack.http import request_json
 from ml_stack.hub import header
+from ml_stack.platform import is_apple_silicon
 from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port, slotdump
+from ml_stack.serve.quant_guard import iq_quant
 
 __all__ = ["Result", "run", "smallest_model"]
 
@@ -45,7 +47,8 @@ def _generates(path: Path) -> bool:
 
 def smallest_model() -> Path | None:
     """The smallest text-generating GGUF in the Hugging Face cache or ``~/.cache``, or the
-    file ``$ML_STACK_SMOKE_GGUF`` names."""
+    file ``$ML_STACK_SMOKE_GGUF`` names. On Apple silicon the smallest one that is not an
+    IQ quantisation, else the smallest."""
     named = os.environ.get("ML_STACK_SMOKE_GGUF")
     if named:
         return Path(named).expanduser()
@@ -54,7 +57,10 @@ def smallest_model() -> Path | None:
              for p in root.rglob("*.gguf")
              if not any(word in p.name.lower() for word in SKIP)
              and 0 < p.stat().st_size < LIMIT and _generates(p)]
-    return min(found, key=lambda p: p.stat().st_size) if found else None
+    found.sort(key=lambda p: p.stat().st_size)
+    if is_apple_silicon():
+        return next((p for p in found if iq_quant(p) is None), found[0] if found else None)
+    return found[0] if found else None
 
 
 def run(binary: Path, model: Path | None = None, *, timeout: float = 300.0,
@@ -66,12 +72,16 @@ def run(binary: Path, model: Path | None = None, *, timeout: float = 300.0,
     if model is None:
         result.add("model", False, "no local GGUF to load; set ML_STACK_SMOKE_GGUF")
         return result
-    manager = ServerManager(LlamaServerBackend(binary=binary))
+    backend = LlamaServerBackend(binary=binary)
+    iq = is_apple_silicon() and iq_quant(model) is not None
     with tempfile.TemporaryDirectory(prefix="ml-stack-smoke-") as made:
         slots = Path(made)
+        # an IQ-only machine leases with the override, through a broker in this process
+        manager = ServerManager(backend, state_file=slots / "servers.json" if iq else None)
         try:
             info = manager.lease(ServerSpec(model=model, port=free_port(), context=512,
-                                            slot_save_path=slots), timeout=timeout)
+                                            slot_save_path=slots), timeout=timeout,
+                                allow_iq=iq)
         except (RuntimeError, OSError, ValueError) as exc:
             result.add("lease", False, f"{type(exc).__name__}: {exc}"[:600])
             return result

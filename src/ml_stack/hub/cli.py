@@ -168,7 +168,7 @@ def _builds(repo: str, ending: str, listing: list[tuple[str, int]]) -> None:
         many = f"  {shards} shards" if shards > 1 else ""
         # IQ builds decode through lookup tables Metal runs slowly: on a Mac the
         # smaller IQ file was the slower model (README, "What this measured")
-        slow = "  IQ: slower on Metal, take a K-quant" if hub.iq_on_metal(name) else ""
+        slow = "  IQ: refused on Metal unless overridden, take a K-quant" if hub.iq_on_metal(name) else ""
         say(f"{human_bytes(size):>8}  {name}{many}{mark}{slow}")
     for name, size in listing:
         if hub.aside(name):
