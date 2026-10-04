@@ -54,6 +54,17 @@ def scrape(base_url: str) -> dict[str, float]:
     return found
 
 
+def slot_last(base_url: str) -> dict[str, int]:
+    """The last request of slot 0 from /slots: its prompt tokens and how many came from the cache."""
+    try:
+        with urllib.request.urlopen(base_url.rstrip("/") + "/slots", timeout=10) as reply:  # noqa: S310
+            slot = json.loads(reply.read().decode("utf-8", "replace"))[0]
+    except (OSError, ValueError, IndexError, KeyError):
+        return {}
+    return {"last_prompt_tokens": int(slot.get("n_prompt_tokens") or 0),
+            "last_cached_tokens": int(slot.get("n_prompt_tokens_cache") or 0)}
+
+
 def parse_claude(stdout: str) -> dict[str, int]:
     """Tool calls and token usage from ``claude -p --output-format stream-json --verbose``."""
     calls = sent = cached = 0
@@ -143,7 +154,7 @@ def measure(name: str, command: list[str], parser, base_url: str, where: Path) -
     wall = time.monotonic() - began
     after = scrape(base_url)
     row: dict[str, object] = {"harness": name, "exit": code, "wall_s": round(wall, 1),
-                              **parser(out), "pass": passes(where)}
+                              **parser(out), **slot_last(base_url), "pass": passes(where)}
     row["processed_tokens"] = int(after.get("processed", 0) - before.get("processed", 0)) if after else None
     row["generated_tokens"] = int(after.get("generated", 0) - before.get("generated", 0)) if after else None
     sent = int(row.get("input_tokens") or 0)
@@ -161,7 +172,7 @@ def probe(command: list[str], parser, base_url: str) -> dict[str, object]:
 
 def table(rows: Sequence[dict[str, object]]) -> str:
     cols = ["harness", "pass", "wall_s", "tool_calls", "input_tokens", "processed_tokens", "generated_tokens",
-            "cache_hit_ratio", "first_turn_input_tokens", "first_turn_processed_tokens", "note"]
+            "cache_hit_ratio", "last_prompt_tokens", "last_cached_tokens", "first_turn_input_tokens", "first_turn_processed_tokens", "note"]
     lines = ["| " + " | ".join(cols) + " |", "|" + " --- |" * len(cols)]
     for row in rows:
         lines.append("| " + " | ".join("" if row.get(c) is None else str(row.get(c)) for c in cols) + " |")

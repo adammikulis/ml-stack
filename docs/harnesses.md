@@ -100,9 +100,7 @@ that exists; it does not on this tree, so the seam is `Seat.record_model` in `ha
 - The Requests answer comes from the terminal or the UI, so an unattended session in `approve-first`
   stops at its first acting call (denied, with the reason shown to the model).
 - Only the deterministic classifier layer runs in the hook; the model-assisted layer does not.
-- The request gate queues generation per slot in the harness's own requests. The harness talks to
-  the server directly, not through `ml_stack.http`, so the per-pool request queue (`ml_stack.gate`)
-  does not order its calls; one slot per session keeps two sessions from sharing a cache.
+- The harness talks to the server directly, not through `ml_stack.http`, so the per-pool request queue (`ml_stack.gate`) does not order its calls. One slot per session keeps two sessions from sharing a cache.
 
 ## Local models and large harness prompts
 
@@ -126,7 +124,7 @@ that exists; it does not on this tree, so the seam is `Seat.record_model` in `ha
 `tests/fixtures/toy_bugfix` (a one-line bug, scored by its own test, in a temporary git repository)
 through `ml-stack-claude` and `ml-stack-codex`, recording wall time, tool calls, the tokens the server
 processed (llama-server `/metrics`), the tokens each harness says it sent and how many came from
-the cache, the first-turn cost of each harness measured with a one-line prompt, and whether the test
+the cache, the last request's prompt and cached tokens from `/slots`, the first-turn cost of each harness measured with a one-line prompt, and whether the test
 passes. Rows are appended to `docs/experiments/harness-comparison.md`. ml-stack's own agent loop is
 skipped where `ml-stack-workspace agent` does not exist. It refuses Flash-Next.
 

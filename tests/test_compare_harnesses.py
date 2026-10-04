@@ -28,6 +28,12 @@ class _Metrics(BaseHTTPRequestHandler):
     processed = 0
 
     def do_GET(self):
+        if self.path == "/slots":
+            body = b'[{"id": 0, "n_prompt_tokens": 500, "n_prompt_tokens_cache": 450}]'
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/bump":
             type(self).processed += 30
         body = (f"# TYPE llamacpp:prompt_tokens_total counter\nllamacpp:prompt_tokens_total {type(self).processed}\n"
@@ -93,6 +99,7 @@ def test_a_row_records_what_the_server_processed_while_the_harness_ran(cmp, serv
     assert row["pass"] is True and row["tool_calls"] == 1 and row["input_tokens"] == 100
     assert row["processed_tokens"] == 30 and before["processed"] == 100.0
     assert row["cache_hit_ratio"] == 0.7
+    assert (row["last_prompt_tokens"], row["last_cached_tokens"]) == (500, 450)
 
 
 def test_a_run_that_does_not_fix_the_bug_is_recorded_as_failed(cmp, server, tmp_path):
