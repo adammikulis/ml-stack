@@ -116,6 +116,47 @@ def test_an_agent_in_its_own_worktree_may_do_all_of_it(repo, command):
     assert bash(command, inside) == ALLOWED
 
 
+LANDING_WITH_REDIRECTS = [
+    "git merge --ff-only work 2>&1 | tail -1", "git merge --ff-only work >/dev/null 2>&1",
+    "git merge --ff-only work &> out", "git merge --ff-only work &>out", "git merge --ff-only work 2>out",
+    "git merge --ff-only work 2> out", "git merge --ff-only work > out 2>&1", "git merge --ff-only work >> out",
+    "git merge --ff-only work 2>/dev/null; git status", "git merge --ff-only work < /dev/null",
+    "git merge --ff-only work <<EOF\nbody\nEOF", "git worktree remove ../work 2>&1",
+    "git worktree remove ../work >/dev/null 2>&1", "git branch -d work 2>&1", "git branch -d work 2>/dev/null",
+]
+
+
+@pytest.mark.parametrize("command", LANDING_WITH_REDIRECTS)
+def test_a_redirection_is_not_an_argument_of_the_command_it_follows(repo, command):
+    primary, _, _ = repo
+    assert bash(command, primary) == ALLOWED
+
+
+def test_a_landing_merge_after_cd_to_the_primary_checkout_may_carry_redirections(repo):
+    primary, work, _ = repo
+    assert bash(f"cd {primary} && git merge --ff-only work 2>&1 | tail -1; git status", work) == ALLOWED
+    assert bash(f"cd {primary} && git merge --ff-only work 2>&1 | tail -1; git commit -m x", work) == BLOCKED
+
+
+@pytest.mark.parametrize("command", [
+    "git add a.py 2>&1", "git commit -m x >/dev/null", "git merge --no-ff work 2>&1",
+    "git merge --ff-only a b 2>&1", "git merge work &> out", "git commit -m x 2>out",
+    "git commit -m 'a > b' >/dev/null", "git add a.py > out && git status",
+])
+def test_a_redirection_does_not_hide_a_refused_command(repo, command):
+    primary, _, _ = repo
+    assert bash(command, primary) == BLOCKED
+
+
+def test_a_redirection_after_a_cd_or_an_install_is_still_read(repo):
+    primary, work, _ = repo
+    assert bash(f"cd {work} 2>&1 && git commit -m x", primary) == ALLOWED
+    assert bash(f"git -C {primary} add a.py 2>&1", work) == BLOCKED
+    assert bash("pip install -e . 2>&1 | tail -1", work) == BLOCKED
+    assert bash("pip install -e . >log", work) == BLOCKED
+    assert bash("pip install requests 2>&1", work) == ALLOWED
+
+
 def test_the_directory_a_compound_command_runs_in_is_followed(repo):
     primary, work, _ = repo
     assert bash(f"cd {work} && git commit -m x", primary) == ALLOWED
