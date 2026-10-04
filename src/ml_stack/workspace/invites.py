@@ -60,14 +60,16 @@ class Invites:
         self.path.chmod(0o600)
 
     def create(self, hint: str, ttl_s: float, project: dict[str, str] | None = None,
-               uses: int = 1, issuer: str = "", can: tuple[str, ...] = ()) -> str:
+               uses: int = 1, origin: tuple[str, tuple[str, ...]] = ("", ())) -> str:
         """A new code, good for ``ttl_s`` seconds and ``uses`` joins (one agent by default);
         ``hint`` is only a suggested id and ``project`` the ``{"key", "name"}`` the joining
-        agents are connected for. An ``issuer`` makes the joiners its children, holding at most ``can``."""
+        agents are connected for. An ``origin`` of ``(issuer, can)`` makes the joiners the issuer's children,
+        holding at most ``can``."""
         if uses < 1:
             raise ValueError("an invite must allow at least one agent")
         if hint and not valid_name(hint):
             raise ValueError(f"{hint!r} is not a usable agent id (a-z, 0-9, . _ -; up to 48)")
+        issuer, can = origin
         code = "-".join("".join(secrets.choice(ALPHABET) for _ in range(WIDTH))
                         for _ in range(GROUPS))
         with held(self.path.with_name("invites.lock")):

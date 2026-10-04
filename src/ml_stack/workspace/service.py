@@ -38,6 +38,14 @@ class SendOptions(TypedDict, total=False):
     label: str
 
 
+class InviteOptions(TypedDict, total=False):
+    """What `Workspace.invite` takes besides the hint, lifetime and uses: the environment that
+    tightens the policy and the function that asks the person."""
+
+    env: Mapping[str, str]
+    ask: agent_invites.Ask
+
+
 class ProcessOptions(TypedDict, total=False):
     """What `Workspace.set_model` takes to judge the calling process: its tty state and environment."""
 
@@ -177,11 +185,11 @@ class Workspace:
         return gone
 
     def invite(self, token: str, hint: str = "", ttl_s: float = 0.0, uses: int = 1,
-               env: Mapping[str, str] | None = None,
-               ask: agent_invites.Ask | None = None) -> dict[str, Any]:
+               **how: Unpack[InviteOptions]) -> dict[str, Any]:
         """A one-time code a joined agent hands to a new agent it starts, which then joins as its
         child; bounded by the limits and, under `approve-first`, by the person's answer."""
-        return agent_invites.issue(self, self.auth(token), hint, ttl_s, uses, env, ask)
+        return agent_invites.issue(self, self.auth(token), (hint, ttl_s, uses),
+                                   how.get("env"), how.get("ask"))
 
     # -- the write checks ----------------------------------------------------------------
     def _check(self, who: Identity, what: str, size_cap: int, *texts: str) -> None:

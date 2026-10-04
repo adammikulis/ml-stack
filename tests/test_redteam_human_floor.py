@@ -290,3 +290,36 @@ def test_a_hostile_message_cannot_widen_a_delegate_or_leak_a_token_path(tmp_path
         ws.delegate(worker, "evil", 0.0, ("send", "read", "claim", "admin"))
     assert ws.registry.children("worker") == ["worker/kid"]
     assert not any(str(P(ws.base) / "tokens") in str(m) for m in ws.inbox(worker, limit=100))
+
+
+def test_the_one_thing_an_agent_may_mint_is_a_bounded_child_invite_and_never_a_person_grant(
+        tmp_path, monkeypatch):
+    from workspace_kit import Kit, clean_env
+
+    from ml_stack.workspace import Denied, guide, onboard, tokens
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    kit.limits(sends_per_window=1000, announce_per_window=1000, agent_invite_ask="plan-and-go")
+    worker = kit.agent("worker")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    for call in (lambda: kit.ws.mint(worker, "x"), lambda: kit.ws.mint(worker, "x", "lead"),
+                 lambda: kit.ws.mint(worker, "x", "human"), lambda: kit.ws.init("again"),
+                 lambda: kit.ws.revoke(worker, "owner"), lambda: kit.ws.gc(worker)):
+        with pytest.raises(Denied):
+            call()
+    with pytest.raises(onboard.human.HumanRequired):
+        guide.connect(kit.ws, guide.Plan(["codex"], 0.0, 0.0, True))
+    made = kit.ws.invite(worker, "peer", 1800.0, 3)
+    assert made["uses"] == 3 and made["ttl_s"] == 1800.0
+    assert not (kit.base / "shared-invites.json").exists()
+    entry, = kit.ws.invites._load()["invites"].values()
+    assert entry["issuer"] == "worker" and entry["uses"] == 3
+    names = [onboard.join(kit.ws, made["code"], "lead") for _ in range(3)]
+    for name in names:
+        info = kit.ws.registry.info(name)
+        assert info["role"] == "agent" and info["parent"] == "worker" and name != "lead"
+        with pytest.raises(Denied):
+            kit.ws.mint(tokens.load(kit.base, name), "y")
+        with pytest.raises(Denied):
+            kit.ws.invite(tokens.load(kit.base, name), "z")
+    with pytest.raises(Denied, match=r"limit is 3"):
+        kit.ws.invite(worker, "peer", 600.0, 4)

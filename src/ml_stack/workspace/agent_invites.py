@@ -108,9 +108,11 @@ def _checks(ws: Workspace, who: Identity, ttl_s: float, uses: int) -> int:
     return depth
 
 
-def issue(ws: Workspace, who: Identity, hint: str, ttl_s: float, uses: int,
+def issue(ws: Workspace, who: Identity, want: tuple[str, float, int],
           env: Mapping[str, str] | None = None, ask: Ask | None = None) -> dict[str, Any]:
-    """A one-time code for a new agent that would join as ``who``'s child; the refusal is audited."""
+    """A one-time code for a new agent that would join as ``who``'s child; ``want`` is the suggested
+    id, the lifetime in seconds and the number of uses. The refusal is audited."""
+    hint, ttl_s, uses = want
     ttl_s = ttl_s or ws.limits.invite_ttl_s
     try:
         how = policy(ws, env)
@@ -125,7 +127,7 @@ def issue(ws: Workspace, who: Identity, hint: str, ttl_s: float, uses: int,
         ws.audit("agent_invite.refused", who.id, why=str(err)[:120])
         raise
     info = ws.registry.info(who.id)
-    code = ws.invites.create(hint, ttl_s, dict(info["project"]), uses, issuer=who.id, can=tuple(who.can))
+    code = ws.invites.create(hint, ttl_s, dict(info["project"]), uses, (who.id, tuple(who.can)))
     ws.audit("agent_invite.create", who.id, uses=uses, ttl_s=ttl_s, depth=depth, policy=how)
     _announce(ws, f"{who.id} invited a new agent ({uses} use{'s' if uses > 1 else ''}, "
                   f"{ttl_s / 60:.0f} min)")
