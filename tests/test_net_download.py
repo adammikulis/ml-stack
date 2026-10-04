@@ -65,6 +65,42 @@ def pull(pipe, site, path, name, want=None, **hooks):
     return net.download(site.base + path, name, want, pipe, net.Hooks(**hooks))
 
 
+@pytest.fixture
+def library_tar(tmp_path):
+    path = tmp_path / "library.tar.gz"
+    with tarfile.open(path, "w:gz") as archive:
+        regular = tarfile.TarInfo("lib/libexample.so.1")
+        regular.size = 7
+        archive.addfile(regular, io.BytesIO(b"library"))
+        alias = tarfile.TarInfo("lib/libexample.so")
+        alias.type, alias.linkname = tarfile.SYMTYPE, "libexample.so.1"
+        archive.addfile(alias)
+    return path
+
+
+def test_library_aliases_require_the_verified_release_digest_and_scan(pipe, library_tar, tmp_path):
+    digest = files.sha256_file(library_tar)
+    kept = tmp_path / "kept.tar.gz"
+    net.accept(library_tar, kept, net.Want(sha256=digest, require_digest=True,
+                                         library_links=True), "https://release.invalid/server", pipe)
+    assert files.sha256_file(kept) == digest
+    assert pipe.scanners[0].seen
+
+
+def test_library_alias_mode_cannot_skip_the_pinned_digest(pipe, library_tar, tmp_path):
+    with pytest.raises(net.Blocked, match="pinned release digest"):
+        net.accept(library_tar, tmp_path / "kept.tar.gz", net.Want(library_links=True),
+                   "https://release.invalid/server", pipe)
+    assert not pipe.scanners[0].seen
+
+
+def test_library_alias_mode_cannot_accept_a_mismatched_digest(pipe, library_tar, tmp_path):
+    with pytest.raises(net.ChecksumMismatch):
+        net.accept(library_tar, tmp_path / "kept.tar.gz", net.Want(sha256="0" * 64,
+                   require_digest=True, library_links=True), "https://release.invalid/server", pipe)
+    assert not pipe.scanners[0].seen
+
+
 def test_a_good_gguf_is_staged_checked_scanned_and_promoted(tmp_path, site, pipe):
     body = gguf_bytes(extra=4096)
     site.add("/m.gguf", body, headers={"Content-Type": "application/octet-stream"})

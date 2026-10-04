@@ -15,6 +15,7 @@ from ml_stack.http import ServerError
 from ml_stack.hub.probe import machine_memory
 from ml_stack.safenames import Unsafe, unpack
 from ml_stack.serve.backend import help_of
+from ml_stack.tar_libraries import unpack as unpack_libraries
 
 from .updates import UpdateError, download
 
@@ -158,7 +159,7 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
         on_progress(f"Downloading {asset['name']}")
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            archive = download(asset, tmp)
+            archive = download(asset, tmp, library_links=True)
         except UpdateError as exc:
             raise LlamaError(str(exc)) from None
         if on_progress:
@@ -171,7 +172,7 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
         _install(found.parent, vendor)
         if companion is not None:
             try:
-                runtime = download(companion, tmp)
+                runtime = download(companion, tmp, library_links=True)
             except UpdateError as exc:
                 raise LlamaError(str(exc)) from None
             runtime_staging = Path(tmp) / "runtime"
@@ -190,7 +191,10 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
 def _unpack(archive: Path, into: Path) -> None:
     """Extract a .zip or a .tar.gz, refusing one that writes outside ``into``."""
     try:
-        unpack(archive, into)
+        if archive.name.endswith(".tar.gz"):
+            unpack_libraries(archive, into)
+        else:
+            unpack(archive, into)
     except Unsafe as exc:
         raise LlamaError(f"refusing {archive.name}: {exc}") from None
 

@@ -19,6 +19,10 @@ On Linux with an NVIDIA GPU, the first-run server installer selects an official 
 release and its matching runtime archive. Both downloads require GitHub's SHA-256
 digests. The installer checks that the resulting server initializes a CUDA device;
 a CPU build is not substituted when CUDA installation fails.
+The WSL download policy requires an available virus scanner. Install ClamAV and
+current definitions with `sudo apt-get install clamav && sudo freshclam` before
+downloading the server. Release archives retain their original SHA-256 checks;
+contained SONAME library aliases are validated and copied as regular files at install.
 
 Status: the design is complete; the parts that can be tried on one machine are built and
 tested (see "What is built"). Issue: *Zero-install onboarding of devices on the local network*.

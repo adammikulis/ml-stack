@@ -68,8 +68,8 @@ class CudaServerInstallTests(unittest.TestCase):
     def test_runtime_without_github_digest_is_refused(self):
         server, _runtime = self.archives()
         original = self.llama.download
-        def fetch(asset, directory):
-            return server if asset is self.asset else original(asset, directory)
+        def fetch(asset, directory, **options):
+            return server if asset is self.asset else original(asset, directory, **options)
         with patch.object(self.llama, "_tokens", return_value=(self.token,)), patch.object(
                 self.llama, "latest", return_value=self.release), patch.object(
                 self.llama.shutil, "which", return_value=None), patch.object(
