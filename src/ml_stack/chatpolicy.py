@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,7 @@ from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
 from ml_stack.net.cli import command as security_command
 from ml_stack.sentinel.human import agent_may
 
-__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "HumanOnlyRail",
+__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "HumanOnlyRail", "catalog",
            "refusal_for", "review_view"]
 
 READ = frozenset({
@@ -75,7 +75,14 @@ HUMAN_ONLY: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
 
 _TOOL_NAME = re.compile(
     r"quarantin|releas|purg|approv|grant|mint|sentinel|security|baseline|honey|polic|guard|rail|"
-    r"unblock|role|permission|privilege|rule|always", re.I)
+    r"unblock|role|permission|privilege|rule|always|classif", re.I)
+
+
+def catalog(reads: Collection[str] = (), acts: Collection[str] = ()) -> dict[str, str]:
+    """The destructive-action label of each tool the agent offers: reads are ``safe``, every
+    tool that waits for a yes (and any in ``acts``) is ``reversible``."""
+    return {**dict.fromkeys(READ | frozenset(CONFIRM), "reversible"), **dict.fromkeys(READ, "safe"),
+            **dict.fromkeys(reads, "safe"), **dict.fromkeys(acts, "reversible")}
 
 
 def refusal_for(text: str) -> tuple[str, str] | None:
