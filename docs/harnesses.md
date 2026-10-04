@@ -14,7 +14,7 @@ ml-stack-claude --on http://127.0.0.1:8080 --role read-only -- -p "explain this 
 
 A program starts the same thing with `ml_stack.coding.launch_coding_agent(model, role, project,
 harness="codex", **options)` (options: `name`, `orders_from`, `harness_args`, `say`,
-`run_codex` / `run_claude`); it returns the harness's exit code.
+`run_codex` / `run_claude`, `context`); it returns the harness's exit code.
 
 ## What a launch does
 

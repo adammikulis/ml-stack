@@ -2,6 +2,7 @@
   <main class="chatmain" id="chat" hidden>
     <aside class="chats" aria-label="Conversations">
       <div class="chat-heading"><h1>Conversations</h1><button class="ghost small" id="chat-new">New chat</button></div>
+      <label for="chat-mode">Mode</label><select id="chat-mode"><option value="chat">Chat</option><option value="coding">Coding</option></select>
       <div class="chat-search"><label for="chat-search">Search conversations</label>
         <input type="search" id="chat-search" placeholder="Search messages…"></div>
       <div id="chat-list"></div>
@@ -15,14 +16,25 @@
       <div class="hint" id="chat-none" hidden>
         No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your fleet.
       </div>
+      <div class="chat-coding-fields" data-coding hidden>
+        <label for="chat-project">Project directory</label><input id="chat-project" placeholder="/path/to/project">
+        <div class="chat-coding-pair"><div><label for="chat-harness">Coding agent</label><select id="chat-harness"></select></div>
+          <div><label for="chat-role">Tool permissions</label><select id="chat-role"></select></div></div>
+        <p class="hint">The selected agent works in this directory using your model and the permissions above.</p>
+      </div>
       <details class="aside" id="chat-options" hidden>
         <summary>Advanced options</summary>
+        <div data-chat>
         <label for="chat-temperature">Temperature</label>
         <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
         <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
+        </div><div data-coding hidden><label for="chat-context">Context length</label>
+          <input id="chat-context" type="number" min="1024" max="1048576" step="1024" value="262144">
+          <p class="hint">Tokens available to the coding agent. Memory admission runs before the model starts.</p></div>
       </details>
       <div class="messages" id="chat-messages" aria-label="Chat messages" role="log"></div>
       <div id="chat-note" role="status"></div>
+      <details id="chat-activity" class="aside" hidden><summary>Tool activity and session details</summary><pre id="chat-activity-output"></pre></details>
       <div class="askrow" id="chat-askrow" hidden>
         <textarea id="ask" rows="3" placeholder="Message your model…" aria-label="Message"></textarea>
         <button id="chat-send">Send</button><button class="ghost" id="chat-stop" hidden>Stop</button>
@@ -82,7 +94,7 @@
       this.send.onclick = () => this.ask();
       this.picker.onchange = () => { this.updateReadiness(); this.saveSettings(); };
       this.temperature.onchange = () => this.saveSettings();
-      this.stop.onclick = () => this.request?.abort();
+      this.coding = new window.ChatCoding(this);
       this.newChat.onclick = () => {
         if (this.request) return;
         this.open = null;
@@ -93,6 +105,7 @@
         this.messages = [];
         this.savedSettings = { mode: "chat", temperature: null };
         this.temperature.value = "";
+        this.coding.restore(this.savedSettings);
         this.welcome();
         this.note.replaceChildren();
         this.paintList();
@@ -147,6 +160,7 @@
         if (M.refused(where)) return;
         if (!where.ok) throw new Error(where.error || "Could not read the serving models.");
         const available = where.models || [];
+        this.chatModels = available;
         const selected = this.picker.value;
         this.picker.replaceChildren(...available.map((m) =>
           el("option", { value: m.model }, m.local ? m.model : `${m.model} — on ${m.peer}`)));
@@ -155,6 +169,7 @@
         this.askrow.hidden = !available.length;
         this.none.hidden = !!available.length;
         this.options.hidden = !available.length;
+        await this.coding.restore(this.savedSettings, this.picker.value);
         this.updateReadiness();
         await this.paintList();
         const selectedChat = this.open || localStorage.getItem("ml-stack.chat.selected");
@@ -163,7 +178,7 @@
     }
 
     settings() {
-      return { ...this.savedSettings, temperature: this.temperature.value === "" ? null : Number(this.temperature.value) };
+      return { ...this.savedSettings, ...this.coding.settings(), temperature: this.temperature.value === "" ? null : Number(this.temperature.value) };
     }
 
     saveSettings() {
@@ -181,6 +196,7 @@
 
     updateReadiness() {
       this.send.disabled = !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
+      this.coding.readiness();
     }
 
     showError(message) {
@@ -274,6 +290,7 @@
         this.messages = one.messages || [];
         this.savedSettings = one.settings || { mode: "chat", temperature: null };
         this.temperature.value = this.savedSettings.temperature ?? "";
+        await this.coding.restore(this.savedSettings, one.model);
         this.list.replaceChildren();
         for (const m of this.messages) this.say(m.role, m.content);
         if (!this.messages.length) this.welcome();
@@ -285,6 +302,7 @@
         }
         this.updateReadiness();
         this.note.replaceChildren();
+        this.coding.reattach();
       } catch (error) { this.showError(error.message); }
     }
 
@@ -299,6 +317,8 @@
       this.stop.hidden = false;
       this.newChat.disabled = this.picker.disabled = true;
       this.temperature.disabled = true;
+      this.coding.busy(true);
+      this.coding.accepted = false;
       let reply, userBody, accepted = false;
       try {
         await this.savePending;
@@ -315,6 +335,11 @@
         this.list.querySelector(".chat-welcome")?.remove();
         userBody = this.say("user", text);
         reply = this.say("assistant", "");
+        if (this.coding.active) {
+          await this.coding.run(text, reply);
+          accepted = this.coding.accepted;
+          return;
+        }
         const messages = [...this.messages, { role: "user", content: text }];
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
           body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages,
@@ -328,6 +353,7 @@
         this.messages = messages;
         await this.stream(r, reply);
       } catch (error) {
+        accepted ||= this.coding.accepted;
         if (error.name === "AbortError") this.note.textContent = "Generation stopped.";
         else this.showError(error.message || "The connection to the model ended.");
         if (reply && !reply.dataset.text) reply.closest(".msg").remove();
@@ -344,6 +370,8 @@
         this.stop.hidden = true;
         this.newChat.disabled = this.picker.disabled = false;
         this.temperature.disabled = false;
+        this.coding.busy(false);
+        this.updateReadiness();
         this.paintList();
       }
     }
