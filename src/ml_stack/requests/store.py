@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
@@ -15,6 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import files, home, keystore, lock
+
+try:
+    from cryptography.exceptions import InvalidTag
+except ImportError:
+    InvalidTag = ValueError  # type: ignore[assignment,misc]
+
 from ml_stack.requests.model import (
     APPROVING,
     KINDS,
@@ -28,6 +35,8 @@ from ml_stack.requests.model import (
 
 __all__ = ["DAY", "MAX_PENDING", "MAX_ROWS", "PURPOSE", "TTL_S", "Ask", "Inbox", "Refused", "Unavailable"]
 
+FAILURES = (OSError, RuntimeError, ValueError, TypeError, KeyError, InvalidTag)
+"""What reading, decrypting or writing the file can raise; each becomes `Unavailable`."""
 PURPOSE = "requests"
 _AAD = b"ml-stack/requests/v1"
 _MAGIC = b"MLR1"
@@ -78,10 +87,12 @@ def hashed(secret: str) -> str:
 class Inbox:
     """The requests of one user. ``directory`` defaults to ``requests`` under the state root and
     ``key`` to the ``requests`` subkey of the keystore; a store that cannot be opened is
-    `Unavailable`."""
+    `Unavailable`. With ``memory`` the rows are kept in this process only, never on disk."""
 
     def __init__(self, directory: Path | None = None, *, key: Callable[[], bytes] | None = None,
-                 clock: Callable[[], float] | None = None) -> None:
+                 clock: Callable[[], float] | None = None, memory: bool = False) -> None:
+        self.memory = memory
+        self._held = threading.RLock()
         self.directory = Path(directory) if directory else home.state("requests")
         self.path = self.directory / "requests.enc"
         self._key_from = key or self._subkey
@@ -91,23 +102,27 @@ class Inbox:
         self._rows: list[Row] = []
 
     def _subkey(self) -> bytes:
-        salt = self.directory / "salt"
-        if not salt.exists():
-            self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            fd = os.open(salt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                os.write(fd, secrets.token_bytes(16))
-            finally:
-                os.close(fd)
-        return keystore.default().subkey(PURPOSE, keystore.os_user(), context=salt.read_bytes())
+        return keystore.default().salted_subkey(PURPOSE, self.directory)
 
     def _cipher(self) -> Any:
         if self._key is None:
             self._key = self._key_from()
         return keystore.aead(self._key)
 
+    def ready(self) -> bool:
+        """Whether the key can be had here, so a raised request can be stored."""
+        if self.memory:
+            return True
+        try:
+            self._cipher()
+        except FAILURES:
+            return False
+        return True
+
     # -- the file ------------------------------------------------------------------
     def _load(self) -> list[Row]:
+        if self.memory:
+            return list(self._rows)
         try:
             stat = self.path.stat()
         except FileNotFoundError:
@@ -125,12 +140,15 @@ class Inbox:
             rows = [Row.from_json(r) for r in doc["rows"]]
         except Unavailable:
             raise
-        except Exception as exc:
+        except FAILURES as exc:
             raise Unavailable(f"the requests file does not open: {type(exc).__name__}") from exc
         self._seen, self._rows = mark, rows
         return list(rows)
 
     def _save(self, rows: list[Row]) -> None:
+        if self.memory:
+            self._rows = rows
+            return
         body = json.dumps({"schema_version": SCHEMA_VERSION, "rows": [r.to_json() for r in rows]},
                           sort_keys=True, ensure_ascii=True).encode()
         nonce = os.urandom(12)
@@ -144,14 +162,14 @@ class Inbox:
     def _edit(self) -> Iterator[list[Row]]:
         """The rows under the lock; a change made in the block is expired, trimmed and written."""
         try:
-            with lock.only_one(self.directory / "requests.lock", timeout=LOCK_WAIT_S,
-                               announce=lambda _m: None):
+            with self._held if self.memory else lock.only_one(
+                    self.directory / "requests.lock", timeout=LOCK_WAIT_S, announce=lambda _m: None):
                 rows = self._load()
                 yield rows
                 self._save(_trim(_expire(rows, self._now()), self._now()))
         except (Unavailable, Refused):
             raise
-        except Exception as exc:
+        except FAILURES as exc:
             raise Unavailable(f"the requests file cannot be edited: {type(exc).__name__}") from exc
 
     # -- raising -------------------------------------------------------------------

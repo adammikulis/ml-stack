@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import secrets
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -56,15 +55,7 @@ class ActivityLog(EventLog):
         self._now = clock
 
     def _subkey(self) -> bytes:
-        salt_file = self.directory / "salt"
-        if not salt_file.exists():
-            self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-            fd = os.open(salt_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                os.write(fd, secrets.token_bytes(16))
-            finally:
-                os.close(fd)
-        return keystore.default().subkey(PURPOSE, keystore.os_user(), context=salt_file.read_bytes())
+        return keystore.default().salted_subkey(PURPOSE, self.directory)
 
     def _cipher(self) -> Any:
         if self._key is None:

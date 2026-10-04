@@ -22,6 +22,7 @@ from ml_stack.requests.inbox import (
     oldest_pending,
     pending_count,
     raise_request,
+    subscribe,
     summary,
 )
 from ml_stack.requests.model import CHOICES, KINDS, Choice, Origin, Request
@@ -29,4 +30,4 @@ from ml_stack.requests.store import Ask, Inbox, Refused, Unavailable
 
 __all__ = ["CHOICES", "KINDS", "Ask", "Choice", "Context", "Handle", "Inbox", "Origin", "Outcome", "Refused", "Request",
            "Unavailable", "answer", "default", "get", "list_requests", "oldest_pending", "pending_count",
-           "raise_request", "summary"]
+           "raise_request", "subscribe", "summary"]

@@ -22,6 +22,7 @@ _MINT = object()
 _FORBIDDEN = (
     "ml-stack security", "ml-stack-security", "ml_stack.sentinel", "ml_stack/sentinel",
     "ml_stack_sentinel", "sentinel.release", "sentinel.purge", "sentinel/state",
+    "ml-stack-requests", "ml_stack.requests", "ml_stack/requests", "ml-stack/requests", "ml_stack_requests", "ml_stack.inbox", "ml_stack/inbox",
     "ml-stack-log", "ml_stack.activity", "ml_stack/activity", "ml-stack/activity", "ml_stack_activity", "activity.log",
 )
 _PROTECTED: set[str] = set()

@@ -9,14 +9,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, sentinel
+from ml_stack import home, requests, sentinel
 from ml_stack.activity import writer
 from ml_stack.activity.schema import valid_kind
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import only_one
 from ml_stack.sentinel.events import Event
 
-__all__ = ["attach", "mirror", "workspace_sync"]
+__all__ = ["attach", "mirror", "mirror_requests", "workspace_sync"]
 
 _ATTACHED: set[int] = set()
 _LOCK = threading.Lock()
@@ -37,9 +37,21 @@ def mirror(event: Event) -> None:
     writer.record(kind, actor="system", subject=event.subject, outcome=outcome, meta=meta, ts=event.ts)
 
 
+def mirror_requests() -> None:
+    """Write every request this process raises, answers or withdraws into the log. Idempotent."""
+    requests.subscribe(_request)
+
+
+def _request(kind: str, request: requests.Request, outcome: str, via: str, actor: str) -> None:
+    writer.record(kind, actor=actor or request.raised_by.agent or "system", subject=request.id, outcome=outcome,
+                  refs={"kind": request.kind, "agent": request.raised_by.agent, "project": request.raised_by.project},
+                  meta={"choice": request.answer, "via": via})
+
+
 def attach() -> None:
-    """Mirror this process's sentinel events into the log, and catch the log up with the
-    workspace. Idempotent."""
+    """Mirror this process's sentinel events and requests into the log, and catch the log up
+    with the workspace. Idempotent."""
+    mirror_requests()
     node = sentinel.default()
     with _LOCK:
         if id(node.bus) in _ATTACHED:

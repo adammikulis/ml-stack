@@ -14,8 +14,21 @@ from ml_stack import keystore, person
 from ml_stack.requests.model import PENDING, Request
 from ml_stack.requests.store import Ask, Inbox, Refused, Unavailable, build
 
-__all__ = ["Context", "Handle", "Outcome", "answer", "default", "get", "list_requests", "oldest_pending",
-           "pending_count", "raise_request", "summary"]
+__all__ = [
+    "Context",
+    "Handle",
+    "Heard",
+    "Outcome",
+    "answer",
+    "default",
+    "get",
+    "list_requests",
+    "oldest_pending",
+    "pending_count",
+    "raise_request",
+    "subscribe",
+    "summary",
+]
 
 logger = logging.getLogger("ml_stack.requests")
 POLL_S = 0.1
@@ -179,12 +192,23 @@ def summary(*, inbox: Inbox | None = None) -> dict[str, Any]:
             "human_only": sum(1 for r in found if r.human_only)}
 
 
+Heard = Callable[[str, Request, str, str, str], None]
+"""``(kind, request, outcome, via, actor)``: what a listener is told of a raise, an answer or a withdrawal."""
+_LISTENERS: list[Heard] = []
+
+
+def subscribe(listener: Heard) -> None:
+    """Tell ``listener`` about every request raised, answered or withdrawn in this process from now on."""
+    with _LOCK:
+        if listener not in _LISTENERS:
+            _LISTENERS.append(listener)
+
+
 def _record(kind: str, request: Request, outcome: str, via: str, *, actor: str = "") -> None:
-    try:
-        from ml_stack import activity
-        activity.record(kind, actor=actor or request.raised_by.agent or "system", subject=request.id,
-                        outcome=outcome, refs={"kind": request.kind, "agent": request.raised_by.agent,
-                                               "project": request.raised_by.project},
-                        meta={"choice": request.answer, "via": via})
-    except (OSError, ValueError, TypeError, RuntimeError, KeyError, ImportError) as exc:
-        logger.debug("request record dropped: %s", type(exc).__name__)
+    with _LOCK:
+        heard = list(_LISTENERS)
+    for listener in heard:
+        try:
+            listener(kind, request, outcome, via, actor)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            logger.debug("request listener failed: %s", type(exc).__name__)

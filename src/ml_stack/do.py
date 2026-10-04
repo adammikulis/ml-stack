@@ -543,10 +543,10 @@ class Person:
         what = f"{call.name}({_compact(call.arguments or {})}): " if call is not None else ""
         self.asked += 1
         can = self.rules is not None and call is not None
-        always = can and bool(ask.details.get("always_ok"))
         label = str((ask.details.get("classifier") or {}).get("label", ""))
         hard = bool(ask.details.get("always_blocked")) and label in ("destructive", "unsure")
-        picks = ["allow-once", *(["allow-always"] if always and not hard else []),
+        always = can and bool(ask.details.get("always_ok")) and not hard
+        picks = ["allow-once", *(["allow-always"] if always else []),
                  *(["never"] if can else []), "deny"]
         handle = self._raise("tool_call_destructive" if hard else "tool_call", what.rstrip(": ") or "a call",
                              ask.question, picks)
@@ -565,7 +565,7 @@ class Person:
             got = got.lower()
             pick = ("allow-once" if got in ("y", "yes", "1") else
                     "never" if can and got in ("3", "never") else
-                    "allow-always" if always and "allow-always" in picks and got in ("2", "a", "always") else
+                    "allow-always" if always and got in ("2", "a", "always") else
                     "deny")
             out = self._answered(handle, pick)
         return self._settle(out, call, ask)

@@ -19,7 +19,7 @@ STATES = (PENDING, *RESOLVED)
 VIAS = ("terminal", "ui", "dialog")
 """The three ways a person answers: a terminal at a tty, the UI's browser session, the desktop dialog."""
 
-MOST = {"subject": 300, "reason": 400, "name": 64, "label": 40, "effect": 200}
+MOST = {"subject": 300, "reason": 700, "name": 64, "label": 40, "effect": 200}
 APPROVING = frozenset({"allow-once", "allow-always", "approve", "approve-other", "release"})
 """Choices that let the thing asked about go ahead; every other choice, and expiry, does not."""
 

@@ -232,6 +232,7 @@ on whichever machine is free rather than the one you are typing at.
 | [Reputation](docs/reputation.md) | how each source has behaved, `ml-stack-reputation` |
 | [The activity log](docs/activity-log.md) | one encrypted, tamper-evident record of what agents, people and the stack did, and `ml-stack-log` to read it |
 | [Security](docs/security.md) | the threat model, findings and what is fixed ([assistant contract](docs/assistant-security.md), [red-teaming](docs/redteam.md)) |
+| [Requests](docs/requests.md) | one place for everything that waits for a person: raised by any component, answered at the terminal, in the browser page or in the desktop dialog, first answer wins, `ml-stack-requests` |
 | [Destructive actions](docs/destructive-actions.md) | the classifier that makes destructive or unsure tool calls ask first: what asks and why, how it meets roles and rules, measured recall |
 | [Decision models](docs/decision-models.md) | typed answers with probabilities, training and evaluating one, JevBench ([integration plan](docs/decision-model-integration-plan.md)) |
 | [Packages](docs/packages.md) | what each module is, and the extras it carries |

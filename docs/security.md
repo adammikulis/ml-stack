@@ -301,6 +301,15 @@ These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-
 - **`scripts/test-on-linux`** needs Docker's daemon; `docs/INTEGRATION-REPORT.md` says whether it
   ran for that integration.
 
+## Requests
+
+Everything that waits for a person (a tool call that asks first, a fact to remember, something
+sentinel holds) is one request in an encrypted per-user store (`docs/requests.md`). It is answered
+only by a person: at a terminal with a tty, or in the browser page behind a launch key, a session
+cookie, a CSRF token and the loopback Host/Origin checks. An answer is bound to the fingerprint of
+the words shown, the first answer wins, and expiry or a failing store denies. No token, tool, MCP
+route or workspace message can answer, cancel or list the answers of a request.
+
 ## Sentinel
 
 `ml_stack.sentinel` watches for the attacks above and holds what they touched; the design,

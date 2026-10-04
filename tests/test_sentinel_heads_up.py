@@ -54,7 +54,7 @@ def test_a_forged_peer_raises_one_dialog_with_exactly_three_buttons():
     title, body, buttons = desk.shown[0]
     assert buttons == (LATER, KEEP, RELEASE) == BUTTONS
     assert "peer 10.0.0.1" in title and "forged or replayed signature" in body
-    assert "Requests from this machine are refused" in body and "Release puts" in body
+    assert "Requests from this machine are refused" in body and "Release: What is held is put back in use" in body
     assert node.store.get(record.id).state == State.QUARANTINED
 
 
