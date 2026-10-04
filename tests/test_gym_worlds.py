@@ -1,5 +1,6 @@
 """Native procedural world reproducibility and manual scenario ownership."""
 
+import json
 import shutil
 from pathlib import Path
 
@@ -140,6 +141,8 @@ def test_traffic_task_resets_preserve_native_connection_and_replenish_demand(com
     try:
         observation, info = env.reset(seed=100)
         connection = env.native.sumo
+        demand = Path(env.world_provenance['files']['continuing_demand']['path'])
+        assert json.loads(demand.read_text())['schema_version'] == 1
         physics = getattr(env.native, 'physics', None)
         for index in range(16):
             observation, _, terminated, truncated, info = env.step(0)
