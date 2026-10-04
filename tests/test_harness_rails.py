@@ -353,7 +353,7 @@ class TestSeat:
 
         seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
         subs = Workspace(seat.base).board.store.state()[1]["local-test-codex"]
-        assert subs[("board", GENERAL)]["mode"] == "digest" and ("kind", "task") in subs
+        assert subs[("board", GENERAL)] == "digest" and ("kind", "task") in subs
         assert ("mentions", "") in subs
 
     def test_ending_the_session_revokes_the_identity_and_removes_the_files(self, person, monkeypatch, tmp_path):
