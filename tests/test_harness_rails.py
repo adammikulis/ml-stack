@@ -392,12 +392,33 @@ class TestSeat:
         assert not (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
         assert not seen["home"].exists()
 
-    def test_a_launcher_an_agent_started_is_not_minted_and_acts_as_its_parent(self, monkeypatch, tmp_path):
+    def test_an_agent_launcher_requires_an_authenticated_parent_instead_of_using_a_label(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDECODE", "1")
+        with pytest.raises(ValueError, match="workspace identity could not be created"):
+            harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+
+    def test_an_agent_launcher_delegates_a_distinct_private_child_without_changing_invite_policy(self, monkeypatch, tmp_path):
+        from ml_stack.workspace import Workspace, tokens
+
+        ws = Workspace()
+        owner = ws.init("owner")
+        parent = ws.mint(owner, "codex", "agent")
+        tokens.store(ws.base, "codex", parent)
         monkeypatch.setenv("CLAUDECODE", "1")
         said = []
-        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", said.append)
-        assert not seat.minted and seat.flags() == ["--agent", "claude-code", "--label", "local-test-codex"]
-        assert seat.revoke() is False and "ml-stack-workspace setup" in said[0]
+        seat = harnessid.invite("local-qwen", tmp_path, "codex", said.append)
+        assert seat.name == "codex/local-qwen" and seat.flags() == ["--agent", "codex/local-qwen"]
+        secret = tokens.load(ws.base, seat.name)
+        child = ws.auth(secret)
+        assert child.parent == "codex" and child.role == "agent"
+        assert set(child.can) <= set(ws.auth(parent).can)
+        assert secret not in "".join(said)
+        assert ws.limits.agent_invite_ask == "approve-first" and ws.invites.made_by("codex") == []
+        assert seat.revoke() and ws.auth(parent).id == "codex"
+        from ml_stack.workspace import Denied
+
+        with pytest.raises(Denied, match="revoked"):
+            ws.delegate(secret, "nested")
 
     def test_the_brief_names_who_the_agent_obeys_and_that_everything_else_is_data(self):
         text = harnessid.brief("n", "alias", "codex", "claude-code", ["reviewer"])
