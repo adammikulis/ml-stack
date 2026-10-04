@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+from ml_stack.files import write_json
 from ml_stack.gym.paths import artifact_root
 
 
@@ -20,9 +21,9 @@ def directory(backend, definition):
 
 
 def record(path, backend, definition, files):
-    manifest = {'backend': backend, 'definition': definition,
+    manifest = {'version': 1, 'backend': backend, 'definition': definition,
                 'files': {name: {'path': str(file), 'sha256': digest(file)} for name, file in files.items()}}
-    (path / 'world.json').write_text(json.dumps(manifest, indent=2))
+    write_json(path / 'world.json', manifest)
     return {**manifest, 'manifest': str(path / 'world.json')}
 
 
@@ -40,4 +41,3 @@ def imported(value):
     if candidate.stat().st_size > 20_000_000:
         raise ValueError('World XML must be at most 20 MB')
     return candidate
-
