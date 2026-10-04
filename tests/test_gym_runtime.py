@@ -291,3 +291,17 @@ def test_async_result_preserves_input_and_rejects_stale_revision(
     assert simulation.state["decision_result"]["observation"] == [2]
     assert simulation.state["action"] == int(accepted)
     assert simulation.state["transition"]["sequence"] == 3
+
+
+def test_reset_cancels_pending_model_before_next_observation(simulation, monkeypatch):
+    monkeypatch.setattr(runtime, "DecisionProcess", PendingDecider)
+    simulation.command("controller", {"controller": "decider"})
+    simulation.step()
+    previous = simulation.decider
+    old_revision = simulation.control_revision
+    simulation.command("reset", {"seed": 3})
+    assert previous.closed and simulation.decider is None
+    assert simulation.control_revision > old_revision
+    simulation.step()
+    assert simulation.decider.pending["observation"] == [3]
+    assert simulation.decider.pending["revision"] == simulation.control_revision
