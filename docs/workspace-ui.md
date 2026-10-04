@@ -17,3 +17,9 @@ Training uses the current Gym catalogue, including forest-search drones when ava
 Settings exposes **Libraries & simulators** directly. Check the capabilities you want and apply the changes. Installed capabilities are checked; available default libraries are not silently selected. The UI reports download and preference-save errors and prevents duplicate submissions while a request is pending.
 
 A simulator's installed interpreter is reused for live Gym sessions and queued Gym training/evaluation. PyFlyt drones use their managed Python 3.12 environment, independent of the application's Python. Custom per-example choices are saved in `gym_pythons`; managed simulator environments are discovered automatically. Reopening an installed simulator does not rerun first-time setup.
+
+## UI route extensions
+
+Fleet discovers optional higher-level routes through the installed distribution's `ml_stack.ui_routes` entry points. A named extension handles only `/ui/<name>/…` after Fleet's UI-header and session checks. The `board` entry point is owned by `ml_stack.workspace.fleet_routes`; Fleet imports neither the workspace service nor its adapter directly.
+
+Wheels and normal editable installs publish this registration. After changing entry points in a source checkout, reinstall the editable package so its distribution metadata is refreshed (`python -m pip install --no-deps -e .`). Frozen packaging must copy the `ml-stack` distribution metadata and include the dynamically loaded workspace adapter.
