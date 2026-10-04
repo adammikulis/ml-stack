@@ -261,5 +261,6 @@ def test_native_probe_skips_namespace_denial_and_fails_other_errors(monkeypatch,
         return sandbox.Result(argv, 1, stderr=error)
 
     monkeypatch.setattr(sandbox, 'run', denied)
-    with pytest.raises(expected):
+    with pytest.raises((AssertionError, pytest.skip.Exception)) as observed:
         require_native_sandbox()
+    assert isinstance(observed.value, expected)
