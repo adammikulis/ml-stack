@@ -62,7 +62,13 @@ controller, or world revision changes.
 | --- | --- | --- |
 | SmolVLM-256M-Instruct | Speed-first RGB baseline | Q8 GGUF and Q8 vision projector |
 | Qwen3.5-0.8B | Small general vision/language alternative | Q4_K_M GGUF and F16 vision projector |
-| FastVLM-0.5B | Efficient Apple vision encoder comparison | Official MLX/Core ML model bundle |
+| FastVLM-0.5B | Efficient Apple vision encoder comparison | Official Apple safetensors model bundle |
+
+The downloaded official Apple FastVLM bundle appears in the vision dropdown with runtime
+support marked unavailable. Its native runtime is not implemented in Gym; downloading it
+does not make it compatible with the current GGUF and vision-projector serving path.
+The RGB and thermal captions identify the controlled drone. Inspecting another drone in the
+scene changes the view; use **Take control** to switch the native camera and policy actor.
 
 These are selection candidates, not a measured throughput ranking on this machine.
 General RGB vision training does not establish recognition accuracy on this synthetic
