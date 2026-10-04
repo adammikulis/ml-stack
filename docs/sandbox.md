@@ -190,3 +190,9 @@ failures and malformed policies fail the tests. The Linux container runner keeps
 default privileges; it does not enable privileged mode or relax seccomp to make a native
 sandbox run. Fail-closed policy and managed-build refusal tests still run when native success
 tests cannot.
+
+Bubblewrap availability uses a bounded native namespace probe, cached per executable identity,
+user and user namespace. An installed executable whose namespace probe is denied is reported
+unavailable. The probe keeps the policy's namespace and network restrictions, mounts no
+entire root directory, and runs the system `true` executable. Timeout cleanup terminates its
+process group. No agent command is executed by the availability check.

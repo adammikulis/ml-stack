@@ -15,6 +15,13 @@ uncovered = 54
 partial = 202
 
 [[group]]
+match = ["spawn:sandbox/bubblewrap.py:_probe"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_bubblewrap.py"]
+note = "actual executable paths containing shell syntax remain literal, control characters cannot execute, probes are single-flight and invalidate on binary changes, stalled probes are killed"
+
+[[group]]
 match = ["spawn:platform.py:start_process"]
 status = "covered"
 count = 1
