@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
@@ -116,15 +116,24 @@ class EventLog:
     def append(self, event: Event) -> None:
         """Add ``event`` to the chain. A head that fails its seal starts a new chain whose
         first record says so."""
-        record = event.to_record()
+        def note(record: dict[str, Any]) -> None:
+            record["evidence"] = {**record["evidence"], "chain": "head failed its seal"}
+
+        self.append_record(event.to_record(), reset=note)
+
+    def append_record(self, record: dict[str, Any],
+                      reset: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+        """Chain ``record`` (a JSON object) onto the log; ``reset`` marks it when the head
+        failed its seal and a new chain starts. Returns the record as written."""
         with self._lock, only_one(self.path.with_name(self.path.name + ".lock")):
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             chain = self._chain()
             if chain is None:
                 chain = Chain(0, GENESIS, GENESIS)
-                record["evidence"] = {**record["evidence"], "chain": "head failed its seal"}
+                if reset is not None:
+                    reset(record)
             chain = self._catch_up(chain)
-            if self.path.exists() and self.path.stat().st_size > self.max_bytes:
+            if self._due():
                 chain = self._rotate(chain)
             record["seq"], record["prev"] = chain.count, chain.last
             record["hash"] = self._head.mac(
@@ -139,6 +148,11 @@ class EventLog:
                              "base": chain.base})
             if self.anchor is not None:
                 self._write_anchor(chain.count + 1, record["hash"])
+            return record
+
+    def _due(self) -> bool:
+        """Whether the current file is to be rotated before the next record."""
+        return self.path.exists() and self.path.stat().st_size > self.max_bytes
 
     def _catch_up(self, chain: Chain) -> Chain:
         """Adopt a last record that was written but whose head update never landed."""

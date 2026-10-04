@@ -1120,3 +1120,9 @@ ml-stack-setup                                             # the machine
 ml-stack-bench status                                      # measuring, serving, what the job kept
 ml-stack-serve profile                                     # every model's serving
 ```
+- [ ] **The destructive-action classifier's model layer has not been measured on a real decider**
+  (`docs/destructive-actions.md`); only the stub logprob server has exercised it.
+- [ ] **Destructive verdicts are not written to the activity log.** They reach `Run.events` and
+  `DestructiveRail.on_verdict` only.
+- [ ] **An approved plan is not classified when it is approved.** A destructive or unsure call asks
+  even when a step names it.

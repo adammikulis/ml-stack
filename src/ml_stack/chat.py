@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import os
 import re
 import secrets
 import sys
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import (
+    activity,
     chatpolicy as policy,
     do,
     files,
@@ -36,6 +38,8 @@ from ml_stack import (
 from ml_stack.agent import Compacted, Compacting, Compaction
 from ml_stack.command import Group, flag, option
 from ml_stack.guard import NOTICE, parse_call
+from ml_stack.guard.destructive_model import from_environment
+from ml_stack.guard.destructive_rail import DestructiveRail, default_roots
 from ml_stack.guard.native import screen as native_screen
 from ml_stack.guard.policy import Limits, ToolPolicyRail
 from ml_stack.guard.secrets import SecretRail
@@ -282,9 +286,14 @@ class Chat:
         self.gate = roles.RoleRail(self.role, self.names, self.plan, extension=self.extension,
                                    rules=self.rules)
         self.person.rules = self.rules
+        floors = {**dict.fromkeys(self.extension.reads, "safe"),
+                  **dict.fromkeys(self.extension.asks, "reversible")}
         mine = list(self.guard) if self.guard is not None else [
             policy.HumanOnlyRail(),
             ToolPolicyRail(limits=Limits(calls=self.role.max_calls)), self.gate,
+            DestructiveRail(roots=default_roots(), model=from_environment(os.environ),
+                            catalog=policy.catalog(), floors=floors,
+                            skip={*roles.OWN, *self.extension.asks_itself}),
             UntrustedRail(external=policy.FENCED), SecretRail(),
             TaintRail(registries={"models": do.on_disk_ids}), *self.extra]
         self.limits = next((r for r in mine if isinstance(r, ToolPolicyRail)), ToolPolicyRail())
@@ -296,6 +305,8 @@ class Chat:
 
     def use_role(self, name: str) -> None:
         """Run under another role from now on; only the person's typed ``/role`` calls this."""
+        activity.record("role.changed", actor="person", subject=name, refs={"session": self.session.id},
+                        meta={"was": self.role.name})
         self.role = roles.get(name)
         self.gate.set(self.role)
         self.limits.limits = replace(self.limits.limits, calls=self.role.max_calls)
@@ -420,6 +431,7 @@ class Chat:
             self.watch.approve(" ".join(steps))
             self.plan.approve(steps)
         text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)[:CUT]
+        self._logged(asked.name, args, _outcome(gate, tool, result), len(text))
         answer = text
         if asked.name not in roles.OWN and gate.allowed:
             shown = self.watch.screen_result(asked, text)
@@ -433,6 +445,24 @@ class Chat:
             person.say("   " + self.watch.screen_model(text).text[:300])
         out.messages.append({"role": "tool", "tool_call_id": call.get("id") or asked.name,
                              "name": asked.name, "content": answer})
+
+
+    def _logged(self, name: str, args: dict[str, Any], how: tuple[str, dict[str, str]],
+                chars: int) -> None:
+        """Record one tool call: its name, argument names and the outcome, never a value."""
+        outcome, refs = how
+        activity.record("agent.tool_call", actor="agent:" + (Path(self.session.model).name or "chat"),
+                        subject=name, outcome=outcome, refs={"role": self.role.name, **refs},
+                        meta={"arg_names": ",".join(sorted(args)), "result_chars": chars})
+
+
+def _outcome(gate: Any, tool: Any, result: Any) -> tuple[str, dict[str, str]]:
+    """How a call ended (blocked, no_such_tool, error, ok) and, when blocked, by which rail."""
+    if not gate.allowed:
+        return "blocked", {"rail": getattr(gate.verdict, "by", "") or "guard"}
+    if tool is None:
+        return "no_such_tool", {}
+    return ("error" if isinstance(result, dict) and "error" in result else "ok"), {}
 
 
 def run_task(task: str, client: Any, *,  # noqa: PLR0913
@@ -656,6 +686,8 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
             return 1
         stdout.write(f"model: {args.model} ({why})\n")
     session.model = args.model or session.model
+    activity.bind_session(session.id)
+    activity.attach()
 
     def connect(ref: str) -> Any:
         client = do.client_for(argparse.Namespace(**{**vars(args), "model": ref, "url": ""}))

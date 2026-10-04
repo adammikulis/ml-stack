@@ -177,6 +177,8 @@ ml-stack-chat = "ml_stack.chat:main"
 ml-stack-memory = "ml_stack.memory.cli:main"
 # how every source (host, URL, peer, repository, hash) has behaved: list, show, forget, export
 ml-stack-reputation = "ml_stack.reputation.cli:main"
+# the activity log: what agents, people and the stack did, read-only
+ml-stack-log = "ml_stack.activity.cli:main"
 # what a draft head is worth for one model: no head, then the head at each depth
 ml-stack-draft = "ml_stack.draft:main"
 ml-stack-help = "ml_stack.cli:help_main"

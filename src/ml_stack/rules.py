@@ -18,8 +18,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files, home
-from ml_stack.chatpolicy import _TOOL_NAME, CONFIRM, READ, _outside_state
+from ml_stack import activity, files, home
+from ml_stack.chatpolicy import _TOOL_NAME, CONFIRM, READ, _outside_state, catalog
+from ml_stack.guard.destructive import classify
+from ml_stack.guard.destructive_rail import default_roots
+from ml_stack.interventions import Call
 
 __all__ = ["Rule", "Rules", "blocked_reason", "describe", "run_command"]
 
@@ -71,6 +74,9 @@ def blocked_reason(call_name: str, arguments: Mapping[str, Any]) -> str:
         return "downloads always ask: their size is not known before they start"
     if _outside_state(dict(arguments)):
         return "it names a path outside ml-stack's state"
+    seen = classify(Call(call_name, dict(arguments)), roots=default_roots(), catalog=catalog())
+    if seen.asks:
+        return f"the classifier labelled it {seen.label}: {'; '.join(seen.reasons)}"
     texts = [_text(v) for v in arguments.values()]
     if any("*" in t or "?" in t for t in texts):
         return "an argument holds a wildcard character"
@@ -136,6 +142,8 @@ class Rules:
     def _event(self, kind: str, rule: Rule) -> None:
         line = {"ts": time.strftime("%FT%T"), "event": kind, "rule": describe(rule)}
         logger.warning("agent rule %s: %s", kind, line["rule"])
+        activity.record("rule." + kind.replace("-", "_"), actor="person", subject=rule.tool,
+                        outcome=rule.verdict, refs={"role": rule.role}, meta={"rule": line["rule"]})
         with (self.path.parent / EVENTS).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(line) + "\n")
 
