@@ -8,8 +8,12 @@ import shlex
 from pathlib import Path
 
 from ml_stack.contracts import recipes
+from ml_stack.files import write_json
+from ml_stack.gym.catalog import ENVIRONMENTS
+from ml_stack.gym.transport import interpreter
 
 from .files import safe_relpath
+from .gym_interpreters import configure_interpreters
 from .jobs import DaemonError
 from .request_fields import field, object_body
 
@@ -132,15 +136,23 @@ class WorkspaceRoutes:
         if "--detach" in args:
             raise ValueError("Workspace jobs are monitored directly; remove --detach.")
         argv = [command, *args]
+        environment = None
+        if command == "ml-stack-gym" and len(args) >= 2 and args[0] in {"run", "train", "evaluate"}:
+            if args[1] not in ENVIRONMENTS:
+                raise ValueError("Choose a supported Gym environment.")
+            configure_interpreters(self.ui)
+            argv = [interpreter(args[1]), "-m", "ml_stack.gym.cli", *args]
+            environment = {"ML_STACK_GYM_PYTHON": "", "ML_STACK_GYM_PYTHONS": "{}",
+                           "ML_STACK_GYM_FILES_ROOT": str(root)}
         metadata = field(req, "metadata", dict, {})
         name = field(req, "name", str, command)
         if field(req, "preview", bool, False):
             self.send(200, {"argv": argv, "command": shlex.join(argv)})
             return True
         root.mkdir(parents=True, exist_ok=True)
-        job = self.ui.runner.submit(name, argv, str(root))
+        job = self.ui.runner.submit(name, argv, str(root), env=environment)
         if isinstance(metadata, dict):
-            (self.ui.runner.job_dir(job.id) / "workspace.json").write_text(json.dumps(metadata))
+            write_json(self.ui.runner.job_dir(job.id) / "workspace.json", {**metadata, "version": 1})
         self.send(202, job.public())
         return True
 
