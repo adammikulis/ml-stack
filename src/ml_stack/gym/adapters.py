@@ -34,8 +34,7 @@ def make_environment(name, config=None, seed=0):
             env = make_traffic_world(cfg, seed, combined=name == "traffic-driving")
     else:
         if name == "car" and "world_seed" in cfg:
-            world_seed = int(cfg.pop("world_seed"))
-            cfg.update(start_seed=world_seed, num_scenarios=1)
+            cfg.pop("world_seed")
         env = make_episode(name, cfg)
     if provenance:
         env.world_provenance = provenance
