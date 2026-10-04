@@ -63,7 +63,7 @@ not vetoes. A red you can explain is a change; a red you cannot is a bug.
 Iteration speed is a requirement (the owner: "10-20 minutes of testing is too much"). A merge into
 the integration branch is gated by `scripts/test quick` (only what the change reaches), the files
 the branch touched, and the structural checks (`scripts/budgets`, `scripts/redteam_coverage.py
---check`, `scripts/reference --write` clean, `tests/test_layers.py`, the human-floor tests): a few
+--check`, `scripts/reference --write` clean, `tests/test_layers.py`, `tests/test_serve_no_bypass.py`, the human-floor tests): a few
 minutes, run by whoever merges, and never queued behind a full run. The `full` tier and the
 red-team tier run in the background on the integration branch after merges (once per batch or on
 a schedule), never in front of a merge and never held by someone waiting on them; a failure there
@@ -436,6 +436,15 @@ Never `git add -A` when anything else may be writing to the tree — another age
 ingest, a model you just drove. Add the files you changed, by name. (2026-09-04: a 0.8B model
 driven in the primary checkout deleted two paragraphs of this file and changed a heading;
 `git add -A` swept it into an unrelated commit.)
+
+**Never start a model server by hand.** `ml-stack-serve up MODEL` is a lease from the broker (it
+admits against memory, queues, picks the port, applies the measured profile, and is held until
+`ml-stack-serve down MODEL`); `ml-stack-claude`, `ml-stack-agent` and `agent start` take a lease
+too. This paragraph is the explanation, not the enforcement: a `Lease` cannot be made outside the
+broker's grant (`ml_stack.serve.grant`), `tests/test_serve_no_bypass.py` and the hard
+`server-starts` budget gate fail on a new spawn site, and the bash guard refuses `llama-server`
+by hand and `up` flags that would skip the lease. The owner's default 27B quant is
+`Qwen3.8-27B-UD-Q4_K_XL.gguf` (16.7 GB), not Q4_K_M.
 
 ## Which models to test with, and the defaults the owner wants
 

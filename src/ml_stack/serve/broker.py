@@ -29,13 +29,14 @@ from ml_stack import activity, gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
-from ml_stack.serve import canaries, guarded, unmanaged
+from ml_stack.serve import canaries, grant, guarded, unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
 from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager, Starting
 from ml_stack.serve.matching import model_matches
-from ml_stack.serve.ports import DEFAULT_HOST, free_port
+from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free
+from ml_stack.serve.preflight import PreflightFailed
 from ml_stack.serve.process import every_server, kill_process_tree, pid_exists
 from ml_stack.serve.reclaim import busy_now
 from ml_stack.serve.weights import weight_of
@@ -86,6 +87,10 @@ class Ask:
     label: str = ""
     weight: int = 0
     spec: Mapping[str, Any] = field(default_factory=dict)
+    #: a port the asker would like; the broker uses it only when it is free, else picks one
+    port: int = 0
+    #: how to start it: ``{"backend": {...}}`` names the binary or build, as for `start`
+    options: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_json(cls, body: Mapping[str, Any]) -> Ask:
@@ -100,7 +105,8 @@ class Ask:
             raise ValueError(f"not server settings: {', '.join(unknown)}")
         return cls(purpose=purpose, models=models, pid=int(body.get("pid") or 0),
                    label=str(body.get("label") or ""), weight=int(body.get("weight") or 0),
-                   spec=spec)
+                   spec=spec, port=int(body.get("port") or 0),
+                   options=dict(body.get("options") or {}))
 
     def server_spec(self, port: int) -> ServerSpec:
         """The spec that starts this ask's first model on ``port``."""
@@ -230,8 +236,9 @@ class Broker:
         manager = self._manager_for(options)
         how = Starting(**{**{k: v for k, v in options.items() if k != "backend"},
                           "who": caller.label or who()})
-        info = manager._start_server(spec, timeout=timeout, how=how, on_event=caller.on_event,
-                                     say=caller.say)
+        with grant.broker_grant():
+            info = manager._start_server(spec, timeout=timeout, how=how,
+                                         on_event=caller.on_event, say=caller.say)
         return self._held_by(info, spec, caller.pid or os.getpid(), caller.label or who())
 
     def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str) -> ServerInfo:
@@ -273,7 +280,8 @@ class Broker:
     def escalate(self, spec: ServerSpec, growth: Growth, caller: Caller | None = None, *,
                  options: Mapping[str, Any] | None = None) -> ServerInfo:
         """Grow the server on ``spec.port`` as ``growth`` says."""
-        info = self._manager_for(options or {})._escalate(spec, growth, caller or Caller())
+        with grant.broker_grant():
+            info = self._manager_for(options or {})._escalate(spec, growth, caller or Caller())
         with self._cond:
             held = self.servers.get(info.port)
             if held is not None:
@@ -394,8 +402,12 @@ class Broker:
 
     def _decide(self, ask: Ask) -> tuple[Held | None, list[Held], str]:
         """``(server to share, servers to stop first, why it must wait)``."""
+        # A shape asked for by `up` is shared only with a server held for that same shape:
+        # taking in one that happens to serve the model is how a caller got the wrong slots.
+        exact = ask.purpose.startswith("serve:")
         mine = [h for h in self.servers.values() if not h.unmanaged
-                and (h.purpose == ask.purpose or (not h.purpose and h.serves(ask.models)))]
+                and (h.purpose == ask.purpose
+                     or (not h.purpose and not exact and h.serves(ask.models)))]
         match = next((h for h in mine if h.serves(ask.models)), None)
         if match is not None:
             return match, [], f"{match.model} is loading on port {match.port}" if match.loading else ""
@@ -448,7 +460,9 @@ class Broker:
             self.servers.pop(held.port, None)
         for held in [h for h in self.servers.values() if h.purpose == ask.purpose]:
             held.holders = {k: v for k, v in held.holders.items() if v[0] != ask.pid}
-        placeholder = Held(port=free_port(), model=ask.models[0], purpose=ask.purpose,
+        asked = ask.port if ask.port and port_is_free(ask.port) and not any(
+            h.port == ask.port for h in self.servers.values()) else 0
+        placeholder = Held(port=asked or free_port(), model=ask.models[0], purpose=ask.purpose,
                            loading=True, weight=ask.weight or weight_of(ask.models[0]),
                            holders={waiting.lease: (ask.pid, ask.label)})
         self.servers[placeholder.port] = placeholder
@@ -458,14 +472,15 @@ class Broker:
     def _start(self, waiting: Waiting, placeholder: Held) -> Grant:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
-            info = self.manager._start_server(
-                spec, how=Starting(roam=False, who=waiting.ask.label))
+            with grant.broker_grant():
+                info = self._manager_for(waiting.ask.options)._start_server(
+                    spec, how=Starting(roam=False, who=waiting.ask.label))
         except Measuring:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
                 self._cond.notify_all()
             raise
-        except (ServerFailed, OSError, TypeError, ValueError) as exc:
+        except (ServerFailed, PreflightFailed, OSError, TypeError, ValueError) as exc:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
                 self._cond.notify_all()

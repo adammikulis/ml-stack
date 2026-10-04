@@ -57,11 +57,20 @@ REFUSE = [
      "Do not `nohup ... &`. Use the Bash tool's run_in_background, which reports the exit "
      "code and keeps the output, or `ml-stack-bench sweep --serve`, which puts one model up "
      "at a time on purpose. Backgrounded jobs have died silently here before."),
-    (RUN + r"(/\S*/)?llama-server\s",
-     "Do not start llama-server by hand. `ml-stack-serve up <model> --port N` leases one "
-     "shape per port, refuses a mismatched lease, and downloads `hf:owner/repo/file` on "
-     "first use. Two shapes on one port made the second caller adopt a server with the "
-     "wrong number of slots."),
+    (RUN + r"(sudo\s+|env\s+|time\s+|nice\s+|nohup\s+)*(\S*/)?llama-server(\s|$)",
+     "Do not start llama-server by hand. `ml-stack-serve up MODEL --context 256k` asks the "
+     "broker for a lease: it checks the memory, queues behind other leases, picks the port "
+     "(a port another process holds is never fought over), applies the measured profile and "
+     "keeps the server up until `ml-stack-serve down MODEL`. A server started by hand "
+     "skips all of that and the next lease refuses."),
+    (r"\bML_STACK_BROKER_LOCAL=",
+     "ML_STACK_BROKER_LOCAL runs a private broker inside the process, with no queue and no "
+     "view of the machine's other servers; it is for the tests. Ask the machine's broker: "
+     "`ml-stack-serve up MODEL`."),
+    (RUN + r"ml-stack-serve\s+up\b[^;&|\n]*\s(--direct|--no-broker|--no-lease|--anyway|"
+     r"--unmanaged|--no-queue)\b",
+     "`ml-stack-serve up` is a lease and no flag skips the broker. Drop the flag: "
+     "`ml-stack-serve up MODEL --context N` (add --no-wait to return while it is queued)."),
     (r"\bfind\b[^|;]*\.gguf|\bls\b[^|;]*\*\.gguf",
      "Do not hunt for GGUFs with find/ls. `ml-stack-models find <words>` searches the Hub "
      "and `ml-stack-models files <repo>` lists what is already on this machine -- a Hub "

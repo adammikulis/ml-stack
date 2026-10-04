@@ -36,17 +36,38 @@ remembered. The commands below are the surface of that.
 From a shell:
 
 ```
-ml-stack-serve up model.gguf --context 32768
+ml-stack-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0
 ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
 ml-stack-serve status
-ml-stack-serve down
+ml-stack-serve down Qwen3.8-27B
 ```
 
-`status` prints the port, the model, the context each slot gets, how many slots there are
-and which process holds the lease. `--json` gives a script the same, and it exits non-zero
-when nothing is serving. `up` adopts a server already serving that model with those settings
-instead of starting a second one, and prints the base URL. `down` stops only a server
-started on this machine.
+**`up` is a lease from the broker, and nothing else starts a server.** The command resolves
+what was asked (the measured profile where there is one, the shape the broker would use
+where there is not, and it says which), then asks the machine's broker for a lease with that
+shape and holds it in a small detached process that outlives the terminal. The broker does
+the rest: it estimates the memory (weights, KV cache at that context and cache type, draft
+head, runtime), **queues** the lease behind the others when memory is short (`up` prints
+`queued, #N of M: ...` and waits; `--no-wait` returns with the lease queued, `--patience`
+bounds the wait), **refuses** a shape that cannot fit even on an empty machine with one
+line (what it needs, what a model may use here, the longest context that does fit, and the
+command a *person* runs to raise the limit, `ml-stack-serve memory --for MODEL --ctx N
+--apply`; nothing ever raises it for you), and **picks the port**. `--port` is a request:
+the broker uses it when it is free and picks another when it is not; a port held by another
+process is never killed or fought over.
+
+`up` for a shape that is already held adopts that lease (no second server). `status` lists
+the leases (id, model, context, port or queued, holder pid, memory, since) above the
+servers, `--json` gives a script the same, and it exits non-zero when nothing is serving.
+`down [LEASE|PORT|MODEL]` releases the lease; the server is stopped only when no other
+lease uses it, and says when one still does. `--idle 10m` (default: `ml-stack-serve limits
+--idle`, else held until `down`) releases the lease once the server has been unused that
+long. `ml-stack-claude`, `ml-stack-agent` and `agent start` take their servers through the
+same broker. The low-level start (`ServerManager`, `LlamaServerBackend.start`) needs a
+`Lease`, and a `Lease` cannot be made outside the broker's grant (`ml_stack.serve.grant`):
+calling it by hand raises `NoGrant`. `tests/test_serve_no_bypass.py`, the hard
+`server-starts` gate in `scripts/budgets` and the bash guard (`scripts/hooks/claude-bash-guard`
+refuses `llama-server` by hand and any `up` flag that would skip the lease) keep it that way.
 
 From Python:
 
