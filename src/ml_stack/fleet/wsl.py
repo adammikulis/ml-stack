@@ -93,7 +93,7 @@ def _bridge(executable: str, arguments: list[str]) -> wsl_network.NetworkBridge 
         elif arg.startswith("--port="):
             port = int(arg.partition("=")[2])
     bridge = wsl_network.NetworkBridge(host, (linux_host, port), discovery.default_group(),
-                                      discovery.default_port(), discovery._socket)
+                                      discovery.default_port(), discovery._native_socket)
     try:
         return bridge.start()
     except OSError as exc:

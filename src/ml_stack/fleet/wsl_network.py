@@ -195,6 +195,7 @@ class NetworkBridge:
                 return
             if options.get("group") not in {None, self.group}:
                 return
+            client.settimeout(None)
             with self.factory(**{**options, "bind": bind}) as udp:
                 udp.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self.host))
                 allowed = {(self.group, self.port), ("255.255.255.255", self.port), ("127.0.0.1", self.port)}

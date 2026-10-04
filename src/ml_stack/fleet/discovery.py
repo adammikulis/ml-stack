@@ -415,6 +415,11 @@ def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
             group: str | None = None) -> socket.socket | wsl_network.DiscoverySocket:
     if os.environ.get(wsl_network.ENV):
         return wsl_network.DiscoverySocket({"broadcast": broadcast, "bind": bind, "group": group})
+    return _native_socket(broadcast=broadcast, bind=bind, group=group)
+
+
+def _native_socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
+                   group: str | None = None) -> socket.socket:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if os.name == "nt":
         wsl_network.disable_udp_reset(s)

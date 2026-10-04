@@ -189,3 +189,18 @@ def test_wsl_offline_runtime_does_not_require_lan_listener(monkeypatch):
     monkeypatch.setattr(wsl, "_read", read)
     assert wsl._bridge("linux-python", []) is None
     read.assert_not_called()
+
+
+def test_windows_bridge_factory_uses_native_socket_with_inherited_proxy(monkeypatch):
+    monkeypatch.setenv(wsl_network.ENV, "inherited Linux proxy configuration")
+    monkeypatch.setattr(discovery, "primary_ip", lambda: "127.0.0.1")
+    monkeypatch.setattr(wsl, "_read", lambda *_args: "127.0.0.2")
+    captured = []
+
+    def factory(*args):
+        captured.append(args[-1])
+        return MagicMock()
+
+    monkeypatch.setattr(wsl_network, "NetworkBridge", factory)
+    wsl._bridge("linux-python", [])
+    assert captured == [discovery._native_socket]
