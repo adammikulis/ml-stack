@@ -14,10 +14,10 @@ COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view"
               "chat-view", "models-view", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view",
               "workspace-jobs", "data-view",
-              "training-view", "tools-view", "benchmarks-view", "gym-scene-controls", "gym-scene", "gym-recordings", "gym-world-options", "gym-view", "close-sheet")
+              "training-view", "tools-view", "benchmarks-view", "gym-scene-controls", "gym-scene", "gym-recordings", "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
 MODULES = {"workspace-model": frozenset({
     "workspace-jobs", "data-view", "training-view", "tools-view", "benchmarks-view",
-    "gym-world-options", "gym-recordings", "gym-view",
+    "gym-world-options", "gym-recordings", "gym-model-options", "gym-view",
 })}
 #: the fit screen on its own, for a machine running no daemon
 FIT_ONLY = ("fleet-model", "fit-model", "fit-view", "fit-charts", "rates-view",

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from ml_stack.gym import catalogue, manager
+from ml_stack.gym.models import model_choices
 
 from .files import safe_relpath
 from .jobs import DaemonError
@@ -31,7 +32,7 @@ class GymRoutes:
                 elif environment is not None and environment.exists:
                     manager.configure(environment.python)
             if self.path == "/ui/gym/catalogue" and self.method == "GET":
-                self.send(200, {"environments": catalogue()})
+                self.send(200, {"environments": catalogue(), "models": model_choices()})
                 return True
             if self.path == "/ui/gym/sessions" and self.method == "GET":
                 self.send(200, {"sessions": manager.list()})

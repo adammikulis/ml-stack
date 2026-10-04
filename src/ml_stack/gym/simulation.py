@@ -17,6 +17,7 @@ from ml_stack.gym.live_learning import create_policy, learn_rollout
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.paths import artifact_root
 from ml_stack.gym.provenance import native_provenance
+from ml_stack.gym.vision_process import Perception, camera_provenance
 
 
 class DecisionHeld(RuntimeError):
@@ -71,10 +72,7 @@ class Simulation:
         self.world = settings["config"].get("simulation_mode", "episode") == "world"
         self.learning_mode = settings["config"].get("learning_mode", "frozen")
         self.control_revision = 0
-        self.decider = None
-        self.decision_max_age_s = float(settings["config"].get("decision_max_age_s", 1))
-        if not 1 <= self.decision_max_age_s <= 30:
-            raise ValueError("decision_max_age_s must be between 1 and 30 seconds")
+        self.initialize_models(settings)
         if self.environment == "car":
             settings["config"].setdefault("steering_magnitude", .35)
         self.running, self.speed, self.manual, self.policy = False, 10., 3 if self.environment == "car" else 0, None
@@ -91,6 +89,7 @@ class Simulation:
         checkpoint = config.pop("checkpoint", None)
         config.pop("decision_checkpoint", None)
         config.pop("decision_max_age_s", None)
+        config.pop("vision_model", None)
         if self.environment == "car":
             config.setdefault("render_preview", True)
         self.env = make_environment(self.environment, config, self.seed)
@@ -120,12 +119,23 @@ class Simulation:
         self.reset({}, initial_info)
         if self.controller == "decider":
             self.start_decider()
+        if self.vision_model:
+            self.change_vision({"model": self.vision_model})
+
+    def initialize_models(self, settings):
+        self.decider = None
+        self.perception = None
+        self.vision_model = settings["config"].get("vision_model")
+        self.decision_max_age_s = float(settings["config"].get("decision_max_age_s", 1))
+        if not 1 <= self.decision_max_age_s <= 30:
+            raise ValueError("decision_max_age_s must be between 1 and 30 seconds")
 
     def reset(self, payload, initial_info=None):
         self.control_revision += 1
         self.running = False
         if hasattr(self, "state"):
             self.stop_decider()
+            self.stop_perception()
         seed = int(payload.get("seed", self.seed))
         if self.world and seed != self.seed:
             raise ValueError("Create a new world to change its seed")
@@ -152,7 +162,10 @@ class Simulation:
             self.running = False
             self.state["status"] = "completed"
             return
+        self.update_perception()
         named = decision_state(self.environment, self.env, self.observation)
+        if self.state.get("perception"):
+            named["vision_perception"] = self.state["perception"]
         choices = self.names, self.native_actions, self.env.np_random, named
         if self.controller == "native-idm":
             action, decision = None, {"state": named, "choice": "Native IDM driving", "probabilities": None,
@@ -166,9 +179,38 @@ class Simulation:
             action, decision = select_action(self.controller, self.observation, choices, self.manual, self.policy)
         self.advance(action, decision)
 
+    def change_vision(self, payload):
+        if self.environment != "drone":
+            raise ValueError("Camera perception is available in the drone environment")
+        model = payload.get("model")
+        if model is not None and not isinstance(model, str):
+            raise ValueError("Vision model must be a local model identifier")
+        self.stop_perception()
+        self.vision_model = model or None
+        self.settings["config"]["vision_model"] = self.vision_model
+        self.state["config"]["vision_model"] = self.vision_model
+        if self.vision_model:
+            self.perception = Perception(self.vision_model)
+        write_json(self.path / "manifest.json", self.settings)
+
+    def stop_perception(self):
+        if getattr(self, "perception", None) is not None:
+            self.perception.close()
+            self.perception = None
+        if hasattr(self, "state"):
+            self.state.update(perception=None, perception_readiness={"status": "unloaded", "pending": False})
+
+    def update_perception(self):
+        if self.vision_model:
+            if self.perception is None and self.running:
+                self.perception = Perception(self.vision_model)
+            if self.perception is not None:
+                self.perception.update(self)
+
     def pause(self):
         self.running = False
         self.stop_decider()
+        self.stop_perception()
         self.control_revision += 1
         self.state["status"] = "paused"
 
@@ -214,7 +256,10 @@ class Simulation:
                 decision.update(fallback=False, reason="accepted", input_sequence=result["sequence"])
             else:
                 decision["reason"] = "abstained" if result["abstained"] else "stale"
-        request = {"observation": json_value(self.observation), "state": json_value(named),
+        model_state = json_value(named)
+        if model_state.get("camera", {}).get("rgb"):
+            model_state["camera"] = camera_provenance(model_state["camera"])
+        request = {"model_state": model_state, "observation": json_value(self.observation), "state": json_value(named),
                    "options": self.names, "sequence": self.state["sequence"], "timestamp": now,
                    "revision": self.control_revision, "agent_id": self.state.get("agent_id")}
         self.decider.submit(request)
@@ -245,6 +290,7 @@ class Simulation:
         self.state["agent_id"] = info.get("ego_actor_id")
         if terminated or truncated:
             if self.world:
+                self.stop_perception()
                 self.control_revision += 1
                 self.stop_decider()
                 self.observation, task_info = self.env.reset()
@@ -266,6 +312,12 @@ class Simulation:
 
     def change_controller(self, payload):
         controller = payload["controller"]
+        if "decision_max_age_s" in payload:
+            age = float(payload["decision_max_age_s"])
+            if not 1 <= age <= 30:
+                raise ValueError("decision_max_age_s must be between 1 and 30 seconds")
+            self.decision_max_age_s = age
+            self.settings["config"]["decision_max_age_s"] = age
         self.control_revision += 1
         if controller not in {"manual", "random", "ppo", "decider", "native-idm", "native-patrol"}:
             raise ValueError("Unknown controller")
@@ -309,6 +361,20 @@ class Simulation:
         self.state.update(model=self.settings["model"], device=self.settings["device"])
         write_json(self.path / "manifest.json", self.settings)
 
+    def select_agent(self, payload):
+        if not self.world or not hasattr(self.env, "select_agent"):
+            raise ValueError("This environment does not expose individually controllable agents")
+        self.observation, info = self.env.select_agent(payload["agent_id"])
+        self.control_revision += 1
+        self.stop_decider()
+        self.stop_perception()
+        self.state.update(observation=json_value(self.observation), decision=None, action=None)
+        self.state["reward"] = None
+        self.state["agent_id"] = info.get("ego_actor_id")
+        geometry, frame = render_state(self.environment, self.env)
+        self.state["info"].update(info, render=geometry)
+        self.state["frame"] = frame
+
     def command(self, command, payload):
         if command == "play":
             if self.state["terminated"] or self.state["truncated"]:
@@ -328,6 +394,8 @@ class Simulation:
             self.state["manual_action"] = selected
         elif command == "controller":
             self.change_controller(payload)
+        elif command == "vision":
+            self.change_vision(payload)
         elif command == "learning":
             mode = payload["mode"]
             if mode not in {"online", "frozen"}:
@@ -340,17 +408,7 @@ class Simulation:
             self.state["config"]["learning_mode"] = mode
             write_json(self.path / "manifest.json", self.settings)
         elif command == "agent":
-            if not self.world or not hasattr(self.env, "select_agent"):
-                raise ValueError("This environment does not expose individually controllable agents")
-            self.observation, info = self.env.select_agent(payload["agent_id"])
-            self.control_revision += 1
-            self.stop_decider()
-            self.state.update(observation=json_value(self.observation), decision=None, action=None)
-            self.state["reward"] = None
-            self.state["agent_id"] = info.get("ego_actor_id")
-            geometry, frame = render_state(self.environment, self.env)
-            self.state["info"].update(info, render=geometry)
-            self.state["frame"] = frame
+            self.select_agent(payload)
         elif command == "reset":
             self.reset(payload)
         elif command == "step":
@@ -376,7 +434,8 @@ def worker(settings, commands, updates):
                 command, payload = commands.get(timeout=1 / simulation.speed if simulation.running else .2)
             except queue.Empty:
                 if not simulation.running:
-                    if simulation.poll_loading():
+                    simulation.update_perception()
+                    if simulation.poll_loading() or simulation.perception is not None:
                         publish(updates, simulation.state)
                     continue
                 command, payload = "step", {}
@@ -398,6 +457,7 @@ def worker(settings, commands, updates):
     finally:
         if simulation is not None and hasattr(simulation, "env"):
             simulation.stop_decider()
+            simulation.stop_perception()
             simulation.env.close()
 
 

@@ -23,7 +23,7 @@ def gym_page(joined, open_page):
 def test_world_modes_manual_validation_and_online_checkpoint(gym_page):
     page, errors = gym_page
     page.get_by_label('Simulation mode', exact=True).select_option('world')
-    assert page.get_by_label('Controller', exact=True).input_value() == 'native-idm'
+    assert page.get_by_label('Controller', exact=True).input_value() == 'decider'
     page.get_by_label('World source', exact=True).select_option('manual')
     page.get_by_role('button', name='Start session', exact=True).click()
     assert 'manual world files or layout' in page.locator('#gym-note').inner_text()
@@ -147,4 +147,22 @@ def test_attach_restores_map_from_world_definition(gym_page):
     assert page.evaluate("document.querySelector('gym-view').worldOptions.value().world.map") == 'SC'
     assert 'map' not in json.loads(page.get_by_label('Additional native settings (JSON)').input_value())
     page.evaluate("document.querySelector('gym-view').session=null")
+    assert not errors
+
+
+def test_models_apply_to_live_world_without_reset_or_extra_click(gym_page):
+    page, errors = gym_page
+    result = page.evaluate("""async () => {
+      const g=document.querySelector('gym-view');g.session='persistent';const calls=[];
+      g.control=async(command,payload)=>calls.push({command,payload});
+      g.modelOptions.choices({decision:[{id:'strands',label:'Strands Decider 2B (default)',checkpoint:null},
+        {id:'trained',label:'Country policy',checkpoint:'/models/trained'}],vision:[]});
+      g.controller.value='decider';g.modelOptions.decision.value='trained';
+      g.modelOptions.decision.dispatchEvent(new Event('change'));await new Promise(resolve=>setTimeout(resolve,10));
+      g.controller.value='native-idm';g.controller.dispatchEvent(new Event('change'));
+      await new Promise(resolve=>setTimeout(resolve,10));g.session=null;return calls;
+    }""")
+    assert [call['command'] for call in result] == ['controller', 'controller']
+    assert result[0]['payload']['decision_checkpoint'] == '/models/trained'
+    assert result[1]['payload']['controller'] == 'native-idm'
     assert not errors

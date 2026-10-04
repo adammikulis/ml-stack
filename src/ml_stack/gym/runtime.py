@@ -72,7 +72,7 @@ class SessionManager:
             return [self.get(identifier) for identifier in self.sessions]
 
     def control(self, identifier, command, payload=None):
-        if command not in {"play", "pause", "step", "reset", "speed", "action", "controller", "learning", "agent"}:
+        if command not in {"play", "pause", "step", "reset", "speed", "action", "controller", "learning", "agent", "vision"}:
             raise ValueError(f"Unknown simulation command: {command}")
         with self.lock:
             session = self.sessions[identifier]
