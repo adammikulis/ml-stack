@@ -109,11 +109,9 @@ capability; every line is something that already exists not being what it says.
 - No context trimming: a task is held inside the 32768-token context by its caps. A task with large
   tool results needs a trim that drops whole oldest turns at a fixed boundary.
 - The guard's model-based screen (`native_screen`) is not attached to the local agent's chat.
-- `agent start` takes no `--think`; effort replaces it. The Agents panel is served by `board-serve`
-  only; the shell that hosts the Board needs to mount `localroute.respond` with its own session check.
 - `--orders-from` defaults to `claude-code`: whoever registers that id is obeyed.
-- The agent has no worktree of its own and no coding tools (it uses `ml-stack-chat`'s tools); a
-  `ml-stack-claude` adapter is the next piece (`docs/notes/agent-control-plane.md`).
+- The general local agent has no worktree of its own; Coding mode works in the selected project
+  directly, so edits need a separate checkout when isolation is required.
 
 ### Sentinel wiring (`docs/sentinel.md`, "What is armed by default")
 
