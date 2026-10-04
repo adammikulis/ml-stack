@@ -1146,3 +1146,56 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
             except subprocess.TimeoutExpired:
                 proc.kill()
             fh.close()
+
+
+def _one_machine(boxes, tmp_path, monkeypatch, *, models):
+    """A dispatcher whose own daemon is the only peer and shares its bench home."""
+    import ml_stack.bench as bench
+    import ml_stack.fleet.sweeps as sweeps_module
+    from ml_stack.bench import ops
+
+    roomy, _ = boxes
+    monkeypatch.setattr(ops, "_commit", lambda root=None: COMMIT)
+    _discovery_stub(monkeypatch, {"roomy": roomy.peer})
+    monkeypatch.setattr(bench, "home_dir", lambda: roomy.home)
+    real_wait = sweeps_module.wait
+    monkeypatch.setattr(sweeps_module, "wait",
+                        lambda handles: real_wait(handles, poll_s=0.1, timeout_s=20))
+    kept = tmp_path / "home.ladybug"
+    line = ["sweep", "--fleet", "--plain-only", "--kept", str(kept), "--no-selfcheck",
+            "--no-prefetch"]
+    for m in models:
+        line += ["--serve", m]
+    return roomy, kept, line
+
+
+def test_sweep_fleet_places_a_job_on_the_dispatchers_own_daemon(boxes, tmp_path, monkeypatch,
+                                                               capsys):
+    from ml_stack.bench import run, runs
+
+    roomy, kept, line = _one_machine(boxes, tmp_path, monkeypatch, models=["big.gguf"])
+    _kept(roomy.store, "big-plain", _later(30))
+
+    code = run.main(line)
+
+    out = capsys.readouterr()
+    assert code == 0, out.out + out.err
+    assert "big.gguf -> roomy" in out.out and "unplaced" not in out.out
+    assert [r["label"] for r in runs(kept)] == ["big-plain"]
+
+
+def test_sweep_fleet_exits_non_zero_when_nothing_is_placed(boxes, tmp_path, monkeypatch,
+                                                         capsys):
+    from ml_stack.bench import run
+
+    roomy, kept, line = _one_machine(boxes, tmp_path, monkeypatch, models=["huge.gguf"])
+    monkeypatch.setattr("ml_stack.fleet.sweeps.estimate", lambda *a, **k: 500 * G)
+    _kept(roomy.store, "old-plain", _later(30))
+
+    code = run.main(line)
+
+    out = capsys.readouterr()
+    assert code == 1
+    assert "huge.gguf -> unplaced" in out.out
+    assert "error: not measured: huge.gguf" in out.err
+    assert "old-plain" not in out.out, "no table of runs this command did not make"

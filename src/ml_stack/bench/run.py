@@ -282,9 +282,13 @@ def _fleet_sweep(args: Any) -> int:
         return 2
     for line in planned.lines:
         say(line)
-    ops.fleet_measure(planned.jobs, into=args.kept)
-    say()
-    table(bench._kept(args.kept))
+    if planned.jobs:
+        ops.fleet_measure(planned.jobs, into=args.kept)
+        say()
+        table(bench._kept(args.kept))
+    if planned.unplaced:
+        warn("error: not measured: " + "; ".join(f"{m}: {why}" for m, why in planned.unplaced))
+        return 1
     return 0
 
 
@@ -685,6 +689,8 @@ def main(argv: list[str] | None = None) -> int:
         # Before the lock, on purpose: a download is minutes of network and no GPU, and
         # holding the measuring lock through it makes the next run wait for the Hub.
         bench.prefetch(references_in(_parser().parse_args(rest)))
+    if cmd == "sweep" and "--fleet" in rest:
+        return _main(rest)
     previous = None
     with contextlib.suppress(ValueError):    # not the main thread: nothing to hand a signal
         previous = signal.signal(signal.SIGTERM, _stop_on_sigterm)
