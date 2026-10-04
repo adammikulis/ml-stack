@@ -132,6 +132,9 @@ note = "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
 match = ["parser:workspace/localroute.py"]
 status = "covered"
 tests = [
+  "tests/test_workspace_local_agent.py::test_coding_tasks_reuse_the_registered_seat_and_reply_on_each_thread",
+  "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_revokes_only_its_private_identity",
+  "tests/test_workspace_local_agent.py::test_paused_coding_worker_keeps_tasks_queued_until_resume",
   "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
   "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
   "tests/test_workspace_local_agent.py::test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused",

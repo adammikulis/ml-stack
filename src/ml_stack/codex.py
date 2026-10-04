@@ -130,6 +130,21 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         return 2
 
 
+
+def workspace_config(seat) -> str:
+    """The assigned-seat MCP settings, or empty for a parent-managed inbox task."""
+    if seat.managed_inbox:
+        return ""
+    workspace = ["", "[mcp_servers.workspace]", f"command = {_q(sys.executable)}",
+         'args = ["-m", "ml_stack.mcp", "--builtin", "--workspace-only"]',
+         "startup_timeout_sec = 30", "required = true", "[mcp_servers.workspace.env]"]
+    workspace += [f"{name} = {_q(value)}" for name, value in {
+        TOKEN_ENV: tokens.load(seat.base, seat.parent or seat.name),
+        "ML_STACK_HOME": str(seat.base.parent), "ML_STACK_WORKSPACE_HOME": str(seat.base),
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        "ML_STACK_AGENT": "1", "ML_STACK_NONINTERACTIVE": "1"}.items()]
+    return "\n".join(workspace) + "\n"
+
 def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, str, int],
          say: Callable[[str], None], runner: Callable[..., int]) -> int:
     """Write this run's ``CODEX_HOME`` and run ``command`` (``codex`` and its arguments) in it."""
@@ -137,19 +152,12 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
     binary, *extra = command
     try:
         with harnessing.opened(args, "codex", served, say) as run:
-            workspace = ["", "[mcp_servers.workspace]", f"command = {_q(sys.executable)}",
-                         'args = ["-m", "ml_stack.mcp", "--builtin", "--workspace-only"]',
-                         "startup_timeout_sec = 30", "required = true", "[mcp_servers.workspace.env]"]
-            workspace += [f"{name} = {_q(value)}" for name, value in {
-                TOKEN_ENV: tokens.load(run.seat.base, run.seat.parent or run.seat.name),
-                "ML_STACK_HOME": str(run.seat.base.parent), "ML_STACK_WORKSPACE_HOME": str(run.seat.base),
-                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-                "ML_STACK_AGENT": "1", "ML_STACK_NONINTERACTIVE": "1"}.items()]
             path = run.files.write("config.toml", config_toml(base_url, alias, window,
-                                    (run.pre, run.post, harnessing.WAIT_S)) + "\n".join(workspace) + "\n")
-            run.files.write("AGENTS.md", run.brief + "\nUse the workspace MCP tools for inbox/send/thread/claim. "
-                            "They already carry your assigned identity; never use shell workspace commands "
-                            "inside the coding sandbox.\n")
+                                    (run.pre, run.post, harnessing.WAIT_S)) + workspace_config(run.seat))
+            extra_brief = "" if run.seat.managed_inbox else (
+                "\nUse the workspace MCP tools for inbox/send/thread/claim. They already carry your "
+                "assigned identity; never use shell workspace commands inside the coding sandbox.\n")
+            run.files.write("AGENTS.md", run.brief + extra_brief)
             say(f"role {args.role}; Bash, apply_patch and MCP calls go through ml-stack's classifier "
                 f"(CODEX_HOME {path.parent}, outside the working tree)")
             flags = [*policy_flags(args.role), "--dangerously-bypass-hook-trust", "--cd", str(run.cwd)]

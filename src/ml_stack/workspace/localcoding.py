@@ -1,20 +1,68 @@
-"""``python -m ml_stack.workspace.localcoding NAME``: runs the Codex harness for a coding agent
-(detached by `agent start --profile coding`) and keeps the agent's status file."""
-
+"""The maintained coding harness consumes a local agent's authenticated inbox tasks."""
 from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 
-from ml_stack import coding
-from ml_stack.workspace import localagent as la, localharness as lh
+from ml_stack import activity
+from ml_stack.fleet.conversations import Conversations
+from ml_stack.workspace import localagent as la, localloop
+from ml_stack.workspace.coding_turns import Manager, Turn
+from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["run_detached"]
 
 
+class BoundManager(Manager):
+    def __init__(self, store, ws, identity):
+        super().__init__(store)
+        self.workspace, self.identity = ws, identity
+
+    def _seat(self, name, folder, parent, say):
+        return Seat(self.identity, base=self.workspace.base, managed_inbox=True)
+
+
+def perform(ws, agent, row, why, stopped):
+    """Run one authorized inbox task and return its native harness result."""
+    store = Conversations(la.folder(ws) / f"{agent.name}-chats")
+    conversation = store.start(model=agent.model, title=f"Workspace task {row['seq']}", settings={
+        "mode": "coding", "harness": agent.harness, "role": agent.role,
+        "project": agent.project, "context": agent.ctx, "draft": "auto"})
+    manager = BoundManager(store, ws, agent.identity or agent.name)
+    turn = Turn(conversation.id)
+    finished = threading.Event()
+    deadline = time.monotonic() + localloop.caps_of(agent).seconds
+
+    def supervise():
+        while not finished.wait(0.1):
+            if stopped() or time.monotonic() >= deadline:
+                turn.cancel()
+                break
+
+    watcher = threading.Thread(target=supervise, daemon=True)
+    watcher.start()
+    actor = agent.identity or agent.name
+    refs = {"workspace_message": str(row["seq"]), "conversation": conversation.id, "project": agent.project}
+    activity.record("agent.task", actor=actor, subject=f"Workspace task {row['seq']}",
+                    outcome="started", refs=refs, meta={"source": "workspace", "model": agent.model_name})
+    try:
+        manager._run(turn, conversation, localloop._frame(row, why))
+    finally:
+        finished.set()
+        watcher.join(timeout=1)
+    activity.record("agent.task", actor=actor, subject=f"Workspace task {row['seq']}",
+                    outcome="cancelled" if turn.cancelled.is_set() else "error" if turn.error else "completed",
+                    refs=refs, meta={"source": "workspace", "session": turn.session, "model": agent.model_name})
+    if turn.error or turn.cancelled.is_set():
+        return "status", turn.error or "The coding task was cancelled", 1
+    return "answer", turn.text or "The harness ended without an answer", 1
+
+
 def run_detached(argv: list[str] | None = None) -> int:
-    """Launch the harness on the agent's model and report its end in the status file."""
+    """Process authorized coding tasks until stopped, retaining the registered agent identity."""
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
         sys.stderr.write("usage: python -m ml_stack.workspace.localcoding NAME\n")
@@ -22,17 +70,10 @@ def run_detached(argv: list[str] | None = None) -> int:
     os.environ["ML_STACK_AGENT"] = "1"
     os.environ["ML_STACK_NONINTERACTIVE"] = "1"
     ws, name = Workspace(), la.check_name(args[0])
-    agent = la.load(ws, name)
-    status = la.Status(ws, name)
-    if agent is None:
-        status.update(state="failed", detail="there is no such local agent")
-        return 1
-    status.update(state="working", detail=f"{lh.CODEX} on {agent.model_name}")
-    code = coding.launch_coding_agent(agent.model, agent.role, agent.project, harness=lh.CODEX, name=name,
-                  orders_from=list(agent.orders_from))
-    status.update(state="stopped" if not code else "failed", detail=f"the harness exited with {code}")
-    return int(code or 0)
+    return localloop.run(ws, name, localloop.Settings(signals=True,
+        serve=lambda _: localloop.Held(None, {}),
+        execute=lambda agent, row, why, stopped: perform(ws, agent, row, why, stopped)))
 
 
-if __name__ == "__main__":  # pragma: no cover - the detached entry point
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(run_detached())

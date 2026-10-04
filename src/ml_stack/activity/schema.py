@@ -26,6 +26,7 @@ BODY_KEYS = frozenset({"body", "text", "content", "message", "prompt", "output",
 """Metadata names that would carry a body; they are dropped, never stored."""
 
 KINDS: dict[str, str] = {
+    "agent.task": "an authenticated queued model task starts, completes, fails or is cancelled",
     "agent.tool_call": "a model's tool call and the outcome of it (blocked, error, ok)",
     "approval.asked": "a question put to the person before a tool call runs",
     "approval.answered": "the person's answer: allow_once, always, never or no",

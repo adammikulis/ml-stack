@@ -21,6 +21,7 @@ class Seat:
     minted: bool = False
     base: Path | None = None
     issuer: Identity | None = None
+    managed_inbox: bool = False
 
     def flags(self) -> list[str]:
         """The workspace command flags this session's messages carry."""
