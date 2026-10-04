@@ -130,6 +130,46 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server started with
 the wrong settings hands back a lease that cannot do what was asked of it.
 
+### Making room for a model (Apple silicon)
+
+A model, its KV cache and its compute buffers must fit under `iogpu.wired_limit_mb`, which is
+about 75% of installed memory until it is raised. `ml-stack-serve memory --for MODEL` works out
+the limit one model needs and what that leaves for the rest of the machine:
+
+```
+ml-stack-serve memory --for Qwen3.8-Flash-Next-UD-Q4_K_XL --ctx 262144 --kv q8_0
+```
+
+* `--for MODEL` takes an installed model's id, name or path; `--ctx N` is the context in
+  tokens (default 131072), `--kv q8_0|f16|q4_0` the cache type (default q8_0), `--no-mtp` leaves
+  the multi-token-prediction head out (it is on by default).
+* It counts, from the GGUF header: the weights, the KV cache at that context and cache type,
+  the recurrent state, the compute buffers, and a safety margin of the larger of 2 GiB and 3%.
+  The MTP head shares the main model's weights and cache, so only what it adds is counted: its
+  own file when it ships separately, its layer's share of the KV cache, and a compute buffer.
+  The output says which was counted.
+* The rest of the machine always keeps at least 8 GiB, so the limit never goes above installed
+  memory less 8 GiB; a model that does not fit is said so, with the longest context that would
+  and a table of context against what it needs and what it leaves. Leaving under 12 GiB is
+  allowed with a warning that the rest of the machine may swap.
+* The parts that grow with use are shown apart and are ordinary host RAM, not wired memory: the
+  prompt cache (`--cache-ram`, default 8192 MiB, capped), context checkpoints (32 per slot) and
+  the ngram-mod table (fixed, 16 MiB). The `ngram-cache` dynamic file has no size option in
+  llama.cpp. `--cache-ram MB` sets the prompt-cache cap used in the estimate.
+* `--apply [MB]` sets the limit for this boot (`sudo sysctl` at a terminal; macOS's own
+  administrator dialog otherwise). `--persist [MB]` also installs the boot-time
+  `stack.ml.wired-limit` LaunchDaemon in one administrator prompt (`--print` prints the old
+  manual steps instead); it runs at device startup before anyone logs in, so it covers login
+  too. `--unpersist` removes it. `--reset` puts the limit back to what it was before the first
+  change (recorded in the state directory) and removes the daemon. No sudoers rule is used.
+
+Changing the limit is a system setting, so it is for a person only: an agent's process, a
+role, a tool call, an access token and another machine are all refused, the number is checked
+as an integer within range and is the only variable part of the privileged command. The same
+control is a slider in Settings (and in the first-run setup, skippable), and a "Make room for
+this model" panel on the Models screen: choose the model, context and cache type, and the
+slider marks where it fits.
+
 ### IQ quantisations on Apple silicon
 
 A lease for an IQ-family GGUF (IQ1_S, IQ1_M, IQ2_XXS/XS/S/M, IQ3_XXS/XS/S/M, IQ4_NL, IQ4_XS)
