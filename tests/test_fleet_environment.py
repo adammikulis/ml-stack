@@ -279,3 +279,25 @@ def test_python_builder_uses_verified_executable_not_shim(tmp_path, monkeypatch)
                         subprocess.CompletedProcess(args[0], 0,
                             json.dumps(['/tmp/real/python', [int(v) for v in version.split('.')]]), ''))
     assert str(Environment(tmp_path, python_version=version).host_python()) == '/tmp/real/python'
+
+
+def test_installed_pyenv_python_is_reused_when_current_shim_cannot_run(tmp_path, monkeypatch):
+    import json
+    import subprocess
+
+    from ml_stack.fleet import environment
+
+    version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
+    monkeypatch.setattr(environment.shutil, 'which', lambda name:
+                        '/tmp/pyenv' if name == 'pyenv' else '/tmp/shims/python')
+
+    def run(argv, **_kwargs):
+        if argv[1] == 'whence':
+            return subprocess.CompletedProcess(argv, 0, '/tmp/installed/python\n', '')
+        if argv[0] == '/tmp/shims/python':
+            return subprocess.CompletedProcess(argv, 127, '', 'pyenv: command not found')
+        return subprocess.CompletedProcess(argv, 0, json.dumps([
+            '/tmp/installed/python', [int(v) for v in version.split('.')]]), '')
+
+    monkeypatch.setattr(environment.subprocess, 'run', run)
+    assert str(Environment(tmp_path, python_version=version).host_python()) == '/tmp/installed/python'
