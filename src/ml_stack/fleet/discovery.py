@@ -88,8 +88,10 @@ def create_cluster_key(path: Path | str | None = None, *,
 
 
 def adopt(member: Membership, path: Path | str | None = None) -> Membership:
-    """Record ``member`` as a cluster this machine is in, replacing one of the same name."""
-    _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
+    """Record ``member`` as a cluster this machine is in: in place of one of the same name, else last."""
+    rows = memberships(path)
+    kept = [member if m.group == member.group else m for m in rows]
+    _write_memberships(kept if any(m.group == member.group for m in rows) else [*rows, member], path)
     return member
 
 

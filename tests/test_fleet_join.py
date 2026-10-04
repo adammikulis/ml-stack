@@ -14,6 +14,7 @@ import math
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler
@@ -665,40 +666,20 @@ class PausableDaemon:
         self.schedule = Availability()
         schedule = self.schedule
 
-        class H(BaseHTTPRequestHandler):
-            def _reply(self_, code: int, payload: dict) -> None:
-                raw = json.dumps(payload).encode()
-                self_.send_response(code)
-                self_.send_header("Content-Type", "application/json")
-                self_.send_header("Content-Length", str(len(raw)))
-                self_.end_headers()
-                self_.wfile.write(raw)
+        from ml_stack.fleet.api import Daemon, make_handler
+        from ml_stack.fleet.discovery import derive_token
+        from ml_stack.fleet.jobs import JobRunner
 
-            def do_GET(self_) -> None:
-                if self_.path == "/availability":
-                    self_._reply(200, schedule.public())
-                    return
-                self_._reply(200 if self_.path == "/health" else 404,
-                             {"ok": True, "name": name, "machine": f"id-{name}",
-                              "busy": False, "free": 1, "slots": 1, "queued": 0})
-
-            def do_POST(self_) -> None:
-                said = json.loads(self_.rfile.read(
-                    int(self_.headers.get("Content-Length", "0"))) or b"{}")
-                if said.get("action") == "pause":
-                    schedule.pause(minutes=said.get("minutes"),
-                                   reason=str(said.get("reason") or ""))
-                else:
-                    schedule.resume()
-                self_._reply(200, schedule.public())
-
-            def log_message(self_, *a: object) -> None:
-                pass
+        root = Path(tempfile.mkdtemp(prefix=f"pausable-{name}-"))
+        (root / "files").mkdir()
+        self.runner = JobRunner(root)
+        handler = make_handler(Daemon(self.runner, root / "files", derive_token(key), name,
+                                      lambda: {"machine": f"id-{name}"}, schedule=schedule))
 
         def refresh(b: Beacon) -> None:
             b.device = {**DEVICE, "availability": schedule.public()}
 
-        self.httpd = Server(("127.0.0.1", port), H)
+        self.httpd = Server(("127.0.0.1", port), handler)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         beacon = Beacon(name=name, port=port, device=dict(DEVICE), machine=f"id-{name}")
         self.advertiser = Advertiser(beacon, key, port=udp, interval_s=0.2,

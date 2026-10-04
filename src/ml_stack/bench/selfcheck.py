@@ -266,7 +266,8 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
 
     @contextlib.contextmanager
     def fake_serve(model: Any, *, port: int | None = None, context: int = 4096,
-                   timeout: float | None = None, manager: Any = None, **spec_kwargs: Any):
+                   timeout: float | None = None, manager: Any = None, reason: str = "",
+                   **spec_kwargs: Any):
         # the spec is built for real: a keyword the server does not take fails here --
         # and then everything `start()` does before Popen: the draft resolved to a file,
         # the argv built, every flag in it checked. A spec the backend refuses is refused

@@ -25,6 +25,7 @@ from ml_stack.http import Server
 from ml_stack.testing.fakes import FakeLlamaServer, Served
 from tests.cluster_support import a_keystore, join_cluster  # noqa: F401
 from tests.keystore_support import counting  # noqa: F401
+from tests.net_site import gguf_bytes
 
 PIECES = ["Hel", "lo", " there"]
 
@@ -39,6 +40,12 @@ def tmp_path_of(ui):
 @pytest.fixture(autouse=True)
 def the_passphrase_is_kept(a_keystore):  # noqa: F811
     """Joining stores the passphrase and signing in compares against it."""
+
+
+@pytest.fixture(autouse=True)
+def loopback_is_the_internet(monkeypatch):
+    """The download test fetches from a server on this machine, which has to be named."""
+    monkeypatch.setenv("ML_STACK_FETCH_ALLOW_HOSTS", "127.0.0.1")
 
 
 @pytest.fixture(autouse=True)
@@ -273,7 +280,7 @@ class TestChattingThroughTheInterface:
 
         from ml_stack.fleet.models import CHUNK, Downloads, Models
 
-        payload = os.urandom(2 * CHUNK)
+        payload = gguf_bytes() + os.urandom(2 * CHUNK)
         seen = threading.Event()
 
         class Slow(BaseHTTPRequestHandler):

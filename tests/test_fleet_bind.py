@@ -84,7 +84,10 @@ def _ui_daemon(tmp_path, *, ui_from_lan):
     handler = make_handler(Daemon(runner, root / "files", load_or_create_token(root),
                                   ui=UI(name="box", cluster_key_path=tmp_path / "k"),
                                   ui_from_lan=ui_from_lan))
-    httpd = LimitedServer((ALL_INTERFACES, 0), handler)
+    from ml_stack.fleet import tls
+
+    context = tls.server_context(tls.identity(tmp_path / "tls", "box"))
+    httpd = LimitedServer((ALL_INTERFACES, 0), handler, tls=context)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd, runner
 
@@ -92,7 +95,10 @@ def _ui_daemon(tmp_path, *, ui_from_lan):
 def _status(address, port):
     import http.client
 
-    conn = http.client.HTTPConnection(address, port, timeout=5)
+    from ml_stack.fleet.onboard.pairing import unverified_context
+
+    conn = (http.client.HTTPConnection(address, port, timeout=5) if address.startswith("127.")
+            else http.client.HTTPSConnection(address, port, timeout=5, context=unverified_context()))
     conn.request("GET", "/ui/", headers={"X-ML-Stack-UI": "1"})
     got = conn.getresponse().status
     conn.close()

@@ -20,7 +20,7 @@ from .discovery import (
     DEFAULT_CLUSTER,
     DiscoveryError,
     Membership,
-    adopt,
+    _write_memberships,
     clusters_path,
     memberships,
 )
@@ -109,7 +109,8 @@ def import_recovery(file: Path | str, path: Path | str | None = None) -> Members
         raise DiscoveryError(f"{file} is not a recovery file") from exc
     if not member.key:
         raise DiscoveryError(f"{file} is not a recovery file")
-    return adopt(member, path)
+    _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
+    return member
 
 
 def add_commands(sub: Any) -> None:
