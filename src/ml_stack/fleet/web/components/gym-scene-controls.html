@@ -26,6 +26,7 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
       };
       const follow = toggle('Follow car','follow'), rays = toggle('Sensor rays','debugRays');
       const vectors = toggle('Heading / control','debugVectors');
+      this.followLabel = follow.node.lastChild;
       this.follow = follow.input; this.rays = rays.input; this.vectors = vectors.input;
       this.agent = E('select',{'aria-label':'Selected agent'});
       this.agent.onchange = () => scene.selectAgent(this.agent.value);
@@ -58,8 +59,11 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
       const signature = agents.map(a => a.key).join('|');
       if (signature !== this.signature) {
         this.signature = signature;
-        this.agent.replaceChildren(...agents.map(a => E('option',{value:a.key},`${a.kind === 'robot' ? 'Robot' : 'Vehicle'} ${a.id}`)));
+        this.agent.replaceChildren(...agents.map(a => E('option',{value:a.key},`${a.kind === 'robot' ? 'Robot' : a.kind === 'drone' ? 'Drone' : 'Vehicle'} ${a.id}`)));
       }
+      this.cameraKind = selected?.kind;
+      this.followLabel.textContent = selected?.kind === 'drone' ? 'Follow drone' : selected?.kind === 'robot' ? 'Follow robot' : 'Follow car';
+      this.cameraButton.textContent = this.scene.cameraMode === 'driver' ? 'Chase view' : this.cameraKind === 'drone' ? 'Onboard view' : 'Driver view';
       this.agent.disabled = !agents.length;
       this.agent.value = selected?.key || previous;
       if (!selected) { this.status.textContent = 'No agents in this snapshot.'; return; }
@@ -82,7 +86,7 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
       const driver = this.scene.cameraMode !== 'driver';
       this.scene.cameraMode = driver ? 'driver' : 'chase';
       this.follow.checked = this.scene.follow = true;
-      this.cameraButton.textContent = driver ? 'Chase view' : 'Driver view';
+      this.cameraButton.textContent = driver ? 'Chase view' : this.cameraKind === 'drone' ? 'Onboard view' : 'Driver view';
       this.cameraButton.setAttribute('aria-pressed',String(driver));
     }
 
