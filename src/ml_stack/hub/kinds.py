@@ -26,6 +26,7 @@ KINDS = (CHAT, EMBEDDING, VISION, SPEECH, DECISION)
 _DECISION_WORDS = re.compile(r"(?<![a-z0-9])(decision|decider|deciders)(?![a-z0-9])", re.I)
 _EMBEDDING_ARCH = ("bert",)
 _SPEECH_ARCH = ("whisper", "wav2vec", "parakeet")
+_VISION_ARCH = ("llava", "fastvlm", "mllama", "qwen2_vl", "qwen2_5_vl", "qwen3_vl", "smolvlm")
 
 
 def valid(kind: str) -> str:
@@ -73,6 +74,6 @@ def classify(  # noqa: PLR0913 - independent facts, all optional
         return SPEECH
     if any(a in arch for a in _EMBEDDING_ARCH):
         return EMBEDDING
-    if has_projector:
+    if has_projector or any(arch.startswith(a) for a in _VISION_ARCH):
         return VISION
     return CHAT
