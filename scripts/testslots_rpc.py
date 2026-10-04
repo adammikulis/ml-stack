@@ -82,7 +82,7 @@ class Handler(socketserver.StreamRequestHandler):
             cancel = testslots.CHECK_CANCELLED.set(self.check_connection)
             try:
                 lane = testslots.heavy_lane(str(request.get("label"))) if request.get("heavy") else contextlib.nullcontext()
-                with lane, testslots.lease(1, 1, label=str(request.get("label", "pytest"))):
+                with lane, testslots.lease(1, 1, label=str(request.get("label", "pytest")), say=lambda message: None):
                     identifier = secrets.token_hex(24)
                     with server.guard:
                         server.active.add(identifier)
