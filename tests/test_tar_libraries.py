@@ -84,6 +84,11 @@ class LibraryArchiveTests(unittest.TestCase):
         with patch.object(tar_libraries, "MOST_UNPACKED", 10), self.assertRaises(Unsafe):
             tar_libraries.unpack(archive, self.root / "limited")
 
+    def test_entry_count_is_bounded_before_unpacking(self):
+        archive = self.archive([(f"file{index}", tarfile.REGTYPE, b"data") for index in range(3)])
+        with patch.object(tar_libraries, "MOST_ENTRIES", 2), self.assertRaisesRegex(Unsafe, "too many entries"):
+            tar_libraries.unpack(archive, self.root / "limited")
+
 
 if __name__ == "__main__":
     unittest.main()

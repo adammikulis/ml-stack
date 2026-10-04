@@ -5,6 +5,7 @@ from __future__ import annotations
 import posixpath
 import re
 import tarfile
+from itertools import islice
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from ml_stack.safenames import MOST_ENTRIES, MOST_UNPACKED, Unsafe, safe_join
@@ -14,7 +15,7 @@ LIBRARY = re.compile(r".+\.so(?:\.\d+)*$")
 
 def members(tf: tarfile.TarFile) -> list[tuple[tarfile.TarInfo, tarfile.TarInfo]]:
     """Archive entries paired with the regular files their library aliases name."""
-    listed = tf.getmembers()
+    listed = list(islice(tf, MOST_ENTRIES + 1))
     if len(listed) > MOST_ENTRIES:
         raise Unsafe("the archive has too many entries")
     index: dict[str, tarfile.TarInfo] = {}
