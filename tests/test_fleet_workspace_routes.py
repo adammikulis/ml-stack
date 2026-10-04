@@ -102,9 +102,12 @@ def test_frozen_gym_uses_installed_environment(daemon, monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     configured = []
-    from ml_stack.fleet import gym_routes
+    from ml_stack.fleet import gym_interpreters, gym_routes
+    monkeypatch.delenv('ML_STACK_GYM_PYTHON', raising=False)
+    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
     monkeypatch.setattr(gym_routes, 'catalogue', lambda: [{'id': 'car', 'available': True}])
-    monkeypatch.setattr(gym_routes, 'manager', SimpleNamespace(configure=lambda python: configured.append(python)))
+    monkeypatch.setattr(gym_interpreters, 'manager', SimpleNamespace(
+        configure=lambda python: configured.append(python), configure_map=lambda mapping: None))
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
     python = tmp_path / 'env' / 'bin' / 'python'
     daemon.ui.environment = SimpleNamespace(exists=True, python=python)
@@ -157,3 +160,60 @@ def test_specialist_descriptions_cover_native_chat_memory_and_gym():
     assert 'export' in PURPOSES['memory']
     assert 'evaluate' in PURPOSES['gym']
     assert 'do' not in PURPOSES
+
+
+def test_gym_jobs_use_saved_example_python_without_shell_expansion(daemon, monkeypatch, tmp_path):
+    from ml_stack.fleet import workspace_routes
+    from ml_stack.fleet.settings import Settings
+
+    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'ml-stack-gym'}])
+    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+    python = tmp_path / 'Python with spaces' / 'bin' / 'python'
+    python.parent.mkdir(parents=True)
+    python.write_text('')
+    daemon.ui.settings.gym_pythons = {'drone': str(python)}
+    daemon.ui.settings.save(daemon.ui.settings_path)
+    daemon.ui.settings = Settings.load(daemon.ui.settings_path)
+    args = ['train', 'drone', '--config', '{"note":"$(touch /tmp/nope); a b"}']
+    code, result, _ = daemon.call('/ui/workspace/jobs', method='POST', body={
+        'command': 'ml-stack-gym', 'args': args, 'preview': True})
+    assert code == 200
+    assert result['argv'] == [str(python), '-m', 'ml_stack.gym.cli', *args]
+    assert daemon.runner.snapshot() == []
+    assert daemon.call('/ui/workspace/jobs', method='POST', body={
+        'command': 'ml-stack-gym', 'args': ['train', '../../escape']})[0] == 400
+    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+
+
+@pytest.mark.slow
+def test_saved_drone_interpreter_runs_a_queued_native_session(daemon, monkeypatch):
+    import json
+    import os
+    import time
+    from pathlib import Path
+
+    from ml_stack.fleet import workspace_routes
+    from ml_stack.fleet.settings import Settings
+
+    python = os.environ.get('ML_STACK_TEST_DRONE_PYTHON')
+    if not python or not Path(python).is_file():
+        pytest.skip('Set ML_STACK_TEST_DRONE_PYTHON to the installed native drone Python')
+    monkeypatch.setenv('ML_STACK_GYM_PYTHONS', '{}')
+    monkeypatch.setattr(workspace_routes, 'commands', lambda: [{'name': 'ml-stack-gym'}])
+    daemon.ui.settings.gym_pythons = {'drone': python}
+    daemon.ui.settings.save(daemon.ui.settings_path)
+    daemon.ui.settings = Settings.load(daemon.ui.settings_path)
+    monkeypatch.setenv('PYTHONPATH', str(Path(__file__).resolve().parents[1] / 'src'))
+    config = {'world': {'trees': 0, 'hikers': 1, 'fires': 0, 'n_agents': 1}}
+    code, result, _ = daemon.call('/ui/workspace/jobs', method='POST', body={
+        'command': 'ml-stack-gym', 'args': ['run', 'drone', '--steps', '1', '--action', '0',
+                                         '--config', json.dumps(config)]})
+    assert code == 202
+    job = daemon.runner.jobs[result['id']]
+    until = time.monotonic() + 45
+    while job.state not in {'done', 'failed', 'stopped'} and time.monotonic() < until:
+        time.sleep(.05)
+    assert job.state == 'done', daemon.runner.log_path(job.id).read_text()
+    assert job.argv[:3] == [python, '-m', 'ml_stack.gym.cli']
+    output = daemon.runner.log_path(job.id).read_text()
+    assert 'drone' in output and 'observation' in output
