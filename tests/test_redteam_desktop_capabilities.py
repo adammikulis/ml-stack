@@ -13,6 +13,8 @@ import pytest
 
 pytestmark = pytest.mark.redteam
 ROOT = Path(__file__).resolve().parents[1]
+RUSTUP_HOME = os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup"))
+CARGO_HOME = os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))
 
 
 def test_desktop_grants_only_window_and_close_commands():
@@ -33,7 +35,9 @@ def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_pa
     project = tmp_path / "desktop"
     shutil.copytree(ROOT / "app/src-tauri", project,
                     ignore=shutil.ignore_patterns("target", "binaries", "gen"))
-    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    native_env = {**os.environ, "RUSTUP_HOME": RUSTUP_HOME, "CARGO_HOME": CARGO_HOME}
+    host = subprocess.run(["rustc", "-vV"], env=native_env,
+                          capture_output=True, text=True, check=True)
     target = next(line.removeprefix("host: ") for line in host.stdout.splitlines()
                   if line.startswith("host: "))
     binaries = project / "binaries"
@@ -42,7 +46,7 @@ def test_native_capability_authority_rejects_hostile_origins_and_commands(tmp_pa
     done = subprocess.run(
         [cargo, "test", "--manifest-path", str(project / "Cargo.toml"),
          "--offline", "security_tests", "--", "--nocapture"],
-        env={**os.environ, "CARGO_TARGET_DIR": os.environ.get(
+        env={**native_env, "CARGO_TARGET_DIR": os.environ.get(
             "ML_STACK_TAURI_TEST_TARGET", str(tmp_path / "target"))},
         capture_output=True, text=True, timeout=600,
     )
