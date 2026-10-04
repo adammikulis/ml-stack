@@ -18,7 +18,7 @@ from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
-from ml_stack.workspace import boardroute, chat, guide, limits, onboard, project, tokens
+from ml_stack.workspace import boardroute, chat, filecli, guide, limits, onboard, project, tokens
 from ml_stack.workspace.boardapi import Follow
 from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
 from ml_stack.workspace.bus import CALL_TYPES, TYPES
@@ -84,6 +84,8 @@ def _text(value: Any) -> str:
         return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])}"
                 f"{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
     if isinstance(value, dict) and value.get("authority") == "none" and "text" in value:
+        return str(value["text"])
+    if isinstance(value, dict) and "handle" in value and "line" in value and "text" in value:
         return str(value["text"])
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and ({"root", "replies"} <= v.keys() or {"members", "posts"} <= v.keys()
@@ -484,6 +486,10 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),
     ("claims", "every live claim", [OWNER, flag("--kind", choices=CLAIM_KINDS, default="")],
      lambda a, w, t: w.claims.listing(a.owner, a.kind)),
+    ("attach", "post a file to a board, an agent or a thread; the message carries a handle, never the content",
+     filecli.ATTACH, filecli.attach),
+    ("file", "a file by handle (--meta, --text, --out PATH), or: list, search QUERY, delete HANDLE (a person)",
+     filecli.FILE, filecli.file),
     ("quarantine-ls", "flagged items held back", [], lambda a, w, t: w.quarantine_list()),
     ("quarantine-release", "deliver a held item, fenced; human token", [flag("qid")], _released),
     ("audit-verify", "whether every log's chain holds", [flag("--anchor", default="")],
