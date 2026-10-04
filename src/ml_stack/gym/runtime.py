@@ -31,10 +31,12 @@ class SessionManager:
         if cfg.get("learning_mode", "frozen") not in {"online", "frozen"}:
             raise ValueError("Learning mode must be online or frozen")
         online = cfg.get("learning_mode", "frozen") == "online"
-        if controller not in {"manual", "random", "decider", "ppo", "native-idm"}:
+        if controller not in {"manual", "random", "decider", "ppo", "native-idm", "native-patrol"}:
             raise ValueError("Unknown simulation controller")
         if controller == "native-idm" and not (world and environment == "car"):
             raise ValueError("Native IDM is available in the persistent car world")
+        if controller == "native-patrol" and not (world and environment == "drone"):
+            raise ValueError("Native patrol is available in the persistent drone world")
         if online and not (world and controller == "ppo"):
             raise ValueError("Online learning requires PPO in a persistent world")
         if controller == "ppo" and not online and not cfg.get("checkpoint"):

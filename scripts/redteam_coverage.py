@@ -330,6 +330,7 @@ def discover() -> dict[str, Surface]:
         ("desktop", "app/src-tauri/capabilities/main.json", "app/src-tauri/capabilities/main.json"),
         ("spawn", "scripts/test-on-linux", "scripts/test-on-linux"),
         ("spawn", "gym/transport.py:Process.start", "src/ml_stack/gym/transport.py"),
+        ("spawn", "gym/decision_process.py:DecisionProcess.__init__", "src/ml_stack/gym/decision_process.py"),
         ("spawn", "sandbox/bubblewrap.py:_probe", "src/ml_stack/sandbox/bubblewrap.py"),
         ("route", "fleet/gym_recording_routes.py:/ui/gym/recordings*", "src/ml_stack/fleet/gym_recording_routes.py"),
     ):
