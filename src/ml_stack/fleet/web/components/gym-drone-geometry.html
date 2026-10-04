@@ -33,10 +33,11 @@
     landmark(scene, object) {
       const T = scene.T, group = new T.Group(), tree = object.kind === 'trees';
       const radius = Number(object.radius || .25), height = Number(object.height || 1.6);
-      const body = new T.Mesh(new T.CylinderGeometry(radius,radius,height,tree ? 12 : 16),
+      const trunkHeight = tree ? height*.45 : height, trunkRadius = tree ? radius*.3 : radius;
+      const body = new T.Mesh(new T.CylinderGeometry(trunkRadius,trunkRadius,trunkHeight,tree ? 12 : 16),
         new T.MeshStandardMaterial({color:tree ? 0x66513a : object.kind === 'fires' ? 0xbf5225 : 0xddaa43,
           roughness:.9}));
-      body.position.y = height/2; body.castShadow = body.receiveShadow = true; group.add(body);
+      body.position.y = trunkHeight/2; body.castShadow = body.receiveShadow = true; group.add(body);
       if (tree) {
         for (let i=0;i<3;i++) {
           const crown = new T.Mesh(new T.ConeGeometry(radius*(3.2-i*.6),height*.48,9),
