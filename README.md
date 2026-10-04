@@ -231,6 +231,7 @@ on whichever machine is free rather than the one you are typing at.
 | [Sentinel](docs/sentinel.md) | what is watched and held, the one click-to-release dialog, `ML_STACK_NOTIFY` |
 | [Reputation](docs/reputation.md) | how each source has behaved, `ml-stack-reputation` |
 | [Security](docs/security.md) | the threat model, findings and what is fixed ([assistant contract](docs/assistant-security.md), [red-teaming](docs/redteam.md)) |
+| [Destructive actions](docs/destructive-actions.md) | the classifier that makes destructive or unsure tool calls ask first: what asks and why, how it meets roles and rules, measured recall |
 | [Decision models](docs/decision-models.md) | typed answers with probabilities, training and evaluating one, JevBench ([integration plan](docs/decision-model-integration-plan.md)) |
 | [Packages](docs/packages.md) | what each module is, and the extras it carries |
 | [Model ranking](docs/model-ranking.md) | one line per model: its best run, and what that run cost |
