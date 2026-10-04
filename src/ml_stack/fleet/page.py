@@ -19,6 +19,7 @@ COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view"
               "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
 MODULES = {"gym-drone-geometry": frozenset({"gym-scene"}),
            "setup-recovery": frozenset({"first-run"}),
+           "chat-model-picker": frozenset({"chat-view"}),
            "chat-coding": frozenset({"chat-view"}), "workspace-model": frozenset({
     "workspace-jobs", "data-view", "training-view", "tools-view", "benchmarks-view",
     "gym-world-options", "gym-recordings", "gym-model-options", "gym-view",

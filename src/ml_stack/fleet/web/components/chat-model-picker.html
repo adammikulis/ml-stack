@@ -1,0 +1,93 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  class ChatModelPicker {
+    constructor(chat) {
+      this.chat = chat;
+      this.button = chat.querySelector("#chat-model-button");
+      this.dialog = chat.querySelector("#chat-model-dialog");
+      this.search = chat.querySelector("#chat-model-search");
+      this.list = chat.querySelector("#chat-model-list");
+      this.library = [];
+      this.button.onclick = () => {
+        if (chat.request) return;
+        this.search.value = "";
+        this.render();
+        this.dialog.showModal();
+        this.search.focus();
+      };
+      chat.querySelector("#chat-model-close").onclick = () => this.dialog.close();
+      this.search.oninput = () => this.render();
+      this.search.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          const first = this.list.querySelector("button:not(:disabled)");
+          if (first) { event.preventDefault(); first.click(); }
+        }
+      };
+    }
+    async catalogue() {
+      const data = await M.api("/ui/models");
+      if (data.ok) this.library = data.library || [];
+    }
+    rows() {
+      const chat = this.chat;
+      const rows = [...chat.picker.options].filter((one) => one.value).map((option) => {
+        const live = (chat.chatModels || []).find((one) => [one.model, one.path].includes(option.value) ||
+          one.model === option.textContent || one.model === option.value.split("/").pop());
+        const installed = this.library.find((one) => one.path === option.value || one.name === option.textContent ||
+          [one.name, one.path].includes(live?.model) || one.path === live?.path);
+        return { value: option.value, name: installed?.name || option.textContent,
+          family: installed?.family || "Other models", status: live ? "Loaded" : installed ? "Installed" :
+          option.disabled ? "Unavailable" : chat.coding.active ? "Installed" : "Loaded",
+          quant: installed?.quantization || "", disabled: option.disabled, installed };
+      });
+      if (!chat.coding.active) {
+        for (const installed of this.library.filter((one) => one.servable)) {
+          if (rows.some((one) => one.installed?.path === installed.path || one.name === installed.name)) continue;
+          rows.push({ value: installed.path, name: installed.name, family: installed.family || "Other models",
+            status: "Installed", quant: installed.quantization || "", installed, needsLoad: true });
+        }
+      }
+      return rows;
+    }
+    render() {
+      const chat = this.chat;
+      this.button.textContent = chat.picker.selectedOptions[0]?.textContent || "Choose a model";
+      this.button.disabled = !!chat.request;
+      const query = this.search.value.trim().toLowerCase();
+      const rows = this.rows().filter((one) => `${one.name} ${one.family} ${one.quant} ${one.status}`.toLowerCase().includes(query));
+      const groups = new Map();
+      for (const row of rows) {
+        if (!groups.has(row.family)) groups.set(row.family, []);
+        groups.get(row.family).push(row);
+      }
+      this.list.replaceChildren();
+      for (const [family, models] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+        const group = M.el("section", { class: "chat-model-family" }, M.el("h3", {}, family));
+        for (const row of models.sort((a, b) => Number(b.status === "Loaded") - Number(a.status === "Loaded") || a.name.localeCompare(b.name))) {
+          group.append(M.el("button", { type: "button", class: "chat-model-choice",
+            ...(row.disabled ? { disabled: "" } : {}),
+            "aria-pressed": String(chat.picker.value === row.value), onclick: () => this.choose(row) },
+          M.el("span", {}, row.name), M.el("small", {}, [row.status, row.quant].filter(Boolean).join(" · "))));
+        }
+        this.list.append(group);
+      }
+      if (!rows.length) this.list.append(M.el("p", { class: "hint" }, "No models match your search."));
+    }
+    async choose(row) {
+      if (this.chat.request || row.disabled) return;
+      if (row.needsLoad) {
+        this.dialog.close();
+        window.location.hash = "models";
+        this.chat.note.textContent = "Choose this model's context length on the Models screen, then load it.";
+        return;
+      }
+      this.chat.picker.value = row.value;
+      this.chat.picker.dispatchEvent(new Event("change"));
+      this.dialog.close();
+      this.render();
+    }
+  }
+  window.ChatModelPicker = ChatModelPicker;
+})();
+</script>
