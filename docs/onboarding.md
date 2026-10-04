@@ -15,6 +15,11 @@ its model, and starting it checks free memory for weights, the head and its cont
 The 27B weights and head are published together in
 [the model repository](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/tree/main).
 
+On Linux with an NVIDIA GPU, the first-run server installer selects an official CUDA
+release and its matching runtime archive. Both downloads require GitHub's SHA-256
+digests. The installer checks that the resulting server initializes a CUDA device;
+a CPU build is not substituted when CUDA installation fails.
+
 Status: the design is complete; the parts that can be tried on one machine are built and
 tested (see "What is built"). Issue: *Zero-install onboarding of devices on the local network*.
 Branch `agent/lan-onboarding`, which builds on `agent/hardening` (signed requests, pinned TLS,

@@ -10,18 +10,7 @@ from ml_stack.ui import assets_dir
 pytestmark = pytest.mark.slow
 
 
-@pytest.mark.parametrize("action", ["install", "skip", "later", "error", "failed", "smaller", "done"])
-def test_first_run_model_choice_requires_opt_in(action):
-    pw = pytest.importorskip("playwright.sync_api")
-    posted = []
-    models = [
-        {"name": "Qwen large", "file": "large.gguf", "ref": "hf:test/large",
-         "gb": 16.7, "draft_gb": 0.8, "draft_ref": "hf:test/mtp",
-         "recommended": True, "what": "General chat"},
-        {"name": "Qwen small", "file": "small.gguf", "ref": "hf:test/small",
-         "gb": 5, "draft_gb": 0, "draft_ref": "", "recommended": False, "what": "Quick chat"},
-    ]
-
+def mock_route(action, posted, models):
     def route(request):
         path = request.request.url.split("http://setup.test", 1)[-1]
         if path == "/":
@@ -51,6 +40,23 @@ def test_first_run_model_choice_requires_opt_in(action):
                                      "done": 12, "total": 100,
                                      "error": "Disk full" if action == "failed" else ""}]}
         request.fulfill(status=code, body=json.dumps(body), content_type="application/json")
+
+    return route
+
+
+@pytest.mark.parametrize("action", ["install", "skip", "later", "error", "failed", "smaller", "done"])
+def test_first_run_model_choice_requires_opt_in(action):
+    pw = pytest.importorskip("playwright.sync_api")
+    posted = []
+    models = [
+        {"name": "Qwen large", "file": "large.gguf", "ref": "hf:test/large",
+         "gb": 16.7, "draft_gb": 0.8, "draft_ref": "hf:test/mtp",
+         "recommended": True, "what": "General chat"},
+        {"name": "Qwen small", "file": "small.gguf", "ref": "hf:test/small",
+         "gb": 5, "draft_gb": 0, "draft_ref": "", "recommended": False, "what": "Quick chat"},
+    ]
+
+    route = mock_route(action, posted, models)
 
     with pw.sync_playwright() as play:
         browser = play.chromium.launch(headless=True)
