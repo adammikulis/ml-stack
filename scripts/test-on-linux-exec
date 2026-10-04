@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Forward host admission controls into this run's private Linux environment.
+set -euo pipefail
+PYTEST_ARGS=("$@")
+if [ -n "${ML_STACK_LINUX_SINGLE:-}" ]; then
+  PYTEST_ARGS+=(-n 0)
+else
+  PYTEST_ARGS+=(-n "$DEV_TEST_WORKERS")
+fi
+exec docker --config "$ML_STACK_LINUX_DCFG" exec \
+  -e DEV_TEST_PYTEST_ENDPOINT -e DEV_TEST_PYTEST_TOKEN \
+  -e DEV_TEST_WORKERS -e DEV_TEST_BUDGET -e DEV_TEST_LEASE \
+  -e PYTHONPATH=/work/scripts \
+  "$ML_STACK_LINUX_CONTAINER" bash -c \
+  'source /test-env; exec setpriv --reuid="$1" --regid="$2" --clear-groups /priv-venv/bin/python -m pytest -p testslots_pytest "${@:3}"' \
+  bash "$ML_STACK_LINUX_UID" "$ML_STACK_LINUX_GID" "${PYTEST_ARGS[@]}"
