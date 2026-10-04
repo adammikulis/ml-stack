@@ -346,8 +346,48 @@ def test_a_sealed_request_sent_twice_is_refused_the_second_time(served):
     assert status == 401 and b"already seen" in answer
 
 
-def test_an_answer_that_should_be_sealed_and_is_not_is_refused_by_the_peer(served, monkeypatch):
+def _rogue(answer: bytes):
+    """A server that answers every request with ``answer`` and holds no cluster key."""
+    from http.server import BaseHTTPRequestHandler
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(answer)))
+            self.end_headers()
+            self.wfile.write(answer)
+
+        def log_message(self, *args):
+            return
+
+    httpd = http.Server(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def test_a_plain_answer_from_a_machine_without_the_key_is_refused_by_the_peer(served):
+    _, token = served
+    rogue = _rogue(b'{"ok": true, "name": "forged"}')
+    try:
+        with pytest.raises(PeerError):
+            Peer(f"http://127.0.0.1:{rogue.server_port}", token).health()
+    finally:
+        rogue.shutdown()
+        rogue.server_close()
+
+
+def test_an_answer_altered_after_it_was_sealed_is_refused_by_the_peer(served):
     base, token = served
-    monkeypatch.setattr(sealing, "seal", lambda key, plain, data: plain)
-    with pytest.raises(PeerError):
-        Peer(base, token).health()
+    url = f"{base}/health"
+    stamp = macauth.Stamp.now()
+    _, answer, _ = _raw(url, "GET", macauth.sign(token, "GET", url, None, stamp) | {sealing.HEADER: "2"})
+    opens = http.Sealed(sealing.box_key(token), stamp.nonce)
+    headers = {sealing.HEADER: "1"}
+    assert json.loads(opens.open(200, headers, answer))["name"] == "sealed-box"
+    for at in (0, 12, len(answer) - 1):
+        altered = answer[:at] + bytes([answer[at] ^ 1]) + answer[at + 1:]
+        with pytest.raises(http.ServerError, match="did not authenticate"):
+            opens.open(200, headers, altered)
+    with pytest.raises(http.ServerError, match="did not authenticate"):
+        opens.open(404, headers, answer)
