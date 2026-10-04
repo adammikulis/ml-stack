@@ -1,10 +1,15 @@
 """Saved conversation listing, lookup and updates behind the daemon UI guard."""
 from __future__ import annotations
 
+from .room_routes import _origin_ok
+
 
 class ConversationRoutes:
     def route(self) -> bool:
         if self.path.startswith("/ui/conversations"):
+            if not _origin_ok(self.header("Origin"), self.host_header):
+                self.send(403, {"error": "conversation requests require the same origin"})
+                return True
             try:
                 return self._conversations()
             except (TypeError, ValueError) as error:

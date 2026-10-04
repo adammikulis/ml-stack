@@ -1,20 +1,4 @@
-"""A graph that outlives the process, in one file, queryable in Cypher.
-
-Every project that builds a graph ends up rewriting the same three things: somewhere to put it,
-a way to ask what is joined to what, and a way to get it back. Ladybug is an embedded property
-graph — one directory on disk, no server, native Cypher, and shortest paths in the engine rather
-than in a loop here. This is the thin part on top: nodes and edges as plain dictionaries, so a
-caller keeps whatever shape it already had and pays nothing to store it.
-
-Attributes travel as JSON in a single column. A property graph could hold them as columns, but
-then every project's own vocabulary becomes schema, and a schema is the thing nobody wants to
-migrate.
-
-    with GraphStore(path) as g:
-        g.write(graph)                       # a whole graph, as built
-        g.neighbours("person:ada")           # what it is joined to
-        g.shortest_path("person:ada", "person:bea")   # how two of them connect
-"""
+"""Nodes, edges, documents and assets persisted in an embedded Cypher store."""
 
 from __future__ import annotations
 
@@ -88,8 +72,6 @@ class GraphStore(CypherStore):
             for table in (NODE_TABLE, EDGE_TABLE, DOC_TABLE, ASSET_TABLE):
                 self.query(table)
             self._upgrade()
-            self.load("fts")
-            self.load("vector")
         else:
             try:
                 self._require_current()
