@@ -15,7 +15,15 @@ from typing import Any
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sentinel.human import HumanRequired
-from ml_stack.workspace import boardroute, guide, limits, onboard, project, tokens
+from ml_stack.workspace import (
+    guide,
+    limits,
+    localcli,
+    localroute,
+    onboard,
+    project,
+    tokens,
+)
 from ml_stack.workspace.boards import MODES, STYPES
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.chain import ChainBroken
@@ -284,8 +292,10 @@ def _ttl(text: str) -> float:
 
 
 def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
-    listener = boardroute.serve(ws, args.port)
+    listener = localroute.serve(ws, args.port)
     say(f"the Board, read-only, for the person: http://127.0.0.1:{listener.port}/")
+    say(f"the Agents panel (start and stop need this browser session): "
+        f"http://127.0.0.1:{listener.port}/agents?session={listener.session}")
     listener.start()
     try:
         threading.Event().wait()
@@ -317,6 +327,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
         *LIVE], _setup),
     ("board-serve", "serve the read-only Board page on a loopback port; the person's identity, no token in the page",
      [flag("--port", type=int, default=0)], _board_serve),
+    ("agent", "start a local model as an agent that takes and gives tasks, stop one, or list them; start and stop at a terminal",
+     localcli.OPTIONS, lambda a, w: localcli.run(a, w)),
     ("doctor", "check the whole setup and say what to fix; at a terminal", [], _doctor),
     ("hello", "send AGENT the first message ('workspace ready'); at a terminal", [flag("name")],
      _hello),
