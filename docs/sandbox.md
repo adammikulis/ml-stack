@@ -153,8 +153,10 @@ as `--cpus`/`--memory`, and a Linux build of the tool inside the image. It serve
 
 `bubblewrap.arguments` builds the argv: `--unshare-all`, `--share-net` only when the policy keeps
 loopback, read-only binds for `read`/`exec`, binds for `write`, `--clearenv` with `--setenv` for
-each variable. It is covered by argv tests only. Landlock and seccomp are a future option; they
-are not written because they could not be verified here.
+each variable. Network-denied reads and GPU visibility are exercised on WSL by
+`tests/test_wsl_backend.py`. Network-sharing modes do not restrict destinations, and
+executable visibility follows the mounted filesystem; the executable allow-list needs
+additional enforcement.
 
 ## Commands
 
@@ -164,14 +166,15 @@ exits 1 when one fails.
 
 ## Sandboxed model server
 
-`LlamaServerBackend(sandboxed=True)` or `ML_STACK_SANDBOX_SERVE=1` starts `llama-server` under
-the `model_server` policy: loopback, the GPU, the binary's install tree, the directories of
-the files on its command line, and the slot-save directory as the only writable path. A failed
-start appends the sandbox's refusals to the `ServerFailed` message. It is opt-in; it stays off by
-default until it has run a day of real workloads (speculative heads, mmproj, multi-shard models and
-Hugging Face downloads were not tried; a Hugging Face reference needs the network and is not
-supported while confined). The measured cost on a 350M model was within the 3.6 to 4.7 s start-up
-of the unconfined server (not separately timed).
+`LlamaServerBackend(sandboxed=True)` or `ML_STACK_SANDBOX_SERVE=1` starts the model under
+the `model_server` policy: the GPU, the binary's install tree, the directories of the files
+on its command line, and the slot-save directory. The Windows WSL launcher enables this
+automatically. On Linux, the model has no network and listens on a private Unix socket in
+a writable temporary directory. Its trusted supervisor relays the socket through host
+loopback and exits with the model. On macOS, the policy grants loopback directly.
+Downloads happen through the broker before the confined process starts. A failed start
+appends the sandbox's refusals to the `ServerFailed` message. GPU inference, MTP,
+multimodal projectors, and sharded models require live model validation.
 
 ## Tests and measurements
 
