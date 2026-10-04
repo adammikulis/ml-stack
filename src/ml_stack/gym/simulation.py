@@ -245,6 +245,8 @@ class Simulation:
         self.state["agent_id"] = info.get("ego_actor_id")
         if terminated or truncated:
             if self.world:
+                self.control_revision += 1
+                self.stop_decider()
                 self.observation, task_info = self.env.reset()
                 self.state.update(observation=json_value(self.observation), terminated=False, truncated=False,
                                   episode_id=self.state["episode_id"] + 1)
