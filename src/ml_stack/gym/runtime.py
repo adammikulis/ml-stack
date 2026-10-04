@@ -1,6 +1,7 @@
 """Installed-interpreter simulation session supervision."""
 
 import atexit
+import json
 import os
 import queue
 import threading
@@ -21,6 +22,12 @@ class SessionManager:
     def configure(self, python):
         """Select the managed environment's simulator interpreter."""
         os.environ["ML_STACK_GYM_PYTHON"] = str(python)
+
+    def configure_map(self, pythons):
+        """Select explicit or managed interpreters independently for each simulator."""
+        if not isinstance(pythons, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in pythons.items()):
+            raise ValueError("Gym interpreters must map environment IDs to Python paths")
+        os.environ["ML_STACK_GYM_PYTHONS"] = json.dumps(pythons)
 
     def create(self, environment, config=None, controller="manual", seed=0):
         require(environment)

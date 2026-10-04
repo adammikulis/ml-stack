@@ -12,9 +12,14 @@ from pathlib import Path
 from ml_stack.platform import start_process, terminate_process_group
 
 
-def interpreter():
+def interpreter(environment=None):
     """Resolve the installed simulator interpreter."""
-    configured = os.environ.get("ML_STACK_GYM_PYTHON")
+    choices = json.loads(os.environ.get("ML_STACK_GYM_PYTHONS", "{}"))
+    if not isinstance(choices, dict):
+        raise ValueError("Gym interpreter choices must be an object")
+    configured = choices.get(environment) or os.environ.get("ML_STACK_GYM_PYTHON")
+    if configured and not isinstance(configured, str):
+        raise ValueError("Gym interpreter paths must be strings")
     if configured:
         python = Path(configured).expanduser()
         if not python.is_file():
@@ -47,9 +52,12 @@ class Process:
         self.settings, self.updates, self.log = settings, updates, log
 
     def start(self):
-        self.handle = start_process([interpreter(), "-m", "ml_stack.gym.worker_entry",
+        environment = dict(os.environ)
+        environment.pop("ML_STACK_GYM_PYTHON", None)
+        environment.pop("ML_STACK_GYM_PYTHONS", None)
+        self.handle = start_process([interpreter(self.settings["environment"]), "-m", "ml_stack.gym.worker_entry",
                                         json.dumps(self.settings)], stdin=subprocess.PIPE,
-                                       stdout=subprocess.PIPE, stderr=self.log, text=True, bufsize=1)
+                                       stdout=subprocess.PIPE, stderr=self.log, text=True, bufsize=1, env=environment)
         self.commands = Commands(self.handle.stdin)
         threading.Thread(target=self.read, daemon=True).start()
 

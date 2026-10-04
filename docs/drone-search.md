@@ -8,9 +8,12 @@ control of selected agent** transfers the controller and camera to that aircraft
 
 ## Installation and relaunch
 
+
 Install the **Drone search** library from the environment installer. PyFlyt 0.29 requires
 Python 3.12 and NumPy below 2; its environment is separate from the car's interpreter.
-The installer keeps that environment for later launches.
+The installer keeps it under `simulators/gym-drone/env` and rediscovers it on later
+launches. It downloads a standalone Python 3.12 if no matching local interpreter is
+available. Installing or removing its packages affects only this environment.
 
 For a source checkout, use a Python 3.12 environment:
 
@@ -20,7 +23,10 @@ python3.12 -m venv /path/to/drone-env
 ```
 
 The environment's saved interpreter selection survives a daemon restart. Installed
-simulators and downloaded models do not need to be fetched again.
+simulators and downloaded models do not need to be fetched again. Advanced existing
+environments can be saved in `settings.json` as
+`gym_pythons: {"drone": "/path/to/drone-env/bin/python"}`; `gym_python` selects the
+default interpreter for other environments.
 
 ## Worlds, training, and sensors
 
