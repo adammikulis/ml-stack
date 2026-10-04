@@ -280,3 +280,28 @@ class TestLaunch:
         binary = tmp_path / "claude"
         binary.write_text("#!/bin/sh\n")
         assert claude.launch(["--claude", str(binary), "--role", "root"], say=lambda _: None) == 2
+
+
+class TestWorkspaceCommands:
+    def _fake_workspace(self, tmp_path, monkeypatch):
+        exe = tmp_path / "bin" / "ml-stack-workspace"
+        exe.parent.mkdir()
+        exe.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$0.argv"\necho nudge text\n')
+        exe.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{exe.parent}:{os.environ['PATH']}")
+        return exe
+
+    def test_a_hostile_label_is_one_argument_and_never_a_shell_line(self, tmp_path, monkeypatch):
+        exe = self._fake_workspace(tmp_path, monkeypatch)
+        hostile = "x; touch /tmp/pwned $(id) `id`"
+        assert harnessing.join_workspace(hostile, "claude-code", "joined: t", lambda _: None)
+        argv = Path(f"{exe}.argv").read_text().splitlines()
+        assert argv == ["send", "*", "status", "joined: t", "--agent", "claude-code", "--label", hostile]
+        assert harnesshook.nudge(hostile) == "nudge text"
+        assert hostile in Path(f"{exe}.argv").read_text().splitlines()
+
+    def test_a_failed_join_says_the_command_that_joins(self, monkeypatch):
+        said = []
+        monkeypatch.setenv("PATH", "/nonexistent")
+        assert harnessing.join_workspace("l", "claude-code", "t", said.append) is False
+        assert "ml-stack-workspace connect" in said[0]

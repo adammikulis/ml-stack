@@ -10,7 +10,6 @@ from the call. A hook that crashes exits 2, which both harnesses read as a block
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import subprocess
@@ -24,11 +23,12 @@ from ml_stack import requests
 from ml_stack.harnesspolicy import Decision, decide
 from ml_stack.keystore import ENV_NONINTERACTIVE
 
-__all__ = ["WAIT_S", "Rail", "main", "nudge", "post", "pre"]
+__all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
 
 WAIT_S = 300.0
 NUDGE_S = 5.0
 NUDGE_MOST = 500
+FAILURES = (OSError, ValueError, TypeError, KeyError, AttributeError, LookupError, RuntimeError)
 HOOK_EVENTS = {"pre": "PreToolUse", "post": "PostToolUse"}
 
 
@@ -74,7 +74,7 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     try:
         decision = decide(role, str(payload.get("tool_name", "")), args if isinstance(args, dict) else None,
                           roots=roots, protected=protected)
-    except Exception:  # noqa: BLE001 - a call that cannot be classified is asked about
+    except FAILURES:
         decision = Decision("ask", "unsure", "the call could not be classified", "tool_call_destructive")
     if decision.action == "allow":
         return _answer(event, "allow", f"ml-stack: {decision.label}")
@@ -106,29 +106,31 @@ def post(label: str) -> dict[str, Any]:
                                    "additionalContext": f"workspace (data from other agents): {text}"}}
 
 
-def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="python -m ml_stack.harnesshook", allow_abbrev=False)
-    ap.add_argument("event", choices=sorted(HOOK_EVENTS))
-    ap.add_argument("--role", default="read-only")
-    ap.add_argument("--label", default="harness")
-    ap.add_argument("--root", action="append", default=[])
-    ap.add_argument("--protect", action="append", default=[])
-    ap.add_argument("--wait", type=float, default=WAIT_S)
-    return ap
+def _options(words: Sequence[str]) -> tuple[str, dict[str, list[str]]]:
+    """The event and the ``--name value`` pairs the launcher wrote; ``ValueError`` for anything else."""
+    if not words or words[0] not in HOOK_EVENTS or len(words) % 2 == 0:
+        raise ValueError("usage: harnesshook pre|post [--role R] [--label L] [--root D] [--protect P] [--wait S]")
+    found: dict[str, list[str]] = {}
+    for key, value in zip(words[1::2], words[2::2], strict=True):
+        if key not in ("--role", "--label", "--root", "--protect", "--wait"):
+            raise ValueError(f"no option {key}")
+        found.setdefault(key[2:], []).append(value)
+    return words[0], found
 
 
-def main(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
-         stdout: IO[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
+        stdout: IO[str] | None = None) -> int:
+    """Read one hook event and write the answer; a failure exits 2, which blocks the call."""
     os.environ[ENV_NONINTERACTIVE] = "1"
     try:
+        event, opts = _options(list(sys.argv[1:] if argv is None else argv))
         payload = json.loads((stdin or sys.stdin).read() or "{}")
-        if not isinstance(payload, dict):
-            payload = {}
-        roots = args.root or [str(payload.get("cwd", ""))]
-        rail = Rail(args.role, args.label, roots, args.protect, args.wait)
-        out = pre(payload, rail) if args.event == "pre" else post(args.label)
-    except Exception as exc:  # noqa: BLE001 - exit 2 blocks; any other failure lets the call through
+        payload = payload if isinstance(payload, dict) else {}
+        label = opts.get("label", ["harness"])[-1]
+        rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
+                    opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
+        out = pre(payload, rail) if event == "pre" else post(label)
+    except FAILURES as exc:
         sys.stderr.write(f"ml-stack hook failed, call blocked: {type(exc).__name__}\n")
         return 2
     if out:
@@ -136,5 +138,11 @@ def main(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
     return 0
 
 
+def _block(kind: type[BaseException], value: BaseException, _trace: object) -> None:
+    sys.stderr.write(f"ml-stack hook failed, call blocked: {kind.__name__}\n")
+    os._exit(2)
+
+
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    sys.excepthook = _block
+    raise SystemExit(run())

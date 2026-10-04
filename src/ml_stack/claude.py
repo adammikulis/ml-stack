@@ -112,40 +112,9 @@ def alias_of(base_url: str, model: str) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-claude", allow_abbrev=False,
-        description="Claude Code on a model this machine serves, in the settings it scored best with. "
-                    "Everything after `--` goes to claude.",
-        usage="ml-stack-claude {MODEL | --on URL} [--port N] [--slots N] [--ctx N] [--role R] [--name L] [--as AGENT] [--no-profile] [--online] "
-              "[--claude PATH] [-- claude arguments]")
-    ap.add_argument("model", nargs="?", default="",
-                    help="the model file, a name ml-stack-models finds, or hf:owner/repo/file")
-    ap.add_argument("--on", metavar="URL", default="",
-                    help="a server already running, e.g. http://127.0.0.1:8080 -- claude "
-                         "talks to it as it stands and it is left running afterwards; "
-                         "nothing is served and no model is named")
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--slots", type=int, default=DEFAULT_SLOTS,
-                    help="conversations the server holds at once; one slot gets the whole "
-                         "measured cache (default: %(default)s)")
-    ap.add_argument("--ctx", type=int, default=harnessing.DEFAULT_CTX,
-                    help="tokens served in all, split across the slots (default: %(default)s)")
-    ap.add_argument("--role", default=harnessing.DEFAULT_ROLE,
-                    help="read-only, approve-first or plan-and-go: what the hooks let a call do "
-                         "(default: %(default)s)")
-    ap.add_argument("--name", default="", help="the workspace label (default: local-<model>)")
-    ap.add_argument("--as", dest="parent", default=harnessing.PARENT,
-                    help="the joined workspace agent this session acts for (default: %(default)s)")
-    ap.add_argument("--no-profile", action="store_true", help="serve the model bare")
-    ap.add_argument("--draft", default="auto", metavar="HEAD",
-                    help="the draft head that guesses tokens ahead for the model to check "
-                         "in one pass: 'auto' takes the smallest one on this machine, "
-                         "'none' serves without one, or name one of the heads offered "
-                         "(default: %(default)s)")
+    ap = harnessing.parser("claude", "Claude Code", DEFAULT_PORT, DEFAULT_SLOTS)
     ap.add_argument("--online", action="store_true",
                     help="leave Claude Code's telemetry and feature-flag calls on")
-    ap.add_argument("--claude", default="", metavar="PATH",
-                    help="the claude binary (default: the one on PATH)")
     return ap
 
 

@@ -27,7 +27,7 @@ from ml_stack.chatpolicy import READ_ONLY
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
 from ml_stack.log import say
 
-__all__ = ["config_toml", "environment", "launch", "main", "policy_flags"]
+__all__ = ["config_toml", "environment", "launch", "policy_flags"]
 
 PROVIDER = "mlstack"
 COMPACT_SHARE = 0.9
@@ -80,37 +80,13 @@ def environment(home: Path, base: Mapping[str, str] | None = None) -> dict[str, 
     return env
 
 
-def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-codex", allow_abbrev=False,
-        description="Codex on a model this machine serves. Everything after `--` goes to codex.",
-        usage="ml-stack-codex {MODEL | --on URL} [--port N] [--slots N] [--ctx N] [--role R] [--name L] "
-              "[--as AGENT] [--no-profile] [--draft HEAD] [--codex PATH] [-- codex arguments]")
-    ap.add_argument("model", nargs="?", default="",
-                    help=f"the model file or name (default: {harnessing.DEFAULT_MODEL})")
-    ap.add_argument("--on", metavar="URL", default="", help="a server already running; left running")
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--slots", type=int, default=DEFAULT_SLOTS)
-    ap.add_argument("--ctx", type=int, default=harnessing.DEFAULT_CTX,
-                    help="tokens served in all, split across the slots (default: %(default)s)")
-    ap.add_argument("--role", default=harnessing.DEFAULT_ROLE,
-                    help="read-only, approve-first or plan-and-go (default: %(default)s)")
-    ap.add_argument("--name", default="", help="the workspace label (default: local-<model>)")
-    ap.add_argument("--as", dest="parent", default=harnessing.PARENT,
-                    help="the joined workspace agent this session acts for (default: %(default)s)")
-    ap.add_argument("--no-profile", action="store_true", help="serve the model bare")
-    ap.add_argument("--draft", default="auto", metavar="HEAD", help="draft head: auto, none or a name")
-    ap.add_argument("--codex", default="", metavar="PATH", help="the codex binary (default: the one on PATH)")
-    return ap
-
-
 def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = say,
            run_codex: Callable[..., int] | None = None) -> int:
     """Lease the model, run ``codex`` inside the lease with this run's home, return its exit code."""
     words = list(sys.argv[1:] if argv is None else argv)
     ours, extra = (words[: words.index("--")], words[words.index("--") + 1:]) \
         if "--" in words else (words, [])
-    args = parser().parse_args(ours)
+    args = harnessing.parser("codex", "Codex", DEFAULT_PORT, DEFAULT_SLOTS).parse_args(ours)
     binary = args.codex or shutil.which("codex") or ""
     if not binary:
         say("error: no `codex` on PATH; install Codex or pass --codex PATH")
@@ -172,9 +148,5 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
         files.release()
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    return launch(argv)
-
-
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(launch())
