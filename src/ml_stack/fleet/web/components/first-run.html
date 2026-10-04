@@ -86,7 +86,11 @@
       const pass = el("input", { type: "password", id: "p1", value: st.pass,
                                  placeholder: "passphrase" });
       const grp = el("input", { type: "text", id: "g", value: st.group,
-                                placeholder: "name (optional)" });
+                                placeholder: "name of a new cluster" });
+      const pick = el("select", { id: "gpick" }, el("option", { value: "" }, "a new cluster"));
+      pick.onchange = () => { grp.hidden = !!pick.value; };
+      api("/ui/setup/clusters").then((r) => (r.found || []).filter((c) => !c.mine).forEach((c) =>
+        pick.append(el("option", { value: c.name }, `${c.name} - ${c.machines.join(", ")}`))));
       const add = el("button", { class: "ghost small" }, "Join");
 
       const remember = () => { st.pass = pass.value; st.group = grp.value.trim(); };
@@ -110,7 +114,7 @@
       add.onclick = async () => {
         add.disabled = true;
         note.replaceChildren(el("span", { class: "spin" }), " Joining…");
-        const named = grp.value.trim() || "ml-stack";
+        const named = pick.value || grp.value.trim() || "ml-stack";
         const r = await api("/ui/setup/join", { method: "POST",
           body: JSON.stringify({ passphrase: pass.value, group: named }) });
         if (!r.ok) {
@@ -118,7 +122,7 @@
           check();
           return;
         }
-        pass.value = grp.value = "";
+        pass.value = grp.value = pick.value = ""; grp.hidden = false;
         st.pass = st.group = "";
         check();
         note.textContent = "Type the same passphrase on your other machines. If you "
@@ -133,7 +137,7 @@
           "Machines that share a passphrase find each other and send each other work. "
           + "You can do this later instead — this one works on its own until you do."),
         rows,
-        el("div", { class: "searchrow" }, pass, grp, add),
+        el("div", { class: "searchrow" }, pick, grp, pass, add),
         note,
         el("button", { onclick: () => { remember(); this.go(2); } }, "Continue"));
 

@@ -88,6 +88,36 @@ current and when it last looked. A fleet half on one commit and half on another 
 thing those two columns exist to make visible -- `harrowgate` above is six days behind and
 following nothing, which is a machine somebody has to visit.
 
+### Choosing the cluster
+
+In a terminal, `join` looks for clusters before it asks for the passphrase: the ones this
+machine is already in and the ones daemons on the network offer to take a machine into. They
+are listed with the machines that hold each, and the person picks a number, types a name, or
+types `n` for a new cluster (enter takes `ml-stack` when none is found):
+
+```
+Clusters found:
+  1) lab - studio, larch
+  2) home - harrowgate
+  n) a new cluster
+  Pick a number, or type a name:
+```
+
+Picking a listed cluster asks for that cluster's passphrase once; a new name asks for a
+passphrase twice and makes the cluster. `--group NAME` (or `ML_STACK_CLUSTER`) names the
+cluster and skips the question, as does a passphrase from `--passphrase` or
+`ML_STACK_PASSPHRASE`; a process with no terminal or with `ML_STACK_NONINTERACTIVE` set is never
+asked and joins `ml-stack` when no name is given. `ml-stack-peers setup` asks the same way.
+`ml-stack-fleet clusters [--json]` prints the listing without joining. The first-run page and the
+Cluster view offer the discovered clusters in a select beside a field for a new name.
+
+A name is trimmed, 1 to 64 characters, and cannot contain `/`, `\` or control characters.
+
+Daemons find clusters with the same datagram that finds a cluster by name (`join?`): an empty
+group asks every cluster, and each daemon answers once per cluster it holds with the cluster's
+name, its own name and its port. The datagram is unsealed, so anyone on the network segment who
+asks learns those three things; it carries no key and no passphrase hash.
+
 ### Adding a machine that is next to you
 
 When the passphrase is not to hand, or the machine is a phone-sized job away, a machine that

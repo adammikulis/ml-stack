@@ -1,7 +1,7 @@
 {
- "surfaces": 611,
+ "surfaces": 613,
  "by_status": {
-  "covered": 298,
+  "covered": 300,
   "partial": 201,
   "uncovered": 54,
   "n/a": 58,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 46,
+   "covered": 48,
    "partial": 61,
    "uncovered": 0,
    "n/a": 0,
@@ -6501,6 +6501,19 @@
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
   {
+   "id": "route:fleet/routes.py:/ui/clusters/found",
+   "kind": "route",
+   "source": "fleet/routes.py:ClusterRoutes.route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_found_route.py::test_first_run_refuses_the_list_from_another_machine",
+    "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in"
+   ],
+   "note": ""
+  },
+  {
    "id": "route:fleet/routes.py:/ui/fit",
    "kind": "route",
    "source": "fleet/routes.py:PageRoutes.open_route",
@@ -6769,6 +6782,19 @@
     "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/setup/clusters",
+   "kind": "route",
+   "source": "fleet/routes.py:SetupRoutes.public_route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_found_route.py::test_first_run_refuses_the_list_from_another_machine",
+    "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in"
+   ],
+   "note": ""
   },
   {
    "id": "route:fleet/routes.py:/ui/setup/done",

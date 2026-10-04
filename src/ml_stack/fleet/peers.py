@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import sys
 from typing import Any
 
@@ -21,6 +22,7 @@ from .discovery import (
     key_path,
     load_cluster_key,
 )
+from .onboard.clusters import known_clusters, pick_cluster
 from .onboard.joining import join_by_passphrase
 
 DEFAULT_GROUP_NAME = "ml-stack"
@@ -67,15 +69,16 @@ def cmd_setup(args: argparse.Namespace) -> int:
     say("Run this on every machine, with the SAME passphrase. That is all it takes.")
     say()
 
-    group = args.group
-    if interactive and not args.group_given:
-        typed = input(f"  Group name [{DEFAULT_GROUP_NAME}]: ").strip()
-        group = typed or DEFAULT_GROUP_NAME
+    group, existing = args.group, False
+    if interactive and not args.group_given and not os.environ.get("ML_STACK_NONINTERACTIVE"):
+        say("  Looking for clusters on this network...", flush=True)
+        choice = pick_cluster(known_clusters(args.cluster_key))
+        group, existing = choice.name, choice.existing
 
     if args.passphrase:
         passphrase = args.passphrase
     elif interactive:
-        passphrase = _prompt_passphrase(confirm=True)
+        passphrase = _prompt_passphrase(confirm=not existing)
     else:
         passphrase = sys.stdin.readline()
         if not passphrase.strip():

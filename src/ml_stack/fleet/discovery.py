@@ -109,6 +109,26 @@ def check_length(passphrase: str) -> str:
     return passphrase
 
 
+MOST_GROUP_NAME = 64
+REFUSED_IN_NAME = "/\\"
+
+
+def check_name(name: str) -> str:
+    """``name`` trimmed, or `DiscoveryError` saying which rule it breaks."""
+    name = name.strip()
+    if not name:
+        raise DiscoveryError("A cluster name cannot be empty.")
+    if len(name) > MOST_GROUP_NAME:
+        raise DiscoveryError(f"A cluster name is at most {MOST_GROUP_NAME} characters; this one is {len(name)}.")
+    bad = sorted({c for c in name if c in REFUSED_IN_NAME or not c.isprintable()})
+    if bad:
+        shown = ", ".join(repr(c) for c in bad)
+        raise DiscoveryError(f"A cluster name cannot contain {shown}: the join handshake uses "
+                                  "slashes as separators and the memberships file cannot carry "
+                                  "control characters.")
+    return name
+
+
 def group_path(path: Path | str | None = None) -> Path:
     """Where the group name is recorded, beside the key."""
     return key_path(path).with_suffix(".group")
@@ -562,9 +582,14 @@ class Advertiser:
             self._asked.set()
 
     def _tell_join(self, sock: socket.socket, nonce: str, addr: tuple[str, int]) -> None:
-        """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
+        """Answer a machine asking to join this cluster: the port and scheme to shake hands on.
+
+        The datagram is unsealed, so anyone on the segment who asks learns the cluster's name,
+        this daemon's name and its port; no key material is in it.
+        """
         reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
-                            "port": self.beacon.port, "tls": bool(self.beacon.cert)})
+                            "name": self.beacon.name, "port": self.beacon.port,
+                            "tls": bool(self.beacon.cert)})
         with contextlib.suppress(OSError):
             sock.sendto(reply, addr)
 
@@ -582,13 +607,13 @@ class Advertiser:
 
 
 def _join_nonce(raw: bytes, group: str) -> str | None:
-    """The nonce of a plain datagram asking to join ``group``, or None for anything else."""
+    """The nonce of a plain datagram asking to join ``group`` or asking every cluster, else None."""
     try:
         msg = json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         return None
     if isinstance(msg, dict) and msg.get("v") == PROTOCOL and msg.get("kind") == "join?" \
-            and msg.get("group") == group:
+            and msg.get("group") in (group, ""):
         return str(msg.get("nonce", ""))[:64]
     return None
 
