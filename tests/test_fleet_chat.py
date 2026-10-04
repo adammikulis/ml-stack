@@ -65,7 +65,7 @@ def _free_port() -> int:
 @pytest.fixture
 def model_server():
     """A llama.cpp-shaped server that streams a reply a piece at a time."""
-    fake = FakeLlamaServer(Served(pieces=tuple(PIECES), gap=0.05))
+    fake = FakeLlamaServer(Served(model="qwen3-4b.gguf", pieces=tuple(PIECES), gap=0.05))
     try:
         yield fake.port
     finally:

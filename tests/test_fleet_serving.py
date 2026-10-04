@@ -54,7 +54,7 @@ class Running:
 @pytest.fixture
 def model():
     """A model server that streams a reply with real gaps between its pieces."""
-    m = FakeLlamaServer(Served(answer="hello", gap=0.25,
+    m = FakeLlamaServer(Served(model="qwen3-4b.gguf", answer="hello", gap=0.25,
                                pieces=tuple(f"tok{n}" for n in range(8))))
     try:
         yield m
@@ -74,6 +74,14 @@ def wired(tmp_path, model):
 
 
 class TestRegistry:
+    def test_recycled_port_reports_its_actual_model_and_prunes_dead_rows(self, tmp_path, model):
+        registry = Serving(tmp_path / "serving.json")
+        registry.register(model.port, ["stale-claim.gguf"])
+        registry.register(free_port(), ["dead-claim.gguf"])
+        live = registry.live(force=True)
+        assert [(one.port, one.models) for one in live] == [(model.port, ["qwen3-4b.gguf"])]
+        assert [(one.port, one.models) for one in registry.all()] == [(model.port, ["qwen3-4b.gguf"])]
+
     def test_a_registered_server_that_died_is_not(self, tmp_path, model):
         """Registration is a claim. A beacon advertising a model nobody can reach
         sends work to a dead port."""
