@@ -302,3 +302,6 @@ reportUndefinedVariable = "error"
 reportUnsupportedDunderAll = "error"
 reportUnusedCoroutine = "error"
 reportUnusedExcept = "error"
+
+[project.entry-points."ml_stack.ui_routes"]
+board = "ml_stack.workspace.fleet_routes:route"

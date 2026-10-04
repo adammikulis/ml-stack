@@ -12,7 +12,6 @@ from typing import Any
 from ml_stack.ui import assets as ui_assets
 
 from . import recovery
-from .board_routes import BoardRoutes
 from .conversation_routes import ConversationRoutes
 from .discovery import (
     DiscoveryError,
@@ -22,6 +21,7 @@ from .discovery import (
     memberships,
 )
 from .onboard.joining import join_by_passphrase
+from .extension_routes import ExtensionRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
 from .page import COMPONENTS, render
@@ -816,7 +816,7 @@ class JobRoutes:
 
 class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
              RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
-             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, BoardRoutes, Base):
+             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:
