@@ -78,6 +78,77 @@ _EXPORTS = {
     "writing": ("ml_stack.graph.access", "writing"),
 }
 
+DOCUMENT: Any
+HIERARCHY: Any
+QUERY: Any
+TASK: Any
+Answer: Any
+Asking: Any
+BatchedGraph: Any
+Change: Any
+CypherStore: Any
+Graph: Any
+GraphStore: Any
+GraphStoreUnavailable: Any
+LockError: Any
+NotADAG: Any
+Snapshot: Any
+SnapshotError: Any
+StoreNeedsUpgrade: Any
+WouldLoseTooMuch: Any
+apply: Any
+batch_graphs: Any
+census: Any
+clear_cache: Any
+concerns: Any
+converse: Any
+count_store: Any
+cycles: Any
+decompose_to_dags: Any
+degree: Any
+embedded: Any
+gather: Any
+geocode: Any
+holder: Any
+hybrid: Any
+kinds_of: Any
+lexical: Any
+look_around: Any
+look_at: Any
+look_up: Any
+normalize_by_degree: Any
+path_between: Any
+places_in: Any
+points: Any
+propagate: Any
+proposing: Any
+prune: Any
+quotes: Any
+reading: Any
+release_all: Any
+remember: Any
+render: Any
+replace: Any
+require_topological_order: Any
+resolvent_sweep: Any
+resting_on: Any
+restore: Any
+roll_back: Any
+rrf: Any
+scatter_mean: Any
+scatter_sum: Any
+smooth: Any
+snapshot: Any
+snapshots: Any
+superseded: Any
+take: Any
+tensors: Any
+tools_for: Any
+topological_order: Any
+world_outline: Any
+write_lock: Any
+writing: Any
+
 __all__ = [
     "DOCUMENT",
     "HIERARCHY",
