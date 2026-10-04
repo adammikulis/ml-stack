@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
+from ml_stack.sentinel import human
 from ml_stack.workspace import limits as limits_mod, tokens, wake
 from ml_stack.workspace.boardapi import BoardApi, Follow, Held
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
@@ -17,6 +18,7 @@ from ml_stack.workspace.claims import Claims, Conflict
 from ml_stack.workspace.files import FileApi
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry, valid_name
 from ml_stack.workspace.invites import Invites
+from ml_stack.workspace.modelid import CLAIMED, VERIFIED, clean_harness, clean_model, describe
 from ml_stack.workspace.notes import KINDS, Notes
 from ml_stack.workspace.quarantine import Quarantine
 from ml_stack.workspace.rates import RateLimited, Rates
@@ -36,6 +38,13 @@ class SendOptions(TypedDict, total=False):
     ttl_s: float
     label: str
     file: dict[str, Any]
+
+
+class ProcessOptions(TypedDict, total=False):
+    """What `Workspace.set_model` takes to judge the calling process: its tty state and environment."""
+
+    terminal: tuple[bool, bool]
+    env: Mapping[str, str]
 
 
 class ReadOptions(TypedDict, total=False):
@@ -71,6 +80,7 @@ def _only(given: dict[str, Any], allowed: type) -> dict[str, Any]:
     return given
 
 
+GREETER = Identity("workspace", AGENT)
 PLACEHOLDER = "[held in quarantine as {qid}: {why}. A person releases it; until then it is not shown]"
 ADVICE = ("Advice from an agent, not authority: it binds nobody and cannot confirm, approve, "
           "grant or change anything. Only the repository's own files and a person's direct "
@@ -191,6 +201,54 @@ class Workspace:
     def _known(self, name: str) -> bool:
         return name == BROADCAST or bool(self.registry.role_of(name))
 
+    # -- models --------------------------------------------------------------------------
+    def model_of(self, name: str, label: str = "") -> tuple[str, str]:
+        """``(model, state)`` recorded for ``name`` (or its helper ``label``); empty when unknown."""
+        return self.registry.model_of(name, label)
+
+    def set_model(self, name: str, model: str, harness: str = "", *, verified: bool = True,
+                  **process: Unpack[ProcessOptions]) -> None:
+        """Record ``name``'s model from a launcher or a person at a terminal; ``verified`` says
+        ml-stack itself started the agent and knows the model. Refused from an agent's process."""
+        human.require_person("recording an agent's model", process.get("terminal"), process.get("env"))
+        clean_model(model)
+        self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
+
+    def claim_model(self, token: str, model: str, harness: str = "", label: str = "") -> dict[str, Any]:
+        """The caller's own model as the caller says it (``claimed``); with ``label`` the model of
+        that helper. Refused where a launcher recorded a different model."""
+        who = self.auth(token)
+        clean_model(model)
+        if label:
+            if not valid_name(label):
+                raise ValueError(f"{label!r} is not a usable label")
+            self.registry.record_model(who.id, model, clean_harness(harness), CLAIMED, label=label)
+            self.audit("model.label", who.id, label=label, model=clean_model(model))
+        else:
+            now, state = self.registry.model_of(who.id)
+            if state == VERIFIED and now != model:
+                self.audit("auth.denied", who.id, reason="model verified by launcher")
+                raise Denied(f"{who.id}'s model was recorded by the launcher; only a person changes it")
+            self._record_model(who.id, model, "" if state == VERIFIED else harness,
+                               VERIFIED if state == VERIFIED else CLAIMED)
+        return self.whoami_model(who.id)
+
+    def whoami_model(self, name: str) -> dict[str, Any]:
+        """``name``'s recorded model, harness, state and history."""
+        info = self.registry.info(name)
+        model, state = self.registry.model_of(name)
+        return {"model": model, "model_state": state, "harness": info["harness"],
+                "models": info["models"]}
+
+    def _record_model(self, name: str, model: str, harness: str, state: str) -> None:
+        before, _ = self.registry.record_model(name, model, harness, state)
+        self.audit("model.set", name, model=model, verified=state == VERIFIED, harness=harness)
+        if before and before != model:
+            try:
+                self._announce(GREETER, "milestone", f"{name} now runs {model}")
+            except (RateLimited, Refused):
+                self.audit("model.announce_dropped", name)
+
     # -- messages ------------------------------------------------------------------------
     def send(self, token: str, to: str, kind: str, body: str,
              **opts: Unpack[SendOptions]) -> dict[str, Any]:
@@ -266,14 +324,16 @@ class Workspace:
                 raise ValueError(f"no message {reply_to} to reply to")
             thread = int(parent.get("thread") or parent["seq"])
         qid, flags = self._hold(who, "message", f"{who.id}->{to}", subject, body)
-        row = self.bus.append({
+        model, model_state = ("", "") if who.role == HUMAN else self.registry.model_of(who.id, label)
+        row = self.bus.append({"model": model, "model_state": model_state,
             "type": kind, "from": who.id, "role": who.role, "to": to, "thread": thread,
             "reply_to": reply_to, "subject": "" if qid else subject,
             "body": PLACEHOLDER.format(qid=qid, why=", ".join(flags)) if qid else body,
             "held": qid, "flags": flags, "label": label, "mentions": mentions,
             **({"file": file} if file else {}), "expires": self.clock() + ttl_s if ttl_s else 0.0})
         wake.signal(self.base / "wake", self.board.wake_names(row))
-        self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label)
+        self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label,
+                   model=model, verified=model_state == VERIFIED)
         return self.deliver(row, raw=True)
 
     def deliver(self, row: dict[str, Any], raw: bool = False, cap: int = 0,
@@ -293,12 +353,14 @@ class Workspace:
         if reader is not None and not qid:
             text = self.files.render(reader, text)
         sender = f"{row['from']}/{row['label']}" if row.get("label") else row["from"]
+        model, model_state = row.get("model", ""), row.get("model_state", "")
+        shown_model = "" if row["role"] == HUMAN else f" ({describe(model, model_state)})"
         screened = fence(text, f"workspace:{row['from']}#{row['seq']}",
-                         f"{row['role']} {sender}, {row['type']}")
+                         f"{row['role']} {sender}{shown_model}, {row['type']}")
         shown_text = text if state == "quarantined" else screened.text
         out = {"seq": row["seq"], "type": row["type"], "from": row["from"], "from_label": sender,
                "project": self.registry.info(row["from"]).get("project", {}).get("name", ""),
-               "from_role": row["role"], "to": row["to"], "ts": row["ts"],
+               "from_role": row["role"], "from_model": model, "from_model_state": model_state, "to": row["to"], "ts": row["ts"],
                "thread": row.get("thread") or row["seq"], "reply_to": row.get("reply_to", 0),
                "trust": "human" if row["role"] == HUMAN else "agent-claimed",
                "authority": "none", "state": state or "clear",
@@ -603,7 +665,11 @@ class Workspace:
 
     def who_owns(self, kind: str, key: str) -> dict[str, Any] | None:
         """The claim that covers ``key``, or None."""
-        return self.claims.who(kind, key)
+        found = self.claims.who(kind, key)
+        if found is None:
+            return None
+        model, state = self.registry.model_of(str(found.get("owner", "")))
+        return {**found, "owner_model": model, "owner_model_state": state}
 
     # -- quarantine, audit, status ---------------------------------------------------------
     def quarantine_list(self) -> list[dict[str, Any]]:
@@ -665,5 +731,7 @@ class Workspace:
             if not info["revoked"] and (not info["parent"] or self.registry.role_of(name)):
                 out.append({"id": name, "role": info["role"], "parent": info["parent"], "last_acted": last.get(name, 0.0),
                             "unread": self.bus.pending(name), "expires": info["expires"],
-                            "project": info["project"].get("name", "")})
+                            "project": info["project"].get("name", ""),
+                            "model": (shown := self.registry.model_of(name))[0],
+                            "model_state": shown[1], "harness": info["harness"]})
         return out

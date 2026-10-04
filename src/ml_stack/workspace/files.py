@@ -308,8 +308,9 @@ class FileApi:
                     "name": meta["name"], "note": note, "text": indexed, "state": "clear",
                     "qid": meta["held"]}})
             g.upsert_node({"id": f"agent:{who.id}", "kind": "agent", "label": who.id})
+            model, state = self.ws.model_of(who.id)
             g.upsert_edge({"source": node, "target": f"agent:{who.id}", "rel": "posted_by",
-                           "model": "agent-claimed"})
+                           "trust": "agent-claimed", "model": model, "model_state": state})
             self._place(g, node, p, project)
             if source:
                 if not g.has(source):

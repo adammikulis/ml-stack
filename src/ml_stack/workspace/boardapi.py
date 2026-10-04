@@ -140,7 +140,9 @@ class BoardApi:
                 "subject": plain.line(row["subject"], self.ws.limits.subject_chars), "body": body,
                 "held": bool(row["held"]), "truncated": cut,
                 **({"file": {k: row["file"][k] for k in ("id", "name", "size", "type", "text")}}
-                   if row.get("file") else {})}
+                   if row.get("file") else {}),
+                "model": "" if row["role"] == "human" else row.get("model", ""),
+                "model_state": "" if row["role"] == "human" else row.get("model_state", "")}
 
     # -- boards ---------------------------------------------------------------------------
     def list(self, token: str) -> list[dict[str, Any]]:

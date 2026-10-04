@@ -15,6 +15,14 @@ from typing import Any
 
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
+from ml_stack.workspace.modelid import (
+    CLAIMED,
+    HISTORY_MAX,
+    INHERITED,
+    VERIFIED,
+    clean_harness,
+    clean_model,
+)
 
 __all__ = [
     "AGENT",
@@ -37,7 +45,7 @@ MINTS = {HUMAN: frozenset(ROLES), LEAD: frozenset({AGENT}), AGENT: frozenset()}
 AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 RESERVED = frozenset({"*", "all", "everyone", "workspace", "system", "human", "owner-token"})
 NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
-VERSION = 1
+VERSION = 2
 CAPS = ("send", "read", "claim")
 """What a delegated identity may be allowed to do; a top-level identity holds all of them."""
 
@@ -86,7 +94,12 @@ class Registry:
     def _load(self) -> dict[str, dict[str, Any]]:
         data = read_json(self.path, {})
         agents = data.get("agents") if isinstance(data, dict) else None
-        return dict(agents) if isinstance(agents, dict) else {}
+        if not isinstance(agents, dict):
+            return {}
+        if int(data.get("version", 1)) < 2:
+            agents = {n: {"model": "", "harness": "", "model_state": "", "models": [], **e}
+                      for n, e in agents.items()}
+        return dict(agents)
 
     def _save(self, agents: Mapping[str, Any]) -> None:
         write_json(self.path, {"version": VERSION, "agents": dict(agents)})
@@ -101,7 +114,61 @@ class Registry:
         entry = self._load().get(name, {})
         return {"role": str(entry.get("role", "")), "expires": float(entry.get("expires", 0.0)),
                 "revoked": bool(entry.get("revoked", not entry)), "parent": entry.get("parent", ""),
-                "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {}))}
+                "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {})),
+                "model": str(entry.get("model", "")), "harness": str(entry.get("harness", "")),
+                "model_state": str(entry.get("model_state", "")),
+                "models": list(entry.get("models", [])),
+                "label_models": dict(entry.get("label_models", {}))}
+
+    def model_of(self, name: str, label: str = "") -> tuple[str, str]:
+        """``(model, state)`` shown for ``name`` (and its helper ``label``): the label's own
+        model, else the identity's own, else its parent's marked inherited; ``("", "")`` when none."""
+        agents = self._load()
+        entry = agents.get(name, {})
+        if label and entry.get("label_models", {}).get(label):
+            return str(entry["label_models"][label]), CLAIMED
+        if entry.get("model"):
+            return str(entry["model"]), INHERITED if label else str(entry.get("model_state") or CLAIMED)
+        parent = agents.get(str(entry.get("parent") or (name.partition("/")[0] if "/" in name else "")), {})
+        if label and parent.get("label_models", {}).get(label):
+            return str(parent["label_models"][label]), CLAIMED
+        if parent.get("model") and (label or "/" in name):
+            return str(parent["model"]), INHERITED
+        return "", ""
+
+    def record_model(self, name: str, model: str, harness: str, state: str, *,
+                     label: str = "") -> tuple[str, str]:
+        """Write ``name``'s model (or its helper ``label``'s) and return the ``(model, state)``
+        it held before; appends to the history when the model or its state changed. No
+        permission check here: callers decide who may."""
+        if state not in (VERIFIED, CLAIMED):
+            raise ValueError(f"a recorded model is {VERIFIED} or {CLAIMED}")
+        model, harness = clean_model(model) if model else "", clean_harness(harness)
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            entry = agents.get(name)
+            if entry is None or entry.get("revoked"):
+                raise ValueError(f"no agent called {name}")
+            if label:
+                if len(entry.setdefault("label_models", {})) >= 20 and label not in entry["label_models"]:
+                    raise ValueError("an agent keeps at most 20 helper models")
+                entry["label_models"][label] = model
+                self._save(agents)
+                return "", ""
+            before = (str(entry.get("model", "")), str(entry.get("model_state", "")))
+            if not model:
+                entry["harness"] = harness
+                self._save(agents)
+                return before
+            entry["model"], entry["model_state"] = model, state
+            if harness:
+                entry["harness"] = harness
+            if before != (model, state):
+                history = [*entry.get("models", []), {"model": model, "verified": state == VERIFIED,
+                                                      "since": self.clock()}]
+                entry["models"] = history[-HISTORY_MAX:]
+            self._save(agents)
+            return before
 
     def _live(self, agents: Mapping[str, Any], entry: Mapping[str, Any] | None) -> bool:
         if not entry or entry.get("revoked"):

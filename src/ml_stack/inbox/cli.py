@@ -44,7 +44,7 @@ def line(request: Request, now: float) -> str:
 def render(request: Request) -> list[str]:
     """Every word of a request, as a person is shown it before answering."""
     rows = [f"{request.id}  {request.state}  {request.kind}",
-            f"from:    {request.raised_by.agent or '-'}  project {request.raised_by.project or '-'}",
+            f"from:    {request.raised_by.who or '-'}  project {request.raised_by.project or '-'}",
             f"about:   {request.subject}", f"because: {request.reason}"]
     rows += [f"  {c.id:<14} {c.label}: {c.effect}" for c in request.choices]
     if request.human_only:
