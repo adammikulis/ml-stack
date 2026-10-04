@@ -1,7 +1,7 @@
 {
- "surfaces": 571,
+ "surfaces": 569,
  "by_status": {
-  "covered": 264,
+  "covered": 262,
   "partial": 202,
   "uncovered": 54,
   "n/a": 51,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 29,
+   "covered": 28,
    "partial": 46,
    "uncovered": 0,
    "n/a": 0,
@@ -65,7 +65,7 @@
    "unmapped": 0
   },
   "listener": {
-   "covered": 2,
+   "covered": 1,
    "partial": 5,
    "uncovered": 0,
    "n/a": 8,
@@ -2300,21 +2300,6 @@
    "note": ""
   },
   {
-   "id": "egress:workspace/boardroute.py:serve",
-   "kind": "egress",
-   "source": "workspace/boardroute.py:serve",
-   "trust": "addresses and redirects named by pages, repositories and peers",
-   "attacker": "a redirect or address sends the request somewhere the person did not choose",
-   "status": "covered",
-   "tests": [
-    "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
-    "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
-    "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
-    "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site"
-   ],
-   "note": "the read-only loopback route, board and conversation privacy, board and subscription caps, a person's board membership"
-  },
-  {
    "id": "handler:fleet/api.py:Handler",
    "kind": "handler",
    "source": "fleet/api.py:Handler",
@@ -3292,21 +3277,6 @@
    "status": "n/a",
    "tests": [],
    "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
-  },
-  {
-   "id": "listener:workspace/cli.py:_board_serve",
-   "kind": "listener",
-   "source": "workspace/cli.py:_board_serve",
-   "trust": "anything that can connect to the address",
-   "attacker": "an unauthenticated or cross-origin client reaches the port",
-   "status": "covered",
-   "tests": [
-    "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
-    "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
-    "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
-    "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site"
-   ],
-   "note": "the read-only loopback route, board and conversation privacy, board and subscription caps, a person's board membership"
   },
   {
    "id": "mcp-tool:bench_history",
