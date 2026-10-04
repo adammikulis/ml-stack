@@ -15,6 +15,7 @@ from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.claims import Claims, Conflict
+from ml_stack.workspace.files import FileApi
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry, valid_name
 from ml_stack.workspace.invites import Invites
 from ml_stack.workspace.modelid import CLAIMED, VERIFIED, clean_harness, clean_model, describe
@@ -36,6 +37,7 @@ class SendOptions(TypedDict, total=False):
     reply_to: int
     ttl_s: float
     label: str
+    file: dict[str, Any]
 
 
 class ProcessOptions(TypedDict, total=False):
@@ -107,6 +109,7 @@ class Workspace:
         self.claims = Claims(self.base, self.limits.claim_ttl_s, clock, self._swept,
                              self._stolen)
         self.board = BoardApi(self)
+        self.files = FileApi(self)
 
     def _may(self, who: Identity, cap: str) -> None:
         if cap not in who.can:
@@ -250,6 +253,8 @@ class Workspace:
     def send(self, token: str, to: str, kind: str, body: str,
              **opts: Unpack[SendOptions]) -> dict[str, Any]:
         """Append a message from the token's owner; returns it as the sender sees it."""
+        if kind == "file" or "file" in opts:
+            raise Refused("a file message is made by `attach`")
         return self.post(self.auth(token), to, kind, body, **opts)
 
     def announce(self, token: str, kind: str, text: str, label: str = "") -> dict[str, Any]:
@@ -279,7 +284,7 @@ class Workspace:
         """Append a message from ``who``, an identity the caller has already established."""
         self._may(who, "send")
         given = _only(dict(opts), SendOptions)
-        label = str(given.get("label", ""))
+        label, file = str(given.get("label", "")), given.get("file")
         if label and not valid_name(label):
             raise ValueError(f"{label!r} is not a usable label")
         if to == BROADCAST:
@@ -290,6 +295,8 @@ class Workspace:
             return self._announce(who, kind, body, label)
         subject, reply_to, ttl_s = (given.get("subject", ""), int(given.get("reply_to", 0)),
                                     float(given.get("ttl_s", 0.0)))
+        if kind == "file" and file is None:
+            raise Refused("a file message is made by `attach`")
         if kind not in TYPES and not announce:
             raise ValueError(f"type must be one of {', '.join(TYPES)}")
         mentions: list[str] = []
@@ -323,13 +330,14 @@ class Workspace:
             "reply_to": reply_to, "subject": "" if qid else subject,
             "body": PLACEHOLDER.format(qid=qid, why=", ".join(flags)) if qid else body,
             "held": qid, "flags": flags, "label": label, "mentions": mentions,
-            "expires": self.clock() + ttl_s if ttl_s else 0.0})
+            **({"file": file} if file else {}), "expires": self.clock() + ttl_s if ttl_s else 0.0})
         wake.signal(self.base / "wake", self.board.wake_names(row))
         self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label,
                    model=model, verified=model_state == VERIFIED)
         return self.deliver(row, raw=True)
 
-    def deliver(self, row: dict[str, Any], raw: bool = False, cap: int = 0) -> dict[str, Any]:
+    def deliver(self, row: dict[str, Any], raw: bool = False, cap: int = 0,
+                reader: Identity | None = None) -> dict[str, Any]:
         """A message as a reader gets it: fenced as untrusted data, never as an instruction.
         With ``cap`` the body is cut to that many characters and says where the rest is."""
         row = self._cut(row, cap)
@@ -342,6 +350,8 @@ class Workspace:
             text = row["body"]
         else:
             text = f"subject: {row['subject']}\n{row['body']}" if row["subject"] else row["body"]
+        if reader is not None and not qid:
+            text = self.files.render(reader, text)
         sender = f"{row['from']}/{row['label']}" if row.get("label") else row["from"]
         model, model_state = row.get("model", ""), row.get("model_state", "")
         shown_model = "" if row["role"] == HUMAN else f" ({describe(model, model_state)})"
@@ -368,7 +378,7 @@ class Workspace:
         return {**row, "body": f"{row['body'][:cap]}…({more} more chars; thread {row['seq']})"}
 
     def _present(self, found: list[dict[str, Any]], limit: int, widen: bool,
-                 raw: bool) -> Held:
+                 raw: bool, reader: Identity | None = None) -> Held:
         """``found`` as the reader gets it. By default at most ``read_items`` messages, each cut
         to ``read_item_chars`` and ``read_total_chars`` in all; an explicit ``limit`` or
         ``widen`` lifts the character cuts (and the count when ``widen``). ``.held`` is how many
@@ -378,7 +388,7 @@ class Workspace:
         take = len(found) if widen else limit if limit > 0 else lim.read_items
         out, used = Held(), 0
         for r in found[:take]:
-            shown = self.deliver(r, raw, 0 if wide else lim.read_item_chars)
+            shown = self.deliver(r, raw, 0 if wide else lim.read_item_chars, reader)
             if not wide and out and used + len(shown["text"]) > lim.read_total_chars:
                 break
             used += len(shown["text"])
@@ -392,7 +402,7 @@ class Workspace:
         read. A bounded few by default; ``.held`` counts the rest."""
         who = self.auth(token)
         self._may(who, "read")
-        out = self._present(self._unread(who, 1 << 30), limit, widen, raw)
+        out = self._present(self._unread(who, 1 << 30), limit, widen, raw, who)
         if ack and out:
             self.bus.ack(who.id, out[-1]["seq"])
         return out
@@ -466,7 +476,7 @@ class Workspace:
         """The last messages the token's owner sent."""
         who = self.auth(token)
         self._may(who, "read")
-        return [self.deliver(r, raw=True) for r in self.bus.outbox(who.id, limit)]
+        return [self.deliver(r, raw=True, reader=who) for r in self.bus.outbox(who.id, limit)]
 
     def wait(self, token: str, timeout_s: float, ack: bool = False, raw: bool = False,
              cancel: Callable[[], bool] | None = None, **opts: Unpack[ReadOptions]) -> Held:
@@ -485,7 +495,7 @@ class Workspace:
         finally:
             waiter.close()
         given = _only(dict(opts), ReadOptions)
-        out = self._present(found, int(given.get("limit", 0)), bool(given.get("widen", False)), raw)
+        out = self._present(found, int(given.get("limit", 0)), bool(given.get("widen", False)), raw, who)
         if ack and out:
             self.bus.ack(who.id, out[-1]["seq"])
         return out
@@ -506,7 +516,7 @@ class Workspace:
         take = len(rows) if widen else limit if limit > 0 else self.limits.read_items
         kept = rows if len(rows) <= take else [rows[0], *rows[-(take - 1):]] if take > 1 else rows[:1]
         cap = 0 if widen else self.limits.board_message_chars
-        out = Held(self.deliver(r, cap=cap) for r in kept)
+        out = Held(self.deliver(r, cap=cap, reader=who) for r in kept)
         out.held = len(rows) - len(out)
         return out
 
@@ -692,6 +702,7 @@ class Workspace:
             raise Denied("only a lead or human token runs gc")
         done = {"messages": self.bus.prune(self.limits.retention_s),
                 "scratch": self.scratch.collect(), "claims": len(self.claims.listing())}
+        done["files"] = self.files.sweep(who)
         self.audit("gc", who.id, messages=done["messages"], scratch=len(done["scratch"]))
         return done
 

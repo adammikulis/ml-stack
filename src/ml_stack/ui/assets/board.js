@@ -1,6 +1,6 @@
 /* <ml-board endpoint="/board">: the workspace's boards, threads and direct conversations, with a live feed and the person's composer (`readonly` removes it).
    Every string from the route is shown as text after control and bidirectional characters are
-   removed; nothing is parsed as markup and no link is made. The page holds no token. */
+   removed; nothing is parsed as markup and the only link is a file's download (an attachment, never shown inline). The page holds no token. */
 import { MlElement, define, h } from "./base.js";
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
@@ -294,6 +294,10 @@ class MlBoard extends MlElement {
         h("span", { class: "meta" }, `  ${line(m.type, 16)}, ${when(m.ts)}${m.held ? ", held in quarantine" : ""}`)),
       m.subject ? h("div", { class: "meta" }, line(m.subject)) : null,
       h("pre", {}, body(m.body)),
+      m.file && /^[0-9a-f]{12}$/.test(String(m.file.id))
+        ? h("a", { class: "file", href: `${this.base()}/file?id=${m.file.id}`, download: "",
+          rel: "noopener" }, m.file.text ? `Download ${line(m.file.name, 80)} (text)` : `Details of ${line(m.file.name, 80)}`)
+        : null,
       m.truncated ? h("div", { class: "cut" }, "Shortened for display.") : null));
   }
 }

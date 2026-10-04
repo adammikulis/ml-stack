@@ -7,7 +7,9 @@ workspace's own owner token file.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -105,6 +107,8 @@ def respond(ws: Workspace, req: Request) -> Reply:
         route = parts.path[len(PREFIX):]
         if req.method == "POST":
             return _json(200, _post(ws, token, req.body))
+        if route == "file":
+            return _file(ws, token, query)
         return _json(200, _answer(api, token, route, query))
     except Denied as err:
         return _json(403, {"error": plain.line(err, 200)})
@@ -112,6 +116,19 @@ def respond(ws: Workspace, req: Request) -> Reply:
         return _json(400, {"error": plain.line(err, 200)})
     except RateLimited as err:
         return _json(429, {"error": plain.line(err, 200)})
+
+
+def _file(ws: Workspace, token: str, query: Mapping[str, list[str]]) -> Reply:
+    """A file for the person: plain text as a download, never rendered; a binary file as its
+    name, size and hash only."""
+    meta, data = ws.files.content_for_person(token, (query.get("id") or [""])[0])
+    if not meta["text"]:
+        return _json(200, {"name": plain.line(meta["name"], 80), "size": meta["size"],
+                           "type": meta["type"], "sha256": hashlib.sha256(data).hexdigest()})
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", str(meta["name"]))[:80] or "file"
+    activity.record("board.file", subject=meta["id"], meta={"size": meta["size"]})
+    return 200, {**SAFE, "Content-Type": "text/plain; charset=utf-8",
+                 "Content-Disposition": f'attachment; filename="{name}.txt"'}, data
 
 
 def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) -> Any:

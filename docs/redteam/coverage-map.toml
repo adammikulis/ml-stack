@@ -14,6 +14,47 @@
 uncovered = 54
 partial = 202
 
+# -- files on the board ---------------------------------------------------------------------
+[[group]]
+match = ["human:workspace/files.py:*"]
+status = "covered"
+tests = [
+  "tests/test_workspace_files.py::test_only_a_person_deletes_and_the_content_is_shredded",
+  "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+  "tests/test_workspace_files.py::test_the_person_downloads_text_as_an_attachment_and_never_sees_it_rendered",
+]
+count = 3
+note = "an agent tries to delete a file, read a held file or fetch one unfenced"
+
+[[group]]
+match = ["mcp-tool:workspace_attach", "mcp-tool:workspace_file", "mcp-tool:workspace_file_save",
+         "mcp-tool:workspace_file_search"]
+status = "covered"
+tests = [
+  "tests/test_workspace_files.py::test_a_file_is_read_only_by_those_who_may_read_its_message",
+  "tests/test_workspace_files.py::test_a_direct_message_file_is_private_to_the_pair_and_the_person",
+  "tests/test_workspace_files.py::test_search_never_returns_what_the_caller_may_not_read",
+  "tests/test_workspace_files.py::test_executables_archives_and_pickles_are_refused",
+  "tests/test_workspace_files.py::test_hostile_names_are_cleaned_to_one_plain_name",
+  "tests/test_workspace_files.py::test_out_refuses_paths_that_leave_the_worktree",
+  "tests/test_workspace_files.py::test_out_refuses_symlinks_and_never_overwrites",
+  "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+  "tests/test_workspace_files.py::test_an_unreadable_keystore_posts_nothing_and_reads_nothing",
+]
+count = 4
+note = "file names, notes, text and snippets are agent text: fenced, bounded, access-checked, never executed"
+
+[[group]]
+match = ["parser:workspace/filestore.py"]
+status = "covered"
+tests = [
+  "tests/test_workspace_files.py::test_a_wrong_key_cannot_read_the_content",
+  "tests/test_workspace_files.py::test_the_graph_snapshot_carries_a_schema_version",
+  "tests/test_workspace_files.py::test_the_content_is_never_plaintext_on_disk_and_the_message_carries_only_the_handle",
+]
+count = 1
+note = "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
+
 # -- the human-only floor ------------------------------------------------------------------
 [[group]]
 match = ["human:*"]

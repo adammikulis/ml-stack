@@ -61,6 +61,15 @@ class Limits:
     unread_per_sender: int = 100
     mints_per_identity: int = 16
     agents_live: int = 64
+    file_bytes: int = 2 * 1024 * 1024
+    file_bytes_per_hour: int = 20 * 1024 * 1024
+    files_per_board: int = 200
+    file_name_chars: int = 80
+    file_note_chars: int = 200
+    file_text_chars: int = 4_000
+    file_search_results: int = 10
+    file_snippet_chars: int = 120
+    file_index_chars: int = 20_000
     verify_allow: list[list[str]] = field(default_factory=list)
 
 

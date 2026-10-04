@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from ml_stack.workspace import Workspace
 
@@ -59,11 +60,11 @@ def run_python(code: str, base: Path, token: str = "", *args: str,
 
 
 def cli(base: Path, token: str, *argv: str, env_extra: dict[str, str] | None = None,
-        timeout: float = 60) -> subprocess.CompletedProcess[str]:
+        timeout: float = 60, **run: Any) -> subprocess.CompletedProcess[str]:
     """Run ``ml-stack workspace`` as a subprocess."""
     env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
     env.update({"ML_STACK_WORKSPACE_HOME": str(base), "PYTHONPATH": SRC, **(env_extra or {})})
     if token:
         env["ML_STACK_WORKSPACE_TOKEN"] = token
     return subprocess.run([sys.executable, "-m", "ml_stack.workspace.cli", *argv], env=env,
-                          capture_output=True, text=True, timeout=timeout, check=False)
+                          capture_output=True, text=True, timeout=timeout, check=False, **run)

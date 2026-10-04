@@ -1,7 +1,7 @@
 {
- "surfaces": 591,
+ "surfaces": 600,
  "by_status": {
-  "covered": 280,
+  "covered": 289,
   "partial": 202,
   "uncovered": 54,
   "n/a": 55,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 55,
+   "covered": 58,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -72,14 +72,14 @@
    "unmapped": 0
   },
   "mcp-tool": {
-   "covered": 20,
+   "covered": 24,
    "partial": 19,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
   },
   "parser": {
-   "covered": 45,
+   "covered": 47,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -3249,6 +3249,48 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/files.py:FileApi._unheld",
+   "kind": "human",
+   "source": "workspace/files.py:FileApi._unheld",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_only_a_person_deletes_and_the_content_is_shredded",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_the_person_downloads_text_as_an_attachment_and_never_sees_it_rendered"
+   ],
+   "note": "an agent tries to delete a file, read a held file or fetch one unfenced"
+  },
+  {
+   "id": "human:workspace/files.py:FileApi.content_for_person",
+   "kind": "human",
+   "source": "workspace/files.py:FileApi.content_for_person",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_only_a_person_deletes_and_the_content_is_shredded",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_the_person_downloads_text_as_an_attachment_and_never_sees_it_rendered"
+   ],
+   "note": "an agent tries to delete a file, read a held file or fetch one unfenced"
+  },
+  {
+   "id": "human:workspace/files.py:FileApi.delete",
+   "kind": "human",
+   "source": "workspace/files.py:FileApi.delete",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_only_a_person_deletes_and_the_content_is_shredded",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_the_person_downloads_text_as_an_attachment_and_never_sees_it_rendered"
+   ],
+   "note": "an agent tries to delete a file, read a held file or fetch one unfenced"
+  },
+  {
    "id": "human:workspace/guide.py:connect",
    "kind": "human",
    "source": "workspace/guide.py:connect",
@@ -4125,6 +4167,26 @@
    "note": ""
   },
   {
+   "id": "mcp-tool:workspace_attach",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_attach",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_a_file_is_read_only_by_those_who_may_read_its_message",
+    "tests/test_workspace_files.py::test_a_direct_message_file_is_private_to_the_pair_and_the_person",
+    "tests/test_workspace_files.py::test_search_never_returns_what_the_caller_may_not_read",
+    "tests/test_workspace_files.py::test_executables_archives_and_pickles_are_refused",
+    "tests/test_workspace_files.py::test_hostile_names_are_cleaned_to_one_plain_name",
+    "tests/test_workspace_files.py::test_out_refuses_paths_that_leave_the_worktree",
+    "tests/test_workspace_files.py::test_out_refuses_symlinks_and_never_overwrites",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_an_unreadable_keystore_posts_nothing_and_reads_nothing"
+   ],
+   "note": "file names, notes, text and snippets are agent text: fenced, bounded, access-checked, never executed"
+  },
+  {
    "id": "mcp-tool:workspace_audit_verify",
    "kind": "mcp-tool",
    "source": "mcp.py:workspace_audit_verify",
@@ -4171,6 +4233,66 @@
     "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_file",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_file",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_a_file_is_read_only_by_those_who_may_read_its_message",
+    "tests/test_workspace_files.py::test_a_direct_message_file_is_private_to_the_pair_and_the_person",
+    "tests/test_workspace_files.py::test_search_never_returns_what_the_caller_may_not_read",
+    "tests/test_workspace_files.py::test_executables_archives_and_pickles_are_refused",
+    "tests/test_workspace_files.py::test_hostile_names_are_cleaned_to_one_plain_name",
+    "tests/test_workspace_files.py::test_out_refuses_paths_that_leave_the_worktree",
+    "tests/test_workspace_files.py::test_out_refuses_symlinks_and_never_overwrites",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_an_unreadable_keystore_posts_nothing_and_reads_nothing"
+   ],
+   "note": "file names, notes, text and snippets are agent text: fenced, bounded, access-checked, never executed"
+  },
+  {
+   "id": "mcp-tool:workspace_file_save",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_file_save",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_a_file_is_read_only_by_those_who_may_read_its_message",
+    "tests/test_workspace_files.py::test_a_direct_message_file_is_private_to_the_pair_and_the_person",
+    "tests/test_workspace_files.py::test_search_never_returns_what_the_caller_may_not_read",
+    "tests/test_workspace_files.py::test_executables_archives_and_pickles_are_refused",
+    "tests/test_workspace_files.py::test_hostile_names_are_cleaned_to_one_plain_name",
+    "tests/test_workspace_files.py::test_out_refuses_paths_that_leave_the_worktree",
+    "tests/test_workspace_files.py::test_out_refuses_symlinks_and_never_overwrites",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_an_unreadable_keystore_posts_nothing_and_reads_nothing"
+   ],
+   "note": "file names, notes, text and snippets are agent text: fenced, bounded, access-checked, never executed"
+  },
+  {
+   "id": "mcp-tool:workspace_file_search",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_file_search",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_a_file_is_read_only_by_those_who_may_read_its_message",
+    "tests/test_workspace_files.py::test_a_direct_message_file_is_private_to_the_pair_and_the_person",
+    "tests/test_workspace_files.py::test_search_never_returns_what_the_caller_may_not_read",
+    "tests/test_workspace_files.py::test_executables_archives_and_pickles_are_refused",
+    "tests/test_workspace_files.py::test_hostile_names_are_cleaned_to_one_plain_name",
+    "tests/test_workspace_files.py::test_out_refuses_paths_that_leave_the_worktree",
+    "tests/test_workspace_files.py::test_out_refuses_symlinks_and_never_overwrites",
+    "tests/test_workspace_files.py::test_injection_text_is_held_until_a_person_releases_it",
+    "tests/test_workspace_files.py::test_an_unreadable_keystore_posts_nothing_and_reads_nothing"
+   ],
+   "note": "file names, notes, text and snippets are agent text: fenced, bounded, access-checked, never executed"
   },
   {
    "id": "mcp-tool:workspace_heartbeat",
@@ -5483,6 +5605,20 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/filestore.py",
+   "kind": "parser",
+   "source": "workspace/filestore.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_files.py::test_a_wrong_key_cannot_read_the_content",
+    "tests/test_workspace_files.py::test_the_graph_snapshot_carries_a_schema_version",
+    "tests/test_workspace_files.py::test_the_content_is_never_plaintext_on_disk_and_the_message_carries_only_the_handle"
+   ],
+   "note": "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
+  },
+  {
    "id": "parser:workspace/notes.py",
    "kind": "parser",
    "source": "workspace/notes.py",
@@ -5551,6 +5687,19 @@
    "id": "parser:workspace/tokens.py",
    "kind": "parser",
    "source": "workspace/tokens.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/tools.py",
+   "kind": "parser",
+   "source": "workspace/tools.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",
