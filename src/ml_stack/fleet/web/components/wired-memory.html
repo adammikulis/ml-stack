@@ -20,6 +20,7 @@ wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
     connectedCallback() {
       if (this.wired) return;
       this.wired = true;
+      this.uid = (WiredMemory.count = (WiredMemory.count || 0) + 1);
       this.busy = false;
       this.keep = false;
       this.load();
@@ -58,14 +59,14 @@ wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
 
     pickers(r) {
       const select = (id, values, label, current) => el("label", {}, label + " ",
-        el("select", { id, onchange: () => this.sized() },
+        el("select", { id: `${id}-${this.uid}`, onchange: () => this.sized() },
           ...values.map(([v, t]) => el("option", { value: v, ...(v === current ? { selected: "1" } : {}) }, t))));
       this.selModel = select("room-model", [["", "no model chosen"],
         ...r.models.map((x) => [x, x.split("/").pop()])], "Size it for", this.chosen?.model || "");
       this.selCtx = select("room-ctx", r.contexts.map((c) => [String(c), ctxName(c)]), "context",
         this.chosen?.ctx || "131072");
       this.selKv = select("room-kv", r.kv_types.map((k) => [k, k]), "KV cache", this.chosen?.kv || "q8_0");
-      this.mtp = el("input", { type: "checkbox", id: "room-mtp", checked: "1", onchange: () => this.sized() });
+      this.mtp = el("input", { type: "checkbox", id: `room-mtp-${this.uid}`, checked: "1", onchange: () => this.sized() });
       return el("div", { class: "room-pick" }, this.selModel, this.selCtx, this.selKv,
         el("label", {}, this.mtp, " MTP head shared"));
     }
@@ -85,7 +86,7 @@ wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
         value: Math.min(Math.max(this.value, m.default_mb), m.max_mb),
         marks: this.marks(m, plan),
         hint: "Models and their cache must fit under this limit. The rest is for everything else." });
-      slider.id = "wired-slider";
+      slider.className = "wired-slider";
       const note = el("div", { class: "why" });
       const paint = () => {
         const [line, warn] = this.readout(m);
@@ -99,23 +100,23 @@ wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
           ? `Does not fit at ${ctxName(plan.context)}; ${plan.largest_context
               ? `${ctxName(plan.largest_context)} would` : "no context length would"}.`
           : `${plan.model.replace(/\.gguf$/, "")} at ${ctxName(plan.context)} needs ${gbOf(plan.proposed_mb)}.`) : null;
-      const suggest = plan && plan.fits ? el("button", { class: "ghost small", id: "room-suggest",
+      const suggest = plan && plan.fits ? el("button", { class: "ghost small room-suggest",
         onclick: () => { this.value = plan.proposed_mb; this.draw(); } },
         `Use ${gbOf(plan.proposed_mb)}`) : null;
-      const keep = el("input", { type: "checkbox", id: "wired-keep", ...(this.keep ? { checked: "1" } : {}) });
+      const keep = el("input", { type: "checkbox", id: `wired-keep-${this.uid}`, class: "wired-keep", ...(this.keep ? { checked: "1" } : {}) });
       keep.onchange = () => { this.keep = keep.checked; };
-      const apply = el("button", { id: "wired-apply", onclick: () => this.change("/ui/room/apply",
+      const apply = el("button", { class: "wired-apply", onclick: () => this.change("/ui/room/apply",
         { mb: this.value, keep: this.keep }) }, `Apply ${gbOf(this.value)}`);
-      const back = el("button", { class: "ghost small", id: "wired-back",
+      const back = el("button", { class: "ghost small wired-back",
         onclick: () => this.change("/ui/room/reset", {}) }, "Back to default");
       const state = m.kept
         ? `Kept after restart at ${m.kept_mb} MB.` + (m.drift ? ` The live value is ${m.live_mb} MB: it differs from the kept one.` : "")
         : "Not kept after a restart: this lasts until the computer restarts.";
       this.buttons = [apply, back];
-      this.status = el("div", { id: "wired-status" });
+      this.status = el("div", { class: "wired-status" });
       this.replaceChildren(slider, note, this.pickers(this.data), verdict,
         el("div", { class: "room-actions" }, apply, suggest, back),
-        el("label", { class: "opt", for: "wired-keep" }, keep, M.row("Keep this after restart", FACT)),
+        el("label", { class: "opt", for: `wired-keep-${this.uid}` }, keep, M.row("Keep this after restart", FACT)),
         el("div", { class: m.drift ? "err" : "hint" }, state),
         el("div", { class: "hint" }, "macOS asks for your password in its own window; it is never typed here."),
         this.status);
