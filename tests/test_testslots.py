@@ -139,14 +139,14 @@ def _load():
 
 def test_the_cap_follows_the_load_average():
     m = _load()
-    # 16 cores: base 12; an idle machine may use all 16; a saturated one backs off to half the base
-    assert m.cap_for(None, cores=16) == 12
-    assert m.cap_for(2.0, cores=16) == 16
-    assert m.cap_for(11.9, cores=16) == 16                    # just under 0.75 * cores
-    assert m.cap_for(12.0, cores=16) == 12
-    assert m.cap_for(31.9, cores=16) == 12                    # just under 2 * cores
-    assert m.cap_for(32.1, cores=16) == 6
-    assert m.cap_for(500.0, cores=4) == 2 and m.cap_for(0.1, cores=4) == 4   # a floor on small machines
+    assert m.cap_for(None, cores=16) == 15
+    assert m.cap_for(2.0, cores=16) == 15
+    assert m.cap_for(12.0, cores=16) == 15
+    assert m.cap_for(31.9, cores=16) == 15
+    assert m.cap_for(32.1, cores=16) == 7
+    assert m.cap_for(500.0, cores=4) == 1
+    assert m.cap_for(0.1, cores=4) == 3
+    assert m.base_budget(1) == 1
 
 
 def test_a_pinned_budget_ignores_the_load(monkeypatch):
@@ -224,3 +224,80 @@ def test_queued_auto_runs_share_instead_of_the_first_taking_everything(tmp_path)
     assert all(p.wait(timeout=60) == 0 for p in (blocker, a, b))
     got = _grants(tmp_path)
     assert got["a"] == 5 and got["b"] == 5, got               # both waiting when the blocker ended: half each
+
+
+def test_nested_live_lease_is_refused_instead_of_queued(tmp_path, monkeypatch):
+    module = _load()
+    monkeypatch.setenv("DEV_TEST_SLOTS_DIR", str(tmp_path / "slots"))
+    monkeypatch.setenv("DEV_TEST_BUDGET", "1")
+    with module.lease(1, 1, say=lambda message: None):
+        result = subprocess.run([sys.executable, str(SCRIPT), "run", "--want", "1", "--", sys.executable, "-c", "pass"],
+                                capture_output=True, text=True, timeout=5)
+    assert result.returncode != 0
+    assert "nested CPU run" in result.stderr
+
+
+def test_a_minimum_cannot_override_the_budget(tmp_path, monkeypatch):
+    import pytest
+    module = _load()
+    monkeypatch.setenv("DEV_TEST_SLOTS_DIR", str(tmp_path / "slots"))
+    monkeypatch.setenv("DEV_TEST_BUDGET", "1")
+    with pytest.raises(ValueError, match="minimum exceeds"), module.lease(2, 2):
+        pass
+
+
+ELASTIC_TEST = '''
+import json, os, time
+from pathlib import Path
+import pytest
+
+@pytest.fixture(autouse=True)
+def record(request):
+    start = time.time()
+    time.sleep(.05)
+    yield
+    time.sleep(.05)
+    with Path(os.environ["TEST_LOG"]).open("a") as stream:
+        stream.write(json.dumps({"name": request.node.name, "start": start, "end": time.time()}) + "\\n")
+
+def test_tail():
+    Path(os.environ["TAIL_READY"]).touch()
+    time.sleep(6)
+
+def test_fast_a():
+    time.sleep(.1)
+
+def test_fast_b():
+    time.sleep(.1)
+'''
+
+
+def _elastic(tmp_path, test_file, workers):
+    environment = {**_env(tmp_path, 2), "PYTHONPATH": str(ROOT / "scripts"),
+                   "TEST_LOG": str(tmp_path / "elastic.jsonl"), "TAIL_READY": str(tmp_path / "tail-ready")}
+    command = [sys.executable, str(SCRIPT), "pytest", "--want", str(workers), "--", sys.executable,
+               "-m", "pytest", "-q", "-n", "{workers}", "-p", "testslots_pytest", str(test_file)]
+    return subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def test_idle_tail_workers_release_capacity_for_another_suite(tmp_path):
+    first_file = tmp_path / "test_first.py"
+    first_file.write_text(ELASTIC_TEST)
+    second_file = tmp_path / "test_second.py"
+    second_file.write_text(ELASTIC_TEST.replace("def test_tail():", "def unused_tail():"))
+    first = _elastic(tmp_path, first_file, 2)
+    deadline = time.monotonic() + 20
+    while not (tmp_path / "tail-ready").exists():
+        assert first.poll() is None, first.communicate()
+        assert time.monotonic() < deadline
+        time.sleep(.05)
+    second = _elastic(tmp_path, second_file, 1)
+    second_output = second.communicate(timeout=20)
+    assert second.returncode == 0, second_output
+    assert first.poll() is None, "The second suite must finish while the long tail remains active"
+    first_output = first.communicate(timeout=20)
+    assert first.returncode == 0, first_output
+    records = [json.loads(line) for line in (tmp_path / "elastic.jsonl").read_text().splitlines()]
+    assert len(records) == 5
+    for record in records:
+        assert sum(other["start"] <= record["start"] < other["end"] for other in records) <= 2, records

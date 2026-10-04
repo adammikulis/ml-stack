@@ -21,7 +21,6 @@ import argparse
 import importlib.util
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import time
@@ -31,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
-import testslots
+import testslots_runner
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -54,8 +53,14 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     junit = Path(tempfile.mkstemp(suffix=".xml")[1]) if "pytest" in command else None
     shown = [*command, f"--junitxml={junit}"] if junit else command
     print("+", " ".join(command), flush=True)
+    environment = dict(os.environ if env is None else env)
+    environment["PYTHONPATH"] = str(ROOT / "scripts") + os.pathsep + environment.get("PYTHONPATH", "")
+    index = shown.index("-n")
+    want = int(shown[index + 1])
+    shown[index + 1] = "{workers}"
+    shown.extend(["-p", "testslots_pytest"])
     began = time.monotonic()
-    status = subprocess.run(shown, cwd=ROOT, env=env, check=False).returncode
+    status = testslots_runner.run_pytest(shown, want, env=environment)
     if junit is not None:
         from ml_stack.activity.gate import Run, record_run
         record_run(Run(ROOT, tier, command, junit, status, time.monotonic() - began))
@@ -149,11 +154,9 @@ def main() -> int:
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
-    with testslots.lease(max(0, args.workers), label=f"ml-stack: {args.tier}") as got:
-        args.workers = got.workers if args.workers <= 0 else min(args.workers, got.workers)
-        if args.tier == "quick":
-            return quick(args, rest)
-        return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier)
+    if args.tier == "quick":
+        return quick(args, rest)
+    return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier)
 
 
 if __name__ == "__main__":
