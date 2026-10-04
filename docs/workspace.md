@@ -227,6 +227,31 @@ agent's own process. Read-only: `workspace_status`, `_inbox` (does not mark read
 `_audit_verify`. Writes: `workspace_send`, `_ack`, `_note_add`, `_claim`, `_heartbeat`,
 `_scratch_new`; destructive: `_release`, `_scratch_rm`.
 
+## Running many agents
+
+Measured with `scripts/experiments/workspace_load.py` (`docs/experiments/workspace-load.md`): 100
+agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit below is a number in
+`limits.json` or a constant; the last column is the command that shows where an agent stands.
+
+| Limit | Value | At the limit | Shows it |
+| --- | --- | --- | --- |
+| Writes per identity | 30 per 60 s (`sends_per_window`, `window_s`), shared by messages, notes and claims | `RateLimited`, exit 4, audited as `write.refused` (`why: rate`); the window is per token, so each labelled subagent has its own | `ml-stack workspace audit-verify`; `status` |
+| Unread inbox | 500 per recipient (`inbox_pending`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`); broadcasts are not counted | `inbox`, `status` (message count) |
+| Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
+| Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
+| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired`; another agent may then take it | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
+| Token TTL | 24 hours (`token_ttl_s`) | the token stops authenticating; mint a new one | `whoami` |
+| Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; there is no cap on how many tokens a lead mints in this tree | the mint is refused for a role that may not make it | `status` (agents) |
+| Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
+| Keystore creates, deletes, retries after a refusal | 5 per hour per user | `KeystoreBusy`; a refusal also latches for 10 minutes | `ml-stack-security keystore` |
+| Waiting | `wait` and `watch` sleep on a named pipe (`wake/<agent>.fifo`); with no pipe they re-check at 0.1 s backing off to 2 s with jitter | a wait returns empty at its timeout or when its caller cancels it | `wait --timeout S` |
+| Scratch | 16 folders and 256 MiB per agent, 3 day expiry | `Refused` | `scratch-ls` |
+
+The bus log is read by every process, so a process keeps the rows it has verified and reads only
+the bytes added since. `audit-verify` and `gc` still walk the whole file; an append walks it
+again when the file is not as the last appender left it. Thread and sender lookups are built
+from those rows in memory and are never stored.
+
 ## Status of this implementation
 
 Implemented and tested with real files and processes (101 tests in `tests/test_workspace_*.py`):

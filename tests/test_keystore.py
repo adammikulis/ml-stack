@@ -41,7 +41,8 @@ class Said:
 
 def make(tmp_path: Path, clock: Clock | None = None, *, person: bool = True,
          say: Said | None = None, bus: Bus | None = None) -> Keystore:
-    wires = Wires(clock=clock or Clock(), say=say or Said(), bus=bus or Bus(), interactive=lambda: person)
+    wires = Wires(clock=clock or Clock(), say=say or Said(), bus=bus or Bus(), interactive=lambda: person,
+                  sleep=lambda _s: None)
     return Keystore(directory=tmp_path / "ks", wires=wires)
 
 
@@ -177,6 +178,9 @@ print(ks.subkey("test", "owner").hex())
 """
 
 
+CHILD_NOWAIT = CHILD.replace('while not Path(os.environ["GO"]).exists():\n    time.sleep(0.005)\n', "")
+
+
 def child_env(tmp_path: Path) -> dict[str, str]:
     return {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "ML_STACK_HOME": str(tmp_path / "home"),
             "PYTHON_KEYRING_BACKEND": "tests.keystore_support.CountingFileRing",
@@ -209,6 +213,21 @@ def test_processes_behind_a_refusal_do_not_ask_again(tmp_path):
         _, err = kid.communicate(timeout=120)
         assert kid.returncode != 0 and "declined" in err
     assert not Path(f"{tmp_path / 'ring.json'}.calls").exists()
+
+
+def test_forty_processes_starting_together_never_see_busy_and_stay_under_the_read_ceiling(tmp_path):
+    env = {**child_env(tmp_path), "ML_STACK_TEST_KEYRING_DELAY": "0"}
+    seed = subprocess.run([sys.executable, "-c", CHILD_NOWAIT], env=env, capture_output=True, text=True, timeout=120)
+    assert seed.returncode == 0, seed.stderr
+    kids = [subprocess.Popen([sys.executable, "-c", CHILD], env=env, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True) for _ in range(40)]
+    (tmp_path / "go").write_text("go")
+    results = [(k.communicate(timeout=240), k.returncode) for k in kids]
+    assert [code for _, code in results] == [0] * 40, [err for (_, err), _ in results if err][:2]
+    assert len({out.strip() for (out, _), _ in results}) == 1
+    calls = Path(f"{tmp_path / 'ring.json'}.calls").read_text().split()
+    assert calls.count("set") == 1 and calls.count("get") <= keystore.READ_CEILING and "delete" not in calls
+    assert calls.count("get") == 41
 
 
 # -- denial -------------------------------------------------------------------------------------
@@ -255,34 +274,100 @@ def test_unlock_by_a_person_clears_the_refusal(tmp_path, counting):
 # -- rate limit -----------------------------------------------------------------------------------
 
 
-def test_a_burst_of_500_calls_reaches_the_backend_at_most_the_ceiling(tmp_path, counting):
+def test_a_burst_of_700_fresh_readers_reaches_the_backend_at_most_the_read_ceiling(tmp_path, counting):
     clock, bus = Clock(), Bus()
     make(tmp_path, clock, bus=bus).subkey("memory", "a")
     busy = ok = 0
-    for _ in range(500):
+    for _ in range(700):
         try:
             make(tmp_path, clock, bus=bus).subkey("memory", "a")
             ok += 1
         except keystore.KeystoreBusy:
             busy += 1
-    assert len(counting.calls) == keystore.RATE_CEILING == 20
-    assert ok == 18 and busy == 482
+    assert counting.count("get") == keystore.READ_CEILING == 600 and counting.count("set") == 1
+    assert ok == 599 and busy == 101
     assert any(e.kind == "keystore.refused" and e.evidence["outcome"] == "busy" for e in bus.recent())
     clock.advance(keystore.RATE_WINDOW_S + 1)
     assert make(tmp_path, clock).subkey("memory", "a")
-    assert len(counting.calls) == 21
+    assert counting.count("get") == 601
+
+
+def test_200_fresh_readers_never_see_busy_and_make_at_most_one_read_each(tmp_path, counting):
+    clock = Clock()
+    first = make(tmp_path, clock).subkey("memory", "a")
+    for _ in range(200):
+        assert make(tmp_path, clock).subkey("memory", "a") == first
+    assert counting.count("get") == 201 and counting.count("set") == 1
+
+
+def test_readers_slow_down_with_jitter_as_they_near_the_read_ceiling(tmp_path, counting):
+    slept: list[float] = []
+    clock = Clock()
+    wires = Wires(clock=clock, say=Said(), bus=Bus(), interactive=lambda: True, sleep=slept.append)
+    for _ in range(int(keystore.READ_CEILING * keystore.NEAR_CEILING) - 1):
+        Keystore(directory=tmp_path / "ks", wires=wires).subkey("memory", "a")
+    assert slept == []
+    for _ in range(20):
+        Keystore(directory=tmp_path / "ks", wires=wires).subkey("memory", "a")
+    assert len(slept) == 20 and all(0.05 <= t <= 0.25 for t in slept) and len(set(slept)) > 1
+
+
+def test_500_create_and_delete_attempts_stop_at_the_write_ceiling(tmp_path, counting):
+    ks = make(tmp_path)
+    busy = 0
+    for _ in range(500):
+        try:
+            ks.reset()
+            ks.provision()
+        except keystore.KeystoreBusy:
+            busy += 1
+    assert counting.count("set") + counting.count("delete") == keystore.WRITE_CEILING == 5
+    assert busy > 400
+    assert ks.status()["writes_this_hour"] == 5
+
+
+def test_a_read_after_a_refusal_counts_as_a_retry_against_the_write_ceiling(tmp_path, counting):
+    clock = Clock()
+    wires = Wires(clock=clock, say=Said(), bus=Bus(), interactive=lambda: True, sleep=lambda _s: None)
+    Keystore(directory=tmp_path / "ks", wires=wires).subkey("memory", "a")
+    counting.refuse = KeyringError
+    counting.calls.clear()
+    outcomes = []
+    for _ in range(5):
+        clock.advance(keystore.COOLDOWN_S + 1)
+        try:
+            Keystore(directory=tmp_path / "ks", write_ceiling=3, wires=wires).subkey("memory", "a")
+        except keystore.KeystoreError as err:
+            outcomes.append(type(err).__name__)
+    assert counting.count("get") == 3
+    assert outcomes == ["KeystoreDenied"] * 3 + ["KeystoreBusy"] * 2
+
+
+def test_a_successful_read_clears_the_retry_mark(tmp_path, counting):
+    clock = Clock()
+    make(tmp_path, clock).subkey("memory", "a")
+    counting.refuse = KeyringError
+    with pytest.raises(keystore.KeystoreDenied):
+        make(tmp_path, clock).subkey("memory", "a")
+    counting.refuse = None
+    clock.advance(keystore.COOLDOWN_S + 1)
+    assert make(tmp_path, clock).subkey("memory", "a")
+    assert not (tmp_path / "ks" / "denied.json").exists()
+    before = make(tmp_path, clock).status()["writes_this_hour"]
+    assert make(tmp_path, clock).subkey("memory", "a")
+    assert make(tmp_path, clock).status()["writes_this_hour"] == before
 
 
 def test_one_instance_locking_and_reading_in_a_loop_is_capped_too(tmp_path, counting):
     ks = make(tmp_path)
     failures = 0
-    for _ in range(100):
+    for _ in range(700):
         ks.lock()
         try:
             ks.subkey("memory", "a")
         except keystore.KeystoreBusy:
             failures += 1
-    assert len(counting.calls) == 20 and failures == 100 - 19
+    assert counting.count("get") == keystore.READ_CEILING and failures == 100
 
 
 # -- background processes ----------------------------------------------------------------------
