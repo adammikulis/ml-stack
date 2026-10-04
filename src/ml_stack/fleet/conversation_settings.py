@@ -4,8 +4,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from ml_stack import roles
-
 DEFAULTS: dict[str, Any] = {"mode": "chat", "temperature": None, "project": "", "role": "",
                             "effort": "off", "max_effort": "medium"}
 LEVELS = ("off", "low", "medium", "high")
@@ -24,8 +22,8 @@ def checked(settings: dict | None = None) -> dict[str, Any]:
     for key in ("project", "role", "effort", "max_effort"):
         if not isinstance(result[key], str):
             raise ValueError(f"{key} must be text")
-    if result["role"]:
-        roles.get(result["role"])
+    if len(result["role"]) > 128:
+        raise ValueError("role identifier is too long")
     if result["effort"] not in (*LEVELS, "auto") or result["max_effort"] not in LEVELS:
         raise ValueError("invalid effort level")
     if len(result["project"]) > 4096:

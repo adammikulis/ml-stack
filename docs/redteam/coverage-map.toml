@@ -16,6 +16,14 @@ partial = 201
 
 # -- coding harnesses on a local model -----------------------------------------------------
 [[group]]
+match = ["route:fleet/conversation_routes.py:/ui/conversations*"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
+         "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"]
+note = "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
+
+[[group]]
 match = ["spawn:claude.py:launch", "spawn:codex.py:launch", "spawn:harnesshook.py:nudge",
          "spawn:harnessid.py:announce"]
 status = "covered"
