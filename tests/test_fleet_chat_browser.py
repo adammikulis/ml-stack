@@ -141,3 +141,17 @@ def test_model_picker_groups_and_searches_loaded_and_installed_models(chat_brows
     page.get_by_label("Search models", exact=True).press("Escape")
     expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
     assert page.locator("chat-view textarea").count() == 1
+
+
+def test_installed_model_picker_remains_visible_with_no_loaded_server(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    page.unroute("**/ui/chat")
+    page.route("**/ui/chat", lambda route: route.fulfill(json={"models": []}))
+    page.route("**/ui/models", lambda route: route.fulfill(json={"ok": True, "library": [
+        {"path": "/models/qwen.gguf", "name": "Qwen3.8-27B", "family": "Qwen", "servable": True}]}))
+    _open(served, page)
+    page.locator("chat-view #chat-model-button").click()
+    expect(page.get_by_role("button", name="Qwen3.8-27B Installed", exact=True)).to_be_visible()
+    expect(page.locator("chat-view #chat-askrow")).to_be_hidden()
