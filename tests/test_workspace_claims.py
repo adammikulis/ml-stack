@@ -257,3 +257,10 @@ def test_the_heartbeat_tool_reports_each_renewed_claim(kit, monkeypatch):
     monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a)
     out = tools.workspace_heartbeat(600)
     assert out["renewed"] == 1 and out["capped"] == [] and out["claims"][0]["key"] == "9302"
+    import json
+    path = kit.base / "claims.json"
+    data = json.loads(path.read_text())
+    data["claims"]["port:9302"]["since"] = time.time() - 8 * 3600 + 30
+    path.write_text(json.dumps(data))
+    out = tools.workspace_heartbeat(600)
+    assert out["capped"] == ["port:9302"] and out["claims"][0]["capped"] is True
