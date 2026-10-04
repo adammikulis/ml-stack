@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -39,7 +40,8 @@ class DecisionProcess:
         self.handle = start_process(
             [interpreter(), "-m", "ml_stack.gym.decision_process", json.dumps(checkpoint)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr,
-            text=True, bufsize=1)
+            text=True, bufsize=1, env={**os.environ, "OMP_NUM_THREADS": "1",
+                                      "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"})
         protect(self.handle.pid)
         threading.Thread(target=self.read, daemon=True).start()
         threading.Thread(target=self.write, daemon=True).start()
@@ -82,8 +84,12 @@ class DecisionProcess:
         return True
 
     def close(self):
-        with contextlib.suppress(ProcessLookupError):
-            terminate_process_group(self.handle)
+        try:
+            if self.handle.poll() is None:
+                terminate_process_group(self.handle)
+        except (ProcessLookupError, PermissionError):
+            if self.handle.poll() is None:
+                raise
         try:
             self.handle.wait(timeout=.4)
         except subprocess.TimeoutExpired:
