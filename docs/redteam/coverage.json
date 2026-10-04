@@ -1,8 +1,8 @@
 {
- "surfaces": 563,
+ "surfaces": 574,
  "by_status": {
-  "covered": 247,
-  "partial": 213,
+  "covered": 268,
+  "partial": 203,
   "uncovered": 54,
   "n/a": 49,
   "unmapped": 0
@@ -30,7 +30,7 @@
    "unmapped": 0
   },
   "desktop": {
-   "covered": 9,
+   "covered": 10,
    "partial": 0,
    "uncovered": 0,
    "n/a": 5,
@@ -79,15 +79,15 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 42,
+   "covered": 48,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 43,
-   "partial": 70,
+   "covered": 53,
+   "partial": 61,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 13,
-   "partial": 66,
+   "covered": 17,
+   "partial": 65,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -1135,6 +1135,18 @@
     "tests/test_decide_questions.py"
    ],
    "note": ""
+  },
+  {
+   "id": "desktop:app/src-tauri/capabilities/main.json",
+   "kind": "desktop",
+   "source": "app/src-tauri/capabilities/main.json",
+   "trust": "names of peers, sessions, files",
+   "attacker": "attacker text reaches a dialog, notification or shell command",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_desktop_capabilities.py"
+   ],
+   "note": "compiled Tauri authority rejects foreign origins and windows, shell execution and filesystem reads"
   },
   {
    "id": "desktop:desktop.py:_mac",
@@ -3812,6 +3824,19 @@
    "note": "files the product wrote for itself (stores, caches, snapshots, case files) are read back; a hand-edited or planted file is not tried"
   },
   {
+   "id": "parser:fleet/gym_recording_routes.py",
+   "kind": "parser",
+   "source": "fleet/gym_recording_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
    "id": "parser:fleet/onboard/bootstrap.py",
    "kind": "parser",
    "source": "fleet/onboard/bootstrap.py",
@@ -3922,6 +3947,32 @@
     "tests/test_onboard_pairing.py"
    ],
    "note": ""
+  },
+  {
+   "id": "parser:fleet/request_fields.py",
+   "kind": "parser",
+   "source": "fleet/request_fields.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
+   "id": "parser:fleet/workspace_routes.py",
+   "kind": "parser",
+   "source": "fleet/workspace_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
   },
   {
    "id": "parser:graph/access.py",
@@ -4102,6 +4153,45 @@
     "tests/test_redteam_judge.py"
    ],
    "note": ""
+  },
+  {
+   "id": "parser:gym/car_definition.py",
+   "kind": "parser",
+   "source": "gym/car_definition.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
+   "id": "parser:gym/traffic_world.py",
+   "kind": "parser",
+   "source": "gym/traffic_world.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
+   "id": "parser:gym/world_files.py",
+   "kind": "parser",
+   "source": "gym/world_files.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
   },
   {
    "id": "parser:hub/cards.py",
@@ -5042,19 +5132,32 @@
    "note": ""
   },
   {
+   "id": "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
+   "kind": "route",
+   "source": "src/ml_stack/fleet/gym_recording_routes.py",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
    "id": "route:fleet/gym_routes.py:/ui/gym*",
    "kind": "route",
    "source": "fleet/gym_routes.py:GymRoutes.route",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/gym_routes.py:/ui/gym/catalogue",
@@ -5062,14 +5165,13 @@
    "source": "fleet/gym_routes.py:GymRoutes.route",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/gym_routes.py:/ui/gym/sessions",
@@ -5077,14 +5179,13 @@
    "source": "fleet/gym_routes.py:GymRoutes.route",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/onboard/bootstrap.py:manifest",
@@ -5821,14 +5922,13 @@
    "source": "fleet/workspace_routes.py:WorkspaceRoutes.route",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/workspace_routes.py:/ui/workspace/commands",
@@ -5836,14 +5936,13 @@
    "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/workspace_routes.py:/ui/workspace/file",
@@ -5851,14 +5950,13 @@
    "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/workspace_routes.py:/ui/workspace/files",
@@ -5866,14 +5964,13 @@
    "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/workspace_routes.py:/ui/workspace/jobs",
@@ -5881,14 +5978,13 @@
    "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:fleet/workspace_routes.py:/ui/workspace/recipes",
@@ -5896,14 +5992,13 @@
    "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-    "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-    "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-    "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff"
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
    ],
-   "note": "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:graph/completions.py:handle_completion",
@@ -7071,11 +7166,37 @@
    "source": "gym/catalog.py:catalogue",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+    "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+  },
+  {
+   "id": "spawn:gym/traffic_world.py:generate",
+   "kind": "spawn",
+   "source": "gym/traffic_world.py:generate",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+    "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"
+   ],
+   "note": "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+  },
+  {
+   "id": "spawn:gym/transport.py:Process.start",
+   "kind": "spawn",
+   "source": "src/ml_stack/gym/transport.py",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_worker.py"
+   ],
+   "note": "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
   },
   {
    "id": "spawn:hub/memory.py:machine_room",
@@ -7297,6 +7418,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:scripts/test-on-linux",
+   "kind": "spawn",
+   "source": "scripts/test-on-linux",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_linux_runner.py",
+    "tests/test_running_on_linux.py::test_the_runner_says_which_command_told_it_docker_is_missing"
+   ],
+   "note": "hostile pytest text remains literal argv; source mount is read-only, no privileged or host-network flags, temporary config and staging are removed"
   },
   {
    "id": "spawn:serve/backend.py:help_of",
