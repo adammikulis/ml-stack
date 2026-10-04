@@ -1,0 +1,121 @@
+<!-- room-card: "Make room for this model" -- sizes the wiring limit and raises it on a click -->
+<style>
+room-card { display: contents; }
+room-card .room-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
+room-card .room-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+room-card .room-table td, room-card .room-table th { text-align: left; padding: 2px 8px; }
+</style>
+<template>
+  <div class="group" id="room-card" hidden>
+    <h2>Make room for this model</h2>
+    <div class="hint">A model and its cache must fit under the GPU wiring limit.</div>
+    <div class="room-pick" id="room-pick"></div>
+    <div id="room-out"></div>
+    <div id="room-note"></div>
+  </div>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const { el, api } = M;
+  const GIB = 1024 ** 3;
+  const gib = (n) => `${(n / GIB).toFixed(1)} GiB`;
+  const ctxName = (n) => (n % 1024 === 0 ? `${n / 1024}K` : String(n));
+
+  class RoomCard extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.card = this.querySelector("#room-card");
+      this.pick = this.querySelector("#room-pick");
+      this.out = this.querySelector("#room-out");
+      this.note = this.querySelector("#room-note");
+      M.onRoute((route) => {
+        this.card.hidden = route !== "models";
+        if (route === "models" && !this.options) this.load();
+      });
+    }
+
+    async load() {
+      const r = await api("/ui/room");
+      if (M.refused(r) || r.error) return;
+      this.options = r;
+      const select = (id, values, label) => {
+        const s = el("select", { id, onchange: () => this.show() },
+          ...values.map(([v, t]) => el("option", { value: v }, t)));
+        return el("label", {}, label + " ", s);
+      };
+      this.model = select("room-model", r.models.map((m) => [m, m.split("/").pop()]), "Model");
+      this.ctx = select("room-ctx", r.contexts.map((c) => [String(c), ctxName(c)]), "Context");
+      this.kv = select("room-kv", r.kv_types.map((k) => [k, k]), "KV cache");
+      this.ctx.querySelector("select").value = "131072";
+      this.mtp = el("input", { type: "checkbox", id: "room-mtp", checked: "checked",
+                               onchange: () => this.show() });
+      const flash = r.models.findIndex((m) => /flash-next/i.test(m));
+      if (flash >= 0) this.model.querySelector("select").selectedIndex = flash;
+      this.pick.replaceChildren(this.model, this.ctx, this.kv,
+        el("label", {}, this.mtp, " MTP head shared"));
+      this.show();
+    }
+
+    async show() {
+      const q = new URLSearchParams({
+        model: this.model.querySelector("select").value,
+        ctx: this.ctx.querySelector("select").value,
+        kv: this.kv.querySelector("select").value,
+        mtp: this.mtp.checked ? "1" : "0" });
+      this.out.replaceChildren(el("div", { class: "hint" }, "Working it out..."));
+      const r = await api(`/ui/room?${q}`);
+      if (r.error || !r.plan) {
+        this.out.replaceChildren(el("div", { class: "err" }, r.error || "no answer"));
+        return;
+      }
+      this.draw(r.plan, r.original_mb);
+    }
+
+    draw(p, original) {
+      const rows = p.table.map((t) => el("tr", {},
+        el("td", {}, ctxName(t.context)), el("td", {}, gib(t.need_bytes)),
+        el("td", {}, gib(t.left_bytes)),
+        el("td", {}, t.fits ? (t.enough_now ? "fits now" : "fits") : "does not fit")));
+      const verdict = !p.fits
+        ? `Does not fit at ${ctxName(p.context)}; ${p.largest_context
+            ? `${ctxName(p.largest_context)} would` : "no context length would"}.`
+        : p.enough_now ? "Fits under the current limit."
+        : `Fits with a higher limit: ${p.proposed_mb} MB.`;
+      const raise = el("button", { class: "small", id: "room-raise",
+        disabled: p.fits && !p.enough_now ? null : "disabled",
+        onclick: () => this.change("/ui/room/apply", { mb: p.proposed_mb }) },
+        p.fits && !p.enough_now ? `Raise the limit to ${(p.proposed_mb / 1024).toFixed(1)} GB`
+          : "Nothing to raise");
+      const back = el("button", { class: "ghost small", id: "room-back",
+        onclick: () => this.change("/ui/room/reset", {}) }, "Back to default");
+      this.out.replaceChildren(
+        el("div", { class: p.fits ? "ok" : "err" }, verdict),
+        el("div", { class: "why" },
+          `Now ${p.current_mb} MB; proposed ${p.proposed_mb || "none"} MB; `
+          + `${gib(p.left_bytes)} left for everything else; installed ${gib(p.total)}.`),
+        p.warn ? el("div", { class: "err" }, p.warn) : null,
+        el("div", { class: "why" }, p.notes.find((n) => n.startsWith("MTP")) || ""),
+        el("table", { class: "room-table" },
+          el("tr", {}, el("th", {}, "Context"), el("th", {}, "Needs"),
+            el("th", {}, "Leaves"), el("th", {}, "")), ...rows),
+        el("div", { class: "hint" },
+          "This lasts until the next reboot. Original limit: "
+          + (original === null || original === undefined ? "not changed yet" : `${original} MB`)),
+        el("div", {}, raise, back));
+    }
+
+    async change(path, body) {
+      this.note.replaceChildren(el("div", { class: "hint" },
+        "macOS will ask for your password in its own window."));
+      const r = await api(path, { method: "POST", body: JSON.stringify(body) });
+      this.note.replaceChildren(r.error || !r.ok
+        ? el("div", { class: "err" }, r.error || r.message)
+        : el("div", { class: "ok" }, `Limit is now ${r.after_mb} MB (was ${r.before_mb} MB).`));
+      this.show();
+    }
+  }
+  customElements.define("room-card", RoomCard);
+})();
+</script>

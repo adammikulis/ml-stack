@@ -66,7 +66,7 @@ def show(plan: wired.Plan) -> None:
         say("WARNING: with the server's host RAM at its caps less than "
             f"{_gib(wired.reserve_bytes(plan.total))} is left; lower the prompt cache "
             "(--cache-ram here, cache_ram_mb on a lease)")
-    say("\ncontext  needs      limit MB  leaves     fits")
+    say("\ncontext  counted    limit MB  leaves     fits")
     for r in plan.table:
         mark = "yes" if r.fits else "no"
         mark += ", already" if r.fits and r.enough_now else ""

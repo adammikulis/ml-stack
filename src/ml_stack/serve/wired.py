@@ -191,6 +191,8 @@ def plan(model: str, *, context: int = 131072, kv: str = "q8_0", mtp: bool = Tru
     if isinstance(context, bool) or not isinstance(context, int) or context < 256:
         raise ValueError("context must be a whole number of tokens, at least 256")
     total, now, held = _facts(total, current, others)
+    default_mb = int(total * 0.75) // MIB
+    now_effective = now or default_mb
     path = est_mod._locate(model)
     found, weights = est_mod.read_meta(path), est_mod._bytes_of(path)
     setup = est_mod.Setup(context=context, kv_cache_type=kv)
@@ -206,13 +208,12 @@ def plan(model: str, *, context: int = 131072, kv: str = "q8_0", mtp: bool = Tru
     margin = max(MARGIN_MIN, int(need * MARGIN_SHARE))
     limit_cap = max_mb(total)
     needed_mb = math.ceil((need + margin) / MIB / 256) * 256
-    default_mb = int(total * 0.75) // MIB
 
     def row(ctx: int) -> Row:
         e, x, _ = need_at(ctx)
         n = e.total_bytes + sum(v for _, v in x)
         mb = math.ceil((n + max(MARGIN_MIN, int(n * MARGIN_SHARE))) / MIB / 256) * 256
-        return Row(ctx, n, mb, max(total - mb * MIB, 0), mb <= limit_cap, mb <= now)
+        return Row(ctx, n, mb, max(total - mb * MIB, 0), mb <= limit_cap, mb <= now_effective)
 
     arch = est_mod._layers(found)[0]
     trained = int(found.get(f"{arch}.context_length") or 0)  # type: ignore[call-overload]
@@ -238,7 +239,7 @@ def plan(model: str, *, context: int = 131072, kv: str = "q8_0", mtp: bool = Tru
                 current_mb=now, default_mb=default_mb, held_others=held,
                 counted=tuple(counted), grows=_growers(est, cache_ram_mb), notes=tuple(list(est.notes) + said),
                 need_bytes=need, margin_bytes=margin, needed_mb=needed_mb, max_mb=limit_cap,
-                fits=fits, enough_now=needed_mb <= now, proposed_mb=proposed, left_bytes=left,
+                fits=fits, enough_now=needed_mb <= now_effective, proposed_mb=proposed, left_bytes=left,
                 warn=warn, largest_context=best, table=table)
 
 
@@ -323,6 +324,7 @@ def _change(mb: int, via: str, *, env: Mapping[str, str] | None, runner: Runner 
     _refuse_agents(env)
     if (system or platform.system()) != "Darwin":
         raise ValueError("the wiring limit is a macOS setting")
+    read = read or current_mb
     before = read()
     _remember(before)
     argv = argv_for(mb, via)
@@ -336,7 +338,7 @@ def _change(mb: int, via: str, *, env: Mapping[str, str] | None, runner: Runner 
 
 def apply(mb: object, *, via: str, total: int | None = None, env: Mapping[str, str] | None = None,
           runner: Runner | None = None, system: str | None = None,
-          read: Callable[[], int] = current_mb, terminal: tuple[bool, bool] | None = None
+          read: Callable[[], int] | None = None, terminal: tuple[bool, bool] | None = None
           ) -> Applied:
     """Set the limit for this boot to ``mb`` MB. ``via`` is ``sudo`` (a terminal, sudo asks)
     or ``osascript`` (macOS's own administrator dialog). Raises `HumanRequired` for a process
@@ -352,7 +354,7 @@ def apply(mb: object, *, via: str, total: int | None = None, env: Mapping[str, s
 
 def reset(*, via: str, total: int | None = None, env: Mapping[str, str] | None = None,
           runner: Runner | None = None, system: str | None = None,
-          read: Callable[[], int] = current_mb, terminal: tuple[bool, bool] | None = None
+          read: Callable[[], int] | None = None, terminal: tuple[bool, bool] | None = None
           ) -> Applied:
     """Put the limit back to what it was before the first change (0, the default share, when
     none was recorded)."""
