@@ -6,7 +6,13 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
+from email.parser import BytesParser
 from pathlib import Path
+
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
@@ -23,8 +29,7 @@ def run(argv: list[str], **kw) -> None:
 
 def wheels() -> list[Path]:
     DIST.mkdir(exist_ok=True)
-    # The bundle carries every wheel it finds here, including a previous version's.
-    for old in DIST.glob("*.whl"):
+    for old in DIST.glob("ml_stack-*.whl"):
         old.unlink()
     run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST), str(ROOT)],
         stdout=subprocess.DEVNULL)
@@ -38,10 +43,49 @@ def wheelhouse(out: Path) -> list[Path]:
 
     out.mkdir(parents=True, exist_ok=True)
     run([sys.executable, "-m", "pip", "wheel", "--wheel-dir", str(out),
+         "--find-links", str(DIST), "--find-links", str(out),
          f"ml-stack[{extras()}] @ file://{ROOT}"], stdout=subprocess.DEVNULL)
     for mine in out.glob("ml_stack-*.whl"):
         mine.unlink()
     return sorted(out.glob("*.whl"))
+
+
+def owned_telemetry(source: Path) -> Path:
+    """Build a validated metal-smi wheel from an isolated source snapshot."""
+    source = source.expanduser().resolve()
+    if not source.is_dir() or not (source / 'pyproject.toml').is_file():
+        raise SystemExit('--metal-smi-source must name a project directory with pyproject.toml')
+    with tempfile.TemporaryDirectory(prefix='ml-stack-metal-smi-') as temporary:
+        stage = Path(temporary)
+        copied, output = stage / 'source', stage / 'wheels'
+        shutil.copytree(source, copied, ignore=shutil.ignore_patterns(
+            '.git', '.venv', 'venv', '__pycache__', '*.pyc', '*.egg-info',
+            'build', 'dist', '.pytest_cache', '.ruff_cache'))
+        run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--wheel-dir', str(output), str(copied)],
+            cwd=stage, stdout=subprocess.DEVNULL)
+        found = list(output.glob('*.whl'))
+        if len(found) != 1:
+            raise SystemExit('metal-smi source must build exactly one wheel')
+        _telemetry_metadata(found[0])
+        DIST.mkdir(parents=True, exist_ok=True)
+        into = DIST / found[0].name
+        shutil.copy2(found[0], into)
+    return into
+
+
+def _telemetry_metadata(wheel: Path) -> None:
+    """Require the owned telemetry distribution and declared minimum version."""
+    with zipfile.ZipFile(wheel) as archive:
+        metadata = [name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
+        if len(metadata) != 1:
+            raise SystemExit('metal-smi wheel must contain one distribution metadata record')
+        headers = BytesParser().parsebytes(archive.read(metadata[0]))
+    try:
+        version = Version(headers.get('Version', '0'))
+    except InvalidVersion as exc:
+        raise SystemExit('telemetry wheel has invalid version metadata') from exc
+    if canonicalize_name(headers.get('Name', '')) != 'metal-smi' or version < Version('1.1.0'):
+        raise SystemExit('telemetry wheel must provide metal-smi>=1.1.0')
 
 
 def built_from() -> Path:
@@ -145,6 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wheelhouse", action="store_true",
                     help="also download the extras, for a machine with no network")
     ap.add_argument("--clean", action="store_true")
+    ap.add_argument('--metal-smi-source', type=Path,
+                    help='build and bundle owned metal-smi>=1.1.0 from this local source directory')
     a = ap.parse_args(argv)
 
     if a.clean:
@@ -153,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(path, ignore_errors=True)
 
     built = wheels()
+    if a.metal_smi_source:
+        built = sorted({*built, owned_telemetry(a.metal_smi_source)})
     print(f"{len(built)} wheels in {DIST}")
     for w in built:
         print(f"  {w.name}  {w.stat().st_size / 1024:.0f} KB")
