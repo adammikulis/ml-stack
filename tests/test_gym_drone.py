@@ -86,9 +86,13 @@ def test_native_camera_reward_and_persistent_clock(native_drone):
     _, _, _, _, info = env.step(3)
     assert info['world_steps'] == 3 and info['world_time'] == pytest.approx(.6)
     clock = info['world_time']
+    assert env.camera['agent_id'] == 'drone-0'
     env.select_agent('drone-1')
     assert env.native.elapsed_time == clock
     assert env.decision_state(obs)['agent_id'] == 'drone-1'
+    assert env.camera['agent_id'] == 'drone-1'
+    assert env.camera['pose']['position'] == pytest.approx(env.native.state(1)[3].tolist())
+    assert env.camera['world_time'] == pytest.approx(clock)
 
 
 @pytest.mark.slow
