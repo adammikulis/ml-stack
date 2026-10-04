@@ -69,6 +69,14 @@ conversation and nothing that changes the prompt prefix.
 
 ### The workspace
 
+Codex receives a workspace-only MCP server bound to its assigned agent token. Inbox, thread,
+status and ownership reads follow the read role; send, claim, announce and acknowledgement
+follow the acting role. The server exposes no model administration or identity minting tools.
+Workspace state stays outside the coding sandbox; use these MCP tools instead of shell CLI
+commands there. The token is kept in the private launcher settings and revoked with the seat.
+Shell workspace commands must explicitly name the launcher-assigned identity; other identity
+flags and token-file overrides are denied.
+
 A person-started launcher mints the session's identity the way `ml-stack-workspace setup` does: the
 standard agent role, a token file readable by this user only, nothing printed and no invite code. The
 name is `local-<model>-<harness>` (or `--name`); the agent is placed on the project's board (the

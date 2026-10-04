@@ -11,17 +11,23 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ml_stack.chatpolicy import APPROVE_FIRST, PLAN_AND_GO, READ_ONLY, refusal_for
 from ml_stack.guard.destructive import classify, reason_text
+from ml_stack.guard.shellscan import segments
 from ml_stack.interventions import Call
 
-__all__ = ["CATALOG", "SHELL_TOOLS", "Decision", "decide"]
+__all__ = ["CATALOG", "SHELL_TOOLS", "Decision", "decide", "workspace_authority"]
 
 CATALOG: dict[str, str] = {
     **dict.fromkeys(("Read", "Glob", "Grep", "LS", "NotebookRead", "TodoWrite", "TaskList", "TaskGet",
                      "ToolSearch", "BashOutput", "read_file", "list_dir", "grep_files", "update_plan"), "safe"),
+    **dict.fromkeys(("mcp__workspace__workspace_inbox", "mcp__workspace__workspace_thread",
+                     "mcp__workspace__workspace_who_owns", "mcp__workspace__workspace_status"), "safe"),
+    **dict.fromkeys(("mcp__workspace__workspace_send", "mcp__workspace__workspace_claim",
+                     "mcp__workspace__workspace_announce", "mcp__workspace__workspace_ack"), "reversible"),
     **dict.fromkeys(("Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch", "WebFetch", "WebSearch"), "reversible"),
 }
 """Labels for the harness tools whose effect is known from the name alone."""
@@ -74,3 +80,25 @@ def decide(role: str, name: str, args: dict[str, Any] | None, *, roots: Sequence
     if role == APPROVE_FIRST:
         return Decision("ask", verdict.label, why)
     return Decision("allow", verdict.label, why)
+
+
+def workspace_authority(line: str, actor: str) -> Decision | None:
+    """A model's workspace CLI call must use its launcher-bound seat, never another token."""
+    commands, _ = segments(line)
+    for command in commands:
+        words = command.argv
+        start = next((at for at, word in enumerate(words) if Path(word).name == "ml-stack-workspace"), None)
+        if start is None:
+            continue
+        words = words[start:]
+        found = []
+        for at, word in enumerate(words):
+            if word == "--token-file" or word.startswith("--token-file="):
+                return _denied("destructive", "the workspace token belongs to the launcher")
+            if word == "--agent":
+                found.append(words[at + 1] if at + 1 < len(words) else "")
+            elif word.startswith("--agent="):
+                found.append(word.split("=", 1)[1])
+        if not found or any(value != actor for value in found):
+            return _denied("destructive", "use the workspace identity assigned by the launcher")
+    return None

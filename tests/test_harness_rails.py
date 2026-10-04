@@ -233,7 +233,8 @@ def _fake_serving(seen):
 class TestLaunch:
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+        monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
@@ -274,6 +275,10 @@ class TestLaunch:
         assert codex.launch(["qwen", "--codex", str(binary), "--", "exec", "fix it"], say=lambda _: None,
                             run_codex=run) == 3
         assert seen["config"]["model_context_window"] == 262144
+        scope = seen["config"]["mcp_servers"]["workspace"]
+        assert scope["command"] == sys.executable
+        assert scope["args"][-1] == "--workspace-only"
+        assert scope["env"]["ML_STACK_WORKSPACE_TOKEN"] == "assigned-test-seat"
         assert "--dangerously-bypass-hook-trust" in seen["command"] and seen["command"][-2:] == ["exec", "fix it"]
         assert tmp_path / "tree" not in seen["home"].parents and not seen["home"].exists()
 
@@ -446,11 +451,12 @@ class TestSeat:
 class TestCodingAgent:
     def test_launch_coding_agent_runs_codex_by_default_with_the_project_and_the_orders(self, monkeypatch, tmp_path):
         seen = {}
+        monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
         monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: seen.update(
-            name=name, project=project) or harnessid.Seat(name, parent))
+            name=name, project=project) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         binary = tmp_path / "codex"
         binary.write_text("#!/bin/sh\n")
         (tmp_path / "proj").mkdir()
@@ -470,3 +476,54 @@ class TestCodingAgent:
 
     def test_an_unknown_harness_is_refused(self):
         assert coding.launch_coding_agent("", "read-only", ".", "bash", say=lambda _: None) == 2
+
+
+def test_explicit_head_and_none_override_measured_profile(monkeypatch):
+    from types import SimpleNamespace
+
+    from ml_stack import hub
+    from ml_stack.serve.serving import Config, Serving
+
+    measured = Config(serving=Serving(model="qwen.gguf", draft="old-head.gguf", spec_type="draft-mtp"))
+    monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: SimpleNamespace(config=lambda **_: measured))
+    monkeypatch.setattr(harnessing.profile, "said", lambda _: "measured profile")
+    monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 262144)
+    monkeypatch.setattr(hub, "head_choice", lambda model, asked: None if asked == "none" else SimpleNamespace(
+        serving=lambda: "requested MTP head", over=lambda: {"draft": asked, "spec_type": "draft-mtp"}))
+    selected = harnessing.config_for("qwen.gguf", harnessing.Want(draft="matching-head.gguf"), lambda _: None)
+    assert selected.serving.draft == "matching-head.gguf"
+    assert selected.serving.slot_context == 262144
+    disabled = harnessing.config_for("qwen.gguf", harnessing.Want(draft="none"), lambda _: None)
+    assert disabled.serving.draft == "" and disabled.serving.mtp is False
+    automatic = harnessing.config_for("qwen.gguf", harnessing.Want(draft="auto"), lambda _: None)
+    assert automatic.serving.draft == "old-head.gguf"
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("ml-stack-workspace inbox --agent own", "allow"),
+    ("ml-stack-workspace send codex note 'sensor count 8' --agent own", "allow"),
+    ("ml-stack-workspace inbox --agent other", "deny"),
+    ("env ML_STACK_WORKSPACE_AGENT=other ml-stack-workspace inbox --agent other", "deny"),
+    ("command ml-stack-workspace inbox --agent other", "deny"),
+    ("ml-stack-workspace inbox --agent own --agent other", "deny"),
+    ("ml-stack-workspace inbox --agent own --token-file /tmp/other", "deny"),
+    ("ml-stack-workspace inbox", "deny"),
+    ("ml-stack-workspace setup --agents own --agent own", "deny"),
+    ("ml-stack-workspace inbox --agent own && rm README.md", "deny"),
+])
+def test_workspace_hook_binds_own_identity_and_keeps_human_commands_blocked(line, expected, tmp_path):
+    payload = {"tool_name": "Bash", "tool_input": {"command": line}, "cwd": str(tmp_path)}
+    rail = harnesshook.Rail("plan-and-go", "own", roots=(str(tmp_path),), wait_s=0)
+    answer = harnesshook.pre(payload, rail)
+    assert answer["hookSpecificOutput"]["permissionDecision"] == expected
+
+
+@pytest.mark.parametrize("name,role,action", [
+    ("mcp__workspace__workspace_inbox", "read-only", "allow"),
+    ("mcp__workspace__workspace_send", "plan-and-go", "allow"),
+    ("mcp__workspace__workspace_send", "approve-first", "ask"),
+    ("mcp__workspace__workspace_send", "read-only", "deny"),
+    ("mcp__foreign__workspace_send", "plan-and-go", "ask"),
+])
+def test_bound_workspace_mcp_obeys_role(name, role, action):
+    assert decide(role, name, {"to": "codex", "kind": "status", "text": "ready"}).action == action

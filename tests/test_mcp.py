@@ -304,3 +304,19 @@ class TestTheCommand:
         assert by_name["serve_down"].annotations.destructive_hint is True
         assert by_name["models_find"].annotations.open_world_hint is True
         assert by_name["serve_status"].output_schema["type"] == "object"
+
+
+def test_workspace_subset_rejects_server_admin_tools(monkeypatch):
+    names = {"workspace_inbox", "workspace_send", "workspace_thread", "workspace_claim",
+             "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status"}
+    monkeypatch.setattr(server, "TOOLS", list(server.TOOLS))
+    monkeypatch.setattr(server, "_BY_NAME", dict(server._BY_NAME))
+    listing = rpc(1, "tools/list")
+    attack = rpc(2, "tools/call", name="serve_down", arguments={"port": 8080})
+    monkeypatch.setattr(server.sys, "stdin", io.StringIO(json.dumps(listing) + "\n" + json.dumps(attack) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(server.sys, "stdout", output)
+    assert server.main(["--builtin", "--workspace-only"]) == 0
+    replies = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert {t["name"] for t in replies[0]["result"]["tools"]} == names
+    assert replies[1]["result"]["isError"] is True

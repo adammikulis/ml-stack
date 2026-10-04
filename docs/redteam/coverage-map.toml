@@ -406,6 +406,8 @@ note = "the IQ-on-Apple-silicon mode cannot be changed through the tool or its e
 match = ["mcp-tool:*"]
 status = "partial"
 tests = [
+  "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+  "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
   "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
   "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
   "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
