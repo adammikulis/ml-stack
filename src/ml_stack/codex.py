@@ -139,10 +139,10 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
         with harnessing.opened(args, "codex", served, say) as run:
             workspace = ["", "[mcp_servers.workspace]", f"command = {_q(sys.executable)}",
                          'args = ["-m", "ml_stack.mcp", "--builtin", "--workspace-only"]',
-                         "startup_timeout_sec = 30", "[mcp_servers.workspace.env]"]
+                         "startup_timeout_sec = 30", "required = true", "[mcp_servers.workspace.env]"]
             workspace += [f"{name} = {_q(value)}" for name, value in {
                 TOKEN_ENV: tokens.load(run.seat.base, run.seat.parent or run.seat.name),
-                "ML_STACK_HOME": str(run.seat.base.parent),
+                "ML_STACK_HOME": str(run.seat.base.parent), "ML_STACK_WORKSPACE_HOME": str(run.seat.base),
                 "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
                 "ML_STACK_AGENT": "1", "ML_STACK_NONINTERACTIVE": "1"}.items()]
             path = run.files.write("config.toml", config_toml(base_url, alias, window,
