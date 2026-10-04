@@ -119,6 +119,7 @@ def test_custom_per_example_python_persists_and_precedes_managed(isolated_routin
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='Executable fixture uses a POSIX shebang')
 def test_catalogue_probes_chosen_drone_python_without_recursive_mapping(isolated_routing, monkeypatch, tmp_path):
+    monkeypatch.setenv('PYTHONUTF8', 'on')
     python = tmp_path / 'native Python'
     python.write_text(f'#!{sys.executable}\nimport json,os\n'
                       'assert "ML_STACK_GYM_PYTHON" not in os.environ\n'

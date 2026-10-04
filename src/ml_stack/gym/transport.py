@@ -30,6 +30,11 @@ def interpreter(environment=None):
     return sys.executable
 
 
+def python_environment():
+    """The UTF-8 environment for Python JSONL workers."""
+    return {**os.environ, "PYTHONUTF8": "1"}
+
+
 class Commands:
     """Write control messages to a simulator process."""
 
@@ -52,7 +57,7 @@ class Process:
         self.settings, self.updates, self.log = settings, updates, log
 
     def start(self):
-        environment = dict(os.environ)
+        environment = python_environment()
         environment.pop("ML_STACK_GYM_PYTHON", None)
         environment.pop("ML_STACK_GYM_PYTHONS", None)
         self.handle = start_process([interpreter(self.settings["environment"]), "-m", "ml_stack.gym.worker_entry",

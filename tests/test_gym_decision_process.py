@@ -61,6 +61,17 @@ def test_loading_and_missing_model_are_explicit(monkeypatch):
         process.close()
 
 
+def test_native_simulator_utf8_setting_cannot_break_model_child(monkeypatch):
+    monkeypatch.setenv('PYTHONUTF8', 'on')
+    process = child(monkeypatch, "import json,sys\n"
+                    "print(json.dumps({'status':'ready','utf8':sys.flags.utf8_mode}),flush=True)\n"
+                    "sys.stdin.readline()\n")
+    try:
+        assert wait_event(process) == {'status': 'ready', 'utf8': 1}
+    finally:
+        process.close()
+
+
 def test_decision_spawn_keeps_hostile_checkpoint_as_one_json_argument(monkeypatch, tmp_path):
     record = tmp_path / "argv.json"
     marker = tmp_path / "injected"
