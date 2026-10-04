@@ -259,6 +259,7 @@ def test_built_wheel_metadata_has_no_direct_dependencies():
 
 def test_unavailable_pyenv_shim_is_not_an_environment_builder(tmp_path, monkeypatch):
     import subprocess
+
     from ml_stack.fleet import environment
     version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
     monkeypatch.setattr(environment.shutil, 'which', lambda _name: '/tmp/shims/python')
@@ -270,6 +271,7 @@ def test_unavailable_pyenv_shim_is_not_an_environment_builder(tmp_path, monkeypa
 def test_python_builder_uses_verified_executable_not_shim(tmp_path, monkeypatch):
     import json
     import subprocess
+
     from ml_stack.fleet import environment
     version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
     monkeypatch.setattr(environment.shutil, 'which', lambda _name: '/tmp/shims/python')
