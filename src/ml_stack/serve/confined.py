@@ -65,11 +65,11 @@ def confine(argv: Sequence[str], env: Mapping[str, str], binary: Path, *,
     socket_path = ""
     port = 0
     if sys.platform.startswith("linux"):
+        host_index = argv.index("--host")
+        port = int(argv[argv.index("--port") + 1])
         socket_dir = os.path.realpath(tempfile.mkdtemp(prefix="ml-stack-server-"))
         socket_path = str(Path(socket_dir) / "model.sock")
         writable = (*writable, socket_dir)
-        host_index = argv.index("--host")
-        port = int(argv[argv.index("--port") + 1])
         argv[host_index + 1] = socket_path
     held = sandbox.Policy(
         base.name, read=tuple(sorted({*base.read, *reads, *map(os.path.realpath, writable)})),
@@ -78,12 +78,13 @@ def confine(argv: Sequence[str], env: Mapping[str, str], binary: Path, *,
         gpu=True, env={**policies.system_env(), **{k: env[k] for k in KEEP if k in env}},
         limits=base.limits)
     began = time.time()
+    made = False
     try:
         wrapped, tag, chosen = sandbox.wrapped(argv, held)
-    except Exception:
-        if socket_path:
+        made = True
+    finally:
+        if socket_path and not made:
             Path(socket_path).parent.rmdir()
-        raise
     if chosen is None:
         raise sandbox.SandboxUnavailable("no sandbox backend for the model server")
     if socket_path:
