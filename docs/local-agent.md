@@ -73,7 +73,7 @@ checks this against a fake server.
 `--profile chat` (default) serves 32K with the caps above. `--profile coding` is 256K (`--ctx 256k`
 accepts k and K) with Qwen3.8-27B (Q4_K_XL first; `ml-stack-serve memory` rates it 27.2 GiB at 256K,
 q8_0 cache, MTP head shared) and caps of 60 rounds, 150 calls, 120 model calls and an hour. A coding
-agent runs on the Codex harness through `ml_stack.harness.launch_coding_agent(model, role, project,
+agent runs on the Codex harness through `ml_stack.coding.launch_coding_agent(model, role, project,
 harness='codex')`; until that lands `start` prints the one command to run (`localharness.stub_command`).
 Flash-Next is used only when named with `--model`. Before starting, the memory estimator checks the
 context; when it does not fit, `start` says the longest context that does and prints the person-only

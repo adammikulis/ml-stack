@@ -108,7 +108,7 @@ READ_CALLS = {"json.loads", "tomllib.loads", "tomllib.load", "struct.unpack",
 READ_ATTRS = {"read_text", "read_bytes", "readlines"}
 ROUTE_NAME = re.compile(r"path|route|tail|rest|action", re.I)
 ROUTE_DIRS = ("fleet/", "graph/", "sentinel/", "ui/")
-ROUTE_FILES = {"workspace/fleet_routes.py"}
+ROUTE_FILES = {"workspace/fleet_routes.py", "workspace/coding_routes.py"}
 ROLE_VALUES = {"tool", "user", "system"}
 TRUST_BY_FILE = {
     "fleet/api.py": "peer holding the cluster key; /health open to anyone",

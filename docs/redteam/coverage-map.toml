@@ -14,6 +14,23 @@
 uncovered = 54
 partial = 200
 
+# -- saved Coding conversations -------------------------------------------------------------
+[[group]]
+match = ["route:workspace/coding_routes.py:/ui/coding/*", "parser:workspace/coding_routes.py",
+         "parser:workspace/coding_turns.py", "parser:workspace/coding_events.py",
+         "spawn:workspace/coding_turns.py:*", "human:workspace/harness_seat.py:*"]
+status = "covered"
+tests = [
+  "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+  "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+  "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+  "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+  "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+  "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+  "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+]
+note = "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+
 # -- coding harnesses on a local model -----------------------------------------------------
 [[group]]
 match = ["spawn:claude.py:launch", "spawn:codex.py:launch", "spawn:harnesshook.py:nudge",
