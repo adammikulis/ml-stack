@@ -114,6 +114,20 @@ note = "raising the GPU wiring limit is person-only: agent processes, tokens, fo
 
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
+match = ["parser:fleet/board_routes.py", "route:fleet/board_routes.py:*"]
+status = "covered"
+tests = [
+  "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
+  "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+  "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+  "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+  "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
+  "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+  "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope",
+]
+note = "Fleet delegates to maintained person-only Board routes after its existing UI authorization; foreign origins, missing UI header, malformed bodies, impersonation fields, oversized requests and agent owner credentials cannot send"
+
+[[group]]
 match = ["egress:workspace/boardroute.py:*", "listener:workspace/cli.py:_board_serve",
          "parser:workspace/boardroute.py", "human:workspace/boardapi.py:*",
          "human:workspace/service.py:Workspace.mint"]
