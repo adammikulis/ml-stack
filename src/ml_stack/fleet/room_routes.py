@@ -7,10 +7,9 @@ from typing import Any
 
 from ml_stack.sentinel.human import HumanRequired
 
-from .daemon import LOOPBACK
-
 __all__ = ["RoomRoutes"]
 
+LOOPBACK = "127.0.0.1"
 PATHS = ("/ui/room", "/ui/room/apply", "/ui/room/reset")
 
 
