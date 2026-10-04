@@ -24,6 +24,7 @@ from ml_stack.fleet.serving import Serving
 from ml_stack.log import warn
 from ml_stack.serve import (
     broker_wire,
+    chat_template as chat_template_mod,
     fit as fit_mod,
     measuring as measuring_mod,
     preflight as preflight_mod,
@@ -449,7 +450,11 @@ def resolve_spec(spec: ServerSpec, *, manager: ServerManager) -> Resolved:
     if asked_mmproj.lower() == "auto" and not seeing:
         notes.append("no vision projector is shipped beside that model; it will not read "
                      "pictures")
-    spec = replace(spec, draft=draft or None, mmproj=seeing or None, spec_type=kind)
+    template = spec.chat_template_file or chat_template_mod.written_beside(str(spec.model))
+    if template and not spec.chat_template_file:
+        notes.append("using a chat template that renders later system messages")
+    spec = replace(spec, draft=draft or None, mmproj=seeing or None, spec_type=kind,
+                   chat_template_file=template)
     spec, yarn_said = LlamaServerBackend.resolved_context(spec)
     if yarn_said:
         notes.append(yarn_said)
