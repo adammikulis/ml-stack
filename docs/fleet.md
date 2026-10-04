@@ -105,7 +105,7 @@ file**: choose a file exported by a cluster owner. The app checks the file’s n
 and authenticates a live beacon before saving membership. Recovery-file joining never
 touches the keystore. Refresh repeats the LAN search; manual
 entry remains available when discovery is blocked. Names in that list are unverified
-LAN hints: the passphrase handshake authenticates the cluster before membership is saved.
+LAN hints: the maintained SPAKE2 handshake authenticates the cluster before membership is saved.
 If a selected cluster disappears, joining fails rather than creating a replacement.
 
 A cluster name is required when creating or joining with a passphrase. Names are at most
@@ -114,7 +114,9 @@ the required name prompt); random-key creation uses `ml-stack-peers init --group
 Existing memberships retain their recorded names. Manual entry creates a new cluster
 when no matching cluster answers, so use exactly the same name and passphrase on each
 machine. Joining explicitly may save the passphrase to the keystore; merely discovering
-nearby clusters never reads or writes it.
+nearby clusters never reads or writes it. Discovery reports password joining from the
+wrapped-passphrase record’s presence; it never decrypts that record. Random-key recovery
+joining authenticates a protocol-3 encrypted beacon using the supplied key.
 
 `join` runs the checks serving depends on (the memory a model may use, a llama-server --
 downloaded if there is none), asks for the passphrase every machine shares (or takes

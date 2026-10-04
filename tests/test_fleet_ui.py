@@ -272,7 +272,7 @@ class TestFirstRunIsNotUpForGrabs:
         serving.call("/ui/setup/join", method="POST",
                      body={"passphrase": WORDS, "group": "home"})
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": "different words here"})
+                                       body={"passphrase": "different words here", "group": "ml-stack"})
         assert status == 401
         assert "sign in" in body["error"]
 
@@ -413,7 +413,7 @@ class TestSignIn:
     def test_the_passphrase_signs_you_in(self, joined):
         """Typing the words you already know, rather than pasting 43 characters."""
         status, body, headers = joined.call("/ui/session", method="POST",
-                                            body={"passphrase": WORDS})
+                                            body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200 and body["signed_in"]
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
@@ -429,7 +429,7 @@ class TestSignIn:
         punished for being the legitimate user."""
         joined.call("/ui/session", method="POST", body={"passphrase": "wrong words"})
         status, body, _ = joined.call("/ui/session", method="POST",
-                                      body={"passphrase": WORDS})
+                                      body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200, body
 
     @pytest.mark.redteam
@@ -446,7 +446,7 @@ class TestSignIn:
 
     def test_a_session_opens_the_cluster_view(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "ml-stack"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, body, _ = joined.call("/ui/peers", cookie=cookie)
         assert status == 200
@@ -454,7 +454,7 @@ class TestSignIn:
 
     def test_signing_out_ends_the_session(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "ml-stack"})
         cookie = headers["Set-Cookie"].split(";")[0]
         joined.call("/ui/session", method="DELETE", cookie=cookie)
         status, _, _ = joined.call("/ui/peers", cookie=cookie)
@@ -464,7 +464,7 @@ class TestSignIn:
         """The cookie is scoped to /ui. A browser session must not become a bearer
         credential for the route that runs commands."""
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "ml-stack"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, _ = joined.call("/jobs", cookie=cookie)
         assert status == 401

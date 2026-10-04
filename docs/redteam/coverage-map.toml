@@ -38,8 +38,9 @@ tests = [
   "tests/test_fleet_named_lan.py::test_random_key_hint_and_upload_authenticate_without_keystore",
   "tests/test_fleet_named_lan.py::test_hostile_recovery_upload_never_writes_membership",
   "tests/test_fleet_named_lan.py::test_wrong_name_wrong_key_and_cross_origin_cannot_import",
+  "tests/test_fleet_named_lan.py::test_authenticated_pake_answer_must_contain_selected_name_and_valid_key",
 ]
-note = "LAN hints are bounded nonce-matching metadata; local setup or a signed-in person selects a named recovery file, validates its bounded shape, and authenticates a native HMAC beacon before any membership write; scans and recovery joins never access the keystore"
+note = "LAN hints are bounded nonce-matching metadata; local setup or a signed-in person selects a named recovery file, validates its bounded shape, and authenticates a native encrypted protocol-3 beacon before any membership write; scans and recovery joins never access the keystore"
 
 [[group]]
 match = ["egress:fleet/serving.py:_identity"]

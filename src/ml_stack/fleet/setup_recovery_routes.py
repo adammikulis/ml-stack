@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 
 from . import recovery
-from .discovery import DiscoveryError, discover, in_cluster, require_name
+from .discovery import DiscoveryError, adopt, discover, in_cluster, require_name
 
 
 class SetupRecoveryRoutes:
@@ -30,14 +30,10 @@ class SetupRecoveryRoutes:
             member = recovery.parse_recovery(req["recovery"])
             if member.group != require_name(req["group"]):
                 raise DiscoveryError("recovery file belongs to a different cluster")
-            if not ui.throttle.acquire():
-                raise DiscoveryError("another join is in progress; try again")
-            try:
+            with ui.join_guard():
                 if not discover(member.key, timeout_s=1.5, port=ui.discovery_port):
                     raise DiscoveryError("no live cluster authenticated this recovery file")
-                recovery.adopt_recovery(member, ui.cluster_key_path)
-            finally:
-                ui.throttle.release()
+                adopt(member, ui.cluster_key_path)
         except (DiscoveryError, ValueError, OSError) as exc:
             self.send(400, {"error": str(exc)})
             return True

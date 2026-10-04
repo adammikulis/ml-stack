@@ -112,7 +112,6 @@ Target: Any
 Unit: Any
 calibrate: Any
 candidates: Any
-check_passphrase: Any
 choose: Any
 cluster_group: Any
 create_cluster_key: Any
@@ -127,9 +126,8 @@ family_of: Any
 group_path: Any
 how_many: Any
 in_cluster: Any
+join_by_passphrase: Any
 is_unfiltered: Any
-join_cluster: Any
-key_from_passphrase: Any
 key_path: Any
 load_cluster_key: Any
 load_or_create_token: Any
@@ -185,7 +183,6 @@ __all__ = [
     'Unit',
     'calibrate',
     'candidates',
-    'check_passphrase',
     'choose',
     'cluster_group',
     'create_cluster_key',
@@ -200,9 +197,8 @@ __all__ = [
     'group_path',
     'how_many',
     'in_cluster',
+    'join_by_passphrase',
     'is_unfiltered',
-    'join_cluster',
-    'key_from_passphrase',
     'key_path',
     'load_cluster_key',
     'load_or_create_token',

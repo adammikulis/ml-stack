@@ -14,7 +14,6 @@ import math
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler
@@ -27,6 +26,7 @@ from ml_stack.fleet import join as joining
 from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
+    derive_token,
     in_cluster,
     load_cluster_key,
     memberships,
@@ -570,7 +570,7 @@ class TestThePage:
                                  body={"passphrase": "other words here", "group": "lab"})
         assert status == 200, body
         assert body["group"] == "lab" and not body["started"], "this daemon is the daemon"
-        assert [m.group for m in memberships(s.keyfile)] == ["home", "lab"]
+        assert [m.group for m in memberships(s.keyfile)] == ["lab", "home"]
         assert any("already running as 'studio'" in line for line in body["said"])
         assert {c["name"] for c in body["checks"]} >= {"llama-server"}
         assert "larch" in [p["name"] for p in body["peers"]]
@@ -659,23 +659,19 @@ class TestThePage:
 class PausableDaemon:
     """A peer with a real `Availability` behind ``/availability``, and a beacon."""
 
-    def __init__(self, port: int, key: bytes, udp: int, name: str) -> None:
+    def __init__(self, port: int, key: bytes, udp: int, name: str, root: Path) -> None:
+        from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.jobs import JobRunner
 
         self.name = name
         self.schedule = Availability()
         schedule = self.schedule
-
-        from ml_stack.fleet.api import Daemon, make_handler
-        from ml_stack.fleet.discovery import derive_token
-        from ml_stack.fleet.jobs import JobRunner
-
-        root = Path(tempfile.mkdtemp(prefix=f"pausable-{name}-"))
-        (root / "files").mkdir()
-        self.runner = JobRunner(root)
-        handler = make_handler(Daemon(self.runner, root / "files", derive_token(key), name,
-                                      lambda: {"machine": f"id-{name}"}, schedule=schedule))
-
+        files = root / "files"
+        files.mkdir(parents=True)
+        self.runner = JobRunner(root, files)
+        handler = make_handler(Daemon(self.runner, files, derive_token(key), name=name,
+                                      schedule=schedule))
         def refresh(b: Beacon) -> None:
             b.device = {**DEVICE, "availability": schedule.public()}
 
@@ -687,6 +683,7 @@ class PausableDaemon:
 
     def close(self) -> None:
         self.advertiser.stop()
+        self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
 
@@ -697,7 +694,7 @@ def cluster(tmp_path, key, udp):
     from tests.cluster_support import join as join_cluster
 
     join_cluster(WORDS, group="home", path=key)
-    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n)
+    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n, root=tmp_path / n)
             for n in ("harrowgate", "larch", "studio")]
     yield made, key, udp, tmp_path / "root"
     for one in made:
