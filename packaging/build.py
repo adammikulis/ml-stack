@@ -1,10 +1,4 @@
-"""Build wheels and a standalone bundle for this platform.
-
-    python packaging/build.py             wheels only
-    python packaging/build.py --bundle    wheels, the daemon, and the window around it
-    python packaging/build.py --bundle --no-window    the daemon on its own
-    python packaging/build.py --wheelhouse            wheels, and the extras beside them
-"""
+"""Build wheels, dependency wheelhouses and standalone platform bundles."""
 
 from __future__ import annotations
 
@@ -17,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP = ROOT / "app"
-EXTERNAL = ("pyinstaller", "packaging", "psutil", "numpy")
+EXTERNAL = ("pyinstaller", "packaging", "psutil", "ladybug>=0.20.4,<0.21")
 SIDECAR = "ml-stack-headless"
 
 
@@ -51,8 +45,7 @@ def wheelhouse(out: Path) -> list[Path]:
 
 
 def built_from() -> Path:
-    """Write the commit this tree is at where ``ml-stack.spec`` puts it beside
-    `ml_stack.fleet.measuring`, which is what the frozen daemon answers as its commit."""
+    """Write the current commit marker into the build directory."""
     sys.path.insert(0, str(ROOT / "src"))
     from ml_stack.fleet.measuring import BUILT_FROM, installed_commit
 
@@ -69,8 +62,6 @@ def daemon() -> Path:
         run([sys.executable, "-m", "venv", str(env)])
     pip = env / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
     run([str(pip), "install", "-q", "--upgrade", *EXTERNAL])
-    # force-reinstall: the version has not changed between builds, so pip would keep
-    # the wheel already in the build venv and bundle code that is one edit behind.
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
          "--force-reinstall", "--no-deps", "ml-stack"])
 
