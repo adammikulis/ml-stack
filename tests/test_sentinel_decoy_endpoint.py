@@ -214,31 +214,33 @@ SHAPES = [
 ]
 
 
+def test_the_corpus_is_at_least_forty_eight_runs() -> None:
+    assert len(SHAPES) * len(TASKS) >= 48
+
+
+@pytest.mark.parametrize("n", range(len(SHAPES)))
 def test_a_corpus_of_legitimate_agent_runs_never_touches_the_decoy_or_quarantines_anything(
-        listener, tmp_path) -> None:
+        listener, tmp_path, n) -> None:
+    """One shape per case (every task through it), so the workers share the corpus instead of one
+    of them running all of it in 25 s."""
+    shape = SHAPES[n]
     node = sentinel.default()
     notes = tmp_path / "notes.txt"
     notes.write_text("hello from the project notes")
-    runs = calls = 0
-    for n, shape in enumerate(SHAPES):
-        for task in TASKS:
-            fake = ToolCallingServer(list(shape))
-            try:
-                agent = Agent(Client(fake.base_url), corpus_tools(notes),
-                              sentinel=Watch(node, f"s-corpus-{n}-{task[:6]}"))
+    for task in TASKS:
+        fake = ToolCallingServer(list(shape))
+        try:
+            agent = Agent(Client(fake.base_url), corpus_tools(notes),
+                          sentinel=Watch(node, f"s-corpus-{n}-{task[:6]}"))
 
-                async def go(a: Agent = agent, t: str = task) -> list:
-                    return [e async for e in a.run(t)]
-                events = asyncio.run(go())
-            finally:
-                fake.close()
-            assert isinstance(events[-1], Done) and events[-1].reason == "answer", events[-1]
-            runs += 1
-            calls += sum(len(t.calls) for t in shape)
-    assert runs == len(SHAPES) * len(TASKS) >= 48
+            async def go(a: Agent = agent, t: str = task) -> list:
+                return [e async for e in a.run(t)]
+            events = asyncio.run(go())
+        finally:
+            fake.close()
+        assert isinstance(events[-1], Done) and events[-1].reason == "answer", events[-1]
     assert listener.hits == 0
     assert node.bus.recent(kind="honey.token_seen") == []
     assert node.bus.recent(kind="honey.endpoint_hit") == []
     assert node.store.records(state=State.QUARANTINED) == []
     assert [r for r in node.store.records(state=State.WATCH) if r.kind == "session"] == []
-    print(f"corpus: {runs} runs, {calls} tool calls")
