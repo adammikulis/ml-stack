@@ -60,7 +60,8 @@ def call(port, method, path, body=None):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     try:
         connection.request(method, path, None if body is None else json.dumps(body),
-                           {"X-ML-Stack-UI": "1", "Content-Type": "application/json"})
+                           {"X-ML-Stack-UI": "1", "Content-Type": "application/json",
+                            "Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"})
         response = connection.getresponse()
         payload = json.loads(response.read())
         assert response.status < 400, payload
