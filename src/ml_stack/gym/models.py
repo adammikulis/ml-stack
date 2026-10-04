@@ -29,10 +29,10 @@ def vision_row(model):
 def model_choices():
     """List local choices without loading, fetching or verifying model weights."""
     decisions = [{"id": "strands", "label": "Strands Decider 2B (default)",
-                  "checkpoint": None, "model": STRANDS, "device": "cpu",
+                  "checkpoint": None, "model": STRANDS, "device": "auto",
                   "status": "not_loaded", "reason": "Verified local files are checked when the model loads"}]
     decisions.extend({"id": row["name"], "label": row["name"], "checkpoint": row["path"],
-                      "model": row["name"], "device": "cpu",
+                      "model": row["name"], "device": "auto",
                       "status": "installed" if Path(row["path"]).is_dir() else "missing"}
                      for row in registry.listing())
     vision = [vision_row(model) for model in hub.discover(kind="vision")]

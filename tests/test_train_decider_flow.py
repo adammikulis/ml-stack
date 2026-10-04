@@ -322,6 +322,14 @@ def test_a_held_server_or_a_second_run_refuses_the_hold():
         pass
 
 
+def test_waiting_gpu_hold_delegates_busy_server_admission_to_broker():
+    busy = Wire([{"model": "big", "port": 1, "loading": False,
+                  "holders": [{"label": "model holder", "pid": 3}]}])
+    with gpu.hold("queued model", wait_s=10, wire=busy):
+        assert busy.calls == [("claim", gpu.CLAIM)]
+    assert busy.calls[-1] == ("unclaim", gpu.CLAIM)
+
+
 # --- the commands ----------------------------------------------------------------------------
 
 
