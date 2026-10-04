@@ -452,7 +452,7 @@ Owner's standing choices (2026-10-03); do not ask again.
 
 - **Live tests and demos use the newest Qwen family** (Qwen3.8 at the time of writing; look at
   what `ml-stack-models list` and the Hugging Face cache actually hold and name the exact id in
-  the report) **and Qwen3.8-Flash-Next**, which the owner rates highly. For large-model tests use the dense Qwen3.8-27B (`Qwen3.8-27B-UD-Q4_K_XL.gguf`); Flash-Next holds too much memory on this machine. For small and day-to-day tests prefer a smaller Qwen3.8 model. Do not use gpt-oss: it is
+  the report) For large-model tests use the dense Qwen3.8-27B (`Qwen3.8-27B-UD-Q4_K_XL.gguf`); Flash-Next holds too much memory on this machine. For small and day-to-day tests prefer a smaller Qwen3.8 model. Do not use gpt-oss: it is
   too old. Old results stay as history, not as a matrix row.
 - **MTP (multi-token prediction) draft heads are on by default** whenever the served model has a
   matching trusted head and the managed llama.cpp build supports it; there is a documented
