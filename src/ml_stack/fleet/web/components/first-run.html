@@ -38,7 +38,8 @@
     show(...nodes) {
       const at = this.state.step;
       this.stepper.current = at;
-      this.stepper.replaceChildren(el("div", { slot: `step-${at}` }, ...nodes));
+      this.stepper.replaceChildren(el("div", { slot: `step-${at}` },
+        ...nodes, this.modelInstall?.status));
     }
 
     go(n) { this.state.step = n; this.paint(); }
@@ -77,8 +78,6 @@
         } }, "Continue"));
     }
 
-    // Step 1: the clusters this machine belongs to. Skippable: a machine on its own is a
-    // working machine, and one that belongs to three is the same row three times over.
     async clustersStep() {
       const st = this.state;
       const rows = el("div");
@@ -143,8 +142,6 @@
         + "commands on every machine in the cluster.";
     }
 
-    // Steps 2 and 3: what work this machine takes, and when it runs. Every box is
-    // pre-ticked from what the machine actually is, and every one shows why.
     async asked() {
       const st = this.state;
       if (!st.suggest) st.suggest = await api("/ui/setup/suggest");
@@ -176,7 +173,6 @@
 
     async jobStep() {
       const { s, machine, pick, spec, radio, check } = await this.asked();
-      // The reason belongs to the option the suggestion names, not to the first one.
       const suggested = (s.labels?.value || []).join(",");
       const why = (value, plain) => (value === suggested && s.labels?.why) || plain;
       this.show(
@@ -240,8 +236,6 @@
         go, outcome);
     }
 
-    // Step 4: what this machine should be able to run. Asked here rather than left in
-    // Settings, because a machine that can do nothing yet is the state everyone starts in.
     chosen() {
       const st = this.state;
       return st.install || (st.install = {
@@ -260,6 +254,7 @@
       if (!st.libraries) st.libraries = await api("/ui/libraries");
       const offered = st.libraries.libraries || [];
       const kept = this.chosen();
+      if (!this.modelInstall) this.modelInstall = await M.startupModels(kept);
       if (!kept.picked) {
         kept.picked = true;
         kept.want = offered.filter((x) => x.default || x.installed).map((x) => x.name);
@@ -300,6 +295,7 @@
               body: JSON.stringify({ install: add }) });
             if (r.error) return stop(r.error);
           }
+          await this.modelInstall.start();
         } catch (e) {
           return stop(String(e));
         }
@@ -316,8 +312,9 @@
           + "Settings."),
         el("div", { class: "cap" }, el("span", {}, "CHATTING")),
         this.optBox("chat", kept.chat, "Run models and chat with them",
-          "downloads llama.cpp, about 20 MB; models come later and are your choice",
+          "downloads llama.cpp, about 20 MB",
           (on) => { kept.chat = on; }),
+        this.modelInstall.panel,
         M.contextPicker(kept.context, (n) => { kept.context = n; }),
         offered.length ? el("div", { class: "cap" }, el("span", {}, "TRAINING")) : null,
         ...offered.map((lib) =>
@@ -331,7 +328,6 @@
         size, go, later, note);
     }
 
-    // Step 5: what it does while nobody is looking at it.
     awayStep() {
       const kept = this.chosen();
       const st = this.state;
@@ -371,7 +367,6 @@
         go);
     }
 
-    // Give models more memory: the slider, skippable.
     async wiredStep() {
       const r = await api("/ui/room");
       if (!r.machine || !r.machine.supported) return this.go(7);
@@ -387,8 +382,6 @@
         el("button", { class: "ghost", onclick: () => this.go(7) }, "Skip"), next);
     }
 
-    // The last step. Not a command: telling someone to open a terminal is the same wall
-    // as telling them to paste a 32-byte key, one layer up.
     doneStep() {
       const st = this.state;
       api("/ui/setup/done", { method: "POST" });
@@ -420,8 +413,6 @@
         const others = (r.peers || []).filter((p) => !p.is_self);
         if (others.length) {
           looking.remove();
-          // Replaces the skip button rather than sitting above it: two buttons that do
-          // the same thing is a choice the reader has to stop and make, about nothing.
           open.remove();
           found.replaceChildren(
             el("div", { class: "ok" }, `Found ${others.map((p) => p.name).join(", ")}.`),
