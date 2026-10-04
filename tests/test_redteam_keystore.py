@@ -103,11 +103,20 @@ def test_a_hostile_label_does_not_change_which_key_comes_out(counting):
     assert len(keys) == len(labels) and all(len(k) == 32 for k in keys)
 
 
-def test_a_loop_of_requests_is_stopped_at_the_ceiling(counting):
+def test_a_loop_of_reads_is_stopped_at_the_read_ceiling(counting):
+    for _ in range(700):
+        with contextlib.suppress(keystore.KeystoreBusy):
+            person_ks(sleep=lambda _s: None).subkey("memory", "a")
+    assert counting.count("get") == keystore.READ_CEILING
+
+
+def test_a_loop_of_resets_and_creates_is_stopped_at_the_write_ceiling(counting):
+    ks = person_ks(sleep=lambda _s: None)
     for _ in range(500):
         with contextlib.suppress(keystore.KeystoreBusy):
-            person_ks().subkey("memory", "a")
-    assert len(counting.calls) == keystore.RATE_CEILING
+            ks.reset()
+            ks.provision()
+    assert counting.count("set") + counting.count("delete") == keystore.WRITE_CEILING
 
 
 def test_a_loop_against_a_refusing_keystore_asks_once(counting):

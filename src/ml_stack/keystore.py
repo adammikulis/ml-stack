@@ -5,9 +5,11 @@ signing key, wrapped credentials) gets a subkey: HKDF-SHA256 over the master wit
 owner and context in ``info``; `wrap` and `unwrap` bind purpose and owner as AAD.
 
 Nothing touches the keystore at import, construction or `status`. The master is read once per
-process. Every backend call passes a gate: denial latch, hourly ceiling, cross-process lock. A
-background process never creates the master and reads it only after ``ml-stack-security
-unlock``. Each backend call is a sentinel event (purpose, outcome), never a value.
+process. Every backend call passes a gate: denial latch, hourly ceiling, cross-process lock. Reads
+of an existing item and the operations that make or remove one (creates, deletes, retries after a
+refusal) have separate hourly ceilings. A background process never creates the master and reads it
+only after ``ml-stack-security unlock``. Each backend call is a sentinel event (purpose, outcome),
+never a value.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import hashlib
 import hmac
 import logging
 import os
+import random
 import sys
 import threading
 import time
@@ -32,15 +35,17 @@ from ml_stack.log import warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.events import Event, Severity
 
-__all__ = ["COOLDOWN_S", "ENV_NONINTERACTIVE", "NOTICE", "RATE_CEILING", "RATE_WINDOW_S",
-           "UNLOCK_COMMAND", "Keystore", "KeystoreBusy", "KeystoreDenied", "KeystoreError",
+__all__ = ["COOLDOWN_S", "ENV_NONINTERACTIVE", "NOTICE", "RATE_WINDOW_S", "READ_CEILING",
+           "UNLOCK_COMMAND", "WRITE_CEILING", "Keystore", "KeystoreBusy", "KeystoreDenied", "KeystoreError",
            "KeystoreLocked", "KeystoreMissing", "KeystoreUnavailable", "Wires", "aead", "default", "hkdf",
            "interactive", "os_user", "scrypt_key"]
 
 SERVICE = "ml-stack"
 ENV_NONINTERACTIVE = "ML_STACK_NONINTERACTIVE"
 UNLOCK_COMMAND = "ml-stack-security unlock"
-RATE_CEILING = 20
+READ_CEILING = 600
+WRITE_CEILING = 5
+NEAR_CEILING = 0.8
 RATE_WINDOW_S = 3600.0
 COOLDOWN_S = 600.0
 FLIGHT_WAIT_S = 180.0
@@ -52,6 +57,7 @@ _SALT = b"ml-stack/keystore/v1"
 _MAGIC = b"MKW1"
 _VERSION = 1
 
+_JITTER = random.SystemRandom()
 logger = logging.getLogger("ml_stack.keystore")
 logger.addHandler(logging.NullHandler())
 
@@ -145,23 +151,26 @@ def _aad(purpose: str, owner: str) -> bytes:
 
 class Wires(NamedTuple):
     """What a `Keystore` calls out to: ``clock``, ``say`` for the first-use sentence, ``bus``
-    for audit events (None: the sentinel's), ``interactive`` (None: the module's)."""
+    for audit events (None: the sentinel's), ``interactive`` (None: the module's), ``sleep`` for
+    the backoff near the read ceiling."""
 
     clock: Callable[[], float] = time.time
     say: Callable[[str], None] = warn
     bus: Any = None
     interactive: Callable[[], bool] | None = None
+    sleep: Callable[[float], None] = time.sleep
 
 
 class Keystore:
     """The master key of one OS user, and the subkeys cut from it."""
 
     def __init__(self, *, user: str | None = None, directory: Path | None = None,
-                 ceiling: int = RATE_CEILING, wires: Wires | None = None) -> None:
+                 ceiling: int = READ_CEILING, write_ceiling: int = WRITE_CEILING,
+                 wires: Wires | None = None) -> None:
         self.user = user or os_user()
         self.account = "master/" + self.user
-        self._fixed, self._ceiling = directory, ceiling
-        self._clock, self._say, self._bus, self._interactive = wires or Wires()
+        self._fixed, self._ceiling, self._write_ceiling = directory, ceiling, write_ceiling
+        self._clock, self._say, self._bus, self._interactive, self._sleep = wires or Wires()
         self._key: bytearray | None = None
         self._legacy: dict[tuple[str, str], str | None] = {}
         self._denied = ""
@@ -208,12 +217,20 @@ class Keystore:
     def status(self) -> dict[str, Any]:
         """Provisioning, denial and rate state from the state files; never a backend call."""
         now = self._clock()
-        ops = [t for t in self._doc("rate.json").get("ops", []) if now - float(t) < RATE_WINDOW_S]
+        reads, writes = self._window(now)
         until = float(self._doc("denied.json").get("until", 0))
         return {"account": self.account, "provisioned": bool(self._doc("provisioned.json").get("at")),
                 "cached": self._key is not None, "denied_for_s": max(0, round(until - now)) if until > now else 0,
-                "denied_in_process": bool(self._denied), "ops_this_hour": len(ops),
-                "ceiling": self._ceiling, "interactive": self._is_interactive()}
+                "denied_in_process": bool(self._denied), "reads_this_hour": len(reads),
+                "writes_this_hour": len(writes), "read_ceiling": self._ceiling,
+                "write_ceiling": self._write_ceiling, "interactive": self._is_interactive()}
+
+    def _window(self, now: float) -> tuple[list[float], list[float]]:
+        """The read and write times inside the last hour; an older file's single list counts as reads."""
+        doc = self._doc("rate.json")
+        pick = [float(t) for t in doc.get("reads", doc.get("ops", [])) if now - float(t) < RATE_WINDOW_S]
+        writes = [float(t) for t in doc.get("writes", []) if now - float(t) < RATE_WINDOW_S]
+        return pick, writes
 
     def pending_notice(self) -> str:
         """The first-use sentence when a prompt may still come and the person has not been
@@ -285,14 +302,23 @@ class Keystore:
                              f"runs `{UNLOCK_COMMAND}` once in a terminal to create it.")
 
     def _spend(self, kind: str, purpose: str) -> None:
+        """Count one backend call against its class; a read after an earlier refusal is a retry
+        and counts with the writes."""
+        write = kind != "read" or self._path("denied.json").exists()
         with self._held("state.lock", STATE_WAIT_S):
             now = self._clock()
-            ops = [float(t) for t in self._doc("rate.json").get("ops", []) if now - float(t) < RATE_WINDOW_S]
-            if len(ops) >= self._ceiling:
+            reads, writes = self._window(now)
+            used, ceiling = (writes, self._write_ceiling) if write else (reads, self._ceiling)
+            if len(used) >= ceiling:
                 self._event("refused", purpose, "busy", Severity.WARNING)
-                raise KeystoreBusy(f"ml-stack has already used the keystore {self._ceiling} times in "
+                what = "changed or retried" if write else "read"
+                raise KeystoreBusy(f"ml-stack has already {what} the keystore {ceiling} times in "
                                    "the last hour and will not ask again until that passes")
-            self._put_doc("rate.json", {"ops": [*ops, now]})
+            used.append(now)
+            self._put_doc("rate.json", {"reads": reads, "writes": writes})
+            near = len(used) / ceiling >= NEAR_CEILING and not write
+        if near:
+            self._sleep(_JITTER.uniform(0.05, 0.25))
 
     def _tell(self) -> None:
         if self._noticed:
@@ -315,6 +341,8 @@ class Keystore:
         except (ring.errors.KeyringError, OSError) as exc:
             raise self._latch(purpose, exc) from exc
         self._event(kind, purpose, "absent" if kind == "read" and out is None else "ok")
+        if kind == "read":
+            self._path("denied.json").unlink(missing_ok=True)
         return out
 
     @contextmanager
@@ -397,7 +425,7 @@ class Keystore:
         self.lock()
         with self._flight("reset", person=True):
             self._call("delete", "reset", lambda r: r.delete_password(SERVICE, self.account))
-        for name in ("provisioned.json", "denied.json", "rate.json", "noticed.json", "legacy.json"):
+        for name in ("provisioned.json", "denied.json", "noticed.json", "legacy.json"):
             self._path(name).unlink(missing_ok=True)
         self._denied, self._noticed = "", False
 
