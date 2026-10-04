@@ -28,6 +28,14 @@ def test_context_length_uses_tokens_and_saves_the_chosen_limit(joined, open_page
     assert not page.locator('#settings-removal button.danger').is_visible()
     page.locator('#settings-advanced summary').click()
     page.locator('#settings-removal button.danger').wait_for()
+    slider.focus()
+    slider.press('End')
+    assert slider.get_attribute('aria-valuetext') == '1,048,576 tokens'
+    assert page.get_by_text('Extended context: Qwen uses YaRN above its native 256K window.', exact=False).is_visible()
+    page.click('#settings-save')
+    page.wait_for_selector('#settings-note .ok')
+    _, saved, _ = joined.call('/ui/settings', cookie=joined.cookie)
+    assert saved['settings']['context'] == 1048576
     assert not errors
 
 
