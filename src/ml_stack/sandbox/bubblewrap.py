@@ -1,7 +1,4 @@
-"""The Linux backend: a ``bwrap`` command line built from the policy.
-
-Designed and checked by its argv only on this machine; no Linux host has run it.
-"""
+"""The Linux backend's bubblewrap command and GPU mounts."""
 
 from __future__ import annotations
 
@@ -35,6 +32,16 @@ def arguments(policy: Policy, program: str) -> list[str]:
             out += ["--ro-bind", path, path]
     for path in policy.write:
         out += ["--bind", path, path]
+    if policy.cache:
+        out += ["--bind", policy.cache, policy.cache]
+    if policy.gpu:
+        for path in ("/dev/dxg", "/dev/nvidiactl", "/dev/nvidia0", "/dev/nvidia-uvm",
+                     "/dev/nvidia-uvm-tools", "/dev/dri"):
+            if os.path.exists(path):
+                out += ["--dev-bind", path, path]
+        for path in ("/usr/lib/wsl/lib", "/usr/lib/wsl/drivers"):
+            if os.path.isdir(path):
+                out += ["--ro-bind", path, path]
     for key, value in policy.env.items():
         out += ["--setenv", key, value]
     return out

@@ -4,6 +4,8 @@ beyond its binary and the files it was asked to load."""
 from __future__ import annotations
 
 import os
+import sys
+import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -11,6 +13,7 @@ from pathlib import Path
 
 from ml_stack import sandbox
 from ml_stack.sandbox import policies
+from ml_stack.sandbox.policy import Net
 
 __all__ = ["ENV", "Confined", "confine", "wanted"]
 
@@ -58,13 +61,33 @@ def confine(argv: Sequence[str], env: Mapping[str, str], binary: Path, *,
             if real != piece and not Path(piece).is_dir():
                 reads.add(os.path.realpath(str(Path(piece).parent)))
     base = policies.model_server(binary, Path(os.path.realpath(binary)).parent)
+    argv = list(argv)
+    socket_path = ""
+    port = 0
+    if sys.platform.startswith("linux"):
+        socket_dir = os.path.realpath(tempfile.mkdtemp(prefix="ml-stack-server-"))
+        socket_path = str(Path(socket_dir) / "model.sock")
+        writable = (*writable, socket_dir)
+        host_index = argv.index("--host")
+        port = int(argv[argv.index("--port") + 1])
+        argv[host_index + 1] = socket_path
     held = sandbox.Policy(
         base.name, read=tuple(sorted({*base.read, *reads, *map(os.path.realpath, writable)})),
-        write=tuple(os.path.realpath(w) for w in writable), exec=base.exec, net=base.net,
+        write=tuple(os.path.realpath(w) for w in writable), exec=base.exec,
+        net=Net.deny() if socket_path else base.net,
         gpu=True, env={**policies.system_env(), **{k: env[k] for k in KEEP if k in env}},
         limits=base.limits)
     began = time.time()
-    wrapped, tag, chosen = sandbox.wrapped(list(argv), held)
+    try:
+        wrapped, tag, chosen = sandbox.wrapped(argv, held)
+    except Exception:
+        if socket_path:
+            Path(socket_path).parent.rmdir()
+        raise
     if chosen is None:
         raise sandbox.SandboxUnavailable("no sandbox backend for the model server")
+    if socket_path:
+        from ml_stack.serve.socket_relay import arguments
+
+        wrapped = arguments(wrapped, port, socket_path)
     return Confined(wrapped, dict(held.env), tag, chosen, began, str(Path(os.path.realpath(binary)).parent))

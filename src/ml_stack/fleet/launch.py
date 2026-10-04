@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 import webbrowser
+import sys
 from typing import Any
 
 from ml_stack.http import ServerError, request_json
@@ -79,8 +80,6 @@ def last_screen(name: str, *, track: str = "", port: int = HTTP_PORT) -> list[st
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    from .daemon import main as daemon_main
-
     ap = argparse.ArgumentParser(
         prog="ml-stack",
         description="Start ml-stack on this machine and open it in your browser.")
@@ -99,6 +98,16 @@ def main(argv: list[str] | None = None) -> int:
         say(f"  {url}")
         return 0
 
+    linux_executable = None
+    if sys.platform == "win32":
+        from .wsl import WSLError, prepare
+
+        try:
+            linux_executable = prepare()
+        except (WSLError, OSError) as exc:
+            warn(str(exc))
+            return 1
+
     def open_when_ready() -> None:
         if wait_for_health(known.port) is None:
             warn("The daemon did not start. Its output is above.")
@@ -108,7 +117,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # Started before the daemon takes over this thread, which never returns.
     threading.Thread(target=open_when_ready, daemon=True).start()
-    return daemon_main(["--port", str(known.port), *rest])
+    arguments = ["--port", str(known.port), *rest]
+    if sys.platform == "win32":
+        from .wsl import WSLError, start
+
+        try:
+            return start(arguments, executable=linux_executable)
+        except (WSLError, OSError) as exc:
+            warn(str(exc))
+            return 1
+    from .daemon import main as daemon_main
+
+    return daemon_main(arguments)
 
 
 if __name__ == "__main__":
