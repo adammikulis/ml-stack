@@ -52,7 +52,7 @@ RECORD_WORKERS = 3
 
 def pytest_command(workers: int, *rest: str) -> list[str]:
     """The pytest invocation every tier shares."""
-    return [sys.executable, "-m", "pytest", "-q", "-n", str(workers), *rest]
+    return [sys.executable, "-m", "pytest", "-q", "-rfE", "-n", str(workers), *rest]
 
 
 def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
