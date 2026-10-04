@@ -306,3 +306,4 @@ reportUnusedExcept = "error"
 [project.entry-points."ml_stack.ui_routes"]
 board = "ml_stack.workspace.fleet_routes:route"
 coding = "ml_stack.workspace.coding_routes:route"
+history = "ml_stack.activity.fleet_routes:route"

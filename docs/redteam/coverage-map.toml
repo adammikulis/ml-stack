@@ -15,6 +15,12 @@ uncovered = 54
 partial = 200
 
 [[group]]
+match = ["route:activity/fleet_routes.py:/ui/history/events"]
+status = "covered"
+tests = ["tests/test_activity_fleet_history.py::test_history_requires_ui_header_and_joined_session"]
+note = "The installed read-only History extension runs after Fleet UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
+
+[[group]]
 match = ["spawn:fleet/environment.py:Environment.host_python"]
 status = "n/a"
 note = "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"

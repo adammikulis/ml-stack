@@ -13,7 +13,7 @@ COMPONENTS_DIR = WEB / "components"
 COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view",
               "chat-view", "board-view", "wired-memory", "models-library", "models-view", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view",
-              "workspace-jobs", "data-view",
+              "workspace-jobs", "history-view", "data-view",
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",
               "gym-drone-camera", "gym-scene", "gym-recordings",
               "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
@@ -21,7 +21,7 @@ MODULES = {"gym-drone-geometry": frozenset({"gym-scene"}),
            "setup-recovery": frozenset({"first-run"}),
            "chat-model-picker": frozenset({"chat-view"}),
            "chat-coding": frozenset({"chat-view"}), "workspace-model": frozenset({
-    "workspace-jobs", "data-view", "training-view", "tools-view", "benchmarks-view",
+    "workspace-jobs", "history-view", "data-view", "training-view", "tools-view", "benchmarks-view",
     "gym-world-options", "gym-recordings", "gym-model-options", "gym-view",
 })}
 #: the fit screen on its own, for a machine running no daemon

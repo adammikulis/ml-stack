@@ -1,0 +1,95 @@
+<style>
+history-view { display:contents; }
+history-view .history-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-bottom:16px; }
+history-view .history-controls label { margin:0; flex:1 1 180px; }
+history-view .history-controls input,history-view .history-controls select { display:block; width:100%; margin-top:6px; }
+history-view .history-agent { margin-bottom:16px; }
+history-view .history-agent>summary { font-size:18px; padding:4px 0; }
+history-view .history-count { color:var(--muted); font-size:13px; margin-left:10px; }
+history-view .history-action { border-top:1px solid var(--line); padding:12px 0; }
+history-view summary { cursor:pointer; overflow-wrap:anywhere; }
+history-view .history-action summary { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+history-view .history-action summary:before { content:'▸'; }
+history-view .history-action[open] summary:before { content:'▾'; }
+history-view time { color:var(--muted); font-size:12px; }
+history-view .history-action dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:8px; font-size:13px; }
+history-view dt { color:var(--muted); }
+history-view dd { margin:0; overflow-wrap:anywhere; white-space:pre-wrap; }
+history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
+@media(max-width:640px){history-view .history-action dl{grid-template-columns:80px minmax(0,1fr)}}
+</style>
+<template>
+<section class="workspace" hidden>
+  <h1>History</h1>
+  <p class="intro">Actions grouped by agent. Open an action to see its recorded details.</p>
+  <div class="history-controls">
+    <label>Agent<select id="history-agent"><option value="">All agents</option></select></label>
+    <label>Search actions<input id="history-search" type="search" placeholder="Tool, model, task, or status…"></label>
+    <button id="history-refresh" type="button">Refresh</button>
+  </div>
+  <p class="status" id="history-status" role="status">Loading activity…</p>
+  <div id="history-list"></div>
+  <p class="intro">Shows up to 500 recent recorded actions. Prompts, tool arguments, outputs, and message bodies are omitted from the activity log.</p>
+</section>
+</template>
+<script>
+(function(){
+ const M=window.fleetModel,W=window.workspaceModel,E=M.el;
+ class HistoryView extends HTMLElement {
+  connectedCallback(){
+   if(this.wired)return;this.wired=true;
+   this.host=this.querySelector('section');this.note=this.querySelector('#history-status');
+   this.list=this.querySelector('#history-list');this.agent=this.querySelector('#history-agent');
+   this.search=this.querySelector('#history-search');this.refresh=this.querySelector('#history-refresh');
+   this.events=[];this.openActions=new Set();this.closedAgents=new Set();
+   this.agent.onchange=()=>this.paint();this.search.oninput=()=>this.paint();this.refresh.onclick=()=>this.load();
+   W.route(this.host,'history',()=>this.load());
+   this.timer=setInterval(()=>{if(!this.host.hidden)this.load();},10000);
+  }
+  disconnectedCallback(){clearInterval(this.timer);}
+  actor(event){return event.refs?.agent||event.refs?.from||event.actor||'Unattributed';}
+  async load(){
+   if(this.loading)return;this.loading=true;this.refresh.disabled=true;
+   try{
+    const data=await W.api('/ui/history/events');this.events=data.events||[];this.data=data;
+    const selected=this.agent.value;
+    this.agent.replaceChildren(E('option',{value:''},'All agents'),...[...new Set(this.events.map(e=>this.actor(e)))].sort().map(name=>E('option',{value:name},name)));
+    this.agent.value=selected;this.paint();
+   }catch(error){W.status(this.note,error);}
+   finally{this.loading=false;this.refresh.disabled=false;}
+  }
+  paint(){
+   const query=this.search.value.trim().toLowerCase(),groups=new Map();
+   for(const event of this.events){
+    const actor=this.actor(event);
+    if(this.agent.value&&actor!==this.agent.value)continue;
+    if(query&&!JSON.stringify(event).toLowerCase().includes(query))continue;
+    if(!groups.has(actor))groups.set(actor,[]);groups.get(actor).push(event);
+   }
+   this.list.replaceChildren(...[...groups].map(([actor,events])=>{
+    const card=E('details',{class:'workspace-card history-agent',open:!this.closedAgents.has(actor)},
+      E('summary',{},actor,E('span',{class:'history-count'},`${events.length} actions`)),...events.map(event=>this.action(event)));
+    card.ontoggle=()=>card.open?this.closedAgents.delete(actor):this.closedAgents.add(actor);return card;
+   }));
+   const count=[...groups.values()].reduce((sum,events)=>sum+events.length,0);
+   this.note.textContent=count?`${count} actions · newest first · refreshed ${new Date().toLocaleTimeString()}`:this.events.length?'No actions match these filters.':'No activity has been recorded yet.';
+   if(this.data?.unreadable)this.note.textContent+=` · ${this.data.unreadable} unreadable records`;
+   if(this.data?.drops?.dropped)this.note.textContent+=` · ${this.data.drops.dropped} dropped records`;
+  }
+  action(event){
+   const refs=event.refs||{},meta=event.meta||{},time=new Date(event.ts*1000);
+   const summary=E('summary',{},E('strong',{},event.subject||event.kind),E('span',{class:'badge'},event.outcome||event.kind),meta.model?E('span',{class:'history-count'},meta.model):null,E('time',{datetime:time.toISOString()},time.toLocaleString()));
+   const values={Action:event.kind,Status:event.outcome||'Not recorded',Actor:event.actor,Session:event.session,'Record ID':event.id,...Object.fromEntries(Object.entries(refs).map(([key,value])=>[`Reference · ${key}`,value])),...Object.fromEntries(Object.entries(meta).map(([key,value])=>[`Detail · ${key}`,value]))};
+   const fields=E('dl');for(const [key,value]of Object.entries(values))fields.append(E('dt',{},key),E('dd',{},typeof value==='object'?W.json(value):String(value??'')));
+   const links=E('div',{class:'history-links'},E('a',{href:'#board'},'Open Board'));
+   for(const [key,value]of Object.entries({...refs,...meta})){
+    if(!/url|issue|task/.test(key)||typeof value!=='string')continue;
+    try{const url=new URL(value);if(url.protocol==='https:'||url.protocol==='http:')links.append(E('a',{href:url.href,target:'_blank',rel:'noopener noreferrer'},key.replaceAll('_',' ')));}catch{}
+   }
+   const row=E('details',{class:'history-action',open:this.openActions.has(event.id)},summary,fields,links);
+   row.ontoggle=()=>row.open?this.openActions.add(event.id):this.openActions.delete(event.id);return row;
+  }
+ }
+ customElements.define('history-view',HistoryView);
+})();
+</script>
