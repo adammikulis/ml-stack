@@ -48,8 +48,13 @@ def test_udp_bridge_preserves_payload_and_peer_address(bridge):
 
 @pytest.mark.parametrize("address", [("8.8.8.8", 53), ("127.0.0.1", 22), ("192.168.2.1", 8771)])
 def test_udp_bridge_refuses_non_discovery_destinations(bridge, address):
+    udp = MagicMock()
+    udp.__enter__.return_value = udp
+    udp.sendto.return_value = 7
+    bridge.factory = lambda **_options: udp
     with discovery._socket(bind=("", 0)) as sock, pytest.raises(OSError, match="Only LAN discovery"):
         sock.sendto(b"hostile", address)
+    udp.sendto.assert_not_called()
 
 
 def test_udp_bridge_only_replies_to_received_private_peers(bridge):
