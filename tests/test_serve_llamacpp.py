@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 import ml_stack.setup as stack_setup
-from ml_stack import sentinel
+from ml_stack import sandbox, sentinel
+from ml_stack.sandbox.container import Container
+from ml_stack.sandbox.run import wrapped
 from ml_stack.serve import (
     binary,
     llamacpp_cli,
@@ -27,6 +29,7 @@ from ml_stack.serve import (
 from ml_stack.serve.build_paths import BuildFailed, builds_dir, current_link, root
 from ml_stack.serve.llamacpp_smoke import Result
 from tests.llamacpp_site import UpstreamSite, toolchain
+from tests.sandbox_kit import require_native_sandbox
 
 
 def passes(binary_path, model=None, say=None):
@@ -53,6 +56,7 @@ def pipe(site, tmp_path):
 
 
 def run(site, pipe, ref="master", smoke=passes, **more):
+    require_native_sandbox()
     env = llamacpp_update.Env(site.upstream, pipe, toolchain(), 2, smoke)
     return llamacpp_update.update(ref, env, **more)
 
@@ -335,3 +339,20 @@ def test_the_architectures_of_a_statically_linked_server_are_read_from_the_binar
     server = tmp_path / "llama-server"
     server.write_bytes(b"\x00\x01qwen4exp\x00gemma4\x00unrelated\x00")
     assert stack_setup._arches(server, known={"qwen4exp", "gemma4", "bert"}) == {"qwen4exp", "gemma4"}
+
+
+def test_missing_native_sandbox_refuses_managed_compile(site, pipe, monkeypatch):
+    site.commit(100)
+    launched = []
+
+    def refuse(argv, policy, **kwargs):
+        launched.append(argv)
+        return wrapped(argv, policy, via=Container())
+
+    monkeypatch.setattr(llamacpp_compile.sandbox, "run", refuse)
+    env = llamacpp_update.Env(site.upstream, pipe, toolchain(), 2, passes)
+    with pytest.raises(sandbox.SandboxUnavailable, match="command was not run"):
+        llamacpp_update.update("master", env)
+    assert len(launched) == 1 and "cmake" in launched[0][0]
+    assert not current_link().exists()
+    assert not list(builds_dir().glob("*/llama-server"))
