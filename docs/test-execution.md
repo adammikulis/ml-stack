@@ -11,7 +11,7 @@ sets an explicit owner override. Normal load uses the full configured capacity;
 severe load above `DEV_TEST_LOAD_HIGH` times the CPU count reduces the default
 capacity. Existing active permits finish before new work enters.
 
-The supervisor admits pytest startup, then each worker's collection, and each
+The supervisor admits pytest startup, then each worker's configuration and collection, and each
 test's complete setup, call and teardown. Idle workers hold no CPU permits. A
 long final test therefore leaves the remaining capacity available to other
 suites. A worker pool retains enough workers to use freed capacity after another

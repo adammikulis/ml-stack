@@ -14,6 +14,24 @@ def _ready(operation: str) -> None:
         pass
 
 
+def pytest_load_initial_conftests(early_config):
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        context = testslots_rpc.request("acquire", label="pytest worker bootstrap", phase="collection")
+        context.__enter__()
+        early_config._testslots_bootstrap = context
+
+
+def _release_bootstrap(config) -> None:
+    context = getattr(config, "_testslots_bootstrap", None)
+    if context is not None:
+        config._testslots_bootstrap = None
+        context.__exit__(None, None, None)
+
+
+def pytest_unconfigure(config):
+    _release_bootstrap(config)
+
+
 def pytest_configure(config):
     if "DEV_TEST_PYTEST_ENDPOINT" not in os.environ:
         raise pytest.UsageError("testslots_pytest requires the testslots supervisor")
@@ -35,12 +53,16 @@ def pytest_xdist_node_collection_finished(node, ids):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_collection(session):
-    with testslots_rpc.request("acquire", label="pytest collection", phase="collection"):
+    if getattr(session.config, "_testslots_bootstrap", None) is not None:
         yield
+    else:
+        with testslots_rpc.request("acquire", label="pytest collection", phase="collection"):
+            yield
 
 
 def pytest_collection_finish(session):
     config = session.config
+    _release_bootstrap(config)
     if not hasattr(config, "workerinput") and not getattr(config.option, "numprocesses", 0):
         _ready("collected")
 

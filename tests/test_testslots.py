@@ -422,3 +422,29 @@ def test_reserved_capacity_is_configurable_and_owner_budget_overrides_it(monkeyp
     assert module.base_budget(16) == 12
     monkeypatch.setenv("DEV_TEST_BUDGET", "22")
     assert module.budget() == 22
+
+
+def test_worker_configuration_is_admitted_across_concurrent_suites(tmp_path):
+    configuration = '''import json, os, time
+from pathlib import Path
+start = time.time()
+time.sleep(.15)
+with Path(os.environ["TEST_LOG"]).open("a") as stream:
+    stream.write(json.dumps({"start": start, "end": time.time()}) + "\\n")
+'''
+    files = []
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "conftest.py").write_text(configuration)
+        test_file = directory / "test_work.py"
+        test_file.write_text("def test_work():\n    pass\n")
+        files.append(test_file)
+    processes = [_elastic(tmp_path, test_file, 2) for test_file in files]
+    for process in processes:
+        output = process.communicate(timeout=30)
+        assert process.returncode == 0, output
+    records = [json.loads(line) for line in (tmp_path / "elastic.jsonl").read_text().splitlines()]
+    assert len(records) == 6
+    for record in records:
+        assert sum(other["start"] <= record["start"] < other["end"] for other in records) <= 2, records
