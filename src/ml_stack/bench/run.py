@@ -267,6 +267,9 @@ def cmd_prepare(args: Any) -> int:
 
 def _fleet_sweep(args: Any) -> int:
     """``sweep --fleet``: the plan said, the jobs dispatched, waited for and gathered."""
+    if not getattr(args, "_argv", None):
+        warn("error: --fleet hands each peer the command line it was given, and this run has none")
+        return 2
     peers = [p.strip() for p in str(getattr(args, "peers", "") or "").split(",") if p.strip()]
     try:
         planned = ops.fleet_planned(list(getattr(args, "_argv", None) or []),
