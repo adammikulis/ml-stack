@@ -483,7 +483,7 @@ def test_connect_waits_for_a_second_process_to_join_then_checks_it_answers(base)
     term.until("codex joined.")
     term.until("Sent a 'workspace ready'" if False else "workspace ready")
     child(["inbox", "--ack", "--agent", "codex"], base)
-    child(["send", "*", "status", "connected", "--agent", "codex"], base)
+    child(["announce", "joined", "connected", "--agent", "codex"], base)
     term.until("codex answered. Connected.")
     term.until("Paste the same block into more agents")
     assert term.finish() == 0
@@ -516,7 +516,7 @@ def test_setup_walks_through_six_steps_with_a_scripted_person(base):
     code = CODE.search(term.until("Step 4 of 6") and term.until("Waiting for the agent")).group(1)
     child(["join", code, "--name", "codex"], base)
     term.until("workspace ready")
-    child(["send", "*", "status", "connected", "--agent", "codex"], base)
+    child(["announce", "joined", "connected", "--agent", "codex"], base)
     term.until("Docs: docs/workspace.md")
     assert term.finish() == 0
     for n in range(1, 7):

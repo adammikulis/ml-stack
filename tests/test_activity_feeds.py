@@ -39,7 +39,7 @@ def test_a_tool_call_is_recorded_with_its_outcome_and_argument_names_never_its_v
     assert seen
     by_kind = {e.kind: e for e in entries()}
     tool = by_kind["agent.tool_call"]
-    assert (tool.subject, tool.outcome, tool.refs["role"]) == ("serve_up", "ok", "operator")
+    assert (tool.subject, tool.outcome, tool.refs["role"]) == ("serve_up", "ok", "approve-first")
     assert tool.meta["arg_names"] == "model,port" and tool.meta["result_chars"] > 0
     assert by_kind["approval.asked"].subject == "serve_up"
     assert by_kind["approval.answered"].outcome == "allow_once"
@@ -48,7 +48,7 @@ def test_a_tool_call_is_recorded_with_its_outcome_and_argument_names_never_its_v
 
 
 def test_a_call_the_role_denies_is_recorded_as_blocked_by_the_rail(person):
-    chat_, _m, seen, _out = session([call("serve_up", model="m", port=1), "done"], role="reader")
+    chat_, _m, seen, _out = session([call("serve_up", model="m", port=1), "done"], role="read-only")
     chat_.turn("start it")
     assert not seen
     [tool] = [e for e in entries() if e.kind == "agent.tool_call"]
@@ -88,9 +88,9 @@ def test_removing_a_rule_is_recorded_as_the_persons_edit(person):
 
 def test_a_role_change_is_recorded_as_the_persons(person):
     chat_, _m, _s, _out = session([])
-    chat_.use_role("reader")
+    chat_.use_role("read-only")
     [e] = entries()
-    assert (e.kind, e.actor, e.subject, e.meta["was"]) == ("role.changed", "person", "reader", "operator")
+    assert (e.kind, e.actor, e.subject, e.meta["was"]) == ("role.changed", "person", "read-only", "approve-first")
 
 
 # -- sentinel events: keystore, quarantine, dialogs ------------------------------------------------------

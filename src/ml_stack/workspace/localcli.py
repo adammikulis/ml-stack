@@ -14,6 +14,7 @@ from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
     localmodel,
+    localprofile as lp,
     localstart as ls,
     plain,
 )
@@ -39,6 +40,9 @@ OPTIONS = [
          help="the most effort the model may give itself with set_effort; default: %(default)s"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
+    flag("--profile", default="chat", choices=["chat", "coding"],
+         help="chat: 32K context and small per-task caps; coding: 256K context, Qwen3.8-27B and larger caps"),
+    flag("--ctx", default="", metavar="TOKENS", help="context to serve, such as 32768, 32k or 256k (default: the profile's)"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
 ]
 
@@ -67,7 +71,7 @@ def _wait(ws: Workspace, name: str, seconds: float) -> int:
 
 
 def _start(args: argparse.Namespace, ws: Workspace) -> int:
-    pick = localmodel.choose(args.model)
+    pick = localmodel.choose(args.model, coding=args.profile == "coding")
     if not pick.ok:
         warn(pick.problem)
         if pick.hint:
@@ -76,13 +80,15 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.project, la.check_orders(args.orders_from.split(","))), pick=pick)
+                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(","))), pick=pick)
     except ls.Unavailable as err:
         warn(str(err))
         return 1
     if got.already:
         say(f"{got.name} is already running (pid {got.pid}) on {got.model} as {got.role}")
         return 0
+    say("it takes tasks from: the person, any lead, " + ", ".join(la.check_orders(args.orders_from.split(",")))
+        + " (and their delegates); everything else is information only")
     say(f"started {got.name} (pid {got.pid}) on {got.model} as {got.role}; "
         f"log: {la.log_file(ws, got.name)}")
     return 0 if args.no_wait else _wait(ws, got.name, READY_WAIT_S)

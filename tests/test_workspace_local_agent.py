@@ -512,9 +512,118 @@ def test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_p
 def test_with_no_one_to_ask_an_acting_call_and_a_plan_are_denied(kit):
     from ml_stack.interventions import Confirm
     state = localtools.TaskState()
-    person = localtools.Unattended("local-t", state)
+    person = localtools.Unattended("local-t", state, lambda needs: False)
     ask = Confirm("serve_up will start a model server.", {"tool": "serve_up"})
     assert person.confirm(ask, None) is False
     assert person.plan(["serve_up m"])["go"] is False
     assert person.ask_user("which?")["answer"] == ""
     assert [n.kind for n in state.needs] == ["tool_call", "plan"]
+
+
+# -- profiles, context, coding model -------------------------------------------------------
+def test_context_sizes_parse_k_and_profiles_carry_their_caps():
+    from ml_stack.workspace import localprofile as lp
+    assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144 == lp.CODING.ctx
+    assert lp.parse_ctx("32768") == lp.CHAT.ctx and lp.parse_ctx("") == 0
+    for bad in ("big", "1", "-5k", "256 k"):
+        with pytest.raises(ValueError):
+            lp.parse_ctx(bad)
+    assert lp.CODING.rounds > lp.CHAT.rounds and lp.CODING.seconds > lp.CHAT.seconds
+    assert localloop.caps_of(la.Agent(name="a", model="m", profile="coding")).calls == lp.CODING.calls
+
+
+def test_a_coding_agent_takes_the_27b_and_never_flash_next_unless_it_is_named():
+    have = [info("Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf", 118), info("Qwen3.6-35B-A3B-Q4_K_M.gguf", 22),
+            info("Qwen3.8-27B (Q4_K_XL)", 18, "qwen35"), info("Qwen3.8-27B (Q4_K_M)", 17, "qwen35")]
+    pick = localmodel.choose(localmodel.AUTO, installed=have, machine=BIG, coding=True)
+    assert pick.ok and pick.name == "Qwen3.8-27B (Q4_K_XL)"
+    plain = localmodel.choose(localmodel.AUTO, installed=have, machine=BIG)
+    assert plain.name.startswith("Qwen3.6-35B-A3B")
+    only_flash = localmodel.choose(localmodel.AUTO, installed=have[:1], machine=BIG, coding=True)
+    assert not only_flash.ok and "27B" in only_flash.problem
+    named = localmodel.choose("Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf", installed=have, machine=BIG)
+    assert named.name.startswith("Qwen3.8-Flash-Next")
+
+
+def test_a_context_that_does_not_fit_says_the_longest_that_does_and_the_person_only_command(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from ml_stack.serve import wired
+    from ml_stack.workspace import localprofile as lp
+    rows = [NS(context=c, enough_now=c <= 65536) for c in (32768, 65536, 131072, 262144)]
+    monkeypatch.setattr(wired, "plan", lambda model, ask: NS(
+        enough_now=False, table=rows, need_bytes=120 * 2**30, model="m.gguf"))
+    problem, hint = lp.admit("m.gguf", 262144)
+    assert "64K" in problem and "120.0 GiB" in problem
+    assert hint == "ml-stack-serve memory --for m.gguf --ctx 262144 --kv q8_0 --apply"
+
+
+def test_start_refuses_a_context_that_does_not_fit_before_minting_anything(kit, monkeypatch):
+    from ml_stack.workspace import localprofile as lp
+    monkeypatch.setattr(lp, "admit", lambda model, ctx: ("too big", "ml-stack-serve memory --apply"))
+    with pytest.raises(ls.Unavailable, match="memory --apply"):
+        ls.start(kit.ws, ls.Ask(profile="coding"), pick=PICK, spawn=sleeper)
+    assert kit.ws.registry.ids() == ["owner"]
+
+
+def test_trim_drops_whole_oldest_turns_once_and_the_prompt_only_grows_after():
+    from ml_stack.workspace import localprofile as lp
+    big = "x" * 3000
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "task"}]
+    for n in range(40):
+        msgs += [{"role": "assistant", "content": big, "tool_calls": [{"id": str(n), "function": {"name": "t"}}]},
+                 {"role": "tool", "tool_call_id": str(n), "content": "ok"}]
+    assert lp.trim(list(msgs), 1_000_000) is False
+    assert lp.trim(msgs, 20_000) is True
+    assert msgs[:2] == [{"role": "system", "content": "S"}, {"role": "user", "content": "task"}]
+    assert msgs[2]["content"] == lp.MARKER and msgs[3]["role"] == "assistant"
+    assert all(m["role"] != "tool" or any(c["id"] == m["tool_call_id"] for p in msgs if p.get("tool_calls")
+                                          for c in p["tool_calls"]) for m in msgs)
+    assert lp._tokens(msgs) <= 20_000 * 0.85
+    before = json.dumps(msgs)
+    msgs.append({"role": "assistant", "content": "next"})
+    assert lp.trim(msgs, 20_000) is False and json.dumps(msgs).startswith(before[:-1])
+
+
+def test_the_guarded_client_trims_a_long_task_before_a_call(kit):
+    big = "y" * 6000
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "task"}]
+    for n in range(30):
+        msgs += [{"role": "assistant", "content": "", "tool_calls": [{"id": str(n), "function": {"name": "t"}}]},
+                 {"role": "tool", "tool_call_id": str(n), "content": big}]
+    model = Script([done("x")])
+    guarded = localtools.Guarded(model, effort="off", limits=(60.0, 5), stop=lambda: False, ctx=32768)
+    guarded.chat(msgs, tools=[])
+    assert len(model.seen[0][0]) < 61 and any(m.get("content") == "[earlier turns of this task were dropped to stay inside the context]" for m in model.seen[0][0])
+
+
+def test_the_default_approval_raises_a_request_and_waits_for_the_stop_flag(kit):
+    from ml_stack import requests
+    la.save(kit.ws, la.Agent(name="local-t", model="m", model_name="m"))
+    tokens.store(kit.base, "local-t", kit.agent("local-t"))
+    loop = localloop.Loop(kit.ws, la.load(kit.ws, "local-t"), localloop.Held(None, {}),
+                          localloop.Settings(), (lambda: True, la.Status(kit.ws, "local-t")))
+    needs = localtools.Needs("local-t", "tool_call", "serve_up(['model'])", "it starts a server")
+    assert loop.approval(needs) is False
+    pending = requests.list_requests()
+    assert pending == [] or all(r.state != "approved" for r in pending)
+
+
+def test_a_coding_agent_without_the_codex_harness_gets_the_one_command_and_nothing_is_minted(kit, monkeypatch):
+    from ml_stack.workspace import localharness as lh
+    monkeypatch.setattr(lh, "launcher", lambda: None)
+    monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
+    from ml_stack.workspace import localprofile as lp
+    monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
+    with pytest.raises(ls.Unavailable, match="ml-stack-codex --model"):
+        ls.start(kit.ws, ls.Ask(profile="coding"))
+    assert kit.ws.registry.ids() == ["owner"]
+    monkeypatch.setattr(lh, "launcher", lambda: lambda *a, **k: 0)
+    monkeypatch.setattr(ls.jobs, "detach", sleeper)
+    got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
+    try:
+        row = ls.listing(kit.ws)[0]
+        assert got.name == "local-qwen3.6-35b-a3b-codex" and row["harness"] == "codex" and row["ctx"] == 262144
+        assert kit.ws.registry.ids() == ["owner"]
+    finally:
+        ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)

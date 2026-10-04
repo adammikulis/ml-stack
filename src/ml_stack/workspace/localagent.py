@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import roles
+from ml_stack.chatpolicy import APPROVE_FIRST, PLAN_AND_GO, READ_ONLY
 from ml_stack.files import read_json, write_json
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace.identity import HUMAN, LEAD, valid_id, valid_name
@@ -25,9 +26,6 @@ __all__ = ["APPROVE_FIRST", "DEFAULT_ORDERS_FROM", "ORDER_KINDS", "PLAN_AND_GO",
            "Agent", "Status", "alive", "check_name", "check_orders", "check_project", "folder",
            "load", "names", "obeys", "role_choices", "save", "status_of"]
 
-READ_ONLY, APPROVE_FIRST, PLAN_AND_GO = tuple(roles.ROLES)
-"""The three roles in the order `roles.ROLES` holds them: reads only, each acting call asks, the
-approved plan runs."""
 DEFAULT_ORDERS_FROM = ("claude-code",)
 ORDER_KINDS = ("task", "question")
 MOST_ORDERERS = 8
@@ -90,6 +88,9 @@ class Agent:
     model_name: str = ""
     size_bytes: int = 0
     role: str = roles.DEFAULT
+    profile: str = "chat"
+    harness: str = "ml-stack-agent"
+    ctx: int = 32768
     effort: str = "off"
     max_effort: str = "medium"
     project: str = ""

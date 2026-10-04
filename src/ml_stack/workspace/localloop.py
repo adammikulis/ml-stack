@@ -6,6 +6,7 @@ way to change a role, a rule, a quarantine or an approval."""
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import signal
@@ -13,13 +14,20 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ml_stack import chat as chatting
 from ml_stack.client import Client, Request, Transport
 from ml_stack.serve import broker_wire
-from ml_stack.workspace import localagent as la, localeffort as le, localtools as lt, plain, tokens
+from ml_stack.workspace import (
+    localagent as la,
+    localeffort as le,
+    localprofile as lp,
+    localtools as lt,
+    plain,
+    tokens,
+)
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
@@ -29,7 +37,6 @@ __all__ = ["Caps", "Held", "Settings", "client_on", "lease_model", "run"]
 
 logger = logging.getLogger("ml_stack.localagent")
 PURPOSE = "local-agent"
-CONTEXT = 32768
 LEASE_WAIT_S = 120.0
 IDLE_S = 5.0
 REPLY_CHARS = 3500
@@ -51,7 +58,7 @@ class Settings:
     """How a loop runs: its task limits, the answer to what only a person may allow, a flag the
     caller can set to stop it, whether to take over SIGTERM and SIGINT, and how to get the model."""
 
-    caps: Caps = field(default_factory=Caps)
+    caps: Caps | None = None
     approval: Callable[[lt.Needs], bool] = lt.ask_a_person
     cancel: threading.Event | None = None
     signals: bool = False
@@ -77,10 +84,21 @@ def client_on(base_url: str) -> Any:
     return Client(base_url, request=Request(n_predict=4096, slot=0), transport=Transport(timeout=600.0))
 
 
+def record_model_identity(ws: Workspace, name: str, lease: dict[str, Any]) -> None:
+    """Seam for feat/model-identity: record the served model alias as verified with
+    ``workspace.set_model`` once it exists on integration/dev. It does nothing until then."""
+
+
+def caps_of(agent: la.Agent) -> Caps:
+    """The caps of the agent's profile."""
+    p = lp.profile(agent.profile)
+    return Caps(p.rounds, p.calls, p.steps, p.seconds)
+
+
 def lease_model(agent: la.Agent, *, wait_s: float = LEASE_WAIT_S) -> Held:
     """Lease the agent's model from the broker (memory admission and the queue are its) and talk to
     it: thinking per request, off unless the effort says otherwise, multi-token prediction on when ml-stack has it."""
-    spec: dict[str, Any] = {"context": CONTEXT, "parallel": 1, "cache_type_k": "q8_0",
+    spec: dict[str, Any] = {"context": agent.ctx, "parallel": 1, "cache_type_k": "q8_0",
                             "cache_type_v": "q8_0", "cache_idle_slots": True}
     grant = broker_wire.lease(PURPOSE, [agent.model], spec=spec, weight=agent.size_bytes,
                               timeout=wait_s)
@@ -108,9 +126,11 @@ class Loop:
     def __init__(self, ws: Workspace, agent: la.Agent, held: Held, settings: Settings,
                  wiring: tuple[Callable[[], bool], la.Status]) -> None:
         self.ws, self.agent, self.held = ws, agent, held
-        self.caps, self.approval = settings.caps, settings.approval
-        self.token = tokens.load(ws.base, agent.name)
         self.stopped, self.status = wiring
+        self.caps = settings.caps or caps_of(agent)
+        self.approval = (functools.partial(lt.ask_a_person, stop=self.stopped)
+                         if settings.approval is lt.ask_a_person else settings.approval)
+        self.token = tokens.load(ws.base, agent.name)
         self.steps = self.tasks = self.ignored = 0
         self.effort = agent.effort
 
@@ -148,8 +168,8 @@ class Loop:
         state = lt.TaskState(ceiling=self.agent.max_effort)
         level = self.level(row)
         person = lt.Unattended(self.agent.name, state, self.approval)
-        guarded = lt.Guarded(self.held.client, effort=level, seconds=self.caps.seconds,
-                             steps=self.caps.steps, stop=self.stopped)
+        guarded = lt.Guarded(self.held.client, effort=level,
+                             limits=(self.caps.seconds, self.caps.steps), stop=self.stopped, ctx=self.agent.ctx)
         extension = lt.workspace_extension(self.ws, self.token, self.agent.name, state, self.obeyed)
         agent = chatting.Chat(guarded, person, tools=chatting.tools_for_chat(person=person),
                               role=self.agent.role, task=True, extension=extension)
@@ -231,6 +251,7 @@ def run(ws: Workspace, name: str, settings: Settings | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as err:
         status.update(state="failed", detail=plain.line(err, 300), lease={})
         return 1
+    record_model_identity(ws, name, held.lease)
     status.update(lease=held.lease, detail="", effort=agent.effort, max_effort=agent.max_effort)
     code = 0
     try:

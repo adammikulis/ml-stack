@@ -53,7 +53,7 @@ def sighted(image: bytes, prompt: str) -> str:
             pixel = rgb.getpixel((int((band + 0.5) * width / 3), height // 2))
             nearest = min(
                 PALETTE,
-                key=lambda n: sum((a - b) ** 2 for a, b in zip(PALETTE[n][0], pixel)),
+                key=lambda n: sum((a - b) ** 2 for a, b in zip(PALETTE[n][0], pixel, strict=False)),
             )
             if not seen or seen[-1] != nearest:
                 seen.append(nearest)

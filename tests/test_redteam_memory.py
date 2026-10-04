@@ -154,7 +154,7 @@ def test_a_poisoned_project_memory_changes_no_role_permission_or_tool(project_me
     session = chat.Chat(model, person, tools=offered, extension=extra)
     session.turn("hello, what do we know?")
     assert [n for n, _ in ran] == []
-    assert session.role.name == "operator" and saved.Rules().rules == []
+    assert session.role.name == "approve-first" and saved.Rules().rules == []
     assert {p: p.read_bytes() for p in before} == before
     assert {s["function"]["name"] for s, _ in offered} == names
     assert not names & {"quarantine_release", "approve_host", "read_file"}

@@ -161,9 +161,8 @@ def test_the_name_says_the_suite_the_backend_and_the_commit():
 
 def test_two_runs_take_turns_rather_than_timing_each_other(lock):
     counting()
-    with only_one(lock):
-        with pytest.raises(Busy):
-            suites.run("counting", backend="counting", seeds=(0,), wait=False, lock=lock)
+    with only_one(lock), pytest.raises(Busy):
+        suites.run("counting", backend="counting", seeds=(0,), wait=False, lock=lock)
 
 
 def test_the_record_says_the_commit_and_whether_the_tree_was_edited(tmp_path, lock):

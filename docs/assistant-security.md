@@ -25,7 +25,7 @@ filter to catch every attempt.
    channel) is a named capability, off by default. A grant says in plain words what it can
    read, write and send, on which account or folder, for how long. It is the narrowest
    thing that works, it expires, and it is listed and revocable in one place.
-   *Built:* roles (`reader`, `operator`, `runner`) and saved Always/Never rules
+   *Built:* roles (`read-only`, `approve-first`, `plan-and-go`) and saved Always/Never rules
    (`docs/agent-roles.md`). *Not built:* a grant ledger that covers connectors.
 
 2. **No ambient authority.** The model never holds a credential. A separate connector process
@@ -82,8 +82,11 @@ filter to catch every attempt.
 
 These are never offered to any model, role or connector, and no stored fact, saved rule or
 channel message can unlock them: releasing a quarantine, approving a network host, minting a
-grant, changing guard or sentinel policy, changing a role, and creating a saved rule. A person
-does them at their own screen.
+grant, changing guard or sentinel policy, changing a role, creating a saved rule, and changing
+the GPU wiring limit (`iogpu.wired_limit_mb`) or the boot-time daemon that keeps it. A person
+does them at their own screen: the Settings slider and `ml-stack-serve memory` refuse a process
+an agent started, an access token, another web page and another machine, and the password goes
+only into macOS's own dialog or sudo.
 
 ## What a new integration must bring
 

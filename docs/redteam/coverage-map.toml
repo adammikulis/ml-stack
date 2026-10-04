@@ -38,8 +38,23 @@ tests = [
   "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
   "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
   "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+  "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+  "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
 ]
 note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+
+# -- the wiring limit ---------------------------------------------------------------------
+[[group]]
+match = ["route:fleet/room_routes.py:*", "spawn:serve/wired.py:*", "spawn:serve/wired_apply.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_wired.py::test_no_model_tool_chat_tool_or_slash_command_touches_the_wiring_limit",
+  "tests/test_redteam_wired.py::test_a_command_run_by_an_agent_is_refused_before_anything_is_written",
+  "tests/test_redteam_wired.py::test_a_model_name_is_a_lookup_and_never_a_command",
+  "tests/test_redteam_wired.py::test_a_hostile_number_never_reaches_the_runner",
+  "tests/test_redteam_wired.py::test_a_token_or_a_foreign_page_cannot_reach_any_changing_route",
+]
+note = "raising the GPU wiring limit is person-only: agent processes, tokens, foreign pages, hostile numbers and model names are refused and the privileged call is never reached"
 
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
@@ -52,8 +67,14 @@ tests = [
   "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
   "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
   "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
+  "tests/test_redteam_board.py::test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it",
+  "tests/test_redteam_board.py::test_a_post_cannot_borrow_another_identity_or_smuggle_options",
+  "tests/test_workspace_quiet.py::test_a_new_agent_has_no_subscriptions_and_its_inbox_holds_no_board_traffic",
+  "tests/test_workspace_quiet.py::test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_only_mute",
+  "tests/test_workspace_quiet.py::test_message_text_never_changes_a_subscription",
+  "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read",
 ]
-note = "the read-only loopback route, board and conversation privacy, board and subscription caps, a person's board membership"
+note = "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, quiet defaults, a person's board membership"
 
 # -- HTTP routes and handlers --------------------------------------------------------------
 [[group]]
@@ -137,6 +158,8 @@ tests = [
   "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
   "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
   "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+  "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+  "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static",
 ]
 
 [[group]]

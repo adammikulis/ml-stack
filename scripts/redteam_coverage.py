@@ -310,7 +310,7 @@ def find_tools(found: dict[str, Surface]) -> None:
     for tool in mcp.TOOLS:
         add(found, "mcp-tool", tool.name, f"mcp.py:{tool.name}")
     person = do.Person(io.StringIO(""), io.StringIO(""))
-    session = chat.Chat(None, person, role="operator", extension=chat.extensions(person))
+    session = chat.Chat(None, person, role="approve-first", extension=chat.extensions(person))
     for spec, _ in session.offered:
         add(found, "chat-tool", spec["function"]["name"], f"chat.py:{spec['function']['name']}")
 

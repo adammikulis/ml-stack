@@ -409,6 +409,18 @@ class Keystore:
         info = _fields(purpose.encode(), owner.encode(), context)
         return hkdf(master, info)
 
+    def salted_subkey(self, purpose: str, directory: Path) -> bytes:
+        """The subkey of ``purpose`` for this OS user, cut with the salt kept in ``directory`` (made on first use)."""
+        salt = directory / "salt"
+        if not salt.exists():
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(salt, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, os.urandom(16))
+            finally:
+                os.close(fd)
+        return self.subkey(purpose, os_user(), context=salt.read_bytes())
+
     def wrap(self, purpose: str, owner: str, plain: bytes) -> bytes:
         """``plain`` encrypted under the subkey of ``purpose`` and ``owner``."""
         cipher = aead(self.subkey(purpose, owner))

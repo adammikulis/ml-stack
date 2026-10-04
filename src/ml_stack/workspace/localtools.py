@@ -9,9 +9,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack import do, roles
+from ml_stack import do, requests, roles
 from ml_stack.interventions import Call, Confirm
-from ml_stack.workspace import localeffort as le, plain
+from ml_stack.workspace import localeffort as le, localprofile as lp, plain
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
@@ -23,6 +23,7 @@ __all__ = ["Guarded", "Needs", "Sink", "TaskState", "TaskStopped", "Unattended",
 SEND_KINDS = ("task", "question", "status")
 SEND_BODY = 4000
 SINK_MAX = 20_000
+APPROVAL_WAIT_S = 300.0
 NOBODY = ("no one is at a terminal and this agent cannot ask; do what the read tools allow and "
           "say in `done` what needs a person")
 
@@ -39,13 +40,21 @@ class Needs:
     kind: str
     what: str
     reason: str
+    destructive: bool = False
 
 
-def ask_a_person(needs: Needs) -> bool:
-    """The one place a headless agent turns to a person. It answers no: nobody can answer in
-    this process. The Requests inbox (`docs/notes/requests-inbox.md`) replaces this body with a
-    raised request that waits for the person's answer."""
-    return False
+def ask_a_person(needs: Needs, *, wait_s: float = APPROVAL_WAIT_S,
+                 stop: Callable[[], bool] | None = None) -> bool:
+    """Raise a request in the Requests inbox and wait up to ``wait_s`` seconds for the person's
+    answer; no answer, an expiry, a stop or an unavailable store is no. Only a person answers."""
+    kind = "tool_call_destructive" if needs.destructive else "tool_call"
+    try:
+        handle = requests.raise_request(requests.Ask(
+            kind, needs.what, needs.reason, ("allow-once", "deny"),
+            requests.Origin(needs.agent, "", ""), ttl=wait_s))
+        return bool(handle.wait(wait_s, stop=stop).approved)
+    except (requests.Unavailable, requests.Refused, OSError):
+        return False
 
 
 class Sink(io.StringIO):
@@ -77,8 +86,8 @@ class Unattended(do.Person):
         super().__init__(io.StringIO(""), Sink())
         self.agent, self.state, self.approval = agent, state, approval
 
-    def _needs(self, kind: str, what: str, reason: str) -> bool:
-        need = Needs(self.agent, kind, plain.line(what, 300), plain.line(reason, 300))
+    def _needs(self, kind: str, what: str, reason: str, destructive: bool = False) -> bool:
+        need = Needs(self.agent, kind, plain.line(what, 300), plain.line(reason, 300), destructive)
         self.state.needs = [*self.state.needs, need][-5:]
         return bool(self.approval(need))
 
@@ -99,7 +108,7 @@ class Unattended(do.Person):
         self.asked += 1
         what = f"{call.name}({sorted(call.arguments or {})})" if call else "a call"
         self.answer = "no"
-        allowed = self._needs("tool_call", what, ask.question)
+        allowed = self._needs("tool_call", what, ask.question, "classifier" in ask.details)
         self.answer = "allow_once" if allowed else "no"
         return allowed
 
@@ -108,8 +117,10 @@ class Guarded:
     """A model client that stops before a call once the kill switch is set, the task's wall-clock
     runs out or its step count is spent, and asks with thinking set as the person chose."""
 
-    def __init__(self, client: Any, *, effort: str, seconds: float, steps: int,
-                 stop: Callable[[], bool]) -> None:
+    def __init__(self, client: Any, *, effort: str, limits: tuple[float, int],
+                 stop: Callable[[], bool], ctx: int = 0) -> None:
+        seconds, steps = limits
+        self.ctx = ctx
         self.client, self.think, self.steps, self.stop = client, le.thinks(effort), steps, stop
         self.tokens = le.TOKENS[effort]
         self.deadline, self.used, self.seconds = time.monotonic() + seconds, 0, seconds
@@ -122,6 +133,8 @@ class Guarded:
         if self.used >= self.steps:
             raise TaskStopped(f"over the {self.steps}-step limit for one task")
         self.used += 1
+        if self.ctx:
+            lp.trim(messages, self.ctx)
         return self.client.chat(messages, **{**kwargs, "think": self.think, "n_predict": self.tokens})
 
     def __getattr__(self, name: str) -> Any:

@@ -19,7 +19,15 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import activity, files, home
-from ml_stack.chatpolicy import _TOOL_NAME, CONFIRM, READ, _outside_state, catalog
+from ml_stack.chatpolicy import (
+    _TOOL_NAME,
+    CONFIRM,
+    LEGACY_ROLE_NAMES,
+    READ,
+    ROLE_NAMES,
+    _outside_state,
+    catalog,
+)
 from ml_stack.guard.destructive import classify
 from ml_stack.guard.destructive_rail import default_roots
 from ml_stack.interventions import Call
@@ -27,7 +35,8 @@ from ml_stack.interventions import Call
 __all__ = ["Rule", "Rules", "blocked_reason", "describe", "run_command"]
 
 logger = logging.getLogger("ml_stack.guard")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+READABLE_VERSIONS = (1, SCHEMA_VERSION)
 FILE = "agent-rules.json"
 EVENTS = "agent-rules-events.jsonl"
 VERDICTS = ("always", "never")
@@ -90,9 +99,12 @@ def _valid(row: Any) -> Rule:
     if not isinstance(match, dict) or not all(isinstance(k, str) and isinstance(v, str)
                                               for k, v in match.items()):
         raise ValueError("match must map argument names to patterns")
-    rule = Rule(str(row.get("tool")), tuple(sorted(match.items())), str(row.get("verdict")),
-                str(row.get("role") or ""), str(row.get("created") or ""),
-                int(row.get("fired") or 0), bool(row.get("tainted_ok", False)))
+    role = str(row.get("role") or "")
+    role = LEGACY_ROLE_NAMES.get(role, role)
+    if role and role not in ROLE_NAMES:
+        raise ValueError(f"role {role!r}")
+    rule = Rule(str(row.get("tool")), tuple(sorted(match.items())), str(row.get("verdict")), role,
+                str(row.get("created") or ""), int(row.get("fired") or 0), bool(row.get("tainted_ok", False)))
     if rule.verdict not in VERDICTS:
         raise ValueError(f"verdict {rule.verdict!r}")
     if rule.tool not in CONFIRM or rule.tool in READ or _TOOL_NAME.search(rule.tool):
@@ -126,7 +138,7 @@ class Rules:
             if path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
                 raise ValueError("the file is readable or writable by others (mode must be 0600)")
             data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+            if not isinstance(data, dict) or data.get("schema_version") not in READABLE_VERSIONS:
                 raise ValueError("unknown schema_version")
             self.rules = [_valid(r) for r in data.get("rules") or []]
         except (OSError, ValueError, TypeError) as exc:

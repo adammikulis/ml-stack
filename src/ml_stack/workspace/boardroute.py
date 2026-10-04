@@ -18,7 +18,8 @@ from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
 from ml_stack.graph.guard import host_ok, refusal
 from ml_stack.ui import assets
 from ml_stack.workspace import plain, tokens
-from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.identity import HUMAN, Denied
+from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
@@ -26,6 +27,8 @@ __all__ = ["MAX_BODY", "PREFIX", "Request", "respond", "serve"]
 
 PREFIX = "/board/"
 MAX_BODY = 512 * 1024
+POST_MAX = 32 * 1024
+WAIT_MAX_S = 25
 SAFE = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
         "Content-Security-Policy": "default-src 'none'", "Referrer-Policy": "no-referrer"}
 Reply = tuple[int, dict[str, str], bytes]
@@ -51,10 +54,12 @@ def _board(query: Mapping[str, list[str]]) -> str:
     return name
 
 
-def _checked(method: str, headers: Mapping[str, str], port: int) -> Reply | None:
-    if method != "GET":
+def _checked(method: str, headers: Mapping[str, str], port: int, writes: bool = False) -> Reply | None:
+    if method != "GET" and not (writes and method == "POST"):
         _, headers, blob = _json(405, {"error": "this route only reads"})
         return 405, {**headers, "Allow": "GET"}, blob
+    if method == "POST" and (headers.get("origin") is None or headers.get("sec-fetch-site", "same-origin") != "same-origin"):
+        return _json(403, {"error": "a post comes from this page"})
     found = refusal(method, dict(headers), port)
     if found:
         return _json(found[0], {"error": found[1]})
@@ -78,16 +83,17 @@ class Request:
     headers: Mapping[str, str] = field(default_factory=dict)
     port: int = 0
     signed_in: bool = True
+    body: bytes = b""
 
 
 def respond(ws: Workspace, req: Request) -> Reply:
     """The answer to one request."""
-    refused = _checked(req.method, req.headers, req.port)
+    parts = urlsplit(req.target)
+    refused = _checked(req.method, req.headers, req.port, parts.path == PREFIX + "post")
     if refused:
         return refused
     if not req.signed_in:
         return _json(401, {"error": "sign in first"})
-    parts = urlsplit(req.target)
     if not parts.path.startswith(PREFIX):
         return _json(404, {"error": "no such route"})
     query, api = parse_qs(parts.query, max_num_fields=8), ws.board
@@ -96,17 +102,22 @@ def respond(ws: Workspace, req: Request) -> Reply:
     except (Denied, OSError):
         return _json(503, {"error": "the person's identity is not set up: run `ml-stack-workspace setup`"})
     try:
-        return _json(200, _answer(api, token, parts.path[len(PREFIX):], query))
+        route = parts.path[len(PREFIX):]
+        if req.method == "POST":
+            return _json(200, _post(ws, token, req.body))
+        return _json(200, _answer(api, token, route, query))
     except Denied as err:
         return _json(403, {"error": plain.line(err, 200)})
     except (ValueError, Refused) as err:
         return _json(400, {"error": plain.line(err, 200)})
+    except RateLimited as err:
+        return _json(429, {"error": plain.line(err, 200)})
 
 
 def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) -> Any:
     limit = _number(query, "limit", 100, 200)
     if route == "boards":
-        return {"boards": api.list(token)}
+        return {"me": api.ws.auth(token).id, "boards": api.list(token)}
     if route == "threads":
         found = _board(query)
         activity.record("board.view", subject=found)
@@ -121,8 +132,37 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
         a, b = (query.get("a") or [""])[0], (query.get("b") or [""])[0]
         return {"a": a, "b": b, "messages": api.ui_dm(token, a, b, limit)}
     if route == "head":
-        return {"head": api.ws.bus.log.head()[:16]}
+        return {"seq": api.ws.news(token, 0, 0)}
+    if route == "wait":
+        after = _number(query, "after", 0, 1 << 40)
+        return {"seq": api.ws.news(token, after, min(_number(query, "timeout", 20, WAIT_MAX_S), WAIT_MAX_S))}
     raise ValueError("no such route")
+
+
+def _post(ws: Workspace, token: str, raw: bytes) -> dict[str, Any]:
+    """The person's one write: a message to a board, thread or conversation."""
+    if len(raw) > POST_MAX:
+        raise ValueError("the message is too large")
+    try:
+        doc = json.loads(raw or b"{}")
+    except ValueError as err:
+        raise ValueError("the body is not JSON") from err
+    if not isinstance(doc, dict) or not isinstance(doc.get("to"), str) \
+            or not isinstance(doc.get("body"), str) or not doc["body"].strip():
+        raise ValueError("a post needs a string `to` and a non-empty string `body`")
+    kind, subject, reply = doc.get("type", "note"), doc.get("subject", ""), doc.get("reply_to", 0)
+    if not isinstance(kind, str) or not isinstance(subject, str) or not isinstance(reply, int) \
+            or isinstance(reply, bool):
+        raise ValueError("type and subject are strings and reply_to is a message number")
+    me = ws.auth(token)
+    if me.role != HUMAN:
+        raise Denied("only the person posts from the page")
+    to = doc["to"]
+    if to.startswith("#") and not ws.board.can_post(me, to):
+        ws.board.join(token, to)
+    sent = ws.send(token, to, kind, doc["body"], subject=subject, reply_to=reply)
+    activity.record("board.post", subject=to if to.startswith("#") else "dm", meta={"size": len(doc["body"])})
+    return {"seq": sent["seq"], "to": to, "thread": sent["thread"]}
 
 
 def _page(req: Request) -> Reply:
@@ -151,8 +191,10 @@ class _Route:
         self.port = 0
 
     def __call__(self, call: Call) -> WebReply:
-        req = Request(call.method, call.path, {k.lower(): v for k, v in call.headers.items()},
-                      self.port)
+        headers = {k.lower(): v for k, v in call.headers.items()}
+        wanted = int(headers.get("content-length", "0") or 0) if headers.get("content-length", "0").isdigit() else 0
+        body = call.body(POST_MAX) if call.method == "POST" and 0 < wanted <= POST_MAX else b""
+        req = Request(call.method, call.path, headers, self.port, True, body)
         board = urlsplit(call.path).path.startswith(PREFIX)
         status, headers, body = respond(self.ws, req) if board else _page(req)
         kind = headers.pop("Content-Type", "application/octet-stream")

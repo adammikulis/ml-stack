@@ -130,7 +130,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
     for index, fit in enumerate(rows):
         colour = colours[index % len(colours)]
         drew = False
-        for style, room in zip(_ROOM_STYLES, drawn_rooms):
+        for style, room in zip(_ROOM_STYLES, drawn_rooms, strict=False):
             here = fit.at_room(room)
             points = [(c, here.users(c)) for c in spans]
             points = [(c, n) for c, n in points if n > 0]
@@ -158,7 +158,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
         left.add_artist(people)
         left.legend(handles=[plt.Line2D([], [], color="0.35", linestyle=style,
                                         label=f"{human_bytes(room)} of room")
-                             for style, room in zip(_ROOM_STYLES, drawn_rooms)],
+                             for style, room in zip(_ROOM_STYLES, drawn_rooms, strict=False)],
                     fontsize=8, loc="lower left")
 
     # -- panel two: what it costs as the users arrive ---------------------------------
@@ -198,7 +198,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
         right.annotate(f"{size}G", xy=(most, size), xytext=(-3, 2),
                        textcoords="offset points", fontsize=7, color="0.55",
                        va="bottom", ha="right", zorder=0)
-    for style, room in zip(_ROOM_STYLES, drawn_rooms):
+    for style, room in zip(_ROOM_STYLES, drawn_rooms, strict=False):
         right.axhline(room / gb, color="#b0413e", linestyle=style, linewidth=1.4)
         right.annotate(f"{human_bytes(room)} of room", xy=(0, room / gb), xytext=(4, 3),
                        textcoords="offset points", fontsize=8, color="#b0413e",

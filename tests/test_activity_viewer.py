@@ -25,7 +25,7 @@ def put(kind, *, ago=0.0, actor="agent:scout", session="s1", **kw):
 def seeded():
     writer.bind_session("s1")
     put("agent.tool_call", ago=10800, subject="serve_up", outcome="ok")
-    put("approval.asked", ago=3000, subject="serve_up", actor="system", refs={"role": "operator"})
+    put("approval.asked", ago=3000, subject="serve_up", actor="system", refs={"role": "approve-first"})
     put("approval.answered", ago=2990, subject="serve_up", actor="person", outcome="allow_once")
     writer.bind_session("s2")
     put("model.lease", ago=2980, subject="model:q.gguf", outcome="granted", actor="system",

@@ -22,6 +22,7 @@ from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
     localmodel,
+    localprofile as lp,
     localstart as ls,
     plain,
 )
@@ -34,7 +35,7 @@ __all__ = ["COOKIE", "PREFIX", "respond", "serve", "session_ok"]
 PREFIX = "/agents/"
 COOKIE = "ml_session"
 BODY_MAX = 4096
-START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "project": str}
+START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str}
 STOP_WAIT_S = 10.0
 
 
@@ -95,7 +96,9 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
         try:
             got = ls.start(ws, ls.Ask(data.get("model") or localmodel.AUTO, data.get("name", ""),
                                       data.get("role") or roles.DEFAULT, data.get("effort") or le.DEFAULT,
-                                      data.get("max_effort") or le.DEFAULT_MAX, data.get("project", "")))
+                                      data.get("max_effort") or le.DEFAULT_MAX,
+                                      data.get("profile") or "chat", lp.parse_ctx(data.get("ctx", "")),
+                                      data.get("project", "")))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}
         return 200, {"name": got.name, "pid": got.pid, "model": plain.line(got.model, 80),

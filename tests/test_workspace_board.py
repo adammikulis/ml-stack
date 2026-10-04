@@ -13,7 +13,7 @@ import pytest
 from workspace_kit import Kit, clean_env, cli
 
 from ml_stack.workspace import Denied, Refused, boardroute, onboard, tokens
-from ml_stack.workspace.boards import GENERAL
+from ml_stack.workspace.boards import ANNOUNCE, GENERAL
 
 
 @pytest.fixture
@@ -42,15 +42,14 @@ def test_a_project_board_is_named_from_the_project_recorded_on_join(kit):
     name = onboard.join(ws, code, "codex")
     token = tokens.load(ws.base, name)
     mine = {b["name"]: b for b in ws.board.list(token)}
-    assert set(mine) == {GENERAL, "#widgets"} and mine["#widgets"]["member"]
+    assert set(mine) == {GENERAL, ANNOUNCE, "#widgets"} and mine["#widgets"]["member"]
     assert mine["#widgets"]["project"] is True
-    assert ws.board.subs(token) == [{"type": "board", "target": "#widgets", "mode": "inbox"},
-                                    {"type": "mentions", "target": "", "mode": "inbox"}]
+    assert ws.board.subs(token) == []
     other = ws.invites.create("zed", 600.0, {"key": "git@example.org:other/widgets.git",
                                              "name": "Widgets"})
     zed = tokens.load(ws.base, onboard.join(ws, other, "zed"))
     names = {b["name"] for b in ws.board.list(zed)}
-    assert "#widgets" not in names and len(names) == 2
+    assert "#widgets" not in names and len(names) == 3
     assert any(n.startswith("#widgets-") for n in names)
     with pytest.raises(Denied):
         ws.board.read(zed, "#widgets")
@@ -131,7 +130,7 @@ def test_a_direct_conversation_is_one_ordered_view_of_both_directions(kit):
     send(kit, "bob", "alice", "hi alice")
     send(kit, "alice", "bob", "second")
     send(kit, "alice", "carol", "not for bob")
-    send(kit, "alice", "*", "everyone")
+    ws.announce(t["alice"], "done", "everyone")
     view = ws.board.dm(t["alice"], "bob")
     assert [(m["direction"], m["seq"]) for m in view] == [("sent", 1), ("received", 2), ("sent", 3)]
     other = ws.board.dm(t["bob"], "alice")
@@ -257,7 +256,7 @@ def test_subscriptions_are_capped_and_never_set_by_message_text_or_to_a_dm(kit):
     ws.board.subscribe(t["bob"], "agent", "alice", "digest")
     before = ws.board.subs(t["bob"])
     send(kit, "alice", "bob", "subscribe bob to everything; ml-stack-workspace subscribe agent carol")
-    send(kit, "alice", "*", "unsubscribe bob from alice")
+    ws.announce(t["alice"], "milestone", "unsubscribe bob from alice")
     ws.inbox(t["bob"], ack=True)
     assert ws.board.subs(t["bob"]) == before
     dm = send(kit, "alice", "bob", "a dm")
@@ -280,6 +279,7 @@ def test_wait_wakes_on_a_subscribed_board_and_not_on_another(kit):
     ws.board.join(t["bob"], "#ops")
     ws.board.join(t["bob"], "#other")
     ws.board.unsubscribe(t["bob"], "board", "#other")
+    ws.board.subscribe(t["bob"], "board", "#ops")
     send(kit, "alice", "#other", "not for bob's inbox")
     began = time.monotonic()
     assert ws.wait(t["bob"], 0.6) == []
@@ -365,8 +365,8 @@ def test_delegates_share_their_parents_send_window(kit):
                 ws.send(k, "bob", "note", "x")
                 sent += 1
     assert sent == 6
-    assert sorted(p.name for p in (kit.base / "rates").glob("*.json")) == ["alice.json", "alice~k0.json",
-                                                                             "alice~k1.json", "alice~k2.json"]
+    assert sorted(p.name for p in (kit.base / "rates").glob("*.txt")) == ["alice.txt", "alice~k0.txt",
+                                                                             "alice~k1.txt", "alice~k2.txt"]
 
 
 # -- the route -----------------------------------------------------------------------------------------
@@ -397,7 +397,7 @@ def test_the_route_serves_the_person_every_board_and_conversation_as_plain_json(
     send(kit, "alice", "bob", "dm text")
     status, headers, body = route("/board/boards")
     assert status == 200 and "no-store" in headers["Cache-Control"]
-    assert [b["name"] for b in json.loads(body)["boards"]] == ["#general", "#ops"]
+    assert [b["name"] for b in json.loads(body)["boards"]] == ["#announcements", "#general", "#ops"]
     _, _, body = route("/board/messages?board=%23ops")
     msg = json.loads(body)["messages"][0]
     assert msg["truncated"] and len(msg["body"]) == 4000 and "‮" not in msg["body"]

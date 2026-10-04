@@ -30,7 +30,7 @@ def released():
 opened: list[memory.Memory] = []
 
 
-def make(tmp_path, script, stdin="", *, role="operator", plant=()):
+def make(tmp_path, script, stdin="", *, role="approve-first", plant=()):
     proj = repo(tmp_path, "alpha")
     mem = memory.Memory.open(explicit=proj)
     opened.append(mem)
@@ -103,7 +103,7 @@ def test_remember_never_offers_always_allow_and_a_saved_rule_cannot_skip_the_pro
     assert "uses port 9090" not in [f.text for f in mem.project.facts()]
 
 
-@pytest.mark.parametrize("role", ["reader", "operator", "runner"])
+@pytest.mark.parametrize("role", ["read-only", "approve-first", "plan-and-go"])
 def test_every_role_may_recall(tmp_path, role):
     session, model, _, _, _ = make(tmp_path, [("recall", {"query": "staging"})], role=role)
     session.turn("what do I know about staging?")
@@ -114,11 +114,11 @@ def test_every_role_may_recall(tmp_path, role):
 
 def test_the_reader_role_is_not_offered_remember_and_the_acting_roles_are(tmp_path):
     reader, model, mem, _, _ = make(tmp_path, [("remember", {"fact": "x fact", "scope": "user"})], stdin="1\n",
-                                    role="reader")
+                                    role="read-only")
     reader.turn("remember something")
     assert "remember" not in model.offered[0] and mem.user.facts()[0].text.startswith("Prefers")
     assert len(mem.user.facts()) == 1
-    for role in ("operator", "runner"):
+    for role in ("approve-first", "plan-and-go"):
         acting, model, _, _, _ = make(tmp_path / role, [], role=role)
         acting.turn("hi")
         assert {"recall", "remember"} <= model.offered[0]

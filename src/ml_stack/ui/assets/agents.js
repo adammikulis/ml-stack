@@ -70,6 +70,8 @@ class MlAgents extends MlElement {
       placeholder: "optional" });
     this.role = h("ml-select", { label: "What it may do", value: "" });
     this.effort = h("ml-select", { label: "Effort", hint: "Off thinks least and answers fastest", value: "off" });
+    this.profile = h("ml-select", { label: "Kind of work", hint: "Coding serves a 256K context with Qwen3.8-27B",
+      value: "chat", options: [{ value: "chat", label: "chat (32K)" }, { value: "coding", label: "coding (256K)" }] });
     this.ceiling = h("ml-select", { label: "Most it may give itself", hint: "It can raise its own effort up to this",
       value: "medium" });
     this.go = h("button", { class: "go", type: "button", onclick: () => this.start() }, "Start a local agent");
@@ -84,7 +86,7 @@ class MlAgents extends MlElement {
           h("div", {}, h("label", { for: "model" }, "Model"), this.modelField),
           h("div", {}, h("label", { for: "name" }, "Name"), this.nameField),
           h("div", {}, h("label", { for: "project" }, "Project folder"), this.projectField),
-          this.role, this.effort, this.ceiling),
+          this.role, this.profile, this.effort, this.ceiling),
         this.rolesEl, this.preview,
         h("div", { class: "row" }, this.go, this.note)),
       h("section", {}, h("h2", {}, "Running agents"), this.list));
@@ -156,7 +158,7 @@ class MlAgents extends MlElement {
     try {
       const got = await this.call("start", {
         model: this.modelField.value.trim() || "auto", name: this.nameField.value.trim(),
-        role: this.role.value, effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim() });
+        role: this.role.value, profile: this.profile.value || "chat", effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim() });
       this.say(got.already ? `${line(got.name, 48)} is already running.` : `${line(got.name, 48)} started.`, false);
     } catch (e) {
       this.say(`${line(e.message, 300)}${e.hint ? ` Run: ${line(e.hint, 200)}` : ""}`, true);
@@ -208,8 +210,8 @@ class MlAgents extends MlElement {
         h("span", { class: "spacer" }),
         h("button", { class: "stop", type: "button", onclick: () => this.stop(a.name) }, "Stop")),
       h("div", { class: "meta" },
-        `${line(a.model, 80)}, ${line(a.role, 40)}`
-        + `, effort ${line(a.effort, 12)} (ceiling ${line(a.max_effort, 12)})`
+        `${line(a.model, 80)} on ${line(a.harness, 24)}, ${line(a.role, 40)}`
+        + `, ${Math.round((Number(a.ctx) || 0) / 1024)}K context, effort ${line(a.effort, 12)} (ceiling ${line(a.max_effort, 12)})`
         + `, ${fmt(a.memory_bytes, "bytes-iec")} held, ${Number(a.tasks) || 0} tasks, ${Number(a.steps) || 0} steps`),
       a.detail ? h("div", { class: "meta" }, line(a.detail, 200)) : null,
       h("div", { class: "meta" }, last));

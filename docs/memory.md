@@ -224,7 +224,7 @@ guide = memory.guidance(project_name)           # for the system message
 
 - `memory.READ` (`recall`) only looks and is in the extension's `reads`. `memory.ACTING`
   (`remember`) writes, asks itself and is in `asks_itself`: roles that act are offered it, the
-  `reader` role is not, the role rail does not ask a second time, and there is no "always allow"
+  `read-only` role is not, the role rail does not ask a second time, and there is no "always allow"
   for it, so each fact is a separate yes.
 - `confirm(question, options)` is shown the question (the exact text and the scope) and numbered
   options and returns the index the person chose, or `None` for no; `do.Person.choose` is that

@@ -105,7 +105,7 @@ def _smaller(rows: Sequence[object], than: Pick) -> Pick | None:
 
 
 def choose(asked: str = AUTO, *, installed: Sequence[object] | None = None,
-           machine: object | None = None, search: bool = True) -> Pick:
+           machine: object | None = None, search: bool = True, coding: bool = False) -> Pick:
     """The downloaded model ``asked`` names, or for ``auto`` the best downloaded mixture-of-experts
     Qwen model ranked for agent work on this machine; Flash-Next is never chosen. A model that
     is absent, or rated red here, comes back with ``problem`` and what to do about it."""
@@ -118,6 +118,8 @@ def choose(asked: str = AUTO, *, installed: Sequence[object] | None = None,
             return Pick(problem=f"{asked} is not downloaded",
                         hint=f'ml-stack-models find "{asked}"')
         return _checked(_line(found), rows)
+    if coding:
+        return _coding(rows, search)
     pool = [r for r in rows if not FLASH_NEXT.search(f"{r.candidate.name} {r.candidate.ref}")  # type: ignore[attr-defined]
             and not NOT_AGENT.search(r.candidate.name) and _is_moe(r.candidate)]  # type: ignore[attr-defined]
     qwen = [r for r in pool if QWEN.search(r.candidate.name)]  # type: ignore[attr-defined]
@@ -136,3 +138,18 @@ def _checked(pick: Pick, rows: Sequence[object]) -> Pick:
     offer = f"; the smaller choice is `--model {small.name}`" if small else ""
     return replace(pick, problem=f"{pick.name} is rated {pick.verdict} for this machine's memory "
                                  f"({pick.note}){offer}")
+
+
+CODING_MODEL = re.compile(r"qwen\s*3\.8.*27b", re.I)
+CODING_QUERY = "Qwen3.8 27B"
+
+
+def _coding(rows: Sequence[object], search: bool) -> Pick:
+    """The downloaded Qwen3.8-27B for a coding agent (Q4_K_XL first); Flash-Next only when named."""
+    found = [r for r in rows if CODING_MODEL.search(r.candidate.name)  # type: ignore[attr-defined]
+             and not FLASH_NEXT.search(r.candidate.name)]  # type: ignore[attr-defined]
+    found.sort(key=lambda r: (r.verdict not in FITS, "Q4_K_XL" not in r.candidate.name))  # type: ignore[attr-defined]
+    if not found:
+        return Pick(problem="no Qwen3.8-27B is downloaded for a coding agent",
+                    hint=f'ml-stack-models find "{CODING_QUERY}"')
+    return _checked(_line(found[0]), found)

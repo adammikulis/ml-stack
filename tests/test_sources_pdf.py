@@ -208,7 +208,7 @@ def test_a_long_section_is_split_on_paragraph_boundaries_and_never_inside_one(tm
     assert len(parts) == len(paragraphs)
     assert [u.part for u in parts] == list(range(1, len(parts) + 1))
     assert all(u.parts == len(parts) for u in parts)
-    for unit, paragraph in zip(parts, paragraphs):
+    for unit, paragraph in zip(parts, paragraphs, strict=False):
         assert unit.text == paragraph
     assert len({u.id for u in units}) == len(units)
 

@@ -18,7 +18,9 @@ from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
+    localharness as lh,
     localmodel,
+    localprofile as lp,
     onboard,
     project as projects,
     tokens,
@@ -50,6 +52,8 @@ class Ask:
     role: str = roles.DEFAULT
     effort: str = "off"
     max_effort: str = "medium"
+    profile: str = "chat"
+    ctx: int = 0
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
 
@@ -96,9 +100,16 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
     folder_ = la.check_project(ask.project, ws.base)
     orders = la.check_orders(list(ask.orders_from))
-    chosen = pick or localmodel.choose(ask.model)
+    prof = lp.profile(ask.profile)
+    ctx = ask.ctx or prof.ctx
+    chosen = pick or localmodel.choose(ask.model, coding=prof.name == "coding")
     if not chosen.ok:
         raise Unavailable(chosen.problem, chosen.hint)
+    if prof.name == "coding":
+        return _coding(ws, ask, chosen, ctx, folder_)
+    problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
+    if problem:
+        raise Unavailable(problem, hint)
     name = la.check_name(ask.name or localmodel.agent_name(chosen.name))
     with held(la.folder(ws) / "start.lock"):
         if not ws.registry.ids():
@@ -113,7 +124,7 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         _mint(ws, name, projects.describe(folder_) if folder_ else {})
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
-                         size_bytes=chosen.size_bytes, role=role, effort=effort, max_effort=ceiling,
+                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
                          project=folder_, orders_from=orders, started=time.time())
         la.save(ws, agent)
         job = (spawn or jobs.detach)(LOOP, [name], log=la.log_file(ws, name), kind=name,
@@ -121,6 +132,35 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
                             log=str(job.log)))
     ws.audit("local-agent.start", onboard.SETUP.id, agent=name, role=role)
+    return Started(name, job.pid, chosen.name, role)
+
+
+def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project: str) -> Started:
+    """A coding agent runs on the Codex harness, which mints its own identity and serves the model
+    at 256K through the broker; this detaches it and records the pid. Without the harness the
+    person gets the one command to run."""
+    problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
+    if problem:
+        raise Unavailable(problem, hint)
+    if lh.launcher() is None:
+        raise Unavailable("the Codex harness is not in this build yet",
+                          lh.stub_command(chosen.ref or chosen.name, project))
+    role = roles.get(ask.role).name
+    name = la.check_name(ask.name or f"{localmodel.agent_name(chosen.name)}-{lh.CODEX}")
+    with held(la.folder(ws) / "start.lock"):
+        have = la.load(ws, name)
+        if have is not None and la.alive(have):
+            return Started(name, have.pid, have.model_name, have.role, already=True)
+        agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
+                         size_bytes=chosen.size_bytes, role=role, profile="coding", harness=lh.CODEX,
+                         ctx=ctx, project=project, orders_from=la.check_orders(list(ask.orders_from)),
+                         started=time.time())
+        la.save(ws, agent)
+        job = jobs.detach(lh.RUNNER, [name], log=la.log_file(ws, name), kind=name,
+                          home=la.folder(ws) / "jobs")
+        la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
+                            log=str(job.log)))
+    ws.audit("local-agent.start", onboard.SETUP.id, agent=name, role=role, harness=lh.CODEX)
     return Started(name, job.pid, chosen.name, role)
 
 
@@ -183,7 +223,7 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         state = str(status.get("state") or "starting") if live else (
             "failed" if status.get("state") == "failed" else "stopped")
         out.append({
-            "name": name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort,
+            "name": name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx,
             "project": Path(agent.project).name if agent.project else "", "running": live,
             "state": state, "detail": str(status.get("detail") or ""),
             "steps": int(status.get("steps") or 0), "tasks": int(status.get("tasks") or 0),
