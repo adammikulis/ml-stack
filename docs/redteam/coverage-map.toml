@@ -86,6 +86,21 @@ tests = [
 note = "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
 
 [[group]]
+match = ["spawn:platform.py:start_process"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py::test_worker_spawn_keeps_hostile_configuration_inside_json"]
+note = "actual worker launch through the process wrapper receives hostile configuration as one JSON argument without a shell"
+
+[[group]]
+match = ["spawn:gym/catalog.py:catalogue", "spawn:gym/traffic_world.py:generate"]
+status = "covered"
+count = 2
+tests = ["tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+         "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"]
+note = "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+
+[[group]]
 match = ["spawn:gym/transport.py:Process.start"]
 status = "covered"
 count = 1
