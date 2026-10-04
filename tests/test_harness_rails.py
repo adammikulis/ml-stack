@@ -200,6 +200,7 @@ class TestCodex:
         assert got["model_context_window"] == 262144
         assert got["model_auto_compact_token_limit"] == int(262144 * 0.9)
         assert got["features"]["hooks"] is True
+        assert got["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__workspace"]
         assert got["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "PRE"
         assert got["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "POST"
         assert text == codex.config_toml("http://127.0.0.1:8080/", "qwen", 262144, ("PRE", "POST", 300.0))

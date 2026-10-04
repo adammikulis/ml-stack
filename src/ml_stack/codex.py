@@ -56,6 +56,8 @@ def config_toml(base_url: str, alias: str, window: int, hooks: tuple[str, str, f
     lines += [
         "", "[shell_environment_policy]", 'inherit = "core"',
         "", "[features]", "hooks = true",
+        "", "[features.code_mode]", "enabled = false",
+        'direct_only_tool_namespaces = ["mcp__workspace"]',
         "", f"[model_providers.{PROVIDER}]", 'name = "ml-stack"',
         f"base_url = {_q(base_url.rstrip('/') + '/v1')}", 'wire_api = "responses"', f"env_key = {_q(KEY_ENV)}",
         "", "[[hooks.PreToolUse]]", 'matcher = ".*"',
