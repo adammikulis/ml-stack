@@ -103,7 +103,7 @@ set -euo pipefail
 
 # Same set as ci.yml's "install test dependencies", and the same reasons.
 apt-get update -qq
-apt-get install -y -qq bubblewrap >/dev/null
+apt-get install -y -qq bubblewrap rustc cargo >/dev/null
 DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
 # The runners have cmake; the image has not, and tests/test_serve_build.py configures a
 # checkout with it. PyPI's wheel carries the binary, so it caches with the venv.
