@@ -52,6 +52,17 @@ _QUANT = re.compile(r"(?i)(?<![a-z0-9])((?:IQ|Q)\d(?:_[A-Z0-9]+)*|BF16|F16|F32)(
 _FLAGS = ("context", "n_gpu_layers", "parallel", "mtp", "spec_type", "flash_attn", "embedding")
 
 
+def _shape_of(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """The settings of a server that decide whether it can be shared, from an ask's spec, a
+    `ServerSpec` as a dict or a lease record."""
+    out: dict[str, Any] = {}
+    for key in ("context", "parallel", "cache_type_k", "cache_type_v", "spec_type", "mtp",
+                "embedding"):
+        if key in settings and settings[key] is not None:
+            out[key] = settings[key]
+    return out
+
+
 def _named(ask: Ask) -> str:
     return "model:" + Path(ask.models[0]).name
 
@@ -135,6 +146,30 @@ class Held:
     #: once when the server was found rather than per ask -- ``None`` when it could
     #: not be read.
     loaded_file: str | None = None
+    #: the settings it was started with that decide whether another ask may share it
+    #: (``context``, ``parallel``, ``cache_type_k``/``v``, ``mtp``, ``spec_type``,
+    #: ``embedding``); a setting not known is not compared
+    shape: dict[str, Any] = field(default_factory=dict)
+
+    def short_of(self, asked: Mapping[str, Any]) -> str:
+        """Why this server cannot serve ``asked`` (an ask's spec), or "" when it can: it must
+        hold at least the context and slots asked for and run the cache type, MTP head and
+        speculation kind asked for. Sharing by model alone served a 256K request from a
+        32K server."""
+        have = self.shape
+        for key, what in (("context", "tokens of context"), ("parallel", "slot(s)")):
+            want, got = asked.get(key), have.get(key)
+            if isinstance(want, int) and want > 0 and isinstance(got, int) and got < want:
+                return f"port {self.port} serves {got:,} {what}, {want:,} asked"
+        for key in ("cache_type_k", "cache_type_v", "spec_type"):
+            want, got = asked.get(key), have.get(key)
+            if want and got is not None and want != got:
+                return f"port {self.port} serves {key} {got!r}, {want!r} asked"
+        for key in ("mtp", "embedding"):
+            want, got = asked.get(key), have.get(key)
+            if want is not None and got is not None and bool(want) != bool(got):
+                return f"port {self.port} serves {key}={bool(got)}, {bool(want)} asked"
+        return ""
 
     @property
     def base_url(self) -> str:
@@ -249,7 +284,9 @@ class Broker:
             if held is None or held.pid != info.pid:
                 held = Held(port=info.port, model=str(spec.model), pid=info.pid,
                             ours=not entry.get("unmanaged"), names=(str(spec.model),),
-                            info=info)
+                            info=info, shape=_shape_of(
+                                {f.name: getattr(spec, f.name)
+                                 for f in dataclasses.fields(spec)}))
                 self.servers[info.port] = held
             elif not info.adopted:
                 held.info = info
@@ -408,12 +445,20 @@ class Broker:
         mine = [h for h in self.servers.values() if not h.unmanaged
                 and (h.purpose == ask.purpose
                      or (not h.purpose and not exact and h.serves(ask.models)))]
-        match = next((h for h in mine if h.serves(ask.models)), None)
+        fits = [h for h in mine if h.serves(ask.models) and not h.short_of(ask.spec)]
+        match = next(iter(fits), None)
+        if match is None:
+            mine, short = [h for h in mine if h not in fits], [
+                h.short_of(ask.spec) for h in mine if h.serves(ask.models) and h.short_of(ask.spec)]
+            if short and not any(h.held_by_others(ask.pid) or h.loading for h in mine):
+                self.say(f"{ask.models[0]}: " + "; ".join(short) + "; starting one that fits")
         if match is not None:
             return match, [], f"{match.model} is loading on port {match.port}" if match.loading else ""
         busy = [h for h in mine if h.loading or h.held_by_others(ask.pid)]
         if busy:
-            return None, [], "; ".join(self._held_said(h) for h in busy)
+            return None, [], "; ".join(
+                [*(h.short_of(ask.spec) for h in busy if h.serves(ask.models)
+                   and h.short_of(ask.spec)), *(self._held_said(h) for h in busy)])
         evict = [h for h in mine if h.ours]
         return self._fit(ask, evict)
 
@@ -464,6 +509,7 @@ class Broker:
             h.port == ask.port for h in self.servers.values()) else 0
         placeholder = Held(port=asked or free_port(), model=ask.models[0], purpose=ask.purpose,
                            loading=True, weight=ask.weight or weight_of(ask.models[0]),
+                           shape=_shape_of(ask.spec),
                            holders={waiting.lease: (ask.pid, ask.label)})
         self.servers[placeholder.port] = placeholder
         self.queue.remove(waiting)
@@ -616,6 +662,7 @@ class Broker:
                 holders[f"up-{port}"] = (pid, "ml-stack-serve up")
             found.append(Held(port=port, model=str(entry.get("model") or ""), pid=pid,
                               ours=not entry.get("unmanaged"), purpose=str(was.get("purpose") or ""), idle_since=now, holders=holders,
+                              shape=_shape_of(entry),
                               info=ServerInfo(base_url=f"http://{DEFAULT_HOST}:{port}",
                                               port=port, pid=pid, backend="", adopted=True)))
         known = {h.port for h in found} | set(self.servers)

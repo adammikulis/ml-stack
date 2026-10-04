@@ -185,3 +185,55 @@ def _listening(port: int) -> bool:
     with socket.socket() as probe:
         probe.settimeout(0.5)
         return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
+def test_two_simultaneous_ups_for_one_shape_start_one_holder(tmp_path, machine, capsys):
+    import threading
+
+    model = gguf(tmp_path, "race.gguf")
+    results = []
+
+    def one():
+        results.append(cli.main(["up", model, "--binary", "x", "--no-profile", "--no-mtp",
+                                 "--context", "4096", "--json"]))
+
+    threads = [threading.Thread(target=one) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(60)
+    out = capsys.readouterr().out
+    assert results == [0, 0], out
+    assert len(holding.holds()) == 1, "the second up adopts the first's lease"
+    assert out.count('"adopted": true') == 1 and out.count('"adopted": false') == 1
+
+
+def test_a_larger_context_is_never_served_by_a_smaller_server(tmp_path, machine):
+    """Sharing is by the shape that matters, not by model: a 256K ask next to a 32K server
+    for the same file gets its own server (or waits), never the 32K one."""
+    from ml_stack.serve.broker import Ask
+
+    model = gguf(tmp_path, "ctx.gguf")
+    manager = ops.manager_for()
+    broker = manager.broker
+    small = broker.lease(Ask(purpose="chat", models=(model,), pid=os.getppid(),
+                             spec={"context": 4096}), timeout=30)
+    same = broker.lease(Ask(purpose="chat", models=(model,), pid=os.getppid(),
+                            spec={"context": 2048}), timeout=30)
+    assert same.port == small.port and same.shared, "a smaller ask is served by the bigger"
+    with pytest.raises(Exception, match="4,096 tokens of context, 262,144 asked"):
+        broker.lease(Ask(purpose="chat", models=(model,), pid=os.getpid(),
+                         spec={"context": 262144}), timeout=2)
+    for grant in (small, same):
+        broker.release(grant.lease)
+    big = broker.lease(Ask(purpose="chat", models=(model,), pid=os.getppid(),
+                           spec={"context": 8192}), timeout=30)
+    assert big.port != small.port or not big.shared
+    broker.release(big.lease)
+
+
+def test_status_shows_each_leases_context(tmp_path, machine, capsys):
+    port = json.loads(up(capsys, gguf(tmp_path, "shown.gguf"), "--context", "8192",
+                         "--json")[1])["port"]
+    cli.main(["status", "--port", str(port)])
+    assert "context 8,192" in capsys.readouterr().out
