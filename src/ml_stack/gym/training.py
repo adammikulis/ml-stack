@@ -4,6 +4,7 @@ import json
 import uuid
 from pathlib import Path
 
+from ml_stack.files import write_json
 from ml_stack.gym.adapters import make_environment
 from ml_stack.gym.paths import artifact_root
 
@@ -49,10 +50,10 @@ def train(environment, config=None, timesteps=2048, seed=0, checkpoint=None):
         model.learn(total_timesteps=timesteps, reset_num_timesteps=checkpoint is None,
                     callback=CheckpointCallback(save_freq=256, save_path=str(path), name_prefix="ppo"))
         model.save(path / "policy.zip")
-        manifest = {"environment": environment, "config": config or {}, "seed": seed,
+        manifest = {"version": 1, "environment": environment, "config": config or {}, "seed": seed,
                         "timesteps": model.num_timesteps, "device": "cpu", "checkpoint": str(path / "policy.zip"),
                         "versions": {name: version(name) for name in ("gymnasium", "stable-baselines3", "torch")}}
-        (path / "manifest.json").write_text(json.dumps(manifest, indent=2))
+        write_json(path / "manifest.json", manifest)
         return manifest
     finally:
         env.close()
