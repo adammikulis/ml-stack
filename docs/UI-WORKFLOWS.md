@@ -97,3 +97,10 @@ setting. An unavailable saved model remains identified until another running mod
 One composer handles messages: Enter sends, Shift + Enter inserts a new line, and Stop interrupts
 generation. Existing saved messages retain their history when the conversation acquires versioned
 settings. Settings updates preserve the title and messages and reject invalid values.
+
+Conversations, messages, chosen models and project relationships live in the daemon's embedded
+graph store, at `chats/conversations.db`. The first access imports existing JSON histories once;
+the original files remain as backups. Subsequent edits and deletions use the graph exclusively.
+Writes run in transactions under the existing file lock, including concurrent message appends.
+Chat does not request a credential or encryption key when opening its history. The standalone
+app bundles the graph engine; word and vector indexes load their extensions when used.
