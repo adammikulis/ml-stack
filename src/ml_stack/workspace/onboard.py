@@ -18,7 +18,7 @@ DEFAULT_AGENTS = ("lead", "codex")
 SETUP = Identity("setup", HUMAN)
 GREETER = Identity("workspace", AGENT)
 SOON_S = 86_400.0
-JOIN_RESERVED = frozenset({"lead", "admin", "system", "human", "workspace", "owner", "root",
+JOIN_RESERVED = frozenset({"admin", "system", "human", "workspace", "owner", "root",
                            "setup", "agent"})
 TOKEN_S = 30 * 86_400.0
 HELLO = ("workspace ready. Read this with `ml-stack-workspace inbox --ack`, then reply with "

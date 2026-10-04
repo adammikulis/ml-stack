@@ -238,7 +238,7 @@ def test_failed_redemptions_lock_every_code_out(base, ws):
         onboard.join(ws, good, "codex")
 
 
-@pytest.mark.parametrize("name", ["lead", "human", "admin", "system", "ml-stack-x", "workspace",
+@pytest.mark.parametrize("name", ["human", "admin", "system", "ml-stack-x", "workspace",
                                   "Bad Name", "../x", "doctor-a"])
 def test_join_refuses_reserved_and_invalid_names_without_spending_the_code(base, ws, name):
     code = ws.invites.create("", 600.0)
@@ -246,6 +246,13 @@ def test_join_refuses_reserved_and_invalid_names_without_spending_the_code(base,
         onboard.join(ws, code, name)
     assert ws.invites.state(code) == "waiting"
     assert onboard.join(ws, code, "claude-code") == "claude-code"
+
+
+def test_lead_is_a_joinable_name_and_a_taken_one_is_suffixed(base, ws):
+    code = ws.invites.create("", 600.0)
+    assert onboard.join(ws, code, "lead") == "lead"
+    other = ws.invites.create("", 600.0)
+    assert onboard.join(ws, other, "lead").startswith("lead-")
 
 
 def test_a_taken_name_gets_a_suffix_and_the_first_agent_keeps_its_token(base, ws):
@@ -265,7 +272,7 @@ def test_a_joined_agent_has_the_standard_role_and_no_human_only_right(base, ws):
                  lambda: ws.quarantine_release(tok, "q1")):
         with pytest.raises(Denied):
             call()
-    assert child(["join", "AAAA-AAAA-AAAA-AAAA", "--name", "lead"], base).returncode == 2
+    assert child(["join", "AAAA-AAAA-AAAA-AAAA", "--name", "admin"], base).returncode == 2
 
 
 def test_join_prints_only_the_name(base, ws):
