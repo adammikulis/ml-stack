@@ -23,6 +23,8 @@ tests = [
   "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
   "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
   "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+  "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+  "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
 ]
 note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
 

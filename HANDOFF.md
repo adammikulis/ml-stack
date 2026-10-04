@@ -26,6 +26,18 @@ Open, and known limits (each is a task or a gap, not a done item):
   questions (`docs/serving.md`); the pre-registered re-measurement is pending.
 - [ ] **Grant ledger, connector credential broker, a hard outward-send rule and the "what can it do
   now" listing are not built** (`docs/assistant-security.md`, "Order of work").
+- [ ] **Requests inbox: sources not raised through it yet** (`docs/requests.md`). Fleet join requests
+  (`fleet/onboard/requests.py`, `fleet/onboard/cli.py` accept and decline), `ml-stack-security
+  approve-host` (`net/cli.py`, refusals in `net/policy.py`), the reputation notice
+  (`reputation/notice.py`, its own dialog), keystore unlock, hold windows and rule suggestions keep
+  their own prompts; the kinds exist in `ml_stack.requests.model.KINDS`.
+- [ ] **Requests page in the shell.** The element (`ui/assets/ml-requests.js`) and
+  `inbox.route.RequestsApp.dispatch` are not mounted in the workspace shell yet, and the page has
+  only had DOM-level tests (a probe of `plain()` under node), no browser run.
+- [ ] **Always allow answered in the UI saves no rule.** The call runs once; a rule is saved only from
+  the terminal's second prompt.
+- [ ] **A background process that cannot read the keystore keeps no requests on disk.** Sentinel's
+  dialog keeps its own in memory for that process; the page does not see them.
 - [ ] **Not run for this tidy:** `scripts/test-on-linux`, Windows, the slow tier, any model-backed
   test. Docs were checked against code and the docs tests, not by driving the app.
 
