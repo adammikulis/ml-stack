@@ -168,6 +168,7 @@ python -m venv "$PRIV"
 PURELIB='import sysconfig; print(sysconfig.get_path("purelib"))'
 SHARED_SITE="$("$ENV_DIR/bin/python" -c "$PURELIB")"
 PRIV_SITE="$("$PRIV/bin/python" -c "$PURELIB")"
+rm -rf "$SHARED_SITE/tests"
 echo "$SHARED_SITE" > "$PRIV_SITE/shared-env.pth"
 "$PRIV/bin/pip" install -q --no-deps -e /work
 
