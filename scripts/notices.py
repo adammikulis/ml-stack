@@ -32,8 +32,8 @@ DISALLOWED = re.compile(
 LICENSE_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
     ("socksio", "1.0.0"): (
         "MIT",
-        "socksio-1.0.0.dist-info/LICENSE is the MIT License (Copyright (c) 2019 Seth Michael Larson, "
-        "https://github.com/sethmlarson/socksio) and the METADATA classifier says 'License :: OSI Approved :: MIT "
+        "socksio-1.0.0.dist-info/LICENSE is the MIT License (Copyright (c) 2019, the socksio authors, "
+        "see the project's repository) and the METADATA classifier says 'License :: OSI Approved :: MIT "
         "License'; only the legacy License: field is the literal 'UNKNOWN'",
     ),
 }
