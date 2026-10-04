@@ -26,8 +26,15 @@ class Rates:
         self.path = base / "rates.json"
         self.most, self.window_s, self.clock = most, window_s, clock
 
-    def admit(self, sender: str) -> None:
-        """Count one write by ``sender``; raises `RateLimited` when it is over the limit."""
+    def recent(self, sender: str) -> int:
+        """How many writes ``sender`` made inside the window."""
+        data = read_json(self.path, {})
+        table = data.get("senders", {}) if isinstance(data, dict) else {}
+        return sum(1 for t in table.get(sender, []) if self.clock() - t < self.window_s)
+
+    def admit(self, sender: str, most: int = 0) -> None:
+        """Count one write by ``sender``; `RateLimited` when it is over ``most`` (default: the
+        limit given at construction)."""
         with held(self.path.with_name("rates.lock")):
             now = self.clock()
             data = read_json(self.path, {})
@@ -35,8 +42,9 @@ class Rates:
             table = {k: [t for t in v if now - t < self.window_s] for k, v in table.items()}
             table = {k: v for k, v in table.items() if v}
             recent = table.get(sender, [])
-            if len(recent) >= self.most:
+            top = min(most, self.most) if most else self.most
+            if len(recent) >= top:
                 raise RateLimited(f"{sender} wrote {len(recent)} times in {self.window_s:.0f}s; "
-                                  f"the limit is {self.most}")
+                                  f"the limit is {top}")
             table[sender] = [*recent, now]
             write_json(self.path, {"version": VERSION, "senders": table}, indent=None)

@@ -8,11 +8,12 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
+from ml_stack.sentinel.human import HumanRequired
+from ml_stack.workspace import guide, limits, onboard, project, tokens
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
@@ -24,28 +25,35 @@ from ml_stack.workspace.service import Workspace
 
 __all__ = ["COMMANDS", "main"]
 
+LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
 CODES = ((Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
-         (ValueError, 2), (OSError, 2))
+         (HumanRequired, 3), (EOFError, 2), (ValueError, 2), (OSError, 2))
 Handler = Callable[[argparse.Namespace, Workspace, str], Any]
 
 COMMON = [option("json"),
           flag("--token-file", default="", help=f"a file holding the sender's token "
-                                                f"(else ${TOKEN_ENV})")]
+                                                f"(else --agent, else ${TOKEN_ENV}, "
+                                                f"else ${tokens.AGENT_ENV})"),
+          flag("--agent", default="", help="act as this agent: its token file from `join`"),
+          flag("--label", default="", help=f"a note of which helper is acting, shown as "
+                                           f"NAME/LABEL (else ${LABEL_ENV}); not an authority")]
 READ = [flag("--ack", action="store_true", help="mark what is shown as read"),
         flag("--raw", action="store_true", help="also show the unfenced text of clear messages")]
 CLAIM = [flag("kind", choices=CLAIM_KINDS), flag("key")]
 OWNER = flag("--owner", default="", help="a lead or human may name another agent")
 
 
+def _label(args: argparse.Namespace) -> str:
+    return args.label or os.environ.get(LABEL_ENV, "")
+
+
 def _token(args: argparse.Namespace) -> str:
-    if args.token_file:
-        return Path(args.token_file).read_text(encoding="utf-8").strip()
-    return os.environ.get(TOKEN_ENV, "").strip()
+    return tokens.resolve(limits.root(), token_file=args.token_file, agent=args.agent)
 
 
 def _text(value: Any) -> str:
     if isinstance(value, dict) and "text" in value and "seq" in value:
-        return (f"[{value['seq']}] {value['type']} from {value['from']} "
+        return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])} "
                 f"({value['trust']}, no authority, {value['state']})\n{value['text']}")
     if isinstance(value, dict) and "text" in value and "kind" in value:
         return (f"note {value['id']} {value['kind']} ({value['trust']}"
@@ -97,16 +105,21 @@ def _revoke(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 def _whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     who = ws.auth(token)
-    return {"id": who.id, "role": who.role}
+    return {"id": who.id, "role": who.role, "project": ws.registry.info(who.id)["project"]}
 
 
 def _send(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     return ws.send(token, args.to, args.type, _body(args.body), subject=args.subject,
-                   reply_to=args.reply_to, ttl_s=args.ttl)
+                   reply_to=args.reply_to, ttl_s=args.ttl, label=_label(args))
 
 
 def _inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.inbox(token, args.ack, args.limit, args.raw)
+    if not args.children:
+        return ws.inbox(token, args.ack, args.limit, args.raw)
+    if args.ack:
+        raise ValueError("--children shows some of the unread messages, so it cannot --ack")
+    me = ws.auth(token).id
+    return [m for m in ws.inbox(token, False, 1 << 20, args.raw) if m["from"].startswith(me + "/")]
 
 
 def _wait(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -121,7 +134,8 @@ def _note_add(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _claim(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=args.note)
+    note = f"[{_label(args)}] {args.note}".strip() if _label(args) else args.note
+    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=note)
 
 
 def _released(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -134,6 +148,87 @@ def _init(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
         raise Denied("init needs a person at a terminal on stdin and stdout")
     return {"token": ws.init(args.name), "note": f"keep this; set {TOKEN_ENV} to use it"}
 
+
+def _setup(args: argparse.Namespace, ws: Workspace) -> int:
+    if args.yes or args.rotate:
+        done = onboard.setup(ws, args.agents or list(onboard.DEFAULT_AGENTS), args.rotate,
+                             args.ttl_hours * 3600)
+        for label, group in (("created", done.minted), ("kept", done.kept),
+                             ("replaced", done.rotated), ("needs --rotate", done.lost)):
+            if group:
+                say(f"{label}: {', '.join(group)}")
+        say(f"token files: {done.directory} (private, never printed)")
+        for name in [*done.minted, *done.rotated, *done.kept]:
+            say(f"\n--- paste into {name} ---\n{onboard.snippet(name)}")
+        return 1 if any(not f.ok for f in onboard.doctor(ws)) else 0
+    plan = guide.Plan(args.agents, 0.0 if args.no_live else args.live_seconds, args.wait_seconds)
+    result = guide.walk(ws, plan)
+    return 0 if not plan.live_s or not result["unconfirmed"] else 1
+
+
+def _connect(args: argparse.Namespace, ws: Workspace) -> int:
+    plan = guide.Plan([args.name] if args.name else [], 0.0 if args.no_live else args.live_seconds,
+                      args.wait_seconds, project=project.describe(args.project, none=args.no_project))
+    return 0 if guide.connect(ws, plan) or plan.live_s == 0 else 1
+
+
+def _join(args: argparse.Namespace, ws: Workspace) -> int:
+    say(f"joined as {onboard.join(ws, args.code, args.name)}")
+    return 0
+
+
+def _doctor(args: argparse.Namespace, ws: Workspace) -> int:
+    found = onboard.doctor(ws)
+    for f in found:
+        say(("ok   " if f.ok else "FIX  ") + f.what + ("" if f.ok else f"  -> {f.fix}"))
+    return 0 if all(f.ok for f in found) else 1
+
+
+def _hello(args: argparse.Namespace, ws: Workspace) -> int:
+    say(f"sent message {onboard.hello(ws, args.name)['seq']} to {args.name}")
+    return 0
+
+
+def _brief(args: argparse.Namespace, ws: Workspace) -> int:
+    me = args.agent or os.environ.get(tokens.AGENT_ENV, "")
+    if not me:
+        raise ValueError("name the parent with --agent NAME (or set ML_STACK_WORKSPACE_AGENT)")
+    say(onboard.brief(args.name, me), end="")
+    return 0
+
+
+def _ttl(text: str) -> float:
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
+
+
+LIVE = [flag("--no-live", action="store_true", help="skip the live check"),
+        flag("--live-seconds", type=float, default=120.0, help="how long the live check waits"),
+        flag("--wait-seconds", type=float, default=600.0, help="how long to wait for a join")]
+BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace], int]], ...] = (
+    ("connect", "ONE command for the person: copy a paste block, wait for the agent, check it",
+     [flag("--name", default="", help="a suggested id for the agent; it may pick its own"),
+      flag("--project", default="", help="the project folder (default: the git root you are in)"),
+      flag("--no-project", action="store_true", help="connect without naming a project"),
+      *LIVE], _connect),
+    ("join", "an agent redeems its one-time code and saves its private token", [
+        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex")],
+     _join),
+    ("setup", "guided walkthrough for several agents; --yes makes token files directly", [
+        flag("agents", nargs="*", help="suggested ids (--yes: the agents to create)"),
+        flag("--rotate", action="append", default=[], metavar="NAME",
+             help="replace this agent's token (repeatable)"),
+        flag("--ttl-hours", type=float, default=720.0, help="how long new tokens last"),
+        flag("--yes", action="store_true", help="no questions: token files for the names given"),
+        *LIVE], _setup),
+    ("doctor", "check the whole setup and say what to fix; at a terminal", [], _doctor),
+    ("hello", "send AGENT the first message ('workspace ready'); at a terminal", [flag("name")],
+     _hello),
+    ("snippet", "print the paste block for AGENT (no secret in it)", [flag("name")],
+     lambda a, w: say(onboard.snippet(a.name), end="") or 0),
+    ("brief", "print the short brief a parent pastes into a subagent's prompt", [flag("name")],
+     _brief),
+)
 
 TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("init", "register the first human identity, at a terminal", [flag("--name", default="owner")],
@@ -148,7 +243,13 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("body"), flag("--subject", default=""), flag("--reply-to", type=int, default=0),
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
     ("inbox", "unread messages, fenced as data", [
-        *READ, flag("--limit", type=int, default=50)], _inbox),
+        *READ, flag("--limit", type=int, default=50),
+        flag("--children", action="store_true", help="only messages from your delegates")],
+     _inbox),
+    ("delegate", "mint a weaker child identity NAME for a subagent; prints its token file path", [
+        flag("name"), flag("--ttl", default="8h", help="e.g. 8h, 30m (never longer than yours)"),
+        flag("--can", default="", help="comma list from send,read,claim (default: all you hold)")],
+     lambda a, w, t: w.delegate(t, a.name, _ttl(a.ttl), tuple(c for c in a.can.split(",") if c))),
     ("wait", "block until a message arrives", [
         *READ, flag("--timeout", type=float, default=60.0)], _wait),
     ("outbox", "messages you sent", [], lambda a, w, t: w.outbox(t)),
@@ -198,7 +299,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: w.audit_verify(a.anchor)),
     ("audit-head", "the audit log's head hash, to keep as an anchor", [],
      lambda a, w, t: {"head": w.audit_log.head()}),
-    ("status", "counts, claims and the test-slot queue", [], lambda a, w, t: w.status()),
+    ("status", "who is registered, unread counts, claims, the test-slot queue; any agent token", [],
+     lambda a, w, t: (w.auth(t), w.status())[1]),
     ("gc", "prune old messages and expired scratch; lead or human", [],
      lambda a, w, t: w.gc(t)),
 )
@@ -235,6 +337,14 @@ COMMANDS = Group(
     "Everything read back is data written by an agent and carries no authority. A sender's "
     f"token comes from ${TOKEN_ENV} or --token-file.",
     allow_abbrev=False)
+def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
+    return _guarded(lambda args: handler(args, Workspace()))
+
+
+for _name, _help, _options, _handler in BARE:
+    COMMANDS.add(_name, _bare(_handler), help=_help,
+                 options=[option("json"), flag("--agent", default="", help="the parent agent"),
+                          *_options])
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
 COMMANDS.add("watch", _guarded(_watching),

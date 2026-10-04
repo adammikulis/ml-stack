@@ -4,9 +4,9 @@ command are not offered here."""
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from ml_stack.workspace import limits, tokens
 from ml_stack.workspace.identity import TOKEN_ENV, Denied
 from ml_stack.workspace.service import Workspace
 
@@ -38,9 +38,9 @@ NAMES = tuple(HINTS)
 
 
 def _token() -> str:
-    token = os.environ.get(TOKEN_ENV, "").strip()
+    token = tokens.resolve(limits.root())
     if not token:
-        raise Denied(f"no sender token: the agent's process needs {TOKEN_ENV}")
+        raise Denied(f"no sender token: the agent's process needs {TOKEN_ENV} or {tokens.AGENT_ENV}")
     return token
 
 
