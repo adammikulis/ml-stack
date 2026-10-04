@@ -15,6 +15,19 @@ uncovered = 54
 partial = 200
 
 [[group]]
+match = ["mcp-tool:workspace_reputation"]
+status = "covered"
+tests = ["tests/test_work_reputation.py::test_reputation_read_requires_valid_token_and_read_capability",
+         "tests/test_work_reputation.py::test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awareness"]
+note = "Reputation reads use the authenticated caller token and delegated read capability; local and MCP tools expose evidence without any self-award operation"
+
+[[group]]
+match = ["route:workspace/work_reputation.py:/ui/work-reputation/standings"]
+status = "covered"
+tests = ["tests/test_work_reputation.py::test_person_reputation_route_is_read_only_and_session_guarded"]
+note = "Verified-work standings are read-only and require the maintained Fleet UI header, session and server-side person owner identity; tokens are never returned"
+
+[[group]]
 match = ["route:activity/fleet_routes.py:/ui/history/events"]
 status = "covered"
 tests = ["tests/test_activity_fleet_history.py::test_history_requires_ui_header_and_joined_session"]

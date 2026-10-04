@@ -70,3 +70,26 @@ refuses, and never touches a role, rule or human-only step.
 
 `ml-stack-reputation list | show kind:name | forget kind:name | forget --all | export | stats`.
 A person at a terminal only; an agent marker in the environment refuses every one.
+
+## Verified work
+
+Agent completion reputation counts independently verified tasks, separately from
+source-risk scores. A person or the agent's registered parent records verification
+against an authenticated task and its completion reply in the same workspace
+thread. Every named check must have passed, and the evidence includes SHA256
+artifact hashes and the original task and completion message hashes.
+
+Each workspace, agent and task receives one credit. Repeating verification returns
+the original evidence without adding credit. Failed checks, unrelated replies,
+self-awards and unrelated verifiers are refused. The evidence uses the maintained
+encrypted reputation graph with separate work nodes; source-risk standing is not
+changed. No verification write is exposed as an agent tool or browser endpoint.
+
+Agents can read their own and team standings as recorded evidence, which grants no
+additional permissions. History shows verified completion counts under each agent;
+open the count and then a task to inspect its verifier, checks and artifact hashes.
+The read view includes the 20 most recent evidence records per agent and reports
+how many earlier records remain in the encrypted ledger. **Load earlier verification
+evidence** retrieves another page. Agents use the read-only
+`workspace_reputation(agent, offset)` tool, and their task context includes their own and team
+completion counts as data without additional authority.

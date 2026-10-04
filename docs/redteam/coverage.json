@@ -1,7 +1,7 @@
 {
- "surfaces": 654,
+ "surfaces": 659,
  "by_status": {
-  "covered": 339,
+  "covered": 344,
   "partial": 200,
   "uncovered": 54,
   "n/a": 61,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 63,
+   "covered": 66,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -72,7 +72,7 @@
    "unmapped": 0
   },
   "mcp-tool": {
-   "covered": 24,
+   "covered": 25,
    "partial": 19,
    "uncovered": 0,
    "n/a": 0,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 64,
+   "covered": 65,
    "partial": 60,
    "uncovered": 0,
    "n/a": 0,
@@ -3806,6 +3806,66 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/work_reputation.py:fleet_route",
+   "kind": "human",
+   "source": "workspace/work_reputation.py:fleet_route",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/work_reputation.py:standings",
+   "kind": "human",
+   "source": "workspace/work_reputation.py:standings",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/work_reputation.py:verify",
+   "kind": "human",
+   "source": "workspace/work_reputation.py:verify",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "keystore:fleet/onboard/signing.py:SigningKeys._drop",
    "kind": "keystore",
    "source": "fleet/onboard/signing.py:SigningKeys._drop",
@@ -4648,6 +4708,19 @@
     "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_reputation",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_reputation",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_work_reputation.py::test_reputation_read_requires_valid_token_and_read_capability",
+    "tests/test_work_reputation.py::test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awareness"
+   ],
+   "note": "Reputation reads use the authenticated caller token and delegated read capability; local and MCP tools expose evidence without any self-award operation"
   },
   {
    "id": "mcp-tool:workspace_scratch_ls",
@@ -7989,6 +8062,18 @@
     "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope"
    ],
    "note": "Fleet delegates to maintained person-only Board routes after its existing UI authorization; foreign origins, missing UI header, malformed bodies, impersonation fields, oversized requests and agent owner credentials cannot send"
+  },
+  {
+   "id": "route:workspace/work_reputation.py:/ui/work-reputation/standings",
+   "kind": "route",
+   "source": "workspace/work_reputation.py:fleet_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_work_reputation.py::test_person_reputation_route_is_read_only_and_session_guarded"
+   ],
+   "note": "Verified-work standings are read-only and require the maintained Fleet UI header, session and server-side person owner identity; tokens are never returned"
   },
   {
    "id": "slash-command:chat.py:/exit",

@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ml_stack.workspace import filecli, limits, tokens
+from ml_stack.workspace import filecli, limits, tokens, work_reputation
 from ml_stack.workspace.files import Attachment, Where
 from ml_stack.workspace.identity import TOKEN_ENV, Denied
 from ml_stack.workspace.service import Workspace
@@ -16,6 +16,7 @@ __all__ = ["HINTS", "NAMES"]
 
 HINTS = {
     "workspace_status": (True, False, True),
+    "workspace_reputation": (True, False, True),
     "workspace_inbox": (True, False, True),
     "workspace_thread": (True, False, True),
     "workspace_notes_search": (True, False, True),
@@ -54,6 +55,11 @@ def _token() -> str:
 def workspace_status() -> dict[str, Any]:
     """Counts, live claims and the test-slot queue. Read only."""
     return Workspace().status()
+
+
+def workspace_reputation(agent: str = "", offset: int = 0) -> dict[str, Any]:
+    """Your own and team independently verified completion scores and evidence. Read only."""
+    return work_reputation.standings(Workspace(), _token(), agent=agent, offset=offset)
 
 
 def _held(out: Any, items: list[dict[str, Any]]) -> list[dict[str, Any]]:

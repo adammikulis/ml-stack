@@ -41,7 +41,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    this.host=this.querySelector('section');this.note=this.querySelector('#history-status');
    this.list=this.querySelector('#history-list');this.agent=this.querySelector('#history-agent');
    this.search=this.querySelector('#history-search');this.refresh=this.querySelector('#history-refresh');
-   this.events=[];this.openActions=new Set();this.closedAgents=new Set();
+   this.events=[];this.openActions=new Set();this.closedAgents=new Set();this.openReputation=new Set();
    this.agent.onchange=()=>this.paint();this.search.oninput=()=>this.paint();this.refresh.onclick=()=>this.load();
    W.route(this.host,'history',()=>this.load());
    this.timer=setInterval(()=>{if(!this.host.hidden)this.load();},10000);
@@ -55,6 +55,8 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
     const selected=this.agent.value;
     this.agent.replaceChildren(E('option',{value:''},'All agents'),...[...new Set(this.events.map(e=>this.actor(e)))].sort().map(name=>E('option',{value:name},name)));
     this.agent.value=selected;this.paint();
+    const reputation=await W.api('/ui/work-reputation/standings').catch(()=>null);
+    this.reputation=reputation;this.paint();
    }catch(error){W.status(this.note,error);}
    finally{this.loading=false;this.refresh.disabled=false;}
   }
@@ -68,13 +70,32 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    }
    this.list.replaceChildren(...[...groups].map(([actor,events])=>{
     const card=E('details',{class:'workspace-card history-agent',open:!this.closedAgents.has(actor)},
-      E('summary',{},actor,E('span',{class:'history-count'},`${events.length} actions`)),...events.map(event=>this.action(event)));
+      E('summary',{},actor,E('span',{class:'history-count'},`${events.length} actions`)),this.standing(actor),...events.map(event=>this.action(event)));
     card.ontoggle=()=>card.open?this.closedAgents.delete(actor):this.closedAgents.add(actor);return card;
    }));
    const count=[...groups.values()].reduce((sum,events)=>sum+events.length,0);
    this.note.textContent=count?`${count} actions · newest first · refreshed ${new Date().toLocaleTimeString()}`:this.events.length?'No actions match these filters.':'No activity has been recorded yet.';
    if(this.data?.unreadable)this.note.textContent+=` · ${this.data.unreadable} unreadable records`;
    if(this.data?.drops?.dropped)this.note.textContent+=` · ${this.data.drops.dropped} dropped records`;
+  }
+  standing(actor){
+   const standing=this.reputation?.team?.find(item=>item.agent===actor||`agent:${item.agent}`===actor);
+   if(!standing)return null;
+   const box=E('details',{class:'history-action',open:this.openReputation.has(actor)},E('summary',{},`${standing.score} verified completion credits`));
+   box.ontoggle=()=>box.open?this.openReputation.add(actor):this.openReputation.delete(actor);
+   if(standing.evidence_held)box.append(E('p',{class:'intro'},`Showing 20 recent verifications; ${standing.evidence_held} earlier verifications remain in the encrypted ledger.`));
+   for(const evidence of standing.evidence||[]){
+    const detail=E('details',{open:this.openActions.has(evidence.id)},E('summary',{},`Task ${evidence.task} · verified by ${evidence.verifier}`));
+    detail.ontoggle=()=>detail.open?this.openActions.add(evidence.id):this.openActions.delete(evidence.id);
+    const fields=E('dl');for(const [key,value]of Object.entries(evidence))fields.append(E('dt',{},key),E('dd',{},typeof value==='object'?W.json(value):String(value)));
+    detail.append(fields);box.append(detail);
+   }
+   if(standing.evidence_held)box.append(W.button('Load earlier verification evidence',async()=>{
+    const more=await W.api(`/ui/work-reputation/standings?agent=${encodeURIComponent(standing.agent)}&offset=${standing.evidence.length}`);
+    const next=more.team.find(item=>item.agent===standing.agent);
+    if(next){standing.evidence.push(...next.evidence);standing.evidence_held=next.evidence_held;this.paint();}
+   }));
+   return box;
   }
   action(event){
    const refs=event.refs||{},meta=event.meta||{},time=new Date(event.ts*1000);
