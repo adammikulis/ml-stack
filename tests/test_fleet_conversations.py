@@ -37,7 +37,7 @@ class TestKeeping:
     def test_chats_are_listed_newest_first(self, store):
         a = store.start(title="older")
         b = store.start(title="newer")
-        store.rename(a.id, "older")
+        store.update(a.id, title="older")
         found = store.all()
         assert {c.id for c in found} == {a.id, b.id}
         assert found == sorted(found, key=lambda c: c.created, reverse=True)
@@ -94,3 +94,47 @@ class TestSearching:
         a = store.start(title="Everest")
         store.start(title="Kilimanjaro")
         assert [c.id for c in store.search("everest")] == [a.id]
+
+
+def test_conversation_settings_and_model_survive_reopening(store, tmp_path):
+    made = store.start(model="small", settings={"mode": "coding", "project": "/tmp/project", "effort": "low"})
+    store.append(made.id, "user", "Review the brakes")
+    store.update(made.id, model="large", settings={"temperature": .3, "max_effort": "high"}, title="Brake review")
+    again = Conversations(tmp_path / "chats").get(made.id)
+    assert again.model == "large"
+    assert again.settings["mode"] == "coding"
+    assert again.settings["project"] == "/tmp/project"
+    assert again.settings["temperature"] == .3
+    assert again.settings["effort"] == "low"
+    assert again.settings["max_effort"] == "high"
+    assert [message.content for message in again.messages] == ["Review the brakes"]
+
+
+@pytest.mark.parametrize("settings", [{"temperature": True}, {"temperature": -1}, {"temperature": float("nan")},
+                                      {"temperature": 3}, {"mode": "unknown"}, {"unknown": "setting"},
+                                      {"effort": "infinite"}, {"max_effort": "auto"}, {"role": "unknown"}, []])
+def test_invalid_settings_leave_the_conversation_unchanged(store, settings):
+    made = store.start(title="Kept")
+    with pytest.raises(ValueError):
+        store.update(made.id, title="Changed", settings=settings)
+    assert store.get(made.id).title == "Kept"
+    assert store.get(made.id).settings == made.settings
+
+
+def test_old_saved_messages_acquire_default_settings_and_version_on_update(store):
+    import json
+    made = store.start(model="old-model", title="Old chat")
+    store.append(made.id, "user", "Keep this message")
+    path = store.root / f"{made.id}.json"
+    raw = json.loads(path.read_text())
+    raw.pop("version")
+    raw.pop("settings")
+    path.write_text(json.dumps(raw))
+    old = store.get(made.id)
+    assert old.model == "old-model"
+    assert old.settings["mode"] == "chat"
+    store.update(made.id, settings={"temperature": .7})
+    saved = json.loads(path.read_text())
+    assert saved["version"] == 1
+    assert saved["messages"][0]["content"] == "Keep this message"
+    assert saved["settings"]["temperature"] == .7

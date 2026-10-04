@@ -3,7 +3,7 @@
 The daemon workspace groups interactive screens in its sidebar. Tools exposes every installed
 `ml-stack-*` console entry point, its help, command review, monitored execution, logs, and cancellation.
 Common controls remain visible; less common settings are grouped under collapsed Advanced
-sections. Chat labels its token-window setting **Context length**.
+sections. Model serving labels its token-window setting **Context length**.
 Commands execute in the daemon files root with the existing job environment and scheduling gate.
 
 | Capability | Destination |
@@ -85,3 +85,15 @@ boundaries. SUMO continues its clock and inserts continued demand through native
 warehouse robots retain their identities and request queue. `task_horizon` limits learning
 steps, while `world_demand_period` sets continuing traffic demand in seconds. Construction,
 world lifetime and model update policy are separate settings.
+
+## Saved conversations
+
+Chat keeps conversations on the daemon's machine. The conversation sidebar searches titles
+and message text; its options menu renames or deletes a conversation. Deletion asks for
+confirmation. Reloading restores the last open conversation, model choice and saved generation
+settings. Temperature stays under collapsed Advanced options and defaults to the model server's
+setting. An unavailable saved model remains identified until another running model is selected.
+
+One composer handles messages: Enter sends, Shift + Enter inserts a new line, and Stop interrupts
+generation. Existing saved messages retain their history when the conversation acquires versioned
+settings. Settings updates preserve the title and messages and reject invalid values.
