@@ -58,7 +58,7 @@ new device                                    owner's device (listening)
  |-- SPAKE2 message (identities: both certificate fingerprints) ---->
  |<-- Y                                                          3 tries, then the request is dead
  |-- confirmation (proves the code) ------------------------->   checks it first
- |<-- confirmation, grant (cluster key, salt, certificate, signing key), tag
+ |<-- confirmation, grant (cluster key, certificate, signing key), tag
  |  verifies the confirmation and the tag, joins the cluster, pins the certificate
 ```
 
@@ -199,8 +199,8 @@ sent when a request is created, once.
 `ml-stack fleet revoke NAME-OR-FINGERPRINT` marks the device revoked: it cannot ask again, and
 the key it signs file requests with (issued at pairing, one per device) stops working, so the
 owner's machine serves it nothing. **It cannot take back the cluster key** the device was given:
-the cluster has one shared key. The command says so. The re-keying flow (mint a new key and
-salt, hand them to each remaining member over its pinned, signed channel) is designed and not
+the cluster has one shared key. The command says so. The re-keying flow (mint a new key,
+hand it to each remaining member over its pinned, signed channel) is designed and not
 built. A device-only pairing (`--no-cluster`) has no cluster key to take back.
 
 ## Machines with nothing installed

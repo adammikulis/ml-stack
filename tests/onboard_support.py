@@ -59,7 +59,7 @@ def info(fingerprint: str, nonce: str = "ab" * 16, **more: str) -> dict[str, str
 
 
 def grant_for(ident: tls.Identity) -> Grant:
-    return Grant(group="home", key="secret-cluster-key", salt="c2FsdA", certificate=ident.beacon)
+    return Grant(group="home", key="secret-cluster-key", certificate=ident.beacon)
 
 
 class FileKeyring(KeyringBackend):

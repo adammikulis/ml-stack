@@ -1086,11 +1086,16 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
   keeps serving the old one until it restarts. Renewing in place means rebuilding the
   `SSLContext` the server holds and re-announcing the new certificate; peers re-pin from the
   next beacon.
-- [ ] **A reply is not signed.** Inside TLS this is moot for a peer that pinned the
-  certificate; a daemon run with `ML_STACK_FLEET_TLS=off` still sends replies anyone on the
-  segment can forge.
-- [ ] **A cluster joined before protocol 2 cannot onboard a machine by passphrase** (it has
-  no salt to tell). Each machine of it must join again; `ml-stack-peers setup` does that.
+- [ ] **Every machine of a cluster made before the join handshake must join again.** Its key
+  was derived from a passphrase and its beacons are protocol 2, which protocol 3 does not hear:
+  `ml-stack-peers setup` on each machine makes the new cluster.
+- [ ] **File and model downloads and the `/infer` stream are signed and not sealed by the
+  application.** They travel inside the daemon's TLS; with `ML_STACK_FLEET_TLS=off` they are
+  readable on the segment. Sealing them needs a framed stream of sealed chunks.
+- [ ] **A machine that joined from a recovery file holds no passphrase**, so it cannot take other
+  machines in by passphrase and the web interface cannot sign it in by passphrase.
+- [ ] **Two machines that start a new cluster of one name at the same moment each make a key.**
+  The join handshake finds a cluster that exists; nothing makes the second wait for the first.
 - [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**
   `ml_stack.httpguard.fetch` pins the checked address for the connection and checks every
   redirect; the page reader and the browser (a redirect or a sub-request inside Playwright

@@ -167,10 +167,9 @@ class Peer:
         return out["metrics"], out["next"]
 
     # -- jobs ------------------------------------------------------------
-    def submit(self, argv: list[str] | str, *, name: str = "",
-               cwd: str = "", env: dict[str, str] | None = None) -> dict:
-        return self._json("POST", "/jobs", {"argv": argv, "name": name,
-                                            "cwd": cwd, "env": env or {}})
+    def submit(self, argv: list[str] | str, *, name: str = "") -> dict:
+        """Run an allowed ml-stack command here (`fleet.commands`); anything else is refused."""
+        return self._json("POST", "/jobs", {"argv": argv, "name": name})
 
     def stop(self, job_id: str) -> dict:
         return self._json("POST", f"/jobs/{job_id}/stop", {})

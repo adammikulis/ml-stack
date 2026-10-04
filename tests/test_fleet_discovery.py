@@ -29,8 +29,8 @@ from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
     DiscoveryError,
+    _pack,
     _prefer,
-    _sign,
     _verify,
     create_cluster_key,
     derive_token,
@@ -44,16 +44,6 @@ from ml_stack.fleet.remote import Peer, PeerError
 #: Real UDP on a real interface and a real daemon subprocess, per the docstring
 #: above -- so every test here waits out a network timeout at least once.
 pytestmark = pytest.mark.slow
-
-SALT = b"a-test-clusters-salt"
-
-
-@pytest.fixture(autouse=True)
-def one_clusters_salt(monkeypatch):
-    """The machines in these tests are in one cluster, so they were all told the same salt."""
-    from ml_stack.fleet import discovery
-
-    monkeypatch.setattr(discovery, "new_salt", lambda: SALT)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -269,30 +259,41 @@ def test_a_beacon_without_an_instance_still_has_an_identity():
 
 # -- the adversary -------------------------------------------------------
 def test_a_tampered_beacon_is_refused(key):
-    raw = _sign(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
+    raw = _pack(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
                       "beacon": {"name": "rtx", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is not None
-    tampered = raw.replace(b'"port":8770', b'"port":9999')
-    assert _verify(key, tampered, kind="beacon") is None, \
-        "a redirected port must not survive verification"
+    for at in (len(raw) // 2, len(raw) - 1):
+        tampered = raw[:at] + bytes([raw[at] ^ 1]) + raw[at + 1:]
+        assert _verify(key, tampered, kind="beacon") is None, \
+            "an altered datagram must not survive verification"
+
+
+def test_a_beacon_is_neither_readable_nor_guessable_from(key):
+    """What an eavesdropper captures names nothing and carries nothing to test a guess against."""
+    raw = _pack(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
+                      "beacon": {"name": "rtx-box", "port": 8770}})
+    assert b"rtx-box" not in raw and b"8770" not in raw and b"mac" not in raw
+    assert _verify(key, raw, kind="who") is None, "a beacon is not accepted as another kind"
+    for words in ("correct horse battery staple", "ml-stack", "password"):
+        assert _verify(words.encode(), raw, kind="beacon") is None
 
 
 def test_a_beacon_signed_with_another_key_is_refused(key, tmp_path):
     other = create_cluster_key(tmp_path / "other.key").encode()
-    raw = _sign(other, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
+    raw = _pack(other, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
                         "beacon": {"name": "evil", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is None
 
 
 def test_a_stale_beacon_is_refused(key):
-    raw = _sign(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time() - 3600,
+    raw = _pack(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time() - 3600,
                       "nonce": "", "beacon": {"name": "rtx", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is None
 
 
 def test_a_replayed_reply_is_refused(key):
     """A recorded answer must not satisfy a later question."""
-    raw = _sign(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time(),
+    raw = _pack(key, {"v": PROTOCOL, "kind": "beacon", "t": time.time(),
                       "nonce": "the-old-nonce",
                       "beacon": {"name": "rtx", "port": 8770}})
     assert _verify(key, raw, kind="beacon", nonce="the-old-nonce") is not None
@@ -386,8 +387,9 @@ def _driver(keyfile: Path, http_port: int) -> Peer:
     return Peer(f"http://127.0.0.1:{http_port}", derive_token(load_cluster_key(keyfile)))
 
 
-def _probe(rtx: Peer, out: Path) -> dict:
-    return rtx.submit([sys.executable, "-c", f"open({str(out)!r}, 'w').write('ran')"],
+def _probe(rtx: Peer) -> dict:
+    """The one command a daemon is asked to run in these tests: its own short calibration."""
+    return rtx.submit(["python3", "-m", "ml_stack.fleet.calibration", "--budget", "0.05"],
                       name="probe")
 
 
@@ -422,12 +424,10 @@ def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, 
     # Authenticated route: proves the derived token matches what the daemon
     # computed independently, which is the claim discovery rests on.
     assert rtx.jobs() == []
-    out = tmp_path / "proof.txt"
-    job = rtx.submit([sys.executable, "-c",
-                      f"open({str(out)!r}, 'w').write('ran')"], name="probe")
+    job = _probe(rtx)
     final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
     assert final["state"] == "done", rtx.log(job["id"])
-    assert out.read_text() == "ran"
+    assert "score" in rtx.log(job["id"])
 
 
 # -- the measuring gate reads the daemon's own bench home, not this machine's ----
@@ -444,11 +444,10 @@ def test_a_daemon_in_its_own_root_runs_training_while_some_other_home_is_measuri
         with _booted(tmp_path) as (keyfile, _disco, http_port, log):
             rtx = _driver(keyfile, http_port)
             assert rtx.health()["measuring"] is False, log.read_text(errors="replace")
-            out = tmp_path / "proof.txt"
-            job = _probe(rtx, out)
+            job = _probe(rtx)
             final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
             assert final["state"] == "done", rtx.log(job["id"])
-            assert out.read_text() == "ran"
+            assert "score" in rtx.log(job["id"])
     said = log.read_text(errors="replace")
     assert f"bench {tmp_path / 'bench'}" in said, said
     assert "holding" not in said
@@ -463,20 +462,18 @@ def test_a_daemon_pointed_at_a_held_bench_home_keeps_training_queued_and_says_so
     home = tmp_path / "bench-of-this-box"
     with _booted(tmp_path, "--bench-home", str(home)) as (keyfile, _disco, http_port, log):
         rtx = _driver(keyfile, http_port)
-        out = tmp_path / "proof.txt"
         with only_one(home / "measuring.lock", announce=lambda *a, **k: None):
             assert rtx.health()["measuring"] is True
-            job = _probe(rtx, out)
+            job = _probe(rtx)
             deadline = time.time() + 4
             while time.time() < deadline and "holding" not in log.read_text(errors="replace"):
                 time.sleep(0.1)
             assert rtx.job(job["id"])["state"] == "queued"
-            assert not out.exists()
             said = log.read_text(errors="replace")
             assert "holding 1 queued job(s): a benchmark is measuring" in said, said
         final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
         assert final["state"] == "done", rtx.log(job["id"])
-        assert out.read_text() == "ran"
+        assert "score" in rtx.log(job["id"])
         assert rtx.health()["measuring"] is False
     assert "taking queued work again" in log.read_text(errors="replace")
 
@@ -623,68 +620,49 @@ def test_a_beacon_from_an_older_daemon_still_reads_as_one_free_slot(key, port):
     assert revived.free == 1
 
 
-# -- joining with a passphrase -------------------------------------------
+# -- the passphrase ------------------------------------------------------
 class TestPassphrase:
-    """Joining has to be something a person can do. The old story was "generate 32
-    random bytes, then paste this shell fragment on every machine", which is a thing
-    nobody who is not already a developer will get through."""
-
     WORDS = "correct horse battery staple"
 
-    def test_the_same_words_give_the_same_key(self):
-        from ml_stack.fleet.discovery import key_from_passphrase
+    @pytest.mark.parametrize("bad", ["", "abc", "1234", "    abcd   "])
+    def test_a_passphrase_under_five_characters_is_refused(self, bad):
+        from ml_stack.fleet.discovery import check_length
 
-        assert key_from_passphrase(self.WORDS, salt=SALT) == key_from_passphrase(self.WORDS, salt=SALT)
+        with pytest.raises(DiscoveryError, match=r"The passphrase needs at least 5 characters\."):
+            check_length(bad)
 
-    def test_surrounding_whitespace_does_not_make_a_different_cluster(self):
-        """Someone pastes the passphrase and picks up a trailing space. Failing on that
-        produces a cluster of one, which looks exactly like a network problem."""
-        from ml_stack.fleet.discovery import key_from_passphrase
+    def test_five_characters_and_surrounding_whitespace_are_accepted(self):
+        from ml_stack.fleet.discovery import MIN_PASSPHRASE, check_length
 
-        assert key_from_passphrase(f"  {self.WORDS}\n", salt=SALT) == key_from_passphrase(self.WORDS, salt=SALT)
-
-    def test_different_words_give_a_different_key(self):
-        from ml_stack.fleet.discovery import key_from_passphrase
-
-        assert key_from_passphrase(self.WORDS, salt=SALT) != key_from_passphrase("something else", salt=SALT)
-
-    def test_the_group_name_separates_two_households_that_chose_the_same_words(self):
-        from ml_stack.fleet.discovery import key_from_passphrase
-
-        assert (key_from_passphrase(self.WORDS, group="home", salt=SALT)
-                != key_from_passphrase(self.WORDS, group="lab", salt=SALT))
-
-    @pytest.mark.parametrize("bad", ["", "abc", "1234"])
-    def test_a_passphrase_too_short_to_survive_guessing_is_refused(self, bad):
-        from ml_stack.fleet.discovery import key_from_passphrase
-
-        with pytest.raises(DiscoveryError, match="at least"):
-            key_from_passphrase(bad, salt=SALT)
+        assert MIN_PASSPHRASE == 5
+        assert check_length(f"  {'a' * 5}\n") == "aaaaa"
 
     def test_joining_writes_a_key_only_this_user_can_read(self, tmp_path):
-        from ml_stack.fleet.discovery import clusters_path, join_cluster
+        from ml_stack.fleet.discovery import clusters_path
+        from tests.cluster_support import join_cluster
 
         keyfile = tmp_path / "cluster.key"
-        join_cluster(self.WORDS, path=keyfile)
+        key = join_cluster(self.WORDS, path=keyfile)
 
         assert clusters_path(keyfile).stat().st_mode & 0o077 == 0
-        assert load_cluster_key(keyfile) == join_cluster(self.WORDS, path=keyfile)
+        assert load_cluster_key(keyfile) == key
 
-    def test_a_derived_key_drives_a_real_daemon(self, tmp_path):
-        """The point of deriving rather than minting: the bearer token both ends compute
-        has to come out the same, or the passphrase bought nothing."""
-        from ml_stack.fleet.discovery import join_cluster
+    def test_a_cluster_key_is_random_and_256_bits(self, tmp_path):
+        import base64
 
-        here = join_cluster(self.WORDS, path=tmp_path / "a.key")
-        there = join_cluster(self.WORDS, path=tmp_path / "b.key")
-        assert derive_token(here) == derive_token(there)
+        from ml_stack.fleet.discovery import mint_cluster
+
+        one = mint_cluster("home", tmp_path / "a.key").key
+        two = mint_cluster("home", tmp_path / "b.key").key
+        assert one != two
+        assert len(base64.urlsafe_b64decode(one + b"=")) == 32
 
 
 def test_two_passphrase_groups_share_a_network_without_seeing_each_other(port, tmp_path):
     """Several clusters on one LAN, separated by nothing but the words people typed.
     The isolation is the same mechanism that keeps a stranger out: a beacon signed with
     another key does not verify, so it is never answered."""
-    from ml_stack.fleet.discovery import join_cluster
+    from tests.cluster_support import join_cluster
 
     ours = join_cluster("correct horse battery staple", path=tmp_path / "ours.key")
     theirs = join_cluster("a completely different phrase", path=tmp_path / "theirs.key")
@@ -699,21 +677,17 @@ def test_two_passphrase_groups_share_a_network_without_seeing_each_other(port, t
 
 
 class TestTheGroupIsRemembered:
-    """The group is load-bearing in the derivation, so a box that forgot it cannot check
-    a passphrase anyone types -- it does not know which salt the words were stretched
-    with. It also could not say which cluster it was in."""
-
     def test_joining_records_which_cluster_it_joined(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group, join_cluster
+        from ml_stack.fleet.discovery import cluster_group
+        from tests.cluster_support import join_cluster
 
         join_cluster("correct horse battery", group="garage",
                      path=tmp_path / "cluster.key")
         assert cluster_group(tmp_path / "cluster.key") == "garage"
 
     def test_the_keys_are_not_left_where_anyone_can_read_them(self, tmp_path):
-        """The passphrase protects the cluster, so the keys derived from it are the
-        one thing on disk that no other account may read."""
-        from ml_stack.fleet.discovery import cluster_group, clusters_path, join_cluster
+        from ml_stack.fleet.discovery import cluster_group, clusters_path
+        from tests.cluster_support import join_cluster
 
         keyfile = tmp_path / "cluster.key"
         join_cluster("correct horse battery", group="garage", path=keyfile)
@@ -726,31 +700,6 @@ class TestTheGroupIsRemembered:
 
         assert cluster_group(tmp_path / "nothing.key") is None
 
-    def test_the_right_words_verify_against_the_stored_key(self, tmp_path):
-        """What lets someone log in by typing the passphrase rather than pasting a
-        43-character token: re-derive and compare, storing nothing."""
-        from ml_stack.fleet.discovery import check_passphrase, join_cluster
-
-        keyfile = tmp_path / "cluster.key"
-        join_cluster("correct horse battery", group="garage", path=keyfile)
-
-        assert check_passphrase("correct horse battery", path=keyfile)
-        assert not check_passphrase("wrong words entirely", path=keyfile)
-
-    def test_the_right_words_in_the_wrong_group_do_not_verify(self, tmp_path):
-        from ml_stack.fleet.discovery import check_passphrase, join_cluster
-
-        keyfile = tmp_path / "cluster.key"
-        join_cluster("correct horse battery", group="garage", path=keyfile)
-
-        assert not check_passphrase("correct horse battery", group="lab", path=keyfile)
-
-    def test_a_machine_in_no_cluster_verifies_nothing(self, tmp_path):
-        from ml_stack.fleet.discovery import check_passphrase
-
-        assert not check_passphrase("correct horse battery", path=tmp_path / "no.key")
-
-
 
 class TestBelongingToSeveralClusters:
     """A machine is not owned by one group of machines."""
@@ -759,7 +708,8 @@ class TestBelongingToSeveralClusters:
     OTHER = "a completely different set of words"
 
     def test_it_joins_more_than_one_and_keeps_both(self, tmp_path):
-        from ml_stack.fleet.discovery import join, memberships
+        from ml_stack.fleet.discovery import memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -769,7 +719,8 @@ class TestBelongingToSeveralClusters:
         assert len({m.key for m in memberships(anchor)}) == 2
 
     def test_leaving_one_leaves_the_others_alone(self, tmp_path):
-        from ml_stack.fleet.discovery import join, leave, memberships
+        from ml_stack.fleet.discovery import leave, memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -779,7 +730,8 @@ class TestBelongingToSeveralClusters:
         assert [m.group for m in memberships(anchor)] == ["work"]
 
     def test_leaving_the_last_one_leaves_no_cluster(self, tmp_path):
-        from ml_stack.fleet.discovery import in_cluster, join, leave
+        from ml_stack.fleet.discovery import in_cluster, leave
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -788,13 +740,8 @@ class TestBelongingToSeveralClusters:
         assert in_cluster(anchor) is False
 
     def test_the_machine_answers_as_the_first_one(self, tmp_path):
-        from ml_stack.fleet.discovery import (
-            cluster_group,
-            join,
-            leave,
-            load_cluster_key,
-            memberships,
-        )
+        from ml_stack.fleet.discovery import cluster_group, leave, load_cluster_key, memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -807,7 +754,8 @@ class TestBelongingToSeveralClusters:
         assert cluster_group(anchor) == "work", "it did not promote the one left"
 
     def test_joining_the_same_cluster_twice_does_not_double_it(self, tmp_path):
-        from ml_stack.fleet.discovery import join, memberships
+        from ml_stack.fleet.discovery import memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -815,7 +763,8 @@ class TestBelongingToSeveralClusters:
         assert [m.group for m in memberships(anchor)] == ["home"]
 
     def test_a_new_passphrase_for_a_cluster_replaces_the_old_key(self, tmp_path):
-        from ml_stack.fleet.discovery import join, memberships
+        from ml_stack.fleet.discovery import memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(self.WORDS, group="home", path=anchor)
@@ -827,15 +776,11 @@ class TestBelongingToSeveralClusters:
 
     def test_a_machine_set_up_before_the_list_existed_is_still_in_its_cluster(
             self, tmp_path):
-        from ml_stack.fleet.discovery import (
-            cluster_group,
-            in_cluster,
-            key_from_passphrase,
-            load_cluster_key,
-        )
+        from ml_stack.fleet.discovery import cluster_group, in_cluster, load_cluster_key
+        from tests.cluster_support import key_for
 
         anchor = tmp_path / "cluster.key"
-        key = key_from_passphrase(self.WORDS, group="ml-stack", salt=SALT)
+        key = key_for(self.WORDS, "ml-stack")
         anchor.write_text(key.decode() + "\n")
 
         assert in_cluster(anchor)
@@ -843,24 +788,21 @@ class TestBelongingToSeveralClusters:
         assert cluster_group(anchor) == "ml-stack"
 
     def test_the_group_it_was_set_up_with_survives(self, tmp_path):
-        from ml_stack.fleet.discovery import cluster_group, key_from_passphrase
+        from ml_stack.fleet.discovery import cluster_group
+        from tests.cluster_support import key_for
 
         anchor = tmp_path / "cluster.key"
-        anchor.write_text(key_from_passphrase(self.WORDS, group="garage", salt=SALT).decode())
+        anchor.write_text(key_for(self.WORDS, "garage").decode())
         (tmp_path / "cluster.group").write_text("garage\n")
 
         assert cluster_group(anchor) == "garage"
 
     def test_the_old_key_is_moved_into_the_list_once(self, tmp_path):
-        from ml_stack.fleet.discovery import (
-            join,
-            key_from_passphrase,
-            leave,
-            memberships,
-        )
+        from ml_stack.fleet.discovery import leave, memberships
+        from tests.cluster_support import join, key_for
 
         anchor = tmp_path / "cluster.key"
-        anchor.write_text(key_from_passphrase(self.WORDS, group="ml-stack", salt=SALT).decode())
+        anchor.write_text(key_for(self.WORDS, "ml-stack").decode())
         assert len(memberships(anchor)) == 1
         assert (tmp_path / "cluster.json").exists()
 
@@ -871,25 +813,15 @@ class TestBelongingToSeveralClusters:
         leave("lab", path=anchor)
         assert memberships(anchor) == [], "leaving must not be undone by the old file"
 
-    def test_a_short_passphrase_is_refused_for_every_cluster(self, tmp_path):
-        import pytest as pt
-
-        from ml_stack.fleet.discovery import DiscoveryError, join, memberships
-
-        anchor = tmp_path / "cluster.key"
-        with pt.raises(DiscoveryError, match="at least"):
-            join("abc", group="home", path=anchor)
-        assert memberships(anchor) == []
-
     def test_two_machines_in_the_same_cluster_derive_the_same_key(self, tmp_path):
-        from ml_stack.fleet.discovery import join
+        from tests.cluster_support import join
 
         one = join(self.WORDS, group="home", path=tmp_path / "a.key")
         two = join(self.WORDS, group="home", path=tmp_path / "b.key")
         assert one[0].key == two[0].key
 
     def test_the_same_words_in_different_clusters_do_not_meet(self, tmp_path):
-        from ml_stack.fleet.discovery import join
+        from tests.cluster_support import join
 
         home = join(self.WORDS, group="home", path=tmp_path / "a.key")
         work = join(self.WORDS, group="work", path=tmp_path / "b.key")
@@ -902,12 +834,3 @@ class TestBelongingToSeveralClusters:
         clusters_path(anchor).parent.mkdir(parents=True, exist_ok=True)
         clusters_path(anchor).write_text("{not json")
         assert memberships(anchor) == []
-
-
-def test_a_passphrase_too_short_to_stand_up_to_guessing_is_refused(tmp_path):
-    from ml_stack.fleet.discovery import MIN_PASSPHRASE, DiscoveryError, join_cluster
-
-    assert MIN_PASSPHRASE >= 12
-    with pytest.raises(DiscoveryError, match="at least"):
-        join_cluster("a" * (MIN_PASSPHRASE - 1), path=tmp_path / "k")
-    join_cluster("a" * MIN_PASSPHRASE, path=tmp_path / "k")

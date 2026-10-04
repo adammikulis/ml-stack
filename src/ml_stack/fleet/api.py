@@ -11,6 +11,7 @@ import json
 import re
 import secrets
 import shlex
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,14 +22,15 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate, sentinel, serverkeys
+from ml_stack import gate, sealing, sentinel, serverkeys
 from ml_stack.files import promote
-from ml_stack.macauth import Authenticator, Verdict
+from ml_stack.macauth import Authenticator, Verdict, parts
 from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
+from . import commands
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
@@ -54,6 +56,7 @@ from .framing import (
 from .jobs import DaemonError, JobRunner
 from .measuring import BenchHost, Job as BenchJob, Refused
 from .models import Models
+from .onboard.joining import API as JOIN_API, Joining
 from .serving import Hosting, NoRoom, Serving
 from .ui import routes as ui_routes
 from .weights import ModelError
@@ -95,6 +98,10 @@ class Daemon:
     decide: Deciding | None = None
     ui_from_lan: bool = False
     """Whether the web interface answers other machines. Off: it answers this one alone."""
+    joining: Joining | None = None
+    """Answers a machine that asks to join with the passphrase; without it the join routes are off."""
+    command: Callable[[list[str]], list[str]] = commands.allowed
+    """Which argv a ``POST /jobs`` may run, and in what form; raises ValueError to refuse."""
 
 
 def _count(text: str, fallback: int, most: int = 1_000_000) -> int:
@@ -110,6 +117,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
     models, cluster_key_path, tokens = daemon.models, daemon.cluster_key_path, daemon.tokens
     bench, hosting, decide = daemon.bench, daemon.hosting, daemon.decide
     ui_from_lan = daemon.ui_from_lan
+    joining, command = daemon.joining, daemon.command
 
     def secrets_now() -> set[str]:
         """Every secret this machine answers to, read at request time."""
@@ -133,15 +141,28 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             """This machine's name, read at request time."""
             return name() if callable(name) else name
 
+        _opening: tuple[bytes, Verdict, bool, Any] | None = None
+
+        def _sealing(self) -> tuple[bytes, Verdict, bool] | None:
+            """What seals this request's answer and opens its body, when it was signed and asked for."""
+            held = self._opening
+            return held[:3] if held is not None and held[3] is self.headers else None
+
         def _send(self, code: int, payload: Any, *, raw: bytes | None = None,
                   headers: dict[str, str] | None = None,
                   content_type: str = "") -> None:
             body = raw if raw is not None else json.dumps(payload).encode()
+            headers = dict(headers or {})
+            opening = self._sealing()
+            if opening is not None and opening[2] and self.command != "HEAD":
+                key, verdict, _ = opening
+                body = sealing.seal(key, body, sealing.response_data(verdict.nonce, code))
+                headers[sealing.HEADER] = "1"
             self.send_response(code)
             self.send_header("Content-Type", content_type or (
                 "application/octet-stream" if raw is not None else "application/json"))
             self.send_header("Content-Length", str(len(body)))
-            for k, v in (headers or {}).items():
+            for k, v in headers.items():
                 self.send_header(k, v)
             self.end_headers()
             if self.command != "HEAD":
@@ -188,12 +209,33 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             verdict = authenticator.check(self.command, self.path, self.headers, body,
                                           self.client_address[0])
             if verdict.ok:
+                mode = self.headers.get(sealing.HEADER, "")
+                self._opening = (sealing.box_key(verdict.secret), verdict, mode == "2",
+                                 self.headers) if mode in ("1", "2") else None
                 return True
             if verdict.locked:
                 self._send(429, {"error": verdict.reason}, headers={"Retry-After": "60"})
             else:
                 self._send(401, {"error": verdict.reason})
             return False
+
+        def _unsealed(self, body: bytes | None) -> bytes | None:
+            """What a signed request's body says, or None once a refusal has been sent: a body
+            is sealed under the key derived from the secret that signed it."""
+            if not body:
+                return body
+            opening = self._sealing()
+            if opening is None:
+                self._send(400, {"error": "a request body is sent sealed"})
+                return None
+            key, verdict, _ = opening
+            host, target = parts(f"//{self.headers.get('Host', '')}{self.path}")
+            try:
+                return sealing.open_(key, body, sealing.request_data(
+                    self.command, target, host, verdict.at, verdict.nonce))
+            except sealing.SealError:
+                self._send(400, {"error": "the body did not authenticate"})
+                return None
 
         def _body(self, most: int = MOST_BODY) -> bytes | None:
             """The request body, or None once a refusal for it has been sent."""
@@ -217,6 +259,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     ("/infer/", "/infer?"))):
                 return False
             if not self._guard(body):
+                return True
+            body = self._unsealed(body)
+            if body is None:
                 return True
             rest = self.path[len("/infer"):] or "/"
             rest = "/" + rest if rest.startswith("?") else rest
@@ -266,9 +311,14 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 self._send(502, {"error": f"the model server did not answer: {exc}"})
                 return True
 
+            kind = response.headers.get("Content-Type", "application/json")
+            opening = self._sealing()
+            if opening is not None and opening[2] and "event-stream" not in kind:
+                with response:
+                    self._send(response.status, None, raw=response.read(), content_type=kind)
+                return True
             self.send_response(response.status)
-            self.send_header("Content-Type",
-                             response.headers.get("Content-Type", "application/json"))
+            self.send_header("Content-Type", kind)
             # No Content-Length and close framing: a streamed completion must reach the
             # caller as it is generated, not after the last token.
             self.send_header("Connection", "close")
@@ -299,7 +349,27 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 self._send(403, {"error": "the web interface answers this machine only; "
                                           "start the daemon with --ui-from-lan to open it"})
                 return True
+            if not isinstance(self.connection, ssl.SSLSocket) and not addressed_to_this_machine(
+                    "localhost", self.client_address[0]):
+                self._send(403, {"error": "the web interface is served to other machines over "
+                                          "TLS only; it signs in with the passphrase"})
+                return True
             return ui_routes(ui, self)
+
+        def _join(self, body: bytes | None) -> bool:
+            """Answer a ``/join/v1`` request, which carries no signature; False for any other path."""
+            if joining is None or not self.path.startswith(JOIN_API + "/"):
+                return False
+            try:
+                asked = json.loads(body or b"{}")
+            except ValueError:
+                asked = None
+            if not isinstance(asked, dict):
+                self._send(400, {"error": "the body is not a JSON object"})
+                return True
+            status, answer = joining.handle(self.path.split("?")[0], asked, self.client_address[0])
+            self._send(status, answer)
+            return True
 
         def do_GET(self) -> None:
             if self.path == "/favicon.ico":
@@ -474,9 +544,12 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if self._ui():
                 return
             body = self._body()
-            if body is None or self._proxy(body):
+            if body is None or self._join(body) or self._proxy(body):
                 return
             if not self._guard(body):
+                return
+            body = self._unsealed(body)
+            if body is None:
                 return
             try:
                 self._route_post(body or b"{}")
@@ -512,15 +585,14 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/jobs":
                 try:
                     req = self._object(body)
+                    if req.get("cwd") or req.get("env"):
+                        raise ValueError("a job runs in the daemon's own folder and "
+                                         "environment; cwd and env are not accepted")
                     argv = req.get("argv")
                     if isinstance(argv, str):
                         argv = shlex.split(argv)
-                    # `or`, not a get() default: the client sends "cwd": "" when the
-                    # caller did not set one, so the default never applied and the job
-                    # ran wherever the daemon happened to be.
-                    job = runner.submit(req.get("name", ""), argv or [],
-                                        req.get("cwd") or str(files_root),
-                                        req.get("env"))
+                    job = runner.submit(req.get("name", ""), command(argv or []),
+                                        str(files_root))
                 except (DaemonError, ValueError) as e:
                     self._send(400, {"error": str(e)})
                     return
@@ -673,6 +745,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             body = self._body(MOST_UPLOAD)
             if body is None or not self._guard(body):
+                return
+            body = self._unsealed(body)
+            if body is None:
                 return
             parsed = urllib.parse.urlparse(self.path)
             if not parsed.path.startswith("/files/"):

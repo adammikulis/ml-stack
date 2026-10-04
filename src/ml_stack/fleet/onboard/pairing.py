@@ -66,13 +66,12 @@ def context_for(request_id: str, nonce: str) -> bytes:
 
 @dataclass(frozen=True, slots=True)
 class Grant:
-    """What an accepted machine receives: the cluster it joins (``group``, ``key``, ``salt``
+    """What an accepted machine receives: the cluster it joins (``group`` and ``key``
     from `discovery`) and the pinned certificate of the machine that took it in. A grant
     with no ``key`` is a device pairing only, with no cluster membership."""
 
     group: str = ""
     key: str = ""
-    salt: str = ""
     certificate: str = ""
     signing_key: str = ""
     device_secret: str = ""
@@ -85,7 +84,7 @@ class Grant:
     """What this machine calls itself, for the peer book."""
 
     def encode(self) -> bytes:
-        return json.dumps({"v": 1, "group": self.group, "key": self.key, "salt": self.salt,
+        return json.dumps({"v": 1, "group": self.group, "key": self.key,
                            "certificate": self.certificate, "signing_key": self.signing_key,
                            "device_secret": self.device_secret, "share_port": self.share_port,
                            "name": self.name},
@@ -97,7 +96,7 @@ class Grant:
         if not isinstance(data, dict) or data.get("v") != 1:
             raise PairError("the grant is in a format this version does not know")
         return cls(**{k: str(data.get(k, "")) for k in
-                      ("group", "key", "salt", "certificate", "signing_key", "device_secret",
+                      ("group", "key", "certificate", "signing_key", "device_secret",
                        "name")}, share_port=_port(data.get("share_port")))
 
 

@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler
 import pytest
 
 from ml_stack.fleet import autostart, launch
-from ml_stack.fleet.discovery import join_cluster
 from ml_stack.http import Server
+from tests.cluster_support import join_cluster
 
 
 class _Health(BaseHTTPRequestHandler):

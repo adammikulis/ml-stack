@@ -27,6 +27,7 @@ from ml_stack.fleet.rates import Rates
 from ml_stack.fleet.remote import Peer
 from ml_stack.fleet.work import Unit, run
 from ml_stack.http import Server
+from tests.cluster_support import any_command
 
 
 def _free_port() -> int:
@@ -55,7 +56,8 @@ class Box:
 
         self.httpd = Server(
             ("127.0.0.1", port),
-            make_handler(Daemon(self.runner, self.files, token, name, report)))
+            make_handler(Daemon(self.runner, self.files, token, name, report,
+                                         command=any_command)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.peer = Peer(f"http://127.0.0.1:{port}", token)
 

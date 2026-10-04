@@ -22,35 +22,51 @@ else on the LAN.
 **A cluster member is fully trusted.** The daemon runs the command line a peer sends it
 (`POST /jobs`), downloads what a peer names (`POST /models/get`) and writes files a peer
 sends (`PUT /files/*`). Holding the cluster key is the same as having a shell on every machine
-in the cluster. The passphrase is all that stands between the LAN and that, so it is at least
-12 characters, and `ml-stack-peers init` makes a random key.
+in the cluster. What stands between the LAN and that is the cluster key, 256 random bits that
+no passphrase derives. The passphrase is only a password for the join handshake, which locks out a
+source that keeps failing, so it is at least 5 characters; `ml-stack-peers init` makes a key with
+no passphrase. A job a peer submits is limited to an allowlist of ml-stack commands
+(`docs/fleet.md`).
 
 ## What listens
 
 | Surface | Default | Who can reach it |
 |---|---|---|
 | Fleet daemon, TCP 8770 | `127.0.0.1` (plain HTTP) until the machine joins a cluster, or `--lan`, `--host`, `--setup-from-lan`; beyond this machine it speaks TLS only | a LAN peer that pins its certificate and holds the cluster key (signed requests inside TLS); plain HTTP from another machine is dropped |
-| Daemon web interface, `/ui` | this machine alone | other machines only with `--ui-from-lan` (it signs in with the passphrase over plain HTTP) |
+| Daemon web interface, `/ui` | this machine alone | other machines only with `--ui-from-lan`, and then over TLS only (it signs in with the passphrase) |
 | Discovery beacons, UDP 8771, multicast `239.255.77.70`, TTL 1 | sent once a cluster is joined | the LAN segment |
 | llama-server and other model servers | `127.0.0.1`, a random port | this machine; the daemon's `/infer` passes signed requests on to a fixed set of model-server paths |
 | `ml-stack-graph` page | `127.0.0.1` | this machine |
 | Pairing listener, TCP 8772, announcements UDP 8773 | off; only while `ml-stack fleet listen` runs | anyone on the LAN can send a request; nothing is given until the owner accepts and the code is typed. TLS only; plain HTTP is refused. `docs/onboarding.md` |
 | Bootstrap offer, an HTTPS port chosen at the time | off; only while `ml-stack fleet bootstrap` runs, for ten minutes | whoever has the unguessable address; program files only |
 
-A beacon carries the machine's name, port, device report, its TLS certificate and an
-HMAC-SHA256 under the cluster key. It never carries the passphrase, the cluster key or the request secret. It does let
-anyone on the segment test passphrase guesses offline (they cost one scrypt, N=2^16, each, under
-the cluster's own random salt), which is why a passphrase has a 12 character minimum.
+A beacon carries the machine's name, port, device report and its TLS certificate, sealed with
+AES-256-GCM under a key derived from the cluster key; the kind, a timestamp and the asker's nonce
+are authenticated. It never carries the passphrase, the cluster key or the request secret, and a
+capture holds nothing a passphrase guess can be tested against. The one unsealed datagram is a
+request to join a cluster by name and its answer (a port and whether it speaks TLS).
+
+**The join handshake.** A machine that has the passphrase and not the key asks a daemon in the
+cluster for it. They run SPAKE2 with the passphrase as the password and the daemon's certificate
+fingerprint as an identity, confirm to each other, and the daemon sends the key sealed under the
+exchange's key. An eavesdropper or an impersonator gets at most one online guess per attempt. A
+daemon counts every attempt per source address: five in ten minutes without a success locks that
+address out for ten minutes, thirty from all addresses lock the handshake for ten minutes, and
+each attempt is logged with its source and outcome. The passphrase is kept in the operating
+system's keystore on each machine that joined with it, and only a machine that holds it takes
+others in.
 
 ## Who can do what
 
 **Somebody on the LAN who holds no key.** Can see that a daemon is there and hear beacons. Cannot
 run a job, read or write a file, learn the name or device report from `/health`, or open the
 web interface. Can send requests; one that is not correctly signed is refused, and an address
-with ten failures in a minute is locked out for a minute. Can try passphrase guesses against a
-captured beacon (see above). Cannot read traffic between peers: it is TLS to a certificate
-the beacon vouched for, and a different, rotated or expired certificate fails the handshake.
-With `ML_STACK_FLEET_TLS=off` it can read it.
+with ten failures in a minute is locked out for a minute. Can try passphrase guesses against the join
+handshake, at five per ten minutes per address (see above); nothing it captures supports a
+guess offline. Cannot read traffic between peers: request and response bodies and beacons are
+sealed under a key derived from the cluster key, and connections are TLS to a certificate the
+beacon vouched for. With `ML_STACK_FLEET_TLS=off` it can read file transfers and the streamed
+output of the model proxy, which are not sealed by the application.
 
 **A web page in the user's browser.** Cannot read the daemon: it listens on loopback, an API
 request must be signed with a secret the page does not have, and `/ui` requires a custom header
@@ -97,10 +113,11 @@ These apply to every consumer of the library without a switch.
   socket and writes no file; `ml_stack.__version__` and a `NullHandler` are all it adds.
 - The daemon listens on this machine until the machine joins a cluster; beyond this machine it
   is TLS to a pinned certificate or nothing (`ML_STACK_FLEET_TLS=off` is the one named switch,
-  announced at every start); every request is signed, fresh and unseen; request framing,
+  announced at every start); every request is signed, fresh and unseen, and its body is sealed
+  with AES-256-GCM under a key derived separately from the signing secret; request framing,
   connection count and time are bounded.
-- A cluster's key is derived under its own random salt, learned from a machine already in it;
-  a protocol 1 peer is ignored.
+- A cluster's key is random and is handed to a joining machine by a password-authenticated
+  exchange; no key is derived from a passphrase, and a protocol 2 peer is ignored.
 - `ml_stack.http.open_stream` and `build_request` open only `http` and `https`; messages about
   a URL carry no user, password or secret query parameter.
 - Everything fetched from the internet goes through `ml_stack.net` (`docs/internet.md`): a
@@ -200,8 +217,8 @@ at that commit.
 | 6 | Medium | `fleet/api.py` (server) | A client that dripped headers, or opened connections without limit, held a thread each (slowloris) | `188ff67` 15 s header deadline, 30 s socket timeout, 64 connections |
 | 7 | Medium | `fleet/api.py:174` | The `/infer` proxy forwarded any path to the model server, including `POST /slots/N?action=erase` and `/props` | `22b0267` allow-listed paths; caches and properties are read-only |
 | 8 | Medium | `fleet/api.py` (`/health`) | An unauthenticated caller read the machine name, device report and what it serves | `188ff67` |
-| 9 | Medium | `fleet/ui.py` login | Another machine on the LAN opening the web interface sent the passphrase over plain HTTP | `0828ee2` `--ui-from-lan` is the named opt-in |
-| 10 | Medium | `fleet/discovery.py:86` | A 5 character minimum passphrase against offline grinding of a beacon's MAC | `7c13db7` 12 characters |
+| 9 | Medium | `fleet/ui.py` login | Another machine on the LAN opening the web interface sent the passphrase over plain HTTP | `0828ee2` `--ui-from-lan` is the named opt-in; now it answers other machines over TLS only |
+| 10 | Medium | `fleet/discovery.py:86` | A 5 character minimum passphrase against offline grinding of a beacon's MAC | `7c13db7` 12 characters; superseded: beacons are sealed under a random cluster key and the passphrase only goes through the join handshake, so the minimum is 5 |
 | 11 | Medium | `serve/manager.py` | A killed host left its llama-server holding GPU memory until the next lease on that port | `c367a8a` exit hook, signal chain and watchdog; `6f93a5a` verified orphan sweep |
 | 12 | Medium | `serve/process.py:126,157` | Without psutil, `kill_process_tree` silently did nothing and records were dropped | `c157987` psutil is a core dependency |
 | 13 | Medium | `fleet/updates.py:186` | A release asset's name from the API JSON was joined onto a directory (`../`), and an asset with no digest was accepted | `e12a6d2` |
@@ -220,7 +237,7 @@ at that commit.
 | 26 | Info | `http.check` | The address check ran before the connection, so DNS could answer differently the second time | `db89b03` `httpguard.fetch` connects to the address it checked |
 | 27 | Low | `serve/preflight.py:87`, `serve/mlx_tree.py:92` | A model file whose header declares a string, an array or a pair count of 2^40 made the preflight allocate or loop on it | `35846af` |
 | 28 | Medium | `fleet/daemon.py`, `fleet/api.py` | Anyone on the segment read and altered peer-to-peer bodies (jobs, files, replies) | `d6ea366` |
-| 29 | Medium | `fleet/discovery.py:_salt_for` | The passphrase salt was a hash of the cluster name, so a table precomputed for `ml-stack` fit every cluster of that name | `518a855` per-cluster random salt, protocol 2 |
+| 29 | Medium | `fleet/discovery.py:_salt_for` | The passphrase salt was a hash of the cluster name, so a table precomputed for `ml-stack` fit every cluster of that name | `518a855` per-cluster random salt, protocol 2; superseded: no key is derived from a passphrase |
 | 30 | Medium | `hub/header.py`, `hub/cards.py`, `serve/tensors.py` | Three more GGUF readers walked the counts and lengths a file claimed: a 2^60-byte string raised `MemoryError`, a 2^50-item or deeply nested array looped for as long as it liked, and a model list hung on one hostile file | integration: one reader, `hub/modelfile.py` |
 
 `ruff --select S` (bandit) over `src`: 84 findings at `agent/audit`; the `ruff-security` budget

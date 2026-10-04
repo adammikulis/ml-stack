@@ -250,7 +250,7 @@
         const said = words.value.trim();
         if (said && said.length < M.MIN_PASS) {
           note.replaceChildren(el("div", { class: "err" },
-            `A passphrase needs at least ${M.MIN_PASS} characters.`));
+            `The passphrase needs at least ${M.MIN_PASS} characters.`));
           return;
         }
         add.disabled = true;

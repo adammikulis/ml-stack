@@ -1,7 +1,7 @@
 {
- "surfaces": 608,
+ "surfaces": 610,
  "by_status": {
-  "covered": 296,
+  "covered": 298,
   "partial": 201,
   "uncovered": 54,
   "n/a": 57,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 28,
+   "covered": 29,
    "partial": 46,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 48,
+   "covered": 49,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -1763,6 +1763,19 @@
    "note": ""
   },
   {
+   "id": "egress:fleet/onboard/joining.py:_Call._connect",
+   "kind": "egress",
+   "source": "fleet/onboard/joining.py:_Call._connect",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_onboard_tailnet.py",
+    "tests/test_onboard_transfer.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "egress:fleet/onboard/lan.py:require_local",
    "kind": "egress",
    "source": "fleet/onboard/lan.py:require_local",
@@ -2390,9 +2403,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "handler:fleet/onboard/bootstrap.py:dispatch",
@@ -4762,6 +4777,20 @@
    "note": ""
   },
   {
+   "id": "parser:fleet/onboard/joining.py",
+   "kind": "parser",
+   "source": "fleet/onboard/joining.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_onboard_manifest.py",
+    "tests/test_peer_pairing.py",
+    "tests/test_onboard_pairing.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:fleet/onboard/manifest.py",
    "kind": "parser",
    "source": "fleet/onboard/manifest.py",
@@ -5818,9 +5847,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/bench",
@@ -5832,9 +5863,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/bench/export",
@@ -5846,9 +5879,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/decide",
@@ -5860,9 +5895,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/favicon.ico",
@@ -5874,9 +5911,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/fetch",
@@ -5888,9 +5927,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/files/*",
@@ -5902,9 +5943,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/health",
@@ -5916,9 +5959,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/infer",
@@ -5930,9 +5975,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/jobs",
@@ -5944,9 +5991,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/models",
@@ -5958,9 +6007,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/models/*",
@@ -5972,9 +6023,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/models/get",
@@ -5986,9 +6039,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/serve",
@@ -6000,9 +6055,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/speech/providers",
@@ -6014,9 +6071,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/speech/transcribe",
@@ -6028,9 +6087,11 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
    "id": "route:fleet/api.py:/ui*",
@@ -6042,9 +6103,41 @@
    "tests": [
     "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
     "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
-    "tests/test_fleet_framing.py"
+    "tests/test_fleet_framing.py",
+    "tests/test_fleet_commands.py",
+    "tests/test_fleet_handshake.py"
    ],
-   "note": "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+   "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+  },
+  {
+   "id": "route:fleet/chat_routes.py:/ui/chat",
+   "kind": "route",
+   "source": "fleet/chat_routes.py:ChatRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+   ],
+   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/chat_routes.py:/ui/conversations*",
+   "kind": "route",
+   "source": "fleet/chat_routes.py:ChatRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "partial",
+   "tests": [
+    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+   ],
+   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
   {
    "id": "route:fleet/framing.py:handle_error",
@@ -6383,39 +6476,9 @@
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
   {
-   "id": "route:fleet/routes.py:/ui/chat",
-   "kind": "route",
-   "source": "fleet/routes.py:ChatRoutes.route",
-   "trust": "browser session on this machine behind the UI header",
-   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
-   "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
-   ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
-  },
-  {
    "id": "route:fleet/routes.py:/ui/clusters",
    "kind": "route",
    "source": "fleet/routes.py:ClusterRoutes.route",
-   "trust": "browser session on this machine behind the UI header",
-   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
-   "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
-   ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
-  },
-  {
-   "id": "route:fleet/routes.py:/ui/conversations*",
-   "kind": "route",
-   "source": "fleet/routes.py:ChatRoutes.route",
    "trust": "browser session on this machine behind the UI header",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",

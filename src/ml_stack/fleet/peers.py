@@ -13,19 +13,17 @@ from ml_stack.log import say, warn
 from . import recovery
 from .discovery import (
     MIN_PASSPHRASE,
-    SEARCH,
     DiscoveryError,
     cluster_group,
     create_cluster_key,
     derive_token,
     discover,
-    join_cluster,
     key_path,
     load_cluster_key,
 )
+from .onboard.joining import join_by_passphrase
 
 DEFAULT_GROUP_NAME = "ml-stack"
-"""The group a passphrase belongs to. Two households that both chose the same words end"""
 
 
 def _require_key(path: str | None) -> bytes:
@@ -41,8 +39,7 @@ def _prompt_passphrase(confirm: bool) -> str:
     while True:
         first = getpass.getpass("  Passphrase: ")
         if len(first.strip()) < MIN_PASSPHRASE:
-            say(f"  Too short -- at least {MIN_PASSPHRASE} characters. "
-                "A few words you will remember beats a short complicated one.")
+            say(f"  The passphrase needs at least {MIN_PASSPHRASE} characters.")
             continue
         if not confirm:
             return first
@@ -86,8 +83,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
             return 2
 
     say()
-    say("  Deriving the key (this is deliberately slow, once)...", flush=True)
-    join_cluster(passphrase, group=group, path=args.cluster_key, salting=SEARCH)
+    say("  Looking for the cluster on this network...", flush=True)
+    join_by_passphrase(passphrase, group, args.cluster_key)
     recovery.remember(passphrase, group, args.cluster_key, say=lambda s: say(f"  {s}"))
 
     say(f"  Joined '{group}'.")

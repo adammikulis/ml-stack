@@ -14,20 +14,18 @@ from ml_stack.http import Server, ServerError, open_stream
 
 from . import pausing, recovery
 from .discovery import (
-    SEARCH,
     DiscoveryError,
-    check_passphrase,
     cluster_group,
     derive_token,
     discover,
     in_cluster,
-    join_cluster,
     leave,
     load_cluster_key,
     memberships,
     named_apart,
 )
 from .join import default_root
+from .onboard.joining import join_by_passphrase
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -212,14 +210,12 @@ class UI:
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
-        if not self.throttle.acquire():
-            raise DiscoveryError("busy deriving another key; try again in a moment")
         try:
-            join_cluster(passphrase, group=group or "ml-stack",
-                         path=self.cluster_key_path, salting=SEARCH)
-            recovery.remember(passphrase, group or "ml-stack", self.cluster_key_path)
-        finally:
-            self.throttle.release()
+            join_by_passphrase(passphrase, group or "ml-stack", self.cluster_key_path)
+        except DiscoveryError:
+            self.throttle.failed(source)
+            raise
+        recovery.remember(passphrase, group or "ml-stack", self.cluster_key_path)
         self.throttle.succeeded(source)
         self._peers = (0.0, [])
         if self.on_join is not None:
@@ -329,11 +325,10 @@ class UI:
     def join_fleet(self, *, passphrase: str = "", group: str = "", persist: bool = False,
                    name: str = "") -> dict[str, Any]:
         """The Join button: `join.join_machine`, with this daemon as the one already up."""
-        from .discovery import SEARCH, join as join_cluster
         from .join import join_machine
 
         def enrol(words: str, named: str) -> None:
-            join_cluster(words, group=named, path=self.cluster_key_path, salting=SEARCH)
+            join_by_passphrase(words, named, self.cluster_key_path)
             self.rejoined()
 
         said: list[str] = []
@@ -540,14 +535,8 @@ class UI:
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
-        if not self.throttle.acquire():
-            raise DiscoveryError("busy checking another passphrase; try again")
-        try:
-            ok = check_passphrase(passphrase, group=group or None,
-                                  path=self.cluster_key_path)
-        finally:
-            self.throttle.release()
-        if not ok:
+        if not recovery.matches(passphrase, group or cluster_group(self.cluster_key_path) or "",
+                                self.cluster_key_path):
             self.throttle.failed(source)
             return None
         self.throttle.succeeded(source)

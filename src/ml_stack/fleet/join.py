@@ -35,13 +35,11 @@ from ml_stack.units import human_bytes
 from . import recovery
 from .discovery import (
     DEFAULT_CLUSTER,
-    SEARCH,
     Beacon,
     DiscoveryError,
     default_port,
     discover,
     in_cluster,
-    join as join_cluster,
     key_path,
     leave as leave_cluster,
     memberships,
@@ -49,6 +47,7 @@ from .discovery import (
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
 from .onboard.cli import COMMANDS as ONBOARD_COMMANDS, add_commands, run as run_onboarding
+from .onboard.joining import join_by_passphrase
 from .pausing import (
     Answer,
     Fanout,
@@ -476,7 +475,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
         if running is not None:
             (enrol or (lambda words, g: _enrol_via_daemon(port, words, g)))(passphrase, group)
         else:
-            join_cluster(passphrase, group=group, path=cluster_key_path, salting=SEARCH)
+            join_by_passphrase(passphrase, group, cluster_key_path)
         say(f"joined cluster '{group}'")
         recovery.remember(passphrase, group, cluster_key_path, say=say)
     elif not in_cluster(cluster_key_path):

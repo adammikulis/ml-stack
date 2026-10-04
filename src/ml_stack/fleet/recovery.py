@@ -20,7 +20,7 @@ from .discovery import (
     DEFAULT_CLUSTER,
     DiscoveryError,
     Membership,
-    _write_memberships,
+    adopt,
     clusters_path,
     memberships,
 )
@@ -72,6 +72,17 @@ def recall(group: str = "", path: Path | str | None = None) -> str | None:
     return _store().unwrap(PURPOSE, group, base64.b64decode(blob)).decode()
 
 
+def matches(passphrase: str, group: str = "", path: Path | str | None = None) -> bool:
+    """Whether ``passphrase`` is the one stored for ``group`` (default: the first cluster)."""
+    import hmac
+
+    try:
+        held = recall(group, path)
+    except keystore.KeystoreError:
+        return False
+    return held is not None and hmac.compare_digest(held.strip().encode(), passphrase.strip().encode())
+
+
 def forget(group: str, path: Path | str | None = None) -> None:
     """Drop the stored passphrase for ``group``."""
     rows = _held(path)
@@ -85,12 +96,12 @@ def forget(group: str, path: Path | str | None = None) -> None:
 
 
 def export_recovery(file: Path | str, group: str = "", path: Path | str | None = None) -> Membership:
-    """Write the group, salt and key of a cluster this machine is in to ``file`` (mode 600)."""
+    """Write the group and key of a cluster this machine is in to ``file`` (mode 600)."""
     rows = memberships(path)
     held = next((m for m in rows if not group or m.group == group), None)
     if held is None:
         raise DiscoveryError("this machine is in no cluster" if not group else f"not in a cluster called '{group}'")
-    body = json.dumps({"group": held.group, "salt": held.salt, "key": held.key.decode()}, indent=1)
+    body = json.dumps({"group": held.group, "key": held.key.decode()}, indent=1)
     target = home.expand(file)
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as out:
@@ -104,13 +115,12 @@ def import_recovery(file: Path | str, path: Path | str | None = None) -> Members
     text = home.expand(file).read_text()
     try:
         data = json.loads("\n".join(ln for ln in text.splitlines() if not ln.startswith("#")))
-        member = Membership(group=str(data["group"]), key=str(data["key"]).encode(), salt=str(data.get("salt") or ""))
+        member = Membership(group=str(data["group"]), key=str(data["key"]).encode())
     except (ValueError, KeyError, TypeError) as exc:
         raise DiscoveryError(f"{file} is not a recovery file") from exc
     if not member.key:
         raise DiscoveryError(f"{file} is not a recovery file")
-    _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
-    return member
+    return adopt(member, path)
 
 
 def add_commands(sub: Any) -> None:

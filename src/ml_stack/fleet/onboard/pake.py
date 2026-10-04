@@ -89,6 +89,12 @@ class Session:
         other = "B" if self.role == "A" else "A"
         return isinstance(theirs, str) and hmac.compare_digest(theirs, self._mac(f"confirm-{other}"))
 
+    def key(self, label: str) -> bytes:
+        """A 32-byte key for ``label`` that both ends hold once the exchange is done."""
+        if self._tt is None:
+            raise Bad("no exchange yet")
+        return hmac.new(self._root, b"key-" + label.encode(), hashlib.sha256).digest()
+
     def seal(self, payload: bytes) -> str:
         """A tag over ``payload`` under the exchange's payload key."""
         sub = hmac.new(self._root, b"payload", hashlib.sha256).digest()

@@ -8,7 +8,9 @@ the beacon -- behind the routes `fleet.api.make_handler` builds. `main` is
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import hashlib
 import json
 import os
 import secrets
@@ -18,7 +20,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, macauth, sentinel
+from ml_stack import home, keystore, macauth, sentinel
 from ml_stack.files import write_text
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
@@ -27,7 +29,7 @@ from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
 
-from . import autostart, tls, updates as updating
+from . import autostart, recovery, tls, updates as updating
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
@@ -49,6 +51,7 @@ from .jobs import JobRunner
 from .join import default_root
 from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
+from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
 from .serving import Hosting, Serving
 from .settings import Settings
@@ -200,6 +203,16 @@ def serve_forever(root: Path | str | None = None,
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
 
+    def passphrase_of(group: str) -> str | None:
+        try:
+            return recovery.recall(group, cluster_key_path)
+        except keystore.KeystoreError:
+            return None
+
+    def fingerprint() -> str:
+        offered = served_cert()
+        return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
+
     handler = make_handler(Daemon(
         runner, files_root, lambda: live_token[0],
         name=lambda: live_name[0], report=report, fetcher=fetcher,
@@ -207,7 +220,8 @@ def serve_forever(root: Path | str | None = None,
         schedule_path=schedule_path, serving=serving, models=models,
         cluster_key_path=cluster_key_path, tokens=every_token,
         bench=bench_host[0], hosting=hosting,
-        decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan))
+        decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan,
+        joining=Joining(lambda: memberships(cluster_key_path), passphrase_of, fingerprint)))
     listening = [bind_address(host, lan=lan or setup_from_lan, joined=key is not None)]
     widen = threading.Event()
     cert: list[tls.Identity | None] = [None]
@@ -295,9 +309,8 @@ def serve_forever(root: Path | str | None = None,
             try:
                 # Not group=: that is the multicast address every cluster shares.
                 # Clusters are told apart by the key their beacons are signed with.
-                tell = Advertiser(beacon, member.key, refresh=refresh)
-                tell.salt = member.salt_bytes()
-                advertisers[group] = tell.start()
+                advertisers[group] = Advertiser(beacon, member.key, cluster=group,
+                                                refresh=refresh).start()
             except DiscoveryError as exc:
                 say(f"  discovery OFF for {group}: {exc}")
 
