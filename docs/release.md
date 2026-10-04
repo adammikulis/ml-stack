@@ -63,3 +63,21 @@ ML_STACK_FROZEN_BINARY=dist/bundle/ml-stack-headless python scripts/test slow -n
 Use the executable with the `.exe` suffix on Windows. The test uses isolated daemon and workspace
 roots, checks the maintained Board extension discovered from bundled metadata, imports an existing
 conversation and verifies edits and deletion across a restart. It starts no model server.
+
+The Coding worker additionally exercises frozen multiprocessing, native-session resume,
+cancellation, identity revocation and the frozen permission-hook dispatcher. Its test build
+replaces only the model-serving boundary with `tests/frozen_coding_broker.py`; the maintained
+harness launcher, role hooks and subprocess lifecycle still run. The test installs its own
+fixture Codex executable in an isolated PATH and starts no model server.
+
+Create a separate proof spec from `packaging/ml-stack.spec`, add
+`runtime_hooks=[str(repository / "tests/frozen_coding_broker.py")]` to `Analysis`, and use the
+absolute path of `packaging/launcher-headless.py` as its entry point. Build that spec with
+PyInstaller in the standalone build environment, then run:
+
+```sh
+ML_STACK_FROZEN_CODING_BINARY=/path/to/proof/ml-stack-headless python scripts/test slow -n 1 tests/test_packaging_coding.py
+```
+
+Keep that fixture hook out of production bundles. Actual local-model acceptance is a separate,
+exclusive brokered run with an installed harness and an isolated project.
