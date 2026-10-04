@@ -150,6 +150,25 @@ def _heavy_lane(request):
         yield
 
 
+def _quick_server_shutdown() -> None:
+    """``BaseServer.shutdown()`` waits for ``serve_forever`` to notice, and it looks once per
+    ``poll_interval`` (half a second by default), so stopping each of the thousand or so servers
+    the suite starts cost a quarter of a second on average: about eight minutes of worker time in
+    teardown. A server in a test process polls every 20 ms instead; a server in a child process
+    is not touched."""
+    import socketserver
+
+    original = socketserver.BaseServer.serve_forever
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        original(self, min(poll_interval, 0.02))
+
+    socketserver.BaseServer.serve_forever = serve_forever  # type: ignore[method-assign]
+
+
+_quick_server_shutdown()
+
+
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""
 

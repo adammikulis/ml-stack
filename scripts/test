@@ -47,6 +47,7 @@ FAST = ["-m", "not slow and not heavy", *(f"--ignore=tests/{name}" for name in (
 CASE = re.compile(r'<testcase classname="([^"]+)" name="[^"]*" time="([^"]+)"')
 HEAVY_FILE = ROOT / "tests" / "heavy-modules.txt"
 FULL: list[str] = []
+RECORD_WORKERS = 3
 
 
 def pytest_command(workers: int, *rest: str) -> list[str]:
@@ -186,9 +187,12 @@ def record(args: argparse.Namespace) -> int:
         stale.unlink(missing_ok=True)
     env = {**os.environ, "TESTMON_DATAFILE": str(scratch)}
     try:
-        with testslots.lease(max(0, args.workers), label="ml-stack: testmon map") as got:
-            status = run(pytest_command(max(1, min(got.workers, 8)), "--testmon-noselect", *FULL), env,
-                         "record")
+        # a few workers on purpose: the map is built behind the person's own quick runs, which must
+        # never wait for it in the machine-wide queue
+        ceiling = args.workers if args.workers > 0 else RECORD_WORKERS
+        with testslots.lease(ceiling, label="ml-stack: testmon map") as got:
+            status = run(pytest_command(max(1, min(got.workers, ceiling)), "--testmon-noselect",
+                                        *FULL), env, "record")
         if scratch.exists():
             scratch.replace(ROOT / DATAFILE)
             for extra in ROOT.glob(f"{DATAFILE}.new-*"):

@@ -143,3 +143,4 @@ def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_A
         if i < len(pending) - 1:
             time.sleep(PAUSE if sleep is None else sleep)
     return cache
+# speed probe
