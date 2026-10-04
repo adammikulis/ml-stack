@@ -47,6 +47,8 @@ def simulation(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "actions", lambda *_: (["hold", "move"], [0, 1]))
     monkeypatch.setattr(runtime, "render_state", lambda *_: ({"actual": True}, None))
     monkeypatch.setattr(runtime, "decision_state", lambda name, env, obs: {"native_observation": obs})
+    monkeypatch.setattr(runtime, "native_provenance", lambda *_: {
+        "versions": {"test-backend": "fixture"}, "scenario_files": {}, "world": None})
     return runtime.Simulation({"id": "episode", "environment": "warehouse", "config": {},
                                "seed": 2, "controller": "manual"})
 
@@ -95,7 +97,7 @@ def test_snapshot_retains_active_controls_for_reattachment(simulation):
     assert simulation.state["config"] == {}
     manifest = json.loads((simulation.path / "manifest.json").read_text())
     assert manifest["seed"] == 7
-    assert manifest["versions"]["gymnasium"]
+    assert manifest["versions"] == {"test-backend": "fixture"}
 
 
 def test_scenario_provenance_uses_opened_native_files(tmp_path):
