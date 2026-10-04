@@ -359,17 +359,13 @@ def test_a_fleet_sweep_passes_the_self_check_on_the_line_a_peer_would_run(monkey
     import ml_stack.lock
     from ml_stack.bench import ops
 
-    def refusing(*a, **k):
-        raise ml_stack.lock.Busy("held by the test")
+    def taken(*a, **k):
+        raise AssertionError("a fleet sweep took the measuring lock before dispatching")
 
-    def never(*a, **k):
-        raise AssertionError("the self-check reached the fleet")
-
-    monkeypatch.setattr(ml_stack.lock, "only_one", refusing)
-    monkeypatch.setattr(ops, "fleet_planned", never)
-    monkeypatch.setattr(ops, "fleet_measure", never)
+    monkeypatch.setattr(ml_stack.lock, "only_one", taken)
+    monkeypatch.setattr(ops, "fleet_planned", lambda *a, **k: ops.Fleeted())
     assert bench.main(["sweep", "--fleet", "--peers", "box", "--serve", "tiny.gguf", "--smoke",
-                       "--kept", str(tmp_path / "runs.ladybug")]) == 3
+                       "--kept", str(tmp_path / "runs.ladybug")]) == 0
     said = capsys.readouterr().out
     assert said.splitlines()[0].startswith("selfcheck: ok (") and "FAILED" not in said
 

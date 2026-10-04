@@ -1188,7 +1188,7 @@ def test_sweep_fleet_exits_non_zero_when_nothing_is_placed(boxes, tmp_path, monk
                                                          capsys):
     from ml_stack.bench import run
 
-    roomy, kept, line = _one_machine(boxes, tmp_path, monkeypatch, models=["huge.gguf"])
+    roomy, _, line = _one_machine(boxes, tmp_path, monkeypatch, models=["huge.gguf"])
     monkeypatch.setattr("ml_stack.fleet.sweeps.estimate", lambda *a, **k: 500 * G)
     _kept(roomy.store, "old-plain", _later(30))
 
