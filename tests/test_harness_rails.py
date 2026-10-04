@@ -397,6 +397,24 @@ class TestSeat:
         with pytest.raises(ValueError, match="workspace identity could not be created"):
             harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
 
+    def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):
+        from ml_stack.testing import FakeLlamaServer, Served
+        from ml_stack.workspace import Workspace, tokens
+
+        ws = Workspace()
+        owner = ws.init("owner")
+        parent = ws.mint(owner, "codex", "agent")
+        tokens.store(ws.base, "codex", parent)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        seat = harnessid.invite("local-qwen", tmp_path, "codex", lambda _: None)
+        endpoint = FakeLlamaServer(Served(model="qwen-27b"))
+        try:
+            assert seat.record_model("qwen-27b", "codex", endpoint.base_url)
+            assert ws.whoami_model(seat.name)["model_state"] == "claimed"
+        finally:
+            endpoint.close()
+            seat.revoke()
+
     def test_an_agent_launcher_delegates_a_distinct_private_child_without_changing_invite_policy(self, monkeypatch, tmp_path):
         from ml_stack.workspace import Workspace, tokens
 
