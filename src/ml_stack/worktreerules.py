@@ -80,8 +80,17 @@ def patch_paths(patch: str) -> list[str]:
     return re.findall(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", patch, re.M)
 
 
+QUOTED_OR_REDIRECT = re.compile(
+    r"""('[^']*'|"[^"]*")|(?:(?<=\s)|^)(?:\d*|&)(?:>>|>\||>|<<<|<<-?|<)&?\s*[^\s;&|]*""")
+
+
+def _without_redirects(segment: str) -> str:
+    return QUOTED_OR_REDIRECT.sub(lambda found: found.group(1) or "", segment).strip()
+
+
 def _segments(command: str) -> list[str]:
-    return [part.strip() for part in re.split(r"&&|\|\||[;|\n]", command) if part.strip()]
+    parts = (_without_redirects(part) for part in re.split(r"&&|\|\||[;|\n]", command))
+    return [part for part in parts if part]
 
 
 def _cd(segment: str, here: Path) -> Path | None:
