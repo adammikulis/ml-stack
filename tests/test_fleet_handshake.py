@@ -201,6 +201,25 @@ def test_a_machine_with_no_passphrase_to_check_takes_nobody_in(tmp_path):
     assert status == 404 and "cannot take" in answer["error"]
 
 
+def test_a_beacon_captured_off_the_network_is_not_readable_and_holds_nothing_to_guess_at(machine, udp):
+    from ml_stack.fleet import discovery
+
+    listener = discovery._socket(broadcast=True, bind=("", udp), group=discovery.default_group())
+    listener.settimeout(3.0)
+    try:
+        machine.advertiser.announce()
+        raw = b""
+        while not raw.startswith(discovery.MAGIC) or b"a" == raw:
+            raw, _ = listener.recvfrom(65535)
+    finally:
+        listener.close()
+    assert b"\"name\"" not in raw and str(machine.port).encode() not in raw
+    for guess in (WORDS, "ml-stack", "lab", "password"):
+        assert discovery._verify(guess.encode(), raw, kind="beacon") is None
+        assert discovery._verify(macauth.derive(guess.encode()).encode(), raw, kind="beacon") is None
+    assert discovery._verify(machine.member.key, raw, kind="beacon")["beacon"]["name"] == "a"
+
+
 # -- traffic -------------------------------------------------------------------------------------
 
 
