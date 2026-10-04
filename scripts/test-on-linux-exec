@@ -10,6 +10,7 @@ fi
 exec docker --config "$ML_STACK_LINUX_DCFG" exec \
   -e DEV_TEST_PYTEST_ENDPOINT -e DEV_TEST_PYTEST_TOKEN \
   -e DEV_TEST_WORKERS -e DEV_TEST_BUDGET -e DEV_TEST_LEASE \
+  -e DEV_TEST_REMOTE_BROKER -e DEV_TEST_REMOTE_LEASE \
   -e PYTHONPATH=/work/scripts \
   "$ML_STACK_LINUX_CONTAINER" bash -c \
   'source /test-env; exec setpriv --reuid="$1" --regid="$2" --clear-groups /priv-venv/bin/python -m pytest -p testslots_pytest "${@:3}"' \

@@ -226,6 +226,6 @@ def test_drone_camera_feeds_keep_frame_provenance_and_hide_off_environment(scene
     assert feed.get_by_alt_text('Live drone synthetic thermal camera').get_attribute('src') == 'data:image/png;base64,YWJj'
     assert 'Frame 42 · 8.4 s' in feed.inner_text()
     assert '1 visible heat regions' in feed.inner_text()
-    page.evaluate("document.querySelector('gym-drone-camera').update(null)")
+    feed.evaluate("node => node.update(null)")
     assert not feed.is_visible()
     assert not errors
