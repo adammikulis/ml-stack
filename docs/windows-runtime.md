@@ -8,7 +8,8 @@ Python interpreter, and bubblewrap namespaces before starting the application.
 Install Ubuntu through Windows' WSL setup, then install these packages in Ubuntu:
 
 ```sh
-sudo apt install python3-venv bubblewrap
+sudo apt install python3-venv bubblewrap clamav
+sudo freshclam
 ```
 
 Install the NVIDIA driver on Windows to expose the GPU to Ubuntu. The launcher does not

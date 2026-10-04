@@ -13,6 +13,7 @@ import pytest
 from ml_stack import files, home, net
 from ml_stack.httpguard import Limits, Refused, TooLarge
 from ml_stack.net import provenance
+from ml_stack.net.download import accept
 from ml_stack.net.hold import staging_dir
 from ml_stack.net.scan import Outcome, ScanPolicy, ScanResult
 from tests.net_site import EICAR, Site, gguf_bytes, safetensors_bytes
@@ -81,7 +82,7 @@ def library_tar(tmp_path):
 def test_library_aliases_require_the_verified_release_digest_and_scan(pipe, library_tar, tmp_path):
     digest = files.sha256_file(library_tar)
     kept = tmp_path / "kept.tar.gz"
-    net.accept(library_tar, kept, net.Want(sha256=digest, require_digest=True,
+    accept(library_tar, kept, net.Want(sha256=digest, require_digest=True,
                                          library_links=True), "https://release.invalid/server", pipe)
     assert files.sha256_file(kept) == digest
     assert pipe.scanners[0].seen
@@ -89,14 +90,14 @@ def test_library_aliases_require_the_verified_release_digest_and_scan(pipe, libr
 
 def test_library_alias_mode_cannot_skip_the_pinned_digest(pipe, library_tar, tmp_path):
     with pytest.raises(net.Blocked, match="pinned release digest"):
-        net.accept(library_tar, tmp_path / "kept.tar.gz", net.Want(library_links=True),
+        accept(library_tar, tmp_path / "kept.tar.gz", net.Want(library_links=True),
                    "https://release.invalid/server", pipe)
     assert not pipe.scanners[0].seen
 
 
 def test_library_alias_mode_cannot_accept_a_mismatched_digest(pipe, library_tar, tmp_path):
     with pytest.raises(net.ChecksumMismatch):
-        net.accept(library_tar, tmp_path / "kept.tar.gz", net.Want(sha256="0" * 64,
+        accept(library_tar, tmp_path / "kept.tar.gz", net.Want(sha256="0" * 64,
                    require_digest=True, library_links=True), "https://release.invalid/server", pipe)
     assert not pipe.scanners[0].seen
 
