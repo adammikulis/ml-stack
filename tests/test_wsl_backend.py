@@ -83,15 +83,22 @@ with socket.socket(socket.AF_UNIX) as server:
   while chunk:=client.recv(65536): data+=chunk
   client.sendall(data[::-1])
 """
-    process = subprocess.Popen(socket_relay.arguments([sys.executable, "-c", script, target], port, target))
+    diagnostics = tmp_path / "relay.log"
+    with diagnostics.open("wb") as log:
+        process = subprocess.Popen(socket_relay.arguments([sys.executable, "-c", script, target], port, target),
+                                   stdout=log, stderr=subprocess.STDOUT)
     try:
         deadline = time.monotonic() + 20
         while not Path(target).exists() and time.monotonic() < deadline:
-            assert process.poll() is None
+            assert process.poll() is None, diagnostics.read_text()
             time.sleep(.02)
-        assert Path(target).exists(), "relay child did not create its Unix socket"
+        assert Path(target).exists(), "relay child did not create its Unix socket: " + diagnostics.read_text()
         payload = b"request" * 16000
-        with socket.create_connection(("127.0.0.1", port), timeout=3) as client:
+        try:
+            client = socket.create_connection(("127.0.0.1", port), timeout=3)
+        except ConnectionRefusedError as exc:
+            raise AssertionError(f"relay exited {process.poll()}: {diagnostics.read_text()}") from exc
+        with client:
             client.sendall(payload)
             client.shutdown(socket.SHUT_WR)
             received = bytearray()
