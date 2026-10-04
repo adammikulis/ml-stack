@@ -365,6 +365,12 @@ tests = [
 ]
 
 [[group]]
+match = ["spawn:worktreerules.py:*"]
+status = "covered"
+tests = ["tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"]
+note = "git is run with argv only; the paths come from a tool call and are one argument each"
+
+[[group]]
 match = ["spawn:workspace/guide.py:clipboard"]
 status = "covered"
 tests = ["tests/test_workspace_quickstart.py::test_the_clipboard_gets_the_text_on_stdin_and_never_through_a_shell"]

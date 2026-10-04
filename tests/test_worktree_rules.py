@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import harnesshook, harnesspolicy
+from ml_stack import harnesshook, harnesspolicy, worktreerules
 
 HOOKS = Path(__file__).resolve().parent.parent / "scripts" / "hooks"
 BASH, EDIT = HOOKS / "claude-bash-guard", HOOKS / "claude-edit-guard"
@@ -221,3 +221,15 @@ def test_the_harness_hook_denies_a_write_to_the_primary_checkout(repo):
     out = harnesshook.pre(event, harnesshook.Rail("plan-and-go", "t"))["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny"
     assert "git worktree add" in out["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize("name", ["a; touch pwned", "$(touch pwned)", "`touch pwned`", "-C", "a b\nc"])
+def test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell(repo, tmp_path, name):
+    primary, _, _ = repo
+    here = tmp_path / "cwd"
+    here.mkdir()
+    worktreerules.checkouts(here / name)
+    worktreerules.commit_refusal(str(here / name), {"CLAUDECODE": "1"})
+    assert worktreerules.bash_refusal(f"cd '{here / name}' && git add a.py", str(here)) == ""
+    assert worktreerules.edit_refusal([str(primary / name / "f.py")], str(here))
+    assert not (here / "pwned").exists() and not Path("pwned").exists()
