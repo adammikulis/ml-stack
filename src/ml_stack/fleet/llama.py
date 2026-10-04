@@ -14,7 +14,7 @@ from ml_stack import net
 from ml_stack.http import ServerError
 from ml_stack.hub.probe import machine_memory
 from ml_stack.safenames import Unsafe, unpack
-from ml_stack.serve.backend import help_of
+from ml_stack.serve.backend import devices_of
 from ml_stack.tar_libraries import unpack as unpack_libraries
 
 from .updates import UpdateError, download
@@ -104,7 +104,7 @@ def cuda_companion(asset: dict[str, Any], release: dict[str, Any]) -> dict[str, 
 
 def cuda_ready(binary: Path) -> bool:
     """Whether the server initializes at least one CUDA device."""
-    return re.search(r"ggml_cuda_init: found [1-9]\d* CUDA devices?", help_of(binary)) is not None
+    return re.search(r"^\s*CUDA\d+:\s*\S", devices_of(binary), re.MULTILINE) is not None
 
 
 def latest(repo: str = REPO, *, timeout: float = TIMEOUT,

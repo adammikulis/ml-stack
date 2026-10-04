@@ -85,6 +85,24 @@ _FLAG_IN_HELP = re.compile(r"(?:^|,)\s*(-{1,2}[A-Za-z][\w-]*)")
 _ALLOWED_IN_HELP = re.compile(r"allowed values:\s*(.+?)\s*$")
 
 
+def _binary_info(path: Path, *, devices: bool, timeout: float) -> str:
+    """Read a fixed information command without loading a model or starting a server."""
+    option = "--list-devices" if devices else "--help"
+    try:
+        got = subprocess.run([str(path), option], capture_output=True, text=True,
+                             errors="replace", timeout=timeout, env=child_env(path))
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if devices and got.returncode != 0:
+        return ""
+    return got.stdout + "\n" + got.stderr
+
+
+def devices_of(binary: str | Path, *, timeout: float = 20.0) -> str:
+    """Currently available devices; unlike help, this initializes backend discovery."""
+    return _binary_info(Path(binary), devices=True, timeout=timeout)
+
+
 def help_of(binary: str | Path, *, timeout: float = 20.0) -> str:
     """A build's ``--help``, stdout and stderr together; ``""`` when it cannot be read."""
     path = Path(binary)
@@ -94,12 +112,7 @@ def help_of(binary: str | Path, *, timeout: float = 20.0) -> str:
         return ""
     if key in _HELP:
         return _HELP[key]
-    try:
-        got = subprocess.run([str(path), "--help"], capture_output=True, text=True,
-                             errors="replace", timeout=timeout, env=child_env(path))
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    text = got.stdout + "\n" + got.stderr
+    text = _binary_info(path, devices=False, timeout=timeout)
     if not text.strip():
         return ""
     _HELP[key] = text

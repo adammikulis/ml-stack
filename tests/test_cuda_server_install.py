@@ -2,6 +2,7 @@
 
 import importlib
 import os
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -33,6 +34,28 @@ class CudaServerInstallTests(unittest.TestCase):
                 self.llama.platform, "machine", return_value="x86_64"), patch.object(
                 self.llama, "machine_memory", return_value=Mock(gpus=[card])):
             self.assertEqual(self.llama._tokens(), (self.token,))
+
+    def test_cuda_discovery_does_not_depend_on_help_initializing_devices(self):
+        backend = importlib.import_module("ml_stack.serve.backend")
+        binary = self.root / "llama-server"
+        binary.write_text("test binary")
+        def inspect(argv, **options):
+            output = ("Available devices:\n  CUDA0: NVIDIA GeForce RTX 3090 Ti "
+                      "(24563 MiB, 23281 MiB free)\n") if argv[1] == "--list-devices" else "--help usage"
+            return subprocess.CompletedProcess(argv, 0, output, "")
+        with patch.object(backend.subprocess, "run", side_effect=inspect) as run:
+            self.assertEqual(backend.help_of(binary).strip(), "--help usage")
+            self.assertTrue(self.llama.cuda_ready(binary))
+            self.assertEqual([call.args[0] for call in run.call_args_list],
+                             [[str(binary), "--help"], [str(binary), "--list-devices"]])
+
+    def test_failed_or_non_cuda_device_discovery_is_refused(self):
+        backend = importlib.import_module("ml_stack.serve.backend")
+        for code, output in ((1, "CUDA0: failed"), (0, "CPU: host"), (0, "CUDA0:")):
+            with self.subTest(code=code, output=output), patch.object(
+                    backend.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], code, output, "")):
+                self.assertFalse(self.llama.cuda_ready(self.root / "llama-server"))
 
     def test_runtime_cannot_be_selected_as_server_or_cpu_as_cuda(self):
         with patch.object(self.llama, "_tokens", return_value=(self.token,)):
