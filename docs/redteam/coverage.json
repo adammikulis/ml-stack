@@ -7564,9 +7564,9 @@
    "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
   {
-   "id": "spawn:harnessing.py:join_workspace",
+   "id": "spawn:harnessid.py:announce",
    "kind": "spawn",
-   "source": "harnessing.py:join_workspace",
+   "source": "harnessid.py:announce",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",

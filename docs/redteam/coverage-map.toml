@@ -17,7 +17,7 @@ partial = 201
 # -- coding harnesses on a local model -----------------------------------------------------
 [[group]]
 match = ["spawn:claude.py:launch", "spawn:codex.py:launch", "spawn:harnesshook.py:nudge",
-         "spawn:harnessing.py:join_workspace"]
+         "spawn:harnessid.py:announce"]
 status = "covered"
 tests = [
   "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
