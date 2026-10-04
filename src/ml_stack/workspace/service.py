@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.workspace import limits as limits_mod, tokens
+from ml_stack.workspace.boardapi import BoardApi
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.claims import Claims, Conflict
@@ -83,6 +84,7 @@ class Workspace:
         self.scratch = Scratch(self.base, self.limits.scratch_bytes, self.limits.scratch_ttl_s,
                                self.limits.scratch_folders, clock)
         self.claims = Claims(self.base, self.limits.claim_ttl_s, clock, self._swept)
+        self.board = BoardApi(self)
 
     def _may(self, who: Identity, cap: str) -> None:
         if cap not in who.can:
@@ -188,12 +190,15 @@ class Workspace:
                                     float(given.get("ttl_s", 0.0)))
         if kind not in TYPES:
             raise ValueError(f"type must be one of {', '.join(TYPES)}")
-        if not self._known(to):
+        mentions: list[str] = []
+        if to.startswith("#"):
+            mentions = self.board.prepare(who, to, body, reply_to)
+        elif not self._known(to):
             raise ValueError(f"no agent called {to!r}; use * for everyone")
         if len(subject) > self.limits.subject_chars:
             raise Refused(f"the subject is over {self.limits.subject_chars} characters")
         self._check(who, "the message", self.limits.body_bytes, subject, body)
-        if to != BROADCAST and self.bus.pending(to) >= self.limits.inbox_pending:
+        if to != BROADCAST and not to.startswith("#") and self.bus.pending(to) >= self.limits.inbox_pending:
             self.audit("write.refused", who.id, what="message", why="inbox-full", to=to)
             raise Refused(f"{to} has {self.limits.inbox_pending} unread messages; wait for it to read")
         thread = 0
@@ -207,7 +212,7 @@ class Workspace:
             "type": kind, "from": who.id, "role": who.role, "to": to, "thread": thread,
             "reply_to": reply_to, "subject": "" if qid else subject,
             "body": PLACEHOLDER.format(qid=qid, why=", ".join(flags)) if qid else body,
-            "held": qid, "flags": flags, "label": label,
+            "held": qid, "flags": flags, "label": label, "mentions": mentions,
             "expires": self.clock() + ttl_s if ttl_s else 0.0})
         self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label)
         return self.deliver(row, raw=True)
@@ -244,10 +249,15 @@ class Workspace:
         """Unread messages for the token's owner, oldest first; ``ack`` marks them read."""
         who = self.auth(token)
         self._may(who, "read")
-        found = self.bus.inbox(who.id, limit=limit)
+        found = self._unread(who, limit)
         if ack and found:
             self.bus.ack(who.id, found[-1]["seq"])
         return [self.deliver(r, raw) for r in found]
+
+    def _unread(self, who: Identity, limit: int) -> list[dict[str, Any]]:
+        direct = self.bus.inbox(who.id, limit=1 << 30)
+        posted = self.board.routed(who, self.bus.cursor(who.id), "inbox")
+        return sorted([*direct, *posted], key=lambda r: r["seq"])[:limit]
 
     def ack(self, token: str, seq: int) -> int:
         """Mark everything up to ``seq`` as read; returns the new cursor."""
@@ -266,7 +276,12 @@ class Workspace:
         """Block until there is something to read or ``timeout_s`` passes."""
         who = self.auth(token)
         self._may(who, "read")
-        found = self.bus.wait(who.id, timeout_s)
+        deadline = time.monotonic() + timeout_s
+        while True:
+            found = self._unread(who, 50)
+            if found or time.monotonic() >= deadline:
+                break
+            time.sleep(min(0.1, max(deadline - time.monotonic(), 0.0)))
         if ack and found:
             self.bus.ack(who.id, found[-1]["seq"])
         return [self.deliver(r, raw) for r in found]
@@ -276,7 +291,10 @@ class Workspace:
         who = self.auth(token)
         self._may(who, "read")
         rows = self.bus.thread(root)
-        seen = who.role != AGENT or any(
+        boarded = bool(rows) and rows[0]["to"].startswith("#")
+        if boarded:
+            self.board.require_read(who, rows[0]["to"])
+        seen = boarded or who.role != AGENT or any(
             who.id == r["from"] or r["to"] in (who.id, BROADCAST) for r in rows)
         if not seen:
             raise Denied(f"{who.id} is not part of that thread")
@@ -434,7 +452,8 @@ class Workspace:
         """Whether every log's chain holds; ``anchor`` is a head the audit log must contain."""
         out: dict[str, Any] = {}
         for name, log in (("audit", self.audit_log), ("bus", self.bus.log),
-                          ("notes", self.notes.log), ("quarantine", self.quarantine.log)):
+                          ("notes", self.notes.log), ("quarantine", self.quarantine.log),
+                          ("boards", self.board.store.log)):
             v = log.verify(anchor if name == "audit" else "")
             out[name] = {"ok": v.ok, "rows": v.rows, "head": v.head, "broken_at": v.broken_at,
                          "reason": v.reason}

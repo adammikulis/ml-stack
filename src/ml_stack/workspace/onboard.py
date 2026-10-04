@@ -128,6 +128,7 @@ def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0) -> str:
         _mint(ws, name, ttl_s or TOKEN_S, AGENT)
         if project:
             ws.registry.set_project(SETUP, name, project)
+        ws.board.place(name, project)
         ws.audit("invite.join", name)
         return name
 
