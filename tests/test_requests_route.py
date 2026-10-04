@@ -188,6 +188,15 @@ def test_a_body_over_the_limit_is_refused_before_it_is_read(live):
     assert live.inbox.get(handle.id).state == "pending"
 
 
+def test_the_app_itself_refuses_an_oversized_body_whatever_server_hands_it_over(live):
+    handle = raised(live)
+    big = json.dumps({**answer_of(handle), "pad": "x" * route.MAX_BODY}).encode()
+    headers = {"host": f"127.0.0.1:{live.port}", "origin": f"http://127.0.0.1:{live.port}", "cookie": live.cookie,
+               "content-type": "application/json", "x-requests-csrf": live.csrf}
+    assert live.app.dispatch("POST", "/requests/api/answer", headers, big).status == 413
+    assert live.inbox.get(handle.id).state == "pending"
+
+
 def test_an_unknown_id_a_replayed_answer_and_a_changed_request_are_each_refused(live):
     handle = raised(live)
     assert live.post({"id": "rq_nope", "choice": "allow-once", "fingerprint": "f" * 64})[0] == 404

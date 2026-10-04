@@ -264,6 +264,7 @@ def test_a_store_that_cannot_be_opened_denies_and_never_approves(tmp_path):
     held = requests.Inbox(tmp_path / "x", key=broken)
     handle = requests.raise_request(ask(), inbox=held)
     assert handle.outcome().state == "denied" and not handle.wait(timeout=1).approved
+    assert "cannot be edited" in handle.outcome().why
     assert requests.list_requests(inbox=held) == [] and requests.pending_count(inbox=held) == 0
     with pytest.raises((requests.Unavailable, requests.Refused)):
         requests.answer("rq_x", "allow-once", "f" * 64, "ui", requests.Context(env={}, inbox=held))
