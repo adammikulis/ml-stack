@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet import autostart, updates
+from ml_stack.fleet import autostart, signing, updates
 
 pytestmark = pytest.mark.usefixtures("loopback_net")
 
@@ -35,10 +35,23 @@ class FakeGit:
     def __call__(self, args) -> tuple[int, str]:
         argv = [str(a) for a in args]
         self.calls.append(argv)
-        return self.answers.get(argv[0], (0, ""))
+        return self.answers.get(_word(argv), (0, ""))
 
     def ran(self, word: str) -> bool:
-        return any(c[0] == word for c in self.calls)
+        return any(_word(c) == word for c in self.calls)
+
+
+def _word(argv: list[str]) -> str:
+    """The subcommand, past any leading ``-c name=value`` pairs."""
+    at = 0
+    while argv[at] == "-c":
+        at += 2
+    return argv[at]
+
+
+@pytest.fixture(autouse=True)
+def _release_key(monkeypatch):
+    monkeypatch.setattr(signing, "RELEASE_KEY", "ssh-ed25519 AAAAfixture")
 
 
 OLD = "1111111111111111111111111111111111111111"
@@ -54,7 +67,7 @@ def _git(**over: tuple[int, str]) -> FakeGit:
         "fetch": (0, ""),
         "merge-base": (0, ""),
         "diff": (0, "src/ml_stack/fleet/join.py\nREADME.md\n"),
-        "pull": (0, "Updating 1111111..2222222"),
+        "merge": (0, "Updating 1111111..2222222"),
     }
     base.update(over)
     return FakeGit(**base)
@@ -68,7 +81,7 @@ class TestFollowingABranch:
                                  restart=lambda: restarts.append(1))
 
         assert got.pulled is False and got.error == ""
-        assert not git.ran("pull"), "it pulled a branch that had not moved"
+        assert not git.ran("merge"), "it pulled a branch that had not moved"
         assert restarts == [], "it restarted for nothing"
 
     def test_a_fast_forward_is_pulled_and_restarted(self, tmp_path):
@@ -92,8 +105,8 @@ class TestFollowingABranch:
         assert got.pulled and got.now == NEW and got.error == ""
         assert got.installed is False, "nothing packaged moved, so nothing was reinstalled"
         assert restarts == [1], "a machine on new code that never restarted runs the old"
-        pull = next(c for c in git.calls if c[0] == "pull")
-        assert "--ff-only" in pull and "merge" not in " ".join(pull)
+        pull = next(c for c in git.calls if c[0] == "merge")
+        assert pull == ["merge", "--ff-only", "FETCH_HEAD"]
 
     def test_a_diverged_checkout_is_reported_and_left_alone(self, tmp_path):
         """Somebody's work in progress is not a thing a daemon resets at 3am."""
@@ -105,7 +118,7 @@ class TestFollowingABranch:
 
         assert got.diverged and not got.pulled
         assert "left alone" in got.error and got.now == OLD
-        assert not git.ran("pull"), "it pulled over a checkout that had diverged"
+        assert not git.ran("merge"), "it pulled over a checkout that had diverged"
         assert restarts == []
 
     def test_a_pull_that_touches_packaging_reinstalls_first(self, tmp_path):
@@ -125,7 +138,7 @@ class TestFollowingABranch:
         assert got.pulled and got.installed is False
 
     def test_a_failing_pull_leaves_the_daemon_on_the_code_it_has(self, tmp_path):
-        git = _git(**{"pull": (1, "error: Your local changes would be overwritten")})
+        git = _git(**{"merge": (1, "error: Your local changes would be overwritten")})
         restarts = []
         got = updates.track_once(REPO, "main", tmp_path, git=git,
                                  restart=lambda: restarts.append(1))
@@ -333,7 +346,7 @@ class TestWhatIsFetchedAndFrom:
         git = _git()
         updates.track_once(REPO, "main", tmp_path, git=git, restart=lambda: "x")
         for call in git.calls:
-            if call[0] in ("ls-remote", "fetch", "pull"):
+            if call[0] in ("ls-remote", "fetch"):
                 assert "--" in call and call.index("--") < call.index(REPO), call
 
     def test_an_asset_with_no_digest_is_refused_before_anything_is_fetched(self, tmp_path):

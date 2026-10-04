@@ -1,12 +1,12 @@
 """Keeping this machine's ml-stack current: a newer release, or the head of a branch.
 
 Two modes, and a machine picks one. **Releases** is what a bundled install does: ask
-GitHub for the newest release, download the zip for this platform, swap the whole bundle
-into place -- the daemon, the CLI and the app window are one download -- and restart.
-**A branch** is for a machine that is a git checkout with an editable install: poll
-``git ls-remote`` for the head of, say, ``main``, fast-forward onto it, reinstall only if
-the packaging changed, and restart. That one runs unreviewed code the moment it is pushed,
-so it is off unless asked for.
+GitHub for the newest release, download the zip for this platform, check its signature
+against `signing.RELEASE_KEY`, swap the whole bundle into place -- the daemon, the CLI and
+the app window are one download -- and restart. **A branch** is for a machine that is a git
+checkout with an editable install: poll ``git ls-remote`` for the head of, say, ``main``,
+fast-forward onto it only if the tip commit is signed by the same key, reinstall only if the
+packaging changed, and restart. It is off unless asked for.
 
 Neither ever interrupts work. `quiet` is the gate both loops pass through: no job running,
 no benchmark measuring, no model loaded. A machine part way through a run is left alone
@@ -36,8 +36,10 @@ from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable
 from ml_stack.httpguard import Refused
 from ml_stack.net import git as netgit
+from ml_stack.net import provenance
 from ml_stack.safenames import Unsafe, safe_filename, unpack
 
+from . import signing
 from .measuring import installed_commit
 
 __all__ = [
@@ -52,6 +54,7 @@ __all__ = [
     "checkout_here",
     "current_version",
     "download",
+    "download_release",
     "in_the_way",
     "install",
     "quiet",
@@ -71,6 +74,9 @@ GIT_TIMEOUT = 300.0
 PIP_TIMEOUT = 1800.0
 EVERY_S = 300.0
 """How often a tracked branch is looked at: five minutes, the same order as a push."""
+
+SIGNATURE_SUFFIX = ".sig"
+SIGNATURE_LIMIT = 16384
 
 COMPANIONS = ("ml-stack", "ml-stack-headless", "ml-stack.exe", "ml-stack-headless.exe")
 """What a release download holds beside the thing that is running. An update replaces the
@@ -174,7 +180,8 @@ def asset_for(release: Release, key: str = "") -> dict[str, Any] | None:
     """The download for this machine, or None if the release has none."""
     key = key or platform_key()
     for asset in release.assets:
-        if key in str(asset.get("name", "")):
+        name = str(asset.get("name", ""))
+        if key in name and not name.endswith(SIGNATURE_SUFFIX):
             return asset
     return None
 
@@ -185,8 +192,7 @@ def download(asset: dict[str, Any], into: Path | str, *, on_progress: Any = None
     for it; an asset with no digest, or a name that is not one plain file name, is refused
     before anything is fetched.
 
-    The digest is not a signature: it proves the bytes match what that release holds, not
-    who built them. The file is also format-checked and virus-scanned; an archive that no
+    The file is format-checked and virus-scanned; an archive that no
     scanner could look at is kept only with ``allow_unscanned``.
     """
     want = str(asset.get("digest") or "").removeprefix("sha256:").strip().lower()
@@ -209,6 +215,25 @@ def download(asset: dict[str, Any], into: Path | str, *, on_progress: Any = None
         raise UpdateError("the download does not match the digest GitHub reports for it") from None
     except (net.Blocked, net.Truncated, ServerError, OSError, Refused) as exc:
         raise UpdateError(f"download failed: {exc}") from None
+    return target
+
+
+def download_release(release: Release, asset: dict[str, Any], into: Path | str, *,
+                     on_progress: Any = None) -> Path:
+    """Fetch a release asset and keep it only if its ``.sig`` verifies against the pinned key."""
+    name = str(asset["name"])
+    sig = next((a for a in release.assets if a.get("name") == name + SIGNATURE_SUFFIX), None)
+    if sig is None:
+        raise UpdateError(f"{name} has no signature, so it is not installed")
+    with tempfile.TemporaryDirectory(prefix="ml-stack-sig-") as tmp:
+        signature = download(sig, tmp, allow_unscanned=True).read_bytes()[:SIGNATURE_LIMIT]
+    target = download(asset, into, on_progress=on_progress)
+    try:
+        signing.verify_file(target, signature)
+    except signing.SignatureError as exc:
+        target.unlink(missing_ok=True)
+        provenance.sidecar(target).unlink(missing_ok=True)
+        raise UpdateError(f"{name} is not installed: {exc}") from None
     return target
 
 
@@ -522,6 +547,19 @@ def check_remote(repo_url: str, branch: str) -> None:
         raise UpdateError(f"{branch!r} is not a branch name")
 
 
+def _unsigned(run: Git) -> str:
+    """Why ``FETCH_HEAD`` is not signed by the release key, or "" when it is."""
+    key = signing.RELEASE_KEY.split()
+    if len(key) < 2:
+        return "no release key is set"
+    with tempfile.TemporaryDirectory(prefix="ml-stack-signers-") as tmp:
+        signers = Path(tmp) / "allowed_signers"
+        signers.write_text(f"* {key[0]} {key[1]}\n")
+        rc, out = run(["-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
+                       "verify-commit", "FETCH_HEAD"])
+    return "" if rc == 0 else (out or "verify-commit failed")
+
+
 def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
                git: Git | None = None,
                pip: Callable[[Path], tuple[int, str]] = pip_install,
@@ -565,6 +603,12 @@ def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
         return Pulled(branch, was=local, now=local, remote=head,
                       error=f"could not fetch {branch}: {out}")
 
+    refused = _unsigned(run)
+    if refused:
+        return Pulled(branch, was=local, now=local, remote=head,
+                      error=f"{branch} at {head[:7]} is not signed by the release key, "
+                            f"so it is not pulled: {refused}")
+
     rc, _ = run(["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head, diverged=True,
@@ -577,10 +621,10 @@ def track_once(repo_url: str, branch: str, install_dir: Path | str, *,
     # than a wasted minute.
     needs_install = rc != 0 or any(Path(f).name in INSTALL_TRIGGERS for f in moved)
 
-    rc, out = run(["pull", "--ff-only", "--", repo_url, branch])
+    rc, out = run(["merge", "--ff-only", "FETCH_HEAD"])
     if rc != 0:
         return Pulled(branch, was=local, now=local, remote=head,
-                      error=f"git pull --ff-only failed, so this machine keeps the code "
+                      error=f"git merge --ff-only failed, so this machine keeps the code "
                             f"it has: {out}")
 
     rc, out = run(["rev-parse", "HEAD"])
@@ -666,7 +710,8 @@ def apply_if_newer() -> dict[str, Any]:
             return {"ok": False, "installed": False,
                     "error": f"release {release.version} has no download for "
                              "this machine"}
-        archive = download(asset, tempfile.mkdtemp(prefix="ml-stack-update-"))
+        archive = download_release(release, asset,
+                                   tempfile.mkdtemp(prefix="ml-stack-update-"))
         install(archive)
     except UpdateError as exc:
         return {"ok": False, "installed": False, "error": str(exc)}

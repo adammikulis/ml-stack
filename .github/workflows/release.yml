@@ -219,6 +219,19 @@ jobs:
       - name: collect the network installers
         run: cp repo/packaging/install.sh repo/packaging/install.ps1 artifacts/
 
+      - name: sign the downloads
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "$RELEASE_SIGNING_KEY" || { echo "RELEASE_SIGNING_KEY is not set"; exit 1; }
+          key="$RUNNER_TEMP/release_key"
+          (umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key")
+          find artifacts -name 'ml-stack-*.zip' -type f | while read -r zip; do
+            ssh-keygen -Y sign -f "$key" -n ml-stack-release "$zip"
+          done
+          rm -f "$key"
+          test -n "$(find artifacts -name 'ml-stack-*.zip.sig' -type f -print -quit)"
+
       - name: what to download
         id: downloads
         shell: bash
