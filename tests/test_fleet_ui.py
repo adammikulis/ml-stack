@@ -220,7 +220,7 @@ class TestFirstRunIsNotUpForGrabs:
         """Whoever reaches an unjoined daemon first would own it. Being on the LAN is
         not enough; you have to be on the box, or use ssh and the CLI."""
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS},
+                                       body={"passphrase": WORDS, "group": "ml-stack"},
                                        host=primary_ip())
         assert status == 403
         assert "ssh" in body["error"]
@@ -230,7 +230,7 @@ class TestFirstRunIsNotUpForGrabs:
         """DNS rebinding: a page anywhere can point a domain at 127.0.0.1 and POST to
         it. Loopback-only buys nothing without checking what it was addressed to."""
         status, body, _ = serving.call(
-            "/ui/setup/join", method="POST", body={"passphrase": WORDS},
+            "/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "ml-stack"},
             headers={"Host": f"evil.example.com:{serving.port}"})
         assert status == 403
         assert "hostname" in body["error"]
@@ -246,7 +246,7 @@ class TestFirstRunIsNotUpForGrabs:
         serving.call("/ui/setup/join", method="POST",
                      body={"passphrase": WORDS, "group": "home"})
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": "different words here"})
+                                       body={"passphrase": "different words here", "group": "ml-stack"})
         assert status == 401
         assert "sign in" in body["error"]
 
@@ -254,10 +254,10 @@ class TestFirstRunIsNotUpForGrabs:
         s = Serving(tmp_path, setup_token="abc123xyz")
         try:
             refused, _, _ = s.call("/ui/setup/join", method="POST",
-                                   body={"passphrase": WORDS}, host=primary_ip())
+                                   body={"passphrase": WORDS, "group": "ml-stack"}, host=primary_ip())
             assert refused == 403
             ok, body, _ = s.call("/ui/setup/join", method="POST",
-                                 body={"passphrase": WORDS}, host=primary_ip(),
+                                 body={"passphrase": WORDS, "group": "ml-stack"}, host=primary_ip(),
                                  headers={"X-ML-Stack-Setup": "abc123xyz"})
             assert ok == 200, body
         finally:
@@ -284,19 +284,19 @@ class TestThePassphraseNeverCrossesPlainHttp:
 
 
 class TestJoiningTwice:
-    def test_a_cluster_with_no_name_is_the_same_one_either_way(self, serving):
+    def test_a_named_cluster_is_the_same_one_either_way(self, serving):
         """The wizard and the Clusters box must derive the same key from the same
         words, or two machines set up different ways never see each other."""
         from ml_stack.fleet.discovery import memberships
 
         status, body, headers = serving.call("/ui/setup/join", method="POST",
-                                             body={"passphrase": WORDS})
+                                             body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200, body
         cookie = headers["Set-Cookie"].split(";")[0]
         first = memberships(serving.keyfile)[0]
 
         status, body, _ = serving.call("/ui/clusters", method="POST", cookie=cookie,
-                                       body={"passphrase": WORDS})
+                                       body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200, body
         rows = memberships(serving.keyfile)
         assert [m.group for m in rows] == [first.group]
@@ -387,7 +387,7 @@ class TestSignIn:
     def test_the_passphrase_signs_you_in(self, joined):
         """Typing the words you already know, rather than pasting 43 characters."""
         status, body, headers = joined.call("/ui/session", method="POST",
-                                            body={"passphrase": WORDS})
+                                            body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200 and body["signed_in"]
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
@@ -402,7 +402,7 @@ class TestSignIn:
         punished for being the legitimate user."""
         joined.call("/ui/session", method="POST", body={"passphrase": "wrong words"})
         status, body, _ = joined.call("/ui/session", method="POST",
-                                      body={"passphrase": WORDS})
+                                      body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200, body
 
     def test_persistent_guessing_is_slowed_down(self, joined):
@@ -418,7 +418,7 @@ class TestSignIn:
 
     def test_a_session_opens_the_cluster_view(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "ml-stack"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, body, _ = joined.call("/ui/peers", cookie=cookie)
         assert status == 200
@@ -426,7 +426,7 @@ class TestSignIn:
 
     def test_signing_out_ends_the_session(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "ml-stack"})
         cookie = headers["Set-Cookie"].split(";")[0]
         joined.call("/ui/session", method="DELETE", cookie=cookie)
         status, _, _ = joined.call("/ui/peers", cookie=cookie)
@@ -436,7 +436,7 @@ class TestSignIn:
         """The cookie is scoped to /ui. A browser session must not become a bearer
         credential for the route that runs commands."""
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "ml-stack"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, _ = joined.call("/jobs", cookie=cookie)
         assert status == 401
@@ -682,7 +682,7 @@ class TestSettingsScreen:
         assert "autostart" in body and "version" in body
 
     def test_settings_need_a_session(self, serving):
-        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
+        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "ml-stack"})
         assert serving.call("/ui/settings")[0] == 401
 
     def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):

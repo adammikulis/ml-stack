@@ -26,6 +26,7 @@ from ml_stack.fleet import join as joining
 from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
+    derive_token,
     in_cluster,
     load_cluster_key,
     memberships,
@@ -569,7 +570,7 @@ class TestThePage:
                                  body={"passphrase": "other words here", "group": "lab"})
         assert status == 200, body
         assert body["group"] == "lab" and not body["started"], "this daemon is the daemon"
-        assert [m.group for m in memberships(s.keyfile)] == ["home", "lab"]
+        assert [m.group for m in memberships(s.keyfile)] == ["lab", "home"]
         assert any("already running as 'studio'" in line for line in body["said"])
         assert {c["name"] for c in body["checks"]} >= {"llama-server"}
         assert "larch" in [p["name"] for p in body["peers"]]
@@ -658,47 +659,23 @@ class TestThePage:
 class PausableDaemon:
     """A peer with a real `Availability` behind ``/availability``, and a beacon."""
 
-    def __init__(self, port: int, key: bytes, udp: int, name: str) -> None:
+    def __init__(self, port: int, key: bytes, udp: int, name: str, root: Path) -> None:
+        from ml_stack.fleet.api import Daemon, make_handler
         from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.jobs import JobRunner
 
         self.name = name
         self.schedule = Availability()
         schedule = self.schedule
-
-        class H(BaseHTTPRequestHandler):
-            def _reply(self_, code: int, payload: dict) -> None:
-                raw = json.dumps(payload).encode()
-                self_.send_response(code)
-                self_.send_header("Content-Type", "application/json")
-                self_.send_header("Content-Length", str(len(raw)))
-                self_.end_headers()
-                self_.wfile.write(raw)
-
-            def do_GET(self_) -> None:
-                if self_.path == "/availability":
-                    self_._reply(200, schedule.public())
-                    return
-                self_._reply(200 if self_.path == "/health" else 404,
-                             {"ok": True, "name": name, "machine": f"id-{name}",
-                              "busy": False, "free": 1, "slots": 1, "queued": 0})
-
-            def do_POST(self_) -> None:
-                said = json.loads(self_.rfile.read(
-                    int(self_.headers.get("Content-Length", "0"))) or b"{}")
-                if said.get("action") == "pause":
-                    schedule.pause(minutes=said.get("minutes"),
-                                   reason=str(said.get("reason") or ""))
-                else:
-                    schedule.resume()
-                self_._reply(200, schedule.public())
-
-            def log_message(self_, *a: object) -> None:
-                pass
-
+        files = root / "files"
+        files.mkdir(parents=True)
+        self.runner = JobRunner(root, files)
+        handler = make_handler(Daemon(self.runner, files, derive_token(key), name=name,
+                                      schedule=schedule))
         def refresh(b: Beacon) -> None:
             b.device = {**DEVICE, "availability": schedule.public()}
 
-        self.httpd = Server(("127.0.0.1", port), H)
+        self.httpd = Server(("127.0.0.1", port), handler)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         beacon = Beacon(name=name, port=port, device=dict(DEVICE), machine=f"id-{name}")
         self.advertiser = Advertiser(beacon, key, port=udp, interval_s=0.2,
@@ -706,6 +683,7 @@ class PausableDaemon:
 
     def close(self) -> None:
         self.advertiser.stop()
+        self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
 
@@ -716,7 +694,7 @@ def cluster(tmp_path, key, udp):
     from tests.cluster_support import join as join_cluster
 
     join_cluster(WORDS, group="home", path=key)
-    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n)
+    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n, root=tmp_path / n)
             for n in ("harrowgate", "larch", "studio")]
     yield made, key, udp, tmp_path / "root"
     for one in made:

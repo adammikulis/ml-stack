@@ -24,13 +24,13 @@ from typing import Any
 from ml_stack import macauth, sealing
 from ml_stack.log import warn
 
-from .. import discovery as disc
+from .. import discovery as disc, recovery
 from ..discovery import DiscoveryError, Membership
 from . import pake
 from .lan import require_local
 from .pairing import fingerprint_of, unverified_context
 
-__all__ = ["API", "Declined", "Joiner", "Joining", "find_joiners", "join_by_passphrase"]
+__all__ = ["API", "Declined", "Joiner", "Joining", "find_joiners", "join_by_passphrase", "join_existing"]
 
 API = "/join/v1"
 CLIENT = "joiner"
@@ -95,7 +95,10 @@ class Joining:
         self.log(f"join: {outcome} from {source} for cluster '{group}'")
 
     def _start(self, body: dict[str, Any], source: str) -> dict[str, Any]:
-        group = str(body.get("group") or "")
+        try:
+            group = disc.require_name(body.get("group"))
+        except DiscoveryError as exc:
+            raise Refusal(400, str(exc)) from None
         if self.lockout.locked(source) or self.everyone.locked("*"):
             self._note(source, group, "refused, too many attempts")
             raise Refusal(429, "too many attempts; try again later")
@@ -259,23 +262,43 @@ def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> bytes:
     if not session.check(str(done.get("confirmation"))):
         raise Declined(403, "the machine did not prove it knew the passphrase")
     try:
-        held = json.loads(sealing.open_(session.key("join"), bytes.fromhex(str(done.get("sealed"))), context))
-        key = str(held["key"]).encode()
-    except (sealing.SealError, ValueError, KeyError, TypeError):
+        held = recovery.parse_recovery(sealing.open_(
+            session.key("join"), bytes.fromhex(str(done.get("sealed"))), context).decode())
+        if held.group != group:
+            raise DiscoveryError("the machine answered for a different cluster")
+        key = held.key
+    except (sealing.SealError, ValueError, KeyError, TypeError, DiscoveryError):
         raise Declined(400, "the machine's answer did not authenticate") from None
     return key
 
 
-def join_by_passphrase(passphrase: str, group: str = disc.DEFAULT_CLUSTER,
+def join_by_passphrase(passphrase: str, group: str,
                        path: Path | str | None = None, *, timeout_s: float = 1.5,
                        port: int | None = None) -> Membership:
     """Join ``group``: a daemon in it gives this machine the cluster key when the passphrase is
     right; when none answers, this machine keeps its own cluster of that name or makes one."""
+    group = disc.require_name(group)
     words = disc.check_length(passphrase)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
         return held or disc.mint_cluster(group, path)
+    return _accept(joiners, group, words, path)
+
+
+def join_existing(passphrase: str, group: str, path: Path | str | None = None, *,
+                  timeout_s: float = 1.5, port: int | None = None) -> Membership:
+    """Join a selected live cluster; never create a replacement when it disappears."""
+    group = disc.require_name(group)
+    words = disc.check_length(passphrase)
+    joiners = find_joiners(group, timeout_s=timeout_s, port=port)
+    if not joiners:
+        raise DiscoveryError("cluster is no longer available; refresh nearby clusters")
+    return _accept(joiners, group, words, path)
+
+
+def _accept(joiners: list[Joiner], group: str, words: str,
+            path: Path | str | None) -> Membership:
     refused: list[Declined] = []
     for one in joiners:
         try:

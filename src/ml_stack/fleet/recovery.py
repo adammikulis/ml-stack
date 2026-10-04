@@ -23,6 +23,7 @@ from .discovery import (
     adopt,
     clusters_path,
     memberships,
+    require_name,
 )
 
 PURPOSE = "fleet-passphrase"
@@ -110,16 +111,31 @@ def export_recovery(file: Path | str, group: str = "", path: Path | str | None =
     return held
 
 
-def import_recovery(file: Path | str, path: Path | str | None = None) -> Membership:
-    """Join the cluster a recovery file describes, replacing any membership of the same group."""
-    text = home.expand(file).read_text()
+def has_passphrase(group: str, path: Path | str | None = None) -> bool:
+    """Whether a wrapped passphrase is recorded, without opening the keystore."""
+    return group in _held(path)
+
+
+def parse_recovery(text: str) -> Membership:
+    """Read a named 256-bit key from bounded recovery-file text."""
     try:
+        if not isinstance(text, str) or len(text.encode("utf-8")) > 8192:
+            raise ValueError("recovery file is too large")
         data = json.loads("\n".join(ln for ln in text.splitlines() if not ln.startswith("#")))
-        member = Membership(group=str(data["group"]), key=str(data["key"]).encode())
-    except (ValueError, KeyError, TypeError) as exc:
-        raise DiscoveryError(f"{file} is not a recovery file") from exc
-    if not member.key:
-        raise DiscoveryError(f"{file} is not a recovery file")
+        if not isinstance(data, dict) or not isinstance(data.get("key"), str):
+            raise ValueError("invalid recovery object")
+        key = data["key"]
+        if len(base64.b64decode(key + "=" * (-len(key) % 4), altchars=b"-_", validate=True)) != 32:
+            raise ValueError("invalid recovery key")
+        return Membership(group=require_name(data.get("group")), key=key.encode("ascii"))
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise DiscoveryError("not a valid cluster recovery file") from exc
+
+
+def import_recovery(file: Path | str, path: Path | str | None = None) -> Membership:
+    """Join from a recovery file, replacing any membership of the same cluster."""
+    with home.expand(file).open() as source:
+        member = parse_recovery(source.read(8193))
     return adopt(member, path)
 
 

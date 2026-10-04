@@ -1,8 +1,7 @@
-"""Named LAN hints from the existing salt handshake."""
+"""Named LAN hints from the maintained PAKE join discovery."""
 
 from __future__ import annotations
 
-import base64
 import json
 import secrets
 import time
@@ -18,15 +17,15 @@ def _hint(raw: bytes, nonce: str) -> dict[str, str] | None:
         msg = json.loads(raw)
         if not isinstance(msg, dict) or msg.get("v") != discovery.PROTOCOL:
             return None
-        if msg.get("kind") != "salt" or msg.get("nonce") != nonce:
+        if msg.get("kind") != "join" or msg.get("nonce") != nonce:
             return None
         name = discovery.require_name(msg.get("group"))
-        if msg.get("salt") == "":
-            return {"group": name, "method": "recovery"}
-        salt = base64.urlsafe_b64decode(msg["salt"] + "==")
-        if not 16 <= len(salt) <= 64:
+        if msg.get("method") not in ("passphrase", "recovery"):
             return None
-        return {"group": name}
+        port = msg.get("port")
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            return None
+        return {"group": name, **({"method": "recovery"} if msg["method"] == "recovery" else {})}
     except (ValueError, TypeError, KeyError, discovery.DiscoveryError):
         return None
 
@@ -34,7 +33,7 @@ def _hint(raw: bytes, nonce: str) -> dict[str, str] | None:
 def nearby(*, timeout_s: float = 1.5, port: int | None = None) -> list[dict[str, Any]]:
     """Unverified cluster-name hints; joining separately authenticates the response."""
     nonce = secrets.token_hex(16)
-    hello = json.dumps({"v": discovery.PROTOCOL, "kind": "hello", "nonce": nonce}).encode()
+    hello = json.dumps({"v": discovery.PROTOCOL, "kind": "join?", "group": "", "nonce": nonce}).encode()
     groups: dict[tuple[str, str], dict[str, str]] = {}
     sources: dict[str, int] = {}
     target_port = port if port is not None else discovery.default_port()
@@ -56,11 +55,3 @@ def nearby(*, timeout_s: float = 1.5, port: int | None = None) -> list[dict[str,
             if group:
                 groups[(group["group"], group.get("method", "passphrase"))] = group
     return sorted(groups.values(), key=lambda row: row["group"].casefold())
-
-
-def verified_salt(passphrase: str, group: str) -> discovery.Salting:
-    """Authenticate an existing cluster before writing a membership."""
-    found = discovery.find_salt(passphrase, group=group)
-    if found is None:
-        raise discovery.DiscoveryError("cluster is no longer available; refresh nearby clusters")
-    return discovery.Salting(salt=found[0])

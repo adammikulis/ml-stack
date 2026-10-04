@@ -34,7 +34,6 @@ from ml_stack.units import human_bytes
 
 from . import recovery
 from .discovery import (
-    DEFAULT_CLUSTER,
     Beacon,
     DiscoveryError,
     default_port,

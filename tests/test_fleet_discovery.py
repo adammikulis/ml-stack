@@ -107,7 +107,7 @@ def _reach(port: int) -> dict[str, str]:
 
 @pytest.fixture
 def key(tmp_path) -> bytes:
-    create_cluster_key(tmp_path / "cluster.key")
+    create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
     return load_cluster_key(tmp_path / "cluster.key")
 
 
@@ -119,16 +119,16 @@ def port() -> int:
 # -- the key -------------------------------------------------------------
 def test_key_is_created_once_and_not_silently_rotated(tmp_path):
     p = tmp_path / "cluster.key"
-    first = create_cluster_key(p)
-    assert create_cluster_key(p) == first, "re-running init must not evict the cluster"
-    assert create_cluster_key(p, overwrite=True) != first
+    first = create_cluster_key(p, group="ml-stack")
+    assert create_cluster_key(p, group="ml-stack") == first, "re-running init must not evict the cluster"
+    assert create_cluster_key(p, overwrite=True, group="ml-stack") != first
 
 
 def test_the_file_holding_the_keys_is_not_world_readable(tmp_path):
     from ml_stack.fleet.discovery import clusters_path
 
     p = tmp_path / "cluster.key"
-    create_cluster_key(p)
+    create_cluster_key(p, group="ml-stack")
     assert oct(clusters_path(p).stat().st_mode)[-3:] == "600"
 
 
@@ -137,8 +137,8 @@ def test_missing_key_reads_as_none(tmp_path):
 
 
 def test_token_is_a_pure_function_of_the_key(tmp_path):
-    a = create_cluster_key(tmp_path / "a.key").encode()
-    b = create_cluster_key(tmp_path / "b.key").encode()
+    a = create_cluster_key(tmp_path / "a.key", group="ml-stack").encode()
+    b = create_cluster_key(tmp_path / "b.key", group="ml-stack").encode()
     assert derive_token(a) == derive_token(a), "both ends must compute the same token"
     assert derive_token(a) != derive_token(b)
     assert a.decode() not in derive_token(a), "the token must not leak the key"
@@ -163,7 +163,7 @@ def test_nothing_is_found_when_nothing_is_advertising(key, port):
 
 
 def test_a_peer_with_a_different_key_is_invisible(key, port, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
     with Advertiser(Beacon(name="stranger", port=8770), other, port=port,
                     interval_s=0.2):
         assert discover(key, timeout_s=1.0, port=port) == [], \
@@ -279,7 +279,7 @@ def test_a_beacon_is_neither_readable_nor_guessable_from(key):
 
 
 def test_a_beacon_signed_with_another_key_is_refused(key, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
     raw = _pack(other, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
                         "beacon": {"name": "evil", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is None
@@ -325,7 +325,7 @@ def _booted(tmp_path, *extra: str):
     """Boot the actual daemon the way a machine would, rooted in ``tmp_path/traind``
     with ``extra`` flags, and yield ``(keyfile, disco_port, http_port, log)``."""
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     disco_port = _free_udp_port()
     http_port = _free_tcp_port()
     env = {**os.environ,
