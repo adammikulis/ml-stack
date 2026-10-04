@@ -16,6 +16,7 @@ from typing import Any
 
 from ml_stack.ui import assets as ui_assets
 
+from .conversation_routes import ConversationRoutes
 from .discovery import (
     DiscoveryError,
     cluster_group,
@@ -567,53 +568,12 @@ class ModelRoutes:
         return True
 
 
-class ChatRoutes:
+class ChatRoutes(ConversationRoutes):
     """The kept conversations, and a question put to whatever is serving a model."""
 
     def route(self) -> bool:
-        if self.path.startswith("/ui/conversations"):
-            return self._conversations()
         if self.path == "/ui/chat":
             return self._chat()
-        return super().route()
-
-    def _conversations(self) -> bool:
-        ui = self.ui
-        if ui.conversations is None:
-            self.send(501, {"error": "no chat store on this daemon"})
-            return True
-        rest = self.path[len("/ui/conversations"):].strip("/")
-        if rest:
-            return self._one_conversation(rest)
-        if self.method == "GET":
-            self.send(200, {"conversations": [
-                c.public(full=False) for c in ui.conversations.search(self.asked("q"))]})
-            return True
-        if self.method == "POST":
-            req = self.body()
-            made = ui.conversations.start(model=str(req.get("model") or ""),
-                                          title=str(req.get("title") or ""))
-            self.send(201, made.public())
-            return True
-        return super().route()
-
-    def _one_conversation(self, rest: str) -> bool:
-        ui = self.ui
-        found = ui.conversations.get(rest)
-        if found is None:
-            self.send(404, {"error": "no such chat"})
-            return True
-        if self.method == "GET":
-            self.send(200, found.public())
-            return True
-        if self.method == "DELETE":
-            ui.conversations.remove(rest)
-            self.send(200, {"removed": rest})
-            return True
-        if self.method == "POST":
-            renamed = ui.conversations.rename(rest, str(self.body().get("title") or ""))
-            self.send(200, renamed.public(full=False))
-            return True
         return super().route()
 
     def _chat(self) -> bool:
