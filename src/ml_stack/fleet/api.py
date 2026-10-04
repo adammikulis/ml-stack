@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate, sentinel
+from ml_stack import gate, sentinel, serverkeys
 from ml_stack.files import promote
 from ml_stack.macauth import Authenticator, Verdict
 from ml_stack.sentinel.adapters import watch_authenticator
@@ -234,6 +234,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
 
             upstream = urllib.request.Request(
                 f"http://127.0.0.1:{port}{rest}", data=body or None, method=self.command)
+            if leased := serverkeys.for_url(upstream.full_url):
+                upstream.add_header("Authorization", f"Bearer {leased}")
             for name, value in self.headers.items():
                 if name.lower() in ("authorization", "host", "content-length",
                                     "connection", "x-ml-stack-ui"):

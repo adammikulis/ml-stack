@@ -535,7 +535,8 @@ class FakeLlamaServer:
     ``requests`` is every ``(method, path, body)`` it took; ``saved`` and ``restored``
     every slot the manager asked it to write out or read back; ``slots`` the rows
     ``/slots`` answers with, which a test may edit. ``refuse`` maps a path -- with its
-    query, or without -- to the status it answers there instead. ``disconnected`` is set
+    query, or without -- to the status it answers there instead. ``api_key``, when set, is
+    the bearer key every route but ``/health`` demands. ``disconnected`` is set
     when a reader hangs up mid-stream.
     """
 
@@ -547,6 +548,7 @@ class FakeLlamaServer:
         self.slots = [{"id": n, "n_ctx": self.served.context // max(self.served.slots, 1),
                        "is_processing": False} for n in range(self.served.slots)]
         self.refuse: dict[str, int] = {}
+        self.api_key = ""
         self.disconnected = threading.Event()
         self._httpd = Server(("127.0.0.1", port), _routes(self))
         self.port = int(self._httpd.server_address[1])
@@ -657,14 +659,26 @@ def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
     class _H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
+        def _unauthorised(self) -> bool:
+            """Answer 401 and return True when ``fake.api_key`` is set and not presented."""
+            if not fake.api_key or self.path.startswith("/health"):
+                return False
+            if self.headers.get("Authorization") == f"Bearer {fake.api_key}":
+                return False
+            self._answer(*_json({"error": "invalid api key"}, status=401))
+            return True
+
         def do_GET(self) -> None:
             fake.requests.append(("GET", self.path, b""))
-            self._answer(*fake.get(self.path))
+            if not self._unauthorised():
+                self._answer(*fake.get(self.path))
 
         def do_POST(self) -> None:
             length = int(self.headers.get("content-length") or 0)
             raw = self.rfile.read(length) if length else b""
             fake.requests.append(("POST", self.path, raw))
+            if self._unauthorised():
+                return
             body = json_body(raw)
             if (body.get("stream") and self.path.split("?")[0].endswith("/chat/completions")
                     and fake.refused(self.path) is None):

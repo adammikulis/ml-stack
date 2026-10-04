@@ -145,6 +145,22 @@ class TestProxy:
             daemon.post("/infer/v1/chat/completions", {}, token=False)
         assert exc.value.code == 401
 
+    def test_it_sends_the_leased_servers_key_upstream(self, wired):
+        from ml_stack import serverkeys
+
+        daemon, _, model = wired
+        model.api_key = serverkeys.issue(model.port)
+        with daemon.post("/infer/v1/chat/completions",
+                         {"messages": [{"role": "user", "content": "hi"}]}) as r:
+            assert json.loads(r.read())["choices"][0]["message"]["content"] == "hello"
+
+    def test_a_server_that_wants_a_key_it_was_not_given_answers_401(self, wired):
+        daemon, _, model = wired
+        model.api_key = "not-in-the-key-file"
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            daemon.post("/infer/v1/chat/completions", {"messages": []})
+        assert exc.value.code == 401
+
     def test_a_plain_completion_comes_back(self, wired):
         daemon, _, _ = wired
         with daemon.post("/infer/v1/chat/completions",
