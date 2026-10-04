@@ -56,7 +56,8 @@ note = "Persisted registrations are claims: identity comes from the bounded loca
 [[group]]
 match = ["route:workspace/coding_routes.py:/ui/coding/*", "parser:workspace/coding_routes.py",
          "parser:workspace/coding_turns.py", "parser:workspace/coding_events.py",
-         "spawn:workspace/coding_turns.py:*", "human:workspace/harness_seat.py:*"]
+         "spawn:workspace/coding_turns.py:*", "human:workspace/harness_seat.py:*",
+         "egress:workspace/harness_seat.py:Seat.record_model"]
 status = "covered"
 tests = [
   "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
@@ -66,6 +67,7 @@ tests = [
   "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
   "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
   "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+  "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model",
 ]
 note = "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
 
