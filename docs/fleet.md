@@ -114,8 +114,8 @@ the required name prompt); random-key creation uses `ml-stack-peers init --group
 Existing memberships retain their recorded names. Manual entry creates a new cluster
 when no matching cluster answers, so use exactly the same name and passphrase on each
 machine. Joining explicitly may save the passphrase to the keystore; merely discovering
-nearby clusters never reads or writes it. Discovery reports password joining from the
-wrapped-passphrase record’s presence; it never decrypts that record. Random-key recovery
+nearby clusters never reads or writes it. Discovery reports password joining from the membership’s stored PAKE join-secret
+presence; it never decrypts a keystore record. Random-key recovery
 joining authenticates a protocol-3 encrypted beacon using the supplied key.
 
 `join` runs the checks serving depends on (the memory a model may use, a llama-server --

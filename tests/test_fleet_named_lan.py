@@ -295,17 +295,17 @@ def test_pake_server_confirmation_is_required_before_membership(serving, passwor
     assert not discovery.memberships(serving.keyfile)
 
 
-def test_join_method_reads_wrapped_record_presence_without_unwrapping(tmp_path, monkeypatch):
+def test_pake_membership_has_join_secret_without_keystore(tmp_path, monkeypatch):
     from ml_stack import keystore
-    from ml_stack.files import write_json
-    from ml_stack.fleet import recovery
 
     def forbidden():
-        raise AssertionError("join discovery must not open the keystore")
+        raise AssertionError("joining must not open the keystore")
 
     monkeypatch.setattr(keystore, "default", forbidden)
+    monkeypatch.setattr(joining, "find_joiners", lambda *args, **kwargs: [])
     path = tmp_path / "cluster.key"
-    assert not recovery.has_passphrase("lab", path)
-    write_json(recovery.passphrases_path(path), {"lab": "wrapped-ciphertext"})
-    assert recovery.has_passphrase("lab", path)
-    assert not recovery.has_passphrase("other", path)
+    member = joining.join_by_passphrase(WORDS, "lab", path)
+    assert member.join == joining.join_secret(WORDS, "lab")
+    assert joining.matches(WORDS, "lab", path)
+    assert not joining.matches("different words", "lab", path)
+    assert WORDS not in discovery.clusters_path(path).read_text()
