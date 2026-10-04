@@ -35,7 +35,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -130,7 +129,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     args = parser().parse_args(ours)
     provenance.told(args.lease_for)
     args.seat_factory = seat_factory
-    binary = args.claude or shutil.which("claude") or ""
+    binary = args.claude or harnessing.binary_for("claude")
     if not binary:
         say("error: no `claude` on PATH; install Claude Code or pass --claude PATH")
         return 2

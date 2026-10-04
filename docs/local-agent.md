@@ -93,3 +93,8 @@ active task finishes first. The listing exposes `identity`, `paused`, `state`, `
 latest message. Stopping a delegated worker revokes its child token, preserving its parent.
 `agent.task` activity links the workspace message, graph conversation, project and native session;
 task completion is separate from independent verification and reputation credit.
+
+Coding start accepts `harness` (`codex` or `claude`), also available as CLI `--harness`.
+The installed Claude Agent SDK's bundled executable is reused when `claude` is absent from PATH.
+The person-authorized start registers one worker identity before launching its inbox loop;
+native tasks reuse that identity rather than minting a new agent for each job.
