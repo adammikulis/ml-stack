@@ -134,7 +134,7 @@ class DroneState:
         if agent_id not in ids:
             raise ValueError('Unknown native drone agent')
         self.actor = ids.index(agent_id)
-        capture(self, fresh=self.world_steps == 0)
+        capture(self, fresh=True)
         return self.observation(), self.info()
 
     def decision_state(self, observation):
