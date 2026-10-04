@@ -75,10 +75,11 @@ def wait_for_health(
     return False
 
 
-def serving_params(base_url: str, *, timeout: float = 5.0) -> ServingParams | None:
+def serving_params(base_url: str, *, timeout: float = 5.0,
+                   guard: Callable[[str], str] | None = None) -> ServingParams | None:
     """Read ``/props`` to learn what the server actually came up with."""
     try:
-        props = request_json(f"{base_url.rstrip('/')}/props", timeout=timeout)
+        props = request_json(f"{base_url.rstrip('/')}/props", timeout=timeout, guard=guard)
     except ServerError:
         return None
 
@@ -132,18 +133,22 @@ def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def reported_models(base_url: str, *, timeout: float = 5.0) -> list[str]:
+def reported_models(base_url: str, *, timeout: float = 5.0,
+                    guard: Callable[[str], str] | None = None) -> list[str]:
     """Model ids the server admits to serving, via ``/v1/models``."""
     try:
-        payload = request_json(f"{base_url.rstrip('/')}/v1/models", timeout=timeout)
+        payload = request_json(f"{base_url.rstrip('/')}/v1/models", timeout=timeout, guard=guard)
     except ServerError:
         return []
     if not isinstance(payload, dict):
         return []
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return []
     return [
         entry["id"]
-        for entry in payload.get("data", [])
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        for entry in data
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"].strip()
     ]
 
 

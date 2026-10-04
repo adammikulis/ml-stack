@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 from http.client import HTTPException
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ml_stack import lock
 from ml_stack.client.counters import read_speculative
@@ -77,7 +78,10 @@ class Serving:
         out = []
         for row in raw if isinstance(raw, list) else []:
             try:
-                out.append(Served(port=int(row["port"]),
+                port = row["port"]
+                if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                    continue
+                out.append(Served(port=port,
                                   models=list(row.get("models") or []),
                                   slots=int(row.get("slots") or 1),
                                   started_at=float(row.get("started_at") or 0),
@@ -261,16 +265,22 @@ def _identity(served: Served, process: dict) -> tuple[Served | None, bool]:
             pass
     except OSError:
         return None, False
+    def local_only(url: str) -> str:
+        target = urlsplit(url)
+        if target.scheme != "http" or target.hostname != "127.0.0.1" or target.port != served.port:
+            raise ValueError("model metadata must stay on its registered local endpoint")
+        return url
+
     try:
-        names = reported_models(f"http://127.0.0.1:{served.port}", timeout=PROBE_TIMEOUT)
+        names = reported_models(f"http://127.0.0.1:{served.port}", timeout=PROBE_TIMEOUT, guard=local_only)
     except (OSError, ValueError, HTTPException):
         return served, False
     if not names:
         return served, False
     base = f"http://127.0.0.1:{served.port}"
     try:
-        params = serving_params(base, timeout=PROBE_TIMEOUT)
-        counts = read_speculative(base, timeout=PROBE_TIMEOUT)
+        params = serving_params(base, timeout=PROBE_TIMEOUT, guard=local_only)
+        counts = read_speculative(base, timeout=PROBE_TIMEOUT, guard=local_only)
     except (OSError, ValueError, HTTPException):
         params, counts = None, None
     slots = params.total_slots if params and type(params.total_slots) is int and params.total_slots > 0 else served.slots

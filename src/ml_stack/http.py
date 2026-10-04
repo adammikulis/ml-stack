@@ -260,24 +260,25 @@ def head_once(url: str, *, headers: dict[str, str] | None = None, token: str = "
 
 def request_bytes(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None, token: str = "",
-                  timeout: float = 180.0, retry: Retry = ONCE) -> Reply:
+                  timeout: float = 180.0, retry: Retry = ONCE,
+                  guard: Callable[[str], str] | None = None) -> Reply:
     """Send a request and read the whole answer."""
     with _queued(url), open_stream(url, data=data, method=method, headers=headers,
-                                   token=token, timeout=timeout, retry=retry) as response:
+                                   token=token, timeout=timeout, retry=retry, guard=guard) as response:
         return Reply(int(response.status), response.read(), response.headers)
 
 
 def request_json(url: str, *, payload: dict[str, Any] | None = None,
                  method: str | None = None, timeout: float = 180.0, tries: int = 1,
                  backoff: float = 0.5, headers: dict[str, str] | None = None,
-                 token: str = "") -> Any:
+                 token: str = "", guard: Callable[[str], str] | None = None) -> Any:
     """Send a JSON request and parse the JSON response."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     sent = {"Content-Type": "application/json"}
     sent.update(headers or {})
 
     reply = request_bytes(url, data=data, method=method, headers=sent, token=token,
-                          timeout=timeout, retry=Retry(tries=tries, backoff=backoff))
+                          timeout=timeout, retry=Retry(tries=tries, backoff=backoff), guard=guard)
     body = reply.body.decode("utf-8")
     try:
         return json.loads(body) if body else None
