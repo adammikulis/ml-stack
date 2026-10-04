@@ -1,9 +1,4 @@
-"""The fleet's page, assembled from the components under ``web/components``.
-
-`COMPONENTS` is the whole interface. A caller hands `render` a shorter list to leave a
-screen out -- ``ml-stack-serve fit --ui`` serves `FIT_ONLY`, which is the fit view and
-nothing that needs a daemon.
-"""
+"""Fleet page components and their shared script modules."""
 
 from __future__ import annotations
 
@@ -17,18 +12,31 @@ COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
 COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view",
               "chat-view", "wired-memory", "models-view", "settings-view", "fit-model", "fit-view",
-              "fit-charts", "rates-view", "telemetry-view", "workspace-model",
+              "fit-charts", "rates-view", "telemetry-view",
               "workspace-jobs", "data-view",
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls", "gym-scene", "gym-recordings", "gym-world-options", "gym-view", "close-sheet")
+MODULES = {"workspace-model": frozenset({
+    "workspace-jobs", "data-view", "training-view", "tools-view", "benchmarks-view",
+    "gym-world-options", "gym-recordings", "gym-view",
+})}
 #: the fit screen on its own, for a machine running no daemon
 FIT_ONLY = ("fleet-model", "fit-model", "fit-view", "fit-charts", "rates-view",
             "telemetry-view")
 
 
 def components(names: Sequence[str | Component] = COMPONENTS) -> list[Component]:
-    """The named components: a bare name is one of the page's own under ``web/components``;
-    a `Component` is taken as given, wherever its file lives."""
-    return [c if isinstance(c, Component) else load(COMPONENTS_DIR, [c])[0] for c in names]
+    """Return page components with shared modules inserted before their consumers."""
+    parts = [part if isinstance(part, Component) else load(COMPONENTS_DIR, [part])[0]
+             for part in names]
+    present = {part.name for part in parts}
+    for module, consumers in MODULES.items():
+        if module in present:
+            continue
+        index = next((index for index, part in enumerate(parts) if part.name in consumers), None)
+        if index is not None:
+            parts.insert(index, load(COMPONENTS_DIR, [module])[0])
+    return parts
+
 
 
 def render(parts: Sequence[str | Component] = COMPONENTS) -> str:

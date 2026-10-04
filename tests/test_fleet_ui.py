@@ -75,7 +75,7 @@ def _free_port() -> int:
 
 
 class Serving:
-    """A real daemon with the UI mounted, bound on every interface."""
+    """A daemon with a loopback UI and an optional explicit LAN listener."""
 
     def __init__(self, tmp_path, name="studio", setup_token="", schedule=None, secure=True):
         self.schedule = schedule
@@ -101,6 +101,7 @@ class Serving:
                          schedule=schedule, tokens=self._cluster_tokens,
                          cluster_key_path=self.keyfile, ui_from_lan=True,
                          schedule_path=(root / "availability.json") if schedule else None)))
+        self.lan_httpd = None
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def _cluster_tokens(self):
@@ -109,8 +110,16 @@ class Serving:
 
         return {derive_token(m.key) for m in memberships(self.keyfile)}
 
-    def call(self, path, *, method="GET", body=None, host="127.0.0.1",
-             headers=None, ui_header=True, cookie=""):
+    def call(self, path, *, method="GET", body=None, **options):
+        host = options.pop("host", "127.0.0.1")
+        headers = options.pop("headers", None)
+        ui_header = options.pop("ui_header", True)
+        cookie = options.pop("cookie", "")
+        if options:
+            raise TypeError(f"Unknown request options: {', '.join(options)}")
+        if host != "127.0.0.1" and self.lan_httpd is None:
+            self.lan_httpd = Server((host, self.port), self.httpd.RequestHandlerClass)
+            threading.Thread(target=self.lan_httpd.serve_forever, daemon=True).start()
         data = json.dumps(body).encode() if body is not None else None
         sent = {"Content-Type": "application/json"}
         if ui_header:
@@ -132,6 +141,9 @@ class Serving:
         self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
+        if self.lan_httpd:
+            self.lan_httpd.shutdown()
+            self.lan_httpd.server_close()
 
 
 @pytest.fixture
@@ -152,10 +164,10 @@ class TestAssets:
         assert asset_bytes("style.css") is not None, "style.css is missing from web/"
 
     def test_every_component_the_page_lists_is_on_disk(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES, components
 
-        assert COMPONENTS, "a page of no components would pass the loop below"
-        for name in COMPONENTS:
+        assert components(), "the page contains no components"
+        for name in (*COMPONENTS, *MODULES):
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
     def test_every_component_defines_the_element_the_shell_holds(self):
@@ -166,6 +178,20 @@ class TestAssets:
             assert f"customElements.define('{name}'" in text \
                 or f'customElements.define("{name}"' in text, \
                 f"{name}.html defines no <{name}>"
+
+    def test_shared_modules_load_before_consumers_without_custom_elements(self):
+        from ml_stack.fleet.page import COMPONENTS, FIT_ONLY, MODULES, components
+
+        parts = components()
+        names = [part.name for part in parts]
+        for name, consumers in MODULES.items():
+            assert name not in COMPONENTS
+            assert names.count(name) == 1
+            module = next(part for part in parts if part.name == name).read()
+            assert not module.templates
+            assert "customElements.define" not in module.script
+            assert all(names.index(name) < names.index(consumer) for consumer in consumers)
+        assert not set(MODULES) & {part.name for part in components(FIT_ONLY)}
 
     def test_every_asset_the_page_asks_for_exists(self):
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
@@ -950,13 +976,13 @@ def test_every_components_script_parses(tmp_path):
     import shutil
     import subprocess
 
-    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES
     from ml_stack.ui import load
 
     node = shutil.which("node")
     if node is None:
         pytest.skip("no node to parse with")
-    for name in COMPONENTS:
+    for name in (*COMPONENTS, *MODULES):
         script = load(COMPONENTS_DIR, [name])[0].read().script
         path = tmp_path / f"{name}.js"
         path.write_text(script, encoding="utf-8")
