@@ -4,6 +4,8 @@ subscriptions and digests, each checked here against the caller's identity."""
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ml_stack.workspace import plain
@@ -15,8 +17,9 @@ from ml_stack.workspace.screen import NEUTRAL, Refused, fence
 if TYPE_CHECKING:
     from ml_stack.workspace.service import Workspace
 
-__all__ = ["BoardApi"]
+__all__ = ["BoardApi", "Follow"]
 
+FOLLOWERS = (".follow", ".chat", ".web")
 MENTION = re.compile(r"(?<![\w/@])@([a-z0-9][a-z0-9._-]{0,47}(?:/[a-z0-9][a-z0-9._-]{0,47})?)")
 
 
@@ -26,6 +29,24 @@ def data_line(value: object, width: int = 120) -> str:
     for pattern, repl in NEUTRAL:
         out = pattern.sub(repl, out)
     return out
+
+
+@dataclass(slots=True)
+class Follow:
+    """What to follow: one of ``board``, ``thread`` or ``dm`` (with ``between`` for a pair a person
+    reads), the messages after ``after`` (negative: from now, after the last ``backlog``), at most
+    ``limit`` of them, how long `Workspace.follow` waits and which wake pipe it sleeps on."""
+
+    board: str = ""
+    thread: int = 0
+    dm: str = ""
+    between: str = ""
+    after: int = -1
+    backlog: int = 0
+    limit: int = 50
+    plain_text: bool = False
+    timeout_s: float = 0.0
+    suffix: str = ".follow"
 
 
 class BoardApi:
@@ -62,6 +83,11 @@ class BoardApi:
             self.ws.audit("board.denied", who.id, board=plain.line(name, 48))
             raise Denied(f"no board {plain.line(name, 48)} that {who.id} belongs to")
 
+    def can_post(self, who: Identity, name: str) -> bool:
+        """Whether ``who`` is a member of ``name`` and so may post to it."""
+        found = self.store.state()[0].get(name)
+        return found is not None and (name == GENERAL or self._root(who) in found["members"])
+
     def require_post(self, who: Identity, name: str) -> None:
         """`Denied` unless ``who`` is a member of ``name``."""
         boards = self.store.state()[0]
@@ -81,8 +107,8 @@ class BoardApi:
         return list(found)[:10]
 
     # -- reading helpers ------------------------------------------------------------------
-    def _rows(self, name: str = "") -> list[dict[str, Any]]:
-        return [r for r in self.ws.bus.log.rows() if r["kind"] == "msg"
+    def _rows(self, name: str = "", after: int = 0) -> list[dict[str, Any]]:
+        return [r for r in self.ws.bus.log.after(after) if r["kind"] == "msg"
                 and r["to"].startswith("#") and (not name or r["to"] == name)
                 and self.ws.bus.live(r)]
 
@@ -280,10 +306,7 @@ class BoardApi:
         rows = self.ws.bus.thread(root)
         if not rows:
             raise ValueError(f"no thread {root}")
-        if rows[0]["to"].startswith("#"):
-            self.require_read(who, rows[0]["to"])
-        elif who.role == AGENT:
-            self._pair_ok(who, rows[0]["from"], rows[0]["to"])
+        self._thread_access(who, rows)
         return {"root": root, "messages": [self._plain(r) for r in rows[:200]]}
 
     # -- direct conversations -------------------------------------------------------------
@@ -444,7 +467,7 @@ class BoardApi:
         mine = subs.get(who.id)
         if who.parent or not mine:
             return []
-        return [r for r in self._rows() if r["seq"] > after and r["from"] != who.id
+        return [r for r in self._rows(after=after) if r["from"] != who.id
                 and self.can_read(who, r["to"], boards)
                 and self._mode(mine, {**r, "mentions": r.get("mentions", [])}, who.id) == mode]
 
@@ -454,6 +477,64 @@ class BoardApi:
         full = {**row, "mentions": row.get("mentions", [])}
         return [m for m, mine in subs.items() if m != row["from"] and self._mode(mine, full, m)
                 == "inbox" and self.can_read(Identity(m, AGENT), row["to"], boards)]
+
+    def wake_names(self, row: dict[str, Any]) -> list[str]:
+        """The wake-pipe names to signal for ``row``: its recipient and subscribers by plain id,
+        and everyone who may be following its board or conversation by each follower name."""
+        direct = set(self.listeners(row)) if row["to"].startswith("#") else (
+            set() if row["to"] == "*" else {row["to"]})
+        boards = self.store.state()[0] if row["to"].startswith("#") else {}
+        found = boards.get(row["to"])
+        following = set(self.ws.registry.ids() if row["to"] == GENERAL else
+                        found["members"] if found else ()) | set(self.ws.registry.readers())
+        following |= {row["from"], *direct}
+        return [*direct, *(f"{n}{s}" for n in following for s in FOLLOWERS)]
+
+    # -- following -------------------------------------------------------------------------
+    def follow(self, token: str, spec: Follow) -> dict[str, Any]:
+        """Messages of one board, thread or conversation newer than ``after`` (negative: from now,
+        after the last ``backlog``), and the log's newest sequence number. A person may ask for
+        plain text; everyone else gets it fenced."""
+        who = self._who(token)
+        board, thread, dm, between = spec.board, spec.thread, spec.dm, spec.between
+        after, backlog, limit, plain_text = spec.after, spec.backlog, spec.limit, spec.plain_text
+        if sum(bool(x) for x in (board, thread, dm)) != 1:
+            raise ValueError("follow one of a board, a thread or a conversation")
+        if plain_text and who.role != HUMAN:
+            raise Denied("only the person's token reads messages unfenced")
+        member = self._scope(who, board, thread, dm, between)
+        rows = self.ws.bus.log.after(0 if after < 0 else after)
+        found = [r for r in rows if r["kind"] == "msg" and self.ws.bus.live(r) and member(r)]
+        found = found[-backlog:] if after < 0 and backlog > 0 else [] if after < 0 else found[:limit]
+        newest = rows[-1]["seq"] if rows else max(after, 0)
+        if after >= 0 and len(found) == limit:
+            newest = found[-1]["seq"]
+        return {"messages": [self._plain(r) if plain_text else self._show(r) for r in found],
+                "seq": newest}
+
+    def _scope(self, who: Identity, board: str, thread: int, dm: str,
+               between: str) -> Callable[[dict[str, Any]], bool]:
+        if board:
+            self.require_read(who, board)
+            return lambda r: r["to"] == board
+        if thread:
+            head = self.ws.bus.thread(thread)
+            if not head:
+                raise ValueError(f"no thread {thread}")
+            self._thread_access(who, head)
+            return lambda r: thread in (r["seq"], r.get("thread"))
+        a = between or who.id
+        if not (valid_id(dm) and valid_id(a)):
+            raise ValueError("name an agent id")
+        self._pair_ok(who, a, dm)
+        return lambda r: ({r["from"], r["to"]} == {a, dm} and a != dm
+                          and not r["to"].startswith("#") and r["to"] != "*")
+
+    def _thread_access(self, who: Identity, rows: list[dict[str, Any]]) -> None:
+        if rows[0]["to"].startswith("#"):
+            self.require_read(who, rows[0]["to"])
+        elif who.role == AGENT:
+            self._pair_ok(who, rows[0]["from"], rows[0]["to"])
 
     # -- digests --------------------------------------------------------------------------
     def digest(self, token: str, ack: bool = False, thread: int = 0) -> dict[str, Any]:
@@ -490,10 +571,7 @@ class BoardApi:
         rows = self.ws.bus.thread(root)
         if not rows:
             raise ValueError(f"no thread {root}")
-        if rows[0]["to"].startswith("#"):
-            self.require_read(who, rows[0]["to"])
-        elif who.role == AGENT:
-            self._pair_ok(who, rows[0]["from"], rows[0]["to"])
+        self._thread_access(who, rows)
         head, replies = rows[0], rows[1:]
         recent = replies[-5:]
         lines = [f"[{head['seq']}] {head['from']}: "

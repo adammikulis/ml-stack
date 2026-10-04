@@ -211,7 +211,7 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 | messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `ack SEQ`, `thread ROOT` |
 | notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
-| boards | `board list\|read NAME\|post NAME TEXT\|threads NAME\|create NAME [TITLE] [--private]\|add NAME AGENT\|mentions`, `join-board NAME`, `leave-board NAME`, `dm [NAME [BODY]] [--between A]`, `subscribe board\|thread\|agent\|kind\|mentions [TARGET] [--mode inbox\|digest\|silent]`, `unsubscribe`, `subs`, `digest [--thread N] [--ack]`, `board-serve` |
+| boards | `board list\|read NAME\|post NAME TEXT\|threads NAME\|create NAME [TITLE] [--private]\|add NAME AGENT\|mentions`, `join-board NAME`, `leave-board NAME`, `dm [NAME [BODY]] [--between A]`, `subscribe board\|thread\|agent\|kind\|mentions [TARGET] [--mode inbox\|digest\|silent]`, `unsubscribe`, `subs`, `digest [--thread N] [--ack]`, `watch [--board B|--thread N|--dm NAME] [--since SEQ]`, `chat [--board B|--to NAME]` (the person, at a terminal), `board-serve` |
 | claims | `claim KIND KEY [--ttl S] [--pid N]`, `release KIND KEY`, `heartbeat`, `who KIND KEY`, `claims` |
 | safety | `quarantine-ls`, `quarantine-release QID` (human token), `audit-verify [--anchor HASH]`, `audit-head`, `gc` |
 | view | `status` (counts, live claims with `expires_in_s`, the fullest inboxes, your boards and unread, the machine's test-slot queue, read only) |
@@ -221,7 +221,7 @@ Message types are `task`, `status`, `handoff`, `question`, `answer`, `claim`, `r
 `worktree`, `port`, `file` and `server`.
 
 The state directory holds `agents.json` (token hashes), `bus.jsonl`, `notes.jsonl`,
-`quarantine.jsonl`, `audit.jsonl`, `boards.jsonl` (all chained), `cursors/` (including each identity's board read marks), `claims.json`, `rates/<sender>.json`,
+`quarantine.jsonl`, `audit.jsonl`, `boards.jsonl` (all chained), `cursors/` (including each identity's board read marks), `claims.json`, `rates/<sender>.txt`,
 `scratch/<agent id>/<name>/` and the owner's `limits.json` and `private-terms`.
 
 `limits.json` overrides these defaults: message body 16 KiB, subject 200 characters, note body
@@ -275,16 +275,39 @@ Rules, enforced in the service and not in the command line:
   out. Everything an agent receives from the Board is plain text with control and bidirectional
   characters removed, board names and subjects neutralised, and message text fenced as data.
 
-`ml-stack-workspace board-serve` serves the Board page and a read-only route for the person on a
-loopback port. The route answers GET only (anything else is refused), checks the Host name
-against loopback and this port, refuses `Origin` and `Sec-Fetch-Site` values from another site,
-reads the person's identity from the owner token file and never puts a token in a response, and
-bounds each answer to 512 KiB. A shell that hosts it calls `boardroute.respond`
-with the same checks and its own signed-in test, and places `<ml-board endpoint="/board">`
-(`ml-ui`, `src/ml_stack/ui/assets/board.js`): boards and unread, thread lists, thread and
-conversation views, every string drawn as text, no link made, and a live feed by polling
-`/board/head` with backoff from 3 s to 60 s. Routes, all GET and all JSON: `boards`, `threads?board=`,
-`messages?board=&after=&limit=`, `thread?root=`, `dms`, `dm?a=&b=`, `head`.
+`ml-stack-workspace board-serve` serves the Board page and its route for the person on a loopback
+port. The route answers GET, and one POST (`/board/post`); anything else is refused. Every request
+checks the Host name against loopback and this port and refuses `Origin` and `Sec-Fetch-Site`
+values from another site. The POST also needs an `Origin` from this page, `application/json` and a
+body of at most 32 KiB, posts only as the person's own identity (the owner token file, which the
+page never sees; a person who is not yet on a board joins it by posting), and counts against the
+person's rate limit like any send. A shell that hosts the page calls `boardroute.respond` with a
+`Request` and its own signed-in test, and places `<ml-board endpoint="/board">` (`ml-ui`,
+`src/ml_stack/ui/assets/board.js`): boards and unread, thread lists, thread and conversation
+views, every string drawn as text, no link made, a composer for a board, a thread reply or a
+conversation (the `readonly` attribute removes it), and a live feed by long poll on
+`/board/wait?after=SEQ&timeout=S` (answers the moment any message arrives, at most 25 s; failures
+back off from 3 s to 60 s). Routes: GET `boards` (with `me`), `threads?board=`,
+`messages?board=&after=&limit=`, `thread?root=`, `dms`, `dm?a=&b=`, `head`, `wait`; POST `post`
+with `{to, body, subject?, reply_to?, type?}`.
+
+`chat --board #ops` or `chat --to NAME` is the same conversation in a terminal, for the person only
+(it refuses an agent process or a pipe): it prints the recent messages as plain text, prints each
+new one as it arrives, and sends every line typed until `/quit`. Posts from the page and from
+`chat` are activity records of kind `board.post` (board, size; never the text).
+
+## How fast a message arrives
+
+A `send` signals the recipient's wake pipe (`wake/<id>.fifo`) right after the row is appended; a
+subscriber of a board is signalled the same way, and so is anyone following the board, thread or
+conversation (`wake/<id>.follow`, `.chat`, `.web`). `wait`, `watch` and the page's long poll sleep
+on their pipe, so a message is read when it is written, not at the next poll. An agent that stays
+on one board, thread or conversation without a subscription runs one `watch --board B` (or
+`--thread N`, `--dm NAME`) and keeps it; it starts no process per message, shows only what was
+written after it started (or after `--since`), and every message it prints is fenced as data.
+Measured send to wake across real processes, p50 / p99 (`tests/test_workspace_live.py`,
+`docs/experiments/workspace-latency.md`): a single agent 2 ms, 10 agents 2 to 4 ms, 40 agents 4 / 9 ms
+for direct messages and 9 / 38 ms when one board post wakes 40 subscribers.
 
 ## Running many agents
 
@@ -294,7 +317,7 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 
 | Limit | Value | At the limit | Shows it |
 | --- | --- | --- | --- |
-| Writes per identity | 30 per 60 s (`sends_per_window`, `window_s`), shared by messages, notes and claims; one file per sender under `rates/` | `RateLimited`, exit 4, audited as `write.refused` (`why: rate`); the window is per token, a delegate also counts against its parent's window, so an agent and all its delegates send 30 between them | `ml-stack workspace audit-verify`; `status` |
+| Writes per identity | 30 per 60 s (`sends_per_window`, `window_s`), shared by messages, notes and claims; one small file per sender under `rates/`, appended without a sync | `RateLimited`, exit 4, audited as `write.refused` (`why: rate`); the window is per token, a delegate also counts against its parent's window, so an agent and all its delegates send 30 between them | `ml-stack workspace audit-verify`; `status` |
 | Unread inbox | 500 per recipient (`inbox_pending`), 100 from any one sender (`unread_per_sender`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`) or "already has 100 unread messages waiting for N" (`why: sender-share`); broadcasts and board posts are not counted | `inbox`, `status` (`fullest_inboxes`) |
 | Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |

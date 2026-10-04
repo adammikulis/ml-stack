@@ -365,8 +365,8 @@ def test_delegates_share_their_parents_send_window(kit):
                 ws.send(k, "bob", "note", "x")
                 sent += 1
     assert sent == 6
-    assert sorted(p.name for p in (kit.base / "rates").glob("*.json")) == ["alice.json", "alice~k0.json",
-                                                                             "alice~k1.json", "alice~k2.json"]
+    assert sorted(p.name for p in (kit.base / "rates").glob("*.txt")) == ["alice.txt", "alice~k0.txt",
+                                                                             "alice~k1.txt", "alice~k2.txt"]
 
 
 # -- the route -----------------------------------------------------------------------------------------

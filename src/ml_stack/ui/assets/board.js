@@ -1,4 +1,4 @@
-/* <ml-board endpoint="/board">: the workspace's boards, threads and direct conversations, read-only.
+/* <ml-board endpoint="/board">: the workspace's boards, threads and direct conversations, with a live feed and the person's composer (`readonly` removes it).
    Every string from the route is shown as text after control and bidirectional characters are
    removed; nothing is parsed as markup and no link is made. The page holds no token. */
 import { MlElement, define, h } from "./base.js";
@@ -8,6 +8,8 @@ const BODY_MAX = 4000;
 const LINE_MAX = 200;
 const POLL_MIN = 3000;
 const POLL_MAX = 60000;
+const WAIT_S = 20;
+const POST_MAX = 16000;
 
 /** `value` on one line, hidden characters turned to spaces, at most `max` characters. */
 export function line(value, max = LINE_MAX) {
@@ -19,7 +21,8 @@ export function body(value, max = BODY_MAX) {
   return String(value ?? "").replace(/\r/g, "").replace(HIDDEN, (c) => (c === "\n" ? "\n" : " ")).slice(0, max);
 }
 
-/** The next poll delay: doubles from `POLL_MIN` up to `POLL_MAX` after a failure, resets on success. */
+/** The pause before asking again: doubles from `POLL_MIN` up to `POLL_MAX` after a failure; a
+    successful long poll asks again at once. */
 export function nextDelay(current, failed) {
   return failed ? Math.min(POLL_MAX, Math.max(POLL_MIN, current) * 2) : POLL_MIN;
 }
@@ -63,12 +66,24 @@ main h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
 .cut { color: var(--ml-yellow-ink); font-size: 12px; }
 .back { all: unset; cursor: pointer; color: var(--ml-accent-ink); font-size: 13px; }
 .back:focus-visible { outline: 2px solid var(--ml-focus); outline-offset: 2px; }
+.composer { display: grid; gap: 6px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--ml-line); }
+.composer textarea, .composer input { font: inherit; color: var(--ml-text); background: var(--ml-sunken);
+  border: 1px solid var(--ml-line-strong); border-radius: 6px; padding: 6px 8px; width: 100%; }
+.composer textarea { min-height: 64px; resize: vertical; }
+.composer button { justify-self: start; padding: 5px 14px; border-radius: 6px; cursor: pointer;
+  background: var(--ml-accent); color: var(--ml-on-accent); border: 0; font-weight: 600; }
+.composer button[disabled] { opacity: .5; cursor: default; }
+.composer .err { color: var(--ml-red-ink); font-size: 12px; }
+nav .new { display: flex; gap: 4px; padding: 6px 14px; }
+nav .new input { flex: 1; min-width: 0; font: inherit; color: var(--ml-text);
+  background: var(--ml-surface); border: 1px solid var(--ml-line-strong); border-radius: 6px; padding: 2px 6px; }
 .state { padding: 24px 8px; color: var(--ml-muted); }
 .state.error { color: var(--ml-red-ink); }
 `;
 
 class MlBoard extends MlElement {
-  static props = { endpoint: "string", interval: "number" };
+  static props = { endpoint: "string", interval: "number", readonly: "bool" };
   static styles = STYLES;
 
   build() {
@@ -77,8 +92,13 @@ class MlBoard extends MlElement {
     this.dms = [];
     this.head = "";
     this.delay = POLL_MIN;
+    this.seq = 0;
+    this.me = "";
+    this.draft = { body: "", subject: "", error: "" };
     this.nav = h("nav", { "aria-label": "Boards and conversations" });
-    this.main = h("main", { "aria-live": "polite" });
+    this.feed = h("div", { "aria-live": "polite" });
+    this.compose = h("div", {});
+    this.main = h("main", {}, this.feed, this.compose);
     this.root.append(h("div", { class: "shell" }, this.nav, this.main));
   }
 
@@ -99,6 +119,16 @@ class MlBoard extends MlElement {
     return e.endsWith("/") ? e.slice(0, -1) : e;
   }
 
+  async send(doc) {
+    const r = await fetch(`${this.base()}/post`, {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(doc) });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(line(out.error || r.status, 160));
+    return out;
+  }
+
   async get(route, params = {}) {
     const q = new URLSearchParams(params).toString();
     const r = await fetch(`${this.base()}/${route}${q ? `?${q}` : ""}`, {
@@ -107,26 +137,30 @@ class MlBoard extends MlElement {
     return r.json();
   }
 
-  schedule() {
+  schedule(pause = 0) {
     clearTimeout(this.timer);
     if (this.stopped) return;
-    this.timer = setTimeout(() => this.poll(), this.interval || this.delay);
+    this.timer = setTimeout(() => this.poll(), pause || this.interval || 0);
   }
 
   async poll() {
+    let pause = 0;
     try {
-      const { head } = await this.get("head");
+      const { seq } = await this.get("wait", { after: this.seq, timeout: WAIT_S });
       this.delay = nextDelay(this.delay, false);
-      if (head !== this.head) { this.head = head; await this.load(); }
+      if (seq > this.seq) { this.seq = seq; await this.load(); }
     } catch {
       this.delay = nextDelay(this.delay, true);
+      pause = this.delay;
     }
-    this.schedule();
+    this.schedule(pause);
   }
 
   async load() {
     try {
-      const [b, d] = await Promise.all([this.get("boards"), this.get("dms")]);
+      const [b, d, h] = await Promise.all([this.get("boards"), this.get("dms"), this.get("head")]);
+      this.seq = Math.max(this.seq, Number(h.seq) || 0);
+      this.me = line(b.me ?? "", 48);
       this.boards = b.boards ?? [];
       this.dms = d.conversations ?? [];
       this.error = "";
@@ -163,22 +197,80 @@ class MlBoard extends MlElement {
       ...this.boards.map((b) => item(b.name, b.unread, this.view.kind !== "none" && this.view.name === b.name,
         () => this.open({ kind: "board", name: b.name }))),
       h("h3", {}, "Direct messages"),
+      ...(this.readonly || !this.me ? [] : [this.newDm()]),
       ...this.dms.map((c) => item(`${c.a} and ${c.b}`, c.unread,
         this.view.kind === "dm" && this.view.a === c.a && this.view.b === c.b,
         () => this.open({ kind: "dm", a: c.a, b: c.b }))));
-    this.main.replaceChildren(...this.pane());
+    this.feed.replaceChildren(...this.pane());
+    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error)]);
+    if (key !== this.composerKey) {
+      this.composerKey = key;
+      const node = this.error ? null : this.composer();
+      this.compose.replaceChildren(...(node ? [node] : []));
+    }
+  }
+
+  newDm() {
+    const box = h("input", { type: "text", maxlength: "48", "aria-label": "Message an agent", placeholder: "agent id" });
+    const open = () => {
+      const name = line(box.value, 48);
+      if (name) this.open({ kind: "dm", a: this.me, b: name });
+    };
+    box.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+    return h("div", { class: "new" }, box, h("button", { type: "button", onclick: open }, "Open"));
+  }
+
+  target() {
+    const v = this.view;
+    if (v.kind === "board") return { to: v.name };
+    if (v.kind === "thread" && v.board) return { to: v.board, reply_to: Number(v.root) || 0 };
+    if (v.kind === "dm" && (v.a === this.me || v.b === this.me)) return { to: v.a === this.me ? v.b : v.a };
+    return null;
+  }
+
+  composer() {
+    const to = this.target();
+    if (this.readonly || !to) return null;
+    const text = h("textarea", { "aria-label": "Message", maxlength: String(POST_MAX) });
+    text.value = this.draft.body;
+    text.addEventListener("input", () => { this.draft.body = text.value; });
+    const subject = this.view.kind === "board" ? h("input", { type: "text", maxlength: "200", "aria-label": "Subject",
+      placeholder: "subject (optional)", value: this.draft.subject }) : null;
+    subject?.addEventListener("input", () => { this.draft.subject = subject.value; });
+    const go = h("button", { type: "button" }, "Send");
+    const post = async () => {
+      if (!text.value.trim()) return;
+      go.disabled = true;
+      try {
+        await this.send({ ...to, body: text.value, subject: subject ? subject.value : "" });
+        this.draft = { body: "", subject: "", error: "" };
+        text.value = "";
+        if (subject) subject.value = "";
+        go.disabled = false;
+        await this.load();
+      } catch (e) {
+        this.draft.error = line(e.message, 160);
+        go.disabled = false;
+        this.update();
+      }
+    };
+    go.addEventListener("click", post);
+    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) post(); });
+    return h("div", { class: "composer" }, subject, text, go,
+      this.draft.error ? h("div", { class: "err", role: "alert" }, this.draft.error) : null);
   }
 
   pane() {
     const v = this.view;
     if (this.error) return [h("p", { class: "state error", role: "alert" }, this.error)];
     if (v.kind === "none") return [h("p", { class: "state" }, "Choose a board or a conversation.")];
-    if (v.kind === "board") return [this.title(line(v.name, 60), "read only"), ...this.threads()];
+    if (v.kind === "board") return [this.title(line(v.name, 60), this.readonly ? "read only" : "live"), ...this.threads()];
     const back = v.kind === "thread" && v.board
       ? h("button", { class: "back", type: "button", onclick: () => this.open({ kind: "board", name: v.board }) },
         `Back to ${line(v.board, 60)}`) : null;
     const title = v.kind === "dm" ? `${line(v.a, 48)} and ${line(v.b, 48)}` : `Thread ${Number(v.root) || ""}`;
-    return [back, this.title(title, "read only"), ...this.messages(v.kind === "dm" ? v.a : "")];
+    return [back, this.title(title, this.readonly ? "read only" : "live"),
+      ...this.messages(v.kind === "dm" ? v.a : "")];
   }
 
   title(text, badge) {

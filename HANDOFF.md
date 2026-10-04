@@ -1145,8 +1145,10 @@ ml-stack-serve profile                                     # every model's servi
   must supply its signed-in check and place the element (`docs/workspace.md`, The Board).
 - [ ] **Board subscriptions deliver a board's older messages to a new member.** A subscription made
   after others posted delivers every unread row after the inbox cursor, bounded by `--limit` only.
-- [ ] **The Board live feed polls `/board/head`.** Server-sent events would avoid the 3 s floor; the person's
-  own posts, subscription edits and views are audited but not yet written as activity records with a
-  `board.*` kind in `activity/schema.py`.
+- [ ] **The page's live feed is a long poll on one wake pipe name per person (`<id>.web`).** Two open tabs
+  share one pipe, so one of them can wake up to 2 s late; `board.view` is recorded for thread lists only.
+- [ ] **A board post wakes every member's follower pipes, and a waiting `wait` rescans on each.** The cost is
+  fine at 40 agents (p99 38 ms); a board with hundreds of members needs the signal limited to subscribers
+  and open followers.
 - [ ] **No board search, edit or delete, and no per-board retention.** Board messages age out with the bus
   (`retention_s`); `boards.jsonl` is never pruned.
