@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
-from ml_stack.workspace import limits as limits_mod, tokens
+from ml_stack.workspace import limits as limits_mod, tokens, wake
 from ml_stack.workspace.boardapi import BoardApi
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
@@ -22,6 +22,8 @@ from ml_stack.workspace.screen import Refused, fence, injection_markers, refusal
 from ml_stack.workspace.slots import testslots
 
 __all__ = ["Workspace"]
+
+CANCEL_SLICE_S = 0.25
 
 class SendOptions(TypedDict, total=False):
     """What `Workspace.send` takes besides who, what and to whom."""
@@ -83,7 +85,8 @@ class Workspace:
         self.rates = Rates(self.base, self.limits.sends_per_window, self.limits.window_s, clock)
         self.scratch = Scratch(self.base, self.limits.scratch_bytes, self.limits.scratch_ttl_s,
                                self.limits.scratch_folders, clock)
-        self.claims = Claims(self.base, self.limits.claim_ttl_s, clock, self._swept)
+        self.claims = Claims(self.base, self.limits.claim_ttl_s, clock, self._swept,
+                             self._stolen)
         self.board = BoardApi(self)
 
     def _may(self, who: Identity, cap: str) -> None:
@@ -132,6 +135,8 @@ class Workspace:
     def mint(self, token: str, name: str, role: str = "agent", ttl_s: float = 0.0) -> str:
         """A token for ``name``, if the caller's role may mint ``role``."""
         who = self.auth(token)
+        if who.role != HUMAN:
+            self.registry.within(who.id, self.limits.mints_per_identity, self.limits.agents_live)
         made = self.registry.mint(who, name, role, ttl_s or self.limits.token_ttl_s)
         self.audit("mint", who.id, agent=name, role=role)
         return made
@@ -156,6 +161,8 @@ class Workspace:
             raise Refused(f"{what} was not written: {'; '.join(why)}. Remove it and send again.")
         try:
             self.rates.admit(who.id, self.limits.child_sends_per_window if who.parent else 0)
+            if who.parent:
+                self.rates.admit(who.parent)
         except RateLimited:
             self.audit("write.refused", who.id, what=what, why="rate")
             raise
@@ -201,6 +208,12 @@ class Workspace:
         if to != BROADCAST and not to.startswith("#") and self.bus.pending(to) >= self.limits.inbox_pending:
             self.audit("write.refused", who.id, what="message", why="inbox-full", to=to)
             raise Refused(f"{to} has {self.limits.inbox_pending} unread messages; wait for it to read")
+        if to != BROADCAST and not to.startswith("#") and sum(
+                1 for r in self.bus.inbox(to, limit=1 << 30) if r["from"] == who.id
+        ) >= self.limits.unread_per_sender:
+            self.audit("write.refused", who.id, what="message", why="sender-share", to=to)
+            raise Refused(f"{who.id} already has {self.limits.unread_per_sender} unread messages "
+                          f"waiting for {to}")
         thread = 0
         if reply_to:
             parent = self.bus.get(reply_to)
@@ -215,6 +228,8 @@ class Workspace:
             "held": qid, "flags": flags, "label": label, "mentions": mentions,
             "expires": self.clock() + ttl_s if ttl_s else 0.0})
         self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label)
+        if to.startswith("#"):
+            wake.signal(self.base / "wake", self.board.listeners(row))
         return self.deliver(row, raw=True)
 
     def deliver(self, row: dict[str, Any], raw: bool = False) -> dict[str, Any]:
@@ -271,17 +286,22 @@ class Workspace:
         self._may(who, "read")
         return [self.deliver(r, raw=True) for r in self.bus.outbox(who.id, limit)]
 
-    def wait(self, token: str, timeout_s: float, ack: bool = False,
-             raw: bool = False) -> list[dict[str, Any]]:
-        """Block until there is something to read or ``timeout_s`` passes."""
+    def wait(self, token: str, timeout_s: float, ack: bool = False, raw: bool = False,
+             cancel: Callable[[], bool] | None = None) -> list[dict[str, Any]]:
+        """Block until there is something to read, ``timeout_s`` passes or ``cancel()`` is true."""
         who = self.auth(token)
         self._may(who, "read")
         deadline = time.monotonic() + timeout_s
-        while True:
-            found = self._unread(who, 50)
-            if found or time.monotonic() >= deadline:
-                break
-            time.sleep(min(0.1, max(deadline - time.monotonic(), 0.0)))
+        waiter = wake.Waiter(self.base / "wake", who.id)
+        try:
+            while True:
+                found = self._unread(who, 50)
+                left = deadline - time.monotonic()
+                if found or left <= 0 or (cancel is not None and cancel()):
+                    break
+                waiter.sleep(left if cancel is None else min(left, CANCEL_SLICE_S))
+        finally:
+            waiter.close()
         if ack and found:
             self.bus.ack(who.id, found[-1]["seq"])
         return [self.deliver(r, raw) for r in found]
@@ -399,7 +419,11 @@ class Workspace:
 
     # -- claims --------------------------------------------------------------------------
     def _swept(self, claim: dict[str, Any]) -> None:
-        self.audit("claim.expired", claim["owner"], kind=claim["kind"], key=claim["key"])
+        self.audit(f"claim.{claim['reason']}", claim["owner"], kind=claim["kind"], key=claim["key"])
+
+    def _stolen(self, old: dict[str, Any], new: dict[str, Any]) -> None:
+        self.audit("claim.stolen", new["owner"], kind=new["kind"], key=new["key"],
+                   previous=old["owner"])
 
     def claim(self, token: str, kind: str, key: str,
               **opts: Unpack[ClaimOptions]) -> dict[str, Any]:
@@ -431,6 +455,13 @@ class Workspace:
         who = self.auth(token)
         self._may(who, "claim")
         return self.claims.heartbeat(who, ttl_s)
+
+    def renew(self, token: str, ttl_s: float = 0.0) -> list[dict[str, Any]]:
+        """Renew every claim the caller holds; returns them, each marked ``capped`` when the
+        lifetime cap held it back."""
+        who = self.auth(token)
+        self._may(who, "claim")
+        return self.claims.renew(who, ttl_s)
 
     def who_owns(self, kind: str, key: str) -> dict[str, Any] | None:
         """The claim that covers ``key``, or None."""
@@ -477,7 +508,14 @@ class Workspace:
                 "notes": chain["notes"]["rows"],
                 "quarantined": sum(1 for q in self.quarantine_list() if q["state"] == "quarantined"),
                 "claims": self.claims.listing(), "chains_ok": chain["ok"],
+                "fullest_inboxes": self.fullest_inboxes(),
                 "testslots": testslots()}
+
+    def fullest_inboxes(self, top: int = 5) -> list[dict[str, Any]]:
+        """The identities with the most unread messages, most first."""
+        counts = [{"id": n, "unread": self.bus.pending(n)} for n in self.registry.ids()
+                  if self.registry.role_of(n)]
+        return sorted((c for c in counts if c["unread"]), key=lambda c: -c["unread"])[:top]
 
     def registered(self) -> list[dict[str, Any]]:
         """Each live identity with its role, last audited action, unread count and expiry."""

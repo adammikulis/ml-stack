@@ -190,7 +190,7 @@ def test_a_claim_is_released_when_its_process_dies(kit):
             time.sleep(0.05)
         assert kit.ws.who_owns("port", "9100") is None
         assert kit.ws.claim(b, "port", "9100")["owner"] == "beta"
-        assert any(r["event"] == "claim.expired" and r["who"] == "alpha"
+        assert any(r["event"] == "claim.dead-pid" and r["who"] == "alpha"
                    for r in kit.ws.audit_log.rows())
     finally:
         if child.poll() is None:
@@ -222,3 +222,33 @@ def test_two_processes_racing_for_a_port_have_exactly_one_winner(kit):
                                    "ML_STACK_WORKSPACE_TOKEN": t}) for t in tokens]
     results = sorted(p.communicate(timeout=120)[0].strip() for p in procs)
     assert results == ["lost", "lost", "lost", "won"]
+
+
+def test_a_claim_taken_over_an_expired_one_is_audited_as_stolen(monkeypatch, tmp_path):
+    now = [1000.0]
+    kit = Kit(clean_env(monkeypatch, tmp_path), clock=lambda: now[0])
+    a, b = kit.agent("alpha"), kit.agent("beta")
+    kit.ws.claim(a, "port", "9300", ttl_s=10)
+    now[0] += 60
+    kit.ws.claim(b, "port", "9300")
+    events = {r["event"]: r for r in kit.ws.audit_log.rows()}
+    assert events["claim.expired"]["who"] == "alpha"
+    assert events["claim.stolen"]["who"] == "beta" and events["claim.stolen"]["previous"] == "alpha"
+    assert events["claim.stolen"]["key"] == "9300"
+
+
+def test_renewing_says_which_claims_the_lifetime_cap_held_back(monkeypatch, tmp_path):
+    now = [1000.0]
+    kit = Kit(clean_env(monkeypatch, tmp_path), clock=lambda: now[0])
+    a = kit.agent("alpha")
+    kit.ws.claim(a, "port", "9301", ttl_s=100)
+    for _ in range(9):
+        now[0] += 3000
+        renewed = kit.ws.renew(a, 3600)
+    assert [c["capped"] for c in renewed] == [True]
+    from ml_stack.workspace import tools
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a)
+    out = tools.workspace_heartbeat(3600)
+    assert out["renewed"] == 1 and out["capped"] == ["port:9301"]
+    listing = kit.ws.claims.listing()[0]
+    assert "expires_in_s" in listing and "expiring_soon" in listing

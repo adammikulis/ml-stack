@@ -315,6 +315,15 @@ class BoardApi:
             self.store.mark(who.id, f"dm:{other}", out[-1]["seq"])
         return out
 
+    def ui_dm(self, token: str, a: str, b: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Plain, bounded messages between ``a`` and ``b`` for a page; a person or lead only."""
+        who = self._who(token)
+        if not (valid_id(a) and valid_id(b)):
+            raise ValueError("name two agent ids")
+        self._pair_ok(who, a, b)
+        return [{**self._plain(r), "direction": "sent" if r["from"] == a else "received"}
+                for r in self._pair_rows(a, b)[-max(limit, 0):]]
+
     def dm_list(self, token: str) -> list[dict[str, Any]]:
         """The conversations the caller is in, or every pair for a person or lead."""
         who = self._who(token)
@@ -438,6 +447,13 @@ class BoardApi:
         return [r for r in self._rows() if r["seq"] > after and r["from"] != who.id
                 and self.can_read(who, r["to"], boards)
                 and self._mode(mine, {**r, "mentions": r.get("mentions", [])}, who.id) == mode]
+
+    def listeners(self, row: dict[str, Any]) -> list[str]:
+        """The identities whose subscriptions deliver ``row`` to their inbox."""
+        boards, subs = self.store.state()
+        full = {**row, "mentions": row.get("mentions", [])}
+        return [m for m, mine in subs.items() if m != row["from"] and self._mode(mine, full, m)
+                == "inbox" and self.can_read(Identity(m, AGENT), row["to"], boards)]
 
     # -- digests --------------------------------------------------------------------------
     def digest(self, token: str, ack: bool = False, thread: int = 0) -> dict[str, Any]:

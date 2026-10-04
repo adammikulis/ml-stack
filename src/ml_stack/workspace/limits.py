@@ -48,6 +48,9 @@ class Limits:
     board_message_chars: int = 4_000
     board_read_chars: int = 60_000
     digest_lines: int = 40
+    unread_per_sender: int = 100
+    mints_per_identity: int = 16
+    agents_live: int = 64
     verify_allow: list[list[str]] = field(default_factory=list)
 
 

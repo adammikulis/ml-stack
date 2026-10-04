@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -14,17 +16,19 @@ from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import guide, limits, onboard, project, tokens
+from ml_stack.workspace.boards import MODES, STYPES
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
 from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
-from ml_stack.workspace.screen import Refused
+from ml_stack.workspace.screen import Refused, fence
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["COMMANDS", "main"]
 
+CANCELLED = threading.Event()
 LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
 CODES = ((Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
          (HumanRequired, 3), (EOFError, 2), (ValueError, 2), (OSError, 2))
@@ -51,10 +55,39 @@ def _token(args: argparse.Namespace) -> str:
     return tokens.resolve(limits.root(), token_file=args.token_file, agent=args.agent)
 
 
+def _block(lines: list[str], what: str) -> str:
+    return fence("\n".join(lines), f"workspace:{what}", "names and subjects written by agents").text
+
+
+def _row(value: dict[str, Any]) -> str:
+    if "root" in value:
+        return (f"[{value['root']}] {value['subject']}  ({value['from']}, {value['replies']} "
+                f"replies, {value['unread']} unread)")
+    if "members" in value:
+        return (f"{value['name']}  {value['unread']} unread, {value['posts']} posts"
+                f"{'' if value['member'] else ', not a member'}  {value['title']}")
+    if "mode" in value:
+        return f"{value['type']} {value['target']} -> {value['mode']}".replace("  ", " ")
+    return f"{value['a']} <-> {value['b']}  {value['messages']} messages, {value['unread']} unread"
+
+
 def _text(value: Any) -> str:
     if isinstance(value, dict) and "text" in value and "seq" in value:
-        return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])} "
-                f"({value['trust']}, no authority, {value['state']})\n{value['text']}")
+        where = f" on {value['board']}" if value.get("board") else ""
+        return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])}"
+                f"{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
+    if isinstance(value, dict) and value.get("authority") == "none" and "text" in value:
+        return str(value["text"])
+    if isinstance(value, list) and value and all(
+            isinstance(v, dict) and ({"root", "replies"} <= v.keys() or {"members", "posts"} <= v.keys()
+                                     or {"a", "b", "messages"} <= v.keys()) for v in value):
+        return _block([_row(v) for v in value], "board")
+    if isinstance(value, list) and value and all(
+            isinstance(v, dict) and {"type", "target", "mode"} == v.keys() for v in value):
+        return _block([_row(v) for v in value], "subscriptions")
+    if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
+        soon = ", expiring soon" if value.get("expiring_soon") else ""
+        return f"{value['kind']} {value['key']}  {value['owner']}  expires in {value['expires_in_s']:.0f} s{soon}"
     if isinstance(value, dict) and "text" in value and "kind" in value:
         return (f"note {value['id']} {value['kind']} ({value['trust']}"
                 f"{', stale' if value['stale'] else ''}): {value['status']}\n{value['text']}")
@@ -86,7 +119,7 @@ def _watch(args: argparse.Namespace, ws: Workspace, token: str) -> int:
         left = args.timeout - (time.monotonic() - began) if args.timeout else 5.0
         if args.timeout and left <= 0:
             return 3
-        batch = ws.wait(token, min(5.0, left), ack=True)
+        batch = ws.wait(token, min(5.0, left), ack=True, cancel=CANCELLED.is_set)
         for item in batch:
             _show(args, item)
             sys.stdout.flush()
@@ -197,9 +230,68 @@ def _brief(args: argparse.Namespace, ws: Workspace) -> int:
     return 0
 
 
+def _heartbeat(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    claims = ws.renew(token, args.ttl)
+    return {"renewed": len(claims), "capped": [f"{c['kind']}:{c['key']}" for c in claims if c["capped"]]}
+
+
+BOARD_ACTIONS = ("list", "read", "post", "threads", "create", "add", "mentions")
+
+
+def _board(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    b, name, rest = ws.board, args.name, args.rest
+    if args.action == "list":
+        return b.list(token)
+    if args.action == "mentions":
+        return b.mentions(token, args.limit)
+    if not name:
+        raise ValueError(f"board {args.action} needs a board name such as #general")
+    if args.action == "read":
+        return b.read(token, name, args.limit, args.after, not args.no_mark)
+    if args.action == "threads":
+        return b.threads(token, name, args.limit)
+    if args.action == "create":
+        return b.create(token, name, private=args.private, title=" ".join(rest))
+    if not rest:
+        raise ValueError(f"board {args.action} needs one more argument")
+    if args.action == "add":
+        return b.add(token, name, rest[0])
+    return ws.send(token, name, args.type, _body(" ".join(rest)), subject=args.subject,
+                   reply_to=args.reply_to, label=_label(args))
+
+
+def _dm(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    if not args.name:
+        return ws.board.dm_list(token)
+    if args.body:
+        ws.send(token, args.name, args.type, _body(args.body), subject=args.subject,
+                reply_to=args.reply_to, label=_label(args))
+    return ws.board.dm(token, args.name, args.between, args.limit)
+
+
+def _subscribe(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    return ws.board.subscribe(token, args.type, args.target, args.mode)
+
+
+def _digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    return ws.board.digest(token, args.ack, args.thread)
+
+
 def _ttl(text: str) -> float:
     units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
+
+
+def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
+    from ml_stack.workspace import boardroute
+
+    server = boardroute.serve(ws, args.port)
+    say(f"the Board, read-only, for the person: http://127.0.0.1:{server.server_address[1]}/")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.server_close()
+    return 0
 
 
 LIVE = [flag("--no-live", action="store_true", help="skip the live check"),
@@ -221,6 +313,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
         flag("--ttl-hours", type=float, default=720.0, help="how long new tokens last"),
         flag("--yes", action="store_true", help="no questions: token files for the names given"),
         *LIVE], _setup),
+    ("board-serve", "serve the read-only Board page on a loopback port; the person's identity, no token in the page",
+     [flag("--port", type=int, default=0)], _board_serve),
     ("doctor", "check the whole setup and say what to fix; at a terminal", [], _doctor),
     ("hello", "send AGENT the first message ('workspace ready'); at a terminal", [flag("name")],
      _hello),
@@ -246,6 +340,33 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         *READ, flag("--limit", type=int, default=50),
         flag("--children", action="store_true", help="only messages from your delegates")],
      _inbox),
+    ("board", "boards: list, read NAME, post NAME TEXT, threads NAME, create NAME [TITLE], add NAME AGENT, mentions", [
+        flag("action", choices=BOARD_ACTIONS), flag("name", nargs="?", default=""),
+        flag("rest", nargs="*"), flag("--type", choices=TYPES, default="note"),
+        flag("--subject", default=""), flag("--reply-to", type=int, default=0),
+        flag("--limit", type=int, default=50), flag("--after", type=int, default=0),
+        flag("--private", action="store_true", help="create: only people you add can join"),
+        flag("--no-mark", action="store_true", help="read: leave the board's unread count")],
+     _board),
+    ("join-board", "join an open board", [flag("name")], lambda a, w, t: w.board.join(t, a.name)),
+    ("leave-board", "leave a board", [flag("name")], lambda a, w, t: w.board.leave(t, a.name)),
+    ("dm", "the two-sided conversation with NAME (BODY sends first); no NAME lists them", [
+        flag("name", nargs="?", default=""), flag("body", nargs="?", default=""),
+        flag("--type", choices=TYPES, default="note"), flag("--subject", default=""),
+        flag("--reply-to", type=int, default=0), flag("--limit", type=int, default=50),
+        flag("--between", default="", help="a person or lead: the pair BETWEEN and NAME")],
+     _dm),
+    ("subscribe", "choose what reaches your inbox: board, thread, agent, kind or mentions", [
+        flag("type", choices=STYPES), flag("target", nargs="?", default=""),
+        flag("--mode", choices=MODES, default="inbox",
+             help="inbox, digest (summarised by `digest`) or silent (kept, never delivered)")],
+     _subscribe),
+    ("unsubscribe", "drop a subscription; messages stay", [
+        flag("type", choices=STYPES), flag("target", nargs="?", default="")],
+     lambda a, w, t: w.board.unsubscribe(t, a.type, a.target)),
+    ("subs", "your subscriptions", [], lambda a, w, t: w.board.subs(t)),
+    ("digest", "a bounded summary of digest subscriptions, or of --thread N", [
+        flag("--thread", type=int, default=0), flag("--ack", action="store_true")], _digest),
     ("delegate", "mint a weaker child identity NAME for a subagent; prints its token file path", [
         flag("name"), flag("--ttl", default="8h", help="e.g. 8h, 30m (never longer than yours)"),
         flag("--can", default="", help="comma list from send,read,claim (default: all you hold)")],
@@ -287,8 +408,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--pid", type=int, default=0, help="release when this process is gone"),
         flag("--note", default="")], _claim),
     ("release", "give a claim up", CLAIM, lambda a, w, t: w.release(t, a.kind, a.key)),
-    ("heartbeat", "renew every claim you hold", [flag("--ttl", type=float, default=0.0)],
-     lambda a, w, t: {"renewed": w.heartbeat(t, a.ttl)}),
+    ("heartbeat", "renew every claim you hold", [flag("--ttl", type=float, default=0.0)], _heartbeat),
     ("who", "who owns this?", CLAIM,
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),
     ("claims", "every live claim", [OWNER, flag("--kind", choices=CLAIM_KINDS, default="")],
@@ -300,7 +420,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("audit-head", "the audit log's head hash, to keep as an anchor", [],
      lambda a, w, t: {"head": w.audit_log.head()}),
     ("status", "who is registered, unread counts, claims, the test-slot queue; any agent token", [],
-     lambda a, w, t: (w.auth(t), w.status())[1]),
+     lambda a, w, t: {**w.status(), **w.board.summary(t)}),
     ("gc", "prune old messages and expired scratch; lead or human", [],
      lambda a, w, t: w.gc(t)),
 )
@@ -328,6 +448,11 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
 
 
 def _watching(args: argparse.Namespace) -> int:
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, lambda *_: CANCELLED.set())
+        except ValueError:
+            break
     return _watch(args, Workspace(), _token(args))
 
 
