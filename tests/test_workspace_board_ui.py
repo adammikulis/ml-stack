@@ -35,11 +35,12 @@ def test_the_element_is_loaded_by_ml_ui_and_builds_nothing_from_markup():
     source = (assets_dir() / "board.js").read_text(encoding="utf-8")
     assert 'import "./board.js"' in (assets_dir() / "ml-ui.js").read_text(encoding="utf-8")
     for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "eval(", "new Function",
-                   "document.write", "localStorage", "sessionStorage", "window.open",
+                   "document.write", "window.open",
                    "target="):
         assert banned not in source, banned
     assert re.search(r'define\("ml-board"', source)
-    assert source.count('method: "POST"') == 1 and source.count("/post`") == 1
+    assert 'method: document ? "POST" : "GET"' in source
+    assert 'this.request("post", {}, document)' in source
     assert "PUT" not in source and "DELETE" not in source
 
 
@@ -156,3 +157,30 @@ def test_the_person_chats_from_the_page_and_an_agent_reads_it_fenced(kit, served
     page.evaluate("document.querySelector('ml-board').readonly = true")
     page.wait_for_function("!document.querySelector('ml-board').shadowRoot.querySelector('.composer')")
     page.close()
+
+
+@pytest.mark.slow
+def test_drafts_are_scoped_to_channel_and_survive_reload_without_posting(kit, served, browser):
+    from playwright.sync_api import expect
+
+    ws, t = kit.ws, kit.tokens
+    ws.board.create(t['alice'], '#ops')
+    ws.board.create(t['alice'], '#other')
+    context = browser.new_context()
+    page = context.new_page()
+    posts = []
+    page.on('request', lambda request: posts.append(request.url) if request.method == 'POST' else None)
+    page.goto(f'http://127.0.0.1:{served}/')
+    page.get_by_role('button', name='#ops', exact=True).click()
+    editor = page.locator('ml-board textarea')
+    editor.fill('Unsent operations draft')
+    page.get_by_role('button', name='#other', exact=True).click()
+    expect(editor).to_have_value('')
+    editor.fill('A different channel draft')
+    page.reload()
+    expect(editor).to_have_value('A different channel draft')
+    page.get_by_role('button', name='#ops', exact=True).click()
+    expect(editor).to_have_value('Unsent operations draft')
+    assert not posts
+    assert not ws.board.ui_read(kit.owner, '#ops')['messages']
+    context.close()
