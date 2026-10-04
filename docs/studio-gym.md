@@ -91,7 +91,11 @@ they add no simulator collisions or obstacles. Stop signs and stop lines follow 
 stop-task metadata.
 
 Use **Follow car** for a chase camera; dragging the orbit controls turns follow off, and
-checking it again resumes tracking. **Whole map** fits the scene. **Sensor rays** toggles
+checking it again resumes tracking. **Driver view** switches to eye height inside the selected
+car; **Chase view** returns behind it. Press **C** to switch between these views. The selected
+car exterior is hidden in driver view so its roof does not obstruct the camera. Movement is
+interpolated for display only; sensor measurements and recorded trajectories retain native
+values. **Whole map** fits the scene. **Sensor rays** toggles
 lidar lines: cyan marks clear range, coral marks detected surfaces and hit markers.
 **Heading / control** shows the native heading in blue and the normalized applied steering
 vector in gold. The steering vector shows the current action, rather than a predicted path.
