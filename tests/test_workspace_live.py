@@ -407,4 +407,4 @@ def test_the_posting_function_itself_refuses_an_agent_token(kit):
     with pytest.raises(Denied):
         boardroute._post(kit.ws, kit.tokens["alice"], body)
     with pytest.raises(ValueError):
-        boardroute._post(kit.ws, kit.owner, b"x" * 40000)
+        boardroute._post(kit.ws, kit.owner, json.dumps({"to": "#general", "body": "x" * 40000}).encode())

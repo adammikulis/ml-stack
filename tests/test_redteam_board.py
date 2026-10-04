@@ -233,7 +233,7 @@ def test_a_post_cannot_borrow_another_identity_or_smuggle_options(kit, route):
         body = json.dumps({"to": "#general", "body": "who am i", **extra})
         status, _ = route("/board/post", "POST", own, body)
         assert status == 200
-    posted = [m for m in kit.ws.board.ui_read(kit.owner, "#general")["messages"]]
+    posted = kit.ws.board.ui_read(kit.owner, "#general")["messages"]
     assert {m["from"] for m in posted} == {"owner"} and {m["role"] for m in posted} == {"human"}
     assert all(m["label"] == "" for m in posted)
 

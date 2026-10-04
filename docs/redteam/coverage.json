@@ -1,7 +1,7 @@
 {
- "surfaces": 569,
+ "surfaces": 574,
  "by_status": {
-  "covered": 262,
+  "covered": 267,
   "partial": 202,
   "uncovered": 54,
   "n/a": 51,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 44,
+   "covered": 48,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 44,
+   "covered": 45,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -2859,9 +2859,69 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/boardapi.py:BoardApi.follow",
+   "kind": "human",
+   "source": "workspace/boardapi.py:BoardApi.follow",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/boardapi.py:BoardApi.join",
    "kind": "human",
    "source": "workspace/boardapi.py:BoardApi.join",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/boardroute.py:_post",
+   "kind": "human",
+   "source": "workspace/boardroute.py:_post",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/chat.py:run",
+   "kind": "human",
+   "source": "workspace/chat.py:run",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/cli.py:_chat",
+   "kind": "human",
+   "source": "workspace/cli.py:_chat",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -4926,9 +4986,12 @@
     "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
     "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
     "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
-    "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site"
+    "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
+    "tests/test_redteam_board.py::test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it",
+    "tests/test_redteam_board.py::test_a_post_cannot_borrow_another_identity_or_smuggle_options",
+    "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read"
    ],
-   "note": "the read-only loopback route, board and conversation privacy, board and subscription caps, a person's board membership"
+   "note": "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, a person's board membership"
   },
   {
    "id": "parser:workspace/chain.py",
@@ -4947,6 +5010,19 @@
    "id": "parser:workspace/notes.py",
    "kind": "parser",
    "source": "workspace/notes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/rates.py",
+   "kind": "parser",
+   "source": "workspace/rates.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",
