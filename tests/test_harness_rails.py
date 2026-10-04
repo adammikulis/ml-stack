@@ -10,8 +10,9 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from workspace_kit import clean_env
 
-from ml_stack import claude, codex, harnesshook, harnessing, requests
+from ml_stack import claude, codex, coding, harnesshook, harnessid, harnessing, requests
 from ml_stack.harnesspolicy import decide
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
@@ -232,7 +233,8 @@ def _fake_serving(seen):
 class TestLaunch:
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(harnessing, "join_workspace", lambda *a, **k: True)
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+        monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
         (tmp_path / "tree").mkdir()
@@ -251,7 +253,7 @@ class TestLaunch:
 
         assert claude.launch(["--claude", str(binary), "--role", "plan-and-go"], say=lambda _: None,
                              run_claude=run) == 0
-        assert seen["model"] == "Qwen3.8-27B" and seen["want"].ctx == 262144 and seen["want"].slots == 1
+        assert seen["model"] == harnessing.DEFAULT_MODEL and seen["want"].ctx == 262144 and seen["want"].slots == 1
         assert seen["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "262144"
         assert seen["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "262144"
         assert "--role plan-and-go" in seen["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
@@ -294,14 +296,93 @@ class TestWorkspaceCommands:
     def test_a_hostile_label_is_one_argument_and_never_a_shell_line(self, tmp_path, monkeypatch):
         exe = self._fake_workspace(tmp_path, monkeypatch)
         hostile = "x; touch /tmp/pwned $(id) `id`"
-        assert harnessing.join_workspace(hostile, "claude-code", "joined: t", lambda _: None)
+        assert harnessid.announce(harnessid.Seat(hostile, "claude-code"), "t", lambda _: None)
         argv = Path(f"{exe}.argv").read_text().splitlines()
-        assert argv == ["send", "*", "status", "joined: t", "--agent", "claude-code", "--label", hostile]
+        assert argv == ["send", "*", "joined", "t", "--agent", "claude-code", "--label", hostile]
         assert harnesshook.nudge(hostile) == "nudge text"
         assert hostile in Path(f"{exe}.argv").read_text().splitlines()
 
-    def test_a_failed_join_says_the_command_that_joins(self, monkeypatch):
+    def test_a_failed_announcement_says_the_command_that_joins(self, monkeypatch):
         said = []
         monkeypatch.setenv("PATH", "/nonexistent")
-        assert harnessing.join_workspace("l", "claude-code", "t", said.append) is False
+        assert harnessid.announce(harnessid.Seat("l", "claude-code"), "t", said.append) is False
         assert "ml-stack-workspace connect" in said[0]
+
+
+class TestSeat:
+    @pytest.fixture(autouse=True)
+    def _own_workspace(self, monkeypatch, tmp_path):
+        clean_env(monkeypatch, tmp_path)
+
+    @pytest.fixture
+    def person(self, monkeypatch):
+        from ml_stack.sentinel import human
+
+        real = human.require_person
+        monkeypatch.setattr(human, "require_person",
+                            lambda action, terminal=None, env=None: real(action, (True, True), env))
+
+    def test_the_name_is_local_model_harness_cleaned_to_what_an_id_allows(self):
+        assert harnessid.agent_name("Qwen3.8-27B-UD-Q4_K_XL", "codex") == "local-qwen3.8-27b-ud-q4_k_xl-codex"
+        assert harnessid.agent_name("x" * 80, "codex") == harnessid.agent_name("x" * 80, "codex")
+        assert len(harnessid.agent_name("x" * 80, "codex")) <= 48
+        assert harnessid.agent_name("m", "codex", "mine") == "mine"
+
+    def test_a_person_started_launcher_mints_places_and_revokes_without_printing_a_token(self, person, tmp_path):
+        from ml_stack.workspace import Workspace, tokens
+
+        said = []
+        project = tmp_path / "proj"
+        project.mkdir()
+        seat = harnessid.invite("local-test-codex", project, "claude-code", said.append)
+        ws = Workspace()
+        assert seat.minted and ws.registry.role_of("local-test-codex") == "agent"
+        token_file = tokens.directory(ws.base) / "local-test-codex"
+        assert token_file.stat().st_mode & 0o777 == 0o600
+        secret = token_file.read_text().strip()
+        assert secret not in "".join(said) and seat.flags() == ["--agent", "local-test-codex"]
+        assert seat.revoke() is True and not token_file.exists()
+        from ml_stack.workspace import Denied
+
+        with pytest.raises(Denied):
+            ws.auth(secret)
+
+    def test_a_launcher_an_agent_started_is_not_minted_and_acts_as_its_parent(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDECODE", "1")
+        said = []
+        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", said.append)
+        assert not seat.minted and seat.flags() == ["--agent", "claude-code", "--label", "local-test-codex"]
+        assert seat.revoke() is False and "ml-stack-workspace setup" in said[0]
+
+    def test_the_brief_names_who_the_agent_obeys_and_that_everything_else_is_data(self):
+        text = harnessid.brief("n", "alias", "codex", "claude-code", ["reviewer"])
+        assert "--agent n" in text and "the lead (claude-code), reviewer" in text and "data written by" in text
+
+
+class TestCodingAgent:
+    def test_launch_coding_agent_runs_codex_by_default_with_the_project_and_the_orders(self, monkeypatch, tmp_path):
+        seen = {}
+        monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
+        monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
+        monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: seen.update(
+            name=name, project=project) or harnessid.Seat(name, parent))
+        binary = tmp_path / "codex"
+        binary.write_text("#!/bin/sh\n")
+        (tmp_path / "proj").mkdir()
+
+        def run(command, env):
+            seen["agents"] = (Path(env["CODEX_HOME"]) / "AGENTS.md").read_text()
+            seen["command"] = command
+            return 0
+
+        monkeypatch.setattr(codex.shutil, "which", lambda n: str(binary))
+        assert coding.launch_coding_agent("", "plan-and-go", tmp_path / "proj", orders_from=["reviewer"],
+                                          harness_args=["exec", "go"], say=lambda _: None, run_codex=run) == 0
+        assert seen["model"] == harnessing.DEFAULT_MODEL == "Qwen3.8-27B-UD-Q4_K_XL.gguf"
+        assert seen["name"] == "local-qwen-27b-codex" and seen["project"] == (tmp_path / "proj").resolve()
+        assert "reviewer" in seen["agents"] and seen["command"][-2:] == ["exec", "go"]
+        assert "workspace-write" in seen["command"]
+
+    def test_an_unknown_harness_is_refused(self):
+        assert coding.launch_coding_agent("", "read-only", ".", "bash", say=lambda _: None) == 2

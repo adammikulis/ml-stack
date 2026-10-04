@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import claude, harnessing
+from ml_stack import claude, harnessid
 
 
 @pytest.fixture(autouse=True)
 def _no_workspace(monkeypatch):
-    monkeypatch.setattr(harnessing, "join_workspace", lambda *a, **k: True)
+    monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+    monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
 
 
 def test_the_environment_points_every_model_call_at_the_server_and_nothing_elsewhere():

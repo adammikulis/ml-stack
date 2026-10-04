@@ -137,7 +137,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     except ValueError as why:
         say(f"error: {why}")
         return 2
-    runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))
+    runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env, cwd=args.project or None))
     if args.on:
         base_url = args.on.rstrip("/")
         alias = alias_of(base_url, "")
@@ -161,30 +161,23 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
 
 def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, str, int],
          say: Callable[[str], None], runner: Callable[..., int]) -> int:
-    """Write the session's settings, join the workspace and run ``command`` (``claude`` and its
-    arguments) with them; ``served`` is the base URL, the alias and the window."""
+    """Write the session's settings and brief, and run ``command`` (``claude`` and its arguments)
+    with them; ``served`` is the base URL, the alias and the window."""
     base_url, alias, window = served
     binary, *extra = command
-    cwd = Path.cwd().resolve()
-    label = harnessing.label_for(args.name, alias)
     try:
-        files = harnessing.session_files(cwd)
+        with harnessing.opened(args, "claude-code", served, say) as run:
+            path = run.files.write("settings.json", settings(run.pre, run.post, harnessing.WAIT_S))
+            brief = run.files.write("brief.md", run.brief)
+            run.files.lock()
+            env = environment(base_url, alias, offline=not args.online, context=window)
+            say(f"role {args.role}; every tool call goes through ml-stack's classifier "
+                f"(settings {path}, outside the working tree)")
+            return int(runner([binary, "--settings", str(path), "--append-system-prompt-file", str(brief),
+                               *extra], env))
     except ValueError as why:
         say(f"error: {why}")
         return 2
-    try:
-        pre = harnessing.hook_command("pre", role=args.role, label=label, root=cwd,
-                                      protect=harnessing.protected_paths(files))
-        post = harnessing.hook_command("post", role=args.role, label=label, root=cwd, protect=[])
-        path = files.write("settings.json", settings(pre, post, harnessing.WAIT_S))
-        files.lock()
-        harnessing.join_workspace(label, args.parent, f"joined: Claude Code on {alias} ({args.role})", say)
-        env = environment(base_url, alias, offline=not args.online, context=window)
-        say(f"role {args.role}; every tool call goes through ml-stack's classifier "
-            f"(settings {path}, outside the working tree)")
-        return int(runner([binary, "--settings", str(path), *extra], env))
-    finally:
-        files.release()
 
 
 def main(argv: Sequence[str] | None = None) -> int:

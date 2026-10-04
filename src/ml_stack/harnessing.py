@@ -10,17 +10,15 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
-import os
 import shlex
 import shutil
 import stat
-import subprocess
 import sys
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from ml_stack import home, hub
+from ml_stack import harnessid, home, hub
 from ml_stack.chatpolicy import APPROVE_FIRST, ROLE_NAMES
 from ml_stack.harnesshook import WAIT_S
 from ml_stack.serve import chat_template, leases, profile, wired
@@ -33,13 +31,12 @@ __all__ = [
     "DEFAULT_ROLE",
     "PARENT",
     "WAIT_S",
-    "SessionFiles",
+    "Session", "SessionFiles",
     "Want",
     "admitted",
     "check_role",
     "config_for",
     "hook_command",
-    "join_workspace",
     "label_for",
     "parser",
     "protected_paths",
@@ -49,7 +46,7 @@ __all__ = [
 ]
 
 DEFAULT_CTX = 262144
-DEFAULT_MODEL = "Qwen3.8-27B"
+DEFAULT_MODEL = "Qwen3.8-27B-UD-Q4_K_XL.gguf"
 DEFAULT_ROLE = APPROVE_FIRST
 PARENT = "claude-code"
 KV = "q8_0"
@@ -62,7 +59,7 @@ def parser(name: str, what: str, port: int, slots: int) -> argparse.ArgumentPars
         prog=f"ml-stack-{name}", allow_abbrev=False,
         description=f"{what} on a model this machine serves. Everything after `--` goes to {name}.",
         usage=f"ml-stack-{name} {{MODEL | --on URL}} [--port N] [--slots N] [--ctx N] [--role R] [--name L] "
-              f"[--as AGENT] [--no-profile] [--draft HEAD] [--{name} PATH] [-- {name} arguments]")
+              f"[--as AGENT] [--project DIR] [--orders-from AGENT] [--no-profile] [--draft HEAD] [--{name} PATH] [-- {name} arguments]")
     ap.add_argument("model", nargs="?", default="",
                     help=f"the model file or a name ml-stack-models finds (default: {DEFAULT_MODEL})")
     ap.add_argument("--on", metavar="URL", default="",
@@ -79,6 +76,10 @@ def parser(name: str, what: str, port: int, slots: int) -> argparse.ArgumentPars
     ap.add_argument("--name", default="", help="the workspace label (default: local-<model>)")
     ap.add_argument("--as", dest="parent", default=PARENT,
                     help="the joined workspace agent this session acts for (default: %(default)s)")
+    ap.add_argument("--project", default="", metavar="DIR",
+                    help="the project directory the session works in (default: the current directory)")
+    ap.add_argument("--orders-from", action="append", default=[], metavar="AGENT",
+                    help="a workspace identity the session obeys besides the person and the lead")
     ap.add_argument("--no-profile", action="store_true", help="serve the model bare")
     ap.add_argument("--draft", default="auto", metavar="HEAD",
                     help="the draft head that guesses tokens ahead for the model to check: 'auto' takes "
@@ -226,20 +227,37 @@ def check_role(role: str) -> str:
     return role
 
 
-def join_workspace(label: str, parent: str, text: str, say: Callable[[str], None]) -> bool:
-    """Announce ``text`` on the workspace as ``label`` acting for ``parent``; when that fails,
-    say the command that joins."""
-    exe = shutil.which("ml-stack-workspace")
-    ok = False
-    if exe:
-        try:
-            done = subprocess.run([exe, "send", "*", "status", text, "--agent", parent, "--label", label],
-                                  capture_output=True, text=True, timeout=15, check=False,
-                                  stdin=subprocess.DEVNULL, env={**os.environ, "ML_STACK_NONINTERACTIVE": "1"})
-            ok = done.returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            ok = False
-    if not ok:
-        say(f"not on the workspace; join it once with `ml-stack-workspace connect`, then pass --as {parent}")
-    return ok
+@dataclasses.dataclass(frozen=True, slots=True)
+class Session:
+    """What a harness run needs from the shared setup: its files, workspace seat, working
+    directory, the two hook command lines and the workspace brief."""
 
+    files: SessionFiles
+    seat: harnessid.Seat
+    cwd: Path
+    pre: str
+    post: str
+    brief: str
+
+
+@contextlib.contextmanager
+def opened(args: argparse.Namespace, harness: str, served: tuple[str, str, int],
+           say: Callable[[str], None]) -> Iterator[Session]:
+    """The session for one run of ``harness``: files outside the working tree, a workspace seat
+    announced as joined, the hook commands. The seat is revoked and the files removed on exit."""
+    _base_url, alias, _window = served
+    cwd = Path(args.project or Path.cwd()).resolve()
+    files = session_files(cwd)
+    seat = None
+    try:
+        seat = harnessid.invite(harnessid.agent_name(alias, harness, args.name), cwd, args.parent, say)
+        seat.record_model(alias, harness)
+        pre = hook_command("pre", role=args.role, label=seat.name, root=cwd, protect=protected_paths(files))
+        post = hook_command("post", role=args.role, label=seat.name, root=cwd, protect=[])
+        harnessid.announce(seat, f"{harness} on {alias} ({args.role}), project {cwd.name}", say)
+        yield Session(files, seat, cwd, pre, post,
+                      harnessid.brief(seat.name, alias, harness, args.parent, args.orders_from))
+    finally:
+        if seat is not None:
+            seat.revoke()
+        files.release()

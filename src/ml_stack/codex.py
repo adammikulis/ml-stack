@@ -99,7 +99,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     except ValueError as why:
         say(f"error: {why}")
         return 2
-    runner = run_codex or (lambda cmd, env: subprocess.call(cmd, env=env))
+    runner = run_codex or (lambda cmd, env: subprocess.call(cmd, env=env, cwd=args.project or None))
     if args.on:
         base_url = args.on.rstrip("/")
         alias = alias_of(base_url, "")
@@ -123,29 +123,21 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
 
 def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, str, int],
          say: Callable[[str], None], runner: Callable[..., int]) -> int:
-    """Write this run's ``CODEX_HOME``, join the workspace and run ``command`` in it."""
+    """Write this run's ``CODEX_HOME`` and run ``command`` (``codex`` and its arguments) in it."""
     base_url, alias, window = served
     binary, *extra = command
-    cwd = Path.cwd().resolve()
-    label = harnessing.label_for(args.name, alias)
     try:
-        files = harnessing.session_files(cwd)
+        with harnessing.opened(args, "codex", served, say) as run:
+            path = run.files.write("config.toml", config_toml(base_url, alias, window,
+                                                              (run.pre, run.post, harnessing.WAIT_S)))
+            run.files.write("AGENTS.md", run.brief)
+            say(f"role {args.role}; Bash, apply_patch and MCP calls go through ml-stack's classifier "
+                f"(CODEX_HOME {path.parent}, outside the working tree)")
+            flags = [*policy_flags(args.role), "--dangerously-bypass-hook-trust", "--cd", str(run.cwd)]
+            return int(runner([binary, *flags, *extra], environment(run.files.path)))
     except ValueError as why:
         say(f"error: {why}")
         return 2
-    try:
-        pre = harnessing.hook_command("pre", role=args.role, label=label, root=cwd,
-                                      protect=harnessing.protected_paths(files))
-        post = harnessing.hook_command("post", role=args.role, label=label, root=cwd, protect=[])
-        path = files.write("config.toml", config_toml(base_url, alias, window,
-                                                      (pre, post, harnessing.WAIT_S)))
-        harnessing.join_workspace(label, args.parent, f"joined: Codex on {alias} ({args.role})", say)
-        say(f"role {args.role}; Bash, apply_patch and MCP calls go through ml-stack's classifier "
-            f"(CODEX_HOME {path.parent}, outside the working tree)")
-        flags = [*policy_flags(args.role), "--dangerously-bypass-hook-trust", "--cd", str(cwd)]
-        return int(runner([binary, *flags, *extra], environment(files.path)))
-    finally:
-        files.release()
 
 
 if __name__ == "__main__":  # pragma: no cover
