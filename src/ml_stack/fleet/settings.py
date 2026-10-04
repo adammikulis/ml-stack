@@ -26,10 +26,9 @@ class Settings:
     autostart: str = "manual"
     setup_done: bool = False
     gym_python: str = ""
+    """The default interpreter for installed simulator libraries."""
     gym_pythons: dict[str, str] = field(default_factory=dict)
     """Existing interpreter overrides by simulator ID, retained across launches."""
-    """An explicitly selected existing interpreter for native simulator libraries."""
-    """Whether the first-run wizard was finished. A machine may finish it in no cluster."""
     on_close: str = ""
     auto_update: bool = True
     """Follow releases: a bundled install replaces itself when a newer one is published,
