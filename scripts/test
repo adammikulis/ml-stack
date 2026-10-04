@@ -39,6 +39,8 @@ import affected
 import testslots_runner
 import testtime
 
+from ml_stack.activity.gate import Run, record_run
+
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
 DATAFILE = ".testmondata"
@@ -56,10 +58,11 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
 
 
 def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
-    """Run a command in the repo, returning its exit status. A pytest run is recorded in the
-    activity log against the tree it ran on."""
-    junit = Path(tempfile.mkstemp(suffix=".xml")[1]) if "pytest" in command else None
-    shown = [*command, f"--junitxml={junit}"] if junit else command
+    """Run pytest in the repository and record its activity."""
+    descriptor, name = tempfile.mkstemp(suffix=".xml")
+    os.close(descriptor)
+    junit = Path(name)
+    shown = [*command, f"--junitxml={junit}"]
     print("+", " ".join(command), flush=True)
     environment = dict(os.environ if env is None else env)
     environment["PYTHONPATH"] = str(ROOT / "scripts") + os.pathsep + environment.get("PYTHONPATH", "")
@@ -74,7 +77,6 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
     if junit is not None:
-        from ml_stack.activity.gate import Run, record_run
         record_run(Run(ROOT, tier, command, junit, status, wall))
         junit.unlink(missing_ok=True)
     return status
