@@ -12,8 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.workspace import ChainBroken, wake
-from ml_stack.workspace import claims as claimlib
+from ml_stack.workspace import ChainBroken, claims as claimlib, wake
 from ml_stack.workspace.bus import Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.identity import Identity
