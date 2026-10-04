@@ -35,6 +35,8 @@ KINDS: dict[str, str] = {
     "rule.removed": "the person removed a rule",
     "rule.flipped": "the person turned an always rule into a never rule or back",
     "rule.tainted_setting": "the person changed whether a rule applies after outside text was read",
+    "board.post": "the person posted from the Board page or `chat` (board or conversation, size; never the body)",
+    "board.view": "the person opened a board on the Board page",
     "workspace.message": "a message between agents (from, to, type, thread, size; never the body)",
     "workspace.claim": "an agent took, released or lost a claim (claimed, released, conflict, expired)",
     "workspace.event": "any other workspace audit row (minted, revoked, refused, held, released)",

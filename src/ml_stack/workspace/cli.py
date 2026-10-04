@@ -10,12 +10,16 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
+from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
-from ml_stack.workspace import boardroute, guide, limits, onboard, project, tokens
+from ml_stack.workspace import boardroute, chat, guide, limits, onboard, project, tokens
+from ml_stack.workspace.boardapi import Follow
 from ml_stack.workspace.boards import MODES, STYPES
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.chain import ChainBroken
@@ -115,11 +119,19 @@ def _watch(args: argparse.Namespace, ws: Workspace, token: str) -> int:
     """Print each batch of new messages as it arrives; 0 after one batch with --once, 3 when
     the timeout passes with nothing."""
     began = time.monotonic()
+    scope = {k: v for k, v in (("board", args.board), ("thread", args.thread), ("dm", args.dm)) if v}
+    if len(scope) > 1:
+        raise ValueError("watch one of --board, --thread or --dm")
+    spec = Follow(**scope, after=args.since, timeout_s=5.0)
     while True:
         left = args.timeout - (time.monotonic() - began) if args.timeout else 5.0
         if args.timeout and left <= 0:
             return 3
-        batch = ws.wait(token, min(5.0, left), ack=True, cancel=CANCELLED.is_set)
+        if scope:
+            got = ws.follow(token, replace(spec, timeout_s=min(5.0, left)), CANCELLED.is_set)
+            spec, batch = replace(spec, after=got["seq"]), got["messages"]
+        else:
+            batch = ws.wait(token, min(5.0, left), ack=True, cancel=CANCELLED.is_set)
         for item in batch:
             _show(args, item)
             sys.stdout.flush()
@@ -216,6 +228,17 @@ def _doctor(args: argparse.Namespace, ws: Workspace) -> int:
     for f in found:
         say(("ok   " if f.ok else "FIX  ") + f.what + ("" if f.ok else f"  -> {f.fix}"))
     return 0 if all(f.ok for f in found) else 1
+
+
+def _chat(args: argparse.Namespace, ws: Workspace) -> int:
+    human.require_person("workspace chat")
+    token = (tokens.read_file(Path(args.token_file).expanduser()) if args.token_file
+             else tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: CANCELLED.set())
+    chat.run(ws, token, Follow(board=args.board, dm=args.to, backlog=args.backlog),
+             chat.Console(sys.stdin, say, CANCELLED))
+    return 0
 
 
 def _hello(args: argparse.Namespace, ws: Workspace) -> int:
@@ -317,6 +340,11 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
         *LIVE], _setup),
     ("board-serve", "serve the read-only Board page on a loopback port; the person's identity, no token in the page",
      [flag("--port", type=int, default=0)], _board_serve),
+    ("chat", "live conversation with a board or one agent: streams it, sends each line you type; at a terminal",
+     [flag("--board", default="", help="a board such as #general"),
+      flag("--to", default="", help="an agent id"), flag("--backlog", type=int, default=20),
+      flag("--token-file", default="", help="the person's token file (default: the owner file)")],
+     _chat),
     ("doctor", "check the whole setup and say what to fix; at a terminal", [], _doctor),
     ("hello", "send AGENT the first message ('workspace ready'); at a terminal", [flag("name")],
      _hello),
@@ -477,6 +505,11 @@ for _name, _help, _options, _handler in TABLE:
 COMMANDS.add("watch", _guarded(_watching),
              help="print messages as they arrive; --once exits after one",
              options=[*COMMON, flag("--once", action="store_true"),
+                      flag("--board", default="", help="follow one board without a subscription"),
+                      flag("--thread", type=int, default=0, help="follow one thread"),
+                      flag("--dm", default="", help="follow your conversation with this agent"),
+                      flag("--since", type=int, default=-1,
+                           help="with --board/--thread/--dm: start after this message (default: from now)"),
                       flag("--timeout", type=float, default=0.0,
                            help="stop after this many seconds (exit 3 if nothing came)")])
 main = COMMANDS.run

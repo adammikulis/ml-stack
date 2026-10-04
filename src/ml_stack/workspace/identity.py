@@ -127,6 +127,11 @@ class Registry:
             agents[name]["project"] = dict(project)
             self._save(agents)
 
+    def readers(self) -> list[str]:
+        """The live identities that read every board: a person or a lead."""
+        agents = self._load()
+        return sorted(n for n, e in agents.items() if e.get("role") != AGENT and self._live(agents, e))
+
     def within(self, minter: str, minted: int, live: int) -> None:
         """`Denied` when ``minter`` has minted ``minted`` live identities or the workspace
         holds ``live`` live top-level ones."""

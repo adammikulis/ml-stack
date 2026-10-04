@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.workspace import limits as limits_mod, tokens, wake
-from ml_stack.workspace.boardapi import BoardApi
+from ml_stack.workspace.boardapi import BoardApi, Follow
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.claims import Claims, Conflict
@@ -227,9 +228,8 @@ class Workspace:
             "body": PLACEHOLDER.format(qid=qid, why=", ".join(flags)) if qid else body,
             "held": qid, "flags": flags, "label": label, "mentions": mentions,
             "expires": self.clock() + ttl_s if ttl_s else 0.0})
+        wake.signal(self.base / "wake", self.board.wake_names(row))
         self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label)
-        if to.startswith("#"):
-            wake.signal(self.base / "wake", self.board.listeners(row))
         return self.deliver(row, raw=True)
 
     def deliver(self, row: dict[str, Any], raw: bool = False) -> dict[str, Any]:
@@ -273,6 +273,46 @@ class Workspace:
         direct = self.bus.inbox(who.id, limit=1 << 30)
         posted = self.board.routed(who, self.bus.cursor(who.id), "inbox")
         return sorted([*direct, *posted], key=lambda r: r["seq"])[:limit]
+
+    def follow(self, token: str, spec: Follow, cancel: Callable[[], bool] | None = None) -> dict[str, Any]:
+        """Messages of one board, thread or conversation after ``spec.after``, waiting up to
+        ``spec.timeout_s`` for one; the answer's ``seq`` is the next ``after``."""
+        who = self.auth(token)
+        self._may(who, "read")
+        deadline = time.monotonic() + spec.timeout_s
+        waiter = wake.Waiter(self.base / "wake", who.id + spec.suffix)
+        try:
+            while True:
+                out = self.board.follow(token, spec)
+                left = deadline - time.monotonic()
+                if out["messages"] or left <= 0 or (cancel is not None and cancel()):
+                    return out
+                spec = replace(spec, after=out["seq"])
+                waiter.sleep(left if cancel is None else min(left, CANCEL_SLICE_S))
+        finally:
+            waiter.close()
+
+    def news(self, token: str, after: int, timeout_s: float,
+             cancel: Callable[[], bool] | None = None) -> int:
+        """For a person or lead: the newest message sequence number once it is above ``after``,
+        or ``after`` again when ``timeout_s`` passes first."""
+        who = self.auth(token)
+        self._may(who, "read")
+        if who.role == AGENT:
+            raise Denied("only a person or lead follows every board")
+        deadline = time.monotonic() + timeout_s
+        waiter = wake.Waiter(self.base / "wake", who.id + ".web")
+        try:
+            while True:
+                rows = [r for r in self.bus.log.after(after) if r["kind"] == "msg"]
+                left = deadline - time.monotonic()
+                if rows:
+                    return int(rows[-1]["seq"])
+                if left <= 0 or (cancel is not None and cancel()):
+                    return after
+                waiter.sleep(left if cancel is None else min(left, CANCEL_SLICE_S))
+        finally:
+            waiter.close()
 
     def ack(self, token: str, seq: int) -> int:
         """Mark everything up to ``seq`` as read; returns the new cursor."""
