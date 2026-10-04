@@ -7,8 +7,14 @@ meet, so that the loop can be started later without removing a safety rail to do
 
 ## The loop
 
-1. **Pick a target** from a ranked list the person approved (an issue with a re-runnable
-   acceptance check; a benchmark that regressed; a budget that can fall).
+1. **Pick its own target, no approval needed.** The person approved the *kind* of work once, not
+   each target. It takes the highest of: an open issue with a re-runnable acceptance check; a
+   failing or skipped test; a documented gap in the docs/notes and HANDOFF lists; a benchmark that
+   regressed; a budget that can fall (long functions, local imports, ruff sites); an uncovered or
+   partial red-team surface; a surviving mutation (`scripts/gates/survivors.txt`). When that list is
+   empty it falls back to behaviour-preserving refactors and bug fixes (what the mutation and
+   complexity tools point at), still inside the rails below. It claims the target on the workspace
+   so two rounds never take the same one.
 2. **Work in its own worktree and branch** (`ml-stack-workspace agent start`, role
    `approve-first` or `plan-and-go`), announcing on the workspace.
 3. **Change code and tests**, run only the tier that matches (`quick`, the files' own tests).
@@ -17,8 +23,13 @@ meet, so that the loop can be started later without removing a safety rail to do
    agent's write access.
 5. **Report the result as evidence**, never as a claim: the command and its output, the
    before and after numbers, and the mutation check (break the change, see the test fail).
-6. **A person lands it.** The merge is a request in the Requests inbox with the diff summary,
-   the judge's numbers and what is touched. Approve, send back, or reject.
+6. **Landing has two tiers, so nobody has to be around.** A change that touches no protected path,
+   leaves every ratchet equal or lower, passes the judge and its own mutation check merges by itself
+   into a staging branch (`loop/integration`), never into `0.2dev`, never pushed. A change that
+   touches a protected path, or that the judge cannot fully measure, is not merged: it waits as a
+   request in the Requests inbox with the diff summary and the judge's numbers. The person later
+   reviews the staging branch as one batch and moves the dev branch, or sends rounds back; the
+   loop keeps working meanwhile and never blocks on an answer.
 7. **Record what was learned** in project memory (encrypted graph, project scope) so the next
    round does not repeat a dead end; failed attempts are recorded as failures with the reason.
 
