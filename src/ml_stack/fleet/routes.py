@@ -24,6 +24,7 @@ from .discovery import (
 from .extension_routes import ExtensionRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
+from .onboard.clusters import known_clusters
 from .onboard.joining import join_by_passphrase
 from .page import COMPONENTS, render
 from .pausing import minutes_of
@@ -185,6 +186,14 @@ class PageRoutes:
         return super().open_route()
 
 
+def found_clusters(routes: Any) -> bool:
+    """Answer with the clusters on this machine and those the network offers."""
+    ui = routes.ui
+    found = known_clusters(ui.cluster_key_path, self_names=(ui.name,))
+    routes.send(200, {"found": [c.public() for c in found]})
+    return True
+
+
 class SetupRoutes:
     """First run: what this machine looks like, what to set it to, and who may say so."""
 
@@ -206,7 +215,10 @@ class SetupRoutes:
                 self.send(401, {"error": "sign in to discover clusters"})
             else:
                 try:
-                    self.send(200, {"clusters": lan_clusters.nearby(port=self.ui.discovery_port)})
+                    self.send(200, {"clusters": lan_clusters.nearby(port=self.ui.discovery_port),
+                                    "found": [c.public() for c in known_clusters(
+                                        self.ui.cluster_key_path, port=self.ui.discovery_port,
+                                        self_names=(self.ui.name,))]})
                 except OSError:
                     self.send(503, {"error": "LAN discovery is unavailable; enter the cluster name manually."})
             return True
@@ -631,6 +643,8 @@ class ClusterRoutes:
     def route(self) -> bool:
         if self.path == "/ui/clusters":
             return self._clusters()
+        if self.path == "/ui/clusters/found" and self.method == "GET":
+            return found_clusters(self)
         if self.path == "/ui/peers" and self.method == "GET":
             self.send(200, {"peers": self.ui.peers(), "self": self.ui.name,
                             "group": cluster_group(self.ui.cluster_key_path)})

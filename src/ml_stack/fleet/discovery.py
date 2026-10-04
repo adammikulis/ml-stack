@@ -67,10 +67,7 @@ def require_name(value: object) -> str:
     """A nonempty cluster name without control characters, at most 64 characters."""
     if not isinstance(value, str) or not value.strip():
         raise DiscoveryError("cluster name is required")
-    name = value.strip()
-    if len(name) > 64 or any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in name):
-        raise DiscoveryError("cluster name must be at most 64 characters without control characters")
-    return name
+    return check_name(value)
 
 
 def key_path(path: Path | str | None = None) -> Path:
@@ -116,6 +113,26 @@ def check_length(passphrase: str) -> str:
     if len(passphrase) < MIN_PASSPHRASE:
         raise DiscoveryError(f"The passphrase needs at least {MIN_PASSPHRASE} characters.")
     return passphrase
+
+
+MOST_GROUP_NAME = 64
+REFUSED_IN_NAME = "/\\"
+
+
+def check_name(name: str) -> str:
+    """``name`` trimmed, or `DiscoveryError` saying which rule it breaks."""
+    name = name.strip()
+    if not name:
+        raise DiscoveryError("A cluster name cannot be empty.")
+    if len(name) > MOST_GROUP_NAME:
+        raise DiscoveryError(f"A cluster name is at most {MOST_GROUP_NAME} characters; this one is {len(name)}.")
+    bad = sorted({c for c in name if c in REFUSED_IN_NAME or not c.isprintable()})
+    if bad:
+        shown = ", ".join(repr(c) for c in bad)
+        raise DiscoveryError(f"A cluster name cannot contain {shown}: the join handshake uses "
+                                  "slashes as separators and the memberships file cannot carry "
+                                  "control characters.")
+    return name
 
 
 def group_path(path: Path | str | None = None) -> Path:
@@ -572,9 +589,13 @@ class Advertiser:
             self._asked.set()
 
     def _tell_join(self, sock: socket.socket, nonce: str, addr: tuple[str, int]) -> None:
-        """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
+        """Answer a machine asking to join this cluster: the port and scheme to shake hands on.
+
+        The datagram is unsealed, so anyone on the segment who asks learns the cluster's name,
+        this daemon's name and its port; no key material is in it.
+        """
         reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
-                            "port": self.beacon.port, "tls": bool(self.beacon.cert),
+                            "name": self.beacon.name, "port": self.beacon.port, "tls": bool(self.beacon.cert),
                             "method": "passphrase" if self.joinable else "recovery"})
         with contextlib.suppress(OSError):
             sock.sendto(reply, addr)

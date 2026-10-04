@@ -247,6 +247,10 @@
       const joined = this.querySelector("#cluster-joined");
       const words = el("input", { type: "password", id: "words", placeholder: "passphrase" });
       const named = el("input", { type: "text", id: "cname", required: true, maxlength: 64, placeholder: "Cluster name (required)" });
+      const pick = el("select", { id: "cpick" }, el("option", { value: "" }, "a new cluster"));
+      pick.onchange = () => { named.hidden = !!pick.value; };
+      api("/ui/clusters/found").then((r) => (r.found || []).filter((c) => !c.mine).forEach((c) =>
+        pick.append(el("option", { value: c.name }, `${c.name} - ${c.machines.join(", ")}`))));
       const note = el("div");
       const persist = el("input", { type: "checkbox", id: "persist" });
       const add = el("button", { class: "ghost small" }, "Join");
@@ -254,7 +258,7 @@
       // (this one), at logon if ticked, and then what the fleet sees.
       add.onclick = async () => {
         const said = words.value.trim();
-        if (!named.value.trim()) { note.textContent = "Cluster name is required."; named.focus(); return; }
+        if (!(pick.value || named.value.trim())) { note.textContent = "Cluster name is required."; named.focus(); return; }
         if (said && said.length < M.MIN_PASS) {
           note.replaceChildren(el("div", { class: "err" },
             `The passphrase needs at least ${M.MIN_PASS} characters.`));
@@ -264,14 +268,14 @@
         note.replaceChildren(el("div", { class: "hint" }, el("span", { class: "spin" }),
           " Joining…"));
         const got = await api("/ui/fleet/join", { method: "POST",
-          body: JSON.stringify({ passphrase: said, group: named.value.trim(),
+          body: JSON.stringify({ passphrase: said, group: pick.value || named.value.trim(),
                                  persist: persist.checked }) });
         add.disabled = false;
         if (got.error) {
           note.replaceChildren(el("div", { class: "err" }, got.error));
           return;
         }
-        words.value = ""; named.value = "";
+        words.value = ""; named.value = pick.value = ""; named.hidden = false;
         note.replaceChildren(
           el("div", { class: "ok" }, `Joined ${got.group}`
             + (got.persisted ? ", and it starts at logon." : ".")),
@@ -299,7 +303,7 @@
                     this.draw();
                   } }, "Leave")))
           : [el("div", { class: "hint" }, "In no cluster. Join one below.")]),
-        el("div", { class: "searchrow" }, words, named, add),
+        el("div", { class: "searchrow" }, pick, named, words, add),
         el("label", { class: "opt", for: "persist" }, persist,
           el("span", {}, el("b", {}, "Start at logon"),
             el("span", { class: "why" },

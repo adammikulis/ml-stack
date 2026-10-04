@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import sys
 from typing import Any
 
@@ -22,7 +23,8 @@ from .discovery import (
     load_cluster_key,
     require_name,
 )
-from .onboard.joining import join_by_passphrase
+from .onboard.clusters import known_clusters, pick_cluster
+from .onboard.joining import join_by_passphrase, join_existing
 
 
 def _require_key(path: str | None) -> bytes:
@@ -66,16 +68,18 @@ def cmd_setup(args: argparse.Namespace) -> int:
     say("Run this on every machine, with the SAME passphrase. That is all it takes.")
     say()
 
-    group = args.group
-    if interactive and not args.group_given:
-        group = input("  Cluster name: ").strip()
+    group, existing = args.group, False
+    if interactive and not args.group_given and not os.environ.get("ML_STACK_NONINTERACTIVE"):
+        say("  Looking for clusters on this network...", flush=True)
+        choice = pick_cluster(known_clusters(args.cluster_key), default="")
+        group, existing = choice.name, choice.existing
 
     group = require_name(group)
 
     if args.passphrase:
         passphrase = args.passphrase
     elif interactive:
-        passphrase = _prompt_passphrase(confirm=True)
+        passphrase = _prompt_passphrase(confirm=not existing)
     else:
         passphrase = sys.stdin.readline()
         if not passphrase.strip():
@@ -84,7 +88,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     say()
     say("  Looking for the cluster on this network...", flush=True)
-    join_by_passphrase(passphrase, group, args.cluster_key)
+    joiner = join_existing if existing else join_by_passphrase
+    joiner(passphrase, group, args.cluster_key)
     recovery.remember(passphrase, group, args.cluster_key, say=lambda s: say(f"  {s}"))
 
     say(f"  Joined '{group}'.")

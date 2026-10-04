@@ -35,8 +35,8 @@ from . import pake
 from .lan import require_local
 from .pairing import fingerprint_of, unverified_context
 
-__all__ = ["API", "Declined", "Joiner", "Joining", "find_joiners", "join_by_passphrase", "join_existing",
-           "join_secret", "matches"]
+__all__ = ["API", "Declined", "Joiner", "Joining", "Offer", "find_clusters", "find_joiners", "join_by_passphrase", "join_existing", "join_secret",
+           "matches"]
 
 API = "/join/v1"
 CLIENT = "joiner"
@@ -183,12 +183,12 @@ class Joiner:
     tls: bool
 
 
-def find_joiners(group: str, *, timeout_s: float = 1.5, port: int | None = None,
-                 most: int = 8) -> list[Joiner]:
-    """Daemons on this network in cluster ``group`` that offer to take a machine in."""
+def _ask_join(group: str, *, timeout_s: float, port: int | None, most: int
+              ) -> list[tuple[str, dict[str, Any]]]:
+    """``(address, answer)`` for each daemon that answers a ``join?`` for ``group`` (every cluster when empty)."""
     nonce = secrets.token_hex(16)
     ask = json.dumps({"v": disc.PROTOCOL, "kind": "join?", "group": group, "nonce": nonce}).encode()
-    found: dict[tuple[str, int], Joiner] = {}
+    found: dict[tuple[str, int, str], tuple[str, dict[str, Any]]] = {}
     where, port_ = disc.default_group(), port if port is not None else disc.default_port()
     with disc._socket(broadcast=True, bind=("", 0)) as sock:
         disc._say(sock, ask, where, port_)
@@ -201,16 +201,49 @@ def find_joiners(group: str, *, timeout_s: float = 1.5, port: int | None = None,
             sock.settimeout(max(0.01, min(deadline, resent) - time.time()))
             try:
                 raw, addr = sock.recvfrom(65535)
+                if len(raw) > 2048:
+                    continue
                 said = json.loads(raw)
-                theirs = int(said["port"])
-            except (TimeoutError, KeyError, TypeError, ValueError):
+                if not isinstance(said, dict) or said.get("v") != disc.PROTOCOL:
+                    continue
+                theirs = said["port"]
+                if type(theirs) is not int or not 1 <= theirs <= 65535:
+                    continue
+                disc.require_name(said.get("group"))
+            except (TimeoutError, KeyError, TypeError, ValueError, DiscoveryError):
                 continue
             except OSError:
                 break
-            if said.get("kind") == "join" and said.get("nonce") == nonce \
-                    and said.get("group") == group:
-                found.setdefault((addr[0], theirs), Joiner(addr[0], theirs, bool(said.get("tls"))))
+            if isinstance(said, dict) and said.get("kind") == "join" and said.get("nonce") == nonce \
+                    and (not group or said.get("group") == group):
+                found.setdefault((addr[0], theirs, str(said.get("group"))), (addr[0], said))
     return list(found.values())
+
+
+def find_joiners(group: str, *, timeout_s: float = 1.5, port: int | None = None,
+                 most: int = 8) -> list[Joiner]:
+    """Daemons on this network in cluster ``group`` that offer to take a machine in."""
+    return [Joiner(host, int(said["port"]), bool(said.get("tls")))
+            for host, said in _ask_join(group, timeout_s=timeout_s, port=port, most=most)]
+
+
+@dataclass(frozen=True, slots=True)
+class Offer:
+    """A daemon that says it takes machines into the cluster ``group``."""
+
+    group: str
+    machine: str
+    host: str
+    method: str = "passphrase"
+
+
+def find_clusters(*, timeout_s: float = 1.5, port: int | None = None, most: int = 64) -> list[Offer]:
+    """The clusters daemons on this network offer to take a machine into, one `Offer` per daemon and cluster."""
+    offers = (Offer(str(said.get("group") or ""), str(said.get("name") or host), host,
+                    "recovery" if said.get("method") == "recovery" else "passphrase")
+              for host, said in _ask_join("", timeout_s=timeout_s, port=port, most=most)
+              if said.get("group"))
+    return list({(o.group, o.machine): o for o in offers}.values())
 
 
 class _Call:

@@ -314,6 +314,14 @@ status = "covered"
 tests = ["tests/test_fleet_framing.py"]
 
 [[group]]
+match = ["route:fleet/routes.py:/ui/setup/clusters", "route:fleet/routes.py:/ui/clusters/found"]
+status = "covered"
+tests = [
+  "tests/test_fleet_found_route.py::test_first_run_refuses_the_list_from_another_machine",
+  "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in",
+]
+
+[[group]]
 match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]
 status = "partial"
 tests = [

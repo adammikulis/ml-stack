@@ -33,6 +33,7 @@ from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
 from . import recovery
+from .applying import apply_plan, serving_table
 from .discovery import (
     Beacon,
     DiscoveryError,
@@ -47,6 +48,7 @@ from .discovery import (
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
 from .onboard.cli import COMMANDS as ONBOARD_COMMANDS, add_commands, run as run_onboarding
+from .onboard.clusters import format_clusters, known_clusters, pick_cluster
 from .onboard.joining import join_by_passphrase
 from .pausing import (
     Answer,
@@ -57,7 +59,6 @@ from .pausing import (
     peer_clients,
     remember_seen,
 )
-from .remote import PeerError
 
 __all__ = [
     "STARTED_FILE",
@@ -66,7 +67,6 @@ __all__ = [
     "Fanout",
     "JoinError",
     "Joined",
-    "apply_plan",
     "checks",
     "default_root",
     "describe",
@@ -80,7 +80,6 @@ __all__ = [
     "remember_seen",
     "remember_track",
     "running_code",
-    "serving_table",
     "start_daemon",
     "sweep_argv",
     "table",
@@ -600,36 +599,37 @@ def sweep_argv(models: Sequence[str], *, peers: Sequence[str] = (), sample: int 
 
 
 # -- the command -----------------------------------------------------------------------
-def _passphrase_from(args: argparse.Namespace, key: Path | str | None) -> str:
-    """The words, from the flag, the environment, a terminal, or standard input.
+def _cluster_and_words(args: argparse.Namespace, key: Path | str | None) -> tuple[str, str]:
+    """The cluster name and the words, from flags, the environment, a terminal, or standard input.
 
-    ``ML_STACK_PASSPHRASE`` is what makes an unattended install possible: a machine being
-    set up by a script has no terminal to type at, and prompting one that cannot answer
-    hangs the install rather than failing it. The order is deliberate -- an explicit flag
-    beats the environment, and both beat asking.
+    ``ML_STACK_PASSPHRASE`` and ``ML_STACK_CLUSTER`` let a script set a machine up without a
+    terminal. A terminal is asked for the cluster name, from the clusters found, before the words.
     """
-    if args.passphrase:
-        return args.passphrase
-    told = os.environ.get("ML_STACK_PASSPHRASE", "").strip()
+    group = args.group or os.environ.get("ML_STACK_CLUSTER", "").strip()
+    told = args.passphrase or os.environ.get("ML_STACK_PASSPHRASE", "").strip()
     if told:
-        return told
+        return require_name(group), told
     if in_cluster(key):
-        return ""
-    if sys.stdin.isatty():
+        return group, ""
+    if sys.stdin.isatty() and not os.environ.get("ML_STACK_NONINTERACTIVE"):
         from .peers import _prompt_passphrase
 
-        say("This machine is in no cluster yet. Type the passphrase every machine shares.")
-        return _prompt_passphrase(confirm=True)
-    words = sys.stdin.readline().strip()
-    return words
+        say("This machine is in no cluster yet.")
+        if group:
+            return group, _prompt_passphrase(confirm=True)
+        say("Looking for clusters on this network...")
+        me = already_running(args.port) or {}
+        found = known_clusters(key, timeout_s=args.timeout, self_names=(str(me.get("name") or ""),))
+        choice = pick_cluster(found, default="")
+        say(f"Type the passphrase {'of' if choice.existing else 'for'} '{choice.name}'.")
+        return choice.name, _prompt_passphrase(confirm=not choice.existing)
+    return require_name(group), sys.stdin.readline().strip()
 
 
 def cmd_join(args: argparse.Namespace) -> int:
-    words = _passphrase_from(args, args.cluster_key)
+    group, words = _cluster_and_words(args, args.cluster_key)
+    # An install script sets these rather than answering prompts it has no terminal for.
     name = args.name or os.environ.get("ML_STACK_NAME", "").strip()
-    group = args.group or os.environ.get("ML_STACK_CLUSTER", "").strip()
-    if words and not group and sys.stdin.isatty():
-        group = input("Cluster name: ").strip()
     joined = join_machine(name=name, passphrase=words, group=group,
                           persist=args.persist, track=args.track, port=args.port,
                           root=args.root,
@@ -645,6 +645,17 @@ def cmd_join(args: argparse.Namespace) -> int:
     say("  ml-stack-fleet status   -- who is in the fleet, what each serves")
     say("  ml-stack-fleet leave    -- undo this")
     return 0
+
+
+def cmd_clusters(args: argparse.Namespace) -> int:
+    me = already_running(args.port) or {}
+    found = known_clusters(args.cluster_key, timeout_s=args.timeout,
+                           self_names=(str(me.get("name") or ""),))
+    if args.json:
+        say(json.dumps([c.public() for c in found], indent=1))
+    else:
+        say("\n".join(format_clusters(found)) or "no cluster on this machine or this network")
+    return 0 if found else 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -664,65 +675,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         say(f"\nthis machine's daemon is not running on port {args.port}; "
             "'ml-stack-fleet join' starts it")
     return 0 if rows else 1
-
-
-def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
-               cluster_key_path: Path | str | None = None,
-               say: Callable[[str], None] = say) -> list[dict[str, Any]]:
-    """``POST /serve`` on each placed peer, and what each answered.
-
-    Each answer is ``{"peer", "model", "slots", "status", "served" | "error", "serving"}``;
-    ``serving`` is the peer's ``/health`` serving rows after the call.
-    """
-    clients = peer_clients(rows, cluster_key_path=cluster_key_path, timeout=600.0)
-    out: list[dict[str, Any]] = []
-    for row in placement.rows:
-        answer: dict[str, Any] = {"peer": row.peer, "model": row.model, "slots": row.slots}
-        peer = clients.get(row.peer)
-        if peer is None:
-            answer.update(status=0, error="no daemon answered for this peer")
-            out.append(answer)
-            say(f"{row.peer}: {row.model}: {answer['error']}")
-            continue
-        try:
-            served = peer._json("POST", "/serve", {"model": row.model, "context": row.context,
-                                                   "parallel": row.slots})
-            answer.update(status=201, served=served)
-            say(f"{row.peer}: {row.model}: {served.get('slots', row.slots)} slot(s) on "
-                f"port {served.get('port', '?')}")
-        except PeerError as exc:
-            status, body = _refusal(str(exc))
-            answer.update(status=status, error=body.get("error") or str(exc))
-            say(f"{row.peer}: {row.model}: {answer['error']}")
-        try:
-            answer["serving"] = list(peer.health().get("serving") or [])
-        except (PeerError, OSError, ValueError):
-            answer["serving"] = []
-        out.append(answer)
-    return out
-
-
-def serving_table(applied: Sequence[dict[str, Any]]) -> str:
-    """What each peer serves after an apply, as text."""
-    lines = [f"{'PEER':<16} SERVING"]
-    for answer in applied:
-        cells = [f"{m}:{one.get('port', '?')} ({int(one.get('slots') or 1)} slot(s))"
-                 for one in answer.get("serving") or [] for m in one.get("models") or []]
-        lines.append(f"{answer['peer']:<16} {', '.join(cells) or '-'}")
-    return "\n".join(lines)
-
-
-def _refusal(message: str) -> tuple[int, dict[str, Any]]:
-    """The status and JSON body out of a `PeerError`'s message; ``(0, {})`` for none."""
-    import re
-
-    found = re.search(r"-> (\d{3}): (\{.*\})", message, re.S)
-    if not found:
-        return 0, {}
-    try:
-        return int(found.group(1)), json.loads(found.group(2))
-    except ValueError:
-        return int(found.group(1)), {}
 
 
 def _measurements() -> tuple[list[Any], list[Any]]:
@@ -833,6 +785,13 @@ def main(argv: list[str] | None = None) -> int:
     status_p.add_argument("--timeout", type=float, default=2.0)
     status_p.add_argument("--json", action="store_true")
 
+    clusters_p = sub.add_parser("clusters", help="the clusters this machine is in and the ones "
+                                                 "other machines on the network offer, with "
+                                                 "who holds each")
+    clusters_p.add_argument("--timeout", type=float, default=2.0,
+                            help="seconds to listen for peers (default: 2)")
+    clusters_p.add_argument("--json", action="store_true")
+
     plan_p = sub.add_parser("plan", help="which model each peer serves, and how many "
                                          "slots, for a number of users at one context; "
                                          "the best measured models go to the most users")
@@ -884,7 +843,7 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, SystemExit) as exc:
             warn(f"error: {exc}")
             return 2
-    fn = {"join": cmd_join, "status": cmd_status, "plan": cmd_plan,
+    fn = {"join": cmd_join, "status": cmd_status, "clusters": cmd_clusters, "plan": cmd_plan,
           "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave,
           "passphrase": recovery.run, "recovery": recovery.run}[args.cmd]
     try:
