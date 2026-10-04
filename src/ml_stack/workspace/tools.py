@@ -126,9 +126,12 @@ def workspace_release(kind: str, key: str) -> dict[str, Any]:
     return Workspace().release(_token(), kind, key)
 
 
-def workspace_heartbeat(ttl_s: float = 0.0) -> dict[str, int]:
-    """Renew every claim this agent holds."""
-    return {"renewed": Workspace().heartbeat(_token(), ttl_s)}
+def workspace_heartbeat(ttl_s: float = 0.0) -> dict[str, Any]:
+    """Renew every claim this agent holds; each renewed claim says whether the lifetime cap held it back."""
+    claims = Workspace().renew(_token(), ttl_s)
+    return {"renewed": len(claims), "capped": [f"{c['kind']}:{c['key']}" for c in claims if c["capped"]],
+            "claims": [{"kind": c["kind"], "key": c["key"], "expires": c["expires"],
+                        "capped": c["capped"]} for c in claims]}
 
 
 def workspace_scratch_new(name: str, ttl_s: float = 0.0) -> dict[str, str]:

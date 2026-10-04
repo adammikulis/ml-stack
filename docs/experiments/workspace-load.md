@@ -78,3 +78,28 @@ Taken with throwaway scripts on the same machine, before and after.
 * Not done: batching fsyncs. Lock hold is 0.2 ms with the fsync on this machine, so there is
   nothing to batch; on a filesystem where fsync costs milliseconds the hold time is the number
   to watch (`bus_lock_hold_s`).
+
+## Rate limiter: one file per sender
+
+Date 2026-10-03, same machine, `feat/board`. The rate counter was one `rates.json` rewritten under
+one lock for every write by every sender; it is now one small file per sender (`rates/<sender>.json`,
+its own lock). "Before" is the tree at the merge that brought swarm-scale into the branch.
+
+Command (each tree, same interpreter, limits opened):
+`python3 scripts/experiments/workspace_load.py --agents 40 --messages 30 --out run.json`
+
+| Measure | One file | One file per sender |
+|---|---|---|
+| verdict | pass | pass |
+| wall, throughput | 11.5 s, 104 msg/s | 13.7 s, 88 msg/s |
+| send p50 / p99 | 2.5 ms / 17 ms | 1.7 ms / 29 ms |
+| delivery p50 / p99 | 35 ms / 103 ms | 1.3 ms / 54 ms |
+| bus lock wait p99 | 0.14 ms | 12.5 ms |
+| keystore read per process p50 | 0.31 s | 1.14 s |
+| CPU total | 6.6 s | 5.5 s |
+
+The whole-run figures differ by less than the run-to-run spread, and the wall time is set by the
+40 processes queueing for the keystore read (p50 1.1 s against 0.3 s, which is the keystore, not
+the limiter). The limiter alone, one process making 1000 admits across 40 senders
+(`admit` p50 / p99): one file 0.60 ms / 1.12 ms, one file per sender 0.25 ms / 0.45 ms.
+Results: `workspace-load-40x30-one-rates-file.json`, `workspace-load-40x30-rates-per-sender.json`.

@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
-__all__ = ["MAX_BODY", "Guarded", "refusal"]
+__all__ = ["MAX_BODY", "Guarded", "host_ok", "refusal"]
 
 MAX_BODY = 4 * 1024 * 1024
 """The largest request body read, in bytes."""
@@ -14,7 +14,7 @@ MAX_BODY = 4 * 1024 * 1024
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "[::1]"})
 
 
-def _host_ok(host: str, port: int) -> bool:
+def host_ok(host: str, port: int) -> bool:
     """True for a loopback name, with this server's port or none."""
     name, sep, tail = host.strip().lower().rpartition(":")
     if not sep or tail.endswith("]"):
@@ -31,14 +31,14 @@ def refusal(method: str, headers: dict[str, str], port: int) -> tuple[int, str] 
     port (when it names one), carry ``application/json`` and claim a length that is a
     number no larger than ``MAX_BODY``.
     """
-    if not _host_ok(headers.get("host", ""), port):
+    if not host_ok(headers.get("host", ""), port):
         return 421, "this server answers to its loopback names only"
     if method != "POST":
         return None
     origin = headers.get("origin")
     if origin is not None:
         parts = urlsplit(origin)
-        if parts.scheme != "http" or not _host_ok(parts.netloc, port):
+        if parts.scheme != "http" or not host_ok(parts.netloc, port):
             return 403, "a request from another origin"
     claimed = headers.get("content-length", "0").strip() or "0"
     if not claimed.isascii() or not claimed.isdigit():

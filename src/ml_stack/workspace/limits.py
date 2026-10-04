@@ -42,6 +42,17 @@ class Limits:
     shared_invite_uses: int = 10
     invite_failures: int = 5
     verify_timeout_s: float = 60.0
+    boards_created: int = 5
+    boards_total: int = 200
+    boards_joined: int = 32
+    board_members: int = 64
+    subs_per_identity: int = 50
+    board_message_chars: int = 4_000
+    board_read_chars: int = 60_000
+    digest_lines: int = 40
+    unread_per_sender: int = 100
+    mints_per_identity: int = 16
+    agents_live: int = 64
     verify_allow: list[list[str]] = field(default_factory=list)
 
 

@@ -127,6 +127,17 @@ class Registry:
             agents[name]["project"] = dict(project)
             self._save(agents)
 
+    def within(self, minter: str, minted: int, live: int) -> None:
+        """`Denied` when ``minter`` has minted ``minted`` live identities or the workspace
+        holds ``live`` live top-level ones."""
+        agents = self._load()
+        mine = sum(1 for e in agents.values() if e.get("minted_by") == minter
+                   and not e.get("parent") and self._live(agents, e))
+        every = sum(1 for e in agents.values() if not e.get("parent") and self._live(agents, e))
+        if mine >= minted or every >= live:
+            raise Denied(f"{minter} holds {mine} live minted identities ({every} in all); "
+                         f"the limits are {minted} and {live}")
+
     def children(self, parent: str) -> list[str]:
         """The live delegated identities of ``parent``."""
         agents = self._load()

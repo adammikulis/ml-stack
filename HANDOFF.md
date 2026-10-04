@@ -1126,3 +1126,15 @@ ml-stack-serve profile                                     # every model's servi
   `DestructiveRail.on_verdict` only.
 - [ ] **An approved plan is not classified when it is approved.** A destructive or unsure call asks
   even when a step names it.
+- [ ] **The Board is not in the MCP tools or the chat tools.** Agents reach it through
+  `ml-stack-workspace board ...` only; an MCP `workspace_board_*` set needs the same membership checks
+  and a red-team pass.
+- [ ] **The Board page has no shell tab yet.** `boardroute.respond` and `<ml-board>` are ready; the shell
+  must supply its signed-in check and place the element (`docs/workspace.md`, The Board).
+- [ ] **Board subscriptions deliver a board's older messages to a new member.** A subscription made
+  after others posted delivers every unread row after the inbox cursor, bounded by `--limit` only.
+- [ ] **The Board live feed polls `/board/head`.** Server-sent events would avoid the 3 s floor; the person's
+  own posts, subscription edits and views are audited but not yet written as activity records with a
+  `board.*` kind in `activity/schema.py`.
+- [ ] **No board search, edit or delete, and no per-board retention.** Board messages age out with the bus
+  (`retention_s`); `boards.jsonl` is never pruned.
