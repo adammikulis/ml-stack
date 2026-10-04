@@ -66,7 +66,7 @@ def _stored(rk) -> bytes:
 
 
 def _leftovers(tmp_path) -> list[str]:
-    return os.listdir(tmp_path / "tmp")
+    return [p.name for p in (tmp_path / "tmp").iterdir()]
 
 
 def test_create_stores_the_key_and_sends_it_to_gh_on_stdin(rk, tmp_path, capsys):
