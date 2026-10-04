@@ -709,7 +709,7 @@ class ClusterRoutes:
         return True
 
     def _clusters(self) -> bool:
-        from .discovery import SEARCH, join, leave, memberships
+        from .discovery import SEARCH, join, memberships
         ui = self.ui
         if self.method == "GET":
             self.send(200, {"clusters": [m.public() for m in
@@ -729,7 +729,7 @@ class ClusterRoutes:
             return True
         if self.method == "DELETE":
             group = str(self.body().get("group") or "")
-            rows = leave(group, ui.cluster_key_path)
+            rows = ui.leave(group)
             ui.rejoined()
             self.send(200, {"clusters": [m.public() for m in rows], "left": group})
             return True

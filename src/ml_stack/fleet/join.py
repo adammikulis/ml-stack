@@ -32,6 +32,7 @@ from ml_stack.jobs import detach
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
+from . import recovery
 from .discovery import (
     DEFAULT_CLUSTER,
     SEARCH,
@@ -477,6 +478,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
         else:
             join_cluster(passphrase, group=group, path=cluster_key_path, salting=SEARCH)
         say(f"joined cluster '{group}'")
+        recovery.remember(passphrase, group, cluster_key_path, say=say)
     elif not in_cluster(cluster_key_path):
         raise JoinError("this machine is in no cluster and no passphrase was given -- "
                         "pass --passphrase WORDS (the same words on every machine)")
@@ -545,6 +547,7 @@ def leave_machine(*, group: str = "", root: Path | str | None = None,
     left = [m.group for m in before if not group or m.group == group]
     for one in left:
         leave_cluster(one, cluster_key_path)
+        recovery.forget(one, cluster_key_path)
         say(f"left cluster '{one}'")
     if not left:
         say("in no cluster" if not before else f"not in a cluster called '{group}'")
@@ -873,9 +876,8 @@ def main(argv: list[str] | None = None) -> int:
                          help="leave only this cluster (default: every one)")
     leave_p.add_argument("--keep-running", action="store_true",
                          help="leave the daemon up, just stop answering as a peer")
-
-
     add_commands(sub)
+    recovery.add_commands(sub)
     args = ap.parse_args(argv)
     if args.cmd in ONBOARD_COMMANDS:
         try:
@@ -884,7 +886,8 @@ def main(argv: list[str] | None = None) -> int:
             warn(f"error: {exc}")
             return 2
     fn = {"join": cmd_join, "status": cmd_status, "plan": cmd_plan,
-          "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave}[args.cmd]
+          "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave,
+          "passphrase": recovery.run, "recovery": recovery.run}[args.cmd]
     try:
         return fn(args)
     except (JoinError, DiscoveryError, OSError) as exc:

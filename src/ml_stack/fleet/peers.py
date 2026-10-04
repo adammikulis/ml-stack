@@ -10,6 +10,7 @@ from typing import Any
 
 from ml_stack.log import say, warn
 
+from . import recovery
 from .discovery import (
     MIN_PASSPHRASE,
     SEARCH,
@@ -87,6 +88,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     say()
     say("  Deriving the key (this is deliberately slow, once)...", flush=True)
     join_cluster(passphrase, group=group, path=args.cluster_key, salting=SEARCH)
+    recovery.remember(passphrase, group, args.cluster_key, say=lambda s: say(f"  {s}"))
 
     say(f"  Joined '{group}'.")
     say()
