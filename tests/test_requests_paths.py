@@ -63,7 +63,7 @@ CALL = Call("bench_run", {"argv": ["x"]})
 
 def classifier_ask(**details):
     return Confirm("bench_run will start a run. Asked because: destructive: deletes files (rm -r).",
-                   {"role": "r", "always_ok": True, **details})
+                   {"role": "approve-first", "always_ok": True, **details})
 
 
 # -- the chat confirmation -----------------------------------------------------------
