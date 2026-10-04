@@ -32,7 +32,12 @@ class ChatRoutes(ConversationRoutes):
         return super().route()
 
     def _say(self, available: list) -> bool:
-        from .chat import ChatError, find, reply_text, stream
+        from .chat import ChatError, find, reply_text
+        try:
+            from .sdk_chat import stream
+        except ImportError:
+            self.send(503, {"error": "chat requires the agents extra: pip install ml-stack[agents]"})
+            return True
         req = self.body()
         target = find(available, str(req.get("model") or ""))
         if target is None:
@@ -47,7 +52,7 @@ class ChatRoutes(ConversationRoutes):
         if req.get("temperature") is not None:
             payload["temperature"] = float(req["temperature"])
         try:
-            pieces = stream(target, payload)
+            pieces = stream(target, payload, connection=self.handler.connection)
             first = next(pieces, b"")
         except ChatError as exc:
             self.send(502, {"error": str(exc)})
@@ -82,4 +87,6 @@ class ChatRoutes(ConversationRoutes):
                 handler.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
+        finally:
+            pieces.close()
         return bytes(said)
