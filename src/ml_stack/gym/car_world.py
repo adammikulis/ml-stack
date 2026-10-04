@@ -1,6 +1,7 @@
 """Persistent MetaDrive traffic with native actor lifecycles."""
 
 from ml_stack.gym.driving import geometry
+from ml_stack.gym.observations import car_navigation
 from ml_stack.gym.road_rules import checkpoint_on_route, front_progress
 from ml_stack.gym.values import json_value
 
@@ -142,9 +143,11 @@ class CarWorldState:
         sensor = self.native.observations[self.ego_id]
         state = {"environment": "car", "simulation_mode": "world", **self.world_info(),
                 "native_observation": json_value(observation),
-                "ego": {"speed_km_h": float(vehicle.speed_km_h), "position_m": json_value(vehicle.position)},
+                "ego": {"speed_km_h": float(vehicle.speed_km_h), "position_m": json_value(vehicle.position),
+                        "heading_radians": float(vehicle.heading_theta)},
                 "sensors": {"lidar_normalized": json_value(sensor.cloud_points),
                             "lidar_range_m": vehicle.config["lidar"]["distance"]}}
+        state.update(car_navigation(vehicle))
         if self.stops:
             state["stop_rule"] = vehicle.studio_stop_checkpoint.state(front_progress(self.native, vehicle))
         return state
