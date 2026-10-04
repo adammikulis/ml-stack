@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.sentinel import human
-from ml_stack.workspace import limits as limits_mod, tokens, wake
+from ml_stack.workspace import agent_invites, limits as limits_mod, tokens, wake
 from ml_stack.workspace.boardapi import BoardApi, Follow, Held
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
@@ -160,11 +160,28 @@ class Workspace:
         self.audit("mint", who.id, agent=name, role=role)
         return made
 
-    def revoke(self, token: str, name: str) -> None:
-        """Stop ``name``'s token working."""
+    def revoke(self, token: str, name: str, tree: bool = False) -> list[str]:
+        """Stop ``name``'s token working, and its outstanding invites and everything below it; with
+        ``tree`` each descendant is marked revoked too. The names revoked."""
         who = self.auth(token)
-        self.registry.revoke(who, name)
-        self.audit("revoke", who.id, agent=name)
+        if tree:
+            gone = self.registry.revoke_tree(who, name)
+        else:
+            self.registry.revoke(who, name)
+            gone = [name]
+        below = self.registry.descendants(name)
+        shut = self.invites.void([name, *below])
+        self.audit("revoke", who.id, agent=name, tree=tree, below=len(below), invites=shut)
+        for child in gone[1:]:
+            self.audit("revoke", who.id, agent=child, tree=True)
+        return gone
+
+    def invite(self, token: str, hint: str = "", ttl_s: float = 0.0, uses: int = 1,
+               env: Mapping[str, str] | None = None,
+               ask: agent_invites.Ask | None = None) -> dict[str, Any]:
+        """A one-time code a joined agent hands to a new agent it starts, which then joins as its
+        child; bounded by the limits and, under `approve-first`, by the person's answer."""
+        return agent_invites.issue(self, self.auth(token), hint, ttl_s, uses, env, ask)
 
     # -- the write checks ----------------------------------------------------------------
     def _check(self, who: Identity, what: str, size_cap: int, *texts: str) -> None:
@@ -175,6 +192,8 @@ class Workspace:
         why = refusals(joined, self.denylist)
         if str(tokens.directory(self.base)) in joined:
             why = [*why, "it names the token directory"]
+        if self.invites.leaks(joined):
+            why = [*why, "it contains a live invite code"]
         if why:
             self.audit("write.refused", who.id, what=what, why="screen", chars=len(joined))
             raise Refused(f"{what} was not written: {'; '.join(why)}. Remove it and send again.")
@@ -192,6 +211,8 @@ class Workspace:
         if not flags:
             return "", []
         qid = self.quarantine.hold(kind, subject, flags, joined, who.id)
+        if who.parent:
+            self.registry.strike(who.id)
         self.audit("quarantine.hold", who.id, what=kind, qid=qid, flags=flags)
         return qid, flags
 

@@ -115,6 +115,8 @@ class Registry:
         return {"role": str(entry.get("role", "")), "expires": float(entry.get("expires", 0.0)),
                 "revoked": bool(entry.get("revoked", not entry)), "parent": entry.get("parent", ""),
                 "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {})),
+                "depth": int(entry.get("depth", 0)), "invited_by": str(entry.get("invited_by", "")),
+                "strikes": int(entry.get("strikes", 0)),
                 "model": str(entry.get("model", "")), "harness": str(entry.get("harness", "")),
                 "model_state": str(entry.get("model_state", "")),
                 "models": list(entry.get("models", [])),
@@ -209,6 +211,93 @@ class Registry:
         if mine >= minted or every >= live:
             raise Denied(f"{minter} holds {mine} live minted identities ({every} in all); "
                          f"the limits are {minted} and {live}")
+
+    @staticmethod
+    def _below(agents: Mapping[str, Any], name: str) -> list[str]:
+        found: list[str] = []
+        todo = [name]
+        while todo:
+            head = todo.pop()
+            for n, e in sorted(agents.items()):
+                if e.get("parent") == head and n not in found:
+                    found.append(n)
+                    todo.append(n)
+        return found
+
+    @staticmethod
+    def _root(agents: Mapping[str, Any], name: str) -> str:
+        seen = {name}
+        while (up := str(agents.get(name, {}).get("parent", ""))) and up not in seen:
+            seen.add(up)
+            name = up
+        return name
+
+    def descendants(self, name: str, live: bool = False) -> list[str]:
+        """Every identity below ``name`` (children, their children, ...), ``live`` ones only if asked."""
+        agents = self._load()
+        return [n for n in self._below(agents, name) if not live or self._live(agents, agents[n])]
+
+    def root_of(self, name: str) -> str:
+        """The top-level identity ``name`` descends from (``name`` itself when it has no parent)."""
+        return self._root(self._load(), name)
+
+    def adopt(self, parent: str, name: str, ttl_s: float, can: tuple[str, ...], limits: tuple[int, int, int]) -> str:
+        """A token for ``name``, a standard agent that is ``parent``'s child: it holds at most
+        ``parent``'s rights and lasts no longer than ``parent``'s token. ``limits`` is the most
+        live children of ``parent``, live descendants of its root and live identities in all;
+        `Denied` names the one that is full."""
+        most_children, most_tree, most_live = limits
+        if not valid_name(name):
+            raise ValueError(f"{name!r} is not a usable agent id (a-z, 0-9, . _ -; up to 48)")
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            top = agents.get(parent)
+            if top is None or not self._live(agents, top):
+                raise Denied(f"{parent} is revoked or expired")
+            if self._live(agents, agents.get(name)):
+                raise ValueError(f"{name} is registered already")
+            rights = tuple(c for c in CAPS if c in top.get("can", CAPS) and c in can)
+            kids = sum(1 for e in agents.values() if e.get("parent") == parent and self._live(agents, e))
+            if kids >= most_children:
+                raise Denied(f"{parent} has {kids} live children; the limit is {most_children}")
+            root = self._root(agents, parent)
+            tree = sum(1 for n in self._below(agents, root) if self._live(agents, agents[n]))
+            if tree >= most_tree:
+                raise Denied(f"{root} has {tree} live descendants; the limit is {most_tree}")
+            every = sum(1 for e in agents.values() if self._live(agents, e))
+            if every >= most_live:
+                raise Denied(f"the workspace holds {every} live identities; the limit is {most_live}")
+            now = self.clock()
+            stop = float(top.get("expires", 0.0))
+            secret = secrets.token_urlsafe(32)
+            agents[name] = {"role": AGENT, "hash": _hash(secret), "created": now, "minted_by": parent,
+                            "parent": parent, "invited_by": parent, "can": list(rights),
+                            "depth": int(top.get("depth", 0)) + 1,
+                            "expires": min(now + ttl_s, stop) if stop else now + ttl_s, "revoked": False}
+            self._save(agents)
+        return f"{PREFIX}{name}.{secret}"
+
+    def strike(self, name: str) -> int:
+        """Count one misbehaviour of ``name`` against its parent; the parent's strikes so far."""
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            top = agents.get(str(agents.get(name, {}).get("parent", "")))
+            if top is None:
+                return 0
+            top["strikes"] = int(top.get("strikes", 0)) + 1
+            self._save(agents)
+            return int(top["strikes"])
+
+    def revoke_tree(self, by: Identity, name: str) -> list[str]:
+        """Revoke ``name`` and everything below it, if ``by`` may revoke ``name``; the names revoked."""
+        self.revoke(by, name)
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            below = self._below(agents, name)
+            for n in below:
+                agents[n]["revoked"] = True
+            self._save(agents)
+        return [name, *below]
 
     def children(self, parent: str) -> list[str]:
         """The live delegated identities of ``parent``."""

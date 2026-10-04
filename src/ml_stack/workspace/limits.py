@@ -61,6 +61,15 @@ class Limits:
     unread_per_sender: int = 100
     mints_per_identity: int = 16
     agents_live: int = 64
+    agent_invite_ttl_s: float = 1_800.0
+    agent_invite_uses: int = 3
+    agent_invites_open: int = 2
+    agent_invites_per_hour: int = 4
+    agent_invite_depth: int = 1
+    agent_tree_live: int = 8
+    agent_invite_strikes: int = 3
+    agent_invite_ask: str = "approve-first"
+    agent_invite_wait_s: float = 120.0
     verify_allow: list[list[str]] = field(default_factory=list)
 
 
