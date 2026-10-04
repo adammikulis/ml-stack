@@ -23,7 +23,7 @@ from ml_stack.files import write_json
 from ml_stack.log import warn
 from ml_stack.platform import private_file
 
-from . import tls
+from . import tls, wsl_network
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
@@ -361,7 +361,7 @@ def _destinations(group: str, port: int) -> list[tuple[tuple[str, int], str]]:
             (("255.255.255.255", port), ""), ((LOOPBACK, port), "")]
 
 
-def _say(sock: socket.socket, data: bytes, group: str,
+def _say(sock: socket.socket | wsl_network.DiscoverySocket, data: bytes, group: str,
          port: int) -> list[tuple[tuple[str, int], OSError]]:
     """Send ``data`` every way `_destinations` names; returns the ones refused."""
     lan = primary_ip()
@@ -412,8 +412,12 @@ def windows_firewall_line(http_port: int = DEFAULT_HTTP_PORT,
 
 
 def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
-            group: str | None = None) -> socket.socket:
+            group: str | None = None) -> socket.socket | wsl_network.DiscoverySocket:
+    if os.environ.get(wsl_network.ENV):
+        return wsl_network.DiscoverySocket({"broadcast": broadcast, "bind": bind, "group": group})
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if os.name == "nt":
+        wsl_network.disable_udp_reset(s)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT"):
         with contextlib.suppress(OSError):
@@ -451,7 +455,7 @@ class Advertiser:
         self.interval_s = interval_s
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
-        self._sock: socket.socket | None = None
+        self._sock: socket.socket | wsl_network.DiscoverySocket | None = None
         self._ready = threading.Event()
         self._error: BaseException | None = None
         self._asked = threading.Event()
@@ -561,7 +565,8 @@ class Advertiser:
                 continue
             self._asked.set()
 
-    def _tell_join(self, sock: socket.socket, nonce: str, addr: tuple[str, int]) -> None:
+    def _tell_join(self, sock: socket.socket | wsl_network.DiscoverySocket,
+                   nonce: str, addr: tuple[str, int]) -> None:
         """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
         reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
                             "port": self.beacon.port, "tls": bool(self.beacon.cert)})

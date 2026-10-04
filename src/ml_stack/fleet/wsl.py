@@ -9,8 +9,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ml_stack.log import say
+from ml_stack.log import say, warn
 from ml_stack.platform import launch
+
+from . import discovery, wsl_network
 
 __all__ = ["WSLError", "command", "prepare", "start"]
 
@@ -78,6 +80,26 @@ print(json.dumps(dict(kernel=platform.release(), python=list(sys.version_info[:2
     return python
 
 
+def _bridge(executable: str, arguments: list[str]) -> wsl_network.NetworkBridge | None:
+    host = discovery.primary_ip()
+    if not host:
+        warn("LAN discovery is unavailable while Windows has no LAN address.")
+        return None
+    linux_host = _read(executable, "-c", "from ml_stack.fleet.discovery import primary_ip; print(primary_ip())")
+    port = 8770
+    for index, arg in enumerate(arguments):
+        if arg == "--port" and index + 1 < len(arguments):
+            port = int(arguments[index + 1])
+        elif arg.startswith("--port="):
+            port = int(arg.partition("=")[2])
+    bridge = wsl_network.NetworkBridge(host, (linux_host, port), discovery.default_group(),
+                                      discovery.default_port(), discovery._socket)
+    try:
+        return bridge.start()
+    except OSError as exc:
+        raise WSLError(f"The Windows LAN bridge could not start: {exc}") from exc
+
+
 def start(argv: list[str], *, executable: str | None = None) -> int:
     """Run the Linux daemon with model confinement enabled."""
     executable = executable or prepare()
@@ -101,17 +123,23 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
                 arguments[index] = name + "=" + value
             else:
                 arguments[index + 1] = value
-    process = launch(command("env", *environment, executable,
-                                       "-m", "ml_stack.fleet.wsl_daemon", *arguments),
-                               stdin=subprocess.PIPE)
+    bridge = _bridge(executable, arguments)
+    if bridge:
+        environment.append(wsl_network.ENV + "=" + bridge.config)
     try:
-        return process.wait()
-    except KeyboardInterrupt:
-        return 130
-    finally:
-        if process.stdin:
-            process.stdin.close()
+        process = launch(command("env", *environment, executable,
+                                 "-m", "ml_stack.fleet.wsl_daemon", *arguments), stdin=subprocess.PIPE)
         try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.terminate()
+            return process.wait()
+        except KeyboardInterrupt:
+            return 130
+        finally:
+            if process.stdin:
+                process.stdin.close()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+    finally:
+        if bridge:
+            bridge.close()
