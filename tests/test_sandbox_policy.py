@@ -11,9 +11,11 @@ import pytest
 
 from ml_stack import sandbox
 from ml_stack.sandbox import AllowUnsandboxed, Limits, Net, Policy, PolicyError, policies, run
+from ml_stack.sandbox.backend import Availability
 from ml_stack.sandbox.bubblewrap import Bubblewrap, arguments
 from ml_stack.sandbox.container import Container
 from ml_stack.sandbox.seatbelt import ProfileError, profile, quote
+from tests.sandbox_kit import require_native_sandbox
 
 SYSTEM_BIN = os.path.realpath("/bin")
 SYSTEM_SHELL = os.path.realpath("/bin/sh")
@@ -241,3 +243,23 @@ def test_native_policy_factories_use_resolved_system_paths(tmp_path):
     assert len(policies.SYSTEM_EXEC) == len(set(policies.SYSTEM_EXEC))
     assert policies.bash(tmp_path, tmp_path).validated().exec == policies.SYSTEM_EXEC
     assert policies.mcp_server(os.path.realpath(sys.executable), tmp_path, tmp_path).validated()
+
+
+@pytest.mark.parametrize('error, expected', [
+    ('bwrap: Creating new namespace failed: Operation not permitted', pytest.skip.Exception),
+    ('dynamic loader failed', AssertionError),
+    ('command permission denied', AssertionError),
+])
+def test_native_probe_skips_namespace_denial_and_fails_other_errors(monkeypatch, error, expected):
+    monkeypatch.setattr(Bubblewrap, 'available', lambda self: Availability(True))
+    monkeypatch.setattr(sandbox, 'backend', Bubblewrap)
+
+    def denied(argv, held, **kwargs):
+        assert held.validated()
+        assert argv[0] == os.path.realpath(argv[0])
+        assert 'unsandboxed' not in kwargs
+        return sandbox.Result(argv, 1, stderr=error)
+
+    monkeypatch.setattr(sandbox, 'run', denied)
+    with pytest.raises(expected):
+        require_native_sandbox()
