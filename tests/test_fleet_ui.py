@@ -62,7 +62,7 @@ def the_passphrase_is_kept(a_keystore):  # noqa: F811
 
 @pytest.fixture(autouse=True)
 def nobody_else_is_on_the_network(monkeypatch):
-    """A join finds no machine to shake hands with, so it makes the cluster."""
+    """No existing cluster answers the test discovery socket."""
     from ml_stack.fleet.onboard import joining
 
     monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
@@ -159,9 +159,12 @@ class TestAssets:
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
     def test_every_component_defines_the_element_the_shell_holds(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, WEB
 
+        shell = (WEB / "shell.html").read_text(encoding="utf-8")
         for name in COMPONENTS:
+            if f"<{name}" not in shell:
+                continue
             text = (COMPONENTS_DIR / f"{name}.html").read_text(encoding="utf-8")
             assert f"customElements.define('{name}'" in text \
                 or f'customElements.define("{name}"' in text, \
@@ -211,7 +214,7 @@ class TestFirstRunIsNotUpForGrabs:
 
     def test_setup_works_from_the_machine_itself(self, serving):
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS, "group": "home"})
+                                       body={"mode": "create", "passphrase": WORDS, "group": "home"})
         assert status == 200, body
         assert body["in_cluster"] is True and body["group"] == "home"
         assert in_cluster(serving.keyfile)
@@ -220,7 +223,7 @@ class TestFirstRunIsNotUpForGrabs:
         """Whoever reaches an unjoined daemon first would own it. Being on the LAN is
         not enough; you have to be on the box, or use ssh and the CLI."""
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS},
+                                       body={"mode": "create", "group": "home", "passphrase": WORDS},
                                        host=primary_ip())
         assert status == 403
         assert "ssh" in body["error"]
@@ -230,7 +233,7 @@ class TestFirstRunIsNotUpForGrabs:
         """DNS rebinding: a page anywhere can point a domain at 127.0.0.1 and POST to
         it. Loopback-only buys nothing without checking what it was addressed to."""
         status, body, _ = serving.call(
-            "/ui/setup/join", method="POST", body={"passphrase": WORDS},
+            "/ui/setup/join", method="POST", body={"mode": "create", "group": "home", "passphrase": WORDS},
             headers={"Host": f"evil.example.com:{serving.port}"})
         assert status == 403
         assert "hostname" in body["error"]
@@ -244,9 +247,9 @@ class TestFirstRunIsNotUpForGrabs:
 
     def test_rejoining_needs_a_session_once_the_box_is_in_a_cluster(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": "different words here"})
+                                       body={"mode": "create", "group": "home", "passphrase": "different words here"})
         assert status == 401
         assert "sign in" in body["error"]
 
@@ -254,10 +257,10 @@ class TestFirstRunIsNotUpForGrabs:
         s = Serving(tmp_path, setup_token="abc123xyz")
         try:
             refused, _, _ = s.call("/ui/setup/join", method="POST",
-                                   body={"passphrase": WORDS}, host=primary_ip())
+                                   body={"mode": "create", "group": "home", "passphrase": WORDS}, host=primary_ip())
             assert refused == 403
             ok, body, _ = s.call("/ui/setup/join", method="POST",
-                                 body={"passphrase": WORDS}, host=primary_ip(),
+                                 body={"mode": "create", "group": "home", "passphrase": WORDS}, host=primary_ip(),
                                  headers={"X-ML-Stack-Setup": "abc123xyz"})
             assert ok == 200, body
         finally:
@@ -277,30 +280,37 @@ class TestThePassphraseNeverCrossesPlainHttp:
             plain.close()
 
     def test_over_tls_the_same_request_reaches_the_sign_in(self, serving):
-        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "home"})
+        serving.call("/ui/setup/join", method="POST", body={"mode": "create", "passphrase": WORDS, "group": "home"})
         status, _, headers = serving.call("/ui/session", method="POST",
                                           body={"passphrase": WORDS}, host=primary_ip())
         assert status == 200 and "Set-Cookie" in headers
 
 
-class TestJoiningTwice:
-    def test_a_cluster_with_no_name_is_the_same_one_either_way(self, serving):
-        """The wizard and the Clusters box must derive the same key from the same
-        words, or two machines set up different ways never see each other."""
+class TestExplicitClusterActions:
+    def test_a_missing_name_is_refused_without_creating_a_cluster(self, serving):
+        status, body, _ = serving.call("/ui/setup/join", method="POST",
+                                       body={"passphrase": WORDS, "mode": "create"})
+        assert status == 400 and "cluster name" in body["error"]
+        assert not in_cluster(serving.keyfile)
+
+    def test_recreating_a_local_cluster_preserves_its_key(self, serving):
         from ml_stack.fleet.discovery import memberships
 
         status, body, headers = serving.call("/ui/setup/join", method="POST",
-                                             body={"passphrase": WORDS})
+            body={"passphrase": WORDS, "group": "home", "mode": "create"})
         assert status == 200, body
         cookie = headers["Set-Cookie"].split(";")[0]
         first = memberships(serving.keyfile)[0]
-
         status, body, _ = serving.call("/ui/clusters", method="POST", cookie=cookie,
-                                       body={"passphrase": WORDS})
-        assert status == 200, body
-        rows = memberships(serving.keyfile)
-        assert [m.group for m in rows] == [first.group]
-        assert rows[0].key == first.key
+            body={"passphrase": "different words", "group": "home", "mode": "create"})
+        assert status == 400 and "already belongs" in body["error"]
+        assert memberships(serving.keyfile)[0].key == first.key
+
+    def test_joining_an_unseen_cluster_creates_no_key(self, serving):
+        status, body, _ = serving.call("/ui/setup/join", method="POST",
+            body={"passphrase": WORDS, "group": "home", "mode": "join"})
+        assert status == 400 and "No machine" in body["error"]
+        assert not in_cluster(serving.keyfile)
 
 
 # -- a machine in no cluster ---------------------------------------------
@@ -341,7 +351,7 @@ class TestOnItsOwn:
     def test_there_is_no_password_to_ask_for(self, serving):
         assert serving.call("/ui/setup")[1]["needs_password"] is False
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         assert serving.call("/ui/setup")[1]["needs_password"] is True
 
     def test_the_machine_itself_gets_in_without_signing_in(self, serving):
@@ -371,7 +381,7 @@ class TestOnItsOwn:
     def test_a_cluster_puts_the_password_back(self, serving):
         self.finished(serving)
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         status, body, _ = serving.call("/ui/settings")
         assert status == 401 and "sign in" in body["error"]
 
@@ -381,7 +391,7 @@ class TestSignIn:
     @pytest.fixture
     def joined(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         return serving
 
     def test_the_passphrase_signs_you_in(self, joined):
@@ -507,7 +517,7 @@ class TestPreferences:
     @pytest.fixture
     def joined(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         return serving
 
     def test_a_gpu_machine_is_suggested_for_training(self):
@@ -676,7 +686,7 @@ class TestSettingsScreen:
     @pytest.fixture
     def signed_in(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         _, _, headers = serving.call("/ui/session", method="POST",
                                      body={"passphrase": WORDS})
         return serving, headers["Set-Cookie"].split(";")[0]
@@ -690,7 +700,7 @@ class TestSettingsScreen:
         assert "autostart" in body and "version" in body
 
     def test_settings_need_a_session(self, serving):
-        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
+        serving.call("/ui/setup/join", method="POST", body={"mode": "create", "group": "home", "passphrase": WORDS})
         assert serving.call("/ui/settings")[0] == 401
 
     def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):
@@ -742,7 +752,7 @@ class TestTheInterfaceAndTheDaemonAgree:
     @pytest.fixture
     def signed_in(self, serving):
         serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+                     body={"mode": "create", "passphrase": WORDS, "group": "home"})
         _, _, headers = serving.call("/ui/session", method="POST",
                                      body={"passphrase": WORDS})
         return serving, headers["Set-Cookie"].split(";")[0]

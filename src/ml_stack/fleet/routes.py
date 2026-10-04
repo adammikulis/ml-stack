@@ -26,7 +26,7 @@ from .discovery import (
     load_cluster_key,
     memberships,
 )
-from .onboard.joining import join_by_passphrase
+from .onboard.joining import cluster_action
 from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .room_routes import RoomRoutes
@@ -223,7 +223,8 @@ class SetupRoutes:
         req = self.body()
         try:
             state, sid = ui.join(str(req.get("passphrase") or ""),
-                                 str(req.get("group") or ""), self.client_ip)
+                                 str(req.get("group") or ""), self.client_ip,
+                                 str(req.get("mode") or "join"))
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})
@@ -672,16 +673,17 @@ class ClusterRoutes:
         if self.method == "POST":
             req = self.body()
             words = str(req.get("passphrase") or "")
-            group = str(req.get("group") or "").strip() or "ml-stack"
+            group = str(req.get("group") or "").strip()
             try:
-                join_by_passphrase(words, group, ui.cluster_key_path)
+                cluster_action(str(req.get("mode") or "join"), words, group, ui.cluster_key_path)
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True
             recovery.remember(words, group, ui.cluster_key_path)
             rows = memberships(ui.cluster_key_path)
             ui.rejoined()
-            self.send(200, {"clusters": [m.public() for m in rows], "joined": group})
+            self.send(200, {"clusters": [m.public() for m in rows], "joined": group,
+                            "mode": str(req.get("mode") or "join")})
             return True
         if self.method == "DELETE":
             group = str(self.body().get("group") or "")

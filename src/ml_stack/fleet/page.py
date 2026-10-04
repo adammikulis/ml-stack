@@ -10,7 +10,7 @@ from ml_stack.ui import Component, assemble, load
 WEB = Path(__file__).parent / "web"
 COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
-COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "startup-models", "first-run", "cluster-view",
+COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "startup-models", "cluster-actions", "first-run", "cluster-view",
               "chat-view", "wired-memory", "models-view", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view", "close-sheet")
 #: the fit screen on its own, for a machine running no daemon

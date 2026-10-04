@@ -1,5 +1,12 @@
 # Onboarding devices on the local network
 
+Select **Join existing cluster**, then enter its name and passphrase. A failed search
+leaves this machine's memberships unchanged. **Create new cluster** starts a separate
+cluster and refuses to replace one already joined here. The name is required; the
+screen selects this machine's primary cluster, or `default` on an unjoined machine.
+From the terminal, join with `ml-stack-peers setup --group NAME`; add `--create` only
+when starting a new cluster.
+
 The first-run wizard offers a model download alongside the optional model server.
 Choose a model, tick its download box, and select **Install and continue** to accept.
 **Not now** leaves downloads for the Models screen. Downloads run in the background;

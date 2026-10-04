@@ -239,65 +239,23 @@
     // Which clusters this machine is in, and the way in and out of one.
     drawClusters(rows) {
       const joined = this.querySelector("#cluster-joined");
-      const words = el("input", { type: "password", id: "words", placeholder: "passphrase" });
-      const named = el("input", { type: "text", id: "cname", placeholder: "name (optional)" });
-      const note = el("div");
-      const persist = el("input", { type: "checkbox", id: "persist" });
-      const add = el("button", { class: "ghost small" }, "Join");
-      // The same `join` as `ml-stack-fleet join`: the checks, the cluster, the daemon
-      // (this one), at logon if ticked, and then what the fleet sees.
-      add.onclick = async () => {
-        const said = words.value.trim();
-        if (said && said.length < M.MIN_PASS) {
-          note.replaceChildren(el("div", { class: "err" },
-            `The passphrase needs at least ${M.MIN_PASS} characters.`));
-          return;
-        }
-        add.disabled = true;
-        note.replaceChildren(el("div", { class: "hint" }, el("span", { class: "spin" }),
-          " Joining…"));
-        const got = await api("/ui/fleet/join", { method: "POST",
-          body: JSON.stringify({ passphrase: said, group: named.value.trim(),
-                                 persist: persist.checked }) });
-        add.disabled = false;
-        if (got.error) {
-          note.replaceChildren(el("div", { class: "err" }, got.error));
-          return;
-        }
-        words.value = ""; named.value = "";
-        note.replaceChildren(
-          el("div", { class: "ok" }, `Joined ${got.group}`
-            + (got.persisted ? ", and it starts at logon." : ".")),
-          el("pre", { class: "cmd" }, (got.said || []).join("\n")));
-        api("/ui/clusters").then((c) => this.drawClusters(c.clusters || []));
+      const refresh = async () => {
+        this.drawClusters((await api("/ui/clusters")).clusters || []);
         this.draw();
       };
-
       joined.replaceChildren(
         el("h2", {}, "Clusters"),
-        el("div", { class: "hint" },
-          "This machine answers to every cluster listed. Machines find each other by "
-          + "sharing a passphrase."),
-        ...(rows.length
-          ? rows.map((c, i) =>
-              el("div", { class: "row" },
-                el("span", {}, el("b", {}, c.group),
-                  el("span", { class: "why" },
-                    i === 0 ? "this machine answers as this one" : "also in this one")),
-                el("button", { class: "ghost small",
-                  onclick: async () => {
-                    const left = await api("/ui/clusters", { method: "DELETE",
-                      body: JSON.stringify({ group: c.group }) });
-                    this.drawClusters(left.clusters || []);
-                    this.draw();
-                  } }, "Leave")))
-          : [el("div", { class: "hint" }, "In no cluster. Join one below.")]),
-        el("div", { class: "searchrow" }, words, named, add),
-        el("label", { class: "opt", for: "persist" }, persist,
-          el("span", {}, el("b", {}, "Start at logon"),
-            el("span", { class: "why" },
-              "so this machine is back in the fleet after a restart"))),
-        note);
+        el("div", { class: "hint" }, "This machine shares work with each cluster listed here."),
+        ...(rows.length ? rows.map((c, i) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, c.group),
+              el("span", { class: "why" }, i === 0 ? "Primary cluster" : "Also joined")),
+            el("button", { class: "ghost small", onclick: async () => {
+              const left = await api("/ui/clusters", { method: "DELETE",
+                body: JSON.stringify({ group: c.group }) });
+              if (!left.error) await refresh();
+            } }, "Leave"))) : [el("div", { class: "hint" }, "No cluster joined.")]),
+        M.clusterForm({ endpoint: "/ui/clusters", group: rows[0]?.group || "default", onComplete: refresh }));
     }
 
     // A sweep across the fleet: the models the peers hold, one job each, detached.

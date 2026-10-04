@@ -1,14 +1,4 @@
-"""Joining a cluster with its passphrase: the handshake a daemon answers and the one a new machine runs.
-
-A machine that holds the cluster key answers ``POST /join/v1/start`` and ``/finish`` without a
-signature, since the machine asking has no key yet. The two ends run SPAKE2 (`pake`) with the
-passphrase as the password and the daemon's certificate fingerprint as its identity; the
-daemon's confirmation reaches the new machine only after the new machine's checked out, and
-the cluster key travels sealed under the exchange's key. A listener learns nothing it can test
-a guess against, and every start counts against its source (`Joining.lockout`). The password the
-exchange runs on is `join_secret`, a scrypt hash of the passphrase that each machine keeps beside
-the cluster key, so a daemon needs no keystore to answer or to check a sign-in.
-"""
+"""Authenticated passphrase exchange for existing clusters and explicit cluster creation."""
 
 from __future__ import annotations
 
@@ -35,7 +25,8 @@ from . import pake
 from .lan import require_local
 from .pairing import fingerprint_of, unverified_context
 
-__all__ = ["API", "Declined", "Joiner", "Joining", "find_joiners", "join_by_passphrase", "join_secret",
+__all__ = ["API", "Declined", "Joiner", "Joining", "cluster_action", "create_by_passphrase",
+           "find_joiners", "join_by_passphrase", "join_secret",
            "matches"]
 
 API = "/join/v1"
@@ -287,16 +278,46 @@ def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> bytes:
     return key
 
 
-def join_by_passphrase(passphrase: str, group: str = disc.DEFAULT_CLUSTER,
+def _named(group: str) -> str:
+    group = group.strip()
+    if not group:
+        raise DiscoveryError("Enter a cluster name.")
+    return group
+
+
+def create_by_passphrase(passphrase: str, group: str,
+                         path: Path | str | None = None) -> Membership:
+    """Create a named cluster with a passphrase."""
+    group = _named(group)
+    if any(member.group == group for member in disc.memberships(path)):
+        raise DiscoveryError(f"This machine already belongs to '{group}'. Leave it before creating another.")
+    words = disc.check_length(passphrase)
+    if find_joiners(group):
+        raise DiscoveryError(f"A cluster named '{group}' is on this network. Join it instead.")
+    return disc.mint_cluster(group, path, join=join_secret(words, group))
+
+
+def cluster_action(mode: str, passphrase: str, group: str,
+                   path: Path | str | None = None) -> Membership:
+    """Join an existing cluster or create a new one."""
+    if mode == "join":
+        return join_by_passphrase(passphrase, group, path)
+    if mode == "create":
+        return create_by_passphrase(passphrase, group, path)
+    raise DiscoveryError("Choose Join existing cluster or Create new cluster.")
+
+
+def join_by_passphrase(passphrase: str, group: str,
                        path: Path | str | None = None, *, timeout_s: float = 1.5,
                        port: int | None = None) -> Membership:
-    """Join ``group``: a daemon in it gives this machine the cluster key when the passphrase is
-    right; when none answers, this machine keeps its own cluster of that name or makes one."""
+    """Join an existing named cluster through its authenticated passphrase exchange."""
+    group = _named(group)
     secret = join_secret(disc.check_length(passphrase), group)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
-        held = next((m for m in disc.memberships(path) if m.group == group), None)
-        return held or disc.mint_cluster(group, path, join=secret)
+        raise DiscoveryError(f"No machine in '{group}' answered on this network. "
+                             "Check its connection and cluster name, then retry. "
+                             "Use Create new cluster to start a separate cluster.")
     refused: list[Declined] = []
     for one in joiners:
         try:
@@ -308,4 +329,6 @@ def join_by_passphrase(passphrase: str, group: str = disc.DEFAULT_CLUSTER,
     if any(w.status == 403 for w in refused):
         raise DiscoveryError(f"{len(joiners)} cluster(s) on this network answered and none "
                              "accepts that passphrase")
-    raise DiscoveryError(refused[0].args[0] if refused else "no machine took this one in")
+    reason = next((why.args[0] for why in refused if why.status),
+                  refused[0].args[0] if refused else "no machine took this one in")
+    raise DiscoveryError(reason)

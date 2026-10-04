@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack.checks import Finding
-from ml_stack.fleet import join as joining
+from ml_stack.fleet import join as joining, ui as fleet_ui
 from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
@@ -43,6 +43,7 @@ from ml_stack.fleet.join import (
     table,
 )
 from ml_stack.http import Server
+from tests.cluster_support import join as join_cluster
 
 WORDS = "quince larch marlow"
 DEVICE = {"gpu": "Pellard P40", "vram_total_gb": 24.0, "vram_free_gb": 20.5,
@@ -129,7 +130,7 @@ def daemons():
 # -- the join --------------------------------------------------------------------------
 class TestJoin:
     @pytest.mark.slow
-    def test_it_checks_joins_starts_announces_and_lists(self, tmp_path, key, udp, daemons):
+    def test_it_checks_joins_starts_announces_and_lists(self, tmp_path, key, udp, daemons, monkeypatch):
         tcp = _free_tcp()
         said: list[str] = []
         calls: list[tuple[int, Path, str]] = []
@@ -140,7 +141,10 @@ class TestJoin:
             daemons.append(FakeDaemon(port, load_cluster_key(key), udp, name="larch"))
             return 4242
 
+
         assert not in_cluster(key)
+        monkeypatch.setattr(joining, "join_by_passphrase",
+                            lambda words, group, path: join_cluster(words, group=group, path=path))
         joined = join_machine(name="larch", passphrase=WORDS, group="home", port=tcp,
                               root=tmp_path / "root", cluster_key_path=key, start=start,
                               discovery_port=udp, say=said.append)
@@ -181,7 +185,6 @@ class TestJoin:
         """Writing the key file under a running daemon leaves it announcing the old set;
         the cluster has to go in through the daemon, which re-reads them."""
         tcp = _free_tcp()
-        from tests.cluster_support import join as join_cluster
 
         # Already in a cluster, already running, before `join` is asked for a second one.
         join_cluster(WORDS, group="home", path=key)
@@ -203,7 +206,6 @@ class TestJoin:
     @pytest.mark.slow
 
     def test_already_in_a_cluster_needs_no_passphrase(self, tmp_path, key, udp, daemons):
-        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -232,7 +234,9 @@ class TestJoin:
         # the fake logon service never brings a daemon up, so the first wait runs its
         # deadline out on purpose; the FakeDaemon `start` puts up answers on the first poll,
         # so a short deadline measures the same fall-through in three seconds instead of twenty
-        joined = join_machine(passphrase=WORDS, persist=True, port=tcp, root=tmp_path,
+
+        join_cluster(WORDS, path=key)
+        joined = join_machine(persist=True, port=tcp, root=tmp_path,
                               cluster_key_path=key, start=start, persist_with=installs,
                               discovery_port=udp, say=lambda s: None, wait_s=3.0)
         assert asked == ["login"] and joined.persisted and joined.persist_note == ""
@@ -248,8 +252,10 @@ class TestJoin:
         assert "sudo cp" in joined.persist_note and "administrator" in joined.persist_note
 
     def test_a_daemon_that_never_answers_is_an_error_naming_the_log(self, tmp_path, key, udp):
+
+        join_cluster(WORDS, path=key)
         with pytest.raises(JoinError) as left:
-            join_machine(passphrase=WORDS, port=_free_tcp(), root=tmp_path / "r",
+            join_machine(port=_free_tcp(), root=tmp_path / "r",
                          cluster_key_path=key, start=lambda *a: 99, wait_s=0.6,
                          discovery_port=udp, say=lambda s: None)
         assert "traind.log" in str(left.value)
@@ -370,7 +376,6 @@ class TestStatus:
     @pytest.mark.slow
 
     def test_peers_lists_one_machine_once_across_two_clusters(self, key, udp, daemons):
-        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
@@ -388,7 +393,6 @@ class TestStatus:
         assert sorted(rows[0]["clusters"]) == ["home", "lab"]
 
     def test_status_command_prints_json_rows(self, key, udp, daemons, monkeypatch, capsys):
-        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -402,7 +406,6 @@ class TestStatus:
 
     def test_two_machines_of_one_name_are_listed_apart(self, key, udp, daemons,
                                                         monkeypatch, capsys):
-        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -468,7 +471,6 @@ class TestStatus:
 # -- leaving ---------------------------------------------------------------------------
 class TestLeave:
     def test_leave_drops_the_cluster_the_service_and_the_daemon_it_started(self, tmp_path, key):
-        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         # A process standing in for the daemon `join` started, stopped by pid, never by name.
@@ -491,7 +493,6 @@ class TestLeave:
                 child.kill()
 
     def test_leave_one_group_keeps_the_other(self, tmp_path, key):
-        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
@@ -539,7 +540,7 @@ class TestThePage:
         s.ui.peer_port = s.port
         s.ui.discovery_port = udp
         s.ui.root = tmp_path / "traind"
-        s.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "home"})
+        s.call("/ui/setup/join", method="POST", body={"mode": "create", "passphrase": WORDS, "group": "home"})
         _, _, headers = s.call("/ui/session", method="POST", body={"passphrase": WORDS})
         cookie = headers["Set-Cookie"].split(";")[0]
         # Another machine in the same cluster, holding two models and serving one.
@@ -561,7 +562,10 @@ class TestThePage:
 
     @pytest.mark.slow
 
-    def test_the_join_button_runs_the_same_join(self, page):
+    def test_the_join_button_runs_the_same_join(self, page, monkeypatch):
+
+        monkeypatch.setattr(fleet_ui, "join_by_passphrase",
+                            lambda words, group, path: join_cluster(words, group=group, path=path))
         s, cookie = page
         status, body, _ = s.call("/ui/fleet/join", method="POST", body={}, cookie=cookie)
         assert status == 400, "an empty form must not start anything"
@@ -951,7 +955,6 @@ class TestWhoAPauseIsSentTo:
     def test_a_row_gets_a_client_holding_the_token_its_cluster_derives(self, tmp_path):
         from ml_stack.fleet.discovery import derive_token
         from ml_stack.fleet.pausing import peer_clients
-        from tests.cluster_support import join as join_cluster
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)
@@ -972,7 +975,6 @@ class TestWhoAPauseIsSentTo:
 
     def test_a_row_no_key_of_this_machine_reaches_gets_no_client(self, tmp_path):
         from ml_stack.fleet.pausing import peer_clients
-        from tests.cluster_support import join as join_cluster
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)

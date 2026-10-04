@@ -25,7 +25,7 @@ from .discovery import (
     named_apart,
 )
 from .join import default_root
-from .onboard.joining import join_by_passphrase, matches
+from .onboard.joining import cluster_action, join_by_passphrase, matches
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -207,17 +207,17 @@ class UI:
         return found
 
     # -- actions ---------------------------------------------------------
-    def join(self, passphrase: str, group: str, source: str) -> tuple[dict[str, Any], str]:
+    def join(self, passphrase: str, group: str, source: str, mode: str = "join") -> tuple[dict[str, Any], str]:
         """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
         try:
-            join_by_passphrase(passphrase, group or "ml-stack", self.cluster_key_path)
+            cluster_action(mode, passphrase, group, self.cluster_key_path)
         except DiscoveryError:
             self.throttle.failed(source)
             raise
-        recovery.remember(passphrase, group or "ml-stack", self.cluster_key_path)
+        recovery.remember(passphrase, group.strip(), self.cluster_key_path)
         self.throttle.succeeded(source)
         self._peers = (0.0, [])
         if self.on_join is not None:

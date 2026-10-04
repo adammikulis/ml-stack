@@ -21,9 +21,7 @@ from .discovery import (
     key_path,
     load_cluster_key,
 )
-from .onboard.joining import join_by_passphrase
-
-DEFAULT_GROUP_NAME = "ml-stack"
+from .onboard.joining import cluster_action
 
 
 def _require_key(path: str | None) -> bytes:
@@ -35,7 +33,7 @@ def _require_key(path: str | None) -> bytes:
 
 
 def _prompt_passphrase(confirm: bool) -> str:
-    """Ask twice, because a typo here does not fail -- it silently makes a cluster of one."""
+    """Read a passphrase, with confirmation when creating a cluster."""
     while True:
         first = getpass.getpass("  Passphrase: ")
         if len(first.strip()) < MIN_PASSPHRASE:
@@ -63,19 +61,20 @@ def cmd_setup(args: argparse.Namespace) -> int:
         say("or 'ml-stack-peers setup --force' to join a different one.")
         return 0
 
-    say("Connect this machine to the others you want to train with.")
-    say("Run this on every machine, with the SAME passphrase. That is all it takes.")
+    say("Create a new cluster." if args.create else "Join a cluster already running on this network.")
     say()
 
     group = args.group
     if interactive and not args.group_given:
-        typed = input(f"  Group name [{DEFAULT_GROUP_NAME}]: ").strip()
-        group = typed or DEFAULT_GROUP_NAME
+        group = input("  Cluster name: ").strip()
+    if not group.strip():
+        warn("error: enter a cluster name with --group NAME")
+        return 2
 
     if args.passphrase:
         passphrase = args.passphrase
     elif interactive:
-        passphrase = _prompt_passphrase(confirm=True)
+        passphrase = _prompt_passphrase(confirm=args.create)
     else:
         passphrase = sys.stdin.readline()
         if not passphrase.strip():
@@ -83,14 +82,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
             return 2
 
     say()
-    say("  Looking for the cluster on this network...", flush=True)
-    join_by_passphrase(passphrase, group, args.cluster_key)
+    say("  Creating the cluster..." if args.create else "  Looking for the cluster on this network...", flush=True)
+    cluster_action("create" if args.create else "join", passphrase, group, args.cluster_key)
     recovery.remember(passphrase, group, args.cluster_key, say=lambda s: say(f"  {s}"))
 
-    say(f"  Joined '{group}'.")
+    say(f"  {'Created' if args.create else 'Joined'} '{group}'.")
     say()
     say("Next:")
-    say("  1. Run this same command on your other machines, same passphrase.")
+    say("  1. Join your other machines with this name and passphrase, without --create.")
     say("  2. On each of them, start the daemon:")
     say()
     say("       ml-stack-traind")
@@ -237,9 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     setup = sub.add_parser(
         "setup", help="join a cluster with a passphrase (start here)")
-    setup.add_argument("--group", default=DEFAULT_GROUP_NAME,
-                       help="which cluster these words belong to, so two groups on one "
-                            f"network stay separate (default: {DEFAULT_GROUP_NAME})")
+    setup.add_argument("--group", default="", help="cluster name (required)")
+    setup.add_argument("--create", action="store_true", help="create a new cluster instead of joining an existing one")
     setup.add_argument("--passphrase", default="",
                        help="skip the prompt. Avoid on a shared machine: it lands in "
                             "your shell history and in 'ps'.")

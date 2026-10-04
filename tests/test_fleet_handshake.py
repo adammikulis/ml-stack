@@ -142,11 +142,10 @@ def test_a_passphrase_under_five_characters_is_refused_before_anything_is_sent(m
     assert machine.captured == []
 
 
-def test_a_machine_that_finds_nobody_makes_the_cluster_and_keeps_it(tmp_path, udp):
-    first = _join(tmp_path, udp)
-    again = _join(tmp_path, udp)
-    assert first.group == "lab" and again.key == first.key
-    assert len(base64.urlsafe_b64decode(first.key + b"=")) == 32
+def test_a_machine_that_finds_nobody_refuses_join_and_creates_no_key(tmp_path, udp):
+    with pytest.raises(DiscoveryError, match="No machine"):
+        _join(tmp_path, udp)
+    assert memberships(tmp_path / "b" / "cluster.key") == []
 
 
 def test_a_captured_join_holds_nothing_to_test_a_guess_against(machine, tmp_path, udp):

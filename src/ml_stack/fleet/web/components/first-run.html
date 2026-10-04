@@ -81,66 +81,31 @@
 
     async clustersStep() {
       const st = this.state;
+      const current = (await api("/ui/clusters")).clusters || [];
       const rows = el("div");
-      const note = el("div", { class: "hint" });
-      const pass = el("input", { type: "password", id: "p1", value: st.pass,
-                                 placeholder: "passphrase" });
-      const grp = el("input", { type: "text", id: "g", value: st.group,
-                                placeholder: "name (optional)" });
-      const add = el("button", { class: "ghost small" }, "Join");
-
-      const remember = () => { st.pass = pass.value; st.group = grp.value.trim(); };
       const draw = (list) => {
         st.clusters = list;
         rows.replaceChildren(...list.map((c, i) =>
           el("div", { class: "row" },
             el("span", {}, el("b", {}, c.group),
-              el("span", { class: "why" },
-                i === 0 ? "this machine answers as this one" : "also in this one")),
-            el("button", { class: "ghost small",
-              onclick: async () => {
-                const left = await api("/ui/clusters", { method: "DELETE",
-                  body: JSON.stringify({ group: c.group }) });
-                draw(left.clusters || []);
-              } }, "Leave"))));
+              el("span", { class: "why" }, i === 0 ? "Primary cluster" : "Also joined")),
+            el("button", { class: "ghost small", onclick: async () => {
+              const left = await api("/ui/clusters", { method: "DELETE",
+                body: JSON.stringify({ group: c.group }) });
+              draw(left.clusters || []);
+            } }, "Leave"))));
       };
-      const check = () => { add.disabled = pass.value.trim().length < M.MIN_PASS; };
-      pass.oninput = check;
-
-      add.onclick = async () => {
-        add.disabled = true;
-        note.replaceChildren(el("span", { class: "spin" }), " Joining…");
-        const named = grp.value.trim() || "ml-stack";
-        const r = await api("/ui/setup/join", { method: "POST",
-          body: JSON.stringify({ passphrase: pass.value, group: named }) });
-        if (!r.ok) {
-          note.replaceChildren(el("div", { class: "err" }, r.error || "Could not join."));
-          check();
-          return;
-        }
-        pass.value = grp.value = "";
-        st.pass = st.group = "";
-        check();
-        note.textContent = "Type the same passphrase on your other machines. If you "
-          + "mistyped it, leave and join again.";
-        draw((await api("/ui/clusters")).clusters || []);
-      };
-
       this.show(
-        this.steps(1, () => { remember(); this.go(0); }),
+        this.steps(1, () => this.go(0)),
         el("h1", {}, "Clusters"),
         el("p", { class: "sub" },
-          "Machines that share a passphrase find each other and send each other work. "
-          + "You can do this later instead — this one works on its own until you do."),
+          "Join your existing cluster to share work with its machines, or create a new one. "
+          + "Everyone with its passphrase can run commands on every machine in it."),
         rows,
-        el("div", { class: "searchrow" }, pass, grp, add),
-        note,
-        el("button", { onclick: () => { remember(); this.go(2); } }, "Continue"));
-
-      draw((await api("/ui/clusters")).clusters || []);
-      check();
-      note.textContent = "A few words you will remember. Everyone who knows them can run "
-        + "commands on every machine in the cluster.";
+        M.clusterForm({ endpoint: "/ui/setup/join", group: current[0]?.group || "default", onComplete: async () =>
+          draw((await api("/ui/clusters")).clusters || []) }),
+        el("button", { onclick: () => this.go(2) }, "Continue"));
+      draw(current);
     }
 
     async asked() {

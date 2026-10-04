@@ -112,7 +112,7 @@ threat model and what is not built are in `docs/onboarding.md`.
 
 ### How a machine joins
 
-The first machine to join a cluster makes its key: 256 random bits that no passphrase derives.
+Creating a cluster makes its key: 256 random bits that no passphrase derives.
 A machine that joins later runs a password-authenticated key exchange (SPAKE2) with a daemon
 already in the cluster: both sides prove they know the passphrase, the passphrase is never
 sent and a listener cannot test a guess against anything it captures, and the daemon then sends

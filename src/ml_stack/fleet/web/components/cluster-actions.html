@@ -1,0 +1,60 @@
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  class ClusterActions extends HTMLElement {
+    setup({ endpoint, onComplete, group = "default" }) {
+    const scope = endpoint.includes("/setup/") ? "setup-cluster" : "fleet-cluster";
+    const mode = el("select", { id: `${scope}-action` },
+      el("option", { value: "join" }, "Join existing cluster"),
+      el("option", { value: "create" }, "Create new cluster"));
+    const named = el("input", { id: `${scope}-name`, type: "text", required: "1", value: group });
+    const words = el("input", { id: `${scope}-passphrase`, type: "password", required: "1" });
+    const submit = el("button", { class: "ghost small" }, "Join existing cluster");
+    const note = el("div", { role: "status", "aria-live": "polite" });
+    const explain = el("div", { class: "hint" });
+    const check = () => { submit.disabled = !named.value.trim() || words.value.trim().length < M.MIN_PASS; };
+    const choose = () => {
+      submit.textContent = mode.value === "create" ? "Create new cluster" : "Join existing cluster";
+      explain.textContent = mode.value === "create"
+        ? "Start a separate cluster with this name and a new passphrase."
+        : "Use the name and passphrase of a cluster already running on your network.";
+      check();
+    };
+    named.oninput = words.oninput = check;
+    mode.onchange = choose;
+    submit.onclick = async () => {
+      submit.disabled = true;
+      note.replaceChildren(el("span", { class: "spin" }),
+        mode.value === "create" ? " Creating cluster…" : " Looking for the existing cluster…");
+      const group = named.value.trim();
+      const action = mode.value;
+      const got = await M.api(endpoint, { method: "POST",
+        body: JSON.stringify({ group, passphrase: words.value, mode: action }) });
+      if (got.error || got.ok === false) {
+        note.replaceChildren(el("div", { class: "err" }, got.error || "The cluster action failed."));
+        check();
+        return;
+      }
+      words.value = "";
+      check();
+      note.replaceChildren(el("div", { class: "ok" },
+        `${action === "create" ? "Created" : "Joined"} cluster '${group}'.`));
+      await onComplete(got);
+    };
+    choose();
+    this.replaceChildren(el("div", { class: "group", id: `${scope}-form` },
+      el("label", { for: `${scope}-action` }, "What would you like to do?"), mode, explain,
+      el("label", { for: `${scope}-name` }, "Cluster name (required)"), named,
+      el("label", { for: `${scope}-passphrase` }, "Cluster passphrase"), words,
+      submit, note));
+    }
+  }
+  customElements.define("cluster-actions", ClusterActions);
+  M.clusterForm = (options) => {
+    const form = el("cluster-actions");
+    form.setup(options);
+    return form;
+  };
+})();
+</script>
