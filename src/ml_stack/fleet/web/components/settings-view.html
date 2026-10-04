@@ -71,6 +71,7 @@
         on_close: cur.on_close || "",
         auto_update: cur.auto_update !== false,
         autodownload_models: cur.autodownload_models !== false,
+        download_sources: cur.download_sources || "",
         context: cur.context || 8192,
       };
       this.querySelector("#settings-sub").textContent =
@@ -93,6 +94,10 @@
 
       this.querySelector("#settings-chatting").replaceChildren(
         el("h2", {}, "Chatting"),
+        el("h3", {}, "Download sources"),
+        this.radio("download_sources", "internet", "Internet only", "Skip LAN model transfers."),
+        this.radio("download_sources", "lan", "LAN only", "No Internet fallback for models or MTP heads."),
+        this.radio("download_sources", "both", "Both", "Try your cluster first, then the Internet."),
         M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }));
 
       const status = el("div", { class: "hint", style: "margin-top:10px" },
@@ -101,7 +106,7 @@
         el("h2", {}, "Updates"),
         el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
         this.check("autodownload_models", "Get models automatically",
-          "from another machine on your network if one has it, otherwise the internet"),
+          "using the download sources selected above"),
         this.check("auto_update", "Download and install updates automatically",
           "checked once a day, put on when no job is running, and it restarts itself"),
         status);

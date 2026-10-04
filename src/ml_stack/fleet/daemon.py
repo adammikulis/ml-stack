@@ -156,7 +156,7 @@ def serve_forever(root: Path | str | None = None,
     environment = Environment(root)
     serving = Serving(root / "serving.json")
     hosting = Hosting(root, serving)
-    models = Models(default_roots(root), root / "models")
+    models = Models(default_roots(root), root / "models", sources=lambda: settings.download_sources)
     conversations = Conversations(root / "chats")
     downloads = Downloads(models)
     measuring_home = (Path(bench_home).expanduser() if bench_home is not None

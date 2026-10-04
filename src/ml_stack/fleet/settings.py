@@ -40,11 +40,12 @@ class Settings:
     update_channel: str = "stable"
     fetch_slots: int = 2
     autodownload_models: bool = True
+    download_sources: str = ""
     context: int = 8192
     """How much of a conversation a model is given to read. Costs memory per token."""
 
     @classmethod
-    def load(cls, path: Path | str) -> "Settings":
+    def load(cls, path: Path | str) -> Settings:
         """What ``path`` holds, or the defaults."""
         return _DOC.read(path)
 
@@ -56,7 +57,7 @@ class Settings:
         return asdict(self)
 
 
-_DOC: Document["Settings"] = Document(
+_DOC: Document[Settings] = Document(
     build=lambda raw: Settings(**{k: v for k, v in raw.items()
                                   if k in Settings.__dataclass_fields__}),
     unbuild=lambda one: dict(sorted(asdict(one).items())),

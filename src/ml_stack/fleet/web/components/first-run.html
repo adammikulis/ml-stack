@@ -8,7 +8,7 @@
   const el = M.el;
   const api = M.api;
 
-  const STEPS = 8;
+  const STEPS = 9;
 
   class FirstRun extends HTMLElement {
     connectedCallback() {
@@ -54,9 +54,10 @@
       if (s === 1) return this.clustersStep();
       if (s === 2) return this.jobStep();
       if (s === 3) return this.startStep();
-      if (s === 4) return this.runStep();
-      if (s === 5) return this.awayStep();
-      if (s === 6) return this.wiredStep();
+      if (s === 4) return this.sourceStep();
+      if (s === 5) return this.runStep();
+      if (s === 6) return this.awayStep();
+      if (s === 7) return this.wiredStep();
       return this.doneStep();
     }
 
@@ -249,6 +250,36 @@
       return el("label", { class: "opt", for: id }, input, M.row(label, why));
     }
 
+    sourceStep() {
+      const kept = this.chosen();
+      const note = el("div", { role: "status" });
+      const go = el("button", { disabled: "1" }, "Save and continue");
+      const choices = [["internet", "Internet only", "Download models from their online source."],
+        ["lan", "LAN only", "Copy models and MTP heads from your cluster. No Internet fallback."],
+        ["both", "Both", "Try your cluster first, then the Internet."]];
+      const rows = choices.map(([value, label, why]) => {
+        const input = el("input", { type: "radio", name: "download-sources", value,
+          id: `source-${value}`, ...(kept.sources === value ? { checked: "1" } : {}) });
+        input.onchange = () => { kept.sources = value; go.disabled = false; };
+        return el("label", { class: "opt", for: input.id }, input, M.row(label, why));
+      });
+      go.disabled = !kept.sources;
+      go.onclick = async () => {
+        go.disabled = true;
+        const r = await api("/ui/setup/prefs", { method: "POST",
+          body: JSON.stringify({ download_sources: kept.sources }) });
+        if (!r.ok || r.error) {
+          note.textContent = r.error || "Could not save download sources.";
+          go.disabled = false;
+          return;
+        }
+        this.go(5);
+      };
+      this.show(this.steps(4, () => this.go(3)), el("h1", {}, "Where should downloads come from?"),
+        el("p", { class: "sub" }, "Choose before installing a model. LAN only also keeps "
+          + "the model server and GPU runtime from downloading from the Internet."), ...rows, go, note);
+    }
+
     async runStep() {
       const st = this.state;
       if (!st.libraries) st.libraries = await api("/ui/libraries");
@@ -263,7 +294,7 @@
       const note = el("div");
       const size = el("div", { class: "hint" });
       const go = el("button", {}, "Install and continue");
-      const later = el("button", { class: "ghost", onclick: () => this.go(5) }, "Not now");
+      const later = el("button", { class: "ghost", onclick: () => this.go(6) }, "Not now");
 
       const paint = () => {
         const mb = offered.filter((x) => want.has(x.name))
@@ -285,7 +316,13 @@
         try {
           if (kept.chat) {
             doing("Getting the model server…");
-            const got = await api("/ui/serving/install", { method: "POST" });
+            const timer = setInterval(async () => {
+              const status = await api("/ui/serving/install");
+              if (status.note) doing(status.note);
+            }, 1000);
+            let got;
+            try { got = await api("/ui/serving/install", { method: "POST" }); }
+            finally { clearInterval(timer); }
             if (got.error) return stop(got.error);
           }
           const add = [...want];
@@ -299,20 +336,20 @@
         } catch (e) {
           return stop(String(e));
         }
-        this.go(5);
+        this.go(6);
       };
 
       paint();
       this.card.className = "card wide";
       this.show(
-        this.steps(4, () => this.go(3)),
+        this.steps(5, () => this.go(4)),
         el("h1", {}, "What should it be able to do?"),
         el("p", { class: "sub" },
           "Ticked from what this machine is. Anything here can be changed later in "
           + "Settings."),
         el("div", { class: "cap" }, el("span", {}, "CHATTING")),
         this.optBox("chat", kept.chat, "Run models and chat with them",
-          "downloads llama.cpp, about 20 MB",
+          "installs the model server and the GPU runtime needed on this machine",
           (on) => { kept.chat = on; }),
         this.modelInstall.panel,
         M.contextPicker(kept.context, (n) => { kept.context = n; }),
@@ -339,11 +376,11 @@
           context: kept.context, auto_update: kept.updates,
           autodownload_models: kept.getModels, on_close: kept.onClose,
           autostart: (st.prefs || {}).autostart || "manual" }) });
-        this.go(6);
+        this.go(7);
       };
       this.card.className = "card";
       this.show(
-        this.steps(5, () => this.go(4)),
+        this.steps(6, () => this.go(5)),
         el("h1", {}, "When you are not using it"),
         el("p", { class: "sub" },
           "It keeps itself current, and stays reachable while the window is shut."),
@@ -352,7 +389,7 @@
           "checked once a day, put on when no job is running, and it restarts itself",
           (on) => { kept.updates = on; }),
         this.optBox("getm", kept.getModels, "Get models automatically",
-          "from another machine on your network if one has it, otherwise the internet",
+          "using the download sources you selected",
           (on) => { kept.getModels = on; }),
         el("div", { class: "cap" }, el("span", {}, "CLOSING THE WINDOW")),
         ...[["", "Ask me each time"],
@@ -369,17 +406,17 @@
 
     async wiredStep() {
       const r = await api("/ui/room");
-      if (!r.machine || !r.machine.supported) return this.go(7);
+      if (!r.machine || !r.machine.supported) return this.go(8);
       const next = el("button", {}, "Continue");
-      next.onclick = () => this.go(7);
+      next.onclick = () => this.go(8);
       this.show(
-        this.steps(6, () => this.go(5)),
+        this.steps(7, () => this.go(6)),
         el("h1", {}, "Give models more memory?"),
         el("p", { class: "sub" },
           "Large models need more of this computer's memory than macOS gives the GPU by default. "
           + "You can skip this and change it later in Settings."),
         document.createElement("wired-memory"),
-        el("button", { class: "ghost", onclick: () => this.go(7) }, "Skip"), next);
+        el("button", { class: "ghost", onclick: () => this.go(8) }, "Skip"), next);
     }
 
     doneStep() {
@@ -395,7 +432,7 @@
 
       if (!joined) {
         return this.show(
-          this.steps(7),
+          this.steps(8),
           el("h1", {}, `“${st.name}” is ready`),
           el("p", { class: "sub" },
             "It is on its own: it will run models and train here, and nothing else on your "
@@ -428,7 +465,7 @@
           el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
 
       this.show(
-        this.steps(7),
+        this.steps(8),
         el("h1", {}, `Joined “${joined.group}”`),
         el("p", { class: "sub" }, "Now add your other machines. On each one:"),
         el("ol", { class: "howto" },

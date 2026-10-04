@@ -19,6 +19,7 @@ from ml_stack.serve.backend import devices_of
 from ml_stack.tar_libraries import unpack as unpack_libraries
 
 from .download_progress import Transfer
+from .settings import Settings
 from .updates import UpdateError, download
 
 __all__ = ["LlamaError", "asset_for_this_machine", "cache_dir",
@@ -138,13 +139,19 @@ def _first_with_a_build(releases: list[dict[str, Any]]) -> dict[str, Any] | None
 
 
 def ensure_server(root: Path | str, *, on_progress: Any = None,
-                  repo: str = REPO) -> Path:
+                  repo: str = REPO, sources: str | None = None) -> Path:
     """The llama-server binary, downloading it if this machine has none."""
     vendor = cache_dir(root)
     found = find_server(vendor)
     needs_cuda = any("cuda-" in token for token in _tokens())
     if found is not None and (not needs_cuda or cuda_ready(found)):
         return found
+    saved = Path(root) / "settings.json"
+    policy = sources if sources is not None else (
+        Settings.load(saved).download_sources if saved.exists() else "both")
+    if policy not in ("internet", "both"):
+        raise LlamaError("The model server is not installed. Choose Internet only or Both "
+                         "to download it, or install a local server with LAN only selected.")
 
     if on_progress:
         on_progress("Looking for a llama.cpp build")

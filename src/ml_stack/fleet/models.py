@@ -145,6 +145,7 @@ class Models:
 
     roots: list[Path]
     store: Path
+    sources: Callable[[], str] = lambda: "both"
     _digests: dict[tuple[str, int, int], str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -234,11 +235,14 @@ class Models:
         found = self.find(name)
         if found:
             return found
+        policy = self.sources()
+        if policy not in ("internet", "lan", "both"):
+            raise ModelError("Choose Internet only, LAN only, or Both before downloading models.")
         if not autodownload:
             raise ModelError(
                 f"{name} is not on this machine, and automatic downloading is off")
 
-        if key is not None:
+        if key is not None and policy != "internet":
             for peer_name, base_url, _size in self.where(name, key):
                 if on_note:
                     on_note(f"Copying {name} from {peer_name}")
@@ -247,6 +251,8 @@ class Models:
                 except (ModelError, OSError):
                     continue
 
+        if policy == "lan":
+            raise ModelError(f"No machine on your LAN has {name}; Internet downloads are disabled.")
         if not source:
             raise ModelError(
                 f"no machine on this network has {name}, and no download was given")
@@ -374,8 +380,13 @@ class Models:
         beside = model.path.with_suffix(hub.DRAFT_MARK + model.path.suffix)
         if beside.is_file():
             return beside
-        if key is not None and self._draft_from_peers(model, beside, key, on_progress):
+        policy = self.sources()
+        if policy not in ("internet", "lan", "both"):
+            raise ModelError("Choose download sources before getting an MTP head.")
+        if policy != "internet" and key is not None and self._draft_from_peers(model, beside, key, on_progress):
             return beside
+        if policy == "lan":
+            raise ModelError("No machine on your LAN has this MTP head; Internet downloads are disabled.")
         got = self._from_internet(beside.name, source, on_progress)
         if got.path != beside:
             promote(got.path, beside)

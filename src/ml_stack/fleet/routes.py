@@ -14,6 +14,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
 from . import recovery
@@ -370,6 +371,10 @@ class SettingsRoutes:
     def _change_libraries(self, vendor: str) -> bool:
         req = self.body()
         add = [str(s) for s in req.get("install") or []]
+        settings = self.ui.settings
+        if add and settings is not None and settings.download_sources not in ("internet", "both"):
+            self.send(409, {"error": "Installing training libraries requires Internet only or Both download sources."})
+            return True
         drop = [str(s) for s in req.get("remove") or []]
         out: dict[str, Any] = {}
         try:
@@ -416,8 +421,12 @@ class ModelRoutes:
             return self._popular()
         if self.path == "/ui/models":
             return self._models()
-        if self.path == "/ui/serving/install" and self.method == "POST":
-            return self._install_server()
+        if self.path == "/ui/serving/install":
+            if self.method == "GET":
+                self.send(200, self.ui.server_install)
+                return True
+            if self.method == "POST":
+                return self._install_server()
         if self.path == "/ui/serving":
             return self._serving()
         return super().route()
@@ -498,6 +507,9 @@ class ModelRoutes:
     def _get_model(self, key: Any, auto_models: bool) -> bool:
         from .weights import ModelError
         ui, req = self.ui, self.body()
+        if ui.settings is not None and not ui.settings.download_sources:
+            self.send(409, {"error": "Choose download sources in Settings before downloading a model."})
+            return True
         name = str(req.get("name") or "")
         if not name:
             self.send(400, {"error": "no model was named"})
@@ -531,11 +543,20 @@ class ModelRoutes:
                                      "on your network can serve one instead"})
             return True
         from .llama import LlamaError, ensure_server
+        ui.server_install = {"state": "installing", "note": "Preparing the model server"}
+
+        def progress(note: str) -> None:
+            ui.server_install = {"state": "installing", "note": note}
+            say(f"  {note}")
+
         try:
-            got = ensure_server(ui.root)
+            got = ensure_server(ui.root, on_progress=progress,
+                                sources=ui.settings.download_sources if ui.settings else "both")
         except LlamaError as exc:
+            ui.server_install = {"state": "failed", "note": str(exc)}
             self.send(400, {"error": str(exc)})
             return True
+        ui.server_install = {"state": "done", "note": "Model server and GPU runtime ready"}
         self.send(200, {"ok": True, "server": str(got)})
         return True
 

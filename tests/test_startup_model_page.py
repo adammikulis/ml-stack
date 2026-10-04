@@ -66,6 +66,12 @@ def test_first_run_model_choice_requires_opt_in(action):
         page.goto("http://setup.test/")
         for _ in range(4):
             page.get_by_role("button", name="Continue", exact=True).click()
+        page.get_by_role("heading", name="Where should downloads come from?").wait_for()
+        assert not any(path in {"/ui/models", "/ui/serving/install"} for path, _ in posted)
+        save = page.get_by_role("button", name="Save and continue")
+        assert save.is_disabled()
+        page.locator("#source-both").check()
+        save.click()
         choice = page.locator("#startup-model-choice")
         assert choice.input_value() == "large.gguf"
         assert "24.0 GB capacity, 22.5 GB free" in page.locator("#startup-model-memory").inner_text()
@@ -86,6 +92,9 @@ def test_first_run_model_choice_requires_opt_in(action):
         downloads = [body for path, body in posted if path == "/ui/models"]
         assert len(downloads) == (0 if action in {"skip", "later"} else 1)
         if downloads:
+            preference = next(i for i, (path, body) in enumerate(posted)
+                              if path == "/ui/setup/prefs" and body.get("download_sources") == "both")
+            assert preference < next(i for i, (path, _) in enumerate(posted) if path == "/ui/models")
             assert downloads[0] == ({"name": "small.gguf", "source": "hf:test/small", "draft": ""}
                                     if action == "smaller" else
                                     {"name": "large.gguf", "source": "hf:test/large", "draft": "hf:test/mtp"})

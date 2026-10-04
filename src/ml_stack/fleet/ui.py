@@ -106,6 +106,7 @@ class UI:
         self.sessions = Sessions()
         self.throttle = Throttle()
         self._peers: tuple[float, list[dict[str, Any]]] = (0.0, [])
+        self.server_install: dict[str, Any] = {"state": "idle", "note": ""}
 
     # -- guards ----------------------------------------------------------
     def host_ok(self, host_header: str) -> bool:
@@ -232,6 +233,8 @@ class UI:
         settings = self.settings
         if settings is None:
             return out
+        if "download_sources" in req and req["download_sources"] not in ("internet", "lan", "both"):
+            return {"error": "Choose Internet only, LAN only, or Both."}
 
         if "slots" in req and self.runner is not None:
             settings.slots = self.runner.set_slots(1)
@@ -253,6 +256,8 @@ class UI:
             settings.auto_update = bool(req["auto_update"])
         if "autodownload_models" in req:
             settings.autodownload_models = bool(req["autodownload_models"])
+        if "download_sources" in req:
+            settings.download_sources = str(req["download_sources"])
         if "context" in req:
             settings.context = max(512, min(1 << 20, int(req["context"])))
 
