@@ -4,6 +4,14 @@ The daemon workspace groups interactive screens in its sidebar. Tools exposes ev
 `ml-stack-*` console entry point, its help, command review, monitored execution, logs, and cancellation.
 Common controls remain visible; less common settings are grouped under collapsed Advanced
 sections. Model serving labels its token-window setting **Context length**.
+Setup and Settings use the same slider, from 2,048 through 1,048,576 tokens.
+Qwen uses YaRN when the requested per-slot context exceeds its native 262,144 tokens.
+The default coding-model server stays at 262,144; selecting a higher limit costs more memory.
+
+Mac device cards show one physical Memory meter, using total installed RAM and current
+usage. Metal’s recommended working-set allowance is a separate serving limit, never free
+physical memory. Each device lists its verified loaded models, per-slot context and
+speculative-decoding status; an empty device explicitly says no models are loaded.
 Commands execute in the daemon files root with the existing job environment and scheduling gate.
 
 | Capability | Destination |
