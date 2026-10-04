@@ -21,14 +21,13 @@ import argparse
 import importlib.util
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import affected
-import testslots
+import testslots_runner
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -48,7 +47,13 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
 def run(command: list[str], env: dict[str, str] | None = None) -> int:
     """Run a command in the repo, returning its exit status."""
     print("+", " ".join(command), flush=True)
-    return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
+    environment = dict(os.environ if env is None else env)
+    environment["PYTHONPATH"] = str(ROOT / "scripts") + os.pathsep + environment.get("PYTHONPATH", "")
+    index = command.index("-n")
+    want = int(command[index + 1])
+    command[index + 1] = "{workers}"
+    command.extend(["-p", "testslots_pytest"])
+    return testslots_runner.run_pytest(command, want, env=environment)
 
 
 def testmon_env() -> dict[str, str]:
@@ -137,11 +142,9 @@ def main() -> int:
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
-    with testslots.lease(max(0, args.workers), label=f"ml-stack: {args.tier}") as got:
-        args.workers = got.workers if args.workers <= 0 else min(args.workers, got.workers)
-        if args.tier == "quick":
-            return quick(args, rest)
-        return run(pytest_command(args.workers, *tiers[args.tier], *rest))
+    if args.tier == "quick":
+        return quick(args, rest)
+    return run(pytest_command(args.workers, *tiers[args.tier], *rest))
 
 
 if __name__ == "__main__":
