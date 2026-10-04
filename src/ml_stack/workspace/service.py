@@ -202,12 +202,14 @@ class Workspace:
         """Record ``name``'s model from a launcher or a person at a terminal; ``verified`` says
         ml-stack itself started the agent and knows the model. Refused from an agent's process."""
         human.require_person("recording an agent's model", terminal, env)
+        clean_model(model)
         self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
 
     def claim_model(self, token: str, model: str, harness: str = "", label: str = "") -> dict[str, Any]:
         """The caller's own model as the caller says it (``claimed``); with ``label`` the model of
         that helper. Refused where a launcher recorded a different model."""
         who = self.auth(token)
+        clean_model(model)
         if label:
             if not valid_name(label):
                 raise ValueError(f"{label!r} is not a usable label")

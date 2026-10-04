@@ -121,7 +121,7 @@ class Registry:
         if label and entry.get("label_models", {}).get(label):
             return str(entry["label_models"][label]), CLAIMED
         if entry.get("model"):
-            return str(entry["model"]), str(entry.get("model_state") or CLAIMED)
+            return str(entry["model"]), INHERITED if label else str(entry.get("model_state") or CLAIMED)
         parent = agents.get(str(entry.get("parent") or (name.partition("/")[0] if "/" in name else "")), {})
         if label and parent.get("label_models", {}).get(label):
             return str(parent["label_models"][label]), CLAIMED
