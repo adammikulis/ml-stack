@@ -142,11 +142,12 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     if measured is not None:
         config = measured.config(port=port, slots=slots, model=found)
         say(f"serving in the settings it scored best with: {profile.said(measured)}")
-        config = drafted(config, "none", say=say)
     else:
         config = Config(serving=Serving(model=found, port=port, slots=slots, slot_context=each))
         say(f"serving bare: nothing measured for this model, {each:,} tokens a slot")
-        config = drafted(config, draft, say=say)
+    if draft.lower() != "auto":
+        config = config.over(draft="", spec_type="", mtp=False if draft.lower() == "none" else None)
+    config = drafted(config, draft, say=say)
     say(f"  {each:,} tokens a slot, {KV} KV cache")
     return dataclasses.replace(config, serving=dataclasses.replace(config.serving, slot_context=each,
                                                                    cache_type=KV))
