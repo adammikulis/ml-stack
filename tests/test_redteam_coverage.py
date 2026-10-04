@@ -51,6 +51,8 @@ def test_packaged_simulation_and_desktop_boundaries_are_inventoried():
         "spawn:gym/transport.py:Process.start",
         "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
         "route:workspace/fleet_routes.py:/ui/board/*",
+        "route:fleet/routes.py:/ui/session",
+        "route:fleet/setup_recovery_routes.py:/ui/setup/recovery",
     } <= found.keys()
 
 

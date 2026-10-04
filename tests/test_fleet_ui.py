@@ -387,6 +387,7 @@ class TestSignIn:
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
 
+    @pytest.mark.redteam
     def test_the_wrong_passphrase_does_not(self, joined):
         status, _, _ = joined.call("/ui/session", method="POST",
                                    body={"passphrase": "not the words"})
@@ -400,6 +401,7 @@ class TestSignIn:
                                       body={"passphrase": WORDS})
         assert status == 200, body
 
+    @pytest.mark.redteam
     def test_persistent_guessing_is_slowed_down(self, joined):
         for _ in range(6):
             status, body, _ = joined.call("/ui/session", method="POST",

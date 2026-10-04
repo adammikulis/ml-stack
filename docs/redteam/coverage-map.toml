@@ -19,6 +19,13 @@ match = ["spawn:fleet/environment.py:Environment.host_python"]
 status = "n/a"
 note = "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
 
+[[group]]
+match = ["route:fleet/routes.py:/ui/session"]
+status = "covered"
+tests = ["tests/test_fleet_ui.py::TestSignIn::test_the_wrong_passphrase_does_not",
+         "tests/test_fleet_ui.py::TestSignIn::test_persistent_guessing_is_slowed_down"]
+note = "Real sign-in requests reject hostile passphrases and rate-limit repeated guesses"
+
 # -- named LAN setup and recovery uploads ---------------------------------------------------
 [[group]]
 match = ["route:fleet/routes.py:/ui/setup/clusters",
