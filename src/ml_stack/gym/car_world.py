@@ -156,7 +156,7 @@ class CarWorldState:
         for actor in result["vehicles"]:
             policy = self.native.engine.get_policy(actor["id"])
             agent_id = identifiers.get(actor["id"])
-            external = self.native.engine.external_actions.get(agent_id) is not None
+            external = (self.native.engine.external_actions or {}).get(agent_id) is not None
             actor.update(agent_id=agent_id, policy=type(policy).__name__,
                          controller="external" if external else "native-idm")
         return {**result, **self.world_info()}
