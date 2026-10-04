@@ -18,7 +18,8 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
     process = None
     try:
         with testslots.lease(1, 1, label=f"{label}: coordinator"):
-            workers = min(want or testslots.base_budget(), testslots.base_budget())
+            maximum = int(environment.get("DEV_TEST_BUDGET", "0")) or testslots.base_budget()
+            workers = min(want or maximum, maximum)
             environment.update(DEV_TEST_SLOTS_DIR=str(testslots.slots_dir().resolve()), DEV_TEST_WORKERS=str(workers),
                                DEV_TEST_PYTEST_ENDPOINT=admission.endpoint, DEV_TEST_PYTEST_TOKEN=admission.token,
                                DEV_TEST_REMOTE_BROKER=str(testslots.slots_dir().resolve()))
