@@ -7,6 +7,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ml_stack import hub
+from ml_stack.hub import remote
+from ml_stack.serve import suggest
 from ml_stack.workspace.identity import valid_name
 
 __all__ = ["AUTO", "FETCH_QUERY", "Pick", "agent_name", "choose", "fetch_hint", "short_name"]
@@ -16,7 +19,9 @@ FETCH_QUERY = "Qwen3.6 35B A3B"
 FLASH_NEXT = re.compile(r"flash[-_ .]?next", re.I)
 MOE = re.compile(r"-a\d+(?:\.\d+)?b|moe", re.I)
 QWEN = re.compile(r"qwen", re.I)
-_QUANT = re.compile(r"[-_.](?:IQ|Q)\d\w*|[-_.](?:BF16|F16|F32)\b|-\d{5}-of-\d{5}", re.I)
+NOT_AGENT = re.compile(r"vl\b|vision|guard|ocr|embed|coder", re.I)
+VERSION = re.compile(r"qwen\s*(\d+(?:\.\d+)?)", re.I)
+_QUANT = re.compile(r"\s*\([^)]*\)|[-_.](?:IQ|Q)\d\w*|[-_.](?:BF16|F16|F32)\b|-\d{5}-of-\d{5}", re.I)
 FITS = ("green", "yellow", "none")
 
 
@@ -53,6 +58,11 @@ def agent_name(pick_name: str) -> str:
     return name
 
 
+def _version(name: str) -> float:
+    found = VERSION.search(name)
+    return float(found.group(1)) if found else 0.0
+
+
 def _is_moe(one: object) -> bool:
     return bool(MOE.search(f"{getattr(one, 'name', '')} {getattr(one, 'ref', '')} "
                            f"{getattr(one, 'architecture', '')}"))
@@ -64,9 +74,6 @@ def fetch_hint(*, search: bool = True) -> str:
     find = f'ml-stack-models find "{FETCH_QUERY}"'
     if not search:
         return find
-    from ml_stack.hub import remote
-    from ml_stack.serve import suggest
-
     try:
         found = suggest.recommend(goal="agent", query=FETCH_QUERY, limit=6)
     except (OSError, remote.RemoteError):
@@ -80,8 +87,6 @@ def fetch_hint(*, search: bool = True) -> str:
 
 
 def _ranked(installed: Sequence[object], machine: object | None) -> list[object]:
-    from ml_stack.serve import suggest
-
     return suggest.suggest_model(installed, machine, "agent")  # type: ignore[arg-type]
 
 
@@ -104,8 +109,6 @@ def choose(asked: str = AUTO, *, installed: Sequence[object] | None = None,
     """The downloaded model ``asked`` names, or for ``auto`` the best downloaded mixture-of-experts
     Qwen model ranked for agent work on this machine; Flash-Next is never chosen. A model that
     is absent, or rated red here, comes back with ``problem`` and what to do about it."""
-    from ml_stack import hub
-
     have = list(hub.discover(formats=("gguf",)) if installed is None else installed)
     rows = _ranked(have, machine)
     if asked and asked != AUTO:
@@ -116,9 +119,9 @@ def choose(asked: str = AUTO, *, installed: Sequence[object] | None = None,
                         hint=f'ml-stack-models find "{asked}"')
         return _checked(_line(found), rows)
     pool = [r for r in rows if not FLASH_NEXT.search(f"{r.candidate.name} {r.candidate.ref}")  # type: ignore[attr-defined]
-            and _is_moe(r.candidate)]  # type: ignore[attr-defined]
-    pool.sort(key=lambda r: not QWEN.search(r.candidate.name))  # type: ignore[attr-defined]
+            and not NOT_AGENT.search(r.candidate.name) and _is_moe(r.candidate)]  # type: ignore[attr-defined]
     qwen = [r for r in pool if QWEN.search(r.candidate.name)]  # type: ignore[attr-defined]
+    qwen.sort(key=lambda r: (r.verdict not in FITS, -_version(r.candidate.name)))  # type: ignore[attr-defined]
     if not qwen:
         return Pick(problem="no downloaded mixture-of-experts Qwen model for agent work",
                     hint=fetch_hint(search=search))

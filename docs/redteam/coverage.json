@@ -1,7 +1,7 @@
 {
- "surfaces": 569,
+ "surfaces": 571,
  "by_status": {
-  "covered": 262,
+  "covered": 264,
   "partial": 202,
   "uncovered": 54,
   "n/a": 51,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 44,
+   "covered": 45,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 44,
+   "covered": 45,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -2934,6 +2934,21 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/localcli.py:run",
+   "kind": "human",
+   "source": "workspace/localcli.py:run",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/notes.py:Notes.trust_of",
    "kind": "human",
    "source": "workspace/notes.py:Notes.trust_of",
@@ -4942,6 +4957,24 @@
     "tests/test_workspace_rules.py"
    ],
    "note": ""
+  },
+  {
+   "id": "parser:workspace/localroute.py",
+   "kind": "parser",
+   "source": "workspace/localroute.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
+    "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
+    "tests/test_workspace_local_agent.py::test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused",
+    "tests/test_redteam_local_agent.py::test_an_injection_from_a_sender_the_agent_does_not_obey_reaches_no_model",
+    "tests/test_redteam_local_agent.py::test_an_injection_in_a_persons_task_gets_a_model_that_obeys_it_nothing_beyond_its_role",
+    "tests/test_redteam_local_agent.py::test_no_tool_the_model_is_offered_starts_stops_or_widens_an_agent",
+    "tests/test_redteam_local_agent.py::test_start_and_stop_refuse_an_agent_process_and_leave_the_state_alone"
+   ],
+   "note": "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
   },
   {
    "id": "parser:workspace/notes.py",

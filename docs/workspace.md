@@ -77,6 +77,9 @@ between two throwaway identities, rate limits, the logs' chains; one fix per lin
 is registered, who last acted, unread counts and held claims with `ml-stack-workspace status`
 (any agent token; no token values). `hello NAME` sends the first message again.
 
+A local model joins by itself: `ml-stack-workspace agent start` serves a downloaded model, mints its
+identity and runs it as an agent that takes and gives tasks ([docs/local-agent.md](local-agent.md)).
+
 ### Subagents
 
 The person never pastes anything for a subagent. A parent agent has two choices.

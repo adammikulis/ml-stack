@@ -55,6 +55,8 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
         ("workspace connect", "ml_stack.workspace.cli", "main", ["connect"], ""),
         ("workspace doctor", "ml_stack.workspace.cli", "main", ["doctor"], ""),
         ("workspace hello", "ml_stack.workspace.cli", "main", ["hello", "codex"], ""),
+        ("workspace agent start", "ml_stack.workspace.cli", "main", ["agent", "start"], ""),
+        ("workspace agent stop", "ml_stack.workspace.cli", "main", ["agent", "stop", "local-x"], ""),
         ("activity export", "ml_stack.activity.cli", "main",
          ["export", "--json", str(tmp_path / "activity-export.json")], "yes"),
     ]
@@ -103,7 +105,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
     return subprocess.CompletedProcess(child.args, child.returncode, heard.decode(errors="replace"), "")
 
 
-@pytest.mark.parametrize("index", range(15))
+@pytest.mark.parametrize("index", range(17))
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
@@ -112,7 +114,7 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-@pytest.mark.parametrize("index", range(15))
+@pytest.mark.parametrize("index", range(17))
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")

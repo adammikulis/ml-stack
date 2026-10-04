@@ -3,9 +3,9 @@ files, the loop over a real workspace with a scripted model, and the routes on a
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
-import os
 import stat
 import subprocess
 import sys
@@ -18,11 +18,18 @@ import pytest
 from workspace_kit import Kit, clean_env, cli
 
 from ml_stack import roles
-from ml_stack.client import Reply
 from ml_stack.hub.discover import ModelInfo
 from ml_stack.hub.probe import MachineMemory
 from ml_stack.testing.fakes import reply_from
-from ml_stack.workspace import localagent as la, localloop, localmodel, localroute, localstart as ls, tokens
+from ml_stack.workspace import (
+    localagent as la,
+    localloop,
+    localmodel,
+    localroute,
+    localstart as ls,
+    localtools,
+    tokens,
+)
 
 GB = 10**9
 BIG = MachineMemory(total_ram=64 * GB, available_ram=60 * GB)
@@ -151,7 +158,7 @@ class Script:
     def chat(self, messages, *, tools=None, on_delta=None, **kw):
         self.calls += 1
         self.kw.append(kw)
-        self.seen.append(([m for m in messages], {t["function"]["name"] for t in tools or []}))
+        self.seen.append((list(messages), {t["function"]["name"] for t in tools or []}))
         entry = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
         return reply_from(entry, messages, tools)
 
@@ -224,7 +231,7 @@ def test_a_task_from_the_person_is_done_and_answered_on_the_thread(kit):
 
 def test_a_message_from_a_sender_it_does_not_obey_is_information_only(kit):
     model = Script([done("never")])
-    with Rig(kit, model) as rig:
+    with Rig(kit, model):
         kit.ws.send(kit.ws.registry.mint(__import__("ml_stack.workspace.onboard", fromlist=["x"]).SETUP,
                                          "eve", "agent", 600), "local-t", "task", "do the thing")
         kit.ws.send(kit.owner, "local-t", "status", "fyi")
@@ -295,8 +302,8 @@ def test_after_reading_an_agent_it_does_not_obey_it_cannot_send_a_task(kit):
 
 def test_the_loop_stops_at_its_step_cap_its_clock_and_the_kill_switch(kit):
     forever = [("workspace_roster", {})]
-    cases = [(dict(caps=localloop.Caps(steps=2)), "step limit"),
-             (dict(caps=localloop.Caps(seconds=0.0)), "limit for one task")]
+    cases = [({"caps": localloop.Caps(steps=2)}, "step limit"),
+             ({"caps": localloop.Caps(seconds=0.0)}, "limit for one task")]
     for settings, words in cases:
         kit2 = kit
         model = Script(forever)
@@ -349,10 +356,8 @@ def served(kit, monkeypatch):
     yield listener
     listener.stop()
     for name in la.names(kit.ws):
-        try:
+        with contextlib.suppress(ValueError):
             ls.stop(kit.ws, name, release=lambda lease: True, wait_s=3)
-        except ValueError:
-            pass
 
 
 def request(port, method, path, body=None, headers=None):
@@ -363,7 +368,8 @@ def request(port, method, path, body=None, headers=None):
     return r.status, r.read()
 
 
-def post(served, route, body, *, cookie=True, origin=True, ctype="application/json"):
+def post(served, route, body, **how):
+    cookie, origin, ctype = how.get("cookie", True), how.get("origin", True), how.get("ctype", "application/json")
     port = served.port
     h = {"Content-Type": ctype}
     if origin:
@@ -454,7 +460,7 @@ def test_the_model_raises_its_own_effort_within_the_ceiling_from_the_next_task_o
     thinks = [k["think"] for k in model.kw]
     assert thinks[:2] == [False, False] and thinks[-1] is True
     assert la.status_of(kit.ws, "local-t")["effort"] == "medium"
-    assert [r for r in kit.ws.audit_log.rows() if r.get("event") == "local-agent.effort"][0]["level"] == "medium"
+    assert next(r for r in kit.ws.audit_log.rows() if r.get("event") == "local-agent.effort")["level"] == "medium"
 
 
 def test_asking_above_the_ceiling_is_refused_with_the_ceiling_and_nothing_changes(kit):
@@ -501,3 +507,14 @@ def test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_p
     keep = {k: v for k, v in bodies[0].items() if k != "messages"}
     assert all({k: v for k, v in b.items() if k != "messages"} == keep for b in bodies)
     assert keep.get("cache_prompt") is True and keep.get("id_slot") == 0
+
+
+def test_with_no_one_to_ask_an_acting_call_and_a_plan_are_denied(kit):
+    from ml_stack.interventions import Confirm
+    state = localtools.TaskState()
+    person = localtools.Unattended("local-t", state)
+    ask = Confirm("serve_up will start a model server.", {"tool": "serve_up"})
+    assert person.confirm(ask, None) is False
+    assert person.plan(["serve_up m"])["go"] is False
+    assert person.ask_user("which?")["answer"] == ""
+    assert [n.kind for n in state.needs] == ["tool_call", "plan"]

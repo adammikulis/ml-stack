@@ -17,13 +17,15 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ml_stack import chat as chatting
+from ml_stack.client import Client, Request, Transport
+from ml_stack.serve import broker_wire
 from ml_stack.workspace import localagent as la, localeffort as le, localtools as lt, plain, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["Caps", "Held", "Settings", "client_on", "lease_model", "main", "run"]
+__all__ = ["Caps", "Held", "Settings", "client_on", "lease_model", "run"]
 
 logger = logging.getLogger("ml_stack.localagent")
 PURPOSE = "local-agent"
@@ -72,16 +74,12 @@ class _Wake(BaseException):
 def client_on(base_url: str) -> Any:
     """A client on slot 0 of the server at ``base_url``: the same slot every task, so the
     server's prompt cache keeps the prefix the system message and tool list make."""
-    from ml_stack.client import Client, Request, Transport
-
     return Client(base_url, request=Request(n_predict=4096, slot=0), transport=Transport(timeout=600.0))
 
 
 def lease_model(agent: la.Agent, *, wait_s: float = LEASE_WAIT_S) -> Held:
     """Lease the agent's model from the broker (memory admission and the queue are its) and talk to
     it: thinking per request, off unless the effort says otherwise, multi-token prediction on when ml-stack has it."""
-    from ml_stack.serve import broker_wire
-
     spec: dict[str, Any] = {"context": CONTEXT, "parallel": 1, "cache_type_k": "q8_0",
                             "cache_type_v": "q8_0", "cache_idle_slots": True}
     grant = broker_wire.lease(PURPOSE, [agent.model], spec=spec, weight=agent.size_bytes,
@@ -255,7 +253,7 @@ def run(ws: Workspace, name: str, settings: Settings | None = None) -> int:
     return code
 
 
-def main(argv: list[str] | None = None) -> int:
+def run_detached(argv: list[str] | None = None) -> int:
     """``python -m ml_stack.workspace.localloop NAME``: marked as an agent process, no prompts."""
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
@@ -268,4 +266,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover - the detached entry point
-    raise SystemExit(main())
+    raise SystemExit(run_detached())

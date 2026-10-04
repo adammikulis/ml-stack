@@ -13,8 +13,16 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import jobs, roles
+from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import localagent as la, localeffort as le, localmodel, onboard, tokens
+from ml_stack.workspace import (
+    localagent as la,
+    localeffort as le,
+    localmodel,
+    onboard,
+    project as projects,
+    tokens,
+)
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT
 from ml_stack.workspace.service import Workspace
@@ -83,8 +91,6 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     """Join a local model to the workspace and run its loop detached; the same name again reports
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
     would not fit, ValueError for a bad name, role or project."""
-    from ml_stack.workspace import project as projects
-
     role = roles.get(ask.role).name
     ceiling = le.valid(ask.max_effort)
     effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
@@ -163,8 +169,6 @@ def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = Non
 
 
 def _release(lease: str) -> bool:
-    from ml_stack.serve import broker_wire
-
     return bool(broker_wire.release(lease))
 
 
