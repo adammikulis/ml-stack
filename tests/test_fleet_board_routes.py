@@ -111,3 +111,15 @@ def test_ack_marks_only_an_existing_visible_message_in_its_scope(board):
     assert kit.ws.board.store.marks('owner') == {}
     assert ack({'to': 'builder', 'through': sent['seq']}) == 200
     assert kit.ws.board.store.marks('owner') == {'dm:builder': sent['seq']}
+
+
+def test_board_extension_is_registered_in_installed_distribution_metadata(board):
+    from importlib.metadata import distribution
+
+    server, _ = board
+    entries = [entry for entry in distribution('ml-stack').entry_points
+               if entry.group == 'ml_stack.ui_routes' and entry.name == 'board']
+    assert len(entries) == 1
+    assert entries[0].value == 'ml_stack.workspace.fleet_routes:route'
+    assert callable(entries[0].load())
+    assert server.call('/ui/board/boards')[0] == 200
