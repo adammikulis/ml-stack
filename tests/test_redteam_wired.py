@@ -37,7 +37,7 @@ def test_no_model_tool_chat_tool_or_slash_command_touches_the_wiring_limit():
     for tool in mcp.TOOLS:
         assert not any(w in f"{tool.name} {tool.description}".lower() for w in words), tool.name
     person = do.Person(io.StringIO(""), io.StringIO(""))
-    session = chat.Chat(None, person, role="operator", extension=chat.extensions(person))
+    session = chat.Chat(None, person, role="approve-first", extension=chat.extensions(person))
     for spec, _ in session.offered:
         text = f"{spec['function']['name']} {spec['function'].get('description', '')}".lower()
         assert not any(w in text for w in words), spec["function"]["name"]
