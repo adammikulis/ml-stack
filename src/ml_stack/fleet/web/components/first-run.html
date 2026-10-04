@@ -82,65 +82,74 @@
     async clustersStep() {
       const st = this.state;
       const rows = el("div");
-      const note = el("div", { class: "hint" });
+      const nearby = el("div", { "aria-live": "polite" });
+      const note = el("div", { class: "hint", "aria-live": "polite" });
       const pass = el("input", { type: "password", id: "p1", value: st.pass,
-                                 placeholder: "passphrase" });
+        autocomplete: "current-password", placeholder: "Cluster passphrase" });
       const grp = el("input", { type: "text", id: "g", value: st.group,
-                                placeholder: "name (optional)" });
-      const add = el("button", { class: "ghost small" }, "Join");
-
+        required: true, maxlength: 64, placeholder: "Cluster name" });
+      const add = el("button", { class: "ghost small" }, "Create or join manually");
+      let selected = null;
+      const check = () => { add.disabled = !grp.value.trim() || pass.value.trim().length < M.MIN_PASS; };
       const remember = () => { st.pass = pass.value; st.group = grp.value.trim(); };
       const draw = (list) => {
         st.clusters = list;
-        rows.replaceChildren(...list.map((c, i) =>
-          el("div", { class: "row" },
-            el("span", {}, el("b", {}, c.group),
-              el("span", { class: "why" },
-                i === 0 ? "this machine answers as this one" : "also in this one")),
-            el("button", { class: "ghost small",
-              onclick: async () => {
-                const left = await api("/ui/clusters", { method: "DELETE",
-                  body: JSON.stringify({ group: c.group }) });
-                draw(left.clusters || []);
-              } }, "Leave"))));
+        rows.replaceChildren(...list.map((c) => el("div", { class: "row" },
+          el("b", {}, c.group), el("button", { class: "ghost small", onclick: async () => {
+            const left = await api("/ui/clusters", { method: "DELETE", body: JSON.stringify({ group: c.group }) });
+            if (left.ok) draw(left.clusters || []);
+            else note.textContent = left.error || "Could not leave cluster.";
+          } }, "Leave"))));
       };
-      const check = () => { add.disabled = pass.value.trim().length < M.MIN_PASS; };
-      pass.oninput = check;
-
+      const choose = (name) => {
+        selected = name;
+        grp.value = name;
+        grp.readOnly = true;
+        pass.value = "";
+        add.textContent = `Join ${name}`;
+        note.textContent = `Enter the passphrase for ${name} to confirm joining. Nearby names are verified only after you join.`;
+        pass.focus(); check();
+      };
+      const manual = el("button", { class: "ghost small", onclick: () => {
+        selected = null; grp.readOnly = false; grp.value = pass.value = "";
+        add.textContent = "Create or join manually";
+        note.textContent = "Enter a cluster name and its passphrase. A new cluster is created if none answers.";
+        grp.focus(); check();
+      } }, "Enter a name manually");
+      const refresh = el("button", { class: "ghost small" }, "Refresh nearby clusters");
+      refresh.onclick = async () => {
+        refresh.disabled = true;
+        nearby.textContent = "Looking for clusters on this LAN…";
+        try {
+          const result = await api("/ui/setup/clusters");
+          nearby.replaceChildren(...(result.clusters || []).map((c) => el("div", { class: "row" },
+            el("b", {}, c.group), el("button", { class: "ghost small", onclick: () => choose(c.group) }, "Join"))));
+          if (!nearby.childNodes.length) nearby.textContent = result.error || "No nearby clusters found. Refresh or enter a name manually.";
+        } catch { nearby.textContent = "Could not discover clusters. Refresh or enter a name manually."; }
+        finally { refresh.disabled = false; }
+      };
+      pass.oninput = grp.oninput = check;
       add.onclick = async () => {
         add.disabled = true;
-        note.replaceChildren(el("span", { class: "spin" }), " Joining…");
-        const named = grp.value.trim() || "ml-stack";
-        const r = await api("/ui/setup/join", { method: "POST",
-          body: JSON.stringify({ passphrase: pass.value, group: named }) });
-        if (!r.ok) {
-          note.replaceChildren(el("div", { class: "err" }, r.error || "Could not join."));
-          check();
-          return;
-        }
-        pass.value = grp.value = "";
-        st.pass = st.group = "";
-        check();
-        note.textContent = "Type the same passphrase on your other machines. If you "
-          + "mistyped it, leave and join again.";
-        draw((await api("/ui/clusters")).clusters || []);
+        note.textContent = "Joining…";
+        try {
+          const result = await api("/ui/setup/join", { method: "POST", body: JSON.stringify({
+            passphrase: pass.value, group: grp.value.trim(), existing: selected !== null }) });
+          if (!result.ok) { note.textContent = result.error || "Could not join."; return; }
+          pass.value = grp.value = ""; grp.readOnly = false; selected = null;
+          st.pass = st.group = ""; add.textContent = "Create or join manually";
+          note.textContent = "Joined. Use this cluster name and passphrase on your other machines.";
+          draw((await api("/ui/clusters")).clusters || []);
+        } catch { note.textContent = "Could not join. Check the connection and try again."; }
+        finally { check(); }
       };
-
-      this.show(
-        this.steps(1, () => { remember(); this.go(0); }),
-        el("h1", {}, "Clusters"),
-        el("p", { class: "sub" },
-          "Machines that share a passphrase find each other and send each other work. "
-          + "You can do this later instead — this one works on its own until you do."),
-        rows,
-        el("div", { class: "searchrow" }, pass, grp, add),
-        note,
+      this.show(this.steps(1, () => { remember(); this.go(0); }), el("h1", {}, "Clusters"),
+        el("p", { class: "sub" }, "Join a named cluster on this LAN, or create one. You can also continue with this machine on its own."),
+        rows, el("h2", {}, "Nearby clusters"), nearby, refresh, manual,
+        el("label", { for: "g" }, "Cluster name (required)"), grp,
+        el("label", { for: "p1" }, "Cluster passphrase"), pass, add, note,
         el("button", { onclick: () => { remember(); this.go(2); } }, "Continue"));
-
-      draw((await api("/ui/clusters")).clusters || []);
-      check();
-      note.textContent = "A few words you will remember. Everyone who knows them can run "
-        + "commands on every machine in the cluster.";
+      draw((await api("/ui/clusters")).clusters || []); check(); refresh.onclick();
     }
 
     // Steps 2 and 3: what work this machine takes, and when it runs. Every box is

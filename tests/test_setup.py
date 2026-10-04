@@ -531,7 +531,7 @@ def test_fleet_finding_says_the_daemon_does_not_answer(tmp_path):
     from ml_stack.setup import _fleet_findings
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     found = {f.name: f for f in
              _fleet_findings(port=_free_tcp_port(), discovery_port=_free_udp_port(),
                              cluster_key_path=keyfile)}
@@ -553,7 +553,7 @@ def _booted_daemon(tmp_path):
     from ml_stack.fleet.launch import already_running
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     http_port, disco_port = _free_tcp_port(), _free_udp_port()
     env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
           "PYTHONPATH": str(REPO / "src"), "PYTHONUNBUFFERED": "1"}

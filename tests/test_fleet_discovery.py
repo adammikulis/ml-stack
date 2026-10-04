@@ -117,7 +117,7 @@ def _reach(port: int) -> dict[str, str]:
 
 @pytest.fixture
 def key(tmp_path) -> bytes:
-    create_cluster_key(tmp_path / "cluster.key")
+    create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
     return load_cluster_key(tmp_path / "cluster.key")
 
 
@@ -129,16 +129,16 @@ def port() -> int:
 # -- the key -------------------------------------------------------------
 def test_key_is_created_once_and_not_silently_rotated(tmp_path):
     p = tmp_path / "cluster.key"
-    first = create_cluster_key(p)
-    assert create_cluster_key(p) == first, "re-running init must not evict the cluster"
-    assert create_cluster_key(p, overwrite=True) != first
+    first = create_cluster_key(p, group="ml-stack")
+    assert create_cluster_key(p, group="ml-stack") == first, "re-running init must not evict the cluster"
+    assert create_cluster_key(p, overwrite=True, group="ml-stack") != first
 
 
 def test_the_file_holding_the_keys_is_not_world_readable(tmp_path):
     from ml_stack.fleet.discovery import clusters_path
 
     p = tmp_path / "cluster.key"
-    create_cluster_key(p)
+    create_cluster_key(p, group="ml-stack")
     assert oct(clusters_path(p).stat().st_mode)[-3:] == "600"
 
 
@@ -147,8 +147,8 @@ def test_missing_key_reads_as_none(tmp_path):
 
 
 def test_token_is_a_pure_function_of_the_key(tmp_path):
-    a = create_cluster_key(tmp_path / "a.key").encode()
-    b = create_cluster_key(tmp_path / "b.key").encode()
+    a = create_cluster_key(tmp_path / "a.key", group="ml-stack").encode()
+    b = create_cluster_key(tmp_path / "b.key", group="ml-stack").encode()
     assert derive_token(a) == derive_token(a), "both ends must compute the same token"
     assert derive_token(a) != derive_token(b)
     assert a.decode() not in derive_token(a), "the token must not leak the key"
@@ -173,7 +173,7 @@ def test_nothing_is_found_when_nothing_is_advertising(key, port):
 
 
 def test_a_peer_with_a_different_key_is_invisible(key, port, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
     with Advertiser(Beacon(name="stranger", port=8770), other, port=port,
                     interval_s=0.2):
         assert discover(key, timeout_s=1.0, port=port) == [], \
@@ -278,7 +278,7 @@ def test_a_tampered_beacon_is_refused(key):
 
 
 def test_a_beacon_signed_with_another_key_is_refused(key, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
     raw = _sign(other, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
                         "beacon": {"name": "evil", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is None
@@ -324,7 +324,7 @@ def _booted(tmp_path, *extra: str):
     """Boot the actual daemon the way a machine would, rooted in ``tmp_path/traind``
     with ``extra`` flags, and yield ``(keyfile, disco_port, http_port, log)``."""
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     disco_port = _free_udp_port()
     http_port = _free_tcp_port()
     env = {**os.environ,
@@ -665,18 +665,18 @@ class TestPassphrase:
         from ml_stack.fleet.discovery import clusters_path, join_cluster
 
         keyfile = tmp_path / "cluster.key"
-        join_cluster(self.WORDS, path=keyfile)
+        join_cluster(self.WORDS, path=keyfile, group="ml-stack")
 
         assert clusters_path(keyfile).stat().st_mode & 0o077 == 0
-        assert load_cluster_key(keyfile) == join_cluster(self.WORDS, path=keyfile)
+        assert load_cluster_key(keyfile) == join_cluster(self.WORDS, path=keyfile, group="ml-stack")
 
     def test_a_derived_key_drives_a_real_daemon(self, tmp_path):
         """The point of deriving rather than minting: the bearer token both ends compute
         has to come out the same, or the passphrase bought nothing."""
         from ml_stack.fleet.discovery import join_cluster
 
-        here = join_cluster(self.WORDS, path=tmp_path / "a.key")
-        there = join_cluster(self.WORDS, path=tmp_path / "b.key")
+        here = join_cluster(self.WORDS, path=tmp_path / "a.key", group="ml-stack")
+        there = join_cluster(self.WORDS, path=tmp_path / "b.key", group="ml-stack")
         assert derive_token(here) == derive_token(there)
 
 
@@ -686,8 +686,8 @@ def test_two_passphrase_groups_share_a_network_without_seeing_each_other(port, t
     another key does not verify, so it is never answered."""
     from ml_stack.fleet.discovery import join_cluster
 
-    ours = join_cluster("correct horse battery staple", path=tmp_path / "ours.key")
-    theirs = join_cluster("a completely different phrase", path=tmp_path / "theirs.key")
+    ours = join_cluster("correct horse battery staple", path=tmp_path / "ours.key", group="ml-stack")
+    theirs = join_cluster("a completely different phrase", path=tmp_path / "theirs.key", group="ml-stack")
 
     with Advertiser(Beacon(name="ours", port=8770), ours, port=port, interval_s=0.2), \
          Advertiser(Beacon(name="theirs", port=8771), theirs, port=port, interval_s=0.2):
@@ -909,5 +909,5 @@ def test_a_passphrase_too_short_to_stand_up_to_guessing_is_refused(tmp_path):
 
     assert MIN_PASSPHRASE >= 12
     with pytest.raises(DiscoveryError, match="at least"):
-        join_cluster("a" * (MIN_PASSPHRASE - 1), path=tmp_path / "k")
-    join_cluster("a" * MIN_PASSPHRASE, path=tmp_path / "k")
+        join_cluster("a" * (MIN_PASSPHRASE - 1), path=tmp_path / "k", group="ml-stack")
+    join_cluster("a" * MIN_PASSPHRASE, path=tmp_path / "k", group="ml-stack")
