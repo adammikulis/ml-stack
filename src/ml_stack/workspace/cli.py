@@ -86,6 +86,8 @@ def _text(value: Any) -> str:
                  else f" ({describe(value.get('from_model', ''), value.get('from_model_state', ''))})")
         return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])}"
                 f"{model}{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
+    if isinstance(value, dict) and {"block", "uses"} <= value.keys():
+        return str(value["block"]).rstrip("\n")
     if isinstance(value, dict) and value.get("authority") == "none" and "text" in value:
         return str(value["text"])
     if isinstance(value, dict) and "handle" in value and "line" in value and "text" in value:
@@ -99,7 +101,7 @@ def _text(value: Any) -> str:
         return _block([_row(v) for v in value], "subscriptions")
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and {"id", "role", "model_state", "last_acted"} <= v.keys() for v in value):
-        return _block([f"{v['id']}  {v['role']}  {describe(v['model'], v['model_state'])}"
+        return _block([f"{v['id']}  {v['role']}{'  child of ' + v['parent'] if v['parent'] else ''}  {describe(v['model'], v['model_state'])}"
                        f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
@@ -166,8 +168,13 @@ def _mint(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _revoke(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    ws.revoke(token, args.name)
-    return {"revoked": args.name}
+    return {"revoked": ws.revoke(token, args.name, args.tree)}
+
+
+def _invite(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    made = ws.invite(token, args.name, _ttl(args.ttl), args.uses)
+    return {"block": onboard.snippet("", made["code"], args.name, made["project"],
+                                     (made["uses"], int(made["ttl_s"] // 60))), "uses": made["uses"]}
 
 
 def _whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -418,7 +425,12 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("mint", "print a new token for an agent id", [
         flag("name"), flag("--role", choices=ROLES, default="agent"),
         flag("--ttl-hours", type=float, default=0.0)], _mint),
-    ("revoke", "stop an agent's token working", [flag("name")], _revoke),
+    ("revoke", "stop an agent's token working, with its outstanding invites; --tree also revokes every agent below it",
+     [flag("name"), flag("--tree", action="store_true", help="revoke every descendant too")], _revoke),
+    ("invite", "a joined agent makes a one-time paste block for a new agent it starts; the new agent joins as its child", [
+        flag("--name", default="", help="a suggested id for the new agent"),
+        flag("--ttl", default="10m", help="how long the code works, e.g. 10m (at most 30m)"),
+        flag("--uses", type=int, default=1, help="how many agents may join with it (at most 3)")], _invite),
     ("whoami", "who the token says you are; --model records your own model id as claimed", [
         flag("--model", default="", help="the exact model id you run as (a label, never a right)"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")], _whoami),

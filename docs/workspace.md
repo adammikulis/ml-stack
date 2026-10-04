@@ -94,6 +94,47 @@ The person never pastes anything for a subagent. A parent agent has two choices.
   parent, and stops working when the parent is revoked or expires. `inbox --children` lists only
   the messages your delegates sent; `status` lists them with their parent.
 
+### Agents inviting agents
+
+A joined agent can bring in a new peer started in another tool (Codex, a local model, another
+Claude Code window): `ml-stack-workspace invite [--name HINT] [--ttl 10m] [--uses 1]` prints the
+paste block with a one-time code (never a token). The agent hands the block only to the process it
+is starting, never to a message, note, file or board; a write that contains a live invite code is
+refused. The joiner becomes a child of the issuer: the standard agent role (never lead or human),
+`parent` set, rights at most the issuer's (taken again at redemption), the quiet defaults, its
+model recorded as claimed. A child sends against its parent's window, cannot delegate, mint or
+use notes and scratch, and cannot invite unless the person raises the depth limit. Only a joined
+agent invites; the person uses `connect`, whose shared reusable code stays person-only.
+
+Limits, all in the owner's `limits.json` (an agent cannot change them; a refusal names the number
+and the key):
+
+| Limit | Default | Key |
+| --- | --- | --- |
+| lifetime of an agent-made code | at most 30 min (10 min by default) | `agent_invite_ttl_s` |
+| uses of one code | at most 3 (1 by default) | `agent_invite_uses` |
+| outstanding invites per issuer | 2 | `agent_invites_open` |
+| invites per issuer per hour | 4 | `agent_invites_per_hour` |
+| tree depth (the person is 0; a child made by invite is 1) | 1, so a child cannot invite; the code never allows more than 2 | `agent_invite_depth` |
+| live children plus open places per issuer | 8 | `max_children` |
+| live descendants of one root agent | 8 | `agent_tree_live` |
+| live identities in the workspace | 64 | `agents_live` |
+| held or refused writes by an issuer's children before it cannot invite | 3 | `agent_invite_strikes` |
+
+Who decides: `agent_invite_ask` is `approve-first` by default, so each invite raises a request in the
+Requests inbox and waits `agent_invite_wait_s` (120 s) for the person; `plan-and-go` (set by the
+person) creates it within the limits; `read-only` refuses. A caller's `$ML_STACK_ROLE` can only
+tighten this, and `$ML_STACK_TAINTED` (set by a launcher whose session read untrusted text) turns
+`plan-and-go` into `approve-first`. The chat assistant has no invite tool.
+
+Visible and revocable: every invite and every join is announced on `#announcements` as a
+milestone (`X invited a new agent`, `Y joined as X's child`), audited as `agent_invite.create`,
+`agent_invite.join` and `agent_invite.refused` (issuer, joiner, counts; never the code, which is
+stored as a hash) and so appears in the activity log, and `agents` and `status` show the parent.
+`revoke NAME --tree` revokes NAME, every descendant and every outstanding invite in one command;
+a plain `revoke` of a parent also stops its descendants and voids its invites. A child's held
+message counts as a strike against its issuer.
+
 Everything below is the design and the full command list.
 
 A local message bus, shared notes, per-agent scratch folders and an ownership registry, so that
@@ -206,8 +247,8 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 
 | Area | Commands |
 | --- | --- |
-| quickstart | `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]` |
-| identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME`, `whoami` |
+| quickstart | `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]`, `invite [--name HINT] [--ttl 10m] [--uses 1]` (a joined agent) |
+| identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME [--tree]`, `whoami` |
 | messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `ack SEQ`, `thread ROOT` |
 | notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
