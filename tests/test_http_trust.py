@@ -47,7 +47,7 @@ def _self_signed(directory) -> tuple[str, str]:
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 - the name http.server dispatches on
+    def do_GET(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()

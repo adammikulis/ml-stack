@@ -138,7 +138,7 @@ class TestRequires:
         ]
         kept, refused = eligible(cands, Requires(backend="cuda"))
         assert [c.name for c in kept] == ["rtx"]
-        assert "pi" in refused and refused["pi"]
+        assert refused.get("pi")
 
 
 # -- choosing ------------------------------------------------------------
@@ -202,7 +202,7 @@ def test_units_spread_over_the_peers_and_never_overlap_on_one(boxes, tmp_path, r
         by_peer.setdefault(placement.peer, []).append(row)
     for peer, ran in by_peer.items():
         ran.sort(key=lambda r: r["start"])
-        for earlier, later in zip(ran, ran[1:]):
+        for earlier, later in zip(ran, ran[1:], strict=False):
             assert earlier["end"] <= later["start"] + 0.05, \
                 f"{peer} ran two units at once"
 

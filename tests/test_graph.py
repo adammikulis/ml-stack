@@ -287,7 +287,7 @@ class TestTopology:
         points = np.array([[0.0, 0.0], [0.1, 0.0], [5.0, 5.0]])
         edges = knn_edges(points, k=1)
         assert len(edges) == 3
-        pairs = set(zip(edges.src.tolist(), edges.dst.tolist()))
+        pairs = set(zip(edges.src.tolist(), edges.dst.tolist(), strict=False))
         assert (0, 1) in pairs and (1, 0) in pairs
 
     def test_knn_never_connects_a_node_to_itself(self):
@@ -345,7 +345,7 @@ class TestTopology:
         ])
         edges = build_topology(points, k=2, include_mst=True)
         graph = Graph.from_edges(
-            12, list(zip(edges.src.tolist(), edges.dst.tolist()))
+            12, list(zip(edges.src.tolist(), edges.dst.tolist(), strict=False))
         ).to_networkx(directed=False)
         assert nx.number_connected_components(graph) == 1
 
@@ -357,14 +357,14 @@ class TestTopology:
         ])
         edges = build_topology(points, k=2, include_mst=False)
         graph = Graph.from_edges(
-            12, list(zip(edges.src.tolist(), edges.dst.tolist()))
+            12, list(zip(edges.src.tolist(), edges.dst.tolist(), strict=False))
         ).to_networkx(directed=False)
         assert nx.number_connected_components(graph) == 2
 
     def test_build_topology_deduplicates_and_drops_self_loops(self):
         points = np.random.default_rng(3).standard_normal((10, 2))
         edges = build_topology(points, k=3, include_mst=True, window=2)
-        pairs = list(zip(edges.src.tolist(), edges.dst.tolist()))
+        pairs = list(zip(edges.src.tolist(), edges.dst.tolist(), strict=False))
         assert len(pairs) == len(set(pairs)), "duplicate edges survived"
         assert not any(u == v for u, v in pairs), "a self-loop survived"
 
@@ -377,7 +377,7 @@ class TestTopology:
 
     def test_symmetrized_edges_go_both_ways(self):
         edges = knn_edges(np.random.default_rng(5).standard_normal((6, 2)), k=1).symmetrized()
-        pairs = set(zip(edges.src.tolist(), edges.dst.tolist()))
+        pairs = set(zip(edges.src.tolist(), edges.dst.tolist(), strict=False))
         assert all((v, u) in pairs for u, v in pairs)
 
 

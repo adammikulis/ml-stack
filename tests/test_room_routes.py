@@ -12,7 +12,7 @@ from conftest import write_gguf
 from test_fleet_ui import SALT, WORDS, Serving
 from test_wired import Recorder, dense
 
-from ml_stack.serve import wired
+from ml_stack.serve import wired, wired_apply as apply
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def the_cluster_already_exists(monkeypatch, tmp_path):
         SALT, discovery.key_from_passphrase(passphrase, group=group, salt=SALT)))
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
-    for name in wired.AGENT_MARKERS:
+    for name in apply.AGENT_MARKERS:
         monkeypatch.delenv(name, raising=False)
 
 
@@ -31,7 +31,8 @@ def the_cluster_already_exists(monkeypatch, tmp_path):
 def room(tmp_path):
     ran = Recorder(start=98304)
     s = Serving(tmp_path)
-    s.ui.room_runner = ran
+    s.ui.room_hooks = wired.Hooks(total=128 * 1024**3, runner=ran, system="Darwin",
+                                  read=ran.read, daemon=tmp_path / "LaunchDaemons" / "d.plist")
     s.ran = ran
     try:
         yield s
@@ -48,11 +49,10 @@ def test_the_page_carries_the_card_on_the_models_screen(room):
     assert room.call("/ui/")[0] == 200
 
 
-def test_a_click_raises_the_limit_through_the_one_stand_in_call(room, monkeypatch):
-    monkeypatch.setattr(wired, "current_mb", room.ran.read)
+def test_a_click_raises_the_limit_through_the_one_stand_in_call(room):
     status, body, _ = room.call("/ui/room/apply", method="POST", body={"mb": 65536})
     assert status == 200 and body["ok"] and body["after_mb"] == 65536, body
-    assert body["resets_on_reboot"] is True and body["original_mb"] == 98304
+    assert body["machine"]["original_mb"] == 98304 and body["machine"]["kept"] is False
     assert room.ran.calls == [["osascript", "-e",
                                'do shell script "/usr/sbin/sysctl -w iogpu.wired_limit_mb=65536"'
                                ' with administrator privileges']]
