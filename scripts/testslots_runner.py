@@ -13,6 +13,8 @@ import testslots_rpc
 def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: dict[str, str] | None = None,
                *, container: bool = False) -> int:
     environment = dict(os.environ if env is None else env)
+    for name in ("PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID"):
+        environment.pop(name, None)
     testslots._reject_nested()
     admission = testslots_rpc.Admission(container)
     process = None
