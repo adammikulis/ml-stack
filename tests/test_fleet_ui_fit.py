@@ -149,15 +149,7 @@ class TestThePage:
 
 
 class TestTheSplitBetweenTheFitComponents:
-    """The fit screen is five files: `fit-model` holds the formatting and the chart geometry,
-    `fit-view` the frame and the table, `fit-charts` the two panels the fit screen draws, and
-    `rates-view` and `telemetry-view` a screen each.
-
-    Nothing here drives a browser -- `TestTheFitView` in `test_fleet_page.py` already opens
-    all three screens and reads what they draw. This is the seam itself: the shared pieces
-    live once, in `fit-model`, and the rest read them off `window.fitModel` rather than each
-    carrying their own copy.
-    """
+    """Fit component composition and workspace navigation."""
 
     NAMES = ("fit-model", "fit-view", "fit-charts", "rates-view", "telemetry-view")
 
