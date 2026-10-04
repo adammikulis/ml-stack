@@ -170,12 +170,16 @@ def _info(one: Entry, parts: list[Entry], head: header.Header | None,
     if one.format != "gguf":
         shown = one.repo.split("/")[-1] if one.repo else one.name
     mmproj = _mmproj(one, side, alone) if one.format == "gguf" else None
+    config = files.read_json(one.path / "config.json", {}) if one.format != "gguf" else {}
+    architecture = config.get("model_type", "") if isinstance(config, dict) else ""
+    if not isinstance(architecture, str):
+        architecture = ""
     return ModelInfo(
         id=_identity(one, _stem(one.name) if total == 1 else one.name),
         name=shown, path=one.path, format=one.format, size_bytes=size, source=one.place,
         quantization=_quant(one.name, head) if one.format == "gguf" else "",
         parameters=head.parameters if head else 0,
-        architecture=head.architecture if head else "",
+        architecture=head.architecture if head else architecture,
         context_length=head.context_length if head else 0,
         mmproj=mmproj,
         repo=one.repo or "", mtime=max(p.mtime for p in parts),
