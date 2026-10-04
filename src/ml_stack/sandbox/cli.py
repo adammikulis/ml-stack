@@ -59,15 +59,15 @@ def test() -> list[dict[str, Any]]:
                 passed, detail = False, str(exc)
             rows.append({"check": name, "passed": passed, "detail": detail})
 
-        check("read inside the allow-list", ["/bin/cat", str(allowed / "f")], True)
-        check("read outside the allow-list is refused", ["/bin/cat", str(outside / "f")], False)
-        check("write inside the allow-list", ["/bin/sh", "-c", f"echo x > {allowed}/w"], True)
+        check("read inside the allow-list", [os.path.realpath("/bin/cat"), str(allowed / "f")], True)
+        check("read outside the allow-list is refused", [os.path.realpath("/bin/cat"), str(outside / "f")], False)
+        check("write inside the allow-list", [os.path.realpath("/bin/sh"), "-c", f"echo x > {allowed}/w"], True)
         check("write outside the allow-list is refused",
-              ["/bin/sh", "-c", f"echo x > {outside}/w"], False)
+              [os.path.realpath("/bin/sh"), "-c", f"echo x > {outside}/w"], False)
         with socket.socket() as server:
             server.bind(("127.0.0.1", 0))
             server.listen(4)
-            dial = ["/usr/bin/nc", "-z", "-w", "2", "127.0.0.1", str(server.getsockname()[1])]
+            dial = [os.path.realpath("/usr/bin/nc"), "-z", "-w", "2", "127.0.0.1", str(server.getsockname()[1])]
             check("a loopback connection works when the policy allows it", dial, True,
                   replace(pol, net=Net.loopback()))
             check("the same connection is refused when the network is denied", dial, False)

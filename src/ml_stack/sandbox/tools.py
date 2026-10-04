@@ -42,7 +42,7 @@ class SandboxedBash:
         policy = policies.bash(self.project, self.scratch)
         if self.tainted():
             policy = policy.without_network()
-        result = run(["/bin/bash", "-c", command], policy, unsandboxed=self.unsandboxed,
+        result = run([os.path.realpath("/bin/bash"), "-c", command], policy, unsandboxed=self.unsandboxed,
                      on_event=self.on_event, cwd=self.project)
         if result.denials:
             try:
