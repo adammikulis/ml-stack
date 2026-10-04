@@ -178,6 +178,8 @@ def make_car_world(config):
     task_horizon = int(cfg.pop("horizon", 1000))
     magnitude = float(cfg.pop("steering_magnitude", .35))
     initial_seed = cfg.pop("world_seed", None)
+    if initial_seed is not None:
+        cfg.update(start_seed=initial_seed, num_scenarios=1)
     if task_horizon < 1 or not 0 < magnitude <= 1:
         raise ValueError("horizon must be positive and steering_magnitude in (0, 1]")
     cfg.pop("simulation_mode", None)
