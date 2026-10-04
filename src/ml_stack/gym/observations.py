@@ -6,8 +6,16 @@ from ml_stack.gym.values import json_value
 
 def car_model_state(state):
     """Named car input with indexed lidar returns and no duplicate native vector."""
-    result = {key: state[key] for key in ('environment', 'simulation_mode', 'ego', 'lane',
+    result = {key: state[key] for key in ('environment', 'simulation_mode', 'lane',
                                          'navigation_normalized', 'stop_rule') if key in state}
+    ego = state.get('ego', {})
+    result['ego'] = {key: round(float(ego[key]), 3) for key in ('speed_km_h', 'heading_radians') if key in ego}
+    if 'stop_rule' in state:
+        result['stop_rule'] = {key: round(value, 3) if isinstance(value, float) else value
+                              for key, value in state['stop_rule'].items()
+                              if key in {'distance_m', 'held_seconds', 'required_hold_seconds',
+                                         'speed_threshold_m_s', 'stop_zone_m', 'completed',
+                                         'passed', 'violated', 'state'}}
     sensors = state.get('sensors', {})
     rays = sensors.get('lidar_normalized', [])
     distance = float(sensors.get('lidar_range_m') or 0)
