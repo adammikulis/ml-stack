@@ -117,7 +117,7 @@ note = "raising the GPU wiring limit is person-only: agent processes, tokens, fo
 
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
-match = ["parser:fleet/board_routes.py", "route:fleet/board_routes.py:*"]
+match = ["parser:workspace/fleet_routes.py", "route:workspace/fleet_routes.py:*"]
 status = "covered"
 tests = [
   "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
