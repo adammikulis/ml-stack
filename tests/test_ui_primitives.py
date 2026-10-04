@@ -90,12 +90,12 @@ def daemon(tmp_path):
         served.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser(request):
-    pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+    pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
     try:
         b = request.getfixturevalue("playwright").chromium.launch(headless=True)
-    except Exception as exc:                           # noqa: BLE001
+    except pw.Error as exc:
         pytest.skip(f"chromium did not launch: {exc}")
     yield b
     b.close()
