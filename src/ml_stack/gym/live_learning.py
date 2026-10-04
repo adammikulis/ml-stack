@@ -1,9 +1,9 @@
 """CPU PPO rollouts over the live worker's single simulation clock."""
 
-import json
 import queue
 import time
 
+from ml_stack.files import write_json
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.training import load_policy
 
@@ -100,6 +100,6 @@ def learn_rollout(simulation, commands, updates, publish):
                                    training_timesteps=model.num_timesteps, optimizer_updates=model._n_updates)
         simulation.state.update(model=str(checkpoint), checkpoint=str(checkpoint))
         simulation.state["config"]["checkpoint"] = str(checkpoint)
-        (simulation.path / "manifest.json").write_text(json.dumps(simulation.settings))
+        write_json(simulation.path / "manifest.json", simulation.settings)
     publish(updates, simulation.state)
     return not callback.closed
