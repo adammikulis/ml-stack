@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import webbrowser
-import sys
 from typing import Any
 
 from ml_stack.http import ServerError, request_json

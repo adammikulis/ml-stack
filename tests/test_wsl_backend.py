@@ -104,3 +104,16 @@ with socket.socket(socket.AF_UNIX) as server:
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=5)
+
+
+def test_wsl_gpu_is_visible_inside_the_network_denied_namespace(tmp_path):
+    binary = "/usr/lib/wsl/lib/nvidia-smi"
+    if not sys.platform.startswith("linux") or not Path(binary).exists():
+        pytest.skip("requires WSL CUDA")
+    policy = Policy("gpu-test", read=("/usr/lib/wsl/lib",), exec=(binary,), gpu=True,
+                    net=Net.deny(), env=system_env(LD_LIBRARY_PATH="/usr/lib/wsl/lib"),
+                    limits=Limits(wall_seconds=10))
+    result = run([binary, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                 policy, cwd=str(tmp_path), diagnose="never")
+    assert result.ok, result.stderr
+    assert int(result.stdout.strip()) >= 24000

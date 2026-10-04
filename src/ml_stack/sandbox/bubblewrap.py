@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from ml_stack.sandbox.backend import Availability, Wrapped, program_of
 from ml_stack.sandbox.policy import NetMode, Policy, PolicyError, checked_path
@@ -37,10 +38,10 @@ def arguments(policy: Policy, program: str) -> list[str]:
     if policy.gpu:
         for path in ("/dev/dxg", "/dev/nvidiactl", "/dev/nvidia0", "/dev/nvidia-uvm",
                      "/dev/nvidia-uvm-tools", "/dev/dri"):
-            if os.path.exists(path):
+            if Path(path).exists():
                 out += ["--dev-bind", path, path]
         for path in ("/usr/lib/wsl/lib", "/usr/lib/wsl/drivers"):
-            if os.path.isdir(path):
+            if Path(path).is_dir():
                 out += ["--ro-bind", path, path]
     for key, value in policy.env.items():
         out += ["--setenv", key, value]
