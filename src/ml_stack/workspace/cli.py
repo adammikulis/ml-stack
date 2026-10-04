@@ -25,6 +25,7 @@ from ml_stack.workspace.bus import CALL_TYPES, TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
 from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
+from ml_stack.workspace.modelid import describe
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused, fence
@@ -81,8 +82,10 @@ def _row(value: dict[str, Any]) -> str:
 def _text(value: Any) -> str:
     if isinstance(value, dict) and "text" in value and "seq" in value:
         where = f" on {value['board']}" if value.get("board") else ""
+        model = ("" if value.get("from_role") == "human"
+                 else f" ({describe(value.get('from_model', ''), value.get('from_model_state', ''))})")
         return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])}"
-                f"{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
+                f"{model}{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
     if isinstance(value, dict) and value.get("authority") == "none" and "text" in value:
         return str(value["text"])
     if isinstance(value, list) and value and all(
@@ -92,6 +95,10 @@ def _text(value: Any) -> str:
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and {"type", "target", "mode"} == v.keys() for v in value):
         return _block([_row(v) for v in value], "subscriptions")
+    if isinstance(value, list) and value and all(
+            isinstance(v, dict) and {"id", "role", "model_state", "last_acted"} <= v.keys() for v in value):
+        return _block([f"{v['id']}  {v['role']}  {describe(v['model'], v['model_state'])}"
+                       f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
         return f"{value['kind']} {value['key']}  {value['owner']}  expires in {value['expires_in_s']:.0f} s{soon}"
@@ -163,7 +170,20 @@ def _revoke(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 def _whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     who = ws.auth(token)
-    return {"id": who.id, "role": who.role, "project": ws.registry.info(who.id)["project"]}
+    if args.model:
+        ws.claim_model(token, args.model, args.harness)
+    model, state = ws.model_of(who.id)
+    return {"id": who.id, "role": who.role, "project": ws.registry.info(who.id)["project"],
+            "model": model or "unknown", "model_state": state, "harness": ws.registry.info(who.id)["harness"]}
+
+
+def _hello_model(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    return ws.claim_model(token, args.model, "", args.label_name)
+
+
+def _agents(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    ws.auth(token)
+    return ws.registered()
 
 
 def _send(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -239,7 +259,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"joined as {onboard.join(ws, args.code, args.name)}")
+    say(f"joined as {onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))}")
     return 0
 
 
@@ -361,7 +381,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
            help="a single-use code (default: one paste for up to 10 agents, one hour)"),
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
-        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex")],
+        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
+        flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
+        flag("--harness", default="", help="your harness, e.g. claude-code or codex")],
      _join),
     ("setup", "guided walkthrough for several agents; --yes makes token files directly", [
         flag("agents", nargs="*", help="suggested ids (--yes: the agents to create)"),
@@ -395,7 +417,13 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("name"), flag("--role", choices=ROLES, default="agent"),
         flag("--ttl-hours", type=float, default=0.0)], _mint),
     ("revoke", "stop an agent's token working", [flag("name")], _revoke),
-    ("whoami", "who the token says you are", [], _whoami),
+    ("whoami", "who the token says you are; --model records your own model id as claimed", [
+        flag("--model", default="", help="the exact model id you run as (a label, never a right)"),
+        flag("--harness", default="", help="your harness, e.g. claude-code or codex")], _whoami),
+    ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
+        flag("label_name", metavar="LABEL"), flag("model", metavar="MODEL")], _hello_model),
+    ("agents", "every live identity with its role, model and whether the model is verified", [],
+     _agents),
     ("send", "send a message (BODY - reads stdin)", [
         flag("to", help="an agent id, or * for the announcements board (joined, milestone, "
                         "done, blocked only)"), flag("type", choices=CALL_TYPES),

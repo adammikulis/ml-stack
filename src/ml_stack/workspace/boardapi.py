@@ -138,7 +138,9 @@ class BoardApi:
                 "to": row["to"], "ts": row["ts"], "thread": row.get("thread") or row["seq"],
                 "reply_to": row.get("reply_to", 0), "mentions": list(row.get("mentions", [])),
                 "subject": plain.line(row["subject"], self.ws.limits.subject_chars), "body": body,
-                "held": bool(row["held"]), "truncated": cut}
+                "held": bool(row["held"]), "truncated": cut,
+                "model": "" if row["role"] == "human" else row.get("model", ""),
+                "model_state": "" if row["role"] == "human" else row.get("model_state", "")}
 
     # -- boards ---------------------------------------------------------------------------
     def list(self, token: str) -> list[dict[str, Any]]:

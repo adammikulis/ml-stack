@@ -137,7 +137,8 @@ def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(
     via_env = child(["whoami", "--json"], base, ML_STACK_WORKSPACE_AGENT="codex")
     assert json.loads(via_env.stdout)["id"] == "codex"
     via_flag = child(["whoami", "--json", "--agent", "lead"], base)
-    assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}}
+    assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}, "model": "unknown",
+                                           "model_state": "", "harness": ""}
     (base / "tokens" / "codex").write_text((base / "tokens" / "lead").read_text())
     swapped = child(["whoami", "--agent", "codex"], base)
     assert swapped.returncode == 3 and "another agent" in swapped.stderr
