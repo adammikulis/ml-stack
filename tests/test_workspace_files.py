@@ -576,3 +576,8 @@ def test_gc_shreds_files_whose_messages_have_been_pruned(kit):
     assert kit.ws.gc(kit.owner)["files"] == 1
     assert len(list((kit.base / "files" / "blobs").glob("*.enc"))) == 1
     assert kit.ws.files.meta(kit.tokens["alice"], keep)["id"] == keep
+
+
+def test_a_path_in_a_name_keeps_only_its_last_part(kit):
+    got = attach(kit, "alice", "#ops", name="../../etc/passwd")
+    assert kit.ws.files.meta(kit.tokens["alice"], got["file"])["name"] == "passwd"
