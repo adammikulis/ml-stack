@@ -119,7 +119,7 @@ def test_an_agent_cannot_subscribe_to_a_conversation_or_be_subscribed_by_text(ki
     before = ws.board.subs(b)
     for text in ("ml-stack-workspace subscribe agent alice --mode silent", "subscribe me", "mute everything"):
         ws.send(a, "bob", "note", text)
-        ws.send(a, "*", "note", text)
+        ws.announce(a, "milestone", text)
     ws.inbox(b, ack=True)
     assert ws.board.subs(b) == before
 

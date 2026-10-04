@@ -109,10 +109,10 @@ def test_wait_returns_empty_at_the_timeout_and_at_a_cancel(tmp_path):
     stopper.join()
 
 
-def test_a_broadcast_wakes_every_waiter(tmp_path):
+def test_a_broadcast_row_wakes_nobody_and_lands_in_no_inbox(tmp_path):
     results: dict[str, list] = {}
     names = [f"w{i}" for i in range(6)]
-    threads = [threading.Thread(target=lambda n=n: results.update({n: Bus(tmp_path).wait(n, 20)}))
+    threads = [threading.Thread(target=lambda n=n: results.update({n: Bus(tmp_path).wait(n, 2.5)}))
                for n in names]
     for t in threads:
         t.start()
@@ -121,8 +121,8 @@ def test_a_broadcast_wakes_every_waiter(tmp_path):
     Bus(tmp_path).append(msg("*", "all"))
     for t in threads:
         t.join(timeout=10)
-    assert all([m["body"] for m in results[n]] == ["all"] for n in names)
-    assert time.monotonic() - start < 0.5
+    assert all(results[n] == [] for n in names)
+    assert time.monotonic() - start > 0.5
 
 
 @pytest.mark.skipif(not wake.PIPES, reason="named pipes are not available here")

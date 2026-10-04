@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.workspace import limits as limits_mod, tokens, wake
-from ml_stack.workspace.boardapi import BoardApi
+from ml_stack.workspace.boardapi import BoardApi, Held
+from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.claims import Claims, Conflict
@@ -185,7 +186,29 @@ class Workspace:
         """Append a message from the token's owner; returns it as the sender sees it."""
         return self.post(self.auth(token), to, kind, body, **opts)
 
-    def post(self, who: Identity, to: str, kind: str, body: str,
+    def announce(self, token: str, kind: str, text: str, label: str = "") -> dict[str, Any]:
+        """Post one terse line to `#announcements`, which everyone receives as a roll-up."""
+        return self._announce(self.auth(token), kind, text, label)
+
+    def _announce(self, who: Identity, kind: str, text: str, label: str = "") -> dict[str, Any]:
+        self._may(who, "send")
+        lim = self.limits
+        if kind not in ANNOUNCE_KINDS:
+            raise Refused(f"an announcement is one of {', '.join(ANNOUNCE_KINDS)}, not {kind!r}; "
+                          f"for anything else send a direct message to the one agent who needs it")
+        if not text.strip() or "\n" in text or len(text) > lim.announce_chars:
+            raise Refused(f"an announcement is one line of at most {lim.announce_chars} "
+                          f"characters ({len(text)} given); put the detail in a note or a thread "
+                          f"and link it by sequence number, such as 'done: see note 12'")
+        horizon = self.clock() - lim.announce_window_s
+        recent = [r for r in self.bus.outbox(who.id, 50) if r["to"] == ANNOUNCE and r["ts"] > horizon]
+        if len(recent) >= lim.announce_per_window:
+            self.audit("write.refused", who.id, what="announcement", why="rate")
+            raise RateLimited(f"{who.id} made {len(recent)} announcements in "
+                              f"{lim.announce_window_s:.0f}s; the limit is {lim.announce_per_window}")
+        return self.post(who, ANNOUNCE, kind, text, subject=kind, label=label, announce=True)
+
+    def post(self, who: Identity, to: str, kind: str, body: str, *, announce: bool = False,
              **opts: Unpack[SendOptions]) -> dict[str, Any]:
         """Append a message from ``who``, an identity the caller has already established."""
         self._may(who, "send")
@@ -193,13 +216,20 @@ class Workspace:
         label = str(given.get("label", ""))
         if label and not valid_name(label):
             raise ValueError(f"{label!r} is not a usable label")
+        if to == BROADCAST:
+            if kind not in ANNOUNCE_KINDS:
+                raise Refused(f"`*` is the announcements board and takes only "
+                              f"{', '.join(ANNOUNCE_KINDS)} (`announce KIND TEXT`); send anything "
+                              f"else to the one agent who needs it")
+            return self._announce(who, kind, body, label)
         subject, reply_to, ttl_s = (given.get("subject", ""), int(given.get("reply_to", 0)),
                                     float(given.get("ttl_s", 0.0)))
-        if kind not in TYPES:
+        if kind not in TYPES and not announce:
             raise ValueError(f"type must be one of {', '.join(TYPES)}")
         mentions: list[str] = []
         if to.startswith("#"):
-            mentions = self.board.prepare(who, to, body, reply_to)
+            if not announce:
+                mentions = self.board.prepare(who, to, body, reply_to)
         elif not self._known(to):
             raise ValueError(f"no agent called {to!r}; use * for everyone")
         if len(subject) > self.limits.subject_chars:
@@ -232,8 +262,10 @@ class Workspace:
             wake.signal(self.base / "wake", self.board.listeners(row))
         return self.deliver(row, raw=True)
 
-    def deliver(self, row: dict[str, Any], raw: bool = False) -> dict[str, Any]:
-        """A message as a reader gets it: fenced as untrusted data, never as an instruction."""
+    def deliver(self, row: dict[str, Any], raw: bool = False, cap: int = 0) -> dict[str, Any]:
+        """A message as a reader gets it: fenced as untrusted data, never as an instruction.
+        With ``cap`` the body is cut to that many characters and says where the rest is."""
+        row = self._cut(row, cap)
         qid = row["held"]
         state = self.quarantine.state(qid) if qid else ""
         if state == "released":
@@ -259,15 +291,42 @@ class Workspace:
             out["raw"] = row["body"]
         return out
 
-    def inbox(self, token: str, ack: bool = False, limit: int = 50,
-              raw: bool = False) -> list[dict[str, Any]]:
-        """Unread messages for the token's owner, oldest first; ``ack`` marks them read."""
+    @staticmethod
+    def _cut(row: dict[str, Any], cap: int) -> dict[str, Any]:
+        if not cap or row["held"] or len(row["body"]) <= cap:
+            return row
+        more = len(row["body"]) - cap
+        return {**row, "body": f"{row['body'][:cap]}…({more} more chars; thread {row['seq']})"}
+
+    def _present(self, found: list[dict[str, Any]], limit: int, widen: bool,
+                 raw: bool) -> Held:
+        """``found`` as the reader gets it. By default at most ``read_items`` messages, each cut
+        to ``read_item_chars`` and ``read_total_chars`` in all; an explicit ``limit`` or
+        ``widen`` lifts the character cuts (and the count when ``widen``). ``.held`` is how many
+        were left unread for the next call."""
+        lim = self.limits
+        wide = widen or limit > 0
+        take = len(found) if widen else limit if limit > 0 else lim.read_items
+        out, used = Held(), 0
+        for r in found[:take]:
+            shown = self.deliver(r, raw, 0 if wide else lim.read_item_chars)
+            if not wide and out and used + len(shown["text"]) > lim.read_total_chars:
+                break
+            used += len(shown["text"])
+            out.append(shown)
+        out.held = len(found) - len(out)
+        return out
+
+    def inbox(self, token: str, ack: bool = False, limit: int = 0, raw: bool = False,
+              widen: bool = False) -> Held:
+        """Unread messages for the token's owner, oldest first; ``ack`` marks the ones shown
+        read. A bounded few by default; ``.held`` counts the rest."""
         who = self.auth(token)
         self._may(who, "read")
-        found = self._unread(who, limit)
-        if ack and found:
-            self.bus.ack(who.id, found[-1]["seq"])
-        return [self.deliver(r, raw) for r in found]
+        out = self._present(self._unread(who, 1 << 30), limit, widen, raw)
+        if ack and out:
+            self.bus.ack(who.id, out[-1]["seq"])
+        return out
 
     def _unread(self, who: Identity, limit: int) -> list[dict[str, Any]]:
         direct = self.bus.inbox(who.id, limit=1 << 30)
@@ -287,7 +346,8 @@ class Workspace:
         return [self.deliver(r, raw=True) for r in self.bus.outbox(who.id, limit)]
 
     def wait(self, token: str, timeout_s: float, ack: bool = False, raw: bool = False,
-             cancel: Callable[[], bool] | None = None) -> list[dict[str, Any]]:
+             cancel: Callable[[], bool] | None = None, limit: int = 0,
+             widen: bool = False) -> Held:
         """Block until there is something to read, ``timeout_s`` passes or ``cancel()`` is true."""
         who = self.auth(token)
         self._may(who, "read")
@@ -295,19 +355,21 @@ class Workspace:
         waiter = wake.Waiter(self.base / "wake", who.id)
         try:
             while True:
-                found = self._unread(who, 50)
+                found = self._unread(who, 1 << 30)
                 left = deadline - time.monotonic()
                 if found or left <= 0 or (cancel is not None and cancel()):
                     break
                 waiter.sleep(left if cancel is None else min(left, CANCEL_SLICE_S))
         finally:
             waiter.close()
-        if ack and found:
-            self.bus.ack(who.id, found[-1]["seq"])
-        return [self.deliver(r, raw) for r in found]
+        out = self._present(found, limit, widen, raw)
+        if ack and out:
+            self.bus.ack(who.id, out[-1]["seq"])
+        return out
 
-    def thread(self, token: str, root: int) -> list[dict[str, Any]]:
-        """A thread, to a participant, a lead or a human."""
+    def thread(self, token: str, root: int, limit: int = 0, widen: bool = False) -> Held:
+        """A thread, to a participant, a lead or a human: its first message and the newest
+        replies (``read_items`` in all by default); ``.held`` counts the omitted middle."""
         who = self.auth(token)
         self._may(who, "read")
         rows = self.bus.thread(root)
@@ -318,7 +380,12 @@ class Workspace:
             who.id == r["from"] or r["to"] in (who.id, BROADCAST) for r in rows)
         if not seen:
             raise Denied(f"{who.id} is not part of that thread")
-        return [self.deliver(r) for r in rows]
+        take = len(rows) if widen else limit if limit > 0 else self.limits.read_items
+        kept = rows if len(rows) <= take else [rows[0], *rows[-(take - 1):]] if take > 1 else rows[:1]
+        cap = 0 if widen else self.limits.board_message_chars
+        out = Held(self.deliver(r, cap=cap) for r in kept)
+        out.held = len(rows) - len(out)
+        return out
 
     # -- notes ---------------------------------------------------------------------------
     def note_add(self, token: str, kind: str, title: str, body: str,
