@@ -14,6 +14,42 @@
 uncovered = 54
 partial = 202
 
+[[group]]
+match = ["spawn:platform.py:start_process"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py::test_worker_spawn_keeps_hostile_configuration_inside_json"]
+note = "actual worker launch through the process wrapper receives hostile configuration as one JSON argument without a shell"
+
+[[group]]
+match = ["spawn:gym/catalog.py:catalogue", "spawn:gym/traffic_world.py:generate"]
+status = "covered"
+count = 2
+tests = ["tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+         "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"]
+note = "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+
+[[group]]
+match = ["spawn:gym/transport.py:Process.start"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py"]
+note = "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
+
+[[group]]
+match = ["desktop:app/src-tauri/capabilities/main.json"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_desktop_capabilities.py"]
+note = "compiled Tauri authority rejects foreign origins and windows, shell execution and filesystem reads"
+
+[[group]]
+match = ["spawn:scripts/test-on-linux"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_linux_runner.py", "tests/test_running_on_linux.py::test_the_runner_says_which_command_told_it_docker_is_missing"]
+note = "hostile pytest text remains literal argv; source mount is read-only, no privileged or host-network flags, temporary config and staging are removed"
+
 # -- the human-only floor ------------------------------------------------------------------
 [[group]]
 match = ["human:*"]
@@ -28,16 +64,12 @@ note = "grant minting, release and purge, signing keys, host approval, vault rek
 
 # -- HTTP routes and handlers --------------------------------------------------------------
 [[group]]
-match = ["route:fleet/gym_routes.py:*", "route:fleet/workspace_routes.py:*"]
-status = "partial"
-count = 9
-tests = [
-  "tests/test_fleet_workspace_routes.py::test_workspace_requires_ui_header",
-  "tests/test_fleet_workspace_routes.py::test_data_upload_preview_and_path_boundary",
-  "tests/test_fleet_workspace_routes.py::test_job_preview_is_not_submitted_and_commands_are_installed",
-  "tests/test_fleet_workspace_routes.py::test_recording_review_boundary_and_export_handoff",
-]
-note = "UI authentication, file traversal, symlink escapes, command allowlists and review labels are attacked; simulator-specific configuration bodies require further coverage"
+match = ["route:fleet/gym_routes.py:*", "route:fleet/gym_recording_routes.py:*", "route:fleet/workspace_routes.py:*"]
+status = "covered"
+count = 10
+tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py",
+         "tests/test_fleet_workspace_routes.py"]
+note = "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
 
 [[group]]
 match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
@@ -343,6 +375,14 @@ note = "a note, page or document the graph or ingest reads is put in the model's
 match = ["context:*"]
 status = "n/a"
 note = "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+
+[[group]]
+match = ["parser:gym/world_files.py", "parser:gym/car_definition.py", "parser:gym/traffic_world.py",
+         "parser:fleet/request_fields.py", "parser:fleet/gym_recording_routes.py", "parser:fleet/workspace_routes.py"]
+status = "covered"
+count = 6
+tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py"]
+note = "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
 
 # -- parsers and readers of files, pages and messages --------------------------------------
 [[group]]

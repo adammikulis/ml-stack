@@ -256,10 +256,20 @@ left alone.
 ## Commands
 
 ```
-ml-stack-memory list [--json]   show ID   add TEXT --scope user|project [--kind K --source S --model M --entity kind:name]
-ml-stack-memory edit ID TEXT    confirm ID        forget ID | --all [--yes]
-ml-stack-memory link ID supersedes|contradicts|related OTHER      unlink ID REL OTHER
-ml-stack-memory rekey           export            stats [--json]  projects   relink OLD_PATH
+ml-stack-memory list [--json]
+ml-stack-memory show ID
+ml-stack-memory add TEXT --scope user|project [--kind K --source S --model M --entity kind:name]
+ml-stack-memory edit ID TEXT
+ml-stack-memory confirm ID
+ml-stack-memory forget ID
+ml-stack-memory forget --all [--yes]
+ml-stack-memory link ID supersedes|contradicts|related OTHER
+ml-stack-memory unlink ID REL OTHER
+ml-stack-memory rekey
+ml-stack-memory export
+ml-stack-memory stats [--json]
+ml-stack-memory projects
+ml-stack-memory relink OLD_PATH
 every command: [--scope user|project] [--project PATH]
 ```
 

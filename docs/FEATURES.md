@@ -448,6 +448,12 @@ The commands are also tools an agent can call.
   asks what the task leaves open, confirms the models it found on this disk, prints a plan,
   asks go, runs the tools, waits for what detached, and reports what was measured and
   where.
+- **`ml-stack-chat` is the agent command**, in a conversation or on a task, under a role
+  (`reader`, `operator`, `runner`). A call that acts asks: allow this time, always allow or
+  never allow, and the saved rules are listed and edited with `/rules`. Releasing quarantine,
+  approving a host and changing roles or rules are the person's alone (`docs/agent-roles.md`).
+- **It remembers across sessions** in an encrypted graph of facts, per user and per project
+  (`ml-stack-memory`, `docs/memory.md`).
 - **Claude Code itself** runs on a model this machine serves, in the settings it scored best with, on a
   lease taken for it and dropped on the way out.
 

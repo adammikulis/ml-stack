@@ -13,6 +13,22 @@ from ml_stack.gym.provenance import native_provenance
 from ml_stack.gym.runtime import SessionManager
 
 
+def test_worker_reports_constructor_errors_and_closes_initialized_environment(monkeypatch):
+    closed = []
+
+    def fail_after_environment_creation(instance, settings):
+        instance.env = SimpleNamespace(close=lambda: closed.append(True))
+        raise AttributeError("native camera startup failed")
+
+    monkeypatch.setattr(runtime.Simulation, "__init__", fail_after_environment_creation)
+    updates = queue.Queue()
+    runtime.worker({"id": "failed-start", "environment": "car"}, queue.Queue(), updates)
+    state = updates.get_nowait()
+    assert state["status"] == "error"
+    assert state["error"] == "native camera startup failed"
+    assert closed == [True]
+
+
 @pytest.fixture
 def simulation(monkeypatch, tmp_path):
     class Environment:

@@ -1,6 +1,6 @@
 # Persistent simulator worlds
 
-The Gym workspace offers **Training episodes** and **Persistent world**. Training episodes
+The Gym workspace offers **Training / evaluation episode** and **Live world**. Training episodes
 end at the task horizon and require a reset. A persistent world initializes its native map
 and simulator once. Learning task boundaries reset counters and select the next active actor;
 they preserve the road, physics engine, simulator connection, other actors, and world clock.
@@ -20,10 +20,10 @@ paths and paths escaping that directory. World manifests retain the definition a
 hashes. The combined traffic example supports one signal-controlled intersection: SUMO owns
 signals, demand, and routes; MetaDrive owns vehicle dynamics and sensors.
 
-In the car world, MetaDrive manages active vehicles and respawns arrivals. **Native IDM** drives
+In the car world, MetaDrive manages active vehicles and respawns arrivals. **Native driving policy** uses IDM to drive
 the watched car and the other cars with native continuous steering and acceleration. The
 recorded native control remains separate from the discrete nine-action space used by manual,
-decision-model, and PPO controllers. Selecting another active car changes the controlled actor
+decision-model, and PPO controllers. Left/right arrows select an agent for inspection. **Take control of selected agent** changes the controlled actor
 at a simulation step boundary and retains the world. A completed actor hands control to another
 active car. Stop rules require a low-speed hold before the stop line and record compliance.
 

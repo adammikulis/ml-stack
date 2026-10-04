@@ -1,53 +1,58 @@
 """Persistent MetaDrive traffic with native actor lifecycles."""
 
-import gymnasium as gym
-import numpy as np
-from metadrive import MultiAgentMetaDrive
-from metadrive.policy.env_input_policy import EnvInputPolicy
-from metadrive.policy.idm_policy import IDMPolicy
-
 from ml_stack.gym.driving import geometry
 from ml_stack.gym.road_rules import checkpoint_on_route, front_progress
 from ml_stack.gym.values import json_value
 
 
-class NativeOrExternalPolicy(EnvInputPolicy):
-    def __init__(self, obj, seed):
-        super().__init__(obj, seed)
-        self.baseline = IDMPolicy(obj, seed)
+def native_policy_type():
+    from metadrive.policy.env_input_policy import EnvInputPolicy
+    from metadrive.policy.idm_policy import IDMPolicy
 
-    def act(self, agent_id):
-        if self.engine.external_actions[agent_id] is None:
-            action = list(self.baseline.act(agent_id))
-            rule = getattr(self.control_object, "studio_stop_checkpoint", None)
-            if rule is not None and not rule.completed:
-                remaining = rule.distance - front_progress(None, self.control_object)
-                speed = self.control_object.speed_km_h / 3.6
-                if 0 <= remaining <= max(3, speed * speed / 6 + 2):
-                    action[1] = -1. if speed > .1 else 0.
-            return action
-        return super().act(agent_id)
+    class NativeOrExternalPolicy(EnvInputPolicy):
+        def __init__(self, obj, seed):
+            super().__init__(obj, seed)
+            self.baseline = IDMPolicy(obj, seed)
 
-    def destroy(self):
-        self.baseline.destroy()
-        super().destroy()
+        def act(self, agent_id):
+            if self.engine.external_actions[agent_id] is None:
+                action = list(self.baseline.act(agent_id))
+                rule = getattr(self.control_object, "studio_stop_checkpoint", None)
+                if rule is not None and not rule.completed:
+                    remaining = rule.distance - front_progress(None, self.control_object)
+                    speed = self.control_object.speed_km_h / 3.6
+                    if 0 <= remaining <= max(3, speed * speed / 6 + 2):
+                        action[1] = -1. if speed > .1 else 0.
+                return action
+            return super().act(agent_id)
 
-class PersistentTraffic(MultiAgentMetaDrive):
-    def _after_vehicle_done(self, obs, rewards, terminated, truncated, info):
-        dt = self.config["physics_world_step_size"] * self.config["decision_repeat"]
-        for actor, vehicle in self.agents.items():
-            rule = getattr(vehicle, "studio_stop_checkpoint", None)
-            if rule is not None:
-                extra = rule.update(front_progress(self, vehicle), vehicle.speed_km_h / 3.6, dt)
-                rewards[actor] += extra
-                info[actor].update(stop_rule=rule.state(front_progress(self, vehicle)), stop_rule_reward=extra)
-        return super()._after_vehicle_done(obs, rewards, terminated, truncated, info)
+        def destroy(self):
+            self.baseline.destroy()
+            super().destroy()
+    return NativeOrExternalPolicy
 
 
-class CarWorld(gym.Env):
-    def __init__(self, cfg, task_horizon, magnitude, stops):
+def native_traffic_type():
+    from metadrive import MultiAgentMetaDrive
+
+    class PersistentTraffic(MultiAgentMetaDrive):
+        def _after_vehicle_done(self, obs, rewards, terminated, truncated, info):
+            dt = self.config["physics_world_step_size"] * self.config["decision_repeat"]
+            for actor, vehicle in self.agents.items():
+                rule = getattr(vehicle, "studio_stop_checkpoint", None)
+                if rule is not None:
+                    extra = rule.update(front_progress(self, vehicle), vehicle.speed_km_h / 3.6, dt)
+                    rewards[actor] += extra
+                    info[actor].update(stop_rule=rule.state(front_progress(self, vehicle)), stop_rule_reward=extra)
+            return super()._after_vehicle_done(obs, rewards, terminated, truncated, info)
+    return PersistentTraffic
+
+
+class CarWorldState:
+    def __init__(self, cfg, task_horizon, magnitude, stops, initial_seed):
         self.task_horizon, self.magnitude, self.stops = task_horizon, magnitude, stops
-        self.native = PersistentTraffic(cfg)
+        import gymnasium as gym
+        self.native = native_traffic_type()(cfg)
         self.native.steering_magnitude = magnitude
         self.action_space = gym.spaces.Discrete(9)
         self.initialized = False
@@ -55,6 +60,7 @@ class CarWorld(gym.Env):
         self.handoffs = self.task_steps = 0
         self.observations = {}
         self.applied_action = None
+        self.initial_seed = initial_seed
 
     def prepare_rules(self):
         if self.stops:
@@ -83,9 +89,11 @@ class CarWorld(gym.Env):
         return self.augment(self.observations[actor], actor), self.world_info()
 
     def reset(self, *, seed=None, options=None):
+        import gymnasium as gym
+        import numpy as np
         super().reset(seed=seed)
         if not self.initialized:
-            self.observations, _ = self.native.reset(seed=seed)
+            self.observations, _ = self.native.reset(seed=seed if self.initial_seed is None else self.initial_seed)
             self.initialized = True
         actor = self.select_ego()
         self.task_steps = 0
@@ -96,6 +104,7 @@ class CarWorld(gym.Env):
         return self.augment(observation, actor), self.world_info()
 
     def augment(self, observation, actor, state=None):
+        import numpy as np
         if not self.stops:
             return observation
         if state is None:
@@ -147,7 +156,7 @@ class CarWorld(gym.Env):
         for actor in result["vehicles"]:
             policy = self.native.engine.get_policy(actor["id"])
             agent_id = identifiers.get(actor["id"])
-            external = self.native.engine.external_actions.get(agent_id) is not None
+            external = (self.native.engine.external_actions or {}).get(agent_id) is not None
             actor.update(agent_id=agent_id, policy=type(policy).__name__,
                          controller="external" if external else "native-idm")
         return {**result, **self.world_info()}
@@ -159,9 +168,16 @@ class CarWorld(gym.Env):
 
 def make_car_world(config):
     """Create a Gym task view over a world initialized exactly once."""
+    import gymnasium as gym
+
+    class CarWorld(CarWorldState, gym.Env):
+        pass
+
+    native_type = native_traffic_type()
     cfg = dict(config)
     task_horizon = int(cfg.pop("horizon", 1000))
     magnitude = float(cfg.pop("steering_magnitude", .35))
+    initial_seed = cfg.pop("world_seed", None)
     if task_horizon < 1 or not 0 < magnitude <= 1:
         raise ValueError("horizon must be positive and steering_magnitude in (0, 1]")
     cfg.pop("simulation_mode", None)
@@ -169,8 +185,8 @@ def make_car_world(config):
     stops = cfg.pop("stop_signs", True)
     debug = cfg.pop("sensor_debug", True)
     preview = cfg.pop("render_preview", False)
-    cfg.setdefault("map", PersistentTraffic.default_config()["map"] if "map_config" in cfg else "SCSCS")
-    cfg.update(horizon=None, allow_respawn=True, agent_policy=NativeOrExternalPolicy,
+    cfg.setdefault("map", native_type.default_config()["map"] if "map_config" in cfg else "SCSCS")
+    cfg.update(horizon=None, allow_respawn=True, agent_policy=native_policy_type(),
                action_check=False, use_render=False)
     cfg.setdefault("num_agents", 8)
     cfg.setdefault("traffic_density", .25)
@@ -184,4 +200,4 @@ def make_car_world(config):
     cfg["vehicle_config"] = {**cfg.get("vehicle_config", {}), "show_lidar": debug,
                              "show_side_detector": debug, "show_lane_line_detector": debug}
 
-    return CarWorld(cfg, task_horizon, magnitude, stops)
+    return CarWorld(cfg, task_horizon, magnitude, stops, initial_seed)

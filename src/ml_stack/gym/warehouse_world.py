@@ -2,14 +2,7 @@
 
 from importlib.metadata import version
 
-import gymnasium as gym
-import rware  # noqa: F401
-
-import numpy as np
-
 from ml_stack.gym.world_files import directory, record
-
-from ml_stack.gym.world_schema import WAREHOUSE as SCHEMA
 
 
 def integer(value, low, high, name):
@@ -20,6 +13,10 @@ def integer(value, low, high, name):
 
 
 def build(spec=None, seed=0):
+    import gymnasium as gym
+    import numpy as np
+    import rware  # noqa: F401
+
     spec = dict(spec or {})
     mode, seed = spec.pop('mode', 'procedural'), int(spec.pop('seed', seed))
     if not 0 <= seed < 2**31:

@@ -94,7 +94,9 @@ READ_DIRS = ("ingest", "hub", "scrape", "sources", "datasheet", "gguf", "media",
              "speech", "memory", "workspace", "sentinel", "decide", "taint", "guard", "sandbox",
              "fleet/onboard", "agent", "graph")
 READ_FILES = ("web.py", "markup.py", "chat.py", "do.py", "files.py", "messages.py", "roles.py",
-              "rules.py", "extraction.py", "records.py", "jsonl/__init__.py")
+              "rules.py", "extraction.py", "records.py", "jsonl/__init__.py",
+              "gym/world_files.py", "gym/car_definition.py", "gym/traffic_world.py",
+              "fleet/request_fields.py", "fleet/gym_recording_routes.py", "fleet/workspace_routes.py")
 FORCED = ("hub/cards.py", "hub/discover.py", "hub/listing.py", "workspace/notes.py",
           "workspace/service.py", "memory/recall.py", "memory/tools.py", "sandbox/policies.py",
           "sentinel/review.py", "decide/questions.py", "decide/pointer_prompt.py",
@@ -324,6 +326,14 @@ def discover() -> dict[str, Surface]:
             finder(found, where, tree)
     find_scripts(found)
     find_tools(found)
+    for kind, name, source in (
+        ("desktop", "app/src-tauri/capabilities/main.json", "app/src-tauri/capabilities/main.json"),
+        ("spawn", "scripts/test-on-linux", "scripts/test-on-linux"),
+        ("spawn", "gym/transport.py:Process.start", "src/ml_stack/gym/transport.py"),
+        ("route", "fleet/gym_recording_routes.py:/ui/gym/recordings*", "src/ml_stack/fleet/gym_recording_routes.py"),
+    ):
+        if (ROOT / source).is_file():
+            add(found, kind, name, source)
     return dict(sorted(found.items()))
 
 

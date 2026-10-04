@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from ml_stack.gym import simulation
 from ml_stack.gym.adapters import make_environment
 from ml_stack.gym.values import json_value
 
@@ -16,6 +17,8 @@ def test_native_car_world_continues_and_switches_actor_without_reset():
     try:
         env.reset(seed=2)
         engine, road = env.native.engine, env.native.current_map
+        assert env.native.engine.external_actions is None
+        assert env.render_state()["vehicles"]
         actors = list(env.native.agents)
         first, second = actors[:2]
         for _ in range(5):
@@ -42,12 +45,34 @@ def test_native_car_world_continues_and_switches_actor_without_reset():
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("preview", [False, True])
+def test_car_simulation_initial_snapshot_precedes_native_actions(tmp_path, monkeypatch, preview):
+    pytest.importorskip("metadrive")
+    monkeypatch.setattr(simulation, "artifact_root", lambda: tmp_path)
+    live = simulation.Simulation({"id": "startup", "environment": "car", "seed": 2,
+        "controller": "native-idm", "config": {"simulation_mode": "world", "render_preview": preview,
+                                               "num_agents": 4, "traffic_density": 0., "map": "SCS"}})
+    try:
+        assert live.state["status"] == "paused"
+        assert live.state["info"]["world_steps"] == 0
+        assert live.state["info"]["render"]["vehicles"]
+        assert live.env.native.engine.external_actions is None
+        assert bool(live.state["frame"]) == preview
+        live.step()
+        assert live.state["info"]["world_steps"] == 1
+        assert live.state["decision"]["choice"] == "Native IDM driving"
+    finally:
+        live.env.close()
+
+
+@pytest.mark.slow
 def test_native_manual_map_recreates_generated_lane_geometry(tmp_path, monkeypatch):
     pytest.importorskip("metadrive")
     env = make_environment("car", {"simulation_mode": "world", "num_agents": 2,
                                    "traffic_density": 0., "world": {"seed": 2, "map": "SCS"}})
     try:
-        env.reset(seed=2)
+        env.reset(seed=99)
+        assert env.native.current_seed == 2
         metadata = env.native.current_map.get_meta_data()
         metadata["map_config"] = metadata["map_config"].get_serializable_dict()
         lanes = env.native.current_map.get_boundary_line_vector(3)

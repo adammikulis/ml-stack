@@ -43,6 +43,16 @@ def test_every_kind_of_surface_is_found():
                      "listener", "egress", "human", "desktop", "keystore", "context", "parser"}
 
 
+def test_packaged_simulation_and_desktop_boundaries_are_inventoried():
+    found = state()[0]
+    assert {
+        "desktop:app/src-tauri/capabilities/main.json",
+        "spawn:scripts/test-on-linux",
+        "spawn:gym/transport.py:Process.start",
+        "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
+    } <= found.keys()
+
+
 def test_a_new_surface_without_a_row_fails_and_the_message_says_what_to_add():
     cov = coverage()
     found, _, _, _ = state()

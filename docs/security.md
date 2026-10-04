@@ -1,11 +1,12 @@
 # Security
 
 What ml-stack trusts, what it exposes, and what each kind of attacker can do. Reviewed
-2026-10-02 on `agent/hardening` and carried onto the 0.3.0 integration branch; the fix for each
+2026-10-02 on `agent/hardening` and carried onto the integration branch; the fix for each
 finding is the commit named in the table. Other documents: `docs/credentials.md` (tokens and
 keys), `docs/fleet.md` (the daemon), `docs/serving.md` and `docs/serve-admission.md` (model
 servers and the broker), `docs/guardrails.md` and `docs/taint.md` (the agent's rails),
-`docs/sentinel.md` (what watches for all of it).
+`docs/sentinel.md` (what watches for all of it), `docs/assistant-security.md` (the design contract
+for anything that acts for a person, with what is built and what is not).
 
 ## The model
 
@@ -295,17 +296,10 @@ not built.
 These need a decision, or work that belongs to another branch (`HANDOFF.md`, ml-stack issue
 #18).
 
-- **`web.py`, the scraper's browser and `ingest/run.py`** still use `http.check` (resolve, then
-  fetch) rather than `httpguard.fetch`. A page redirect or sub-request inside the browser is
-  unchecked.
-- **`hub/` calls `huggingface_hub` without `token=`** so `ML_STACK_CREDENTIALS_FILE` and the
-  keychain do not reach a download there.
 - **Windows:** the mode and ownership checks on credential files do not apply, `icacls` is
   best effort, and the exit watchdog was not run on Windows.
 - **`scripts/test-on-linux`** needs Docker's daemon; `docs/INTEGRATION-REPORT.md` says whether it
-  ran for the 0.3.0 integration.
-- **`agent/lan-onboarding` and `agent/internet-pipeline`** are separate branches, not part of this
-  document until they land.
+  ran for that integration.
 
 ## Sentinel
 
@@ -445,3 +439,39 @@ outside its allow-list, write outside its scratch directory or open a connection
   (`docs/sandbox.md`), confined to `sandbox/seatbelt.py`; GPU workloads have no replacement yet.
 - **Linux** (bubblewrap) is built and checked by its argument list only.
 - `ml-stack security sandbox status|test` shows the backend and runs the guarantees.
+
+## Live Gym and training workspace
+
+The Gym daemon starts an installed Python interpreter with an argument list and JSON session
+settings. MetaDrive uses native Bullet/Panda3D; warehouse sessions use RWARE; traffic sessions
+start SUMO, and procedural traffic generation starts `netgenerate`. Closing a session terminates
+its worker process group, including child simulators. These processes run as the daemon's OS
+account. They inherit its environment and are not enclosed in the agent shell sandbox. They
+are therefore trusted installed programs, not an isolation boundary for hostile native code.
+Gym sessions do not create containers or mount host directories into them. Monitored workspace
+jobs run an installed `ml-stack-*` command with literal argument strings, without a shell.
+
+Browser routes require the UI authentication and host checks. Request bodies must be JSON
+objects; session configuration and control payloads must be objects. Manual scenario filenames
+are relative to the daemon job queue's files root, which the daemon supplies. Resolved paths
+must remain inside that root; traversal and symlink escapes are refused. SUMO XML rejects
+entities, document types and includes. This does not make an arbitrary native simulator asset
+safe: import only scenario files whose source you trust. Recording camera paths and review files
+are confined to their session directory; dataset exports remain under the daemon files root.
+
+Observations, actor identifiers, scenario metadata and recorded state reach decision models as
+simulation data. A decision selects from native action labels; it does not grant shell, network,
+credential, role or rule access. An abstaining decision pauses the simulation. Checkpoints and
+scenario names are untrusted inputs: learning checkpoints must come from the trusted Gym
+artifact directory, and decision weights use the model loader's integrity checks. Frozen and
+online learning change policy updates, not the daemon account's privileges.
+
+Gym controls are browser operations, not MCP or chat tools. Human-only credential changes,
+keystore access, grant minting, quarantine release, rule adoption and approval of operating
+system actions are not simulation actions. Any future agent-facing simulation tool must pass
+through the roles, rules and human-only floor described in [agent roles](agent-roles.md).
+
+The Tauri window capability allows core/window-state operations and the app's close-choice and
+closing handlers for its main window. Remote IPC origins are loopback HTTP URLs. It declares
+no filesystem, shell, process-spawn or credential plugin permission. The packaged daemon still
+runs with the launching user's OS privileges; limiting webview IPC does not sandbox the daemon.

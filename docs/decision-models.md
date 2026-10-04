@@ -12,7 +12,7 @@ needs a sentence or a plan.
                         abstain_below=0.7)
     got.choice, got.confidence, got.scores, got.abstained, got.latency_ms
 
-`ml-stack-decide ask|train|eval|calibrate|bench|list|make-cases|export-cases|check-cases|fetch`
+`ml-stack-decide ask|train|eval|calibrate|bench|jevbench|list|make-cases|export-cases|check-cases|fetch`
 is the command; `POST /decide` on the daemon (same bearer token as every route, 256 KB body
 limit) and the `decide` MCP tool call the same router.
 
