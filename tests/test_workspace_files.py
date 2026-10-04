@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-from workspace_kit import Kit, clean_env
+from workspace_kit import SRC, Kit, clean_env, cli
 
 from ml_stack import keystore
 from ml_stack.net.scan import Outcome, ScanResult
@@ -459,3 +459,120 @@ def test_the_default_listing_is_bounded_and_counts_the_rest(kit):
     listed = kit.ws.files.list(kit.tokens["alice"])
     assert len(listed) == 10 and listed.held == 2
     assert len(kit.ws.files.list(kit.tokens["alice"], widen=True)) == 12
+
+
+# -- the command line (real child processes) ---------------------------------------------------
+@pytest.fixture
+def child_keys(tmp_path):
+    tests = str(Path(__file__).resolve().parent)
+    return {"PYTHON_KEYRING_BACKEND": "onboard_support.FileKeyring",
+            "ML_STACK_TEST_KEYRING": str(tmp_path / "keyring.json"),
+            "PYTHONPATH": f"{SRC}:{tests}"}
+
+
+def test_the_command_line_attaches_reads_lists_and_searches(kit, tmp_path, child_keys):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "notes.txt").write_bytes(TEXT)
+    t = kit.tokens["alice"]
+    run = lambda *argv, token=t: cli(kit.base, token, *argv, env_extra={**child_keys, "PWD": str(work)}, cwd=work)  # noqa: E731
+    done = run("attach", str(work / "notes.txt"), "--to", "#ops", "--note", "see the log", "--json")
+    assert done.returncode == 0, done.stderr
+    posted = json.loads(done.stdout)
+    h = posted["file"]
+    assert CANARY not in done.stdout
+    meta = run("file", h)
+    assert meta.returncode == 0 and "notes.txt" in meta.stdout and CANARY not in meta.stdout
+    text = run("file", h, "--text")
+    assert CANARY in text.stdout and text.stdout.lstrip().startswith("<untrusted")
+    listed = run("file", "list", "--board", "#ops")
+    assert f"(file {h})" in listed.stdout and listed.stdout.lstrip().startswith("<untrusted")
+    found = run("file", "search", "orchids")
+    assert f"(file {h})" in found.stdout
+    out = run("file", h, "--out", "copy.txt")
+    assert out.returncode == 0 and (work / "copy.txt").read_bytes() == TEXT
+    again = run("file", h, "--out", "copy.txt")
+    assert again.returncode == 3 and "overwrite" in again.stderr
+    outside = run("file", h, "--out", "../x.txt")
+    assert outside.returncode == 3 and not (tmp_path / "x.txt").exists()
+    other = run("file", h, "--text", token=kit.tokens["bob"])
+    assert other.returncode == 3 and "not available to you" in other.stderr and CANARY not in other.stdout
+    stdin = cli(kit.base, t, "attach", "-", "--to", "#ops", "--name", "piped.txt", "--json",
+                env_extra=child_keys, cwd=work, input="from stdin\n")
+    assert stdin.returncode == 0, stdin.stderr
+    inbox = run("board", "read", "#ops")
+    assert "file: notes.txt" in inbox.stdout and "file: piped.txt" in inbox.stdout and CANARY not in inbox.stdout
+
+
+def test_the_command_line_fails_closed_when_the_keystore_is_unreadable(kit, tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "n.txt").write_bytes(TEXT)
+    done = cli(kit.base, kit.tokens["alice"], "attach", str(work / "n.txt"), "--to", "#ops", cwd=work)
+    assert done.returncode == 3 and "nothing was posted" in done.stderr
+    assert kit.ws.board.read(kit.tokens["alice"], "#ops") == []
+
+
+def test_the_command_line_refuses_to_attach_the_workspaces_own_files(kit, child_keys):
+    done = cli(kit.base, kit.tokens["alice"], "attach", str(kit.base / "limits.json"), "--to", "#ops",
+               env_extra=child_keys)
+    assert done.returncode == 3 and "workspace's own state" in done.stderr
+
+
+# -- the person's page ------------------------------------------------------------------------
+@pytest.fixture
+def page(kit):
+    import http.client
+
+    from ml_stack.workspace import boardroute, tokens
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
+    server = boardroute.serve(kit.ws, 0)
+    server.start()
+
+    def call(path):
+        conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
+        conn.request("GET", path)
+        r = conn.getresponse()
+        body = r.read()
+        conn.close()
+        return r.status, {k.lower(): v for k, v in r.getheaders()}, body
+    yield call
+    server.stop()
+
+
+def test_the_person_downloads_text_as_an_attachment_and_never_sees_it_rendered(kit, page):
+    h = attach(kit, "alice", "#ops", b"<script>alert(1)</script> hello\n", name="a b<c>.html")["file"]
+    status, headers, body = page(f"/board/file?id={h}")
+    assert status == 200 and body == b"<script>alert(1)</script> hello\n"
+    assert headers["content-type"].startswith("text/plain")
+    assert headers["content-disposition"].startswith("attachment; filename=\"") and "<" not in headers["content-disposition"]
+    assert headers["x-content-type-options"] == "nosniff"
+    assert headers["content-security-policy"] == "default-src 'none'"
+
+
+def test_the_page_shows_a_binary_file_as_name_size_and_hash_only(kit, page):
+    png = b"\x89PNG\r\n\x1a\n" + b"1" * 40
+    h = attach(kit, "alice", "#ops", png, name="shot.png")["file"]
+    status, headers, body = page(f"/board/file?id={h}")
+    doc = json.loads(body)
+    assert status == 200 and headers["content-type"].startswith("application/json")
+    assert doc == {"name": "shot.png", "size": len(png), "type": "png", "sha256": hashlib.sha256(png).hexdigest()}
+
+
+def test_the_page_answers_an_unknown_file_with_a_refusal_and_lists_the_file_on_its_message(kit, page):
+    assert page("/board/file?id=" + "0" * 12)[0] == 403
+    assert page("/board/file?id=../../x")[0] == 403
+    attach(kit, "alice", "#ops", name="n.txt")
+    _, _, body = page("/board/messages?board=%23ops")
+    row = json.loads(body)["messages"][-1]
+    assert row["file"]["name"] == "n.txt" and row["type"] == "file"
+
+
+def test_gc_shreds_files_whose_messages_have_been_pruned(kit):
+    h = attach(kit, "alice", "#ops")["file"]
+    keep = attach(kit, "alice", "#ops", b"kept file\n")["file"]
+    assert kit.ws.gc(kit.owner)["files"] == 0
+    kit.ws.bus.log.prune_prefix(lambda r: r.get("file", {}).get("id") == h)
+    assert kit.ws.gc(kit.owner)["files"] == 1
+    assert len(list((kit.base / "files" / "blobs").glob("*.enc"))) == 1
+    assert kit.ws.files.meta(kit.tokens["alice"], keep)["id"] == keep

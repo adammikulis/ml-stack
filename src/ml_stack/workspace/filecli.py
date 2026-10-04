@@ -15,7 +15,7 @@ from ml_stack.workspace.files import Attachment, Where, valid_handle
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["ATTACH", "FILE", "attach", "file"]
+__all__ = ["ATTACH", "FILE", "attach", "file", "read_source"]
 
 ATTACH = [
     flag("path", help="a file in your worktree, or - to read stdin"),
@@ -34,7 +34,9 @@ FILE = [
     flag("--derived-from", default="")]
 
 
-def _read(path: str, ws: Workspace) -> tuple[bytes, str]:
+def read_source(path: str, ws: Workspace) -> tuple[bytes, str]:
+    """The bytes of ``path`` (or stdin for -), at most one byte over the size cap, and the
+    file's own name; a link, a folder or a file inside the workspace's state is refused."""
     cap = ws.limits.file_bytes + 1
     if path == "-":
         return sys.stdin.buffer.read(cap), ""
@@ -52,7 +54,7 @@ def _read(path: str, ws: Workspace) -> tuple[bytes, str]:
 
 def attach(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     """Post PATH (or stdin) as a file message."""
-    data, own = _read(args.path, ws)
+    data, own = read_source(args.path, ws)
     return ws.files.attach(token, args.to, data, Attachment(
         name=args.name or own or "stdin.txt", note=args.note, reply_to=args.reply_to,
         derived_from=args.derived_from))

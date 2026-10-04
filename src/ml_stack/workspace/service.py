@@ -636,6 +636,7 @@ class Workspace:
             raise Denied("only a lead or human token runs gc")
         done = {"messages": self.bus.prune(self.limits.retention_s),
                 "scratch": self.scratch.collect(), "claims": len(self.claims.listing())}
+        done["files"] = self.files.sweep(who)
         self.audit("gc", who.id, messages=done["messages"], scratch=len(done["scratch"]))
         return done
 

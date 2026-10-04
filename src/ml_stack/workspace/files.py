@@ -521,6 +521,19 @@ class FileApi:
         self.ws.audit("file.delete", who.id, file=handle, shredded=shredded)
         return {"deleted": handle, "shredded": shredded}
 
+    def sweep(self, who: Identity) -> int:
+        """Shred the content of every file no remaining message carries; returns how many. Needs
+        no key."""
+        carried = {r["file"]["id"] for r in self.ws.bus.log.rows() if r["kind"] == "msg" and r.get("file")}
+        gone, shredded = self._gone(), 0
+        for blob in sorted(self.store.blobs.glob("*.enc")) if self.store.blobs.exists() else ():
+            handle = blob.stem[:12]
+            if handle not in carried and handle not in gone:
+                self.store.shred(blob.stem)
+                self.removed.append({"op": "delete", "id": handle, "by": who.id, "why": "no message"})
+                shredded += 1
+        return shredded
+
     def content_for_person(self, token: str, handle: str) -> tuple[dict[str, Any], bytes]:
         """For the person's page: the file's metadata and bytes; a person's token only."""
         who = self._who(token)
