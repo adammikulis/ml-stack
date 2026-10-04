@@ -182,7 +182,7 @@ class Manager:
                 if turn.session:
                     args += ["--resume", turn.session]
             result = coding.launch_coding_agent(conversation.model, settings["role"] or roles.DEFAULT,
-                settings["project"], harness=harness, context=settings["context"], name=f"chat-{conversation.id}",
+                settings["project"], harness=harness, context=settings["context"], draft=settings.get("draft", "auto"), name=f"chat-{conversation.id}",
                 harness_args=args, seat_factory=self._seat, say=lambda text: turn.emit({"status": text}),
                 **{f"run_{harness}": lambda command, env: self._process(turn, command, env, (home, harness, prompt, settings["project"]))})
             if result and not turn.cancelled.is_set():

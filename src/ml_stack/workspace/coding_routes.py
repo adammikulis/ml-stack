@@ -16,10 +16,11 @@ LIMIT = 262144
 def catalogue() -> dict:
     installed = hub.discover(formats=("gguf",))
     preferred = localmodel.choose(installed=installed, coding=True, search=False)
+    preferred_path = next((str(model.path) for model in installed if model.path and preferred.name == model.name), preferred.ref)
     return {"harnesses": [{"name": name, "available": bool(shutil.which(name))} for name in coding.HARNESSES],
             "roles": localagent.role_choices(), "default_role": roles.DEFAULT,
-            "context": 262144, "default_model": preferred.ref, "model_problem": preferred.problem,
-            "model_hint": preferred.hint, "models": [{"name": model.name, "ref": model.ref or str(model.path)}
+            "context": 262144, "default_model": preferred_path, "model_problem": preferred.problem,
+            "model_hint": preferred.hint, "models": [{"name": model.name, "ref": str(model.path) if model.path else model.id}
                                             for model in installed]}
 
 

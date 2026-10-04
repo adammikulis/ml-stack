@@ -10,6 +10,7 @@
       this.harness = chat.querySelector("#chat-harness");
       this.role = chat.querySelector("#chat-role");
       this.context = chat.querySelector("#chat-context");
+      this.draft = chat.querySelector("#chat-draft");
       this.activity = chat.querySelector("#chat-activity");
       this.output = chat.querySelector("#chat-activity-output");
       this.mode.onchange = async () => {
@@ -17,7 +18,7 @@
         this.render(this.active ? this.data?.default_model || "" : "");
         chat.saveSettings();
       };
-      for (const field of [this.project, this.harness, this.role, this.context]) {
+      for (const field of [this.project, this.harness, this.role, this.context, this.draft]) {
         field.onchange = () => { this.readiness(); chat.saveSettings(); };
       }
       chat.stop.onclick = () => this.stop();
@@ -25,7 +26,7 @@
     get active() { return this.mode.value === "coding"; }
     settings() {
       return { mode: this.mode.value, project: this.project.value, harness: this.harness.value || "codex",
-        role: this.role.value, context: Number(this.context.value || 262144) };
+        role: this.role.value, context: Number(this.context.value || 262144), draft: this.draft.value.trim() || "auto" };
     }
     async catalogue() {
       if (this.data) return;
@@ -47,6 +48,7 @@
       this.harness.value = settings.harness || "codex";
       this.role.value = settings.role || this.data?.default_role || "";
       this.context.value = settings.context || this.data?.context || 262144;
+      this.draft.value = settings.draft || "auto";
       this.render(model);
     }
     render(model) {
@@ -81,7 +83,7 @@
       chat.send.disabled = !chat.picker.value || chat.picker.selectedOptions[0]?.disabled || !this.project.value.trim() || !available || !this.context.checkValidity();
     }
     busy(value) {
-      for (const field of [this.mode, this.project, this.harness, this.role, this.context]) field.disabled = value;
+      for (const field of [this.mode, this.project, this.harness, this.role, this.context, this.draft]) field.disabled = value;
     }
     async stop() {
       if (!this.active) { this.chat.request?.abort(); return; }
