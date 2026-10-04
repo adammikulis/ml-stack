@@ -109,6 +109,10 @@ fn told_where() -> Option<PhysicalPosition<i32>> {
     ))
 }
 
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -152,7 +156,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("the window could not be built")
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]
