@@ -10,6 +10,7 @@ from ml_stack import roles
 from ml_stack.command import flag
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
+from ml_stack.serve import provenance
 from ml_stack.workspace import (
     localagent as la,
     localeffort as le,
@@ -43,6 +44,8 @@ OPTIONS = [
     flag("--profile", default="chat", choices=["chat", "coding"],
          help="chat: 32K context and small per-task caps; coding: 256K context, Qwen3.8-27B and larger caps"),
     flag("--ctx", default="", metavar="TOKENS", help="context to serve, such as 32768, 32k or 256k (default: the profile's)"),
+    flag("--for", dest="lease_for", default="", metavar="TEXT",
+         help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
 ]
 
@@ -124,5 +127,6 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
     if args.action == "list":
         return _list(ws)
     human.require_person(f"{args.action} a local agent")
+    provenance.told(args.lease_for)
     handler: Any = _start if args.action == "start" else _stop
     return int(handler(args, ws))

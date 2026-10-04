@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from ml_stack import hub
@@ -152,7 +153,7 @@ def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
 
         began = time.time()
         with serve(config.model, manager=config.serving.manager(), **config.lease(),
-                   **SERVE_EXTRA) as server:
+                   **SERVE_EXTRA, reason=f"ingest with {Path(config.model).name}") as server:
             say(f"    up in {time.time() - began:.0f}s")
             yield config.client(server.base_url, index=0)
 

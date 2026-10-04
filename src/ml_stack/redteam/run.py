@@ -73,7 +73,8 @@ def _model(plan: Plan, parallel: int = 2) -> Iterator[tuple[str, str, int | None
     path = located(plan.model)
     if path is None:
         raise SystemExit(f"{plan.model} is not an installed model; nothing is downloaded")
-    with serve(path, context=8192 * parallel, parallel=parallel, roam=True) as info:
+    with serve(path, context=8192 * parallel, parallel=parallel, roam=True,
+               reason=f"red-team run on {path.name}") as info:
         yield info.base_url, path.name, info.port
 
 

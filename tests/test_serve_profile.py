@@ -776,7 +776,7 @@ def test_up_for_a_workload_serves_that_workloads_record(leases, tmp_path):
     add(measured(workload="ask", mmproj="", spec_draft_max=4))
     add(measured(workload="ingest", mmproj="", spec_draft_max=2, build="hollowmere",
                  slot_context=8192))
-    assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
+    assert serve_cli.main(upped("--profile", "--workload", "ingest", root=tmp_path)) == 0
 
     spec = leases[0]
     assert spec.spec_draft_max == 2, "the depth the server starts with is the ingest one"
@@ -793,7 +793,7 @@ def test_up_with_no_workload_named_serves_the_graph_asking(leases, tmp_path):
 def test_up_for_an_unmeasured_workload_says_which_record_it_fell_back_to(leases, tmp_path,
                                                                         capsys):
     add(measured(workload="ask", mmproj="", spec_draft_max=4))
-    assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
+    assert serve_cli.main(upped("--profile", "--workload", "ingest", root=tmp_path)) == 0
 
     said_out = capsys.readouterr().err
     assert "not for ingest" in said_out

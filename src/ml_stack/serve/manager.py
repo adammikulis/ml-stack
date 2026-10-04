@@ -20,7 +20,7 @@ from ml_stack.files import write_json
 from ml_stack.hub import free_memory, installed_for, room as machine_room
 from ml_stack.limits import read as limits_read
 from ml_stack.lock import only_one
-from ml_stack.serve import admission, exit_guard, guarded, mtp, quant_guard, unmanaged
+from ml_stack.serve import admission, exit_guard, guarded, mtp, provenance, quant_guard, unmanaged
 from ml_stack.serve.admitting import STATE_LOCK_TIMEOUT_S, Admitting
 from ml_stack.serve.backend import (
     Lease,
@@ -192,10 +192,10 @@ class ServerManager(Admitting):
               roam: bool = True, check_flags: bool = True, preflight: bool = True,
               warmup_request: bool = True, escalate: bool = False, anyway: bool = False,
               iq: str = "", on_event: Event | None = None,
-              say: Callable[[str], None] | None = None) -> ServerInfo:
+              say: Callable[[str], None] | None = None, reason: str = "") -> ServerInfo:
         """A healthy server for ``spec``, from the broker: one already up that fits, else a
         new one when the machine has the memory for it. The broker waits for memory and
-        refuses with `AdmissionRefused` when none comes free.
+        refuses with `AdmissionRefused` when none comes free. ``reason`` is why, in one line.
 
         ``on_event`` and ``say`` are called with a broker running in this process and not
         with the machine's broker. The rest of the arguments are those of
@@ -206,7 +206,8 @@ class ServerManager(Admitting):
         if wanted == "block":
             quant_guard.enforce(spec.model, gpu_layers=spec.n_gpu_layers, asked=wanted)
         how = Starting(roam, check_flags, preflight, warmup_request, escalate, anyway, wanted)
-        info = self.broker.start(spec, Caller(on_event=on_event, say=say or self.say),
+        info = self.broker.start(spec, Caller(on_event=on_event, say=say or self.say,
+                                              claim=provenance.asked(reason)),
                                  timeout=timeout, options=asdict(how))
         if info.lease:
             self._leases[info.lease] = info
@@ -799,11 +800,12 @@ def serve(
     iq: str = "",
     on_event: Event | None = None,
     say: Callable[[str], None] | None = None,
+    reason: str = "",
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:
     """Run a server for the duration of the block, yielding its ``ServerInfo``.
 
-    ``roam``, ``escalate``, ``anyway``, ``iq``, ``on_event`` and ``say`` go to
+    ``roam``, ``escalate``, ``anyway``, ``iq``, ``on_event``, ``say`` and ``reason`` go to
     :meth:`ServerManager.lease`.
     """
     manager = manager or default_manager()
@@ -814,7 +816,7 @@ def serve(
         **spec_kwargs,  # type: ignore[arg-type]
     )
     info = manager.lease(spec, timeout=timeout, roam=roam, escalate=escalate,
-                         anyway=anyway, iq=iq, on_event=on_event, say=say)
+                         anyway=anyway, iq=iq, on_event=on_event, say=say, reason=reason)
     try:
         yield info
     finally:

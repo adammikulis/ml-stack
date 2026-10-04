@@ -282,7 +282,7 @@ def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, l
         """One lease, without what is not the serving: the bench's prefix cache and skipped
         warm-up, and the manager, which is the named build asserted below."""
         return {k: v for k, v in kwargs.items()
-                if k not in ("cache_reuse", "warmup", "timeout", "manager")}
+                if k not in ("cache_reuse", "warmup", "timeout", "manager", "reason")}
 
     assert lease_of(asked[0][1]) == shipped.lease(), "the bench's"
     assert lease_of(asked[1][1]) == shipped.lease(), "the page's"

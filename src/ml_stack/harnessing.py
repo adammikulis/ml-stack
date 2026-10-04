@@ -80,6 +80,8 @@ def parser(name: str, what: str, port: int, slots: int) -> argparse.ArgumentPars
                     help="the project directory the session works in (default: the current directory)")
     ap.add_argument("--orders-from", action="append", default=[], metavar="AGENT",
                     help="a workspace identity the session obeys besides the person and the lead")
+    ap.add_argument("--for", dest="lease_for", default="", metavar="TEXT",
+                    help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`")
     ap.add_argument("--no-profile", action="store_true", help="serve the model bare")
     ap.add_argument("--draft", default="auto", metavar="HEAD",
                     help="the draft head that guesses tokens ahead for the model to check: 'auto' takes "
@@ -165,7 +167,7 @@ def serving(model: str, want: Want, say: Callable[[str], None], by: str) -> Iter
         leasing("this model's template refuses a system message after the first; serving "
                 f"with one that renders it instead ({patched.name})")
     with served(config, say=say, timeout=900.0, cache_reuse=256, warmup=False, escalate=True,
-                chat_template_file=patched,
+                chat_template_file=patched, reason=f"{by} session on {Path(found).name}",
                 on_event=lambda e: say(f"  {e.get('event')}: " + ", ".join(
                     f"{k}={v}" for k, v in e.items() if k != "event"))) as base_url:
         yield base_url, config, found

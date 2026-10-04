@@ -47,7 +47,7 @@ from ml_stack.guard.secrets import SecretRail
 from ml_stack.guard.untrusted import UntrustedRail
 from ml_stack.interventions import Deny, Run, Verdict
 from ml_stack.memory import Memory
-from ml_stack.serve import suggest
+from ml_stack.serve import provenance, suggest
 from ml_stack.taint import TaintRail
 
 __all__ = ["COMMAND", "Chat", "Outcome", "Session", "default_model", "main", "run_task", "serve",
@@ -597,6 +597,8 @@ OPTIONS = (
          help="a task in words: the agent plans, asks go, acts and ends on done (default: a "
               "conversation); `rules ...` lists and edits the saved always/never rules"),
     flag("--task", default="", metavar="TEXT", help="the task, as an option instead of words"),
+    flag("--for", dest="lease_for", default="", metavar="TEXT",
+         help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`"),
     flag("--role", default="", choices=["", *roles.ROLES],
          help="read-only (reads only), approve-first (acting calls ask; the conversation default) or "
               "plan-and-go (the approved plan runs unasked; the task default)"),
@@ -660,6 +662,7 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     if args.model and args.url:
         stdout.write("--model and --url name two servers: give one\n")
         return 2
+    provenance.told(args.lease_for)
     task = _task_of(args)
     role = args.role or (roles.TASK_DEFAULT if task else roles.DEFAULT)
     person = do.Person(stdin, stdout)

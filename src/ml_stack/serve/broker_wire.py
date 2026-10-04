@@ -24,7 +24,7 @@ from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
-from ml_stack.serve import guarded
+from ml_stack.serve import guarded, provenance
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
 from ml_stack.serve.events import Caller, Growth
@@ -87,7 +87,8 @@ class _Server(socketserver.ThreadingTCPServer):
             return {"ok": True, **self.broker.lease(ask, timeout=float(body["wait_s"])).as_dict()}
         if op == "start":
             info = self.broker.start(
-                spec_from(body["spec"]), Caller(pid=pid, label=str(body.get("label") or "")),
+                spec_from(body["spec"]),
+                Caller(pid=pid, label=str(body.get("label") or ""), claim=body.get("claim") or {}),
                 timeout=body.get("timeout_s"), options=body.get("options") or {})
             return {"ok": True, **info_dict(info)}
         if op == "drop":
@@ -166,7 +167,8 @@ class RemoteBroker:
     def start(self, spec: ServerSpec, caller: Caller | None = None, *,
               timeout: float | None = None, options: dict[str, Any] | None = None) -> ServerInfo:
         """A server for ``spec`` from the broker, which waits for memory to start one."""
-        reply = call("start", timeout=None, label=who(), spec=spec_to_json(spec),
+        claim = dict(caller.claim) if caller is not None and caller.claim else provenance.asked()
+        reply = call("start", timeout=None, label=who(), claim=claim, spec=spec_to_json(spec),
                      timeout_s=timeout, options={**self.options, **(options or {})})
         info = ServerInfo(**info_fields(reply))
         if caller is not None and caller.on_event is not None:
@@ -177,8 +179,8 @@ class RemoteBroker:
         """A lease on a server for ``ask``, queued behind the others until it has its turn."""
         reply = call("lease", timeout=None, purpose=ask.purpose, models=list(ask.models),
                      spec=dict(ask.spec), weight=ask.weight, label=ask.label or who(),
-                     wait_s=timeout, port=ask.port,
-                     options={**self.options, **dict(ask.options)})
+                     wait_s=timeout, port=ask.port, claim=dict(ask.claim or provenance.asked()),
+                     behalf=ask.behalf, options={**self.options, **dict(ask.options)})
         return Grant(**{k: reply[k] for k in ("lease", "purpose", "model", "port", "base_url",
                                               "shared")})
 
@@ -350,13 +352,13 @@ def _error(kind: str) -> type[Exception]:
     return seen.get(kind, BrokerError)
 
 
-def lease(purpose: str, models: list[str] | tuple[str, ...], *, spec: dict[str, Any] | None = None,
-          weight: int = 0, timeout: float = 600.0) -> Grant:
+def lease(purpose: str, models: list[str] | tuple[str, ...], *, reason: str,
+          spec: dict[str, Any] | None = None, weight: int = 0, timeout: float = 600.0) -> Grant:
     """A server for ``purpose`` serving one of ``models``, held by this process until it
-    calls `release` or ends. Waits up to ``timeout`` seconds in the queue; ``weight`` is
-    the bytes it will take when the weights are not on disk to measure."""
+    calls `release` or ends. ``reason`` is why, in one line. Waits up to ``timeout`` seconds in
+    the queue; ``weight`` is the bytes it will take when the weights are not on disk to measure."""
     reply = call("lease", timeout=None, purpose=purpose, models=list(models), spec=spec or {},
-                 weight=weight, label=who(), wait_s=timeout)
+                 weight=weight, label=who(), wait_s=timeout, claim=provenance.asked(reason))
     return Grant(**{k: reply[k] for k in ("lease", "purpose", "model", "port", "base_url",
                                           "shared")})
 

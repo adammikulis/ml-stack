@@ -317,7 +317,8 @@ def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
 
             stack = contextlib.ExitStack()
             server = stack.enter_context(
-                serve(config.model, manager=config.serving.manager(), **config.lease()))
+                serve(config.model, manager=config.serving.manager(), **config.lease(),
+                      reason=f"a shared client on {Path(config.model).name}"))
             _STACKS[config.port], _URLS[config.port] = stack, server.base_url
         where = _URLS[config.port]
     return config.client(where, index=index)
@@ -369,7 +370,7 @@ def serving_said(base_url: str) -> str:
 
 
 @contextlib.contextmanager
-def served(config: Config, *, say: Callable[[str], None] | None = None,
+def served(config: Config, *, say: Callable[[str], None] | None = None, reason: str = "",
            **over: Any) -> Iterator[str]:
     """The base URL of a server holding ``config``'s model, for the duration of the block.
 
@@ -388,7 +389,8 @@ def served(config: Config, *, say: Callable[[str], None] | None = None,
              f"it is left running")
         yield base_url
         return
-    with serve(config.model, manager=config.serving.manager(), **config.lease(), **over) as server:
+    with serve(config.model, manager=config.serving.manager(), **config.lease(), **over,
+               reason=reason or f"{Path(config.model).name} for this run") as server:
         yield server.base_url
 
 

@@ -26,6 +26,7 @@ from ml_stack import harnessing, serverkeys
 from ml_stack.chatpolicy import READ_ONLY
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
 from ml_stack.log import say
+from ml_stack.serve import provenance
 
 __all__ = ["config_toml", "environment", "launch", "policy_flags"]
 
@@ -89,6 +90,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     ours, extra = (words[: words.index("--")], words[words.index("--") + 1:]) \
         if "--" in words else (words, [])
     args = harnessing.parser("codex", "Codex", DEFAULT_PORT, DEFAULT_SLOTS).parse_args(ours)
+    provenance.told(args.lease_for)
     binary = args.codex or shutil.which("codex") or ""
     if not binary:
         say("error: no `codex` on PATH; install Codex or pass --codex PATH")

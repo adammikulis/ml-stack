@@ -242,8 +242,8 @@ def _jevbench_decider(name: str, args: Namespace) -> Iterator[Callable[[Case], D
     elif name == "logprob":
         if not args.gguf:
             raise BackendUnavailable("logprob needs --gguf MODEL.gguf, served through the Broker")
-        grant = broker_wire.lease("jevbench", [args.gguf], spec={"context": args.context},
-                                  timeout=1800.0)
+        grant = broker_wire.lease("jevbench", [args.gguf], reason="JevBench logprob decider",
+                                  spec={"context": args.context}, timeout=1800.0)
         try:
             decider = router.build("logprob", router.Config(backend="logprob", url=grant.base_url))
             yield lambda c: decider.decide(c.question, c.state, c.options)

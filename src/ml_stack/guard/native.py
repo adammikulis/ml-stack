@@ -110,7 +110,8 @@ class Leased(Many):
         model = self.model or pick_model()
         if not model:
             raise DecideError("no installed model can serve as the guard's judge")
-        self.grant = broker_wire.lease(PURPOSE, [model], spec={"context": CONTEXT, "mtp": False},
+        self.grant = broker_wire.lease(PURPOSE, [model], reason="guard judge",
+                                       spec={"context": CONTEXT, "mtp": False},
                                        timeout=self.lease_timeout)
         return str(self.grant.base_url)
 

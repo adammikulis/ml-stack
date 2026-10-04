@@ -71,7 +71,8 @@ def run(binary: Path, model: Path | None = None, *, timeout: float = 300.0,
         slots = Path(made)
         try:
             info = manager.lease(ServerSpec(model=model, port=free_port(), context=512,
-                                            slot_save_path=slots), timeout=timeout)
+                                            slot_save_path=slots), timeout=timeout,
+                                reason="smoke test of a llama-server build")
         except (RuntimeError, OSError, ValueError) as exc:
             result.add("lease", False, f"{type(exc).__name__}: {exc}"[:600])
             return result

@@ -151,6 +151,35 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server started with
 the wrong settings hands back a lease that cannot do what was asked of it.
 
+### Who holds a server, and why
+
+Every lease records a **reason** (one line) and a **requester**, and the broker records the rest
+itself from the process that took it, so nothing about who or where depends on what the caller
+says:
+
+| recorded | from |
+|---|---|
+| reason | `ml-stack-serve up MODEL --for 'text'`; the `--for` of `ml-stack-claude`, `ml-stack-codex`, `ml-stack-chat` and `ml-stack-workspace agent start`; `$ML_STACK_LEASE_FOR` (which leads the reason when the caller also gives one); the reason an in-repo caller passes (`broker_wire.lease(..., reason=)`, `ServerManager.lease(..., reason=)`, `serve(..., reason=)`). A lease with none reads `(no reason given)`. |
+| requester | the workspace agent label (`$ML_STACK_WORKSPACE_LABEL`) when one is set, else the program that took the lease |
+| process | the connecting pid and its start time, and the command lines of it and up to three parents, with tokens, keys and `--password`-style values masked |
+| place | the working directory and the git worktree and branch it sits in |
+| time | when the lease was taken |
+
+A holder that joins a server already up (a second `up` for the same shape, or another lease
+for the same model) is recorded with its own reason, so every holder of a server is listed.
+
+```
+ml-stack-serve status            each lease with why, who, where, and the others using its server
+ml-stack-serve leases [--json]   every server the broker holds, each holder with the above
+ml-stack-serve queue             holders and waiting asks, with reason and requester
+ml-stack-serve history [--model NAME] [--since 2026-10-01|3d|2h] [--json]
+```
+
+When a lease ends (released, dropped, or its process gone) a row goes into a graph kept beside
+the lease record (`lease-history.ladybug` under the state root): one `lease` node with the
+model, reason, requester, branch, worktree, when it was taken and ended and the duration, joined
+to a `model` node and a `branch` node. `history` reads it back.
+
 ### Making room for a model (Apple silicon)
 
 A model, its KV cache and its compute buffers must fit under `iogpu.wired_limit_mb`, which is
@@ -267,7 +296,7 @@ is what it means when nothing is said.
 ml-stack-serve profile
 ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
 ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --for ingest
-ml-stack-serve up model.gguf --profile --for ingest
+ml-stack-serve up model.gguf --profile --workload ingest
 ml-stack-bench report --profile
 ```
 

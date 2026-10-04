@@ -41,14 +41,15 @@ def cmd_queue(args: argparse.Namespace) -> int:
         say(json.dumps(snapshot, indent=2))
         return 0
     for held in snapshot["servers"]:
-        holders = ", ".join(f"pid {h['pid']}" + (f" ({h['label']})" if h["label"] else "")
+        holders = ", ".join(f"pid {h['pid']} ({h['requester']}: {h['reason']})"
                             for h in held["holders"]) or "nobody"
         state = ("loading" if held["loading"] else "unmanaged" if held["unmanaged"]
                  else "ours" if held["ours"] else "adopted, not ours")
         say(f":{held['port']}  {held['purpose'] or '-':<10} {held['model']}  [{state}]  "
             f"held by {holders}")
     for at, waiting in enumerate(snapshot["queue"], start=1):
-        say(f"waiting #{at}: {waiting['purpose']} {waiting['model']} for pid {waiting['pid']}, "
+        say(f"waiting #{at}: {waiting['purpose']} {waiting['model']} for pid {waiting['pid']} "
+            f"({waiting['requester']}: {waiting['reason']}), "
             f"{waiting['waited_s']}s -- {waiting['blocked_by'] or 'queued'}")
     for pool, line in snapshot.get("requests", {}).items():
         for at, request in enumerate(line):

@@ -475,7 +475,7 @@ def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None
     if say is not None:
         manager.say = say
     info = manager.lease(spec, timeout=timeout, escalate=escalate, anyway=anyway,
-                         on_event=on_event)
+                         on_event=on_event, reason=f"serving {Path(str(spec.model)).name}")
     held = recorded_servers(lease_file()).get(info.port) or {}
     if not info.adopted or held.get("owner_pid") == os.getpid():
         # a server this process started, or an orphan it took over: on the record under the

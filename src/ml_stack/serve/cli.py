@@ -3,7 +3,7 @@
 Every subcommand parses its arguments and prints; the work is in `ml_stack.serve.ops`, and
 each command group's own parsing lives beside it: `status_cli`, `lifecycle_cli` (up, down,
 escalate, build), `slots_cli`, `profile_cli`, `fit_cli`, `machine_cli` (memory, limits, reclaim),
-`broker_cli` (broker, queue).
+`broker_cli` (broker, queue), `lease_cli` (leases, history).
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from ml_stack.command import Group, flag
 from ml_stack.serve import (
     broker_cli,
     fit_cli,
+    lease_cli,
     lifecycle_cli,
     llamacpp_cli,
     machine_cli,
@@ -105,6 +106,16 @@ COMMANDS.add(
     "queue", broker_cli.cmd_queue,
     help="the servers the broker holds, who holds each, and who is waiting",
     options=broker_cli.OPTIONS_QUEUE)
+
+COMMANDS.add(
+    "leases", lease_cli.cmd_leases,
+    help="every server the broker holds, and for each holder why it was taken, by whom and from where",
+    options=lease_cli.OPTIONS_LEASES)
+
+COMMANDS.add(
+    "history", lease_cli.cmd_history,
+    help="the leases that have ended: model, reason, requester, branch, when and for how long",
+    options=lease_cli.OPTIONS_HISTORY)
 
 
 if __name__ == "__main__":

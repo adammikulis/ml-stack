@@ -4,8 +4,8 @@ asking."""
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = ["Caller", "Event", "Growth", "emit"]
@@ -26,12 +26,13 @@ def emit(on_event: Event | None, event: str, **fields: Any) -> None:
 @dataclass(frozen=True)
 class Caller:
     """Who is asking a broker for a server, and how to tell them what happens. ``pid`` 0 is
-    the process making the call."""
+    the process making the call; ``claim`` is what it says about the lease (`provenance.asked`)."""
 
     pid: int = 0
     label: str = ""
     on_event: Event | None = None
     say: Callable[[str], None] | None = None
+    claim: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

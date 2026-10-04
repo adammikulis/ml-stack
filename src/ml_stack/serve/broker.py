@@ -29,7 +29,7 @@ from ml_stack import activity, gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
-from ml_stack.serve import canaries, grant, guarded, unmanaged
+from ml_stack.serve import canaries, grant, guarded, lease_history, provenance, unmanaged
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
@@ -102,6 +102,11 @@ class Ask:
     port: int = 0
     #: how to start it: ``{"backend": {...}}`` names the binary or build, as for `start`
     options: Mapping[str, Any] = field(default_factory=dict)
+    #: what the asker says about the lease (`provenance.asked`), and the process it asks for
+    claim: Mapping[str, Any] = field(default_factory=dict)
+    behalf: int = 0
+    #: the broker's own record of the lease, made when it arrives
+    record: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_json(cls, body: Mapping[str, Any]) -> Ask:
@@ -117,7 +122,8 @@ class Ask:
         return cls(purpose=purpose, models=models, pid=int(body.get("pid") or 0),
                    label=str(body.get("label") or ""), weight=int(body.get("weight") or 0),
                    spec=spec, port=int(body.get("port") or 0),
-                   options=dict(body.get("options") or {}))
+                   options=dict(body.get("options") or {}),
+                   claim=dict(body.get("claim") or {}), behalf=int(body.get("behalf") or 0))
 
     def server_spec(self, port: int) -> ServerSpec:
         """The spec that starts this ask's first model on ``port``."""
@@ -141,6 +147,8 @@ class Held:
     weight: int = 0
     idle_since: float = 0.0
     holders: dict[str, tuple[int, str]] = field(default_factory=dict)
+    #: lease id -> why it was taken and by whom (`provenance.observe`)
+    records: dict[str, dict[str, Any]] = field(default_factory=dict)
     info: ServerInfo | None = None
     #: what ``/props`` said this server actually loaded (its ``model_path``), fetched
     #: once when the server was found rather than per ask -- ``None`` when it could
@@ -189,7 +197,8 @@ class Held:
                 "pid": self.pid, "ours": self.ours, "unmanaged": self.unmanaged,
                 "loading": self.loading,
                 "base_url": self.base_url,
-                "holders": [{"lease": lease, "pid": pid, "label": label}
+                "holders": [{**provenance.record_from(self.records.get(lease, {})),
+                             "lease": lease, "pid": pid, "label": label}
                             for lease, (pid, label) in self.holders.items()]}
 
 
@@ -233,6 +242,8 @@ class Broker:
         self.say: Callable[[str], Any] = lambda _line: None
         #: who holds what, beside the lease record, so a restart does not forget
         self.held_file = self.manager.state_file.with_name("broker-leases.json")
+        self.history_file = self.manager.state_file.with_name("lease-history.ladybug")
+        self._ended: list[tuple[str, str, dict[str, Any]]] = []
         self.idle_s = idle_s
         self.room = room
         self.alive = alive
@@ -274,9 +285,12 @@ class Broker:
         with grant.broker_grant():
             info = manager._start_server(spec, timeout=timeout, how=how,
                                          on_event=caller.on_event, say=caller.say)
-        return self._held_by(info, spec, caller.pid or os.getpid(), caller.label or who())
+        pid = caller.pid or os.getpid()
+        return self._held_by(info, spec, pid, caller.label or who(),
+                             provenance.observe(pid, caller.claim))
 
-    def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str) -> ServerInfo:
+    def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str,
+                 record: Mapping[str, Any]) -> ServerInfo:
         lease = uuid.uuid4().hex
         entry = recorded_servers(self.manager.state_file).get(info.port) or {}
         with self._cond:
@@ -291,6 +305,7 @@ class Broker:
             elif not info.adopted:
                 held.info = info
             held.holders[lease] = (pid, label)
+            held.records[lease] = dict(record)
             self._write_held()
             self._cond.notify_all()
         return replace(info, lease=lease)
@@ -298,17 +313,19 @@ class Broker:
     def drop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Let go of the lease ``info`` was granted under. The server is stopped when
         nobody else holds it."""
+        keep = False
         with self._cond:
             held = self.servers.get(info.port)
             if held is not None:
-                held.holders.pop(info.lease, None)
-                if held.holders or held.loading or not held.ours:
-                    self._write_held()
-                    self._cond.notify_all()
-                    return
-                self.servers.pop(info.port, None)
+                self._end(held, info.lease)
+                keep = bool(held.holders or held.loading or not held.ours)
+                if not keep:
+                    self.servers.pop(info.port, None)
                 self._write_held()
                 self._cond.notify_all()
+        self._flush_ended()
+        if keep:
+            return
         if held is not None:
             self._stop(held)
         elif not info.adopted and info.pid and self.alive(info.pid):
@@ -332,7 +349,8 @@ class Broker:
             held = self.servers.get(info.port)
             if held is not None and info.pid:
                 held.holders[f"up-{info.port}"] = (info.pid, "ml-stack-serve up")
-                held.holders.pop(info.lease, None)
+                held.records[f"up-{info.port}"] = held.records.get(info.lease, {})
+                self._end(held, info.lease, keep_record=True)
                 self._write_held()
 
     # ------------------------------------------------------------------ leases
@@ -343,6 +361,7 @@ class Broker:
         like any other holder, so a measurement is never spoiled and never refuses a lease
         that could have had its turn."""
         caller = ask.label or f"pid-{ask.pid}"
+        ask = replace(ask, record=provenance.observe(ask.pid, ask.claim, behalf=ask.behalf))
         try:
             grant = self._lease(ask, caller, timeout)
         except BrokerError as why:
@@ -351,7 +370,7 @@ class Broker:
             raise
         activity.record("model.lease", subject=_named(ask), outcome="shared" if grant.shared else "granted",
                         refs={"for": caller, "purpose": ask.purpose, "lease": grant.lease},
-                        meta={"port": grant.port, **_flags(ask)})
+                        meta={"port": grant.port, "why": ask.record["reason"], **_flags(ask)})
         return grant
 
     def _lease(self, ask: Ask, caller: str, timeout: float) -> Grant:
@@ -388,20 +407,43 @@ class Broker:
         """Let go of ``lease``. False when nothing held it."""
         with self._cond:
             for held in self.servers.values():
-                if held.holders.pop(lease, None) is not None:
+                if lease in held.holders:
+                    self._end(held, lease)
                     if not held.holders:
                         held.idle_since = time.monotonic()
                     self._cond.notify_all()
                     self._write_held()
-                    return True
-        return False
+                    found = True
+                    break
+            else:
+                found = False
+        self._flush_ended()
+        return found
+
+    def _end(self, held: Held, lease: str, *, keep_record: bool = False) -> None:
+        """Take ``lease`` off ``held`` and queue its history row. Called with the lock held."""
+        held.holders.pop(lease, None)
+        record = held.records.pop(lease, None)
+        if record is not None and not keep_record:
+            self._ended.append((held.model, lease, record))
+
+    def _flush_ended(self) -> None:
+        """Write the history rows of the leases that ended since the last call."""
+        with self._cond:
+            ended, self._ended = self._ended, []
+        for model, lease, record in ended:
+            try:
+                lease_history.append(self.history_file, lease_history.ended_row(model, lease, record))
+            except (OSError, RuntimeError, ValueError, KeyError) as why:
+                self.say(f"lease {lease[:8]} ended; its history row was not written: {why}")
 
     def _write_held(self) -> None:
         """Record who holds what, so a broker that restarts does not unload a server its
         holder is still using. Called with the lock held."""
         write_json(self.held_file, {
             str(held.port): {"purpose": held.purpose, "model": held.model,
-                             "holders": {lease: list(who) for lease, who in held.holders.items()}}
+                             "holders": {lease: list(who) for lease, who in held.holders.items()},
+                             "why": held.records}
             for held in self.servers.values() if held.holders and not held.loading})
 
     def _read_held(self) -> dict[int, dict[str, Any]]:
@@ -493,6 +535,7 @@ class Broker:
         lease = next((lease for lease, (pid, _) in held.holders.items() if pid == ask.pid),
                      waiting.lease)
         held.holders[lease] = (ask.pid, ask.label)
+        held.records[lease] = dict(ask.record)
         self.queue.remove(waiting)
         self._write_held()
         self._cond.notify_all()
@@ -504,13 +547,15 @@ class Broker:
         for held in evict:
             self.servers.pop(held.port, None)
         for held in [h for h in self.servers.values() if h.purpose == ask.purpose]:
-            held.holders = {k: v for k, v in held.holders.items() if v[0] != ask.pid}
+            for lease in [k for k, v in held.holders.items() if v[0] == ask.pid]:
+                self._end(held, lease)
         asked = ask.port if ask.port and port_is_free(ask.port) and not any(
             h.port == ask.port for h in self.servers.values()) else 0
         placeholder = Held(port=asked or free_port(), model=ask.models[0], purpose=ask.purpose,
                            loading=True, weight=ask.weight or weight_of(ask.models[0]),
                            shape=_shape_of(ask.spec),
-                           holders={waiting.lease: (ask.pid, ask.label)})
+                           holders={waiting.lease: (ask.pid, ask.label)},
+                           records={waiting.lease: dict(ask.record)})
         self.servers[placeholder.port] = placeholder
         self.queue.remove(waiting)
         return placeholder, evict
@@ -559,7 +604,10 @@ class Broker:
             if (held.holders or held.loading) and not force:
                 return {"stopped": False, "why": self._held_said(held)}
             self.servers.pop(port)
+            for lease in list(held.holders):
+                self._end(held, lease)
             self._cond.notify_all()
+        self._flush_ended()
         self._stop(held)
         return {"stopped": True, "port": port, "model": held.model}
 
@@ -618,9 +666,11 @@ class Broker:
             for held in list(self.servers.values()):
                 for lease, (pid, _) in list(held.holders.items()):
                     if not self.alive(pid):
-                        del held.holders[lease]
+                        self._end(held, lease)
                         held.idle_since = now
                 if not held.loading and held.pid and not self.alive(held.pid):
+                    for lease in list(held.holders):
+                        self._end(held, lease)
                     del self.servers[held.port]
             self.queue = [w for w in self.queue if self.alive(w.ask.pid)]
             self.claims = {k: v for k, v in self.claims.items() if self.alive(v["pid"])}
@@ -637,6 +687,7 @@ class Broker:
                 del self.servers[held.port]
             self._write_held()
             self._cond.notify_all()
+        self._flush_ended()
         for held in idle:
             self.say(f"stopping port {held.port} ({held.model}): nobody has held it for "
                      f"{now - held.idle_since:.0f}s and it is answering nothing")
@@ -656,12 +707,14 @@ class Broker:
             was = kept.get(port, {})
             holders = {lease: (int(who[0]), str(who[1])) for lease, who in (was.get("holders") or {}).items()
                        if self.alive(int(who[0]))}
+            why = {lease: rec for lease, rec in (was.get("why") or {}).items() if lease in holders}
             if not holders and isinstance(owner, int) and owner not in (pid, me) and self.alive(owner):
                 holders = {f"recorded-{port}": (owner, "recorded owner")}
             if owner == pid:
                 holders[f"up-{port}"] = (pid, "ml-stack-serve up")
             found.append(Held(port=port, model=str(entry.get("model") or ""), pid=pid,
                               ours=not entry.get("unmanaged"), purpose=str(was.get("purpose") or ""), idle_since=now, holders=holders,
+                              records=why,
                               shape=_shape_of(entry),
                               info=ServerInfo(base_url=f"http://{DEFAULT_HOST}:{port}",
                                               port=port, pid=pid, backend="", adopted=True)))
@@ -714,7 +767,8 @@ class Broker:
         @contextlib.contextmanager
         def using() -> Iterator[str]:
             grant = self.lease(Ask(purpose=one["purpose"] or "chat", models=(one["model"],),
-                                   pid=os.getpid(), label="sentinel-canary"),
+                                   pid=os.getpid(), label="sentinel-canary",
+                                   claim=provenance.asked("sentinel canary check", "sentinel")),
                                timeout=canaries.LEASE_WAIT_S)
             try:
                 if grant.port != one["port"]:
@@ -739,6 +793,8 @@ class Broker:
                 "servers": [h.said() for h in sorted(self.servers.values(), key=lambda h: h.port)],
                 "queue": [{"lease": w.lease, "purpose": w.ask.purpose, "model": w.ask.models[0],
                            "pid": w.ask.pid, "label": w.ask.label,
+                           "reason": w.ask.record.get("reason") or provenance.NO_REASON,
+                           "requester": w.ask.record.get("requester") or "(unknown)",
                            "waited_s": round(now - w.since, 1), "blocked_by": w.blocked_by}
                           for w in self.queue],
                 "claims": {k: dict(v) for k, v in self.claims.items()},

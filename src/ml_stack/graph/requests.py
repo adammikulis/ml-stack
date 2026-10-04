@@ -171,7 +171,7 @@ def load_or_build(requests_path: Path, proposals_path: Path, graph: Mapping[str,
     from ml_stack.serve import serve
 
     log(f"requests: {len(pending)} to read")
-    with serve(str(model), **lease) as server:
+    with serve(str(model), **lease, reason=f"graph requests read by {Path(str(model)).name}") as server:
         client = Client(server.base_url, request=Request(slot=0, n_predict=n_predict),
                         transport=Transport(timeout=300))
         out = propose(pending, graph, client, done=done, log=log)

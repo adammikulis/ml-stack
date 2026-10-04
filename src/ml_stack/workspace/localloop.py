@@ -106,8 +106,8 @@ def lease_model(agent: la.Agent, *, wait_s: float = LEASE_WAIT_S) -> Held:
     it: thinking per request, off unless the effort says otherwise, multi-token prediction on when ml-stack has it."""
     spec: dict[str, Any] = {"context": agent.ctx, "parallel": 1, "cache_type_k": "q8_0",
                             "cache_type_v": "q8_0", "cache_idle_slots": True}
-    grant = broker_wire.lease(PURPOSE, [agent.model], spec=spec, weight=agent.size_bytes,
-                              timeout=wait_s)
+    grant = broker_wire.lease(PURPOSE, [agent.model], reason=f"workspace local agent {agent.name}",
+                              spec=spec, weight=agent.size_bytes, timeout=wait_s)
     if why := check_context(agent.ctx, str(grant.base_url)):
         broker_wire.release(grant.lease)
         raise RuntimeError(why)

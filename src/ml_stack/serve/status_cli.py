@@ -12,8 +12,9 @@ from pathlib import Path
 from ml_stack.command import flag, option
 from ml_stack.hub import pretty_name
 from ml_stack.log import say
-from ml_stack.serve import holding, ops
+from ml_stack.serve import holding, lease_cli, ops, provenance
 from ml_stack.serve.backend import ServerSpec, logs_of, parse_context
+from ml_stack.serve.broker import BrokerError
 from ml_stack.serve.ops import base_url_for
 from ml_stack.serve.quant_guard import status_note
 from ml_stack.units import human_bytes
@@ -128,14 +129,29 @@ def _kept_line(drafting: ops.Drafting) -> str:
             f"{counted.tokens_per_draft or 0:.1f} tokens per verification pass")
 
 
+def _broker_servers() -> list[dict]:
+    """The servers and holders the running broker reports; none when no broker is running."""
+    try:
+        return list(lease_cli.snapshot()["servers"])
+    except (BrokerError, OSError, KeyError):
+        return []
+
+
 def _say_leases(held: list[holding.Hold]) -> None:
-    """One line per lease `ml-stack-serve up` holds: who, what, how much memory, since when."""
+    """Each lease `ml-stack-serve up` holds: who, what, how much memory, since when, why, and
+    everyone else using its server."""
+    servers = _broker_servers()
     for one in held:
         since = time.strftime("%F %T", time.localtime(one.since)) if one.since else "-"
         where = f"port {one.port}" if one.port else one.status
         say(f"lease {one.id}  {Path(one.model).name}  context {one.context:,}  {where}  "
             f"held by pid {one.pid}  {human_bytes(one.memory) if one.memory else 'memory unmeasured'}"
             f"  since {since}" + (f"  idle {one.idle_s:.0f}s" if one.idle_s else ""))
+        for line in provenance.lines(one.why):
+            say(line)
+        users = [*holding.joined(one.id), *lease_cli.other_holders(servers, one.port, besides=one.lease)]
+        for other in users:
+            say(f"  also used by {other.get('requester')} (pid {other.get('pid')}): {other.get('reason')}")
 
 
 def cmd_status(args: argparse.Namespace) -> int:

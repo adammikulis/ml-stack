@@ -139,7 +139,8 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
         extra = ("-md", str(draft), "-ngld", "99")
     lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
                                      parallel=parallel, extra_args=extra),
-                          escalate=escalate)
+                          escalate=escalate,
+                          reason=f"fleet serving of {Path(model_path).name}")
     served = None
     if serving is not None:
         served = serving.register(port, [name or Path(model_path).name], slots=parallel)

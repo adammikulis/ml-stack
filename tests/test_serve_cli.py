@@ -1033,5 +1033,5 @@ class TestTheMeasuredShapeIsTheDefault:
         assert args.profile is False
 
     def test_naming_a_workload_is_enough_to_get_that_workloads_shape(self):
-        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf", "--for", "ingest"])
+        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf", "--workload", "ingest"])
         assert (args.profile, args.workload) == (True, "ingest")

@@ -260,8 +260,10 @@ OPTIONS_UP = [
               "(`ml-stack-serve profile MODEL` prints it). A flag given wins over the "
               "record. --no-profile serves the model bare, at this command's own "
               "defaults rather than the ones that measured best"),
-    flag("--for", dest="workload", default=ASK, choices=sorted(WORKLOADS),
-         metavar="WORKLOAD",
+    flag("--for", dest="reason", default="", metavar="TEXT",
+         help="why this lease is taken, in one line; `status`, `leases` and `history` show it "
+              "(default: $ML_STACK_LEASE_FOR, else none given)"),
+    flag("--workload", default=ASK, choices=sorted(WORKLOADS), metavar="WORKLOAD",
          help=f"which workload the profile is for: "
               f"{'; '.join(f'{k}, {v}' for k, v in WORKLOADS.items())} "
               f"(default: {ASK})"),
@@ -332,7 +334,7 @@ def _lease(args: argparse.Namespace, spec: ServerSpec, manager: object, *, chose
             spec, manager=manager, say=warn,
             terms=holding.Terms(wait_s=float(args.patience), wait=bool(args.wait),
                                 idle_s=_idle_seconds(args), port=int(args.port or 0),
-                                weight=weight))
+                                weight=weight, reason=str(args.reason or "")))
     except holding.Refusal as no:
         for line in no.lines:
             warn(line)

@@ -29,7 +29,7 @@ from ml_stack import home, hub, jobs
 from ml_stack.files import read_json, write_json
 from ml_stack.lock import only_one
 from ml_stack.platform import stop_pid
-from ml_stack.serve import admission, broker_wire
+from ml_stack.serve import admission, broker_wire, provenance
 from ml_stack.serve.backend import ServerFailed, ServerSpec
 from ml_stack.serve.broker import Ask, BrokerError
 from ml_stack.serve.broker_wire import spec_to_json
@@ -39,8 +39,8 @@ from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.serve.reclaim import busy_now
 from ml_stack.units import human_bytes
 
-__all__ = ["Hold", "Refusal", "Terms", "check_fits", "down", "find", "holds", "run_holder", "shape_of",
-           "up"]
+__all__ = ["Hold", "Refusal", "Terms", "check_fits", "down", "find", "holds", "joined", "run_holder",
+           "shape_of", "up"]
 
 logger = logging.getLogger(__name__)
 DEFAULT_WAIT_S = 600.0
@@ -80,6 +80,8 @@ class Hold:
     idle_s: float = 0.0
     error: str = ""
     adopted: bool = False
+    #: why this was taken and by whom (`provenance.observe`)
+    why: dict = dataclasses.field(default_factory=dict)
 
     @classmethod
     def read(cls, path: Path) -> Hold | None:
@@ -115,6 +117,16 @@ def _request_path(hold_id: str) -> Path:
     return hold_dir() / f"{hold_id}.request.json"
 
 
+def _joined_path(hold_id: str) -> Path:
+    return hold_dir() / f"{hold_id}.joined.json"
+
+
+def joined(hold_id: str) -> list[dict]:
+    """The records of the later `up`s that adopted this hold instead of making one."""
+    rows = read_json(_joined_path(hold_id), [])
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
 def shape_of(spec: ServerSpec) -> str:
     """A key for what was asked: the model and every setting that shapes the server, not the
     port (the broker picks that)."""
@@ -126,7 +138,7 @@ def holds() -> list[Hold]:
     """Every hold whose holder is running; the records of ones that are gone are removed."""
     out = []
     for path in sorted(hold_dir().glob("*.json")):
-        if path.name.endswith(".request.json"):
+        if path.name.endswith((".request.json", ".joined.json")):
             continue
         hold = Hold.read(path)
         if hold is not None and (hold.alive() or (
@@ -136,6 +148,7 @@ def holds() -> list[Hold]:
         else:
             path.unlink(missing_ok=True)
             _request_path(path.stem).unlink(missing_ok=True)
+            _joined_path(path.stem).unlink(missing_ok=True)
     return out
 
 
@@ -201,6 +214,8 @@ class Terms:
     weight: int = 0
     patience_s: float = 120.0
     """How long the holder may stay silent before `up` gives up on it."""
+    reason: str = ""
+    """Why the lease is taken, one line."""
 
 
 def up(spec: ServerSpec, *, manager: Any, terms: Terms = Terms(),  # noqa: B008 - frozen
@@ -214,20 +229,24 @@ def up(spec: ServerSpec, *, manager: Any, terms: Terms = Terms(),  # noqa: B008 
     wait_s, wait, idle_s, asked_port, weight, patience_s = (
         terms.wait_s, terms.wait, terms.idle_s, terms.port, terms.weight, terms.patience_s)
     shape = shape_of(spec)
+    claim = provenance.asked(terms.reason)
+    mine = provenance.observe(os.getpid(), claim)
     hold_dir().mkdir(parents=True, exist_ok=True)
     # Finding a hold for this shape and making one are one step: two `up`s at once must not
     # start two holders, so the second finds the first's record and adopts it.
     with only_one(hold_dir() / "up.lock", wait=True, timeout=30.0, announce=lambda _l: None):
         hold = find(shape)
         adopted = hold is not None
+        if hold is not None:
+            write_json(_joined_path(hold.id), [*joined(hold.id), mine])
         if hold is None:
             hold = Hold(id=os.urandom(4).hex(), shape=shape, model=str(spec.model),
                         context=int(spec.context), parallel=int(spec.parallel or 1),
-                        idle_s=idle_s, memory=weight, since=time.time())
+                        idle_s=idle_s, memory=weight, since=time.time(), why=mine)
             _write(hold)
             write_json(_request_path(hold.id), {
                 "spec": spec_to_json(spec), "wait_s": wait_s, "idle_s": idle_s,
-                "port": asked_port, "weight": weight,
+                "port": asked_port, "weight": weight, "claim": claim, "behalf": os.getpid(),
                 "options": {"backend": manager.backend.options()}
                 if hasattr(manager.backend, "options") else {}})
     if adopted:
@@ -323,7 +342,8 @@ def _hold(hold_id: str, *, manager: Any,
               label=f"ml-stack-serve up {Path(hold.model).name}",
               weight=int(request.get("weight") or 0),
               spec={k: v for k, v in spec.items() if k != "port"},
-              port=int(request.get("port") or 0), options=request.get("options") or {})
+              port=int(request.get("port") or 0), options=request.get("options") or {},
+              claim=request.get("claim") or {}, behalf=int(request.get("behalf") or 0))
     granted = None
     try:
         granted = manager.broker.lease(ask, timeout=float(request.get("wait_s") or DEFAULT_WAIT_S))
@@ -349,6 +369,7 @@ def _hold(hold_id: str, *, manager: Any,
         _write(hold)
         _path(hold_id).unlink(missing_ok=True)
         _request_path(hold_id).unlink(missing_ok=True)
+        _joined_path(hold_id).unlink(missing_ok=True)
         _STOPS.pop(hold_id, None)
     return 0
 

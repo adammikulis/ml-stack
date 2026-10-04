@@ -44,6 +44,7 @@ from pathlib import Path
 
 from ml_stack import harnessing, serverkeys
 from ml_stack.log import say
+from ml_stack.serve import provenance
 
 __all__ = ["environment", "launch", "main", "settings"]
 
@@ -125,6 +126,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
     ours, extra = (words[: words.index("--")], words[words.index("--") + 1:]) \
         if "--" in words else (words, [])
     args = parser().parse_args(ours)
+    provenance.told(args.lease_for)
     binary = args.claude or shutil.which("claude") or ""
     if not binary:
         say("error: no `claude` on PATH; install Claude Code or pass --claude PATH")

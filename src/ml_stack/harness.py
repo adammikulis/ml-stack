@@ -25,6 +25,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from ml_stack import hub
@@ -182,7 +183,8 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
         leasing("this model's template refuses a system message after the first; serving "
                 f"with one that renders it instead ({patched.name})")
     with served(config, say=say, timeout=900.0, cache_reuse=256, warmup=False,
-                        chat_template_file=patched) as base_url:
+                        chat_template_file=patched,
+                        reason=f"the harness on {Path(found).name}") as base_url:
         alias = alias_of(base_url, found)
         say(f"the harness on {base_url} as {alias!r}")
         guard = options.pop("guard", None)
