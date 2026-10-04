@@ -31,6 +31,8 @@ def fixture_worker(root, cid, conversation, prompt, output) -> None:
     from ml_stack import coding
     from ml_stack.workspace.coding_turns import worker
     def launch(model, role, project, **options):
+        if prompt == "startup rejected":
+            raise SystemExit(2)
         seat = options["seat_factory"](options["name"], Path(project), "", lambda text: None)
         try:
             with tempfile.TemporaryDirectory() as private:
