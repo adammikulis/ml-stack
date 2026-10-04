@@ -154,7 +154,8 @@ def run_in(tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[s
          "--rootdir", str(tmp_path), "-c", str(TESTS.parent / "pyproject.toml"), str(tmp_path)],
         capture_output=True, text=True, cwd=tmp_path, check=False,
         env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
-             "PYTHONPATH": os.pathsep.join([str(TESTS.parent / "src"), str(TESTS.parent / "scripts")]),
+             "PYTHONPATH": os.pathsep.join([str(TESTS.parent / "src"), str(TESTS.parent / "scripts"),
+                                           str(TESTS.parent)]),
              **env})
 
 

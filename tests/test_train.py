@@ -319,7 +319,7 @@ class TestSchedules:
     def test_cosine_is_monotonic_after_warmup(self):
         schedule = warmup_cosine(1.0, total_steps=500, warmup_steps=50)
         values = [schedule(s) for s in range(50, 500)]
-        assert all(a >= b - 1e-12 for a, b in zip(values, values[1:]))
+        assert all(a >= b - 1e-12 for a, b in zip(values, values[1:], strict=False))
 
     def test_wsd_holds_flat_through_the_stable_stretch(self):
         """The reason to prefer WSD: the horizon only matters during the final decay, so a

@@ -105,10 +105,9 @@ class TestTheLockOnWindows:
     def test_a_second_holder_is_refused_rather_than_allowed_to_overlap(
             self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock
-        with only_one(tmp_path / "l", wait=False):
-            with pytest.raises(Busy) as why:
-                with only_one(tmp_path / "l", wait=False):
-                    raise AssertionError("two runs held the same lock at once")
+        with only_one(tmp_path / "l", wait=False), pytest.raises(Busy) as why:
+            with only_one(tmp_path / "l", wait=False):
+                raise AssertionError("two runs held the same lock at once")
         assert str(os.getpid()) in str(why.value), "says who has it, for a stalled machine"
 
     def test_the_lock_is_released_when_the_block_ends(self, win_lock, tmp_path):
@@ -120,9 +119,8 @@ class TestTheLockOnWindows:
 
     def test_it_is_released_even_when_the_run_raises(self, win_lock, tmp_path):
         only_one, _, _ = win_lock
-        with pytest.raises(ValueError):
-            with only_one(tmp_path / "l"):
-                raise ValueError("a run that failed still has to let the next one in")
+        with pytest.raises(ValueError), only_one(tmp_path / "l"):
+            raise ValueError("a run that failed still has to let the next one in")
         with only_one(tmp_path / "l", wait=False):
             pass
 
@@ -151,10 +149,9 @@ class TestTheLockOnWindows:
 
     def test_a_bounded_wait_gives_up_and_says_so(self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock
-        with only_one(tmp_path / "l"):
-            with pytest.raises(Busy, match="still held"):
-                with only_one(tmp_path / "l", timeout=0.2, announce=lambda _: None):
-                    pass
+        with only_one(tmp_path / "l"), pytest.raises(Busy, match="still held"):
+            with only_one(tmp_path / "l", timeout=0.2, announce=lambda _: None):
+                pass
 
     def test_the_pid_is_written_at_the_front_where_a_person_can_read_it(
             self, win_lock, tmp_path):

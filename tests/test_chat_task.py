@@ -234,7 +234,7 @@ def run_main(argv, stdin: str, monkeypatch, model=None, seen=None):
 def test_dry_run_prints_the_task_prompt_and_every_tool_of_the_role_with_a_worked_example():
     code, printed = run_main(["--dry-run", "run benchmarks with quince-2b"], "", None)
     assert code == 0
-    assert chat.TASK.splitlines()[0] in printed and "Your role is runner" in printed
+    assert chat.TASK.splitlines()[0] in printed and "Your role is plan-and-go" in printed
     blocks: dict[str, str] = {}
     current = ""
     for line in printed.splitlines():

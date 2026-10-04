@@ -168,7 +168,7 @@ def test_keep_vague_takes_them_anyway_and_marks_every_edge(tmp_path):
 def test_every_vague_predicate_is_one_the_table_names_and_has_no_verb_for():
     """A vague predicate the table did not name would be classed twice over."""
     uncovered = {word for word, found in ingest.RELATIONS.items() if found is None}
-    assert ingest.VAGUE <= uncovered, ingest.VAGUE - uncovered
+    assert uncovered >= ingest.VAGUE, ingest.VAGUE - uncovered
     assert not ingest.vague("connects") and ingest.vague("related_to")
 
 

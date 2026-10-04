@@ -11,10 +11,10 @@ fails when one is missing, so a new detector cannot ship without its sentence.
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import PurePath
 
+from ml_stack.safetext import escape
 from ml_stack.sentinel.redaction import redact
 from ml_stack.sentinel.store import Record, State
 
@@ -91,30 +91,13 @@ BLOCKS: dict[str, str] = {
 """What a quarantine of each subject kind stops. A subject kind without a line stops nothing."""
 
 _CODE = re.compile(r"^([a-z_]+\.[a-z_]+)\b")
-_EDGE = "…"
 
 
 def show(value: object, limit: int = 60) -> str:
     """``value`` as one safe line of at most ``limit`` characters: secrets masked, and every
     control, format (bidi, zero-width), separator, private or unassigned character written
     as a visible escape such as ``\\x1b`` or ``\\u202e``. Cut with an ellipsis when long."""
-    text = redact(str(value)[:limit * 8])
-    out = "".join(ch if _plain(ch) else _escape(ch) for ch in text)
-    return out if len(out) <= limit else out[:limit - 1] + _EDGE
-
-
-def _plain(ch: str) -> bool:
-    return ch == " " or (ch.isprintable() and unicodedata.category(ch)[0] not in "CZ")
-
-
-def _escape(ch: str) -> str:
-    named = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
-    if ch in named:
-        return named[ch]
-    point = ord(ch)
-    if point < 0x100:
-        return f"\\x{point:02x}"
-    return f"\\u{point:04x}" if point < 0x10000 else f"\\U{point:08x}"
+    return escape(redact(str(value)[:limit * 8]), limit)
 
 
 def name_of(kind: str, key: str) -> str:

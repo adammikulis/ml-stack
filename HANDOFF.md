@@ -2,7 +2,7 @@
 
 ## Current state (2026-10-03)
 
-What the docs now describe as in place: `ml-stack-chat` (roles `reader`, `operator`, `runner`, saved
+What the docs now describe as in place: `ml-stack-chat` (roles `read-only`, `approve-first`, `plan-and-go`, saved
 Always/Never rules; `ml-stack-do` is gone), graph-based encrypted agent memory per user and per
 project (`ml-stack-memory`), source reputation (`ml-stack-reputation`), the one OS keystore item
 (`ml-stack-security unlock`, `keystore`, `keystore-reset`), the single click-to-release sentinel
@@ -26,6 +26,18 @@ Open, and known limits (each is a task or a gap, not a done item):
   questions (`docs/serving.md`); the pre-registered re-measurement is pending.
 - [ ] **Grant ledger, connector credential broker, a hard outward-send rule and the "what can it do
   now" listing are not built** (`docs/assistant-security.md`, "Order of work").
+- [ ] **Requests inbox: sources not raised through it yet** (`docs/requests.md`). Fleet join requests
+  (`fleet/onboard/requests.py`, `fleet/onboard/cli.py` accept and decline), `ml-stack-security
+  approve-host` (`net/cli.py`, refusals in `net/policy.py`), the reputation notice
+  (`reputation/notice.py`, its own dialog), keystore unlock, hold windows and rule suggestions keep
+  their own prompts; the kinds exist in `ml_stack.requests.model.KINDS`.
+- [ ] **Requests page in the shell.** The element (`ui/assets/ml-requests.js`) and
+  `inbox.route.RequestsApp.dispatch` are not mounted in the workspace shell yet, and the page has
+  only had DOM-level tests (a probe of `plain()` under node), no browser run.
+- [ ] **Always allow answered in the UI saves no rule.** The call runs once; a rule is saved only from
+  the terminal's second prompt.
+- [ ] **A background process that cannot read the keystore keeps no requests on disk.** Sentinel's
+  dialog keeps its own in memory for that process; the page does not see them.
 - [ ] **Not run for this tidy:** `scripts/test-on-linux`, Windows, the slow tier, any model-backed
   test. Docs were checked against code and the docs tests, not by driving the app.
 
@@ -1133,8 +1145,10 @@ ml-stack-serve profile                                     # every model's servi
   must supply its signed-in check and place the element (`docs/workspace.md`, The Board).
 - [ ] **Board subscriptions deliver a board's older messages to a new member.** A subscription made
   after others posted delivers every unread row after the inbox cursor, bounded by `--limit` only.
-- [ ] **The Board live feed polls `/board/head`.** Server-sent events would avoid the 3 s floor; the person's
-  own posts, subscription edits and views are audited but not yet written as activity records with a
-  `board.*` kind in `activity/schema.py`.
+- [ ] **The page's live feed is a long poll on one wake pipe name per person (`<id>.web`).** Two open tabs
+  share one pipe, so one of them can wake up to 2 s late; `board.view` is recorded for thread lists only.
+- [ ] **A board post wakes every member's follower pipes, and a waiting `wait` rescans on each.** The cost is
+  fine at 40 agents (p99 38 ms); a board with hundreds of members needs the signal limited to subscribers
+  and open followers.
 - [ ] **No board search, edit or delete, and no per-board retention.** Board messages age out with the bus
   (`retention_s`); `boards.jsonl` is never pruned.

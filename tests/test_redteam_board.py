@@ -203,3 +203,50 @@ def test_the_route_answers_a_burst_with_bounded_bodies_and_never_a_token(kit, ro
     for text in (route("/board/boards")[1], body, route("/")[1]):
         for secret in (kit.owner, *kit.tokens.values()):
             assert secret.encode() not in text
+
+
+def test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it(kit, route):
+    ws = kit.ws
+    ws.board.create(kit.tokens["alice"], "#vault", private=True)
+    before = (ws.bus.log.head(), ws.board.store.log.head())
+    own = {"Origin": f"http://127.0.0.1:{route.port}", "Content-Type": "application/json"}
+    doc = json.dumps({"to": "#vault", "body": "forged"})
+    attacks = [
+        ({"Origin": "http://attacker.example", "Content-Type": "application/json"}, doc),
+        ({"Origin": "null", "Content-Type": "application/json"}, doc),
+        ({"Content-Type": "application/json"}, doc),
+        ({"Origin": own["Origin"], "Content-Type": "text/plain"}, doc),
+        ({"Origin": own["Origin"], "Content-Type": "application/x-www-form-urlencoded"}, "to=%23vault&body=x"),
+        ({**own, "Sec-Fetch-Site": "same-site"}, doc),
+        ({**own, "Host": "attacker.example"}, doc),
+        ({**own, "Host": f"127.0.0.1.attacker.example:{route.port}"}, doc),
+    ]
+    for headers, body in attacks:
+        status, _ = route("/board/post", "POST", headers, body)
+        assert status in (400, 403, 421), headers
+    assert (ws.bus.log.head(), ws.board.store.log.head()) == before
+
+
+def test_a_post_cannot_borrow_another_identity_or_smuggle_options(kit, route):
+    own = {"Origin": f"http://127.0.0.1:{route.port}", "Content-Type": "application/json"}
+    for extra in ({"from": "alice"}, {"role": "lead"}, {"token": kit.tokens["alice"]}, {"label": "x"}):
+        body = json.dumps({"to": "#general", "body": "who am i", **extra})
+        status, _ = route("/board/post", "POST", own, body)
+        assert status == 200
+    posted = kit.ws.board.ui_read(kit.owner, "#general")["messages"]
+    assert {m["from"] for m in posted} == {"owner"} and {m["role"] for m in posted} == {"human"}
+    assert all(m["label"] == "" for m in posted)
+
+
+def test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read(kit, route):
+    ws, a, b = kit.ws, kit.tokens["alice"], kit.tokens["bob"]
+    ws.board.create(a, "#vault", private=True)
+    send_secret = ws.send(a, "#vault", "note", "SECRETBOARD")
+    for done in (cli(kit.base, b, "watch", "--board", "#vault", "--once", "--timeout", "1"),
+                 cli(kit.base, b, "watch", "--thread", str(send_secret["seq"]), "--once", "--timeout", "1"),
+                 cli(kit.base, b, "watch", "--dm", "alice", "--once", "--timeout", "1")):
+        assert "SECRET" not in done.stdout + done.stderr
+    assert cli(kit.base, b, "chat", "--board", "#vault", env_extra={"CLAUDECODE": "1"}).returncode == 3
+    with pytest.raises(Denied):
+        ws.news(b, 0, 0)
+    assert "SECRET" not in route("/board/wait?after=0&timeout=1")[1].decode()

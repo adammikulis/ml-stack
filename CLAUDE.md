@@ -58,6 +58,22 @@ is not there, ask first rather than deciding it and reporting after. What is ref
 `graph/cache.py:fingerprint` catch bytes moving when nobody meant them to: they are detectors,
 not vetoes. A red you can explain is a change; a red you cannot is a bug.
 
+## Gating a merge takes minutes, not twenty
+
+Iteration speed is a requirement (the owner: "10-20 minutes of testing is too much"). A merge into
+the integration branch is gated by `scripts/test quick` (only what the change reaches), the files
+the branch touched, and the structural checks (`scripts/budgets`, `scripts/redteam_coverage.py
+--check`, `scripts/reference --write` clean, `tests/test_layers.py`, the human-floor tests): a few
+minutes, run by whoever merges, and never queued behind a full run. The `full` tier and the
+red-team tier run in the background on the integration branch after merges (once per batch or on
+a schedule), never in front of a merge and never held by someone waiting on them; a failure there
+is fixed forward as the next task, with the failing test named on the board. `0.2dev` moves when
+the quick gate and structure are green and the last background full run on that tree has no
+failure that is not a documented load flake. Nobody starts a second full run while one is queued.
+The full tier's wall time is itself a budget that only falls: the slowest tests and modules are
+listed (`scripts/test --durations`), and a change that makes the full tier slower than the last
+recorded time needs a reason.
+
 ## The gates
 
 **A budget is a debt, not a permission.** Every number in `budgets.json` is a count of violations

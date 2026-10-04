@@ -25,10 +25,9 @@ def g():
 
 @pytest.fixture(scope="module")
 def stored(g):
-    with tempfile.TemporaryDirectory() as d:
-        with GraphStore(pathlib.Path(d) / "g.ladybug") as store:
-            store.write(g)
-            yield store
+    with tempfile.TemporaryDirectory() as d, GraphStore(pathlib.Path(d) / "g.ladybug") as store:
+        store.write(g)
+        yield store
 
 
 def test_every_expected_answer_exists(g):

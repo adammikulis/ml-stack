@@ -35,8 +35,8 @@ stopped from the UI even if its process is wedged.
 
 ## First runner milestone: start a local model from the UI and have it contribute (owner priority)
 From the UI: pick a downloaded model (fit meter, a recommended default: the best MoE ranked for
-agents, thinking off, a warning on quants known to be slow on Metal), a role (reader, operator,
-runner), a project and a task or "pick up work from the board", then Start. ml-stack leases the model
+agents, thinking off, a warning on quants known to be slow on Metal), a role (read-only, approve-first,
+plan-and-go), a project and a task or "pick up work from the board", then Start. ml-stack leases the model
 through the Broker, creates a fresh worktree and branch, connects the agent to the workspace with its
 own identity, and launches it there with the board brief. The adapter reuses `ml-stack-claude MODEL`
 (Claude Code on a locally served model, in the settings it scored best with) so the local model has

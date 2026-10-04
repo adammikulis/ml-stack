@@ -13,7 +13,15 @@ from types import MappingProxyType
 from typing import Any
 
 from ml_stack import activity
-from ml_stack.chatpolicy import _TOOL_NAME, CONFIRM, READ, _outside_state
+from ml_stack.chatpolicy import (
+    _TOOL_NAME,
+    APPROVE_FIRST,
+    CONFIRM,
+    PLAN_AND_GO,
+    READ,
+    READ_ONLY,
+    _outside_state,
+)
 from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
 from ml_stack.rules import Rules, blocked_reason, describe
 from ml_stack.taint.ledger import ledger_of
@@ -79,16 +87,16 @@ def _table(*roles: Role) -> Mapping[str, Role]:
 
 
 ROLES: Mapping[str, Role] = _table(
-    Role("reader", "reads only: nothing is offered that starts, stops, downloads or writes",
+    Role(READ_ONLY, "reads only: nothing is offered that starts, stops, downloads or writes",
          frozenset(READ), "never", max_calls=60, max_gpu_seconds=0.0),
-    Role("operator", "reads run; each call that acts asks the person first",
+    Role(APPROVE_FIRST, "reads run; each call that acts asks the person first",
          frozenset(READ) | frozenset(CONFIRM), "each", max_calls=200),
-    Role("runner", "runs the calls an approved plan names without asking again; anything else asks",
+    Role(PLAN_AND_GO, "runs the calls an approved plan names without asking again; anything else asks",
          frozenset(READ) | frozenset(CONFIRM), "outside-plan", max_calls=200,
          max_gpu_seconds=6 * 3600.0),
 )
-DEFAULT = "operator"
-TASK_DEFAULT = "runner"
+DEFAULT = APPROVE_FIRST
+TASK_DEFAULT = PLAN_AND_GO
 
 
 def validate(table: Mapping[str, Role] = ROLES) -> None:
@@ -168,7 +176,7 @@ class PlanLedger:
 
 class RoleRail(Base):
     """Holds each call to the current ``role``: a tool outside it is denied, one that acts
-    asks the person (or runs, for a ``runner`` call inside the approved plan), and a run that
+    asks the person (or runs, for a ``plan-and-go`` call inside the approved plan), and a run that
     has read outside text asks whatever the role. The role changes only through
     ``set``, which the model has no tool to reach."""
 

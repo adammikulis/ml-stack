@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ml_stack.command import flag
 from ml_stack.log import say, warn
-from ml_stack.serve import ops
+from ml_stack.serve import ops, wired_cli
 from ml_stack.serve.ops import Refused
 from ml_stack.units import human_bytes
 
@@ -18,10 +18,30 @@ __all__ = ["OPTIONS_LIMITS", "OPTIONS_MEMORY", "OPTIONS_RECLAIM", "cmd_limits",
 
 OPTIONS_MEMORY = [
     flag("--persist", nargs="?", const="", default=None, metavar="MB",
-         help="write a boot-time setting for the wiring limit; the megabytes default "
-              "to whatever is set now"),
+         help="keep the wiring limit across restarts: installs a boot-time daemon (one "
+              "administrator prompt); the megabytes default to what --for needs, else what "
+              "is set now. --print only prints the steps"),
     flag("--write", default="", metavar="FILE",
          help="where to write it (default: ./stack.ml.wired-limit.plist)"),
+    flag("--for", dest="for_model", default="", metavar="MODEL",
+         help="size the wiring limit for this model (id, name or path)"),
+    flag("--ctx", type=int, default=131072, metavar="N",
+         help="with --for: context length in tokens (default: %(default)s)"),
+    flag("--kv", default="q8_0", choices=["q8_0", "f16", "q4_0"],
+         help="with --for: KV cache type (default: %(default)s)"),
+    flag("--mtp", action=argparse.BooleanOptionalAction, default=True,
+         help="with --for: serve with the MTP head, sharing the model's weights (default: on)"),
+    flag("--cache-ram", type=int, default=8192, metavar="MB",
+         help="with --for: the server's prompt cache cap in host RAM (default: %(default)s)"),
+    flag("--apply", nargs="?", const="", default=None, metavar="MB",
+         help="raise the limit for this boot to MB (default: what --for needs); sudo asks at "
+              "a terminal, macOS's own password dialog otherwise"),
+    flag("--unpersist", action="store_true",
+         help="remove the boot-time daemon (one administrator prompt)"),
+    flag("--print", dest="print_only", action="store_true",
+         help="with --persist: print the steps instead of installing the daemon"),
+    flag("--reset", action="store_true",
+         help="put the limit back to what it was before the first change and remove the daemon"),
     flag("--limit", type=int, default=0, metavar="MB",
          help="preview: what the rest of the machine would have under this wiring "
               "limit, against what it holds now"),
@@ -34,6 +54,9 @@ def cmd_memory(args: argparse.Namespace) -> int:
     On unified memory the ceiling that matters is `iogpu.wired_limit_mb`: a runtime setting
     that goes back to the default on every reboot.
     """
+    installing = args.persist is not None and not args.print_only
+    if args.for_model or args.reset or args.unpersist or args.apply is not None or installing:
+        return wired_cli.run(args)
     machine = ops.memory()
     total, now = machine.total, machine.room
     if not now:
@@ -71,7 +94,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
                 + (" -- less than it holds now" if left < others else ""))
     want = args.persist
     if want is None:
-        say("\n  ml-stack-serve memory --persist [MB]   to write a boot-time setting")
+        say("\n  ml-stack-serve memory --for MODEL   to size it for a model")
         return 0
 
     mb = int(want) if want else now // (1024 * 1024)
