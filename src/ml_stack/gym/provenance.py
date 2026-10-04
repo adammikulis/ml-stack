@@ -10,6 +10,8 @@ def native_provenance(environment, env):
     libraries = ["gymnasium", "numpy"]
     if environment in {"car", "traffic-driving"}:
         libraries.append("metadrive-simulator")
+    if environment == "drone":
+        libraries.extend(("PyFlyt", "pybullet"))
     if environment == "warehouse":
         libraries.append("rware")
     if environment in {"traffic", "traffic-driving"}:

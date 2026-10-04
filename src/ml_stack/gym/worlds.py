@@ -1,6 +1,7 @@
 """Per-example native world construction and UI configuration descriptors."""
 
 from ml_stack.gym.car_definition import SCHEMA, build as build_car
+from ml_stack.gym.drone_definition import SCHEMA as DRONE_SCHEMA
 from ml_stack.gym.traffic import traffic_defaults
 from ml_stack.gym.traffic_world import build as build_traffic
 from ml_stack.gym.warehouse_world import build as build_warehouse
@@ -8,6 +9,8 @@ from ml_stack.gym.world_schema import TRAFFIC, WAREHOUSE
 
 
 def schema(environment):
+    if environment == 'drone':
+        return DRONE_SCHEMA
     if environment == 'car':
         return SCHEMA
     if environment == 'warehouse':
