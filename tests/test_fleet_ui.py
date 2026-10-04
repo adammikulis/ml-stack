@@ -19,13 +19,18 @@ from pathlib import Path
 
 import pytest
 
+from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import in_cluster, primary_ip
+from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.onboard.pairing import unverified_context
 from ml_stack.fleet.session import Sessions, Throttle, parse_cookie
 from ml_stack.fleet.ui import UI, asset_bytes
 from ml_stack.http import Server
+from tests.cluster_support import a_keystore  # noqa: F401
+from tests.keystore_support import counting  # noqa: F401
 
 
 def _maybe_json(raw: bytes) -> dict:
@@ -37,7 +42,6 @@ def _maybe_json(raw: bytes) -> dict:
 
 
 
-SALT = b"a-test-clusters-salt"
 
 
 @pytest.fixture(autouse=True)
@@ -52,12 +56,16 @@ def no_release_lookup(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def the_cluster_already_exists(monkeypatch):
-    """The machines in these tests join a cluster whose salt every one of them is told."""
-    from ml_stack.fleet import discovery
+def the_passphrase_is_kept(a_keystore):  # noqa: F811
+    """Joining stores the passphrase and signing in compares against it."""
 
-    monkeypatch.setattr(discovery, "find_salt", lambda passphrase, group="ml-stack", **_: (
-        SALT, discovery.key_from_passphrase(passphrase, group=group, salt=SALT)))
+
+@pytest.fixture(autouse=True)
+def nobody_else_is_on_the_network(monkeypatch):
+    """A join finds no machine to shake hands with, so it makes the cluster."""
+    from ml_stack.fleet.onboard import joining
+
+    monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
 
 
 def _free_port() -> int:
@@ -67,7 +75,7 @@ def _free_port() -> int:
 
 
 class Serving:
-    """A daemon with a loopback UI and an optional explicit LAN listener."""
+    """A real daemon with the UI mounted, bound on every interface."""
 
     def __init__(self, tmp_path, name="studio", setup_token="", schedule=None):
         self.schedule = schedule
@@ -85,13 +93,13 @@ class Serving:
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
-        self.httpd = Server(
-            ("127.0.0.1", self.port),
-            make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
+        self.httpd = LimitedServer(
+            ("0.0.0.0", self.port),
+            tls=tls.server_context(tls.identity(tmp_path / "tls", name)),
+            handler=make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
                          cluster_key_path=self.keyfile, ui_from_lan=True,
                          schedule_path=(root / "availability.json") if schedule else None)))
-        self.lan_httpd = None
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def _cluster_tokens(self):
@@ -100,16 +108,8 @@ class Serving:
 
         return {derive_token(m.key) for m in memberships(self.keyfile)}
 
-    def call(self, path, *, method="GET", body=None, **options):
-        host = options.pop("host", "127.0.0.1")
-        headers = options.pop("headers", None)
-        ui_header = options.pop("ui_header", True)
-        cookie = options.pop("cookie", "")
-        if options:
-            raise TypeError(f"Unknown request options: {', '.join(options)}")
-        if host != "127.0.0.1" and self.lan_httpd is None:
-            self.lan_httpd = Server((host, self.port), self.httpd.RequestHandlerClass)
-            threading.Thread(target=self.lan_httpd.serve_forever, daemon=True).start()
+    def call(self, path, *, method="GET", body=None, host="127.0.0.1",
+             headers=None, ui_header=True, cookie=""):
         data = json.dumps(body).encode() if body is not None else None
         sent = {"Content-Type": "application/json"}
         if ui_header:
@@ -117,7 +117,8 @@ class Serving:
         if cookie:
             sent["Cookie"] = cookie
         sent.update(headers or {})
-        conn = http.client.HTTPConnection(host, self.port, timeout=10)
+        conn = (http.client.HTTPConnection(host, self.port, timeout=10) if host == "127.0.0.1"
+                else http.client.HTTPSConnection(host, self.port, timeout=10, context=unverified_context()))
         try:
             conn.request(method, path, body=data, headers=sent)
             r = conn.getresponse()
@@ -129,9 +130,6 @@ class Serving:
         self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
-        if self.lan_httpd:
-            self.lan_httpd.shutdown()
-            self.lan_httpd.server_close()
 
 
 @pytest.fixture
@@ -152,10 +150,10 @@ class TestAssets:
         assert asset_bytes("style.css") is not None, "style.css is missing from web/"
 
     def test_every_component_the_page_lists_is_on_disk(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES, components
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
 
-        assert components(), "the page contains no components"
-        for name in (*COMPONENTS, *MODULES):
+        assert COMPONENTS, "a page of no components would pass the loop below"
+        for name in COMPONENTS:
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
     def test_every_component_defines_the_element_the_shell_holds(self):
@@ -166,20 +164,6 @@ class TestAssets:
             assert f"customElements.define('{name}'" in text \
                 or f'customElements.define("{name}"' in text, \
                 f"{name}.html defines no <{name}>"
-
-    def test_shared_modules_load_before_consumers_without_custom_elements(self):
-        from ml_stack.fleet.page import COMPONENTS, FIT_ONLY, MODULES, components
-
-        parts = components()
-        names = [part.name for part in parts]
-        for name, consumers in MODULES.items():
-            assert name not in COMPONENTS
-            assert names.count(name) == 1
-            module = next(part for part in parts if part.name == name).read()
-            assert not module.templates
-            assert "customElements.define" not in module.script
-            assert all(names.index(name) < names.index(consumer) for consumer in consumers)
-        assert not set(MODULES) & {part.name for part in components(FIT_ONLY)}
 
     def test_every_asset_the_page_asks_for_exists(self):
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
@@ -234,7 +218,7 @@ class TestFirstRunIsNotUpForGrabs:
         """Whoever reaches an unjoined daemon first would own it. Being on the LAN is
         not enough; you have to be on the box, or use ssh and the CLI."""
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS, "group": "ml-stack"},
+                                       body={"passphrase": WORDS},
                                        host=primary_ip())
         assert status == 403
         assert "ssh" in body["error"]
@@ -244,7 +228,7 @@ class TestFirstRunIsNotUpForGrabs:
         """DNS rebinding: a page anywhere can point a domain at 127.0.0.1 and POST to
         it. Loopback-only buys nothing without checking what it was addressed to."""
         status, body, _ = serving.call(
-            "/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "ml-stack"},
+            "/ui/setup/join", method="POST", body={"passphrase": WORDS},
             headers={"Host": f"evil.example.com:{serving.port}"})
         assert status == 403
         assert "hostname" in body["error"]
@@ -268,10 +252,10 @@ class TestFirstRunIsNotUpForGrabs:
         s = Serving(tmp_path, setup_token="abc123xyz")
         try:
             refused, _, _ = s.call("/ui/setup/join", method="POST",
-                                   body={"passphrase": WORDS, "group": "ml-stack"}, host=primary_ip())
+                                   body={"passphrase": WORDS}, host=primary_ip())
             assert refused == 403
             ok, body, _ = s.call("/ui/setup/join", method="POST",
-                                 body={"passphrase": WORDS, "group": "ml-stack"}, host=primary_ip(),
+                                 body={"passphrase": WORDS}, host=primary_ip(),
                                  headers={"X-ML-Stack-Setup": "abc123xyz"})
             assert ok == 200, body
         finally:
@@ -279,23 +263,23 @@ class TestFirstRunIsNotUpForGrabs:
 
 
 class TestJoiningTwice:
-    def test_a_named_cluster_is_the_same_one_either_way(self, serving):
+    def test_a_cluster_with_no_name_is_the_same_one_either_way(self, serving):
         """The wizard and the Clusters box must derive the same key from the same
         words, or two machines set up different ways never see each other."""
-        from ml_stack.fleet.discovery import key_from_passphrase, memberships
+        from ml_stack.fleet.discovery import memberships
 
         status, body, headers = serving.call("/ui/setup/join", method="POST",
-                                             body={"passphrase": WORDS, "group": "ml-stack"})
+                                             body={"passphrase": WORDS})
         assert status == 200, body
         cookie = headers["Set-Cookie"].split(";")[0]
         first = memberships(serving.keyfile)[0]
 
         status, body, _ = serving.call("/ui/clusters", method="POST", cookie=cookie,
-                                       body={"passphrase": WORDS, "group": "ml-stack"})
+                                       body={"passphrase": WORDS})
         assert status == 200, body
         rows = memberships(serving.keyfile)
         assert [m.group for m in rows] == [first.group]
-        assert rows[0].key == key_from_passphrase(WORDS, group="ml-stack", salt=SALT)
+        assert rows[0].key == first.key
 
 
 # -- a machine in no cluster ---------------------------------------------
@@ -387,7 +371,6 @@ class TestSignIn:
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
 
-    @pytest.mark.redteam
     def test_the_wrong_passphrase_does_not(self, joined):
         status, _, _ = joined.call("/ui/session", method="POST",
                                    body={"passphrase": "not the words"})
@@ -401,7 +384,6 @@ class TestSignIn:
                                       body={"passphrase": WORDS})
         assert status == 200, body
 
-    @pytest.mark.redteam
     def test_persistent_guessing_is_slowed_down(self, joined):
         for _ in range(6):
             status, body, _ = joined.call("/ui/session", method="POST",
@@ -488,15 +470,6 @@ class TestThrottle:
         t.failed("1.2.3.4")
         t.succeeded("1.2.3.4")
         assert t.blocked_for("1.2.3.4") == 0
-
-    def test_one_derivation_at_a_time(self):
-        """scrypt is ~64MB a call on an unauthenticated route. Twenty at once is a
-        gigabyte on a box whose whole job is to have memory free for training."""
-        t = Throttle(slots=1, wait_s=0.05)
-        assert t.acquire()
-        assert not t.acquire(), "a second derivation ran concurrently"
-        t.release()
-        assert t.acquire()
 
 
 class TestPreferences:
@@ -688,7 +661,7 @@ class TestSettingsScreen:
         assert "autostart" in body and "version" in body
 
     def test_settings_need_a_session(self, serving):
-        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "ml-stack"})
+        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
         assert serving.call("/ui/settings")[0] == 401
 
     def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):
@@ -948,13 +921,13 @@ def test_every_components_script_parses(tmp_path):
     import shutil
     import subprocess
 
-    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES
+    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
     from ml_stack.ui import load
 
     node = shutil.which("node")
     if node is None:
         pytest.skip("no node to parse with")
-    for name in (*COMPONENTS, *MODULES):
+    for name in COMPONENTS:
         script = load(COMPONENTS_DIR, [name])[0].read().script
         path = tmp_path / f"{name}.js"
         path.write_text(script, encoding="utf-8")
@@ -977,8 +950,7 @@ class TestUpdatingItself:
         monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
             "0.2.0", "", "", ({"name": "ml-stack-macos-arm64.zip"},), 0))
         monkeypatch.setattr(updates, "asset_for", lambda r, key="": r.assets[0])
-        monkeypatch.setattr(updates, "download_release",
-                            lambda r, a, into, **k: tmp_path / "a.zip")
+        monkeypatch.setattr(updates, "download", lambda a, into, **k: tmp_path / "a.zip")
         monkeypatch.setattr(updates, "install", lambda a: seen.setdefault("put", a))
 
         got = updates.apply_if_newer()

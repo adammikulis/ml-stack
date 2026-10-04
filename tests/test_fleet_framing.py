@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from ml_stack import macauth
+from ml_stack import macauth, sealing
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.framing import LimitedServer
@@ -57,11 +57,26 @@ def talk(port, raw: bytes, *, read_s=3.0, then=b"") -> tuple[int, bytes]:
     return int(head.split()[1]), body
 
 
+SEAL = 28
+"""What sealing adds to a body: a 12 byte nonce and a 16 byte tag."""
+
+
+def CL(n: int) -> bytes:
+    """The ``Content-Length`` line `signed` writes for a plain body of ``n`` bytes."""
+    return f"Content-Length: {n + SEAL if n else 0}".encode()
+
+
 def signed(served, method, path, body=b"", extra=""):
-    """A request line and headers carrying a valid signature."""
+    """A request line and headers carrying a valid signature, with its body sealed."""
     host = f"127.0.0.1:{served['port']}"
-    auth = macauth.sign(served["token"], method, f"http://{host}{path}", body)["Authorization"]
-    return (f"{method} {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: {auth}\r\n{extra}"
+    url = f"http://{host}{path}"
+    stamp = macauth.Stamp.now()
+    if body:
+        body = sealing.seal(sealing.box_key(served["token"]), body, sealing.request_data(
+            method, macauth.parts(url)[1], host, f"{stamp.at:.0f}", stamp.nonce))
+    auth = macauth.sign(served["token"], method, url, body, stamp)["Authorization"]
+    return (f"{method} {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: {auth}\r\n"
+            f"{sealing.HEADER}: 1\r\n{extra}"
             f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body
 
 
@@ -99,7 +114,7 @@ def test_a_captured_request_cannot_be_sent_again(served):
 
 def test_a_signed_request_cannot_be_altered(served):
     raw = signed(served, "POST", "/jobs", b'{"argv": ["true"]}')
-    forged = raw.replace(b'["true"]', b'["fals"]')
+    forged = raw[:-1] + bytes([raw[-1] ^ 1])
     assert talk(served["port"], forged)[0] == 401
     assert talk(served["port"], signed(served, "GET", "/jobs").replace(b"GET /jobs", b"GET /jobs?x=1"))[0] == 401
 
@@ -117,7 +132,7 @@ def test_an_address_that_keeps_guessing_is_locked_out(served):
 @pytest.mark.parametrize("length", ["abc", "-5", "1e3", "0x10", "5.0", "", "+5", "1 2", "9" * 40])
 def test_a_content_length_that_is_not_a_plain_number_is_refused(served, length):
     status, _ = talk(served["port"], signed(served, "POST", "/jobs", b"{}").replace(
-        b"Content-Length: 2", f"Content-Length: {length}".encode()))
+        CL(2), f"Content-Length: {length}".encode()))
     assert status in (400, 413)
 
 
@@ -128,7 +143,7 @@ def test_two_content_lengths_that_disagree_are_refused(served):
 
 def test_a_huge_content_length_is_refused_without_reading_it(served):
     started = time.monotonic()
-    raw = signed(served, "POST", "/jobs", b"{}").replace(b"Content-Length: 2",
+    raw = signed(served, "POST", "/jobs", b"{}").replace(CL(2),
                                                          b"Content-Length: 999999999999")
     assert talk(served["port"], raw)[0] == 413
     assert time.monotonic() - started < 1.0
@@ -136,12 +151,12 @@ def test_a_huge_content_length_is_refused_without_reading_it(served):
 
 def test_an_upload_over_the_cap_is_refused_before_its_body_is_sent(served):
     raw = signed(served, "PUT", "/files/big", b"x").replace(
-        b"Content-Length: 1", f"Content-Length: {25 << 20}".encode())
+        CL(1), f"Content-Length: {25 << 20}".encode())
     assert talk(served["port"], raw)[0] == 413
 
 
 def test_a_body_that_ends_early_is_refused(served):
-    raw = signed(served, "POST", "/jobs", b"{}").replace(b"Content-Length: 2",
+    raw = signed(served, "POST", "/jobs", b"{}").replace(CL(2),
                                                          b"Content-Length: 50")
     status, _ = talk(served["port"], raw[:-2] + b"{}")
     assert status in (400, 401, 408)
@@ -149,7 +164,7 @@ def test_a_body_that_ends_early_is_refused(served):
 
 def test_a_body_that_stops_arriving_ends_at_the_timeout(served):
     started = time.monotonic()
-    raw = signed(served, "POST", "/jobs", b"{}").replace(b"Content-Length: 2",
+    raw = signed(served, "POST", "/jobs", b"{}").replace(CL(2),
                                                          b"Content-Length: 50")
     status, _ = talk(served["port"], raw[:-2] + b"{", read_s=6.0)
     assert status in (0, 400, 401, 408) and time.monotonic() - started < 5.0
@@ -190,7 +205,7 @@ def test_a_range_that_cannot_be_served_is_refused(served):
 
 
 def test_query_numbers_that_are_not_numbers_fall_back(served):
-    job = served["peer"].submit(["true"])
+    job = served["peer"].submit(["python3", "-m", "ml_stack.fleet.calibration", "--budget", "0.05"])
     time.sleep(0.5)
     status, _ = talk(served["port"], signed(served, "GET", f"/jobs/{job['id']}/log?tail=abc"))
     assert status == 200

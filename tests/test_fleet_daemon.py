@@ -31,6 +31,7 @@ from ml_stack.fleet.jobs import DaemonError, JobRunner
 from ml_stack.fleet.remote import Peer, PeerError
 from ml_stack.fleet.settings import Settings
 from ml_stack.http import Server
+from tests.cluster_support import any_command
 
 
 def _free_port() -> int:
@@ -48,7 +49,7 @@ def daemon(tmp_path):
     runner = JobRunner(root)
     port = _free_port()
     httpd = Server(("127.0.0.1", port),
-                                make_handler(Daemon(runner, files, token)))
+                                make_handler(Daemon(runner, files, token, command=any_command)))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     client = Peer(f"http://127.0.0.1:{port}", token)
@@ -141,14 +142,6 @@ def test_a_job_that_cannot_start_is_failed_with_why(daemon, tmp_path):
     done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
     assert done["state"] == "failed" and done["returncode"] == -1
     assert client.log(job["id"]).startswith("failed to start:")
-
-
-def test_an_environment_value_that_is_not_a_string_reaches_the_job(daemon):
-    client, *_ = daemon
-    job = client.submit([sys.executable, "-c", "import os; print(os.environ['ANSWER'])"],
-                        env={"ANSWER": 42})
-    done = client.wait(job["id"], poll_s=0.2, timeout_s=30)
-    assert done["state"] == "done" and client.log(job["id"]).strip() == "42"
 
 
 @pytest.mark.slow
@@ -484,7 +477,7 @@ def multi_daemon(tmp_path):
     runner = JobRunner(root, slots=3)
     port = _free_port()
     httpd = Server(("127.0.0.1", port),
-                                make_handler(Daemon(runner, files, token)))
+                                make_handler(Daemon(runner, files, token, command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
     try:
@@ -713,7 +706,8 @@ def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
     httpd = Server(
         ("127.0.0.1", port),
         make_handler(Daemon(runner, root / "files", token, "rtx",
-                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"}))))
+                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"}),
+                     command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         health = Peer(f"http://127.0.0.1:{port}", token).health()
@@ -750,7 +744,8 @@ def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
     called = ["hollowbrook"]
     httpd = Server(
         ("127.0.0.1", port),
-        make_handler(Daemon(runner, root / "files", token, lambda: called[0])))
+        make_handler(Daemon(runner, root / "files", token, lambda: called[0],
+                                         command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Peer(f"http://127.0.0.1:{port}", token)
     try:
@@ -1086,9 +1081,3 @@ def test_a_job_does_not_inherit_the_daemons_tokens_and_keys(daemon, monkeypatch)
     assert "None kept" in client.log(job["id"])
 
 
-def test_a_job_gets_the_environment_its_submitter_names(daemon):
-    client, *_ = daemon
-    job = client.submit([sys.executable, "-c", "import os; print(os.environ['FROM_THE_PEER'])"],
-                        env={"FROM_THE_PEER": "asked-for"})
-    client.wait(job["id"], poll_s=0.2, timeout_s=30)
-    assert "asked-for" in client.log(job["id"])

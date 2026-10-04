@@ -150,6 +150,19 @@ wheel on the LAN for ten minutes to somebody who opens the address on it, and `b
 user@host --share DIR` (try `--dry-run` first) installs it over your own ssh keys. The design, the
 threat model and what is not built are in `docs/onboarding.md`.
 
+### How a machine joins
+
+The first machine to join a cluster makes its key: 256 random bits that no passphrase derives.
+A machine that joins later runs a password-authenticated key exchange (SPAKE2) with a daemon
+already in the cluster: both sides prove they know the passphrase, the passphrase is never
+sent and a listener cannot test a guess against anything it captures, and the daemon then sends
+the cluster key sealed under the key the exchange made. The exchange binds the daemon's
+certificate fingerprint, so a machine impersonating it is refused. A daemon counts every attempt
+against the address it came from; five attempts in ten minutes without a success lock that
+address out for ten minutes, and every attempt is logged with its source and outcome. A
+passphrase needs at least 5 characters. The routes are `POST /join/v1/start` and
+`/join/v1/finish` on the daemon, found by a datagram asking to join a cluster by name.
+
 ### The passphrase and the recovery file
 
 Joining with a passphrase stores it in the operating system's keystore (one Keychain prompt the
@@ -158,10 +171,11 @@ terminal and refuses when `CLAUDECODE` or `ML_STACK_NONINTERACTIVE` is set. If t
 cannot store it, the join says so once and the cluster still works. `ml-stack-fleet leave`
 removes the stored passphrase with the cluster.
 
-`ml-stack-fleet recovery export FILE` writes the cluster's group, salt and key to a mode 600 file,
+`ml-stack-fleet recovery export FILE` writes the cluster's group and key to a mode 600 file,
 and `ml-stack-fleet recovery import FILE` joins a machine from it. The file is a replacement for
 the passphrase when joining; it does not reveal the passphrase. Anyone holding it can run commands
-on every machine in the cluster.
+on every machine in the cluster. A machine that joined from a file holds no passphrase, so it
+cannot take other machines in or sign the web interface in by passphrase.
 
 With neither the passphrase nor a recovery file, run `ml-stack-fleet leave` on every machine,
 then join each with a new passphrase.
@@ -230,8 +244,9 @@ survives a reboot.
 
 Discovery is multicast on UDP port **8771** (`239.255.77.70`, TTL 1 -- it never leaves the
 segment), one above the daemon's HTTP port 8770 so one firewall rule covers both;
-`$ML_STACK_DISCOVERY_PORT` moves it. Beacons are signed with the key the passphrase derives,
-so a machine that does not hold it hears nothing and is heard by nobody. There is one
+`$ML_STACK_DISCOVERY_PORT` moves it. Each datagram is sealed with AES-256-GCM under a key
+derived from the cluster key, so a machine that does not hold it hears nothing, is heard by
+nobody and captures nothing a passphrase guess can be tested against. There is one
 discovery mechanism: `ml-stack-peers ls`, the app's Cluster view and `ml-stack-fleet status`
 all read the same beacons.
 
@@ -242,11 +257,25 @@ HMAC-SHA256 over the method, target, `Host`, body, a timestamp and a nonce, keye
 derived from the cluster key, so the secret never crosses the wire; a request is refused
 outside a two minute window or if its nonce was seen, and an address that fails ten times in a
 minute is locked out for a minute. An unsigned `/health` from another machine says only that
-a daemon is there. The web interface answers this machine only unless `--ui-from-lan` is
-given, because it signs in with the passphrase over plain HTTP. A passphrase is at least 12
-characters; `ml-stack-peers init` makes a random key instead. Nothing is encrypted in
-transit: the signature gives authenticity, integrity and replay protection, not secrecy,
-so a cluster belongs on a network you trust (`docs/security.md`).
+a daemon is there.
+
+**What is encrypted.** A signed request's body is sealed with AES-256-GCM under a second key
+derived from the cluster key, separate from the signing secret. The method, target, `Host`,
+timestamp and nonce are authenticated data, so a body cannot be moved to another request, and
+the answer is sealed with the request's nonce and the status as authenticated data, so it
+cannot be moved to another answer. A body that is not sealed, or does not authenticate, is
+refused with 400, and a peer refuses an answer that should have been sealed and was not.
+Beacons are sealed under the same derived key. File downloads, model downloads and the
+streamed output of the `/infer` proxy are signed but not sealed by the application; they travel
+inside the daemon's TLS, which every connection from another machine uses. The web interface
+answers other machines (`--ui-from-lan`) over TLS only; it signs in with the passphrase, which
+is sent to this machine's own address or inside TLS and never over plain HTTP.
+
+**What a peer may run.** `POST /jobs` accepts `ml-stack-bench ...` and
+`python -m ml_stack.fleet.calibration ...`, run in the daemon's own folder with its own
+environment, and refuses any other program, any `cwd` and any `env` from the wire. A fleet
+sweep (`ml-stack-bench sweep --fleet`) dispatches measurements through `POST /bench`, which
+takes a typed job and no command line.
 
 The app's Cluster view has the same Join button, and a "Run across the fleet" form that
 builds `ml-stack-bench sweep --fleet --serve MODEL ...` from the models the peers hold,

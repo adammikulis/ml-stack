@@ -177,7 +177,7 @@ def adopt(grant: Grant, directory: Path, *, cluster_path: Path | str | None = No
     joined = False
     if grant.key:
         rows = [m for m in memberships(cluster_path) if m.group != grant.group]
-        rows.insert(0, Membership(group=grant.group, key=grant.key.encode(), salt=grant.salt))
+        rows.insert(0, Membership(group=grant.group, key=grant.key.encode()))
         write_memberships(rows, cluster_path)
         joined = True
     write_json(directory / "trust.json", {"schema_version": 1, "certificate": grant.certificate,
@@ -240,7 +240,7 @@ def cmd_listen(args: argparse.Namespace) -> int:
             return Grant(certificate=ident.beacon, signing_key=signer_pub, device_secret=secret,
                          share_port=share_port, name=me)
         m = held[0]
-        return Grant(group=m.group, key=m.key.decode(), salt=m.salt, certificate=ident.beacon,
+        return Grant(group=m.group, key=m.key.decode(), certificate=ident.beacon,
                      signing_key=signer_pub, device_secret=secret, share_port=share_port, name=me)
 
     def learned(request: Request, offer: Offer) -> None:

@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
 __all__ = ["PREFIX", "SCHEME", "Authenticator", "Lockout", "Stamp", "Verdict", "derive",
-           "sign", "unwrap"]
+           "parts", "sign", "unwrap"]
 
 SCHEME = "ML-Stack-MAC"
 PREFIX = "mlsk1."
@@ -50,9 +50,10 @@ def key_id(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()[:8]
 
 
-def _target(url: str) -> tuple[str, str]:
-    parts = urllib.parse.urlsplit(url)
-    return parts.netloc, (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+def parts(url: str) -> tuple[str, str]:
+    """``(host, target)`` of a URL: what a signature covers of where the request goes."""
+    split = urllib.parse.urlsplit(url)
+    return split.netloc, (split.path or "/") + (f"?{split.query}" if split.query else "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +69,7 @@ class Stamp:
 
 
 def _canonical(method: str, url: str, body: bytes | None, stamp: Stamp) -> bytes:
-    host, target = _target(url)
+    host, target = parts(url)
     body_hash = hashlib.sha256(body).hexdigest() if body else EMPTY
     return "\n".join((SCHEME, method.upper(), target, host, body_hash, f"{stamp.at:.0f}",
                       stamp.nonce)).encode()
@@ -91,6 +92,10 @@ class Verdict:
     ok: bool
     reason: str = ""
     locked: bool = False
+    secret: str = ""
+    """The secret that signed it, when it is authentic."""
+    at: str = ""
+    nonce: str = ""
 
 
 class Lockout:
@@ -171,19 +176,20 @@ class Authenticator:
             return Verdict(False, "request is not signed")
         if abs(self.clock() - int(stamp)) > self.window_s:
             return Verdict(False, "request time is outside the window; check the clocks")
-        _, target = _target(url)
+        _, target = parts(url)
         wanted = _canonical(method, f"//{headers.get('Host', '')}{target}", body,
                             Stamp(float(stamp), nonce))
-        match = False
+        match = ""
         for secret in self.secrets():
             if secret and hmac.compare_digest(kid, key_id(secret)):
                 good = hmac.new(secret.encode(), wanted, hashlib.sha256).hexdigest()
-                match = hmac.compare_digest(mac, good) or match
+                if hmac.compare_digest(mac, good):
+                    match = secret
         if not match:
             return Verdict(False, "request is not signed")
         if not self._fresh(nonce):
             return Verdict(False, "request was already seen")
-        return Verdict(True)
+        return Verdict(True, secret=match, at=stamp, nonce=nonce)
 
     def _fresh(self, nonce: str) -> bool:
         with self._lock:

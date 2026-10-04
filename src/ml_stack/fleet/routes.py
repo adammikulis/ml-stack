@@ -11,19 +11,20 @@ from typing import Any
 
 from ml_stack.ui import assets as ui_assets
 
-from . import lan_clusters
+from . import lan_clusters, recovery
 from .conversation_routes import ConversationRoutes
 from .discovery import (
     DiscoveryError,
     cluster_group,
-    derive_token,
     in_cluster,
     load_cluster_key,
+    memberships,
     require_name,
 )
 from .extension_routes import ExtensionRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
+from .onboard.joining import join_by_passphrase
 from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .room_routes import RoomRoutes
@@ -732,7 +733,6 @@ class ClusterRoutes:
         return True
 
     def _clusters(self) -> bool:
-        from .discovery import SEARCH, join, memberships
         ui = self.ui
         if self.method == "GET":
             self.send(200, {"clusters": [m.public() for m in
@@ -743,10 +743,12 @@ class ClusterRoutes:
             words = str(req.get("passphrase") or "")
             try:
                 group = require_name(req.get("group"))
-                rows = join(words, group=group, path=ui.cluster_key_path, salting=SEARCH)
+                join_by_passphrase(words, group, ui.cluster_key_path)
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True
+            recovery.remember(words, group, ui.cluster_key_path)
+            rows = memberships(ui.cluster_key_path)
             ui.rejoined()
             self.send(200, {"clusters": [m.public() for m in rows], "joined": group})
             return True

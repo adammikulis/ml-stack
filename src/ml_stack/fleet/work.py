@@ -5,8 +5,8 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from ml_stack.log import emitting
@@ -29,8 +29,6 @@ class Unit:
     id: str
     argv: Sequence[str]
     name: str = ""
-    cwd: str = ""
-    env: Mapping[str, str] = field(default_factory=dict)
     requires: Requires = Requires()
     peer: str = ""
     """Pin to one peer, by name or machine id. Empty means place it automatically."""
@@ -127,8 +125,7 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
             place.started_at = place.started_at or time.time()
             emit("start", unit=uid, peer=name, attempt=place.attempts)
             try:
-                job = peer.submit(list(unit.argv), name=unit.name or uid,
-                                  cwd=unit.cwd, env=dict(unit.env))
+                job = peer.submit(list(unit.argv), name=unit.name or uid)
                 place.job_id = job["id"]
                 with lock:
                     live[uid] = (peer, job["id"])

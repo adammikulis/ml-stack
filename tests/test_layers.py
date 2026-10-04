@@ -21,7 +21,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("activity", "asking", "backend", "checks", "command", "contracts", "credentials", "data",
               "entities", "extraction", "files", "gate", "geo",
               "home", "http", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "limits",
-              "lock", "log", "macauth",
+              "lock", "log", "macauth", "sealing",
               "markup", "sandbox",
               "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
               "records", "requests", "person", "safetext", "serverkeys",

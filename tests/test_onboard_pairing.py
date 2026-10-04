@@ -58,7 +58,7 @@ def test_the_right_code_pairs_and_delivers_the_grant(world):
     code = world.rq.accept(request_id, mine=True).code
     assert c.state() == "accepted"
     grant = c.finish(code)
-    assert (grant.group, grant.key, grant.salt) == ("home", "secret-cluster-key", "c2FsdA")
+    assert (grant.group, grant.key) == ("home", "secret-cluster-key")
     assert grant.certificate == world.acceptor.beacon
     assert world.rq.get(request_id).state is State.PAIRED
     device = world.rq.devices.all()[0]

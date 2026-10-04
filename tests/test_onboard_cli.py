@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack.fleet import discovery
+from tests.cluster_support import join as cluster_join
 
 FP1 = "1" * 64
 
@@ -74,8 +75,7 @@ def owner(tmp_path):
     """A machine with a cluster, listening for pairing on loopback."""
     env = env_for(tmp_path / "owner")
     key_path = tmp_path / "owner" / "cluster.key"
-    discovery.join("a-long-enough-passphrase", path=key_path,
-                   salting=discovery.Salting(salt=b"s" * 16))
+    cluster_join("a-long-enough-passphrase", path=key_path)
     state = tmp_path / "owner" / "state"
     proc = spawn(env, "listen", "--json", "--state", str(state), "--host", "127.0.0.1",
                  "--port", "0", "--no-announce", "--for", "120s")
@@ -131,7 +131,7 @@ def test_the_whole_conversation_across_three_processes(owner, tmp_path):
     # the new machine now holds the cluster key the owner holds
     mine = discovery.memberships(tmp_path / "newbox" / "cluster.key")
     theirs = discovery.memberships(owner.key_path)
-    assert mine and mine[0].key == theirs[0].key and mine[0].salt == theirs[0].salt
+    assert mine and mine[0].key == theirs[0].key
     # and the owner can see it and revoke it
     devices = json.loads((owner.state / "devices.json").read_text())["devices"]
     assert devices[0]["name"] == "new-box" and devices[0]["status"] == "active"
@@ -359,8 +359,7 @@ def test_a_click_on_accept_in_the_dialog_accepts_the_request_and_the_code_comes_
     env = {**env_for(tmp_path / "owner"), "ML_STACK_NOTIFY": "system", "FAKE_DIALOGS": str(record),
            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
     key_path = tmp_path / "owner" / "cluster.key"
-    discovery.join("a-long-enough-passphrase", path=key_path,
-                   salting=discovery.Salting(salt=b"s" * 16))
+    cluster_join("a-long-enough-passphrase", path=key_path)
     state = tmp_path / "owner" / "state"
     listener = spawn(env, "listen", "--json", "--state", str(state), "--host", "127.0.0.1",
                      "--port", "0", "--no-announce", "--for", "120s")

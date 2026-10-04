@@ -59,6 +59,8 @@ ALLOWED: dict[str, str] = {
                                  "(fleet/onboard/lan.py)",
     "fleet/onboard/pairing.py": "the pairing exchange with a device on this network, confirmed "
                                 "by a code and the certificate fingerprint (fleet/onboard/lan.py)",
+    "fleet/onboard/joining.py": "the join handshake with a daemon on this network, proved by the "
+                                "passphrase and the certificate fingerprint (fleet/onboard/lan.py)",
     "fleet/onboard/routes.py": "asks a paired device's address for its certificate; a public address "
                                "is refused first and only the pinned certificate counts "
                                "(fleet/onboard/lan.py)",
@@ -205,7 +207,7 @@ def test_a_sibling_module_named_like_a_library_is_not_the_library(tmp_path, sour
 def test_every_module_that_may_open_a_peer_connection_checks_the_address_first():
     """The onboarding exemption is only as good as `require_local`: each module on the list for
     it calls it before it connects, and none builds a client that trusts the system store."""
-    for rel in ("fleet/onboard/transfer.py", "fleet/onboard/pairing.py"):
+    for rel in ("fleet/onboard/transfer.py", "fleet/onboard/pairing.py", "fleet/onboard/joining.py"):
         source = (ROOT / rel).read_text(encoding="utf-8")
         assert "require_local" in source, rel
         assert "create_default_context" not in source, rel

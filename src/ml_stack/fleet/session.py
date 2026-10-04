@@ -100,20 +100,14 @@ class Sessions:
 
 @dataclass
 class Throttle:
-    """Serialises expensive derivations and backs off a source that keeps guessing."""
+    """Backs off a source that keeps guessing."""
 
-    slots: int = 1
-    wait_s: float = 2.0
     free_attempts: int = 3
     """Wrong guesses before any delay is imposed. Not one: people mistype, and someone"""
     base_backoff_s: float = 1.0
     max_backoff_s: float = 30.0
-    _sem: threading.Semaphore = field(init=False)
     _fails: dict[str, tuple[int, float]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def __post_init__(self) -> None:
-        self._sem = threading.Semaphore(self.slots)
 
     def blocked_for(self, source: str) -> float:
         """Seconds this source must still wait, or 0."""
@@ -121,13 +115,6 @@ class Throttle:
             _count, until = self._fails.get(source, (0, 0.0))
         left = until - time.time()
         return 0.0 if left <= 0 else max(1.0, left)
-
-    def acquire(self) -> bool:
-        """A derivation slot, or False if the queue is already too deep."""
-        return self._sem.acquire(timeout=self.wait_s)
-
-    def release(self) -> None:
-        self._sem.release()
 
     def failed(self, source: str) -> float:
         """Record a wrong guess. Returns how long this source is now held off."""

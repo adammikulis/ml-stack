@@ -289,8 +289,10 @@ tests = [
   "tests/test_redteam_fleet.py::test_no_protected_route_answers_without_the_right_token",
   "tests/test_redteam_fleet.py::test_no_path_reaches_a_file_outside_the_files_directory",
   "tests/test_fleet_framing.py",
+  "tests/test_fleet_commands.py",
+  "tests/test_fleet_handshake.py",
 ]
-note = "authentication, traversal and framing are attacked; the JSON bodies of /jobs, /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+note = "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
 
 [[group]]
 match = ["route:fleet/framing.py:*"]
@@ -298,7 +300,7 @@ status = "covered"
 tests = ["tests/test_fleet_framing.py"]
 
 [[group]]
-match = ["route:fleet/routes.py:*", "handler:fleet/ui.py:*"]
+match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]
 status = "partial"
 tests = [
   "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",

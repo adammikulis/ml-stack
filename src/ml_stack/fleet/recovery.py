@@ -20,10 +20,9 @@ from .discovery import (
     DEFAULT_CLUSTER,
     DiscoveryError,
     Membership,
-    _write_memberships,
+    adopt,
     clusters_path,
     memberships,
-    require_name,
 )
 
 PURPOSE = "fleet-passphrase"
@@ -73,6 +72,17 @@ def recall(group: str = "", path: Path | str | None = None) -> str | None:
     return _store().unwrap(PURPOSE, group, base64.b64decode(blob)).decode()
 
 
+def matches(passphrase: str, group: str = "", path: Path | str | None = None) -> bool:
+    """Whether ``passphrase`` is the one stored for ``group`` (default: the first cluster)."""
+    import hmac
+
+    try:
+        held = recall(group, path)
+    except keystore.KeystoreError:
+        return False
+    return held is not None and hmac.compare_digest(held.strip().encode(), passphrase.strip().encode())
+
+
 def forget(group: str, path: Path | str | None = None) -> None:
     """Drop the stored passphrase for ``group``."""
     rows = _held(path)
@@ -86,12 +96,12 @@ def forget(group: str, path: Path | str | None = None) -> None:
 
 
 def export_recovery(file: Path | str, group: str = "", path: Path | str | None = None) -> Membership:
-    """Write the group, salt and key of a cluster this machine is in to ``file`` (mode 600)."""
+    """Write the group and key of a cluster this machine is in to ``file`` (mode 600)."""
     rows = memberships(path)
     held = next((m for m in rows if not group or m.group == group), None)
     if held is None:
         raise DiscoveryError("this machine is in no cluster" if not group else f"not in a cluster called '{group}'")
-    body = json.dumps({"group": held.group, "salt": held.salt, "key": held.key.decode()}, indent=1)
+    body = json.dumps({"group": held.group, "key": held.key.decode()}, indent=1)
     target = home.expand(file)
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as out:
@@ -100,37 +110,17 @@ def export_recovery(file: Path | str, group: str = "", path: Path | str | None =
     return held
 
 
-def parse_recovery(text: str) -> Membership:
-    """Read the cluster name, salt and key from bounded recovery-file text."""
-    try:
-        if not isinstance(text, str) or len(text.encode("utf-8")) > 8192:
-            raise ValueError("recovery file is too large")
-        data = json.loads("\n".join(ln for ln in text.splitlines() if not ln.startswith("#")))
-        if not isinstance(data, dict) or not isinstance(data.get("key"), str):
-            raise ValueError("invalid recovery object")
-        key = data["key"]
-        salt = data.get("salt", "")
-        if not isinstance(salt, str) or len(base64.b64decode(key + "=" * (-len(key) % 4), altchars=b"-_", validate=True)) != 32:
-            raise ValueError("invalid recovery key")
-        member = Membership(group=require_name(data.get("group")), key=key.encode("ascii"), salt=salt)
-        if salt and not 16 <= len(member.salt_bytes()) <= 64:
-            raise ValueError("invalid recovery salt")
-        return member
-    except (ValueError, TypeError, UnicodeError) as exc:
-        raise DiscoveryError("not a valid cluster recovery file") from exc
-
-
-def adopt_recovery(member: Membership, path: Path | str | None = None) -> Membership:
-    """Save a parsed membership, replacing only the same named cluster."""
-    _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
-    return member
-
-
 def import_recovery(file: Path | str, path: Path | str | None = None) -> Membership:
-    """Join from a recovery file, replacing any membership of the same cluster."""
-    with home.expand(file).open() as source:
-        member = parse_recovery(source.read(8193))
-    return adopt_recovery(member, path)
+    """Join the cluster a recovery file describes, replacing any membership of the same group."""
+    text = home.expand(file).read_text()
+    try:
+        data = json.loads("\n".join(ln for ln in text.splitlines() if not ln.startswith("#")))
+        member = Membership(group=str(data["group"]), key=str(data["key"]).encode())
+    except (ValueError, KeyError, TypeError) as exc:
+        raise DiscoveryError(f"{file} is not a recovery file") from exc
+    if not member.key:
+        raise DiscoveryError(f"{file} is not a recovery file")
+    return adopt(member, path)
 
 
 def add_commands(sub: Any) -> None:

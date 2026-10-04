@@ -19,7 +19,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate, macauth, serverkeys
+from ml_stack import gate, macauth, sealing, serverkeys
 from ml_stack.httpguard import Limits, Refused, resolve, split
 
 USER_AGENT = "ml-stack"
@@ -134,29 +134,69 @@ def shown(url: str) -> str:
     return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, query, ""))
 
 
+@dataclass(frozen=True, slots=True)
+class Sealed:
+    """What opens the answer to a request that was signed with a fleet secret."""
+
+    key: bytes = b""
+    nonce: str = ""
+
+    def open(self, status: int, headers: Any, body: bytes) -> bytes:
+        """``body`` opened when the server sealed it, else as it came."""
+        if not self.key:
+            return body
+        if not headers.get(sealing.HEADER):
+            plain = status >= 400 or not body or "json" not in str(headers.get("Content-Type", ""))
+            if plain:
+                return body
+            raise ServerError("the answer was not sealed", status=status)
+        try:
+            return sealing.open_(self.key, body, sealing.response_data(self.nonce, status))
+        except sealing.SealError as exc:
+            raise ServerError(f"the answer did not authenticate ({exc})", status=status) from exc
+
+
+class _Request(urllib.request.Request):
+    """A request that remembers what opens its answer."""
+
+    sealed = Sealed()
+
+
 def build_request(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None,
                   token: str = "") -> urllib.request.Request:
     """A request carrying the caller's headers, a user agent and its credential.
 
     A ``token`` (or ``Authorization: Bearer`` header) that is a fleet MAC secret signs the
-    request instead of being sent; any other token is sent as a bearer token.
+    request instead of being sent, and seals its body (`ml_stack.sealing`). Any other token
+    is sent as a bearer token.
     """
     if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
         raise ServerError(f"only http(s) is fetched, not {shown(url)}")
     sent = {"User-Agent": USER_AGENT}
     sent.update(headers or {})
+    opens = Sealed()
     verb = method or ("POST" if data is not None else "GET")
     secret = token if token.startswith(macauth.PREFIX) else macauth.unwrap(
         sent.get("Authorization", ""))
     if secret:
         sent.pop("Authorization", None)
-        sent.update(macauth.sign(secret, verb, url, data))
+        stamp = macauth.Stamp.now()
+        key = sealing.box_key(secret)
+        host, target = macauth.parts(url)
+        if data:
+            data = sealing.seal(key, data, sealing.request_data(
+                verb, target, host, f"{stamp.at:.0f}", stamp.nonce))
+        sent.update(macauth.sign(secret, verb, url, data, stamp))
+        sent.setdefault(sealing.HEADER, "1")
+        opens = Sealed(key, stamp.nonce)
     elif token:
         sent["Authorization"] = f"Bearer {token}"
     elif "Authorization" not in sent and (leased := serverkeys.for_url(url)):
         sent["Authorization"] = f"Bearer {leased}"
-    return urllib.request.Request(url, data=data, method=verb, headers=sent)  # noqa: S310 - http(s) only
+    request = _Request(url, data=data, method=verb, headers=sent)
+    request.sealed = opens
+    return request
 
 
 class _Guarded(urllib.request.HTTPRedirectHandler):
@@ -197,10 +237,13 @@ def open_stream(url: str, *, data: bytes | None = None, method: str | None = Non
     for attempt in range(tries):
         request = build_request(url, data=data, method=method, headers=headers, token=token)
         try:
-            return _open(request, timeout, guard)
+            response = _open(request, timeout, guard)
+            response.sealed = request.sealed
+            return response
 
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:500]
+            raw = request.sealed.open(exc.code, exc.headers, exc.read())
+            detail = raw.decode("utf-8", "replace")[:500]
             last = ServerError(f"{shown(url)} -> HTTP {exc.code}: {detail}", status=exc.code,
                                body=detail, headers=exc.headers)
             if exc.code not in retry.on_status:
@@ -263,10 +306,13 @@ def head_once(url: str, *, headers: dict[str, str] | None = None, token: str = "
 def request_bytes(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None, token: str = "",
                   timeout: float = 180.0, retry: Retry = ONCE) -> Reply:
-    """Send a request and read the whole answer."""
-    with _queued(url), open_stream(url, data=data, method=method, headers=headers,
+    """Send a request and read the whole answer, opened when the server sealed it."""
+    asking = {**(headers or {}), sealing.HEADER: "2"}
+    with _queued(url), open_stream(url, data=data, method=method, headers=asking,
                                    token=token, timeout=timeout, retry=retry) as response:
-        return Reply(int(response.status), response.read(), response.headers)
+        status = int(response.status)
+        opens = getattr(response, "sealed", Sealed())
+        return Reply(status, opens.open(status, response.headers, response.read()), response.headers)
 
 
 def request_json(url: str, *, payload: dict[str, Any] | None = None,

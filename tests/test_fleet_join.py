@@ -180,7 +180,7 @@ class TestJoin:
         """Writing the key file under a running daemon leaves it announcing the old set;
         the cluster has to go in through the daemon, which re-reads them."""
         tcp = _free_tcp()
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         # Already in a cluster, already running, before `join` is asked for a second one.
         join_cluster(WORDS, group="home", path=key)
@@ -202,7 +202,7 @@ class TestJoin:
     @pytest.mark.slow
 
     def test_already_in_a_cluster_needs_no_passphrase(self, tmp_path, key, udp, daemons):
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -369,7 +369,7 @@ class TestStatus:
     @pytest.mark.slow
 
     def test_peers_lists_one_machine_once_across_two_clusters(self, key, udp, daemons):
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
@@ -387,7 +387,7 @@ class TestStatus:
         assert sorted(rows[0]["clusters"]) == ["home", "lab"]
 
     def test_status_command_prints_json_rows(self, key, udp, daemons, monkeypatch, capsys):
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -401,7 +401,7 @@ class TestStatus:
 
     def test_two_machines_of_one_name_are_listed_apart(self, key, udp, daemons,
                                                         monkeypatch, capsys):
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         tcp = _free_tcp()
@@ -467,7 +467,7 @@ class TestStatus:
 # -- leaving ---------------------------------------------------------------------------
 class TestLeave:
     def test_leave_drops_the_cluster_the_service_and_the_daemon_it_started(self, tmp_path, key):
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         # A process standing in for the daemon `join` started, stopped by pid, never by name.
@@ -490,7 +490,7 @@ class TestLeave:
                 child.kill()
 
     def test_leave_one_group_keeps_the_other(self, tmp_path, key):
-        from ml_stack.fleet.discovery import join as join_cluster
+        from tests.cluster_support import join as join_cluster
 
         join_cluster(WORDS, group="home", path=key)
         join_cluster("other words here", group="lab", path=key)
@@ -713,7 +713,7 @@ class PausableDaemon:
 @pytest.fixture
 def cluster(tmp_path, key, udp):
     """Three peers on loopback in one cluster, and the root a command would keep."""
-    from ml_stack.fleet.discovery import join as join_cluster
+    from tests.cluster_support import join as join_cluster
 
     join_cluster(WORDS, group="home", path=key)
     made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n)
@@ -968,8 +968,9 @@ class TestWhoAPauseIsSentTo:
     """`pausing.peer_clients` builds the clients `pause_fleet` posts to."""
 
     def test_a_row_gets_a_client_holding_the_token_its_cluster_derives(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, join as join_cluster
+        from ml_stack.fleet.discovery import derive_token
         from ml_stack.fleet.pausing import peer_clients
+        from tests.cluster_support import join as join_cluster
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)
@@ -989,8 +990,8 @@ class TestWhoAPauseIsSentTo:
         assert clients["workshop"].timeout == 12.5
 
     def test_a_row_no_key_of_this_machine_reaches_gets_no_client(self, tmp_path):
-        from ml_stack.fleet.discovery import join as join_cluster
         from ml_stack.fleet.pausing import peer_clients
+        from tests.cluster_support import join as join_cluster
 
         key = tmp_path / "clusters.json"
         join_cluster("nine blue kettles", group="studio", path=key)

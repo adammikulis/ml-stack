@@ -47,6 +47,7 @@ from ml_stack.fleet.sweeps import (
     wait,
 )
 from ml_stack.http import Server
+from tests.cluster_support import any_command
 
 G = 2**30
 COMMIT = "ab12cd3"
@@ -113,7 +114,8 @@ def _box(tmp_path: Path, name: str, *, room: int, launch=None, busy: bool = Fals
         return {"cpus": 8, **host.report()}
 
     httpd = Server(("127.0.0.1", 0),
-                                make_handler(Daemon(runner, files, token, name, report, bench=host)))
+                                make_handler(Daemon(runner, files, token, name, report, bench=host,
+                                         command=any_command)))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     peer = Peer(f"http://127.0.0.1:{httpd.server_address[1]}", token)
     box = Box(name=name, peer=peer, host=host, runner=runner, home=home, httpd=httpd)

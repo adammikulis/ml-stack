@@ -19,11 +19,12 @@ from test_fleet_ui import WORDS, Serving as UIServing
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.chat import find, targets
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import Salting, join_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Serving
 from ml_stack.http import Server, ServerError, open_stream
 from ml_stack.testing.fakes import FakeLlamaServer, Served
+from tests.cluster_support import a_keystore, join_cluster  # noqa: F401
+from tests.keystore_support import counting  # noqa: F401
 
 PIECES = ["Hel", "lo", " there"]
 
@@ -33,16 +34,19 @@ def tmp_path_of(ui):
 
 
 
-SALT = b"a-test-clusters-salt"
 
 
 @pytest.fixture(autouse=True)
-def the_cluster_already_exists(monkeypatch):
-    """The machines in these tests join a cluster whose salt every one of them is told."""
-    from ml_stack.fleet import discovery
+def the_passphrase_is_kept(a_keystore):  # noqa: F811
+    """Joining stores the passphrase and signing in compares against it."""
 
-    monkeypatch.setattr(discovery, "find_salt", lambda passphrase, group="ml-stack", **_: (
-        SALT, discovery.key_from_passphrase(passphrase, group=group, salt=SALT)))
+
+@pytest.fixture(autouse=True)
+def nobody_else_is_on_the_network(monkeypatch):
+    """A join finds no machine to shake hands with, so it makes the cluster."""
+    from ml_stack.fleet.onboard import joining
+
+    monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
 
 
 def _free_port() -> int:
@@ -67,7 +71,7 @@ def host(tmp_path, model_server):
     root = tmp_path / "host"
     files = root / "files"
     files.mkdir(parents=True)
-    key = join_cluster(WORDS, group="home", path=tmp_path / "host.key", salting=Salting(SALT))
+    key = join_cluster(WORDS, group="home", path=tmp_path / "host.key")
     token = load_or_create_token(root, key)
     serving = Serving(root / "serving.json")
     serving.register(model_server, ["qwen3-4b.gguf"])
@@ -122,7 +126,7 @@ class TestChattingThroughTheInterface:
     def bare(self, tmp_path, host):
         """A machine that installed nothing: no model store, nothing serving."""
         ui = UIServing(tmp_path / "bare", name="laptop")
-        join_cluster(WORDS, group="home", path=ui.keyfile, salting=Salting(SALT))
+        join_cluster(WORDS, group="home", path=ui.keyfile)
         ui.call("/ui/setup/join", method="POST",
                 body={"passphrase": WORDS, "group": "home"})
         _, _, headers = ui.call("/ui/session", method="POST",
@@ -408,7 +412,8 @@ class TestAnsweringToSeveralClusters:
             return exc.status
 
     def test_either_cluster_can_reach_it(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, join
+        from ml_stack.fleet.discovery import derive_token
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(WORDS, group="home", path=anchor)
@@ -428,7 +433,8 @@ class TestAnsweringToSeveralClusters:
             httpd.server_close()
 
     def test_a_cluster_it_left_is_refused(self, tmp_path):
-        from ml_stack.fleet.discovery import derive_token, join, leave, memberships
+        from ml_stack.fleet.discovery import derive_token, leave, memberships
+        from tests.cluster_support import join
 
         anchor = tmp_path / "cluster.key"
         join(WORDS, group="home", path=anchor)

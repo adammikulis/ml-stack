@@ -22,7 +22,7 @@ from test_hub_pull import blob
 from test_onboard_cli import env_for, fleet as run_fleet, read_document, spawn, stop
 
 from ml_stack import hub, sentinel
-from ml_stack.fleet import discovery, tls
+from ml_stack.fleet import tls
 from ml_stack.fleet.onboard import modelstore, pake, peerfirst, peerlearn
 from ml_stack.fleet.onboard.human import mint
 from ml_stack.fleet.onboard.manifest import DEFAULT_CHUNK, Entry
@@ -43,6 +43,7 @@ from ml_stack.hub.peerbook import PeerBook
 from ml_stack.hub.places import Place
 from ml_stack.safenames import Unsafe
 from ml_stack.sentinel.store import Holding
+from tests.cluster_support import join as cluster_join
 
 KIB = 1024
 FP = "a" * 64
@@ -171,8 +172,7 @@ def test_two_devices_with_one_name_do_not_overwrite_each_other(tmp_path):
 def start_owner(tmp_path, *listen_args):
     env = env_for(tmp_path / "owner")
     key_path = tmp_path / "owner" / "cluster.key"
-    discovery.join("a-long-enough-passphrase", path=key_path,
-                   salting=discovery.Salting(salt=b"s" * 16))
+    cluster_join("a-long-enough-passphrase", path=key_path)
     state = tmp_path / "owner" / "state"
     port = free_port()
     proc = spawn(env, "listen", "--json", "--state", str(state), "--host", "127.0.0.1",

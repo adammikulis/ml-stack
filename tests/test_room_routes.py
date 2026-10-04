@@ -9,18 +9,22 @@ import platform
 
 import pytest
 from conftest import write_gguf
-from test_fleet_ui import SALT, WORDS, Serving
+from test_fleet_ui import WORDS, Serving, a_keystore, counting  # noqa: F401
 from test_wired import Recorder, dense
 
 from ml_stack.serve import wired, wired_apply as apply
 
 
 @pytest.fixture(autouse=True)
-def the_cluster_already_exists(monkeypatch, tmp_path):
-    from ml_stack.fleet import discovery
+def the_passphrase_is_kept(a_keystore):  # noqa: F811
+    """Joining stores the passphrase and signing in compares against it."""
 
-    monkeypatch.setattr(discovery, "find_salt", lambda passphrase, group="ml-stack", **_: (
-        SALT, discovery.key_from_passphrase(passphrase, group=group, salt=SALT)))
+
+@pytest.fixture(autouse=True)
+def the_cluster_already_exists(monkeypatch, tmp_path):
+    from ml_stack.fleet.onboard import joining
+
+    monkeypatch.setattr(joining, "find_joiners", lambda *a, **k: [])
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     for name in apply.AGENT_MARKERS:

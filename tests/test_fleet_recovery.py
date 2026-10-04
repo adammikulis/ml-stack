@@ -4,6 +4,7 @@ fake keyring backend; the real one is never touched."""
 
 from __future__ import annotations
 
+import json
 import socket
 import stat
 
@@ -14,14 +15,13 @@ from ml_stack.fleet import recovery
 from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
-    Salting,
     discover,
-    join_cluster,
     load_cluster_key,
     memberships,
 )
 from ml_stack.fleet.join import leave_machine, main
 from ml_stack.keystore import Keystore, Wires
+from tests.cluster_support import join_cluster
 from tests.keystore_support import counting  # noqa: F401
 
 WORDS = "quince larch marlow"
@@ -41,7 +41,7 @@ def _udp_port() -> int:
 
 
 def _join(path, group="lab"):
-    join_cluster(WORDS, group=group, path=path, salting=Salting(salt=b"s" * 16))
+    join_cluster(WORDS, group=group, path=path)
     recovery.remember(WORDS, group, path)
 
 
@@ -59,7 +59,7 @@ def test_a_keystore_that_refuses_is_said_once_and_the_join_stands(tmp_path, monk
 
     monkeypatch.setattr(recovery, "_store", refuse)
     key = tmp_path / "cluster.key"
-    join_cluster(WORDS, group="lab", path=key, salting=Salting(salt=b"s" * 16))
+    join_cluster(WORDS, group="lab", path=key)
     said: list[str] = []
     recovery.remember(WORDS, "lab", key, say=said.append)
     assert len(said) == 1 and "not saved" in said[0]
@@ -101,6 +101,8 @@ def test_export_then_import_joins_a_fresh_machine_with_the_same_key(tmp_path, ks
     assert main(["--cluster-key", str(first), "recovery", "export", str(file)]) == 0
     assert stat.S_IMODE(file.stat().st_mode) == 0o600
     assert "run commands on every machine" in file.read_text().splitlines()[1]
+    body = json.loads("\n".join(ln for ln in file.read_text().splitlines() if not ln.startswith("#")))
+    assert body == {"group": "lab", "key": memberships(first)[0].key.decode()}
     assert main(["--cluster-key", str(second), "recovery", "import", str(file)]) == 0
     assert memberships(second) == memberships(first)
     assert recovery.recall("lab", second) is None
@@ -136,7 +138,24 @@ def test_join_machine_stores_the_passphrase(tmp_path, ks, monkeypatch):
     monkeypatch.setattr(joining, "checks", lambda *a, **k: [])
     monkeypatch.setattr(joining, "peers", lambda **k: [])
     joining.join_machine(passphrase=WORDS, group="lab", root=tmp_path, cluster_key_path=key,
-                         enrol=lambda words, group: join_cluster(words, group=group, path=key,
-                                                                 salting=Salting(salt=b"s" * 16)),
+                         enrol=lambda words, group: join_cluster(words, group=group, path=key),
                          say=lambda s: None)
     assert recovery.recall("lab", key) == WORDS
+
+
+def test_the_stored_passphrase_is_recognised_and_another_is_not(tmp_path, ks):
+    key = tmp_path / "cluster.key"
+    _join(key)
+    assert recovery.matches(f"  {WORDS}\n", "lab", key)
+    assert recovery.matches(WORDS, "", key)
+    assert not recovery.matches("some other words", "lab", key)
+    assert not recovery.matches(WORDS, "elsewhere", key)
+
+
+def test_a_machine_that_joined_from_a_file_holds_no_passphrase(tmp_path, ks):
+    first, second = tmp_path / "a.key", tmp_path / "b.key"
+    _join(first)
+    file = tmp_path / "lab.recovery"
+    recovery.export_recovery(file, "lab", first)
+    recovery.import_recovery(file, second)
+    assert not recovery.matches(WORDS, "lab", second)
