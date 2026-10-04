@@ -37,19 +37,21 @@ def annotations_of(tools: Collection[Mapping[str, Any]]) -> dict[str, Mapping[st
 
 class DestructiveRail(Base):
     """Classifies each call that is not in ``skip`` and asks when the label is ``destructive``
-    or ``unsure``. ``catalog`` maps tool names to a label, ``roots`` are where writes may go,
+    or ``unsure``. ``catalog`` maps tool names to a label, ``floors`` to the least severe label a tool may get, ``roots`` are where writes may go,
     ``model`` is an optional second opinion that can only raise the label, and ``on_verdict``
-    receives each verdict that asks. ``last`` holds the latest verdict."""
+    (set after construction) receives each verdict that asks. ``last`` holds the latest verdict."""
 
     name = "destructive"
 
     def __init__(self, *, roots: Callable[[], tuple[str, ...]] | tuple[str, ...] = (),
                  catalog: Callable[[], Mapping[str, str]] | Mapping[str, str] | None = None,
+                 floors: Mapping[str, str] | None = None,
                  skip: Callable[[], Collection[str]] | Collection[str] = (),
-                 model: ModelLayer | None = None,
-                 on_verdict: Callable[[Call, Verdict], Any] | None = None) -> None:
+                 model: ModelLayer | None = None) -> None:
         self._roots, self._catalog, self._skip = roots, catalog, skip
-        self.model, self.on_verdict = model, on_verdict
+        self.floors = dict(floors or {})
+        self.model = model
+        self.on_verdict: Callable[[Call, Verdict], Any] | None = None
         self.last: Verdict | None = None
 
     def judge(self, call: Call, context: Context | None = None) -> Verdict:
@@ -58,7 +60,7 @@ class DestructiveRail(Base):
         roots = self._roots() if callable(self._roots) else self._roots
         catalog = (self._catalog() if callable(self._catalog) else self._catalog) or {}
         try:
-            base = classify(call, roots=roots, catalog=catalog,
+            base = classify(call, roots=roots, catalog=catalog, floors=self.floors,
                             annotations=annotations_of(context.tools) if context else None)
             if self.model is not None and not base.asks:
                 base = combine(base, self.model.classify(call))

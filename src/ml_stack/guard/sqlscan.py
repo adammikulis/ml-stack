@@ -76,6 +76,8 @@ def _statement(words: list[str]) -> Finding:
         if "INTO" in words and first == "SELECT":
             return Finding(R, "creates a table from a query")
         return Finding(S, f"{first.lower()} only reads")
+    if first == "REPLACE" or (first == "MERGE" and "DELETE" in words):
+        return Finding(D, f"{first.lower()} overwrites or deletes the rows it matches")
     if first in ("INSERT", "REPLACE", "MERGE", "UPSERT", "SET", "LOCK", "ATTACH", "DETACH", "COMMENT",
                  "RENAME", "CREATE", "COPY", "LOAD", "IMPORT", "REINDEX", "CLUSTER", "REFRESH"):
         if "PROGRAM" in words:

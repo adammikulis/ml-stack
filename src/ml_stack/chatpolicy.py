@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -78,11 +78,10 @@ _TOOL_NAME = re.compile(
     r"unblock|role|permission|privilege|rule|always|classif", re.I)
 
 
-def catalog(reads: Collection[str] = (), acts: Collection[str] = ()) -> dict[str, str]:
-    """The destructive-action label of each tool the agent offers: reads are ``safe``, every
-    tool that waits for a yes (and any in ``acts``) is ``reversible``."""
-    return {**dict.fromkeys(READ | frozenset(CONFIRM), "reversible"), **dict.fromkeys(READ, "safe"),
-            **dict.fromkeys(reads, "safe"), **dict.fromkeys(acts, "reversible")}
+def catalog() -> dict[str, str]:
+    """The destructive-action label of each tool the agent has built in: reads are ``safe``, every
+    tool that waits for a yes is ``reversible``."""
+    return {**dict.fromkeys(CONFIRM, "reversible"), **dict.fromkeys(READ, "safe")}
 
 
 def refusal_for(text: str) -> tuple[str, str] | None:

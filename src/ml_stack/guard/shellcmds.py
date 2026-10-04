@@ -34,20 +34,53 @@ class Ctx:
     fed: bool = False
 
 
-READ_ONLY = frozenset(["ls", "cat", "head", "tail", "pwd", "echo", "printf", "wc", "grep", "egrep", "fgrep", "rg", "ag", "ack", "which", "type", "whoami", "date", "df", "du", "stat", "file", "uname", "printenv", "id", "hostname", "ps", "pgrep", "top", "htop", "diff", "cmp", "uniq", "cut", "tr", "basename", "dirname", "realpath", "readlink", "tree", "less", "more", "jq", "yq", "true", "false", "test", "[", "[[", "seq", "sleep", "nl", "tac", "rev", "fold", "column", "paste", "comm", "join", "od", "hexdump", "xxd", "strings", "md5", "md5sum", "shasum", "sha1sum", "sha256sum", "cksum", "lsof", "uptime", "free", "vmstat", "ping", "host", "dig", "nslookup", "traceroute", "whereis", "man", "help", "cal", "groups", "locale", "ulimit", "sort", "tput", "clear", "lscpu", "nproc", "arch", "sw_vers", "system_profiler", "ioreg", "pmset", "jobs", "wait", "getconf", "expr", "bc", "tty", "stty", "column", "fmt", "expand", "unexpand", "look", "nm", "otool", "ldd", "size", "lipo"])
-REVERSIBLE_CMDS = frozenset(["mkdir", "touch", "black", "ruff", "prettier", "isort", "autopep8", "gofmt", "rustfmt", "clang-format", "make", "cmake", "ninja", "pytest", "tox", "nox", "mypy", "pyright", "tsc", "eslint", "javac", "gcc", "g++", "clang", "cc", "cd", "pushd", "popd", "export", "set", "unset", "open", "code", "mktemp", "tar", "unzip", "zip", "gzip", "gunzip", "bzip2", "xz", "npm", "yarn", "pnpm", "cargo", "go", "uv", "poetry", "pipx", "gradle", "mvn", "rake", "bundle", "swift", "xcodebuild", "brew-services"])
+READ_ONLY = frozenset([
+    "ls", "cat", "head", "tail", "pwd", "echo", "printf", "wc", "grep", "egrep", "fgrep", "rg",
+    "ag", "ack", "which", "type", "whoami", "date", "df", "du", "stat", "file", "uname",
+    "printenv", "id", "hostname", "ps", "pgrep", "top", "htop", "diff", "cmp", "uniq", "cut",
+    "tr", "basename", "dirname", "realpath", "readlink", "tree", "less", "more", "jq", "yq",
+    "true", "false", "test", "[", "[[", "seq", "sleep", "nl", "tac", "rev", "fold", "column",
+    "paste", "comm", "join", "od", "hexdump", "xxd", "strings", "md5", "md5sum", "shasum",
+    "sha1sum", "sha256sum", "cksum", "lsof", "uptime", "free", "vmstat", "ping", "host", "dig",
+    "nslookup", "traceroute", "whereis", "man", "help", "cal", "groups", "locale", "ulimit",
+    "sort", "tput", "clear", "lscpu", "nproc", "arch", "sw_vers", "system_profiler", "ioreg",
+    "pmset", "jobs", "wait", "getconf", "expr", "bc", "tty", "stty", "column", "fmt", "expand",
+    "unexpand", "look", "nm", "otool", "ldd", "size", "lipo", "journalctl", "dmesg", "last",
+    "who", "w"
+])
+REVERSIBLE_CMDS = frozenset([
+    "mkdir", "touch", "black", "ruff", "prettier", "isort", "autopep8", "gofmt", "rustfmt",
+    "clang-format", "make", "cmake", "ninja", "pytest", "tox", "nox", "mypy", "pyright", "tsc",
+    "eslint", "javac", "gcc", "g++", "clang", "cc", "cd", "pushd", "popd", "export", "set",
+    "unset", "open", "code", "mktemp", "tar", "unzip", "zip", "gzip", "gunzip", "bzip2", "xz",
+    "npm", "yarn", "pnpm", "cargo", "go", "uv", "poetry", "pipx", "gradle", "mvn", "rake",
+    "bundle", "swift", "xcodebuild", "brew-services"
+])
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "ash"})
 INTERPRETERS = frozenset({"python", "python3", "node", "nodejs", "ruby", "perl", "php", "lua",
                           "deno", "bun", "osascript", "pwsh", "powershell"})
 EVALS = frozenset({"eval", "source", ".", "exec", "alias", "trap", "builtin", "coproc", "fc"})
 DOWNLOADERS = frozenset({"curl", "wget", "fetch", "http", "https", "xh", "aria2c"})
-SENDERS = frozenset(["scp", "sftp", "ftp", "nc", "ncat", "netcat", "socat", "telnet", "ssh", "mail", "mailx", "sendmail", "mutt", "mosh", "rclone", "s3cmd", "gsutil", "tftp", "lftp", "rcp"])
-STOPPERS = frozenset(["kill", "pkill", "killall", "skill", "xkill", "shutdown", "reboot", "halt", "poweroff", "init", "telinit", "swapoff", "umount", "lvremove", "vgremove", "pvremove", "rmmod", "userdel", "groupdel", "deluser", "delgroup", "iptables", "ip6tables", "ufw", "pfctl", "nft", "mkfs", "newfs", "mke2fs", "wipefs", "fdisk", "sfdisk", "gdisk", "parted", "format", "srm", "shred", "rm", "rmdir", "unlink", "truncate", "mkswap", "tune2fs", "resize2fs", "cryptsetup", "vipw", "visudo"])
+SENDERS = frozenset([
+    "scp", "sftp", "ftp", "nc", "ncat", "netcat", "socat", "telnet", "ssh", "mail", "mailx",
+    "sendmail", "mutt", "mosh", "rclone", "s3cmd", "gsutil", "tftp", "lftp", "rcp"
+])
+STOPPERS = frozenset([
+    "kill", "pkill", "killall", "skill", "xkill", "shutdown", "reboot", "halt", "poweroff",
+    "init", "telinit", "swapoff", "umount", "lvremove", "vgremove", "pvremove", "rmmod",
+    "userdel", "groupdel", "deluser", "delgroup", "iptables", "ip6tables", "ufw", "pfctl", "nft",
+    "mkfs", "newfs", "mke2fs", "wipefs", "fdisk", "sfdisk", "gdisk", "parted", "format", "srm",
+    "shred", "rm", "rmdir", "unlink", "truncate", "mkswap", "tune2fs", "resize2fs", "cryptsetup",
+    "vipw", "visudo"
+])
 WRAPPERS = frozenset({"sudo", "doas", "env", "command", "nohup", "time", "nice", "ionice",
                       "stdbuf", "timeout", "xargs", "watch", "caffeinate", "setsid", "chronic",
                       "unbuffer", "exec"})
 VALUE_FLAGS = {"sudo": "ugChpCDRTU", "doas": "uC", "env": "uC", "nice": "n", "ionice": "cnp",
                "stdbuf": "ioe", "timeout": "ks", "xargs": "IiLnPsdEaJ", "watch": "ndp"}
+LOADER_VARS = frozenset({"LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+                         "PATH", "BASH_ENV", "ENV", "IFS", "PROMPT_COMMAND", "PYTHONPATH", "NODE_OPTIONS",
+                         "PYTHONSTARTUP", "PERL5OPT", "RUBYOPT"})
 HELP = frozenset({"--help", "--version", "-V", "-h", "-version", "version"})
 
 
@@ -221,12 +254,20 @@ def _git(args: list[str], ctx: Ctx) -> list[Finding]:
         if words[:1] in (["drop"], ["clear"]):
             return [Finding(D, f"deletes stashed changes (git stash {words[0]})")]
         return [Finding(S, "git stash list or show")] if words[:1] in (["list"], ["show"]) else [Finding(R, "stashes changes")]
+    if sub == "commit" and "--amend" in flags:
+        return [Finding(D, "rewrites the last commit (git commit --amend)")]
+    if sub == "submodule" and words[:1] == ["deinit"]:
+        return [Finding(D, "removes a submodule's working tree (git submodule deinit)")]
     if sub in ("gc", "prune", "filter-branch", "filter-repo", "replace", "update-ref", "worktree", "submodule", "remote", "config", "tag", "rebase", "merge", "cherry-pick", "revert", "am", "apply", "pull", "fetch", "clone", "add", "rm", "mv", "commit", "init", "sparse-checkout", "lfs"):
         return _git_changes(sub, flags, words)
     return [Finding(U, f"git {sub} is not a subcommand the classifier knows")]
 
 
 def _git_changes(sub: str, flags: set[str], words: list[str]) -> list[Finding]:
+    if sub == "commit" and "--amend" in flags:
+        return [Finding(D, "rewrites the last commit (git commit --amend)")]
+    if sub == "submodule" and words[:1] == ["deinit"]:
+        return [Finding(D, "removes a submodule's working tree (git submodule deinit)")]
     if (sub in ("gc", "prune") and flags & {"--prune=now", "--prune", "--aggressive", "--prune=all"}) or sub == "prune":
         return [Finding(D, f"permanently deletes unreachable objects (git {sub})")]
     if sub in ("filter-branch", "filter-repo"):
@@ -269,6 +310,11 @@ def _cloud(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
 def _pkg(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
     _, words = split_args(args)
     sub = words[0] if words else ""
+    if not sub and name in ("make", "cmake", "ninja", "rake", "gradle", "mvn", "tox", "nox"):
+        return [Finding(R, f"{name} builds the project")]
+    if sub in ("run", "exec", "x") and len(words) > 1 and verb_finding(words_of(words[1]), "") \
+            and verb_finding(words_of(words[1]), "").label == D:
+        return [Finding(D, f"{name} runs a script named {words[1]}")]
     if sub in ("remove", "uninstall", "purge", "autoremove", "erase", "del", "delete", "rm", "clean", "prune", "unlink", "unpublish", "deprecate", "cache", "yank", "owner", "logout"):
         return [Finding(D, f"removes packages ({name} {sub})")]
     if sub in ("publish", "push", "upload", "release"):
@@ -282,7 +328,12 @@ def _pkg(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
 
 def _docker(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
     words = [a for a in args if not a.startswith("-")]
-    if any(w in ("run", "exec", "attach", "cp", "build", "buildx", "create") for w in words[:3]):
+    if any(w in ("build", "buildx", "pull", "tag", "create") for w in words[:2]):
+        return [Finding(R, f"{name} {words[0]} builds or fetches an image")]
+    if words[:1] in (["images"], ["image"], ["info"], ["stats"], ["top"], ["port"], ["history"], ["events"],
+                     ["version"], ["context"], ["buildx"]) and not set(words) & {"rm", "prune", "rmi"}:
+        return [Finding(S, f"{name} {words[0]} only reads")]
+    if any(w in ("run", "exec", "attach", "cp") for w in words[:3]):
         return [Finding(U, f"{name} starts or enters a container (what runs inside is not read)")]
     if any(w in ("push", "login") for w in words[:3]):
         return [Finding(D, f"{name} sends an image to a registry")]
@@ -321,7 +372,12 @@ def _http(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
     flags, words = split_args(args)
     joined = " ".join(args).lower()
     sends = bool(flags & {"d", "F", "T", "--data", "--data-raw", "--data-binary", "--data-urlencode", "--form", "--upload-file", "--json", "--post-data", "--post-file", "--body-data", "--body-file", "--method"})
-    if re.search(r"(?:^|\s)(?:-x|--request)[= ]?\s*(?:post|put|delete|patch)", joined) or re.search(r"\b(?:post|put|delete|patch)\b", " ".join(w for w in words[:1]) if name in ("http", "https", "xh") else ""):
+    if re.search(r"(?:^|\s)(?:-x|--request)[= ]?\s*(?:post|put|delete|patch)", joined):
+        sends = True
+    if name in ("http", "https", "xh") and ((words[:1] and words[0].upper() in ("POST", "PUT", "DELETE", "PATCH"))
+                                           or any(re.match(r"^[\w.-]+(=|:=|@)", w) for w in words[1:])):
+        sends = True
+    if "--method" in flags and any(m in joined for m in ("delete", "put", "post", "patch")):
         sends = True
     if sends:
         return [Finding(D, f"sends data to a remote server ({name})")]
@@ -365,6 +421,15 @@ def _pytest(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
     if set(args) & {"--collect-only", "--co", "--version"}:
         return [Finding(S, "pytest lists tests without running them")]
     return [Finding(R, "pytest runs project code")]
+
+
+def _tar(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
+    flags, _ = split_args(args)
+    if "--remove-files" in flags:
+        return [Finding(D, "deletes the files it archives (tar --remove-files)")]
+    if name == "unzip" and flags & {"o"}:
+        return [Finding(D, "overwrites existing files without asking (unzip -o)")]
+    return [Finding(R, f"{name} writes files into the project")]
 
 
 def _awk(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
@@ -427,7 +492,8 @@ HANDLERS: dict[str, Handler] = {
     "ln": lambda n, a, c: _ln(a, c), "sed": lambda n, a, c: _sed(a, c), "find": lambda n, a, c: _find(a, c),
     "git": lambda n, a, c: _git(a, c), "diskutil": lambda n, a, c: _diskutil(a, c),
     "awk": _awk, "gawk": _awk, "mawk": _awk, "nawk": _awk, "sort": lambda n, a, c: _sort(a, c),
-    "crontab": lambda n, a, c: _crontab(a, c),
+    "crontab": lambda n, a, c: _crontab(a, c), "tar": lambda n, a, c: _tar(n, a, c),
+    "unzip": lambda n, a, c: _tar(n, a, c),
 }
 for _n in ("kubectl", "helm", "terraform", "tofu", "aws", "gcloud", "az", "gsutil", "gh", "heroku", "fly", "flyctl", "vercel", "netlify", "wrangler", "oc", "kustomize", "pulumi", "ansible", "ansible-playbook", "vagrant", "minikube", "kind"):
     HANDLERS[_n] = _cloud
@@ -437,6 +503,14 @@ for _n in ("docker", "podman", "docker-compose", "nerdctl", "ctr", "crictl", "co
     HANDLERS[_n] = _docker
 for _n in ("systemctl", "launchctl", "service", "rc-service", "sv", "initctl", "brew-services"):
     HANDLERS[_n] = _service
+def _sysctl(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
+    flags, words = split_args(args)
+    if "w" in flags or any("=" in w for w in words):
+        return [Finding(D, "changes a kernel setting (sysctl -w)")]
+    return [Finding(S, "sysctl reads settings")]
+
+
+HANDLERS["sysctl"] = _sysctl
 HANDLERS["pytest"] = _pytest
 for _n in DOWNLOADERS:
     HANDLERS[_n] = _http
@@ -495,7 +569,7 @@ def analyse(argv: list[str], ctx: Ctx) -> list[Finding]:
 
 
 def _redirect(op: str, target: str, ctx: Ctx) -> Finding | None:
-    if target in NULLS or target.isdigit() or target.startswith("&") or op in ("<", "<<<", "<&"):
+    if target in NULLS or target.isdigit() or target.startswith("&") or op.startswith("<"):
         return None
     if has_expansion(target) or has_glob(target):
         return Finding(U, "redirects output to a path built from a variable or pattern")
@@ -529,6 +603,8 @@ def scan(command: str, roots: tuple[str, ...] = (), depth: int = 0) -> list[Find
     for seg in parsed:
         argv = list(seg.argv)
         while argv and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[0]):
+            if argv[0].split("=", 1)[0] in LOADER_VARS:
+                found.append(Finding(U, "sets a variable that changes how programs load code"))
             argv.pop(0)
         piped_ctx = Ctx(roots, depth, seg.piped)
         found += analyse(argv, piped_ctx)

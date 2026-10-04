@@ -285,11 +285,13 @@ class Chat:
         self.gate = roles.RoleRail(self.role, self.names, self.plan, extension=self.extension,
                                    rules=self.rules)
         self.person.rules = self.rules
+        floors = {**dict.fromkeys(self.extension.reads, "safe"),
+                  **dict.fromkeys(self.extension.asks, "reversible")}
         mine = list(self.guard) if self.guard is not None else [
             policy.HumanOnlyRail(),
             ToolPolicyRail(limits=Limits(calls=self.role.max_calls)), self.gate,
             DestructiveRail(roots=default_roots(), model=from_environment(os.environ),
-                            catalog=policy.catalog(self.extension.reads, self.extension.asks),
+                            catalog=policy.catalog(), floors=floors,
                             skip={*roles.OWN, *self.extension.asks_itself}),
             UntrustedRail(external=policy.FENCED), SecretRail(),
             TaintRail(registries={"models": do.on_disk_ids}), *self.extra]

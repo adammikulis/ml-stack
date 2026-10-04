@@ -34,19 +34,20 @@ def _hint(annotations: Mapping[str, Any] | None) -> Finding | None:
     return None
 
 
-def _named(name: str, catalog: Mapping[str, str], annotations: Mapping[str, Any] | None
-           ) -> tuple[Finding | None, bool]:
-    """The label the tool's metadata gives, and whether the catalog (which also vouches for how
-    its arguments are read) gave it."""
+def _named(name: str, catalog: Mapping[str, str], floors: Mapping[str, str],
+           annotations: Mapping[str, Any] | None) -> tuple[list[Finding], bool]:
+    """The labels the tool's metadata gives, and whether the catalog (which also vouches for how
+    its arguments are read) gave them."""
     if name in catalog:
-        return Finding(catalog[name], f"{name} is {catalog[name]} in the tool catalog"), True
+        return [Finding(catalog[name], f"{name} is {catalog[name]} in the tool catalog")], True
+    found = [Finding(floors[name], f"{name} is declared {floors[name]}")] if name in floors else []
     hint = _hint(annotations)
     verb = verb_finding(words_of(name), f"{name}'s")
     if hint is not None and hint.label == "destructive":
-        return hint, False
+        found.append(hint)
     if verb is not None:
-        return verb, False
-    return hint, False
+        found.append(verb)
+    return found or ([hint] if hint is not None else []), False
 
 
 def reason_text(verdict: Verdict) -> str:
@@ -55,6 +56,7 @@ def reason_text(verdict: Verdict) -> str:
 
 
 def classify(call: Call, *, roots: Sequence[str] = (), catalog: Mapping[str, str] | None = None,
+             floors: Mapping[str, str] | None = None,
              annotations: Mapping[str, Mapping[str, Any]] | None = None) -> Verdict:
     """The verdict for ``call``. ``roots`` are the directories writes may go to (the first is
     where relative paths are read); ``catalog`` maps tool names to a label; ``annotations`` maps
@@ -71,17 +73,17 @@ def classify(call: Call, *, roots: Sequence[str] = (), catalog: Mapping[str, str
     if size > MAX_INPUT:
         return Verdict("unsure", [f"the call is {size} characters, too long to read"], confidence=0.0)
     where = tuple(roots)
-    named, vouched = _named(call.name, cat, (annotations or {}).get(call.name))
-    found: list[Finding] = [named] if named else []
+    named, vouched = _named(call.name, cat, floors or {}, (annotations or {}).get(call.name))
+    found: list[Finding] = list(named)
     read = False
     if not vouched:
         more, read = argscan.content(call.name, args, where)
         found += more
-    found += argscan.generic(call.name, args, where, named.label if named else "")
+    found += argscan.generic(call.name, args, where, worst(named) if named else "")
     if not found:
         return Verdict("unsure", [f"{call.name} is not a tool the classifier knows and its "
                                   "arguments say nothing about what it does"], confidence=0.0)
-    if not read and named is None:
+    if not read and not named:
         found.append(Finding("unsure", f"{call.name} is not a tool the classifier knows"))
     label = worst(found)
     reasons = list(dict.fromkeys(f.reason for f in found if f.label == label))
