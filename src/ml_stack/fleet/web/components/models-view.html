@@ -66,21 +66,9 @@
       this.querySelector("#models-free").textContent =
         `${m.free_gb} GB free on this machine.`;
 
-      const here = (m.here || []).map((x) =>
-        el("div", { class: "row" },
-          el("span", {}, el("b", {}, x.name),
-            el("span", { class: "why" },
-              running.has(x.name) ? `${fileSize(x.size)} · running` : fileSize(x.size))),
-          run.can_serve
-            ? (running.has(x.name)
-                ? el("button", { class: "ghost small",
-                    onclick: () => this.halt(portOf(x.name)) }, "Stop server")
-                : el("button", { class: "ghost small",
-                    onclick: () => this.serve(x.name) }, "Serve model"))
-            : el("span", { class: "label" }, "here")));
-      this.querySelector("#models-here").replaceChildren(
-        el("h2", {}, "On this machine"),
-        ...(here.length ? here : [el("div", { class: "hint" }, "None yet.")]));
+      const here = this.querySelector('#models-here');
+      if (!this.library) { this.library = el('models-library'); here.replaceChildren(this.library); }
+      this.library.update(m.library || [], run, (path,label) => this.serve(path,label), port => this.halt(port));
 
       const elsewhere = this.querySelector("#models-elsewhere");
       elsewhere.hidden = !(m.elsewhere || []).length;
@@ -124,11 +112,11 @@
       this.loadPopular();
     }
 
-    async serve(name) {
+    async serve(path, name) {
       this.note.replaceChildren(el("div", { class: "hint" },
         el("span", { class: "spin" }), ` Starting ${name}…`));
       const r = await api("/ui/serving", { method: "POST",
-        body: JSON.stringify({ name }) });
+        body: JSON.stringify({ path }) });
       this.note.replaceChildren(r.error
         ? el("div", { class: "err" }, r.error)
         : el("div", { class: "ok" }, `${name} is running. Open Chat to use it.`));
