@@ -1,7 +1,7 @@
 {
- "surfaces": 588,
+ "surfaces": 589,
  "by_status": {
-  "covered": 277,
+  "covered": 278,
   "partial": 202,
   "uncovered": 54,
   "n/a": 55,
@@ -72,7 +72,7 @@
    "unmapped": 0
   },
   "mcp-tool": {
-   "covered": 19,
+   "covered": 20,
    "partial": 19,
    "uncovered": 0,
    "n/a": 0,
@@ -3903,7 +3903,25 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_announce",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_announce",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -3917,7 +3935,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -3931,7 +3951,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -3945,7 +3967,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -3959,7 +3983,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -3973,7 +3999,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -3987,7 +4015,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4001,7 +4031,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4015,7 +4047,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4029,7 +4063,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4043,7 +4079,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4057,7 +4095,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4071,7 +4111,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4085,7 +4127,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4099,7 +4143,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4113,7 +4159,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4127,7 +4175,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -4141,7 +4191,9 @@
    "tests": [
     "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
     "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
-    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader"
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
    ],
    "note": ""
   },
@@ -5210,9 +5262,12 @@
     "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
     "tests/test_redteam_board.py::test_the_one_write_route_refuses_every_way_a_hostile_page_could_reach_it",
     "tests/test_redteam_board.py::test_a_post_cannot_borrow_another_identity_or_smuggle_options",
+    "tests/test_workspace_quiet.py::test_a_new_agent_has_no_subscriptions_and_its_inbox_holds_no_board_traffic",
+    "tests/test_workspace_quiet.py::test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_only_mute",
+    "tests/test_workspace_quiet.py::test_message_text_never_changes_a_subscription",
     "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read"
    ],
-   "note": "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, a person's board membership"
+   "note": "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, quiet defaults, a person's board membership"
   },
   {
    "id": "parser:workspace/chain.py",

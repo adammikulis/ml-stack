@@ -46,7 +46,15 @@ class Limits:
     boards_total: int = 200
     boards_joined: int = 32
     board_members: int = 64
-    subs_per_identity: int = 50
+    subs_per_identity: int = 12
+    inbox_subs_free: int = 3
+    read_items: int = 10
+    read_item_chars: int = 400
+    read_total_chars: int = 8_000
+    announce_chars: int = 200
+    announce_per_window: int = 6
+    announce_window_s: float = 600.0
+    announce_rollup: int = 5
     board_message_chars: int = 4_000
     board_read_chars: int = 60_000
     digest_lines: int = 40

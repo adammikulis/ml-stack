@@ -20,8 +20,8 @@ from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import boardroute, chat, guide, limits, onboard, project, tokens
 from ml_stack.workspace.boardapi import Follow
-from ml_stack.workspace.boards import MODES, STYPES
-from ml_stack.workspace.bus import TYPES
+from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
+from ml_stack.workspace.bus import CALL_TYPES, TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
 from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
@@ -45,7 +45,10 @@ COMMON = [option("json"),
           flag("--agent", default="", help="act as this agent: its token file from `join`"),
           flag("--label", default="", help=f"a note of which helper is acting, shown as "
                                            f"NAME/LABEL (else ${LABEL_ENV}); not an authority")]
-READ = [flag("--ack", action="store_true", help="mark what is shown as read"),
+WIDEN = [flag("--limit", type=int, default=0,
+              help="show this many (default: a few, each cut short; the rest is counted)"),
+         flag("--all", action="store_true", help="show everything, uncut")]
+READ = [*WIDEN, flag("--ack", action="store_true", help="mark what is shown as read"),
         flag("--raw", action="store_true", help="also show the unfenced text of clear messages")]
 CLAIM = [flag("kind", choices=CLAIM_KINDS), flag("key")]
 OWNER = flag("--owner", default="", help="a lead or human may name another agent")
@@ -115,6 +118,14 @@ def _ids(text: str) -> list[int]:
     return [int(x) for x in text.split(",") if x.strip()]
 
 
+def _held_note(value: Any) -> None:
+    """Say on stderr how many results the default caps held back, and how to see them."""
+    held = getattr(value, "held", 0)
+    if held:
+        warn(f"workspace: {held} more held back (not shown, still unread); "
+             f"use --limit N or --all to see more")
+
+
 def _watch(args: argparse.Namespace, ws: Workspace, token: str) -> int:
     """Print each batch of new messages as it arrives; 0 after one batch with --once, 3 when
     the timeout passes with nothing."""
@@ -131,10 +142,12 @@ def _watch(args: argparse.Namespace, ws: Workspace, token: str) -> int:
             got = ws.follow(token, replace(spec, timeout_s=min(5.0, left)), CANCELLED.is_set)
             spec, batch = replace(spec, after=got["seq"]), got["messages"]
         else:
-            batch = ws.wait(token, min(5.0, left), ack=True, cancel=CANCELLED.is_set)
+            batch = ws.wait(token, min(5.0, left), ack=True, cancel=CANCELLED.is_set,
+                            limit=args.limit, widen=args.all)
         for item in batch:
             _show(args, item)
             sys.stdout.flush()
+        _held_note(batch)
         if batch and args.once:
             return 0
 
@@ -160,15 +173,22 @@ def _send(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 def _inbox(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     if not args.children:
-        return ws.inbox(token, args.ack, args.limit, args.raw)
+        roll = None if args.json else ws.board.rollup(token, args.ack)
+        if roll:
+            say(_text(roll))
+        return ws.inbox(token, args.ack, args.limit, args.raw, args.all)
     if args.ack:
         raise ValueError("--children shows some of the unread messages, so it cannot --ack")
     me = ws.auth(token).id
-    return [m for m in ws.inbox(token, False, 1 << 20, args.raw) if m["from"].startswith(me + "/")]
+    return [m for m in ws.inbox(token, False, 0, args.raw, True) if m["from"].startswith(me + "/")]
 
 
 def _wait(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.wait(token, args.timeout, args.ack, args.raw)
+    return ws.wait(token, args.timeout, args.ack, args.raw, limit=args.limit, widen=args.all)
+
+
+def _announce(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    return ws.announce(token, args.kind, _body(args.text), _label(args))
 
 
 def _note_add(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -267,13 +287,13 @@ def _board(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     if args.action == "list":
         return b.list(token)
     if args.action == "mentions":
-        return b.mentions(token, args.limit)
+        return b.mentions(token, args.limit or 50)
     if not name:
         raise ValueError(f"board {args.action} needs a board name such as #general")
     if args.action == "read":
         return b.read(token, name, args.limit, args.after, not args.no_mark)
     if args.action == "threads":
-        return b.threads(token, name, args.limit)
+        return b.threads(token, name, args.limit or 50)
     if args.action == "create":
         return b.create(token, name, private=args.private, title=" ".join(rest))
     if not rest:
@@ -294,7 +314,7 @@ def _dm(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _subscribe(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    return ws.board.subscribe(token, args.type, args.target, args.mode)
+    return ws.board.subscribe(token, args.type, args.target, args.mode, args.force)
 
 
 def _digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -304,6 +324,18 @@ def _digest(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 def _ttl(text: str) -> float:
     units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
+
+
+def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
+    say(onboard.hook_snippet(args.tool, args.agent or "NAME"), end="")
+    return 0
+
+
+def _nudging(args: argparse.Namespace) -> int:
+    line = Workspace().nudge(_token(args))
+    if line:
+        say(line)
+    return 0
 
 
 def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
@@ -350,6 +382,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
      _hello),
     ("snippet", "print the paste block for AGENT (no secret in it)", [flag("name")],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
+    ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
+     [flag("tool", choices=("claude-code", "codex"))], _hook_snippet),
     ("brief", "print the short brief a parent pastes into a subagent's prompt", [flag("name")],
      _brief),
 )
@@ -363,18 +397,20 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("revoke", "stop an agent's token working", [flag("name")], _revoke),
     ("whoami", "who the token says you are", [], _whoami),
     ("send", "send a message (BODY - reads stdin)", [
-        flag("to", help="an agent id, or * for everyone"), flag("type", choices=TYPES),
+        flag("to", help="an agent id, or * for the announcements board (joined, milestone, "
+                        "done, blocked only)"), flag("type", choices=CALL_TYPES),
         flag("body"), flag("--subject", default=""), flag("--reply-to", type=int, default=0),
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
     ("inbox", "unread messages, fenced as data", [
-        *READ, flag("--limit", type=int, default=50),
+        *READ,
         flag("--children", action="store_true", help="only messages from your delegates")],
      _inbox),
     ("board", "boards: list, read NAME, post NAME TEXT, threads NAME, create NAME [TITLE], add NAME AGENT, mentions", [
         flag("action", choices=BOARD_ACTIONS), flag("name", nargs="?", default=""),
         flag("rest", nargs="*"), flag("--type", choices=TYPES, default="note"),
         flag("--subject", default=""), flag("--reply-to", type=int, default=0),
-        flag("--limit", type=int, default=50), flag("--after", type=int, default=0),
+        flag("--limit", type=int, default=0, help="read: how many (default: a few, cut short)"),
+        flag("--after", type=int, default=0),
         flag("--private", action="store_true", help="create: only people you add can join"),
         flag("--no-mark", action="store_true", help="read: leave the board's unread count")],
      _board),
@@ -389,7 +425,9 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("subscribe", "choose what reaches your inbox: board, thread, agent, kind or mentions", [
         flag("type", choices=STYPES), flag("target", nargs="?", default=""),
         flag("--mode", choices=MODES, default="inbox",
-             help="inbox, digest (summarised by `digest`) or silent (kept, never delivered)")],
+             help="inbox, digest (summarised by `digest`) or silent (kept, never delivered)"),
+        flag("--force", action="store_true",
+             help="accept more than a few inbox subscriptions, each one more context")],
      _subscribe),
     ("unsubscribe", "drop a subscription; messages stay", [
         flag("type", choices=STYPES), flag("target", nargs="?", default="")],
@@ -406,8 +444,11 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("outbox", "messages you sent", [], lambda a, w, t: w.outbox(t)),
     ("ack", "mark messages up to SEQ read", [flag("seq", type=int)],
      lambda a, w, t: {"cursor": w.ack(t, a.seq)}),
-    ("thread", "a message and its replies", [flag("root", type=int)],
-     lambda a, w, t: w.thread(t, a.root)),
+    ("thread", "a message and its replies (first and newest by default)", [
+        flag("root", type=int), *WIDEN], lambda a, w, t: w.thread(t, a.root, a.limit, a.all)),
+    ("announce", "one terse line for everyone's roll-up: joined, milestone, done or blocked", [
+        flag("kind", choices=ANNOUNCE_KINDS), flag("text", help="one line, up to 200 characters")],
+     _announce),
     ("notes-add", "add a note; the service sets its trust level", [
         flag("kind", choices=NOTE_KINDS), flag("title"), flag("body", help="- reads stdin"),
         flag("--source", default=""), flag("--tags", default="", help="comma separated"),
@@ -472,7 +513,9 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        _show(args, handler(args, Workspace(), _token(args)))
+        result = handler(args, Workspace(), _token(args))
+        _show(args, result)
+        _held_note(result)
         return 0
     return _guarded(run)
 
@@ -502,9 +545,12 @@ for _name, _help, _options, _handler in BARE:
                           *_options])
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
+COMMANDS.add("nudge", _guarded(_nudging),
+             help="print one line counting what waits for you (nothing when nothing does); for hooks",
+             options=COMMON)
 COMMANDS.add("watch", _guarded(_watching),
              help="print messages as they arrive; --once exits after one",
-             options=[*COMMON, flag("--once", action="store_true"),
+             options=[*COMMON, *WIDEN, flag("--once", action="store_true"),
                       flag("--board", default="", help="follow one board without a subscription"),
                       flag("--thread", type=int, default=0, help="follow one thread"),
                       flag("--dm", default="", help="follow your conversation with this agent"),

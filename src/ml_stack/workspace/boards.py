@@ -13,9 +13,13 @@ from ml_stack.files import read_json, write_json
 from ml_stack.workspace import plain
 from ml_stack.workspace.chain import ChainLog, held
 
-__all__ = ["GENERAL", "MODES", "STYPES", "Boards", "project_board_name"]
+__all__ = ["ANNOUNCE", "ANNOUNCE_KINDS", "ANNOUNCE_MARK", "GENERAL", "MODES", "STYPES", "Boards",
+           "project_board_name"]
 
 GENERAL = "#general"
+ANNOUNCE = "#announcements"
+ANNOUNCE_KINDS = ("joined", "milestone", "done", "blocked")
+ANNOUNCE_MARK = ANNOUNCE
 MODES = ("inbox", "digest", "silent")
 STYPES = ("board", "thread", "agent", "kind", "mentions")
 VERSION = 1
@@ -41,7 +45,9 @@ class Boards:
         identity mapping ``(type, target)`` to a delivery mode."""
         boards: dict[str, dict[str, Any]] = {GENERAL: {
             "by": "", "open": True, "project": "", "title": "everyone", "members": set(),
-            "created": 0.0}}
+            "created": 0.0},
+            ANNOUNCE: {"by": "", "open": True, "project": "", "title": "terse one-line progress",
+                       "members": set(), "created": 0.0}}
         subs: dict[str, dict[tuple[str, str], str]] = {}
         for r in self.log.rows():
             op, name, who = r.get("op"), r.get("name", ""), r.get("who", "")
@@ -63,6 +69,20 @@ class Boards:
                 else:
                     mine.pop(key, None)
         return boards, subs
+
+    def sinces(self) -> dict[str, dict[tuple[str, str], int]]:
+        """Per identity, the message sequence number each subscription was made at: a
+        subscription delivers only what arrives after it."""
+        found: dict[str, dict[tuple[str, str], int]] = {}
+        for r in self.log.rows():
+            if r.get("kind") == "sub":
+                mine = found.setdefault(r.get("who", ""), {})
+                key = (r["stype"], r["target"])
+                if r.get("op") == "set":
+                    mine[key] = int(r.get("since", 0))
+                else:
+                    mine.pop(key, None)
+        return found
 
     def append(self, row: dict[str, Any]) -> dict[str, Any]:
         """Add one event row."""
