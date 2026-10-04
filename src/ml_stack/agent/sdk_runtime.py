@@ -134,14 +134,14 @@ class Runtime(Model):
                     call['function']['name'] = self.names[call['id']]
             if message['role'] == 'tool' and message.get('tool_call_id') in self.names:
                 message['name'] = self.names[message['tool_call_id']]
-        self.steps += 1
-        self.run.context.step, self.run.context.tool_calls = self.steps, self.calls
+        self.run.context.step, self.run.context.tool_calls = self.steps + 1, self.calls
         await self.decide('before_model_call')
         _inject(self.run, self.messages)
         if owner.auto:
             for event in await owner.auto.before(self.messages, self.schemas):
                 self.emit(event)
         reply = await self.ask()
+        self.steps += 1
         count = _completion_tokens(reply)
         self.tokens += count
         pending = owner._pending(reply, self.index)
