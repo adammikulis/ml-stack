@@ -23,6 +23,8 @@ class Message:
     role: str
     content: str
     at: float = field(default_factory=time.time)
+    reasoning: str = ""
+    status: str = "complete"
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
@@ -76,11 +78,12 @@ class Conversations:
         self._write(made)
         return made
 
-    def append(self, cid: str, role: str, content: str) -> Conversation:
+    def append(self, cid: str, role: str, content: str, *,
+               reasoning: str = "", status: str = "complete") -> Conversation:
         found = self.get(cid) or self.start()
         if role not in ROLES:
             raise ValueError(f"a message is from {' or '.join(ROLES)}, not {role!r}")
-        found.messages.append(Message(role=role, content=content))
+        found.messages.append(Message(role=role, content=content, reasoning=reasoning, status=status))
         if not found.title and role == "user":
             found.title = _title(content)
         self._write(found)
@@ -124,7 +127,9 @@ class Conversations:
             try:
                 messages.append(Message(role=str(row["role"]),
                                         content=str(row["content"]),
-                                        at=float(row.get("at") or 0)))
+                                        at=float(row.get("at") or 0),
+                                        reasoning=str(row.get("reasoning") or ""),
+                                        status=str(row.get("status") or "complete")))
             except (KeyError, TypeError, ValueError):
                 continue
         return Conversation(id=str(raw["id"]), title=str(raw.get("title") or ""),
