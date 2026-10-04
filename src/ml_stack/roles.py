@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from ml_stack import activity
 from ml_stack.chatpolicy import _TOOL_NAME, CONFIRM, READ, _outside_state
 from ml_stack.interventions import Base, Call, Confirm, Context, Deny, Proceed, Verdict
 from ml_stack.rules import Rules, blocked_reason, describe
@@ -211,6 +212,9 @@ class RoleRail(Base):
         tainted = self._read_outside_text(context)
         rule = self.rules.covers(call.name, call.arguments, role.name, tainted) \
             if self.rules else None
+        if rule is not None and (rule.verdict == "never" or not outside):
+            activity.record("approval.rule_fired", subject=call.name, outcome=rule.verdict,
+                            refs={"role": role.name}, meta={"rule": describe(rule), "outside": bool(outside)})
         if rule is not None and rule.verdict == "never":
             self.rules.fire(rule)
             return Deny(f"a rule you set says: {describe(rule)}", self.name)

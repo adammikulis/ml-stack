@@ -23,9 +23,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
 import testslots
@@ -45,10 +48,19 @@ def pytest_command(workers: int, *rest: str) -> list[str]:
     return [sys.executable, "-m", "pytest", "-q", "-n", str(workers), *rest]
 
 
-def run(command: list[str], env: dict[str, str] | None = None) -> int:
-    """Run a command in the repo, returning its exit status."""
+def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -> int:
+    """Run a command in the repo, returning its exit status. A pytest run is recorded in the
+    activity log against the tree it ran on."""
+    junit = Path(tempfile.mkstemp(suffix=".xml")[1]) if "pytest" in command else None
+    shown = [*command, f"--junitxml={junit}"] if junit else command
     print("+", " ".join(command), flush=True)
-    return subprocess.run(command, cwd=ROOT, env=env, check=False).returncode
+    began = time.monotonic()
+    status = subprocess.run(shown, cwd=ROOT, env=env, check=False).returncode
+    if junit is not None:
+        from ml_stack.activity.gate import Run, record_run
+        record_run(Run(ROOT, tier, command, junit, status, time.monotonic() - began))
+        junit.unlink(missing_ok=True)
+    return status
 
 
 def testmon_env() -> dict[str, str]:
@@ -78,7 +90,7 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
         changed, deleted = affected.changed_since(ROOT, args.base)
     except (RuntimeError, IndexError) as exc:
         print(f"quick: cannot diff against {args.base} ({exc}); running the full tier")
-        return run(pytest_command(args.workers, *tier, *rest))
+        return run(pytest_command(args.workers, *tier, *rest), tier="quick")
     if not changed:
         print(f"quick: nothing differs from {args.base}; running nothing")
         return 0
@@ -93,7 +105,7 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
             print(f"quick: {line}")
         print("quick: running the full tier")
         record = [] if testmon_missing() else ["--testmon-noselect"]
-        return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env())
+        return run(pytest_command(args.workers, *record, *tier, *rest), testmon_env(), "quick")
     if args.explain:
         for test, reasons in sorted(picked.why.items()):
             print(f"quick: {test}  <- {'; '.join(sorted(set(reasons))[:3])}")
@@ -102,10 +114,10 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
     if direct:
         print(f"quick: {len(direct)} test file(s) importing or naming a changed module")
         status = clean(run(pytest_command(min(args.workers, len(direct)), "--testmon-noselect",
-                                          *tier, *direct, *rest), testmon_env()))
+                                          *tier, *direct, *rest), testmon_env(), "quick"))
     print("quick: every other test whose recorded execution touches a changed line")
     return max(status, clean(run(pytest_command(args.workers, "--testmon", *tier, *rest),
-                                 testmon_env())))
+                                 testmon_env(), "quick")))
 
 
 def heavy(junit: Path, over: float) -> int:
@@ -141,7 +153,7 @@ def main() -> int:
         args.workers = got.workers if args.workers <= 0 else min(args.workers, got.workers)
         if args.tier == "quick":
             return quick(args, rest)
-        return run(pytest_command(args.workers, *tiers[args.tier], *rest))
+        return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier)
 
 
 if __name__ == "__main__":

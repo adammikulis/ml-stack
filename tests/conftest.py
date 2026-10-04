@@ -534,6 +534,17 @@ def _no_real_keychain(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _activity_log_is_quiet(request, monkeypatch):
+    """Only the activity tests write the activity log; everywhere else `record` does nothing, so
+    a test about something else never asks the keystore for the log's key."""
+    if request.module.__name__.rpartition(".")[2].startswith("test_activity"):
+        return
+    from ml_stack.activity import writer
+
+    monkeypatch.setattr(writer, "_put", lambda *_a, **_k: None)
+
+
+@pytest.fixture(autouse=True)
 def _keystore_has_a_person(monkeypatch):
     """The keystore treats a test as a session with a person present, whatever the host has."""
     from ml_stack import keystore

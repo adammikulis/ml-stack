@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files, http, httpguard, sentinel
+from ml_stack import activity, files, http, httpguard, sentinel
 from ml_stack.httpguard import Refused, TooLarge
 from ml_stack.net import observed, provenance, sniff
 from ml_stack.net.hold import staging_dir
@@ -212,6 +212,8 @@ def _reject(pipe: Pipeline, staged: Path, note: provenance.Provenance, reason: s
     held = pipe.hold.hold(staged, reason, {"url": note.url, "sha256": note.sha256,
                                             "kind": note.kind, "reason": reason})
     provenance.record(replace(note, outcome="held", reason=reason, path=held))
+    activity.record("net.download", subject=f"host:{host_of(note.url)}", outcome="held",
+                    refs={"sha256": note.sha256}, meta={"size": note.size, "reason": reason})
     _event("net.download.held", "warning", f"artifact:{note.sha256 or note.url}",
            {"url": note.url, "reason": reason, "held": held})
     return error(f"{note.url}: {reason}", held)
@@ -307,6 +309,8 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
     provenance.record(done, beside=final)
     _event("net.download", "info", f"artifact:{digest}", {"url": url, "path": str(final),
                                                           "scan": why})
+    activity.record("net.download", subject=f"host:{arrival.host}", outcome="ok",
+                    refs={"sha256": digest}, meta={"size": size, "kind": verdict.kind, "scan": why})
     return done
 
 

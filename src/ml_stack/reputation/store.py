@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files
+from ml_stack import activity, files
 from ml_stack.graph.columns import column
 from ml_stack.graph.store import GraphStore
 from ml_stack.memory import vault
@@ -212,6 +212,9 @@ class Ledger:
         held = self.standing(kind, name)
         if held is None:
             raise RuntimeError("the source was not written")
+        activity.record("reputation.observed", actor="system", subject=f"{kind}:{name}",
+                        outcome=held.state, meta={"event": event, "scale": scale,
+                                                   "short": round(held.short, 2)})
         return held
 
     def trait(self, kind: str, key: str, name: str, value: str) -> None:
