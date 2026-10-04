@@ -5,7 +5,7 @@
   fit-view header.fit-top {
     display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
     padding: 14px 20px; border-bottom: 1px solid var(--line);
-    background: var(--bg-raised); position: sticky; top: 0; z-index: 20;
+    background: var(--bg-raised);
   }
   fit-view header.fit-top h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
   fit-view header.fit-top .machine { color: var(--muted); font-family: var(--mono); font-size: 12px; }
@@ -146,12 +146,17 @@
         if (view === "fit" && this.ready) this.draw();
       });
 
+      const capacity = this.closest("#model-capacity");
+      const enter = () => {
+        if (!this.ready && (!capacity || capacity.open)) this.start();
+      };
+      if (capacity) capacity.addEventListener("toggle", () => { if (capacity.open) enter(); });
       M.onRoute((route) => {
-        const on = route === "fit";
+        const on = route === (capacity ? "models" : "fit");
         this.box.hidden = !on;
         if (!on) return;
         if (this.ready) { if (FM.view === "fit") this.draw(); }
-        else this.start();
+        else enter();
       });
     }
 

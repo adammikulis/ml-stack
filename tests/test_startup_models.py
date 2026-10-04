@@ -49,7 +49,8 @@ class StartupModelTests(unittest.TestCase):
 
     def test_disk_offer_accounts_for_prediction_head(self):
         result = startup_models.choices(machine=self.machine(24, 24), disk_gb=17)
-        self.assertFalse(any(row["params_b"] == 27 for row in result["models"]))
+        self.assertFalse(any("Q4_K_XL" in row["file"] for row in result["models"]))
+        self.assertTrue(any("IQ4_XS" in row["file"] for row in result["models"]))
 
     def test_failed_prediction_head_is_a_failed_download(self):
         models = Mock()

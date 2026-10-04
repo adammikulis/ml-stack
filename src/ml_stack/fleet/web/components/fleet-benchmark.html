@@ -1,0 +1,146 @@
+<template>
+  <details class="panel benchmark-panel" id="cluster-sweep">
+    <summary><span>Benchmark models</span><span class="why" id="benchmark-summary">Compare models across your cluster</span></summary>
+    <p class="hint">Choose models and machines, then measure their answers using the same questions.</p>
+    <div class="two benchmark-choices">
+      <fieldset><legend>Models to compare</legend><div id="benchmark-models"></div></fieldset>
+      <fieldset><legend>Machines to use</legend><div id="benchmark-machines"></div></fieldset>
+    </div>
+    <div class="benchmark-options">
+      <label for="benchmark-questions">Questions
+        <select id="benchmark-questions" aria-label="Questions"><option value="all">All questions</option><option value="limit">Limit the number</option></select>
+      </label>
+      <label for="sample" id="benchmark-limit" hidden>Question limit
+        <input type="number" id="sample" min="1" step="1" value="40"></label>
+      <label for="label">Run name <span class="why">optional</span>
+        <input type="text" id="label" placeholder="For example: evening comparison"></label>
+    </div>
+    <div class="actions"><button id="benchmark-run" disabled>Start benchmark</button>
+      <button id="benchmark-stop" class="ghost" hidden>Stop benchmark</button></div>
+    <p class="hint" id="benchmark-status" role="status"></p>
+    <details class="benchmark-history"><summary>Recent benchmark runs</summary><div id="benchmark-history"></div></details>
+  </details>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const { el, api } = M;
+  class FleetBenchmark extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.selectedModels = new Set();
+      this.selectedMachines = new Set();
+      this.models = [];
+      this.peers = [];
+      this.run = this.querySelector("#benchmark-run");
+      this.stop = this.querySelector("#benchmark-stop");
+      this.status = this.querySelector("#benchmark-status");
+      this.questions = this.querySelector("#benchmark-questions");
+      this.limit = this.querySelector("#sample");
+      this.label = this.querySelector("#label");
+      this.questions.onchange = () => {
+        this.querySelector("#benchmark-limit").hidden = this.questions.value !== "limit";
+        this.paintStatus();
+      };
+      this.limit.oninput = () => this.paintStatus();
+      this.run.onclick = () => this.start();
+      this.stop.onclick = () => this.stopRun();
+      this.querySelector("#cluster-sweep").addEventListener("toggle", (event) => {
+        if (event.target.open && !this.historyLoaded) this.loadHistory();
+      });
+    }
+
+    update(fleet) {
+      this.bench = fleet.bench || {};
+      const peers = fleet.peers || [];
+      const models = (fleet.models || []).filter((name) => !/(^mtp[-_]|^mmproj|\.draft\.gguf$)/i.test(name));
+      const key = JSON.stringify([models, peers.map((p) => [p.name, p.models])]);
+      if (key !== this.inventoryKey) {
+        const first = this.inventoryKey === undefined;
+        this.inventoryKey = key;
+        this.models = models;
+        this.peers = peers;
+        for (const name of [...this.selectedModels]) if (!models.includes(name)) this.selectedModels.delete(name);
+        if (first) peers.forEach((p) => this.selectedMachines.add(p.name));
+        this.drawChoices();
+      }
+      this.paintStatus();
+    }
+
+    choice(set, key, text, why, index, group) {
+      const input = el("input", { type: "checkbox", id: `${group}-${index}` });
+      input.checked = set.has(key);
+      input.onchange = () => { if (input.checked) set.add(key); else set.delete(key); this.paintStatus(); };
+      return el("label", { class: "opt", for: input.id }, input, M.row(text, why));
+    }
+
+    drawChoices() {
+      this.querySelector("#benchmark-models").replaceChildren(...(this.models.length
+        ? this.models.map((name, i) => this.choice(this.selectedModels, name, name,
+            this.peers.filter((p) => (p.models || []).includes(name)).map((p) => p.name).join(", "), i, "bench-model"))
+        : [el("p", { class: "hint" }, "Install a model under Models to begin.")]));
+      this.querySelector("#benchmark-machines").replaceChildren(...this.peers.map((p, i) =>
+        this.choice(this.selectedMachines, p.name, p.name, p.is_self ? "This machine" : "Cluster machine", i, "bench-machine")));
+    }
+
+    paintStatus() {
+      const measuring = !!this.bench?.measuring;
+      const validLimit = this.questions.value === "all" || (Number.isInteger(Number(this.limit.value)) && Number(this.limit.value) > 0);
+      this.run.disabled = measuring || this.pending || !this.selectedModels.size
+        || !this.selectedMachines.size || !validLimit || this.bench?.available === false;
+      this.stop.hidden = !measuring;
+      this.querySelector("#benchmark-summary").textContent = measuring ? "Benchmark running"
+        : `${this.models.length} models available · compare quality and speed`;
+      if (!this.message) this.status.textContent = this.bench?.available === false
+        ? "Benchmarking is unavailable on this machine."
+        : measuring ? "A benchmark is running. Results appear in recent runs when it finishes."
+          : !this.selectedModels.size ? "Choose at least one model to compare."
+            : !this.selectedMachines.size ? "Choose at least one machine."
+              : !validLimit ? "Enter a positive whole number of questions." : "Ready to benchmark your selection.";
+    }
+
+    async start() {
+      if (this.run.disabled) return;
+      this.pending = true;
+      this.message = "";
+      this.status.textContent = "Starting benchmark…";
+      this.paintStatus();
+      try {
+        const response = await api("/ui/bench/sweep", { method: "POST", body: JSON.stringify({
+          models: this.models.filter((x) => this.selectedModels.has(x)),
+          peers: this.peers.map((p) => p.name).filter((x) => this.selectedMachines.has(x)),
+          sample: this.questions.value === "all" ? 0 : Number(this.limit.value), label: this.label.value.trim(),
+        }) });
+        this.message = response.error || "Benchmark started. You can leave this screen while it runs.";
+        this.status.textContent = this.message;
+        if (!response.error) this.bench.measuring = { pid: response.pid };
+      } catch (error) { this.status.textContent = `Could not start benchmark: ${error.message}`; }
+      finally { this.pending = false; this.paintStatus(); }
+    }
+
+    async stopRun() {
+      this.stop.disabled = true;
+      try {
+        const response = await api("/ui/bench/stop", { method: "POST", body: JSON.stringify({ pid: this.bench.measuring.pid }) });
+        this.message = response.error || "Benchmark stopped.";
+        this.status.textContent = this.message;
+        if (!response.error) this.bench.measuring = null;
+      } finally { this.stop.disabled = false; this.paintStatus(); this.loadHistory(); }
+    }
+
+    async loadHistory() {
+      const response = await api("/ui/bench/history");
+      this.historyLoaded = true;
+      const rows = response.history || [];
+      this.querySelector("#benchmark-history").replaceChildren(...(rows.length
+        ? rows.slice(0, 8).map((x) => el("div", { class: "model-row" },
+            el("div", { class: "model-info" }, el("b", {}, x.name || "Benchmark run"),
+              el("span", { class: "why" }, `${x.started || ""}${x.questions ? ` · ${x.questions} questions` : ""}`)),
+            el("span", { class: "label" }, x.exit === 0 ? "Complete" : x.exit === null ? "Running" : "Stopped")))
+        : [el("p", { class: "hint" }, response.error || "No benchmark runs yet.")]));
+    }
+  }
+  customElements.define("fleet-benchmark", FleetBenchmark);
+})();
+</script>

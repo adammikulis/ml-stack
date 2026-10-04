@@ -74,7 +74,7 @@ def test_first_run_model_choice_requires_opt_in(action):
         save.click()
         choice = page.locator("#startup-model-choice")
         assert choice.input_value() == "large.gguf"
-        assert "24.0 GB capacity, 22.5 GB free" in page.locator("#startup-model-memory").inner_text()
+        assert "24.0 GiB capacity, 22.5 GiB free" in page.locator("#startup-model-memory").inner_text()
         assert "16.7 GB download + 0.8 GB MTP draft" in page.locator("#startup-model-detail").inner_text()
         opt = page.locator("#startup-model-download")
         assert not opt.is_checked()

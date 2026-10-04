@@ -14,9 +14,10 @@
       <div class="messages" id="chat-messages"></div>
       <div id="chat-note"></div>
       <div class="askrow" id="chat-askrow" hidden>
-        <textarea id="ask" rows="3" placeholder="Ask it something"></textarea>
-        <button id="chat-send">Send</button>
+        <textarea id="ask" rows="3" placeholder="Ask it something" aria-label="Message" aria-describedby="chat-shortcut"></textarea>
+        <button id="chat-send" title="Enter to send · Shift+Enter for a new line">Send</button>
       </div>
+      <p class="hint" id="chat-shortcut">Enter to send · Shift+Enter for a new line</p>
     </div>
   </main>
 </template>
@@ -43,7 +44,9 @@
       this.open = null;
       this.send.onclick = () => this.ask();
       this.input.onkeydown = (e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.ask(); }
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+          e.preventDefault(); this.ask();
+        }
       };
       M.onRoute((route) => {
         const on = route === "chat";
@@ -103,7 +106,7 @@
 
     async ask() {
       const text = this.input.value.trim();
-      if (!text) return;
+      if (!text || this.send.disabled || !this.picker.value) return;
       this.list.setAttribute("aria-busy", "true");
       this.input.value = "";
       this.note.replaceChildren();

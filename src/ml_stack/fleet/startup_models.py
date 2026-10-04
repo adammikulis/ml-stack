@@ -34,18 +34,18 @@ def memory_pool(machine: MachineMemory) -> tuple[str, int, int]:
     return "RAM", machine.total_ram, machine.available_ram
 
 
-def memory_need(pick: Suggestion) -> int:
+def memory_need(pick: Suggestion, context: int = CONTEXT) -> int:
     """Estimated bytes for weights, prediction head and one chat context."""
     measured = [row for row in records() if row.model == pick.file
                 and row.cache_type == "q8_0" and bool(row.spec) == bool(pick.draft_ref)]
     if measured:
         row = measured[-1]
-        return row.loaded() + row.cost(CONTEXT)
-    if pick.file == "Qwen3.8-27B-UD-Q4_K_XL.gguf":
-        draft_kv = (_head_kv_per_token(QWEN_27B_HEADER, DEFAULT_KV, DEFAULT_KV) * CONTEXT
+        return row.loaded() + row.cost(context)
+    if pick.params_b == 27 and pick.family in {"", "Qwen"}:
+        draft_kv = (_head_kv_per_token(QWEN_27B_HEADER, DEFAULT_KV, DEFAULT_KV) * context
                     if pick.draft_ref else 0)
         return estimate_meta(QWEN_27B_HEADER, int(pick.gb * GIB), Setup(
-            context=CONTEXT, draft_bytes=int(pick.draft_gb * GIB),
+            context=context, draft_bytes=int(pick.draft_gb * GIB),
             draft_kv_bytes=draft_kv)).total_bytes
     return int((pick.gb + pick.draft_gb) * GIB * 1.25) + GIB
 
@@ -67,6 +67,10 @@ def choices(*, machine: MachineMemory | None = None, disk_gb: float = 0,
             continue
         rows.append({**pick.public(), "installed": pick.file in here,
                      "memory_gb": round(need / GIB, 1), "fits_now": need < free * 0.95,
+                     "estimated_context": max((tokens for tokens in
+                        (8192, 16384, 32768, 65536, 131072, 262144)
+                        if memory_need(pick, tokens) <= capacity * 0.9), default=0)
+                        if pick.params_b == 27 else 0,
                      "recommended": False})
     preferred = next((row for row in rows if row["params_b"] == 27), None)
     if preferred is None:

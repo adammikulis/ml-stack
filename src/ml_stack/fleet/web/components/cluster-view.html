@@ -7,7 +7,7 @@
     <div class="group" id="cluster-pause"></div>
     <div id="cluster-cards"></div>
     <div class="group" id="cluster-joined"></div>
-    <div class="group" id="cluster-sweep"></div>
+    <fleet-benchmark></fleet-benchmark>
   </main>
 </template>
 <script>
@@ -258,105 +258,10 @@
         M.clusterForm({ endpoint: "/ui/clusters", group: rows[0]?.group || "default", onComplete: refresh }));
     }
 
-    // A sweep across the fleet: the models the peers hold, one job each, detached.
-    drawSweep(r) {
-      const sweep = this.sweep;
-      const bench = r.bench || {};
-      const held = r.models || [];
-      const peers = r.peers || [];
-      const names = peers.map((p) => p.name);
-      const command = () => {
-        const parts = ["ml-stack-bench sweep --fleet"];
-        for (const m of held) if (sweep.models.has(m)) parts.push(`--serve ${m}`);
-        const chosen = names.filter((n) => sweep.peers.has(n));
-        if (chosen.length && chosen.length < names.length) parts.push(`--peers ${chosen.join(",")}`);
-        if (sweep.sample) parts.push(`--sample ${sweep.sample}`);
-        if (sweep.label) parts.push(`--label ${sweep.label}`);
-        return parts.join(" ");
-      };
-      const shown = el("pre", { class: "cmd" }, command());
-      const tick = (set, key, on) => {
-        if (on) set.add(key); else set.delete(key);
-        shown.textContent = command();
-      };
-      const box = (set, key, label, why) => {
-        const input = el("input", { type: "checkbox", id: `tick-${key}` });
-        input.checked = set.has(key);
-        input.onchange = () => tick(set, key, input.checked);
-        return el("label", { class: "opt", for: `tick-${key}` }, input,
-          el("span", {}, el("b", {}, label), why ? el("span", { class: "why" }, why) : null));
-      };
-      const heldBy = (m) => peers.filter((p) => (p.models || []).includes(m)).map((p) => p.name);
-      const sampleBox = el("input", { type: "text", id: "sample",
-        placeholder: "questions (all)", value: sweep.sample });
-      sampleBox.oninput = () => {
-        sweep.sample = sampleBox.value.replace(/\D/g, "");
-        shown.textContent = command();
-      };
-      const labelBox = el("input", { type: "text", id: "label",
-        placeholder: "label (optional)", value: sweep.label });
-      labelBox.oninput = () => { sweep.label = labelBox.value.trim(); shown.textContent = command(); };
-      const sweepNote = el("div", {}, sweep.note ? el("div", { class: "hint" }, sweep.note) : null);
-      const start = el("button", { class: "ghost small" }, "Run across fleet");
-      start.disabled = !held.some((m) => sweep.models.has(m)) || !!(bench.measuring);
-      start.onclick = async () => {
-        start.disabled = true;
-        const got = await api("/ui/bench/sweep", { method: "POST",
-          body: JSON.stringify({ models: held.filter((m) => sweep.models.has(m)),
-                                 peers: names.filter((n) => sweep.peers.has(n)),
-                                 sample: Number(sweep.sample || 0), label: sweep.label }) });
-        if (got.error) {
-          sweep.note = "";
-          sweepNote.replaceChildren(el("div", { class: "err" }, got.error));
-          start.disabled = false;
-          return;
-        }
-        sweep.note = `Started (pid ${got.pid}); log ${got.log}`;
-        this.draw();
-      };
-      const stop = bench.measuring
-        ? el("button", { class: "ghost small", onclick: async () => {
-            const got = await api("/ui/bench/stop", { method: "POST",
-              body: JSON.stringify({ pid: bench.measuring.pid }) });
-            sweep.note = got.error || got.stopped || "";
-            this.draw();
-          } }, "Stop")
-        : null;
-      const history = el("div", { class: "hint" }, "Loading…");
-      api("/ui/bench/history").then((h) => {
-        const rows = (h.history || []).slice(0, 8);
-        history.replaceChildren(...(rows.length
-          ? rows.map((e) => el("div", { class: "row" },
-              el("span", {}, el("b", {}, `${e.subcommand} ${e.name}`),
-                el("span", { class: "why" },
-                  `${e.started} · ${e.exit}${e.seconds ? ` · ${Math.round(e.seconds)}s` : ""}`
-                  + `${e.questions ? ` · ${e.questions} questions` : ""}`))))
-          : [el("div", { class: "hint" }, h.error || "Nothing has been measured yet.")]));
-      });
-
-      this.querySelector("#cluster-sweep").replaceChildren(
-        el("h2", {}, "Run across the fleet"),
-        el("div", { class: "hint" },
-          bench.available === false ? bench.text
-          : "Each model is measured on a machine that holds it, one job per model, and the "
-            + "runs are gathered here. Every machine must be on this checkout's commit."),
-        held.length
-          ? el("div", { class: "two" },
-              el("div", {}, el("h2", {}, "models"),
-                held.map((m) => box(sweep.models, m, m, `on ${heldBy(m).join(", ")}`))),
-              el("div", {}, el("h2", {}, "machines"),
-                peers.map((p) => box(sweep.peers, p.name, p.name,
-                  p.commit && p.commit !== "?" ? p.commit : "")),
-                el("div", { class: "hint" },
-                  "None ticked means whichever the fleet plans over.")))
-          : el("div", { class: "hint" }, "No machine has a model yet. Get one under Models."),
-        el("div", { class: "searchrow" }, sampleBox, labelBox, start, stop),
-        shown,
-        el("pre", { class: "cmd" }, bench.text || ""),
-        sweepNote,
-        el("h2", {}, "History"),
-        history);
+    drawSweep(fleet) {
+      this.querySelector("fleet-benchmark").update(fleet);
     }
+
   }
   customElements.define("cluster-view", ClusterView);
 })();

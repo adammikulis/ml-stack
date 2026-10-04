@@ -140,6 +140,11 @@ def open_page(browser):
         ctx.close()
 
 
+def open_capacity(page):
+    page.click("nav.tabs a:has-text('Models')")
+    page.locator("#model-capacity > summary").click()
+
+
 # -- first run ---------------------------------------------------------------------------
 class TestFirstRun:
     def test_a_machine_in_no_cluster_opens_on_the_wizard(self, daemon, open_page):
@@ -246,15 +251,14 @@ class TestTheClusterView:
         assert page.locator("#cluster-joined button:has-text('Leave')").count() == 1
         assert not errors
 
-    def test_the_sweep_command_follows_what_is_ticked(self, joined, open_page):
+    def test_benchmark_options_are_explicit_and_no_command_is_shown(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.wait_for_selector("#cluster-sweep .searchrow")
-        shown = page.locator("#cluster-sweep pre.cmd").first
-        assert shown.inner_text().strip() == "ml-stack-bench sweep --fleet"
-        page.fill("#sample", "40")
-        page.fill("#label", "nightly")
-        assert "--sample 40" in shown.inner_text()
-        assert "--label nightly" in shown.inner_text()
+        page.locator("#cluster-sweep > summary").click()
+        page.get_by_label("Questions", exact=True).select_option("limit")
+        page.get_by_label("Question limit", exact=True).fill("40")
+        page.get_by_label("Run name", exact=False).fill("nightly")
+        assert page.locator("#sample").input_value() == "40"
+        assert "ml-stack-bench" not in page.locator("#cluster-sweep").inner_text()
         assert not errors
 
 
@@ -297,19 +301,20 @@ class TestTheModelsView:
         (joined.files / "thornfield-8B-Q4_K_M.gguf").write_bytes(b"x" * (2 << 20))
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Models')")
-        page.wait_for_selector("#models-here h2")
-        here = page.locator("#models-here")
+        page.wait_for_selector("#browser-results")
+        here = page.locator("#browser-results")
         assert "thornfield-8B-Q4_K_M.gguf" in here.inner_text()
-        assert "GB free on this machine" in page.locator("#models-free").inner_text()
+        assert "GB free storage on this machine" in page.locator("#models-free").inner_text()
         assert not errors
 
     def test_with_no_hub_the_search_box_still_takes_a_query(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Models')")
-        page.wait_for_selector("#models-popular .hint")
+        page.get_by_role("button", name="Hugging Face", exact=True).click()
+        page.wait_for_selector("#browser-source")
         page.fill("#hunt", "thornfield")
-        page.wait_for_selector("#models-popular h2:has-text('Models matching')")
-        assert "THORNFIELD" in page.locator("#models-popular h2").first.inner_text().upper()
+        page.wait_for_function("document.querySelector('model-browser').hubKey.includes('thornfield')")
+        assert page.locator("#hunt").input_value() == "thornfield"
         assert not errors
 
 
@@ -339,9 +344,8 @@ class TestTheSettingsView:
         page, errors = open_page(joined, cookie=joined.cookie)
         page.wait_for_selector("#cluster-joined .row")
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
-                           ("Models", "#models-here h2"),
+                           ("Models", "#browser-results"),
                            ("Settings", "#settings-removal label.opt"),
-                           ("Fit", "table.fit tbody tr"),
                            ("Cluster", "#cluster-sweep .searchrow")):
             page.click(f"nav.tabs a:has-text('{tab}')")
             page.wait_for_selector(ready)
@@ -371,7 +375,7 @@ class TestTheFitView:
         from ml_stack.serve.fit import Fit
 
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector("table.fit tbody tr")
         rows = page.locator("table.fit tbody tr")
         assert rows.count() == 2
@@ -387,7 +391,7 @@ class TestTheFitView:
 
     def test_moving_the_room_asks_again_and_slots_fewer(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector("table.fit tbody tr")
         before = page.locator("table.fit tbody tr").first.locator("td").nth(3).inner_text()
         page.select_option("#fit-controls select", "8")
@@ -405,7 +409,7 @@ class TestTheFitView:
 
     def test_both_panels_are_drawn(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         assert page.locator(".panels .panel").count() == 2
         assert page.locator(".panels svg path.ln").count() >= 2
@@ -417,7 +421,7 @@ class TestTheFitView:
         costs at that point, the line nearest the pointer goes hot, and its row in the table
         lights with it. Fails when the cursor tracking is dropped from either panel."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1)
         line = cost.locator("svg path.ln").first.bounding_box()
@@ -437,7 +441,7 @@ class TestTheFitView:
         whole axis back. Fails when the drag no longer narrows it, and when the
         double-click no longer restores it."""
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1).locator("svg")
 
@@ -467,7 +471,7 @@ class TestTheFitView:
 
     def test_the_other_two_views_open(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
-        page.click("nav.tabs a:has-text('Fit')")
+        open_capacity(page)
         page.wait_for_selector("#fit-views button")
         page.click("#fit-views button:has-text('What it cost to be right')")
         page.wait_for_selector("#fit-heading:has-text('What it cost to be right')")

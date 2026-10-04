@@ -1,0 +1,235 @@
+<template>
+  <section class="model-browser" aria-label="Model library">
+    <div class="section-heading"><div><h2>Your model library</h2>
+      <p class="hint">Run a model here, copy it from your cluster, or browse new models.</p></div></div>
+    <div class="browser-toolbar">
+      <div class="segmented" role="group" aria-label="Model source">
+        <button type="button" data-source="network" aria-pressed="true">On network</button>
+        <button type="button" data-source="hub" aria-pressed="false">Hugging Face</button>
+      </div>
+      <label class="search-field" for="hunt"><span class="sr-only">Search models</span>
+        <input type="search" id="hunt" placeholder="Search models on your network"></label>
+    </div>
+    <div class="quant-filters">
+      <label for="quant-bits">Quantization bits <select id="quant-bits" aria-label="Quantization bits">
+        <option value="">All bits</option><option value="3">All 3-bit</option><option value="4">All 4-bit</option>
+        <option value="2">All 2-bit</option><option value="5">All 5-bit</option><option value="6">All 6-bit</option><option value="8">All 8-bit</option>
+      </select></label>
+      <label for="quant-family">Quant family <select id="quant-family" aria-label="Quant family">
+        <option value="">All families</option><option value="UD">UD</option><option value="GSQ/RCO">GSQ / RCO</option><option value="Standard">Standard</option>
+      </select></label>
+    </div>
+    <p class="hint" id="browser-source"></p>
+    <div id="browser-filters" hidden></div>
+    <div id="browser-results" aria-live="polite"></div>
+    <div id="browser-pages"></div>
+  </section>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const { el, api } = M;
+  const isWeight = (name) => !/(^mtp[-_]|^mmproj|\.draft\.gguf$|[-_]draft[-_])/i.test(name || "");
+
+  class ModelBrowser extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.source = "network";
+      this.search = { typed: "", page: 0, rude: false, families: null };
+      this.hunt = this.querySelector("#hunt");
+      this.results = this.querySelector("#browser-results");
+      this.filters = this.querySelector("#browser-filters");
+      this.pages = this.querySelector("#browser-pages");
+      this.description = this.querySelector("#browser-source");
+      this.bits = this.querySelector("#quant-bits");
+      this.quantFamily = this.querySelector("#quant-family");
+      const refilter = () => this.source === "network" ? this.paintNetwork() : this.hub && this.paintHub();
+      this.bits.onchange = refilter;
+      this.quantFamily.onchange = refilter;
+      this.inventory = { here: [], elsewhere: [] };
+      this.run = {};
+      this.pending = new Set();
+      this.selected = new Map();
+      this.querySelectorAll("[data-source]").forEach((button) => {
+        button.onclick = () => this.chooseSource(button.dataset.source);
+      });
+      this.hunt.oninput = () => {
+        clearTimeout(this.debounce);
+        this.search.typed = this.hunt.value.trim();
+        this.search.page = 0;
+        this.search.families = null;
+        if (this.source === "network") this.paintNetwork();
+        else this.debounce = setTimeout(() => this.loadHub(), 350);
+      };
+      this.paintNetwork();
+    }
+
+    setInventory(inventory, run) {
+      const changed = JSON.stringify([inventory.here, inventory.elsewhere, run.running, run.can_serve]);
+      this.inventory = inventory;
+      this.run = run;
+      if (changed === this.inventoryKey) return;
+      this.inventoryKey = changed;
+      if (this.source === "network") this.paintNetwork();
+    }
+
+    setLoading(name, loading) {
+      if (loading) this.pending.add(name); else this.pending.delete(name);
+      if (this.source === "network") this.paintNetwork();
+    }
+
+    chooseSource(source) {
+      if (source === this.source) return;
+      clearTimeout(this.debounce);
+      this.requestId = (this.requestId || 0) + 1;
+      this.source = source;
+      this.querySelectorAll("[data-source]").forEach((b) =>
+        b.setAttribute("aria-pressed", String(b.dataset.source === source)));
+      this.hunt.placeholder = source === "network" ? "Search models on your network"
+        : "Search Hugging Face, or paste a model reference";
+      this.filters.hidden = source !== "hub";
+      if (source === "network") this.paintNetwork();
+      else if (this.hub && this.hubKey === this.key()) this.paintHub();
+      else this.loadHub();
+    }
+
+    paintNetwork() {
+      const local = new Set((this.inventory.here || []).map((x) => x.name));
+      const running = new Map((this.run.running || []).flatMap((r) =>
+        (r.models || []).map((name) => [name, r.port])));
+      const rows = [...(this.inventory.here || []).map((x) => ({ ...x, local: true })),
+        ...(this.inventory.elsewhere || []).filter((x) => !local.has(x.name))]
+        .filter((x) => isWeight(x.name) && x.name.toLowerCase().includes(this.search.typed.toLowerCase()));
+      this.description.textContent = "Models already on this machine and authenticated machines in your cluster. No internet search.";
+      this.filters.hidden = true;
+      this.pages.replaceChildren();
+      const groups = this.grouped(rows);
+      this.results.replaceChildren(...(groups.length ? groups.map((group) => this.variantRow(group, running))
+        : [el("div", { class: "empty-state" }, this.search.typed
+          ? "No models on your network match this search."
+          : "No models on your network yet. Choose Hugging Face to find one.")]));
+    }
+
+    grouped(rows) {
+      const groups = new Map();
+      for (const row of rows) {
+        const file = row.file || row.name;
+        const bits = file.match(/(?:IQ|Q)(\d)(?:_|-)/i)?.[1];
+        const family = row.quant_family || (/GSQ|RCO/i.test(file) ? "GSQ/RCO" : /-UD-/i.test(file) ? "UD" : "Standard");
+        if ((this.bits.value && bits !== this.bits.value) || (this.quantFamily.value && family !== this.quantFamily.value)) continue;
+        const key = file.replace(/-(?:(?:UD|GSQ|RCO)-)*((?:IQ|Q)\d(?:_[A-Z0-9]+)+)(?:-mtp)?(?=\.gguf$)/i, "").replace(/\.gguf$/i, "");
+        if (!groups.has(key)) groups.set(key, { key, rows: [] });
+        groups.get(key).rows.push(row);
+      }
+      return [...groups.values()];
+    }
+
+    variantRow(group, running = new Map()) {
+      const key = `${this.source}:${group.key}`;
+      const prior = this.selected.get(key);
+      let chosen = group.rows.find((x) => (x.file || x.name) === prior)
+        || group.rows.find((x) => x.recommended) || group.rows[0];
+      const quant = (x) => (x.file || x.name).match(/-((?:IQ|Q)\d(?:_[A-Z0-9]+)+)(?:-mtp)?(?=\.gguf$)/i)?.[1] || "Original";
+      const size = (x) => x.size ? M.fileSize(x.size)
+        : x.download_gb !== undefined ? `${x.download_gb} GB` : x.gb !== undefined ? `${x.gb} GB` : "size unknown";
+      const title = group.rows.some((x) => quant(x) !== "Original") || chosen.name.endsWith(".gguf")
+        ? group.key.replace(/-/g, " ") : chosen.name;
+      const card = el("div", { class: "model-row", "data-group": group.key });
+      const selector = el("select", { "aria-label": `Quantization for ${title}`, class: "quant-select" },
+        ...group.rows.map((x) => el("option", { value: x.file || x.name },
+          `${x.quant_family || (/-UD-/i.test(x.file || x.name) ? "UD " : /GSQ|RCO/i.test(x.file || x.name) ? "GSQ/RCO " : "")}${quant(x)}${x.integrated_mtp ? " + MTP" : ""} · ${size(x)}`)));
+      selector.value = chosen.file || chosen.name;
+      const info = el("div", { class: "model-info" }, el("b", {}, title),
+        el("label", { class: "variant-choice" }, "Quantization", selector));
+      const detail = el("div", { class: "why" });
+      const action = el("div", { class: "model-actions" });
+      info.append(detail);
+      const paint = () => {
+        const name = chosen.file || chosen.name;
+        this.selected.set(key, name);
+        card.dataset.model = name;
+        const loading = this.pending.has(name);
+        const active = running.has(name);
+        const total = (chosen.download_gb ?? chosen.gb) + (chosen.draft_download_gb ?? chosen.draft_gb ?? 0);
+        detail.replaceChildren(el("span", {}, name), el("span", { class: "why" },
+          this.source === "network" ? (chosen.local
+            ? `This machine · ${size(chosen)}${loading ? " · loading model" : active ? " · running" : ""}`
+            : `On ${(chosen.peers || []).join(", ")} · ${size(chosen)}`)
+          : `${size(chosen)} weights${chosen.draft_ref ? ` + ${chosen.draft_download_gb ?? chosen.draft_gb ?? "unknown"} GB MTP head · ${Number.isFinite(total) ? `${total.toFixed(1)} GB total download` : "total size unknown"}` : ""}`),
+          ...M.kids(chosen.estimated_context ? el("span", { class: "why" },
+            `Estimated up to ${M.ctxWords(chosen.estimated_context)} at Q8 KV; other apps reduce available memory.`) : null,
+            chosen.bits_per_weight ? el("span", { class: "why" }, `${chosen.bits_per_weight} bits per weight`) : null));
+        const button = this.source === "hub"
+          ? el("button", { class: "ghost small", onclick: () => this.owner.get(name, chosen.ref, chosen.draft_ref) }, "Download")
+          : chosen.local ? (this.run.can_serve
+            ? el("button", { class: active ? "ghost small" : "small", onclick: () => active
+                ? this.owner.halt(running.get(name)) : this.owner.serve(name) }, active ? "Stop" : "Run")
+            : el("span", { class: "label" }, "Installed"))
+            : el("button", { class: "ghost small", onclick: () => this.owner.get(name, "") }, "Copy here");
+        if (loading) { button.disabled = true; button.replaceChildren(el("span", { class: "spin" }), "Loading…"); }
+        action.replaceChildren(button);
+      };
+      selector.onchange = () => { chosen = group.rows.find((x) => (x.file || x.name) === selector.value); paint(); };
+      paint();
+      card.append(info, action);
+      return card;
+    }
+
+    key() { return JSON.stringify([this.search.typed, this.search.page, this.search.rude]); }
+
+    async loadHub() {
+      if (this.source !== "hub") return;
+      const request = this.requestId = (this.requestId || 0) + 1;
+      const key = this.key();
+      const query = new URLSearchParams({ q: this.search.typed, page: this.search.page,
+        rude: this.search.rude ? "1" : "0" });
+      this.description.textContent = "Searching Hugging Face…";
+      const [response, suggested] = await Promise.all([api(`/ui/models/popular?${query}`), api("/ui/models/startup")]);
+      if (request !== this.requestId || this.source !== "hub" || key !== this.key()) return;
+      if (M.refused(response)) return;
+      const known = new Set((response.models || []).map((x) => x.file));
+      const alternatives = (suggested.models || []).filter((x) => x.params_b === 27 && !known.has(x.file)
+        && (!this.search.typed || `${x.name} ${x.file}`.toLowerCase().includes(this.search.typed.toLowerCase())));
+      response.models = [...alternatives, ...(response.models || [])];
+      response.families = [...new Set([...(response.families || []), ...alternatives.map((x) => x.family)])];
+      this.hub = response;
+      this.hubKey = key;
+      if (this.search.families === null) this.search.families = new Set(response.families || []);
+      this.paintHub();
+    }
+
+    paintHub() {
+      const response = this.hub;
+      const s = this.search;
+      this.description.textContent = response.error || "From Hugging Face. Downloading starts only when you choose Download.";
+      this.filters.hidden = false;
+      const uncensored = el("input", { type: "checkbox", id: "rude" });
+      uncensored.checked = s.rude;
+      uncensored.onchange = () => { s.rude = uncensored.checked; s.page = 0; s.families = null; this.loadHub(); };
+      this.filters.replaceChildren(el("div", { class: "chips" },
+        ...(response.families || []).map((family, i) => {
+          const box = el("input", { type: "checkbox", id: `family-${i}` });
+          box.checked = s.families.has(family);
+          box.onchange = () => { if (box.checked) s.families.add(family); else s.families.delete(family); this.paintHub(); };
+          return el("label", { class: "opt inline" }, box, family);
+        })), el("label", { class: "opt inline" }, uncensored, "Include uncensored builds"));
+      const rows = (response.models || []).filter((x) => s.families.has(x.family));
+      const groups = this.grouped(rows);
+      this.results.replaceChildren(...(groups.length ? groups.map((group) => this.variantRow(group))
+        : [el("div", { class: "empty-state" }, response.error || "No models match these filters.")]));
+      if (/^(hf:|https?:)/.test(s.typed)) this.results.append(
+        el("button", { class: "ghost small", onclick: () => this.owner.get(s.typed.split("/").pop(), s.typed) }, "Download this reference"));
+      const previous = el("button", { class: "ghost small" }, "Previous");
+      const next = el("button", { class: "ghost small" }, "Next");
+      previous.disabled = !response.page;
+      next.disabled = (response.page || 0) + 1 >= (response.pages || 1);
+      previous.onclick = () => { s.page--; this.loadHub(); };
+      next.onclick = () => { s.page++; this.loadHub(); };
+      this.pages.replaceChildren(previous, el("span", { class: "why" },
+        `Page ${(response.page || 0) + 1} of ${response.pages || 1}`), next);
+    }
+  }
+  customElements.define("model-browser", ModelBrowser);
+})();
+</script>

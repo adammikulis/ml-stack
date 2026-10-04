@@ -115,6 +115,10 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
 
   /** Show one screen by name, and tell every component that is watching. */
   M.go = function (name) {
+    if (name === "fit" && document.querySelector("models-view")) {
+      name = "models";
+      document.getElementById("model-capacity").open = true;
+    }
     M.route = name;
     const app = document.getElementById("app");
     if (app) app.hidden = !IN_APP.includes(name);

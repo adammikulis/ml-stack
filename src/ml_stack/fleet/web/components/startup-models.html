@@ -30,9 +30,10 @@
     const draw = () => {
       kept.modelFile = select.value;
       const m = models.find((x) => x.file === select.value);
-      detail.textContent = `${m.gb} GB download`
-        + (m.draft_ref ? ` + ${m.draft_gb} GB MTP draft` : "")
+      detail.textContent = `${m.download_gb ?? m.gb} GB download`
+        + (m.draft_ref ? ` + ${m.draft_download_gb ?? m.draft_gb} GB MTP draft` : "")
         + (m.what ? `. ${m.what.replace(/\.$/, "")}` : "")
+        + (m.estimated_context ? `. Estimated up to ${M.ctxWords(m.estimated_context)} at Q8 KV, depending on other apps` : "")
         + ". Downloading leaves the model ready to run from Models.";
     };
     select.onchange = draw;
@@ -42,8 +43,8 @@
     opt.onchange = () => { kept.downloadModel = opt.checked; };
     panel.append(el("h2", {}, "Choose a model"),
       el("div", { class: "hint", id: "startup-model-memory" },
-        `${memory.pool || "Memory"}: ${M.gb(memory.capacity_gb) || "unknown"} capacity, `
-        + `${M.gb(memory.free_gb) || "unknown"} free. `
+        `${memory.pool || "Memory"}: ${M.gb(memory.capacity_gb)?.replace("GB", "GiB") || "unknown"} capacity, `
+        + `${M.gb(memory.free_gb)?.replace("GB", "GiB") || "unknown"} free. `
         + "Starting a model checks the memory available then."),
       el("label", { for: select.id }, "Model"), select, detail,
       el("label", { class: "opt", for: opt.id }, opt,
