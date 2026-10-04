@@ -7,6 +7,7 @@ import pytest
 from ml_stack.gym import simulation
 from ml_stack.gym.adapters import make_environment
 from ml_stack.gym.car_definition import build
+from ml_stack.gym.training import evaluate, train
 from ml_stack.gym.values import json_value
 
 
@@ -143,5 +144,56 @@ def test_native_car_arrivals_handoff_in_the_same_world():
         assert env.native.current_map is road and env.native.engine is engine
         assert info["world_reset_count"] == 1
         assert env.native.agents
+    finally:
+        env.close()
+
+
+@pytest.mark.slow
+def test_procedural_episode_definitions_support_training_and_heldout_evaluation():
+    pytest.importorskip("metadrive")
+    pytest.importorskip("stable_baselines3")
+    torch = pytest.importorskip("torch")
+    torch.set_num_threads(1)
+    config = {"horizon": 20, "traffic_density": 0., "world": {"map": 3, "seed": 2}}
+    env = make_environment("car", config)
+    try:
+        geometries = {}
+        for seed in (0, 2, 10000):
+            env.reset(seed=seed)
+            assert env.unwrapped.current_seed == seed
+            geometries[seed] = json_value(env.unwrapped.current_map.get_boundary_line_vector(3))
+        assert geometries[0] != geometries[2] != geometries[10000]
+        env.reset(seed=2)
+        assert json_value(env.unwrapped.current_map.get_boundary_line_vector(3)) == geometries[2]
+    finally:
+        env.close()
+    trained = train("car", config, timesteps=256, seed=2)
+    assert trained["timesteps"] == 256
+    evaluated = evaluate("car", trained["checkpoint"], config, episodes=2, seed=10000)
+    assert [episode["seed"] for episode in evaluated["episodes"]] == [10000, 10001]
+    assert all(0 < episode["steps"] <= 20 for episode in evaluated["episodes"])
+
+
+@pytest.mark.slow
+def test_manual_episode_geometry_is_independent_of_scenario_reset_seed(tmp_path, monkeypatch):
+    pytest.importorskip("metadrive")
+    source = make_environment("car", {"traffic_density": 0., "world": {"map": "SCS", "seed": 2}})
+    try:
+        source.reset(seed=2)
+        metadata = source.unwrapped.current_map.get_meta_data()
+        metadata["map_config"] = metadata["map_config"].get_serializable_dict()
+        expected = json_value(source.unwrapped.current_map.get_boundary_line_vector(3))
+        (tmp_path / "authored.json").write_text(json.dumps(json_value(metadata)))
+    finally:
+        source.close()
+    monkeypatch.setenv("ML_STACK_GYM_FILES_ROOT", str(tmp_path))
+    env = make_environment("car", {"traffic_density": 0., "world": {
+        "mode": "manual", "map_file": "authored.json", "seed": 2}})
+    try:
+        for seed in (0, 2, 10000):
+            env.reset(seed=seed)
+            assert env.unwrapped.current_seed == seed
+            assert json_value(env.unwrapped.current_map.get_boundary_line_vector(3)) == expected
+            env.step(4)
     finally:
         env.close()
