@@ -110,6 +110,22 @@ wheel on the LAN for ten minutes to somebody who opens the address on it, and `b
 user@host --share DIR` (try `--dry-run` first) installs it over your own ssh keys. The design, the
 threat model and what is not built are in `docs/onboarding.md`.
 
+### The passphrase and the recovery file
+
+Joining with a passphrase stores it in the operating system's keystore (one Keychain prompt the
+first time). `ml-stack-fleet passphrase [--group G]` prints it; it runs for a person at a
+terminal and refuses when `CLAUDECODE` or `ML_STACK_NONINTERACTIVE` is set. If the keystore
+cannot store it, the join says so once and the cluster still works. `ml-stack-fleet leave`
+removes the stored passphrase with the cluster.
+
+`ml-stack-fleet recovery export FILE` writes the cluster's group, salt and key to a mode 600 file,
+and `ml-stack-fleet recovery import FILE` joins a machine from it. The file is a replacement for
+the passphrase when joining; it does not reveal the passphrase. Anyone holding it can run commands
+on every machine in the cluster.
+
+With neither the passphrase nor a recovery file, run `ml-stack-fleet leave` on every machine,
+then join each with a new passphrase.
+
 ### Placing users
 
 `plan` says which model each peer should serve, and with how many slots, for a number of

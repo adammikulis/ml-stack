@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack.home import machine_id
 from ml_stack.http import Server, ServerError, open_stream
 
-from . import pausing
+from . import pausing, recovery
 from .discovery import (
     SEARCH,
     DiscoveryError,
@@ -22,6 +22,7 @@ from .discovery import (
     discover,
     in_cluster,
     join_cluster,
+    leave,
     load_cluster_key,
     memberships,
     named_apart,
@@ -148,6 +149,11 @@ class UI:
                 self.settings.save(self.settings_path)
         return self.state()
 
+    def leave(self, group: str) -> list[Any]:
+        """Drop a cluster and its stored passphrase; the clusters left."""
+        recovery.forget(group, self.cluster_key_path)
+        return leave(group, self.cluster_key_path)
+
     def rejoined(self) -> None:
         """The set of clusters changed: advertise on the new one, drop the old."""
         self._peers = (0.0, [])
@@ -211,6 +217,7 @@ class UI:
         try:
             join_cluster(passphrase, group=group or "ml-stack",
                          path=self.cluster_key_path, salting=SEARCH)
+            recovery.remember(passphrase, group or "ml-stack", self.cluster_key_path)
         finally:
             self.throttle.release()
         self.throttle.succeeded(source)
