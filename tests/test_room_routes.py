@@ -140,3 +140,18 @@ def test_an_agent_marker_in_the_daemons_environment_refuses_even_a_good_request(
     status, body, _ = room.call("/ui/room/apply", method="POST", body={"mb": 65536})
     assert status == 403 and "agent" in body["error"]
     assert room.ran.calls == []
+
+
+def test_another_machine_on_the_network_cannot_make_the_request_even_signed_in(room):
+    from ml_stack.fleet.discovery import primary_ip
+
+    lan = primary_ip()
+    if lan.startswith("127."):
+        pytest.skip("this machine has no address but loopback")
+    room.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "home"})
+    _, _, headers = room.call("/ui/session", method="POST", body={"passphrase": WORDS}, host=lan)
+    cookie = headers["Set-Cookie"].split(";")[0]
+    status, body, _ = room.call("/ui/room/apply", method="POST", body={"mb": 65536},
+                                host=lan, cookie=cookie)
+    assert status == 403 and "its own browser" in body["error"], (status, body)
+    assert room.ran.calls == []
