@@ -884,13 +884,23 @@ def points_at(link) -> str:
 
 #: Names at the top of the real state root that a process outside the suite rewrites on
 #: its own: a running broker's holders, record and lock, the edit guard's cache, and the
-#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content. `workspace`,
-#: `activity`, `sentinel` and `harness` are written live by every other agent's tool use and by the end of every other
-#: test run on the machine; they failed this run with writes it never made (a flake that grows with the
-#: number of agents). A test cannot reach them by accident: HOME and ML_STACK_HOME are moved.
+#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content.
 LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
-                          "servers.lock", "logs", "guard", "workspace", "activity",
-                          "sentinel", "harness"})
+                          "servers.lock", "logs", "guard"})
+
+#: Paths below the state root that OTHER agents and test runs on the machine append to while this
+#: run is going (every `scripts/test` run ends by logging to `activity/`; every agent message lands
+#: in `workspace/`), so a write there says nothing about this run. A glob per path, and only logs
+#: and the hub: the keystore, key files, manifests, canaries, honey, requests, credentials and the
+#: sentinel's records stay guarded, because a test that reached for those would be an escape.
+LIVE_PATHS = ("workspace/*", "harness/*", "activity/*/activity.log*", "activity/*/activity.log.lock",
+              "sentinel/events.log*", "sentinel/anchor.log")
+
+
+def _live(rel: str) -> bool:
+    import fnmatch
+
+    return rel.endswith(".key") is False and any(fnmatch.fnmatch(rel, g) for g in LIVE_PATHS)
 
 
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
@@ -904,6 +914,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):
+                continue
+            if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
             try:
                 out[(rel / name).as_posix()] = (Path(dirpath) / name).lstat().st_mtime_ns

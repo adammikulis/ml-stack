@@ -89,6 +89,12 @@ Rules that keep the suite fast and not flaky:
 * A test that checks a failure path does not wait out the production timeout: pass a small one.
 * Servers a test starts shut down in milliseconds (conftest polls every 20 ms); do not add sleeps
   to wait for them.
+* The real-state-root guard (`tests/conftest.py`, `LIVE_PATHS`) fails a run when a file under
+  `~/.ml-stack` changed. Other agents and runs append to a few logs while yours is going, so only
+  `workspace/`, `harness/`, the activity log and the sentinel's event and anchor logs are tolerated.
+  The keystore, every `.key` file, manifests, canaries, honey, requests and credentials stay guarded
+  (`tests/test_live_paths.py`). The guard cannot tell which process wrote a tolerated log; a test
+  that escapes into one of those paths is not caught.
 * A test never depends on a neighbour having run first (a module fixture it forgot to request, a
   process-wide observer): run it alone before you push.
 
