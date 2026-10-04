@@ -36,6 +36,13 @@ tests = ["tests/test_redteam_bubblewrap.py"]
 note = "actual executable paths containing shell syntax remain literal, control characters cannot execute, probes are single-flight and invalidate on binary changes, stalled probes are killed"
 
 [[group]]
+match = ["context:gym/vision_process.py:image_request"]
+status = "covered"
+count = 1
+tests = ["tests/test_gym_models.py"]
+note = "compatible HTTP server receives only captured RGB and explicitly synthetic thermal image pixels, not simulator detection labels or hidden actor coordinates; unregistered and unsupported model selections are refused; superseded actor results are rejected"
+
+[[group]]
 match = ["spawn:gym/decision_process.py:DecisionProcess.__init__"]
 status = "covered"
 count = 1

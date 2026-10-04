@@ -32,13 +32,13 @@ def decision_controller(checkpoint=None):
 class DecisionProcess:
     """Own one model process and one outstanding decision request."""
 
-    def __init__(self, checkpoint=None):
+    def __init__(self, checkpoint=None, *, module="ml_stack.gym.decision_process"):
         self.events = queue.Queue(maxsize=1)
         self.requests = queue.Queue(maxsize=1)
         self.pending = None
         self.status, self.error = "loading", None
         self.handle = start_process(
-            [interpreter(), "-m", "ml_stack.gym.decision_process", json.dumps(checkpoint)],
+            [interpreter(), "-m", module, json.dumps(checkpoint)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr,
             text=True, bufsize=1, env={**os.environ, "OMP_NUM_THREADS": "1",
                                       "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"})
@@ -120,7 +120,7 @@ def serve():
             began = time.perf_counter()
             with contextlib.redirect_stdout(sys.stderr):
                 answer = policy.decide("Choose the next safe environment action",
-                                       request["state"], request["options"])
+                                       request.get("model_state", request["state"]), request["options"])
             result = {**request, "choice": answer.choice, "probabilities": dict(answer.scores),
                       "abstained": answer.abstained, "model": answer.model, "backend": answer.backend,
                       "latency_ms": (time.perf_counter() - began) * 1000}

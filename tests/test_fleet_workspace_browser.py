@@ -53,7 +53,7 @@ def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playw
             gym.session = null;
             return {before, calls};
         }""")
-        assert applied['before'] == 0
+        assert applied['before'] == 1
         assert applied['calls'][0]['payload']['decision_checkpoint'] == '/tmp/trained-pointer'
         assert not errors
         browser.close()
