@@ -447,6 +447,11 @@ not in source, not in a test, not in a fixture, not in a docstring, not in a com
 data is invented. If a real value revealed a bug, reproduce its *shape* — the casing, the
 punctuation, a dot in a handle, a missing surname — never its content.
 
+A licence beats this rule. Where a licence requires a copyright holder to be named for code we
+copy, port or redistribute (the `NOTICE` file and the licence texts that travel with such code),
+write the name exactly as the licence requires; that is the only exception, it lives in those
+files, and nothing else may carry the name. Never drop a required attribution to satisfy this rule.
+
 Long-dead public figures are not covered: a fixture may use a name like Alan Turing, Ada
 Lovelace or Grace Hopper, listed in `tests/known-fixtures.txt`. A living person never.
 

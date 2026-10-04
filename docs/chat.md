@@ -47,11 +47,15 @@ Reads run without asking: `serve_status`, `models_find`, `models_files`, `models
 `doctor`, `jobs_status`, `jobs_wait`, and `review_view` (status, held items, events, hosts,
 downloads, scanners of the security review, as JSON).
 
-Each of these waits for your yes, every call, naming the arguments (and any path outside
-ml-stack's state directory): `serve_up`, `serve_down`, `serve_escalate`, `models_fetch`,
-`bench_run`, `bench_standard`, `bench_speed`, `bench_compare`, `bench_animate`. No answer, EOF or
-anything but `y`/`yes` is a no; there is no `--yes`; a yes to one call does not cover the next;
-an answer to the model's own question (`ask_user`) is not a yes to a call.
+Each of these asks you, naming the arguments (and any path outside ml-stack's state
+directory): `serve_up`, `serve_down`, `serve_escalate`, `models_fetch`, `bench_run`,
+`bench_standard`, `bench_speed`, `bench_compare`, `bench_animate`. The question offers
+`1) allow this time`, `2) always allow` and `3) never allow`; Enter, no answer, EOF or
+anything else is a no. Always and never become saved rules (`docs/agent-roles.md`), only on your
+own typed answer, and always is not offered for a downloaded model, a path outside ml-stack's
+state, a wildcard value or a run that has read outside text. There is no `--yes`; an allow this
+time does not cover the next call; an answer to the model's own question (`ask_user`) is not an
+answer to a call.
 
 Not offered at all: releasing or purging quarantine, approving a host, minting a human grant,
 changing the sentinel mode or the scan policy, planting baselines or decoys, the workspace and
@@ -96,9 +100,9 @@ you> yes, start it
 -> serve_up(model="Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf", port=8080, draft="auto")
 
 ! serve_up(...): serve_up will start a model server (takes GPU and memory).
-allow it? [y/N] y
+allow it? 1) allow this time  2) always allow  3) never allow  [Enter = no] > 1
 ! serve_up(...): serve_up (fleet) would use draft after the run read untrusted text from flagged, tool:serve_status#1, tool:models_on_disk#1
-allow it? [y/N] y
+allow it? 1) allow this time  3) never allow  [Enter = no] > 1
    {"log": "...", "pid": 7}
 It is starting; serve_status will say when it answers.
 
@@ -106,7 +110,7 @@ you> pull the Q4_K_M quince-2b
 -> models_fetch(reference="hf:unsloth/quince-2b-GGUF/quince-2b-Q4_K_M.gguf")
 
 ! models_fetch(...): models_fetch will start a download into the model cache.
-allow it? [y/N] y
+allow it? 1) allow this time  2) always allow  3) never allow  [Enter = no] > 1
 ...
 
 you> smoke-benchmark it
@@ -115,7 +119,7 @@ you> smoke-benchmark it
 -> bench_run(argv=["sweep", "--serve", "quince-2b-Q4_K_M.gguf", "--smoke"])
 
 ! bench_run(...): bench_run will start a benchmark (a long job on the GPU).
-allow it? [y/N] y
+allow it? 1) allow this time  2) always allow  3) never allow  [Enter = no] > 1
 ...
 A smoke sweep is running; bench_status will say when it ends.
 

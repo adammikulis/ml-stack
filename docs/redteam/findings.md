@@ -1,22 +1,25 @@
 # Red-team findings
 
-From `baseline-2026-10-02.md`. Severity is for a machine whose daemon is reachable by peers holding the
-cluster token and whose agent reads pages from the web. Status is `open` for everything: nothing here
-was fixed on this branch, because each belongs to code another branch is changing (`fleet/api.py` by
-agent/hardening, `agent/` by agent/port-pcbe) or to a decision. Each has the command that shows it and
-the baseline row that should change when it is fixed.
+F1-F9 are from `baseline-2026-10-02.md`. Severity is for a machine whose daemon is reachable by peers holding the
+cluster token and whose agent reads pages from the web. The bodies below describe each finding as it was
+measured on 2026-10-02. The status column is what `baseline-deterministic-2026-10-03.md` (stub model, no GPU)
+shows today: F3 (`proxy-route` 0 of 8) and F4 (`malformed-request` 0 of 55) no longer succeed, `oversized-body`
+still succeeds 2 of 3 (F5, held at 2 by the weekly gate) and `hidden-text-extraction` 6 of 13 (F2, one is the
+visible control). F1, F6, F7 and F8 need a model or the `isolation` and `compaction` scenarios, which that
+baseline does not run, so they are not re-measured here. F10-F18 (further down) are fixed, each with its commit
+and test.
 
-| id | severity | owner | summary |
-|---|---|---|---|
-| F1 | high | agent/decide, app | the model follows injected instructions in the user turn and in pages |
-| F2 | medium | `markup.py` / web reading | the page reader passes zero-size, white, off-screen text, markdown titles and PDF text layers |
-| F3 | medium | agent/hardening, `fleet/api.py` | `/infer` forwards any path of the model server |
-| F4 | medium | agent/hardening, `fleet/api.py` | the handler raises on a bad `Content-Length` or a non-object `/jobs` body |
-| F5 | medium | agent/hardening, `fleet/api.py` | a body is read to the length claimed and never capped |
-| F6 | medium | agent/hardening, `fleet/api.py` | `timings.cache_n` reaches every caller and tells a peer what another session cached |
-| F7 | low | model | a system prompt does not hold a secret |
-| F8 | low | agent/port-pcbe, `agent/compact.py` | a summary carries an injected instruction forward |
-| F9 | info | by design | `/health` is open; the token is shared by every peer and `POST /jobs` runs commands |
+| id | severity | owner | summary | status |
+|---|---|---|---|---|
+| F1 | high | agent/decide, app | the model follows injected instructions in the user turn and in pages | open: guards on calls exist; not re-measured on a model |
+| F2 | medium | `markup.py` / web reading | the page reader passes zero-size, white, off-screen text, markdown titles and PDF text layers | open (6 of 13) |
+| F3 | medium | agent/hardening, `fleet/api.py` | `/infer` forwards any path of the model server | closed (0 of 8) |
+| F4 | medium | agent/hardening, `fleet/api.py` | the handler raises on a bad `Content-Length` or a non-object `/jobs` body | closed (0 of 55) |
+| F5 | medium | agent/hardening, `fleet/api.py` | a body is read to the length claimed and never capped | open (2 of 3) |
+| F6 | medium | agent/hardening, `fleet/api.py` | `timings.cache_n` reaches every caller and tells a peer what another session cached | not re-measured |
+| F7 | low | model | a system prompt does not hold a secret | model behaviour |
+| F8 | low | agent/port-pcbe, `agent/compact.py` | a summary carries an injected instruction forward | not re-measured |
+| F9 | info | by design | `/health` is open; the token is shared by every peer and `POST /jobs` runs commands | by design |
 
 ## F1 The loop does what a page or a user turn tells it (high)
 

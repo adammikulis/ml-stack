@@ -42,8 +42,33 @@ Everything runs on your own hardware. Nothing leaves the network.
   before it believes what it says about a page.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
   in one cluster, each reporting its own temperature, clocks and throttle state.
+- **An agent that asks first.** `ml-stack-chat` operates ml-stack for you under a role
+  (`reader`, `operator` or `runner`): reads run, anything that starts, stops, downloads or
+  measures asks, and each question offers Allow this time, Always allow or Never allow.
+  Releasing quarantine, approving a host and changing the roles or rules are yours alone
+  ([roles and rules](docs/agent-roles.md)).
+- **Memory that is encrypted and scoped.** What the agent remembers is a graph of facts,
+  kept per user and per project, sealed under one key held in the operating system's keystore
+  ([memory](docs/memory.md), [keystore](docs/keystore.md)).
+- **Decision models.** Ask a small local model to pick one of the options you name and
+  get a probability for each, with no text generated; train one from labelled cases
+  ([decision models](docs/decision-models.md)).
 
 [Full list of what it does](docs/FEATURES.md).
+
+## Security
+
+Treat every network, page, model file and model reply as untrusted. Fetches go through one
+pipeline with a host allow-list, size caps, hash pins and checks, and a quarantine for what
+fails; model servers start only through the machine's broker; the daemon is on loopback until
+a machine joins a cluster and is TLS with signed requests beyond it; one operating-system
+keystore item protects memory, the fleet signing key and stored credentials; and a watcher
+(sentinel) holds what changed or was forged until a person releases it at a terminal or from
+one dialog. An agent's process cannot do the things reserved to a person. These defences
+reduce what a fooled model can do; they do not make it impossible. Read
+[the threat model](docs/security.md), [the design contract for an assistant that acts for
+you](docs/assistant-security.md) (what is built and what is not) and [the red-team
+record](docs/redteam.md), and report a problem as [SECURITY.md](SECURITY.md) says.
 
 ## Install
 
@@ -201,6 +226,13 @@ on whichever machine is free rather than the one you are typing at.
 | [Studio and live Gym](docs/studio-gym.md) | organized workspaces, live sensor/decision views, specialist simulators, PPO, and reviewed training trajectories |
 | [Measuring](docs/bench.md) | timing and scoring a model's answers, what that settled here, and an evening of runs as a file |
 | [An invented world](docs/world.md) | a community with people who talk, the days they talk over, and the exports their corpus arrives as; nobody real in any of it |
+| [Chatting and roles](docs/chat.md) | `ml-stack-chat`: conversation or task, the three roles, saved Always/Never rules ([roles](docs/agent-roles.md)) |
+| [Agent memory](docs/memory.md) | the encrypted fact graph, user and project scopes, `ml-stack-memory` |
+| [The keystore](docs/keystore.md) | the one OS keystore item, what prompts, `ml-stack-security unlock` and `keystore-reset` |
+| [Sentinel](docs/sentinel.md) | what is watched and held, the one click-to-release dialog, `ML_STACK_NOTIFY` |
+| [Reputation](docs/reputation.md) | how each source has behaved, `ml-stack-reputation` |
+| [Security](docs/security.md) | the threat model, findings and what is fixed ([assistant contract](docs/assistant-security.md), [red-teaming](docs/redteam.md)) |
+| [Decision models](docs/decision-models.md) | typed answers with probabilities, training and evaluating one, JevBench ([integration plan](docs/decision-model-integration-plan.md)) |
 | [Packages](docs/packages.md) | what each module is, and the extras it carries |
 | [Model ranking](docs/model-ranking.md) | one line per model: its best run, and what that run cost |
 | [Architectures](docs/architectures/README.md) | the models that behave unlike a dense transformer when served |
