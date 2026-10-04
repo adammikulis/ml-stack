@@ -195,19 +195,40 @@ Native references: [SUMO netgenerate](https://sumo.dlr.de/docs/netgenerate.html)
 Basic controls keep environment choice and common task settings visible. Additional
 native JSON and less common configuration sit in collapsed **Advanced** sections.
 
-Choose manual control, a seeded random baseline, a PPO checkpoint, or a decision model.
-Choose the controller and checkpoint first, then press **Apply controller** to change an
-existing session. Editing a checkpoint path alone does not change the running controller.
-The Live sessions selector reattaches to an active worker after a page reload.
-Pause, reset, single-step, and speed controls act on the worker. Speed sets the requested
-step rate; slow inference reduces the achieved rate. Simulation advancement waits for the
-controller decision.
+Choose manual control, a seeded random baseline, a PPO checkpoint, a decision model, or
+an explicitly labelled native simulator policy. New car sessions default to **Strands
+Decider 2B**. The decision model dropdown includes registered trained deciders; changing
+it or the controller applies to the live world immediately, preserving its clock and
+actors. PPO checkpoint setup retains an Apply button. Custom checkpoint paths and the
+maximum input age are under **Advanced options**. The Live sessions selector reattaches
+to an active worker after a page reload.
 
-The default decision controller is `StrandsAgents/strands-decider-2B-hobson-v19` on the
-CPU. Its files must already be available through the existing decision-model installation
-workflow. Select a trained pointer-model directory with `decision_checkpoint` in the
-session configuration. Native loading verifies model metadata and hashes and refuses
-pickled model files. See [decision models](decision-models.md).
+Pause, reset, single-step, and speed controls act on the physics worker. Decision loading
+and inference run in a separate CPU process with one outstanding request. Native physics
+continues while loading or waiting, using explicit straight braking for cars, hold/noop
+for drones and warehouse robots, and the current signal phase for traffic. An abstaining,
+stale or failed model never becomes a silently substituted native policy. Readiness and
+the reason for fallback remain visible. Pause cancels the inference process; resume loads
+it again. Reset, actor selection and controller changes invalidate previous results.
+
+The default model is `StrandsAgents/strands-decider-2B-hobson-v19` on the CPU. Its files
+must already be available through the existing decision-model installation workflow.
+Loading verifies metadata and hashes and refuses pickled model files. The default maximum
+decision input age is one second; `decision_max_age_s` accepts one through thirty seconds.
+Slow CPU inference can exceed that limit, in which case the car continues braking and the
+result is explicitly reported stale. See [decision models](decision-models.md).
+
+Drone camera perception is optional and has a separate **Vision model** dropdown. It lists
+all locally discovered vision models, with SmolVLM 256M as the speed default. Installed
+GGUF models also require their vision projector. FastVLM MLX/CoreML downloads are labelled
+unsupported until that runtime is implemented. The asynchronous vision child acquires a
+normal serving-broker lease; it queues behind existing model workloads and never forces
+GPU availability. It submits only actual RGB and synthetic visible-surface temperature
+camera pixels, with an explicit synthetic-thermal disclaimer. This is not a thermal-trained
+model or a real thermal camera. Simulator actor positions and target labels are excluded
+from the vision request. Captured frame IDs, image hashes and camera poses identify the
+source images; results expire after ten seconds and are discarded after actor/model/reset
+changes. Accepted model text can accompany the next decision-model input.
 
 For live PPO control, select `ppo` and provide `checkpoint` in the session configuration.
 Only local Gym artifact checkpoints are accepted. Native SB3 checkpoints are trusted
@@ -215,10 +236,14 @@ training artifacts; do not move downloaded archives into that directory and load
 
 Each step records the observation supplied to the controller, decision, applied action,
 reward, next observation, termination flags, episode ID, and sequence. Reset starts a new
-episode while sequence numbers keep increasing. An inference failure or abstention pauses
-the simulator and exposes the reason. No action is applied for an abstained decision.
+episode while sequence numbers keep increasing. Pending or rejected decisions record their
+explicit fallback action. Completed model results retain their original input observation,
+sequence, actor, revision, probability scores and latency in `decision_result`, separately
+from the current transition.
 Decision models receive named specialist state alongside the native numeric observation;
-the exact model input appears in `decision.state`. PPO receives the numeric observation.
+the submitted model input appears in `decision_result.model_state`; raw source state stays in
+`decision_result.state`. Camera pixels are replaced by capture metadata for the text-only
+pointer model, while the vision model receives the image pixels. PPO receives the numeric observation.
 Camera previews remain in the live stream and are omitted from saved trajectories by
 default. Set `record_frames` to `true` to save separate PNG files with frame references.
 
