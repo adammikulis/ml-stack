@@ -134,7 +134,7 @@ def test_catalogue_missing_dependencies_and_unknown_environment(monkeypatch):
     monkeypatch.setattr(catalog, "find_spec", lambda _: None)
     monkeypatch.setattr(catalog.shutil, "which", lambda _: None)
     entries = catalog.catalogue()
-    assert {entry["id"] for entry in entries} == {"car", "warehouse", "traffic", "traffic-driving"}
+    assert {entry["id"] for entry in entries} == {"car", "drone", "warehouse", "traffic", "traffic-driving"}
     assert all(not entry["available"] for entry in entries)
     with pytest.raises(RuntimeError, match="gym-driving"):
         catalog.require("car")

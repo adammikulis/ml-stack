@@ -10,7 +10,13 @@ all actors, the Bullet connection, and the world clock.
 PyFlyt currently requires NumPy below 2. Use Python 3.12 for this example; the
 Python 3.13 driving environment remains separate. Install `ml-stack[gym-drone,gym-rl]`
 inside that environment and save its interpreter through the reusable Gym interpreter
-setting. On macOS, Bullet may need a source build with `SDKROOT` pointing at the
+setting. The Libraries screen installs the drone package into its own managed
+`simulators/gym-drone/env` directory with Python 3.12, downloading a standalone
+interpreter if a matching local Python is unavailable. Future launches automatically
+rediscover that directory. Advanced existing environments can be remembered in
+`settings.json` as `gym_pythons: {"drone": "/path/to/python"}`; `gym_python` remains
+the default for other environments. Installing or removing drone packages affects
+only the drone environment, including its NumPy and CPU PPO dependencies. On macOS, Bullet may need a source build with `SDKROOT` pointing at the
 installed macOS SDK and `CFLAGS=-Dfdopen=fdopen`.
 
 The regular camera is PyFlyt's native Bullet camera. The thermal camera is a

@@ -7,6 +7,7 @@ import subprocess
 import sys
 from importlib.util import find_spec
 
+from ml_stack.gym.transport import interpreter
 from ml_stack.gym.worlds import schema
 
 CAR_ACTIONS = [f"{steer} {drive}" for steer in ("left", "straight", "right")
@@ -32,18 +33,22 @@ ENVIRONMENTS = {
 
 def catalogue():
     """Return supported environments and missing dependency diagnostics."""
-    configured = os.environ.get("ML_STACK_GYM_PYTHON")
-    if configured and configured != sys.executable:
-        environment = dict(os.environ)
-        environment.pop("ML_STACK_GYM_PYTHON", None)
-        result = subprocess.run([configured, "-m", "ml_stack.gym.cli", "catalogue"],
-                                capture_output=True, text=True, env=environment, timeout=10)
-        if result.returncode:
-            raise RuntimeError(f"Gym environment did not answer: {result.stderr.strip()}")
-        return json.loads(result.stdout)
-    entries = []
+    entries, probes = [], {}
     for name, spec in ENVIRONMENTS.items():
+        interpreter_error = None
+        try:
+            python = interpreter(name)
+        except RuntimeError as exc:
+            python, interpreter_error = sys.executable, str(exc)
+        if python != sys.executable:
+            if python not in probes:
+                probes[python] = probe(python)
+            entry = next(row for row in probes[python] if row["id"] == name)
+            entries.append({**entry, "interpreter": python})
+            continue
         missing = [module for module in spec["modules"] if find_spec(module) is None]
+        if interpreter_error:
+            missing.append(interpreter_error)
         if name in {"traffic", "traffic-driving"} and not shutil.which("sumo") and find_spec("sumo") is None:
             missing.append("SUMO executable")
         entries.append({"id": name, **{k: v for k, v in spec.items() if k != "modules"},
@@ -54,6 +59,18 @@ def catalogue():
                                    ("; install the pinned MetaDrive source from docs/studio-gym.md"
                                     if "metadrive" in spec["modules"] else "")})
     return entries
+
+
+def probe(python):
+    """Ask one installed interpreter without forwarding parent interpreter routing."""
+    environment = dict(os.environ)
+    environment.pop("ML_STACK_GYM_PYTHON", None)
+    environment.pop("ML_STACK_GYM_PYTHONS", None)
+    result = subprocess.run([python, "-m", "ml_stack.gym.cli", "catalogue"],
+                            capture_output=True, text=True, env=environment, timeout=10)
+    if result.returncode:
+        raise RuntimeError(f"Gym environment did not answer: {result.stderr.strip()}")
+    return json.loads(result.stdout)
 
 
 def require(environment):
