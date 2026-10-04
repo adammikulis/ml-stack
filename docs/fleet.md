@@ -1,5 +1,28 @@
 # The fleet
 
+## Chat and Coding
+
+Open **Chat** in the sidebar. The same conversation list and message composer serve ordinary
+model chat and **Coding** mode. Search saved messages, rename a conversation from its menu, or
+delete it after confirmation. Reopening a conversation restores its model and mode.
+
+For Coding, select a downloaded model, an existing **Project directory**, **Coding agent**
+(Codex or Claude Code), and **Tool permissions**. The model preference comes from the maintained
+coding profile; unavailable models and missing command-line agents cannot start a turn.
+**Advanced options** holds **Context length**, in tokens. Ordinary Chat keeps Temperature there.
+
+Coding launches through the same broker and permission hooks as the command-line harnesses;
+it never grants a human identity to the agent. Responses stream into the shared conversation.
+Expand **Tool activity and session details** to inspect commands, usage and the native session identifier. **Stop**
+cancels model startup or the running harness and revokes that session's temporary workspace
+identity. Closing the tab leaves an accepted turn running; reopening its conversation reattaches.
+
+Conversation messages, model and project relationships live in the local graph store. Native
+harness session files are private to each conversation and settings fingerprint under the chat
+state root. Subsequent turns resume that session; changing the model, project or permissions starts
+fresh native context with the saved conversation. Coding works in the selected project directly;
+create a separate checkout when you want isolated edits. See [the harness rails](harnesses.md).
+
 ## Driving it from Python
 
 `ml-stack` is pure Python and pulls in nothing heavy, so the machine you drive from

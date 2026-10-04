@@ -410,3 +410,8 @@ input[type="range"] {
 .chatmain .askrow textarea { background:transparent; border:0; box-shadow:none; padding:4px; outline:none; }
 .chatmain .chat-hint { text-align:center; }
 @media(max-width:720px) { .chatmain { grid-template-columns:1fr; gap:20px; } }
+
+.chat-coding-fields { margin:12px 0; }
+.chat-coding-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+#chat-activity-output { max-height:300px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:12px; }
+@media(max-width:600px) { .chat-coding-pair { grid-template-columns:1fr; gap:0; } }
