@@ -4,7 +4,7 @@
     scripts/compare-harnesses --model Qwen3.5-2B [--ctx 262144] [--out docs/experiments/harness-comparison.md]
     scripts/compare-harnesses --on http://127.0.0.1:8080 --dry-run
 
-The fixture is tests/fixtures/toy_bugfix, copied to a temporary git repository per run and scored
+The fixture is tests/fixtures/toy_bugfix (its test is stored as check_calc.py so the suite does not collect it), copied to a temporary git repository per run and scored
 by its own test. Every harness is the launcher this repository ships (`ml-stack-claude`,
 `ml-stack-codex`), pointed at one server, so the model, the slot and the cache are shared and the
 rows are comparable. A first call per harness with a one-line prompt measures the prompt prefix
@@ -95,6 +95,7 @@ def workdir() -> Path:
     """A fresh git repository holding the fixture."""
     where = Path(tempfile.mkdtemp(prefix="harness-fixture-")) / "task"
     shutil.copytree(FIXTURE, where, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+    (where / "check_calc.py").rename(where / "test_calc.py")
     for words in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
                                                    "commit", "-q", "-m", "fixture"]):
         subprocess.run(["git", *words], cwd=where, check=True, capture_output=True)

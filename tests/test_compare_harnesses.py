@@ -74,7 +74,7 @@ def test_the_parsers_count_tool_calls_and_tokens(cmp):
 
 
 def test_a_row_records_what_the_server_processed_while_the_harness_ran(cmp, server, tmp_path):
-    url, handler = server
+    url, _ = server
     assert cmp.scrape(url) == {"processed": 100.0, "generated": 7.0, "prompt_s": 1.5}
     fake = tmp_path / "harness.py"
     fake.write_text(
