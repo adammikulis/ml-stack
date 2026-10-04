@@ -47,7 +47,8 @@ def test_native_manual_map_recreates_generated_lane_geometry(tmp_path, monkeypat
     env = make_environment("car", {"simulation_mode": "world", "num_agents": 2,
                                    "traffic_density": 0., "world": {"seed": 2, "map": "SCS"}})
     try:
-        env.reset(seed=2)
+        env.reset(seed=99)
+        assert env.native.current_seed == 2
         metadata = env.native.current_map.get_meta_data()
         metadata["map_config"] = metadata["map_config"].get_serializable_dict()
         lanes = env.native.current_map.get_boundary_line_vector(3)
