@@ -25,7 +25,7 @@ def catalogue() -> dict:
 
 def route(request) -> bool:
     prefix = "/ui/coding/"
-    if not request.path.startswith(prefix):
+    if not request.path.startswith("/ui/coding/"):
         return False
     headers = {key.lower(): value for key, value in request.handler.headers.items()}
     if request.method != "GET":
