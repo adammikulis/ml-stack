@@ -9,8 +9,6 @@ import platform
 
 import pytest
 
-pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
-
 pytestmark = pytest.mark.slow
 
 from test_fleet_page import (  # noqa: E402, F401
