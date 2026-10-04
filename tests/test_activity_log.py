@@ -77,6 +77,12 @@ def test_control_and_bidi_characters_are_written_as_visible_escapes():
     assert "\\x1b" in payload["subject"] and "\\u202e" in payload["subject"]
 
 
+def test_control_characters_in_metadata_and_references_are_escaped_where_they_are_written():
+    payload = line(refs={"to": "a\x1b[2Jb"}, meta={"note": "x\u202ey\x00", "n": 3})
+    assert payload["refs"]["to"] == "a\\x1b[2Jb"
+    assert payload["meta"]["note"] == "x\\u202ey\\x00" and payload["meta"]["n"] == 3
+
+
 # -- encryption at rest ---------------------------------------------------------------------
 def test_nothing_a_record_says_is_readable_in_any_file_under_the_directory(person):
     for n in range(5):
@@ -195,20 +201,34 @@ def test_rotation_keeps_one_chain_across_files(tmp_path):
 
 def test_a_file_older_than_the_retention_is_removed_and_the_chain_still_holds(tmp_path):
     now = [1_800_000_000.0]
-    log = small(tmp_path, limits=Limits(max_bytes=500, keep=6, retention_s=3600.0), clock=lambda: now[0])
+    log = small(tmp_path, limits=Limits(max_bytes=500, keep=100, retention_s=3600.0), clock=lambda: now[0])
     for i in range(12):
         now[0] += 10
         log.add(line(subject=f"old{i}", ts=now[0]))
-    before = len(log.files())
+    assert len(log.files()) > 3
     now[0] += 7200
-    for i in range(12):
+    for i in range(30):
         now[0] += 10
         log.add(line(subject=f"new{i}", ts=now[0]))
     done = log.verify()
     assert done.ok, done.problems
     left = [e.subject for e in log.entries() if isinstance(e, Entry)]
-    assert (before > 1 and not [s for s in left if s.startswith("old")][:1]) or len(left) < 24
-    assert "new11" in left and "old0" not in left
+    assert "old0" not in left and "new29" in left
+    assert log._head.load().payload["base"] != "0" * 64
+
+
+def test_a_record_does_not_expire_without_a_retention(tmp_path):
+    now = [1_800_000_000.0]
+    log = small(tmp_path, limits=Limits(max_bytes=500, keep=100), clock=lambda: now[0])
+    for i in range(12):
+        now[0] += 10
+        log.add(line(subject=f"old{i}", ts=now[0]))
+    now[0] += 10 * 86400
+    for i in range(30):
+        now[0] += 10
+        log.add(line(subject=f"new{i}", ts=now[0]))
+    assert log.verify().ok
+    assert "old0" in [e.subject for e in log.entries() if isinstance(e, Entry)]
 
 
 def test_an_active_file_older_than_the_age_limit_is_rotated(tmp_path):

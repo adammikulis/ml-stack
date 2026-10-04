@@ -127,4 +127,6 @@ def test_a_fake_record_cannot_pass_for_a_person_or_a_kind_it_does_not_have(perso
 def test_a_call_naming_the_log_its_command_or_its_directory_is_refused(person, call):
     name, args = call
     assert human.agent_may(name, args)
-    assert human.agent_may("read_file", {"path": str(writer.directory() / "activity.log.head.key")})
+    writer.log()
+    for leaf in ("activity.log.head.key", "salt", "drops.json", "notes/anything"):
+        assert human.agent_may("read_file", {"path": str(writer.directory() / leaf)}), leaf

@@ -14,7 +14,7 @@ from typing import Any
 
 from ml_stack import keystore
 from ml_stack.activity.schema import Entry
-from ml_stack.sentinel.events import GENESIS, Chain, EventLog
+from ml_stack.sentinel.events import Chain, EventLog
 
 __all__ = ["PURPOSE", "ActivityLog", "Limits", "Unreadable"]
 
@@ -143,7 +143,6 @@ class ActivityLog(EventLog):
             if stamp >= horizon:
                 break
             base = digest
-            old.unlink()
-        if base != chain.base:
             self._head.save({"count": chain.count, "last": chain.last, "base": base})
-        return Chain(chain.count, chain.last, base) if base != GENESIS else chain
+            old.unlink()
+        return Chain(chain.count, chain.last, base)
