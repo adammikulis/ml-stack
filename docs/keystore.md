@@ -31,12 +31,24 @@ owner as AAD, so a value wrapped for one purpose or owner does not open for anot
 
 ## Limits that keep it quiet
 
+The ceilings stop prompt and store spam, not ordinary reads of an item the person already
+authorised, so they are counted in two classes (`rate.json`, a list of times per class):
+
 | Limit | Value |
 |---|---|
-| Backend operations (read, create, delete) per user per hour | 20, counted in `~/.ml-stack/keystore/rate.json`; the next one raises `KeystoreBusy` and logs an event |
-| After the OS refuses or the person declines | the process stops asking for good; other processes wait 10 minutes (`denied.json`); `KeystoreDenied` with one plain message |
-| Processes starting together | one lock (`flight.lock`): one asks, the rest find the key or the refusal |
+| Reads of the existing master per user per hour | 600 (`READ_CEILING`); the next one raises `KeystoreBusy` and logs an event. From 80% of the ceiling each read first sleeps a random 50 to 250 ms, inside the lock, so a stampede slows down before it stops |
+| Creates and deletes per user per hour, plus every read made after an earlier refusal (a retry) | 5 (`WRITE_CEILING`); the next one raises `KeystoreBusy` |
+| After the OS refuses or the person declines | the process stops asking for good; other processes wait 10 minutes (`denied.json`); `KeystoreDenied` with one plain message. A read that succeeds again removes the mark |
+| Processes starting together | one lock (`flight.lock`): each process reads the OS keystore itself, one at a time, polling the lock every 20 ms and backing off to 0.5 s. The master is never written to a file or shared between processes, so a swarm costs one backend read per process, not one per use |
 | Background process (no terminal and no desktop session, or `ML_STACK_NONINTERACTIVE`) | never creates the master; reads it only after `ml-stack-security unlock`; otherwise `KeystoreLocked` naming that command |
+
+Why two classes: a swarm of subagents starts dozens of processes in an hour and each reads the
+master once. One shared ceiling of 20 refused the twenty-first process (measured: 40 agents
+starting together gave 22 `KeystoreBusy`). Reads of an item that exists never prompt, so they get
+a ceiling a swarm cannot reach by accident (600) but a loop still hits. Anything that can make
+the OS show a prompt or change the store (create, delete, retry after a refusal) keeps a ceiling
+of a few per hour. `keystore-reset` keeps the counts, so reset and create in a loop is stopped by
+the same 5.
 
 Every backend call is a sentinel event `keystore.read`, `keystore.create` or `keystore.delete`
 (subject `purpose:<label>`, evidence `{"outcome": ...}`), and a refusal is `keystore.denied` or
@@ -49,7 +61,7 @@ All are `ml-stack-security` subcommands; an agent's tool call naming them is ref
 ```
 ml-stack-security unlock          # a person at a terminal: make the master if missing, clear a refusal,
                                   # let background processes (daemons, jobs) read it from now on
-ml-stack-security keystore        # provisioned? refused for how long? operations this hour (no keystore call)
+ml-stack-security keystore        # provisioned? refused for how long? reads and writes this hour (no keystore call)
 ml-stack-security keystore-reset  # delete the master after typing the account name back
 ```
 
