@@ -600,7 +600,7 @@ class ChatRoutes(ConversationRoutes):
         if not messages:
             self.send(400, {"error": "nothing to send"})
             return True
-        payload = {"model": target.model, "messages": messages, "stream": True}
+        payload = {"model": target.alias or target.model, "messages": messages, "stream": True}
         if req.get("temperature") is not None:
             payload["temperature"] = float(req["temperature"])
         try:
