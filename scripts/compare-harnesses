@@ -181,6 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--model", default="", help="the model to serve (Flash-Next is refused)")
     ap.add_argument("--on", default="", help="a server already running")
     ap.add_argument("--ctx", type=int, default=262144)
+    ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--out", default=str(ROOT / "docs" / "experiments" / "harness-comparison.md"))
     ap.add_argument("--dry-run", action="store_true", help="print what would run and stop")
     args = ap.parse_args(argv)
@@ -220,7 +221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.on:
         return run(args.on.rstrip("/"), f"server already up at {args.on}")
-    want = harnessing.Want(ctx=args.ctx)
+    want = harnessing.Want(port=args.port, ctx=args.ctx)
     with harnessing.serving(args.model, want, print, "compare") as (base_url, config, _found):
         return run(base_url, f"{config.serving.slots} slot x {config.serving.slot_context} tokens, "
                              f"{config.serving.cache_type} KV")
