@@ -26,6 +26,8 @@ class Settings:
     autostart: str = "manual"
     setup_done: bool = False
     gym_python: str = ""
+    gym_pythons: dict[str, str] = field(default_factory=dict)
+    """Existing interpreter overrides by simulator ID, retained across launches."""
     """An explicitly selected existing interpreter for native simulator libraries."""
     """Whether the first-run wizard was finished. A machine may finish it in no cluster."""
     on_close: str = ""
@@ -46,7 +48,7 @@ class Settings:
     """How much of a conversation a model is given to read. Costs memory per token."""
 
     @classmethod
-    def load(cls, path: Path | str) -> "Settings":
+    def load(cls, path: Path | str) -> Settings:
         """What ``path`` holds, or the defaults."""
         return _DOC.read(path)
 
@@ -58,7 +60,7 @@ class Settings:
         return asdict(self)
 
 
-_DOC: Document["Settings"] = Document(
+_DOC: Document[Settings] = Document(
     build=lambda raw: Settings(**{k: v for k, v in raw.items()
                                   if k in Settings.__dataclass_fields__}),
     unbuild=lambda one: dict(sorted(asdict(one).items())),
