@@ -78,8 +78,9 @@ def canonical_xml(path, expected):
 
 
 def generate(path, definition):
+    import sumo
     if not (path / 'routes.rou.xml').is_file():
-        home = Path(os.environ['SUMO_HOME'])
+        home = Path(os.environ.get('SUMO_HOME', sumo.SUMO_HOME))
         command = [str(home / 'bin' / 'netgenerate'), '--grid', '--grid.number', '1',
                    '--grid.attach-length', str(definition['arm_length']), '--tls.set', 'A0', '--default.lanenumber', str(definition['lanes']),
                    '--seed', str(definition['seed']), '-o', str(path / 'network.net.xml')]
