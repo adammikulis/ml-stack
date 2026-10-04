@@ -128,7 +128,8 @@ def _load():
     return module
 
 
-def test_the_cap_follows_the_load_average():
+def test_the_cap_follows_the_load_average(monkeypatch):
+    monkeypatch.setenv("DEV_TEST_RESERVED_CORES", "1")
     m = _load()
     assert m.cap_for(None, cores=16) == 15
     assert m.cap_for(2.0, cores=16) == 15
@@ -292,3 +293,132 @@ def test_idle_tail_workers_release_capacity_for_another_suite(tmp_path):
     assert len(records) == 5
     for record in records:
         assert sum(other["start"] <= record["start"] < other["end"] for other in records) <= 2, records
+
+
+def test_remote_nested_command_is_refused_without_deadlocking(tmp_path):
+    test_file = tmp_path / "test_nested.py"
+    test_file.write_text(f'''import subprocess, sys
+
+def test_nested():
+    result = subprocess.run([sys.executable, {str(SCRIPT)!r}, "run", "--want", "1", "--", sys.executable, "-c", "pass"],
+                            capture_output=True, text=True, timeout=5)
+    assert result.returncode != 0
+    assert "nested CPU run" in result.stderr
+''')
+    process = _elastic(tmp_path, test_file, 1)
+    output = process.communicate(timeout=20)
+    assert process.returncode == 0, output
+
+
+def _rpc_module():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import testslots_rpc
+    return testslots_rpc
+
+
+def _rpc_socket(server, token):
+    import socket
+    connection = socket.create_connection(server.server_address, timeout=5)
+    stream = connection.makefile("rwb")
+    stream.write(json.dumps({"token": token, "operation": "acquire", "label": "rpc proof"}).encode() + b"\n")
+    stream.flush()
+    return connection, stream
+
+
+def test_invalid_rpc_token_cannot_acquire_capacity(tmp_path, monkeypatch):
+    rpc = _rpc_module()
+    monkeypatch.setenv("DEV_TEST_SLOTS_DIR", str(tmp_path / "slots"))
+    monkeypatch.setenv("DEV_TEST_BUDGET", "1")
+    server = rpc.Admission(False)
+    try:
+        server.admitted.set()
+        server.collected.set()
+        connection, stream = _rpc_socket(server, "invalid")
+        with connection, stream:
+            assert "invalid admission token" in json.loads(stream.readline())["error"]
+        assert rpc.testslots.status()["in_use"] == 0
+    finally:
+        server.finish()
+
+
+def test_disconnected_rpc_waiter_releases_its_queue_entry(tmp_path, monkeypatch):
+    rpc = _rpc_module()
+    monkeypatch.setenv("DEV_TEST_SLOTS_DIR", str(tmp_path / "slots"))
+    monkeypatch.setenv("DEV_TEST_BUDGET", "1")
+    server = rpc.Admission(False)
+    holder = waiter = None
+    holder_stream = waiter_stream = None
+    try:
+        server.admitted.set()
+        server.collected.set()
+        holder, holder_stream = _rpc_socket(server, server.token)
+        assert "lease" in json.loads(holder_stream.readline())
+        waiter, waiter_stream = _rpc_socket(server, server.token)
+        deadline = time.monotonic() + 5
+        while not rpc.testslots.status()["waiting"]:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        waiter_stream.close()
+        waiter.close()
+        while rpc.testslots.status()["waiting"]:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        assert rpc.testslots.status()["in_use"] == 1
+    finally:
+        for resource in (waiter_stream, waiter, holder_stream, holder):
+            if resource is not None:
+                resource.close()
+        server.finish()
+
+
+def test_short_tests_do_not_wait_for_a_polling_tail_between_batches(tmp_path):
+    test_file = tmp_path / "test_short.py"
+    test_file.write_text('''import json, os, time
+from pathlib import Path
+import pytest
+
+@pytest.mark.parametrize("case", range(80))
+def test_short(case):
+    start = time.time()
+    time.sleep(.005)
+    with Path(os.environ["TEST_LOG"]).open("a") as stream:
+        stream.write(json.dumps({"start": start, "end": time.time()}) + "\\n")
+''')
+    process = _elastic(tmp_path, test_file, 2)
+    output = process.communicate(timeout=30)
+    assert process.returncode == 0, output
+    records = [json.loads(line) for line in (tmp_path / "elastic.jsonl").read_text().splitlines()]
+    assert len(records) == 80
+    duration = max(record["end"] for record in records) - min(record["start"] for record in records)
+    measurement = {"tests": 80, "workers": 2, "duration_seconds": duration}
+    print(json.dumps(measurement))
+    assert duration < 3, duration
+    for record in records:
+        assert sum(other["start"] <= record["start"] < other["end"] for other in records) <= 2
+
+
+def test_backfill_uses_idle_capacity_and_is_bounded(tmp_path):
+    holder = _spawn(tmp_path, 3, 2, 2, "holder")
+    time.sleep(.2)
+    older = _spawn(tmp_path, 3, 2, .1, "older")
+    time.sleep(.1)
+    first = _spawn(tmp_path, 3, 1, .1, "first")
+    assert first.wait(timeout=10) == 0
+    second = _spawn(tmp_path, 3, 1, .1, "second")
+    assert second.wait(timeout=10) == 0
+    third = _spawn(tmp_path, 3, 1, .1, "third")
+    time.sleep(.2)
+    assert third.poll() is None
+    assert all(process.wait(timeout=10) == 0 for process in (holder, older, third))
+    records = {record["label"]: record for record in _records(tmp_path)}
+    assert records["first"]["start"] < records["holder"]["end"]
+    assert records["second"]["start"] < records["holder"]["end"]
+    assert records["third"]["start"] >= records["older"]["start"]
+
+
+def test_reserved_capacity_is_configurable_and_owner_budget_overrides_it(monkeypatch):
+    module = _load()
+    monkeypatch.setenv("DEV_TEST_RESERVED_CORES", "4")
+    assert module.base_budget(16) == 12
+    monkeypatch.setenv("DEV_TEST_BUDGET", "22")
+    assert module.budget() == 22
