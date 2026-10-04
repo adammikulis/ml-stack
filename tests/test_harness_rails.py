@@ -470,3 +470,24 @@ class TestCodingAgent:
 
     def test_an_unknown_harness_is_refused(self):
         assert coding.launch_coding_agent("", "read-only", ".", "bash", say=lambda _: None) == 2
+
+
+def test_explicit_head_and_none_override_measured_profile(monkeypatch):
+    from types import SimpleNamespace
+
+    from ml_stack import hub
+    from ml_stack.serve.serving import Config, Serving
+
+    measured = Config(serving=Serving(model="qwen.gguf", draft="old-head.gguf", spec_type="draft-mtp"))
+    monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: SimpleNamespace(config=lambda **_: measured))
+    monkeypatch.setattr(harnessing.profile, "said", lambda _: "measured profile")
+    monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 262144)
+    monkeypatch.setattr(hub, "head_choice", lambda model, asked: None if asked == "none" else SimpleNamespace(
+        serving=lambda: "requested MTP head", over=lambda: {"draft": asked, "spec_type": "draft-mtp"}))
+    selected = harnessing.config_for("qwen.gguf", harnessing.Want(draft="matching-head.gguf"), lambda _: None)
+    assert selected.serving.draft == "matching-head.gguf"
+    assert selected.serving.slot_context == 262144
+    disabled = harnessing.config_for("qwen.gguf", harnessing.Want(draft="none"), lambda _: None)
+    assert disabled.serving.draft == "" and disabled.serving.mtp is False
+    automatic = harnessing.config_for("qwen.gguf", harnessing.Want(draft="auto"), lambda _: None)
+    assert automatic.serving.draft == "old-head.gguf"
