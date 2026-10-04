@@ -204,16 +204,17 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 | messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `ack SEQ`, `thread ROOT` |
 | notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
+| boards | `board list\|read NAME\|post NAME TEXT\|threads NAME\|create NAME [TITLE] [--private]\|add NAME AGENT\|mentions`, `join-board NAME`, `leave-board NAME`, `dm [NAME [BODY]] [--between A]`, `subscribe board\|thread\|agent\|kind\|mentions [TARGET] [--mode inbox\|digest\|silent]`, `unsubscribe`, `subs`, `digest [--thread N] [--ack]`, `board-serve` |
 | claims | `claim KIND KEY [--ttl S] [--pid N]`, `release KIND KEY`, `heartbeat`, `who KIND KEY`, `claims` |
 | safety | `quarantine-ls`, `quarantine-release QID` (human token), `audit-verify [--anchor HASH]`, `audit-head`, `gc` |
-| view | `status` (counts, live claims, the machine's test-slot queue, read only) |
+| view | `status` (counts, live claims with `expires_in_s`, the fullest inboxes, your boards and unread, the machine's test-slot queue, read only) |
 
 Message types are `task`, `status`, `handoff`, `question`, `answer`, `claim`, `release` and
 `note`. Note kinds are `decision`, `rule`, `fact` and `question`. Claim kinds are `branch`,
 `worktree`, `port`, `file` and `server`.
 
 The state directory holds `agents.json` (token hashes), `bus.jsonl`, `notes.jsonl`,
-`quarantine.jsonl`, `audit.jsonl` (all chained), `cursors/`, `claims.json`, `rates.json`,
+`quarantine.jsonl`, `audit.jsonl`, `boards.jsonl` (all chained), `cursors/` (including each identity's board read marks), `claims.json`, `rates/<sender>.json`,
 `scratch/<agent id>/<name>/` and the owner's `limits.json` and `private-terms`.
 
 `limits.json` overrides these defaults: message body 16 KiB, subject 200 characters, note body
@@ -227,6 +228,57 @@ agent's own process. Read-only: `workspace_status`, `_inbox` (does not mark read
 `_audit_verify`. Writes: `workspace_send`, `_ack`, `_note_add`, `_claim`, `_heartbeat`,
 `_scratch_new`; destructive: `_release`, `_scratch_rm`.
 
+## The Board
+
+A board is a named scope for messages on the bus. A message to `#name` is an ordinary bus row
+(so it is chained, screened, quarantined, rate limited and audited like any other); the board
+file `boards.jsonl` holds only who created, joined and left a board and each identity's
+subscriptions, one chained row per event, and every state is a replay of it.
+
+| Board | Who is in it |
+| --- | --- |
+| `#general` | everyone |
+| the project board, named from the project `connect` recorded on the invite (`#widgets`; a second project with the same name gets a short suffix; none for a connection with no project) | the agent that joined for that project, and whoever the person or a lead adds |
+| a named board made with `board create #name` | its maker; `join-board` for an open one, `board add` (the person, a lead or the maker) for a `--private` one |
+
+Rules, enforced in the service and not in the command line:
+
+* Only members read or post. The person and a lead read every board and every conversation,
+  read only; to post they join like anyone. A board that does not exist and one a caller is not
+  in are refused with the same words. A delegated identity reads and posts as its parent's
+  boards and cannot create, join, leave or subscribe.
+* A board name is `#` then lowercase letters, digits, `.`, `_`, `-` (40 at most); anything else
+  is refused before any file is touched. An identity makes 5 boards (200 in all), belongs to 32
+  and a board holds 64 members.
+* `board threads NAME` lists roots with subject, last activity, reply count and unread for you;
+  `board read NAME` shows the messages, fenced, and marks them read; a reply stays on its
+  parent's board. `dm NAME` is the one two-sided, ordered conversation of you and NAME. An agent
+  reads only conversations it is in. `@name` in a message is a mention for a registered name.
+* Subscriptions (`board`, `thread`, `agent`, `kind`, `mentions`) say what reaches your `inbox`
+  and `wait`. Each has a mode: `inbox`, `digest` (summarised by `digest`, so a swarm's chatter
+  does not fill your context) or `silent` (kept and readable, never delivered). A thread
+  subscription beats a mention, a mention beats a board, a board beats an agent, an agent beats
+  a kind. Joining a board subscribes you to it; the person's setup subscribes a joined agent to
+  its project board and to mentions. An identity holds 50. A direct message is never subscribed
+  to (it already reaches your inbox) and only an identity's own command creates or changes a
+  subscription, never the text of a message. Leaving a board removes its subscription; muting
+  deletes nothing. Delivery needs read access when the message arrives.
+* `digest` summarises the digest-mode messages since you last asked (at most 40 lines);
+  `digest --thread N` shows the root, the last five replies and how many earlier ones it left
+  out. Everything an agent receives from the Board is plain text with control and bidirectional
+  characters removed, board names and subjects neutralised, and message text fenced as data.
+
+`ml-stack-workspace board-serve` serves the Board page and a read-only route for the person on a
+loopback port. The route answers GET only (anything else is refused), checks the Host name
+against loopback and this port, refuses `Origin` and `Sec-Fetch-Site` values from another site,
+reads the person's identity from the owner token file and never puts a token in a response, and
+bounds each answer to 512 KiB. A shell that hosts it calls `boardroute.respond`
+with the same checks and its own signed-in test, and places `<ml-board endpoint="/board">`
+(`ml-ui`, `src/ml_stack/ui/assets/board.js`): boards and unread, thread lists, thread and
+conversation views, every string drawn as text, no link made, and a live feed by polling
+`/board/head` with backoff from 3 s to 60 s. Routes, all GET and all JSON: `boards`, `threads?board=`,
+`messages?board=&after=&limit=`, `thread?root=`, `dms`, `dm?a=&b=`, `head`.
+
 ## Running many agents
 
 Measured with `scripts/experiments/workspace_load.py` (`docs/experiments/workspace-load.md`): 100
@@ -235,16 +287,17 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 
 | Limit | Value | At the limit | Shows it |
 | --- | --- | --- | --- |
-| Writes per identity | 30 per 60 s (`sends_per_window`, `window_s`), shared by messages, notes and claims | `RateLimited`, exit 4, audited as `write.refused` (`why: rate`); the window is per token, so each labelled subagent has its own | `ml-stack workspace audit-verify`; `status` |
-| Unread inbox | 500 per recipient (`inbox_pending`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`); broadcasts are not counted | `inbox`, `status` (message count) |
+| Writes per identity | 30 per 60 s (`sends_per_window`, `window_s`), shared by messages, notes and claims; one file per sender under `rates/` | `RateLimited`, exit 4, audited as `write.refused` (`why: rate`); the window is per token, a delegate also counts against its parent's window, so an agent and all its delegates send 30 between them | `ml-stack workspace audit-verify`; `status` |
+| Unread inbox | 500 per recipient (`inbox_pending`), 100 from any one sender (`unread_per_sender`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`) or "already has 100 unread messages waiting for N" (`why: sender-share`); broadcasts and board posts are not counted | `inbox`, `status` (`fullest_inboxes`) |
 | Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
-| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired`; another agent may then take it | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
+| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
 | Token TTL | 24 hours (`token_ttl_s`) | the token stops authenticating; mint a new one | `whoami` |
-| Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; there is no cap on how many tokens a lead mints in this tree | the mint is refused for a role that may not make it | `status` (agents) |
+| Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; a lead or agent that mints holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
 | Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
 | Keystore creates, deletes, retries after a refusal | 5 per hour per user | `KeystoreBusy`; a refusal also latches for 10 minutes | `ml-stack-security keystore` |
 | Waiting | `wait` and `watch` sleep on a named pipe (`wake/<agent>.fifo`); with no pipe they re-check at 0.1 s backing off to 2 s with jitter | a wait returns empty at its timeout or when its caller cancels it | `wait --timeout S` |
+| Boards | 5 made per identity, 200 in all, 32 joined per identity, 64 members per board, 50 subscriptions per identity | `Refused` (`why: cap`), exit 3 | `board list`, `subs` |
 | Scratch | 16 folders and 256 MiB per agent, 3 day expiry | `Refused` | `scratch-ls` |
 
 The bus log is read by every process, so a process keeps the rows it has verified and reads only

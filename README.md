@@ -217,6 +217,7 @@ on whichever machine is free rather than the one you are typing at.
 | --- | --- |
 | [What it does](docs/FEATURES.md) | every feature; `docs/verify_release.py` checks claims from each section but Entities |
 | [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
+| [The agent workspace](docs/workspace.md) | one bus for the agents on a machine: messages, boards and threads, subscriptions, notes, claims, and a read-only Board page for you |
 | [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
 | [The fleet](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
 | [Finding and serving a model](docs/serving.md) | one manager per machine, the settings each model scored best with, how many people fit in a card, llama.cpp builds and draft heads |
