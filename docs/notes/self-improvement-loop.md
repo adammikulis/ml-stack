@@ -23,14 +23,23 @@ meet, so that the loop can be started later without removing a safety rail to do
    agent's write access.
 5. **Report the result as evidence**, never as a claim: the command and its output, the
    before and after numbers, and the mutation check (break the change, see the test fail).
-6. **Landing has two tiers, so nobody has to be around.** A change that touches no protected path,
-   leaves every ratchet equal or lower, passes the judge and its own mutation check merges by itself
+6. **A second model checks the work before it lands.** Claude Code or Codex (never the author, and
+   when one is out of usage the other) takes the round as a review request on the workspace. In its
+   own worktree it re-runs the acceptance check and the judge itself (an author's report is a claim),
+   reads the diff for what the tests do not say (a weakened assertion, a loosened guard, a changed
+   protected path, a test that cannot fail), mutation-checks the change once, and answers
+   `approve`, `send back with reasons`, or `escalate to the person`. Two disagreeing reviews, or a
+   reviewer that cannot reproduce the numbers, escalate. A reviewer is a check, not a person:
+   it cannot approve a protected-path change.
+7. **Landing has two tiers, so nobody has to be around.** A change that touches no protected path,
+   leaves every ratchet equal or lower, passes the judge, its own mutation check and the
+   second model's review merges by itself
    into a staging branch (`loop/integration`), never into `0.2dev`, never pushed. A change that
    touches a protected path, or that the judge cannot fully measure, is not merged: it waits as a
    request in the Requests inbox with the diff summary and the judge's numbers. The person later
    reviews the staging branch as one batch and moves the dev branch, or sends rounds back; the
    loop keeps working meanwhile and never blocks on an answer.
-7. **Record what was learned** in project memory (encrypted graph, project scope) so the next
+8. **Record what was learned** in project memory (encrypted graph, project scope) so the next
    round does not repeat a dead end; failed attempts are recorded as failures with the reason.
 
 ## Rails that must hold before the loop runs unattended
