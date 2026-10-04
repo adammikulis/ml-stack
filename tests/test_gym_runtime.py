@@ -234,7 +234,7 @@ def test_external_worker_lifecycle_and_recording():
 class PendingDecider:
     status, error, pending = "ready", None, None
 
-    def __init__(self, checkpoint=None):
+    def __init__(self, checkpoint=None, *, device="cpu"):
         self.event, self.closed = None, False
 
     def poll(self):

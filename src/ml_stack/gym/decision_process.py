@@ -1,4 +1,4 @@
-"""Bounded, CPU-only decision inference outside the native physics process."""
+"""Bounded decision inference outside the native physics process."""
 
 import contextlib
 import json
@@ -9,35 +9,38 @@ import threading
 import time
 from pathlib import Path
 
-from ml_stack.decide.pointer import PointerDecider
+from ml_stack.decide.pointer import PointerDecider, device_name
 from ml_stack.decide.sources import local_source
 from ml_stack.gym.transport import interpreter, python_environment
 from ml_stack.platform import start_process, terminate_process_group
+from ml_stack.serve import broker_wire
 from ml_stack.serve.exit_guard import protect, release
+from ml_stack.train.gpu import hold
 
 
-def decision_controller(checkpoint=None):
-    """Load a default or verified trained pointer decider on the CPU."""
+def decision_controller(checkpoint=None, device="cpu"):
+    """Load a default or verified trained pointer decider on the selected device."""
     if not checkpoint:
-        return PointerDecider(device="cpu")
+        return PointerDecider(device=device)
     source = Path(checkpoint).expanduser().resolve()
     if not source.is_dir():
         raise ValueError("Decision checkpoint must be a local trained model directory")
     local_source(source, download=False)
-    return PointerDecider(source, device="cpu")
+    return PointerDecider(source, device=device)
 
 
 
 class DecisionProcess:
     """Own one model process and one outstanding decision request."""
 
-    def __init__(self, checkpoint=None, *, module="ml_stack.gym.decision_process"):
+    def __init__(self, checkpoint=None, *, module="ml_stack.gym.decision_process", device="cpu"):
         self.events = queue.Queue(maxsize=1)
         self.requests = queue.Queue(maxsize=1)
         self.pending = None
         self.status, self.error = "loading", None
+        self.device = device
         self.handle = start_process(
-            [interpreter(), "-m", module, json.dumps(checkpoint)],
+            [interpreter(), "-m", module, json.dumps(checkpoint), device],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr,
             text=True, bufsize=1, env={**python_environment(), "OMP_NUM_THREADS": "1",
                                       "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"})
@@ -71,6 +74,7 @@ class DecisionProcess:
             return None
         self.status = event["status"]
         self.error = event.get("error")
+        self.device = event.get("device", self.device)
         if "result" in event:
             self.pending = None
         return event
@@ -110,22 +114,36 @@ def serve():
     """Load verified local model files and emit typed decision events."""
     output = sys.stdout
     try:
-        with contextlib.redirect_stdout(sys.stderr):
-            policy = decision_controller(json.loads(sys.argv[1]))
-            policy.load()
-        emit({"status": "ready", "model": policy.model, "device": "cpu"}, output)
-        for line in sys.stdin:
-            request = json.loads(line)
-            began = time.perf_counter()
-            with contextlib.redirect_stdout(sys.stderr):
-                answer = policy.decide("Choose the next safe environment action",
-                                       request.get("model_state", request["state"]), request["options"])
-            result = {**request, "choice": answer.choice, "probabilities": dict(answer.scores),
-                      "abstained": answer.abstained, "model": answer.model, "backend": answer.backend,
-                      "latency_ms": (time.perf_counter() - began) * 1000}
-            emit({"status": "ready", "result": result}, output)
+        device = device_name(sys.argv[2] if len(sys.argv) > 2 else "cpu")
+        lease = contextlib.nullcontext()
+        if device != "cpu":
+            emit({"status": "queued", "device": device}, output)
+            if not broker_wire.status(start=True).get("exclusive_gpu_claims"):
+                raise RuntimeError("Decision accelerator requires an updated exclusive-GPU broker")
+            lease = hold("Gym decision model", wait_s=600)
+        with lease:
+            run_policy(json.loads(sys.argv[1]), device, output)
     except (RuntimeError, ValueError, OSError, ImportError, KeyError, TypeError) as exc:
         emit({"status": "error", "error": str(exc)}, output)
+
+
+def run_policy(checkpoint, device, output):
+    """Keep the device lease through model loading and bounded inference."""
+    emit({"status": "loading", "device": device}, output)
+    with contextlib.redirect_stdout(sys.stderr):
+        policy = decision_controller(checkpoint, device)
+        policy.load()
+    emit({"status": "ready", "model": policy.model, "device": device}, output)
+    for line in sys.stdin:
+        request = json.loads(line)
+        began = time.perf_counter()
+        with contextlib.redirect_stdout(sys.stderr):
+            answer = policy.decide("Choose the next safe environment action",
+                                   request.get("model_state", request["state"]), request["options"])
+        result = {**request, "choice": answer.choice, "probabilities": dict(answer.scores),
+                  "abstained": answer.abstained, "model": answer.model, "backend": answer.backend,
+                  "device": device, "latency_ms": (time.perf_counter() - began) * 1000}
+        emit({"status": "ready", "device": device, "result": result}, output)
 
 
 if __name__ == "__main__":
