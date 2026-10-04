@@ -22,10 +22,8 @@ from .discovery import (
     join_cluster,
     key_path,
     load_cluster_key,
+    require_name,
 )
-
-DEFAULT_GROUP_NAME = "ml-stack"
-"""The group a passphrase belongs to. Two households that both chose the same words end"""
 
 
 def _require_key(path: str | None) -> bytes:
@@ -72,8 +70,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     group = args.group
     if interactive and not args.group_given:
-        typed = input(f"  Group name [{DEFAULT_GROUP_NAME}]: ").strip()
-        group = typed or DEFAULT_GROUP_NAME
+        group = input("  Cluster name: ").strip()
+
+    group = require_name(group)
 
     if args.passphrase:
         passphrase = args.passphrase
@@ -110,18 +109,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
 def cmd_init(args: argparse.Namespace) -> int:
     p = key_path(args.cluster_key)
     existed = p.exists()
-    key = create_cluster_key(args.cluster_key)
+    create_cluster_key(args.cluster_key, group=args.group)
     say(f"cluster key {'already at' if existed else 'written to'} {p}")
-    say()
-    say("Run this on every other machine that should join:")
-    say()
-    say(f"    mkdir -p {p.parent} && printf '%s\\n' '{key}' > {p} "
-        f"&& chmod 600 {p}")
-    say()
-    say("or, on a Windows machine, in PowerShell:")
-    say()
-    say(f'    New-Item -ItemType Directory -Force "{p.parent}" | Out-Null; '
-        f'Set-Content -NoNewline -Path "{p}" -Value "{key}"')
+    say("Export its name and key together, then copy the recovery file privately:")
+    say("    ml-stack-fleet recovery export cluster-recovery.json")
+    say("On the other machine (including Windows PowerShell):")
+    say("    ml-stack-fleet recovery import cluster-recovery.json")
     say()
     say("Then start the daemon on the box with the card:")
     say()
@@ -240,15 +233,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     setup = sub.add_parser(
         "setup", help="join a cluster with a passphrase (start here)")
-    setup.add_argument("--group", default=DEFAULT_GROUP_NAME,
-                       help="which cluster these words belong to, so two groups on one "
-                            f"network stay separate (default: {DEFAULT_GROUP_NAME})")
+    setup.add_argument("--group", default="", help="required cluster name")
     setup.add_argument("--passphrase", default="",
                        help="skip the prompt. Avoid on a shared machine: it lands in "
                             "your shell history and in 'ps'.")
     setup.add_argument("--force", action="store_true",
                        help="leave the cluster this machine is in and join another")
-    sub.add_parser("init", help="mint a random key instead of using a passphrase")
+    init = sub.add_parser("init", help="mint a random key instead of using a passphrase")
+    init.add_argument("--group", required=True, help="cluster name")
     sub.add_parser("key", help="print the cluster key")
     sub.add_parser("token", help="print the traind bearer token this key derives")
     ls = sub.add_parser("ls", help="list daemons on this LAN")
@@ -279,7 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     busy.add_argument("--name", default="")
     busy.add_argument("--port", type=int, default=8770)
     args = ap.parse_args(argv)
-    args.group_given = "--group" in (argv if argv is not None else sys.argv)
+    args.group_given = any(a == "--group" or a.startswith("--group=")
+                           for a in (argv if argv is not None else sys.argv))
     fn = {"setup": cmd_setup, "init": cmd_init, "key": cmd_key,
           "token": cmd_token, "ls": cmd_ls, "pause": cmd_pause,
           "resume": cmd_resume, "when": cmd_when, "busy": cmd_busy}[args.cmd]

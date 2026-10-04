@@ -120,7 +120,7 @@ def test_a_salt_told_to_the_wrong_group_is_not_accepted(tmp_path, port):
 
 def test_a_random_key_cluster_has_no_salt_to_tell(tmp_path, port):
     path = tmp_path / "k"
-    key = discovery.create_cluster_key(path).encode()
+    key = discovery.create_cluster_key(path, group="ml-stack").encode()
     tell = Advertiser(Beacon(name="r", port=1), key, port=port, interval_s=30).start()
     try:
         assert find_salt(WORDS, group="ml-stack", timeout_s=0.8) is None

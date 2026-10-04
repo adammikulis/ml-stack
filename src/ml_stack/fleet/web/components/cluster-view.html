@@ -246,7 +246,7 @@
     drawClusters(rows) {
       const joined = this.querySelector("#cluster-joined");
       const words = el("input", { type: "password", id: "words", placeholder: "passphrase" });
-      const named = el("input", { type: "text", id: "cname", placeholder: "name (optional)" });
+      const named = el("input", { type: "text", id: "cname", required: true, maxlength: 64, placeholder: "Cluster name (required)" });
       const note = el("div");
       const persist = el("input", { type: "checkbox", id: "persist" });
       const add = el("button", { class: "ghost small" }, "Join");
@@ -254,6 +254,7 @@
       // (this one), at logon if ticked, and then what the fleet sees.
       add.onclick = async () => {
         const said = words.value.trim();
+        if (!named.value.trim()) { note.textContent = "Cluster name is required."; named.focus(); return; }
         if (said && said.length < M.MIN_PASS) {
           note.replaceChildren(el("div", { class: "err" },
             `A passphrase needs at least ${M.MIN_PASS} characters.`));

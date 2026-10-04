@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack.home import machine_id
 from ml_stack.http import Server, ServerError, open_stream
 
-from . import pausing, recovery
+from . import lan_clusters, pausing, recovery
 from .discovery import (
     SEARCH,
     DiscoveryError,
@@ -26,6 +26,7 @@ from .discovery import (
     load_cluster_key,
     memberships,
     named_apart,
+    require_name,
 )
 from .join import default_root
 from .page import FIT_ONLY
@@ -207,17 +208,19 @@ class UI:
         return found
 
     # -- actions ---------------------------------------------------------
-    def join(self, passphrase: str, group: str, source: str) -> tuple[dict[str, Any], str]:
+    def join(self, passphrase: str, group: str, source: str, *, existing: bool = False) -> tuple[dict[str, Any], str]:
         """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
+        group = require_name(group)
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
         if not self.throttle.acquire():
             raise DiscoveryError("busy deriving another key; try again in a moment")
         try:
-            join_cluster(passphrase, group=group or "ml-stack",
-                         path=self.cluster_key_path, salting=SEARCH)
-            recovery.remember(passphrase, group or "ml-stack", self.cluster_key_path)
+            salting = lan_clusters.verified_salt(passphrase, group) if existing else SEARCH
+            join_cluster(passphrase, group=group,
+                         path=self.cluster_key_path, salting=salting)
+            recovery.remember(passphrase, group, self.cluster_key_path)
         finally:
             self.throttle.release()
         self.throttle.succeeded(source)

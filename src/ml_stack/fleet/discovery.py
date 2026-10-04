@@ -65,6 +65,16 @@ class DiscoveryError(RuntimeError):
 
 
 # -- the key -------------------------------------------------------------
+def require_name(value: object) -> str:
+    """A nonempty cluster name without control characters, at most 64 characters."""
+    if not isinstance(value, str) or not value.strip():
+        raise DiscoveryError("cluster name is required")
+    name = value.strip()
+    if len(name) > 64 or any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in name):
+        raise DiscoveryError("cluster name must be at most 64 characters without control characters")
+    return name
+
+
 def key_path(path: Path | str | None = None) -> Path:
     """Where the cluster key lives. ``$ML_STACK_CLUSTER_KEY`` wins if set."""
     if path is not None:
@@ -74,14 +84,15 @@ def key_path(path: Path | str | None = None) -> Path:
 
 
 def create_cluster_key(path: Path | str | None = None, *,
-                       overwrite: bool = False) -> str:
+                       overwrite: bool = False, group: str = "") -> str:
     """Mint a cluster key with no passphrase behind it, or return the one here."""
     joined = memberships(path)
     if joined and not overwrite:
         return joined[0].key.decode()
+    group = require_name(group)
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-    rows = [Membership(group=DEFAULT_CLUSTER, key=key.encode())]
-    rows += [m for m in joined if m.group != DEFAULT_CLUSTER]
+    rows = [Membership(group=group, key=key.encode())]
+    rows += [m for m in joined if m.group != group]
     _write_memberships(rows, path)
     return key
 
@@ -154,10 +165,11 @@ def _salted(passphrase: str, group: str, how: Salting) -> tuple[bytes, bytes]:
     return salt, key_from_passphrase(passphrase, group=group, salt=salt)
 
 
-def join_cluster(passphrase: str, *, group: str = DEFAULT_CLUSTER,
+def join_cluster(passphrase: str, *, group: str = "",
                  path: Path | str | None = None, overwrite: bool = True,
                  salting: Salting = Salting()) -> bytes:  # noqa: B008
     """Join, and answer as this cluster from now on. Returns the key."""
+    group = require_name(group)
     joined = memberships(path)
     if joined and not overwrite:
         return joined[0].key
@@ -261,7 +273,7 @@ def _write_memberships(rows: list[Membership],
 def join(passphrase: str, *, group: str = "", path: Path | str | None = None,
          salting: Salting = Salting()) -> list[Membership]:  # noqa: B008
     """Add a cluster. Joining one already joined replaces its key."""
-    group = group.strip() or DEFAULT_CLUSTER
+    group = require_name(group)
     salt, key = _salted(passphrase, group, salting)
     rows = [m for m in memberships(path) if m.group != group]
     rows.append(Membership(group=group, key=key,
@@ -522,6 +534,7 @@ class Advertiser:
         beacon.instance = beacon.instance or secrets.token_hex(8)
         self.beacon = beacon
         self.key = key
+        self.cluster_name = ""
         self.refresh = refresh
         self.group = group or default_group()
         self.port = port if port is not None else default_port()
@@ -643,7 +656,8 @@ class Advertiser:
         salt and the right words make, so only those words recognise it."""
         nonce = str(json.loads(raw).get("nonce", ""))[:64]
         reply = _sign(self.key, {"v": PROTOCOL, "kind": "salt", "t": time.time(),
-                                 "nonce": nonce, "salt": base64.urlsafe_b64encode(self.salt).decode()})
+                                 "nonce": nonce, "group": self.cluster_name,
+                                 "salt": base64.urlsafe_b64encode(self.salt).decode()})
         with contextlib.suppress(OSError):
             sock.sendto(reply, addr)
 
@@ -697,7 +711,9 @@ def find_salt(passphrase: str, *, group: str = DEFAULT_CLUSTER, timeout_s: float
                 continue
             except OSError:
                 break
-            if said.get("kind") == "salt" and said.get("nonce") == nonce and len(salt) >= 16:
+            if not isinstance(said, dict) or (said.get("group") and said["group"] != group):
+                continue
+            if said.get("kind") == "salt" and said.get("nonce") == nonce and 16 <= len(salt) <= 64:
                 heard.setdefault(base64.urlsafe_b64encode(salt).decode(), raw)
     for encoded, raw in heard.items():
         salt = base64.urlsafe_b64decode(encoded + "==")
