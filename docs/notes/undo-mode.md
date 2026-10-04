@@ -4,7 +4,7 @@ Owner request, 2026-10-03. Builds on the destructive-action classifier (`feat/de
 
 ## Two features
 1. **Hold window.** A destructive or reversible call that the person has already chosen to trust
-   (an "Always allow" rule, an approved runner plan) is queued instead of run, with a visible
+   (an "Always allow" rule, an approved plan under plan-and-go) is queued instead of run, with a visible
    countdown (5-30 s, chosen by the person). The person can cancel until it ends; it runs on its
    own if not cancelled. A hold is weaker than approval, so it is opt-in.
 2. **Real undo after the action**, where the action allows it: a delete moves to a recoverable

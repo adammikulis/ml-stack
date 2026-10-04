@@ -16,8 +16,16 @@ from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
 from ml_stack.net.cli import command as security_command
 from ml_stack.sentinel.human import agent_may
 
-__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "HumanOnlyRail", "catalog",
-           "refusal_for", "review_view"]
+__all__ = ["APPROVE_FIRST", "CONFIRM", "FENCED", "HUMAN_ONLY", "LEGACY_ROLE_NAMES", "PLAN_AND_GO", "READ",
+           "READ_ONLY", "ROLE_NAMES", "HumanOnlyRail", "catalog", "refusal_for", "review_view"]
+
+READ_ONLY = "read-only"
+APPROVE_FIRST = "approve-first"
+PLAN_AND_GO = "plan-and-go"
+ROLE_NAMES = (READ_ONLY, APPROVE_FIRST, PLAN_AND_GO)
+LEGACY_ROLE_NAMES = {"reader": READ_ONLY, "operator": APPROVE_FIRST, "runner": PLAN_AND_GO}
+"""The role names, and the older spellings a saved rule may still carry."""
+_ROLE_WORDS = "|".join(re.escape(n) for n in (*ROLE_NAMES, *LEGACY_ROLE_NAMES))
 
 READ = frozenset({
     "serve_status", "models_find", "models_files", "bench_status", "bench_history", "bench_show",
@@ -66,9 +74,9 @@ HUMAN_ONLY: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
          r"\b(?:baseline|honey\w*|decoys?)\b.{0,30}\b(?:plant\w*|remov\w*|reset\w*|clear\w*)\b",
          "ml-stack-security baseline"),
         ("change the role this session runs under",
-         r"\b(?:roles?|permissions?|privileges?)\b.{0,40}\b(?:runner|operator|raise\w*|elevat\w*"
+         rf"\b(?:roles?|permissions?|privileges?)\b.{{0,40}}\b(?:{_ROLE_WORDS}|raise\w*|elevat\w*"
          r"|upgrad\w*|admin|escalat\w*|grant\w*|chang\w*|switch\w*|set)\b"
-         r"|\b(?:runner|operator|reader)\b.{0,20}\b(?:roles?|mode)\b",
+         rf"|\b(?:{_ROLE_WORDS})\b.{{0,20}}\b(?:roles?|mode)\b",
          "/role NAME, typed at the prompt"),
         ("answer, approve, deny or cancel a request waiting for a person",
          r"\b(?:answer\w*|approv\w*|den(?:y|ies)|cancel\w*|resolv\w*|dismiss\w*|withdraw\w*)\b.{0,40}"

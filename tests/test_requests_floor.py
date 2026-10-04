@@ -23,7 +23,7 @@ NAMES = ("answer_request", "approve_request", "deny_request", "cancel_request", 
 
 def test_no_tool_offered_to_a_model_names_a_request_or_an_answer():
     person = do.Person(io.StringIO(""), io.StringIO(""))
-    session = chat.Chat(None, person, role="runner", extension=chat.extensions(person))
+    session = chat.Chat(None, person, role="plan-and-go", extension=chat.extensions(person))
     offered = [s["function"]["name"] for s, _ in session.offered] + [t.name for t in mcp.TOOLS]
     named = [n for n in offered if any(w in n.lower() for w in ("request", "answer", "approve"))]
     assert named == []

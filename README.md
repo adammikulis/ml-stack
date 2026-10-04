@@ -43,7 +43,7 @@ Everything runs on your own hardware. Nothing leaves the network.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
   in one cluster, each reporting its own temperature, clocks and throttle state.
 - **An agent that asks first.** `ml-stack-chat` operates ml-stack for you under a role
-  (`reader`, `operator` or `runner`): reads run, anything that starts, stops, downloads or
+  (`read-only`, `approve-first` or `plan-and-go`): reads run, anything that starts, stops, downloads or
   measures asks, and each question offers Allow this time, Always allow or Never allow.
   Releasing quarantine, approving a host and changing the roles or rules are yours alone
   ([roles and rules](docs/agent-roles.md)).

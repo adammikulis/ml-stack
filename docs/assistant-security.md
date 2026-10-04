@@ -25,7 +25,7 @@ filter to catch every attempt.
    channel) is a named capability, off by default. A grant says in plain words what it can
    read, write and send, on which account or folder, for how long. It is the narrowest
    thing that works, it expires, and it is listed and revocable in one place.
-   *Built:* roles (`reader`, `operator`, `runner`) and saved Always/Never rules
+   *Built:* roles (`read-only`, `approve-first`, `plan-and-go`) and saved Always/Never rules
    (`docs/agent-roles.md`). *Not built:* a grant ledger that covers connectors.
 
 2. **No ambient authority.** The model never holds a credential. A separate connector process
