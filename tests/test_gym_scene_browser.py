@@ -136,3 +136,24 @@ def test_controls_help_shortcuts_and_input_route_boundaries(scene_page):
     page.keyboard.press('d')
     assert not page.evaluate("document.querySelector('gym-scene').debugRays")
     assert not errors
+
+
+def test_driver_camera_button_and_shortcut_use_selected_car(scene_page):
+    page, errors = scene_page
+    scene = page.locator('gym-scene')
+    scene.get_by_role('button', name='Driver view', exact=True).click()
+    page.wait_for_function("""() => {
+      const s=document.querySelector('gym-scene'), car=s.meshes.get(s.focusKey);
+      return s.cameraMode==='driver' && !car.visible &&
+        s.camera.position.distanceTo(car.position)<2 && s.camera.fov===72;
+    }""")
+    assert scene.get_by_role('button', name='Chase view', exact=True).is_visible()
+    scene.get_by_role('button', name='Chase view', exact=True).click()
+    page.wait_for_function("""() => {
+      const s=document.querySelector('gym-scene'), car=s.meshes.get(s.focusKey);
+      return car.visible && s.camera.position.distanceTo(car.position)>8 && s.camera.fov===54;
+    }""")
+    page.locator('gym-scene canvas').focus()
+    page.keyboard.press('c')
+    page.wait_for_function("document.querySelector('gym-scene').cameraMode==='driver'")
+    assert not errors
