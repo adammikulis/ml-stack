@@ -150,7 +150,8 @@ def test_a_build_that_answers_every_flag_is_not_mentioned(tmp_path, monkeypatch)
     import ml_stack.serve.binary as binary_module
     import ml_stack.setup as setup
     from ml_stack.serve import backend
-    from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
+    from ml_stack.serve.backend import LlamaServerBackend
+    from ml_stack.serve.emitted import emitted_flags
 
     monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})

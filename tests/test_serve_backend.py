@@ -19,13 +19,13 @@ from ml_stack.serve.backend import (
     LlamaServerBackend,
     ServerSpec,
     UnknownFlag,
-    emitted_flags,
     flags_of,
     parse_context,
     trained_context,
     unknown_flags,
     values_of,
 )
+from ml_stack.serve.emitted import emitted_flags
 from ml_stack.testing.fakes import fake_binary
 from tests.conftest import leased, write_gguf
 

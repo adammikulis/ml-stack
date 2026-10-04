@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 from conftest import threaded_server
-from tests.net_site import gguf_bytes
 
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.weights import ModelError, resolve
 from ml_stack.http import Server
+from tests.net_site import gguf_bytes
 
 
 def free_port() -> int:
@@ -1043,39 +1043,41 @@ class TestWhereADownloadMayComeFrom:
         assert not list(store.store.glob("*"))
 
 
+def a_peer_holding(listing, body):
+    """A server that lists ``listing`` at /models and answers every other path with ``body``."""
+
+    class Holding(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            reply = json.dumps({"models": listing}).encode() if self.path == "/models" else body
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+    return threaded_server(Holding)
+
+
 class TestWhatAPeerOrServerSends:
-    def _peer(self, monkeypatch, listing, body):
-        class FakePeer:
-            def __init__(self, *a, **k):
-                pass
-
-            def models(self):
-                return listing
-
-            def pull(self, remote, local, **k):
-                Path(local).write_bytes(body)
-                return Path(local)
-
-        monkeypatch.setattr("ml_stack.fleet.remote.Peer", FakePeer)
-
     @pytest.mark.parametrize("evil", ["../../escaped.gguf", "/tmp/escaped-abs.gguf"])
-    def test_a_peer_cannot_place_a_file_outside_the_store(self, store, tmp_path, monkeypatch, evil):
-        self._peer(monkeypatch, [{"name": evil}], gguf_bytes())
-        got = store._from_peer("escaped", "http://peer", b"k", None)
+    def test_a_peer_cannot_place_a_file_outside_the_store(self, store, tmp_path, evil):
+        with a_peer_holding([{"name": evil}], gguf_bytes()) as base:
+            got = store._from_peer("escaped", base, b"k", None)
         assert got.path.parent == store.store
         assert not (tmp_path / "escaped.gguf").exists()
         assert not Path("/tmp/escaped-abs.gguf").exists()
 
-    def test_a_peer_name_without_a_weights_suffix_is_refused(self, store, monkeypatch):
-        self._peer(monkeypatch, [{"name": "evil.sh"}], gguf_bytes())
-        with pytest.raises(ModelError):
-            store._from_peer("evil", "http://peer", b"k", None)
+    def test_a_peer_name_without_a_weights_suffix_is_refused(self, store):
+        with a_peer_holding([{"name": "evil.sh"}], gguf_bytes()) as base, pytest.raises(ModelError):
+            store._from_peer("evil", base, b"k", None)
         assert not list(store.store.glob("*"))
 
-    def test_a_peer_file_that_is_not_a_gguf_is_deleted(self, store, monkeypatch):
-        self._peer(monkeypatch, [{"name": "m.gguf"}], b"<html>not a model</html>")
-        with pytest.raises(ModelError):
-            store._from_peer("m", "http://peer", b"k", None)
+    def test_a_peer_file_that_is_not_a_gguf_is_deleted(self, store):
+        with a_peer_holding([{"name": "m.gguf"}], b"<html>not a model</html>") as base, \
+                pytest.raises(ModelError):
+            store._from_peer("m", base, b"k", None)
         assert not list(store.store.glob("*"))
 
     def test_a_download_that_is_not_a_gguf_is_deleted(self, store):

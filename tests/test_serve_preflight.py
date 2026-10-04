@@ -593,7 +593,8 @@ class TestSeams:
                                                                         monkeypatch):
         import ml_stack.hub as hub_module
         import ml_stack.setup as setup_module
-        from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
+        from ml_stack.serve.backend import LlamaServerBackend
+        from ml_stack.serve.emitted import emitted_flags
 
         def never(*a, **k):
             raise AssertionError("a real reader was reached")

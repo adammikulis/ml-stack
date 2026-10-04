@@ -394,7 +394,8 @@ def _firewall_finding() -> Finding:
 def _lacking_flags(binary: str) -> list[tuple[str, str]]:
     """Every flag ``ServerSpec`` can emit that this build's ``--help`` does not list, with
     the nearest it has; empty when the build answers everything or printed no help at all."""
-    from ml_stack.serve.backend import LlamaServerBackend, emitted_flags, flags_of, unknown_flags
+    from ml_stack.serve.backend import LlamaServerBackend, flags_of, unknown_flags
+    from ml_stack.serve.emitted import emitted_flags
 
     try:
         return unknown_flags(emitted_flags(LlamaServerBackend(binary=binary)),

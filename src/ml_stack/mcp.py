@@ -42,7 +42,7 @@ from ml_stack.client import Client
 from ml_stack.decide import router
 from ml_stack.home import state
 from ml_stack.log import say
-from ml_stack.serve import quant_guard
+from ml_stack.serve import ops, quant_guard
 from ml_stack.workspace import tools as workspace_tools
 
 __all__ = [
@@ -192,8 +192,6 @@ def _confined(path: str) -> Path:
 
 def _local_server(url: str) -> str:
     """``url`` when it is the address of a server this machine's broker holds, else ``ValueError``."""
-    from ml_stack.serve import ops
-
     held = {ops.base_url_for(port).rstrip("/") for port in ops.recorded_servers(ops.lease_file())}
     if url.rstrip("/") not in held:
         raise ValueError(f"{url!r} is not a server this machine is serving")
@@ -237,8 +235,6 @@ def checked(fn: Callable[..., Any], arguments: dict[str, Any]) -> None:
 def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     """What is serving on this machine: every recorded server and ``port``, each with its
     model, context, slots and lease -- what ``ml-stack-serve status`` prints."""
-    from ml_stack.serve import ops
-
     records = ops.recorded_servers(ops.lease_file())
     found = []
     for one in sorted({*records, int(port)}):
@@ -279,8 +275,6 @@ def serve_up(model: str, context: int = 0, parallel: int = 1, draft: str = "",
 def serve_down(port: int = 8080) -> dict[str, Any]:
     """Stop the server this machine started on ``port`` (``ml-stack-serve down``); says
     whether a process was still running, and why it would not act when it would not."""
-    from ml_stack.serve import ops
-
     try:
         stopped, fleet = ops.down(int(port))
     except ops.Refused as no:
@@ -344,9 +338,9 @@ def _checked_bench_argv(argv: list[str]) -> list[str]:
     if not words or words[0] not in _BENCH_COMMANDS:
         raise ValueError(f"bench_run takes one of {', '.join(_BENCH_COMMANDS)} first")
     for word in words[1:]:
-        if word.startswith("-") and not re.fullmatch(r"-\d+(\.\d+)?", word):
-            if word.split("=", 1)[0] not in _BENCH_FLAGS:
-                raise ValueError(f"{word.split('=', 1)[0]} is not a flag bench_run accepts")
+        flag = word.split("=", 1)[0]
+        if word.startswith("-") and not re.fullmatch(r"-\d+(\.\d+)?", word) and flag not in _BENCH_FLAGS:
+            raise ValueError(f"{flag} is not a flag bench_run accepts")
     return words
 
 
