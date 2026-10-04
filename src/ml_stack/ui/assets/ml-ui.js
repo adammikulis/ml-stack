@@ -10,6 +10,7 @@ import "./toast.js";
 import "./controls.js";
 import "./slider.js";
 import "./board.js";
+import "./agents.js";
 
 export { LABELS, NAMES, THRESHOLDS, icon, normalize, verdictOf } from "./verdict.js";
 export { duration, fmt } from "./format.js";

@@ -18,7 +18,17 @@ from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
-from ml_stack.workspace import boardroute, chat, filecli, guide, limits, onboard, project, tokens
+from ml_stack.workspace import (
+    chat,
+    filecli,
+    guide,
+    limits,
+    localcli,
+    localroute,
+    onboard,
+    project,
+    tokens,
+)
 from ml_stack.workspace.boardapi import Follow
 from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
 from ml_stack.workspace.bus import CALL_TYPES, TYPES
@@ -368,8 +378,10 @@ def _nudging(args: argparse.Namespace) -> int:
 
 
 def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
-    listener = boardroute.serve(ws, args.port)
+    listener = localroute.serve(ws, args.port)
     say(f"the Board, read-only, for the person: http://127.0.0.1:{listener.port}/")
+    say(f"the Agents panel (start and stop need this browser session): "
+        f"http://127.0.0.1:{listener.port}/agents?session={listener.session}")
     listener.start()
     try:
         threading.Event().wait()
@@ -403,6 +415,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
         *LIVE], _setup),
     ("board-serve", "serve the read-only Board page on a loopback port; the person's identity, no token in the page",
      [flag("--port", type=int, default=0)], _board_serve),
+    ("agent", "start a local model as an agent that takes and gives tasks, stop one, or list them; start and stop at a terminal",
+     localcli.OPTIONS, lambda a, w: localcli.run(a, w)),
     ("chat", "live conversation with a board or one agent: streams it, sends each line you type; at a terminal",
      [flag("--board", default="", help="a board such as #general"),
       flag("--to", default="", help="an agent id"), flag("--backlog", type=int, default=20),

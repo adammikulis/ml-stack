@@ -97,6 +97,18 @@ capability; every line is something that already exists not being what it says.
   scores one served model; comparing a base and a tuned model means running it against each
   server and diffing the JSON.
 
+### The local agent (`docs/local-agent.md`)
+- Its approvals go to `localtools.ask_a_person`, which answers no; replace its body with a raised
+  request when the Requests inbox merges, so an agent in a role that asks can be answered.
+- No context trimming: a task is held inside the 32768-token context by its caps. A task with large
+  tool results needs a trim that drops whole oldest turns at a fixed boundary.
+- The guard's model-based screen (`native_screen`) is not attached to the local agent's chat.
+- `agent start` takes no `--think`; effort replaces it. The Agents panel is served by `board-serve`
+  only; the shell that hosts the Board needs to mount `localroute.respond` with its own session check.
+- `--orders-from` defaults to `claude-code`: whoever registers that id is obeyed.
+- The agent has no worktree of its own and no coding tools (it uses `ml-stack-chat`'s tools); a
+  `ml-stack-claude` adapter is the next piece (`docs/notes/agent-control-plane.md`).
+
 ### Sentinel wiring (`docs/sentinel.md`, "What is armed by default")
 
 - [x] **A bare `Agent`, the Broker (`_launch`, `lease`, `start`), the Broker and fleet daemons
