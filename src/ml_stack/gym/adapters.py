@@ -7,6 +7,8 @@ import itertools
 from ml_stack.gym.car_world import make_car_world
 from ml_stack.gym.catalog import CAR_ACTIONS, require
 from ml_stack.gym.driving import geometry as driving_geometry
+from ml_stack.gym.drone_definition import ACTIONS as DRONE_ACTIONS
+from ml_stack.gym.drone_world import make_drone_environment
 from ml_stack.gym.episode_environment import make_episode
 from ml_stack.gym.values import json_value
 from ml_stack.gym.world_traffic import make_traffic_world
@@ -23,6 +25,8 @@ def make_environment(name, config=None, seed=0):
     if mode not in {"episode", "world"}:
         raise ValueError("simulation_mode must be episode or world")
     provenance = None
+    if name == "drone":
+        return make_drone_environment(cfg, seed, mode)
     if "world" in cfg and (mode == "episode" or name == "car"):
         cfg, provenance = configure_world(name, cfg, seed)
     if mode == "world":
@@ -43,6 +47,8 @@ def make_environment(name, config=None, seed=0):
 
 def actions(name, env):
     """Return names and native actions in matching order."""
+    if name == "drone":
+        return DRONE_ACTIONS, list(range(len(DRONE_ACTIONS)))
     if name == "car":
         return CAR_ACTIONS, list(range(9))
     space = env.action_space
@@ -58,13 +64,15 @@ def render_state(name, env):
     native = env.unwrapped
     if hasattr(env, "render_state"):
         geometry = env.render_state()
-        frame = native.main_camera.perceive(to_float=False) if native.main_camera is not None else None
+        camera = getattr(native, "main_camera", None)
+        frame = camera.perceive(to_float=False) if camera is not None else None
         return geometry, png_frame(frame)
     if name == "traffic-driving":
         return native.geometry(), None
     if name == "car":
         geometry = driving_geometry(native)
-        frame = native.main_camera.perceive(to_float=False) if native.main_camera is not None else None
+        camera = getattr(native, "main_camera", None)
+        frame = camera.perceive(to_float=False) if camera is not None else None
     elif name == "warehouse":
         geometry = {"robots": [{"x": a.x, "y": a.y, "direction": int(a.dir.value),
                                 "carrying": a.carrying_shelf is not None} for a in native.agents],

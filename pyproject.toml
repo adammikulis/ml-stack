@@ -29,6 +29,7 @@ dependencies = ["packaging>=24.2", "psutil>=7.2.2"]
 # Nothing below is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
 [project.optional-dependencies]
+gym-drone = ["PyFlyt==0.29.0; python_version < '3.13'", "pillow>=10; python_version < '3.13'"]
 gym-driving = ["gymnasium>=1.0", "pillow>=10"]
 gym-warehouse = ["rware>=2.0", "gymnasium>=1.0"]
 gym-traffic = ["sumo-rl>=1.4.5", "eclipse-sumo>=1.24", "gymnasium>=1.0", "defusedxml>=0.7"]

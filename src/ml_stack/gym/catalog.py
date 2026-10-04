@@ -12,6 +12,9 @@ from ml_stack.gym.worlds import schema
 CAR_ACTIONS = [f"{steer} {drive}" for steer in ("left", "straight", "right")
                for drive in ("brake", "coast", "accelerate")]
 ENVIRONMENTS = {
+    "drone": {"title": "Forest search drones", "description": "Native quadrotors searching for hikers and fires with RGB and synthetic thermal cameras",
+              "library": "PyFlyt", "physics": "Bullet", "modules": ["PyFlyt", "pybullet", "gymnasium"],
+              "extra": "gym-drone", "python": "3.12", "actions": []},
     "car": {"title": "Smart car", "description": "Road navigation with lidar and vehicle dynamics",
                 "library": "MetaDrive", "physics": "Bullet", "modules": ["metadrive", "gymnasium"],
                 "extra": "gym-driving", "actions": CAR_ACTIONS},
@@ -45,7 +48,7 @@ def catalogue():
             missing.append("SUMO executable")
         entries.append({"id": name, **{k: v for k, v in spec.items() if k != "modules"},
                         "world_schema": schema(name), "simulation_modes": ["episode", "world"],
-                        "supported_controllers": ["manual", "random", "decider", "ppo", *(["native-idm"] if name == "car" else [])],
+                        "supported_controllers": ["manual", "random", "decider", "ppo", *(["native-idm"] if name == "car" else ["native-patrol"] if name == "drone" else [])],
                         "available": not missing, "missing": missing,
                         "install": f"pip install 'ml-stack[{spec['extra']}]'" +
                                    ("; install the pinned MetaDrive source from docs/studio-gym.md"
