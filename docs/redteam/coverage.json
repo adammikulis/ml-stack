@@ -6688,7 +6688,7 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "covered",
    "tests": [
-    "tests/test_startup_models.py::StartupModelTests::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"
+    "tests/test_startup_models.py::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"
    ],
    "note": ""
   },

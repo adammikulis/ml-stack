@@ -157,7 +157,7 @@ tests = ["tests/test_fleet_framing.py"]
 [[group]]
 match = ["route:fleet/routes.py:/ui/models/startup"]
 status = "covered"
-tests = ["tests/test_startup_models.py::StartupModelTests::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"]
+tests = ["tests/test_startup_models.py::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"]
 
 [[group]]
 match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]
