@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import resource
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +20,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+if os.name == "posix":
+    import resource
+else:
+    resource = None
 
 from ml_stack.credentials.environment import child_environment
 
@@ -134,6 +138,8 @@ def find_cli(which: Callable[[str], str | None] = shutil.which,
 
 
 def _limit(size: int) -> Callable[[], None]:
+    if resource is None:
+        raise RuntimeError("process output resource limits require a POSIX platform")
     def apply() -> None:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         resource.setrlimit(resource.RLIMIT_FSIZE, (size, size))
@@ -144,6 +150,9 @@ def _run(cli: str, args: tuple[str, ...], *, timeout_s: float, most: int) -> byt
     """Standard output of ``cli args``, or None on a failure, a timeout or output over ``most``."""
     if args not in READ_ONLY:
         raise ValueError(f"tailscale {' '.join(args)} is not a read-only command")
+    if resource is None:
+        logger.warning("tailscale status requires POSIX output resource limits; command was not run")
+        return None
     with tempfile.TemporaryFile() as out:
         try:
             done = subprocess.run(

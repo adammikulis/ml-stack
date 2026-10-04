@@ -6,7 +6,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import resource
 import signal
 import subprocess
 import sys
@@ -16,6 +15,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+if os.name == "posix":
+    import resource
+else:
+    resource = None
 
 from ml_stack.sandbox.backend import Backend, SandboxUnavailable
 from ml_stack.sandbox.bubblewrap import Bubblewrap
@@ -93,6 +97,8 @@ def wrapped(argv: Sequence[str], policy: Policy, *, via: Backend | None = None,
 
 
 def _limits(limits: Limits) -> Callable[[], None]:
+    if resource is None:
+        raise SandboxUnavailable("process resource limits require a POSIX platform; command was not run")
     def apply() -> None:
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         for which, value in ((resource.RLIMIT_CPU, limits.cpu_seconds),
