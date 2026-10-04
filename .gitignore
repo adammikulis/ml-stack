@@ -24,3 +24,4 @@ tests/_generated_*/
 *.pem
 *.key
 .claude/settings.local.json
+.full-tier-last.json

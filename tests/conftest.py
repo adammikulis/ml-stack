@@ -130,6 +130,25 @@ every run shares one set of heavy lanes."""
 
 
 
+def _quick_server_shutdown() -> None:
+    """``BaseServer.shutdown()`` waits for ``serve_forever`` to notice, and it looks once per
+    ``poll_interval`` (half a second by default), so stopping each of the thousand or so servers
+    the suite starts cost a quarter of a second on average: about eight minutes of worker time in
+    teardown. A server in a test process polls every 20 ms instead; a server in a child process
+    is not touched."""
+    import socketserver
+
+    original = socketserver.BaseServer.serve_forever
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        original(self, min(poll_interval, 0.02))
+
+    socketserver.BaseServer.serve_forever = serve_forever  # type: ignore[method-assign]
+
+
+_quick_server_shutdown()
+
+
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""
 
@@ -257,6 +276,21 @@ def _no_machine_state(monkeypatch, tmp_path):
     speech = sys.modules.get("ml_stack.speech") or importlib.import_module("ml_stack.speech")
     for attr in ("ASR", "TTS", "VAD"):
         monkeypatch.setattr(speech, attr, speech.Registry(kind=attr.lower()))
+
+
+@pytest.fixture(autouse=True)
+def _no_reputation_observer_leaks():
+    """The process-wide reputation observer a test installs does not outlive it. One that did made
+    ``127.0.0.1`` a "watch" host for whichever test ran next on the same xdist worker, so a
+    llama.cpp test failed or passed by which neighbours it was scheduled beside."""
+    from ml_stack.sentinel import observers
+
+    before = observers.installed()
+    yield
+    if observers.installed() is not before:
+        observers.uninstall()
+        if before is not None:
+            observers.install(before)
 
 
 @pytest.fixture(autouse=True)
@@ -854,6 +888,20 @@ def points_at(link) -> str:
 LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
                           "servers.lock", "logs", "guard"})
 
+#: Paths below the state root that OTHER agents and test runs on the machine append to while this
+#: run is going (every `scripts/test` run ends by logging to `activity/`; every agent message lands
+#: in `workspace/`), so a write there says nothing about this run. A glob per path, and only logs
+#: and the hub: the keystore, key files, manifests, canaries, honey, requests, credentials and the
+#: sentinel's records stay guarded, because a test that reached for those would be an escape.
+LIVE_PATHS = ("workspace/*", "harness/*", "activity/*/activity.log*", "activity/*/activity.log.lock",
+              "sentinel/events.log*", "sentinel/anchor.log")
+
+
+def _live(rel: str) -> bool:
+    import fnmatch
+
+    return rel.endswith(".key") is False and any(fnmatch.fnmatch(rel, g) for g in LIVE_PATHS)
+
 
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
@@ -866,6 +914,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):
+                continue
+            if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
             try:
                 out[(rel / name).as_posix()] = (Path(dirpath) / name).lstat().st_mtime_ns
