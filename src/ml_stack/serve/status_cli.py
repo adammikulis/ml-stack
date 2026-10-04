@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import asdict
+from pathlib import Path
 
 from ml_stack.command import flag, option
 from ml_stack.hub import pretty_name
 from ml_stack.log import say
-from ml_stack.serve import ops
+from ml_stack.serve import holding, ops
 from ml_stack.serve.backend import ServerSpec, logs_of, parse_context
 from ml_stack.serve.ops import base_url_for
 from ml_stack.serve.quant_guard import status_note
+from ml_stack.units import human_bytes
 
 __all__ = ["OPTIONS", "cmd_status"]
 
@@ -125,21 +128,34 @@ def _kept_line(drafting: ops.Drafting) -> str:
             f"{counted.tokens_per_draft or 0:.1f} tokens per verification pass")
 
 
+def _say_leases(held: list[holding.Hold]) -> None:
+    """One line per lease `ml-stack-serve up` holds: who, what, how much memory, since when."""
+    for one in held:
+        since = time.strftime("%F %T", time.localtime(one.since)) if one.since else "-"
+        where = f"port {one.port}" if one.port else one.status
+        say(f"lease {one.id}  {Path(one.model).name}  context {one.context:,}  {where}  "
+            f"held by pid {one.pid}  {human_bytes(one.memory) if one.memory else 'memory unmeasured'}"
+            f"  since {since}" + (f"  idle {one.idle_s:.0f}s" if one.idle_s else ""))
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     if getattr(args, "every", False):
         return _say_processes(bool(args.json))
 
     found = ops.status(port=args.port, model=args.model, context=args.context,
                        parallel=args.parallel)
+    held = holding.holds()
     if args.json:
         say(json.dumps(
             {"serving": bool(found.servers) or bool(found.foreign),
+             "leases": [asdict(h) for h in held],
              "ports_checked": list(found.ports),
              "servers": [asdict(s) for s in found.servers],
              "foreign": list(found.foreign)},
             indent=2))
         return 0 if (found.servers or found.foreign) else 1
 
+    _say_leases(held)
     if not found.servers and not found.foreign:
         say("nothing is serving on port " + ", ".join(str(p) for p in found.ports) + ".")
         say(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")

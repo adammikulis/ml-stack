@@ -173,6 +173,27 @@ class RemoteBroker:
             caller.on_event({"event": "ready", "port": info.port, "adopted": info.adopted})
         return info
 
+    def lease(self, ask: Ask, *, timeout: float) -> Grant:
+        """A lease on a server for ``ask``, queued behind the others until it has its turn."""
+        reply = call("lease", timeout=None, purpose=ask.purpose, models=list(ask.models),
+                     spec=dict(ask.spec), weight=ask.weight, label=ask.label or who(),
+                     wait_s=timeout, port=ask.port,
+                     options={**self.options, **dict(ask.options)})
+        return Grant(**{k: reply[k] for k in ("lease", "purpose", "model", "port", "base_url",
+                                              "shared")})
+
+    def release(self, lease_id: str) -> bool:
+        """Let go of a lease."""
+        return bool(call("release", start=False, lease=lease_id)["released"])
+
+    def stop(self, port: int, *, force: bool = False) -> dict[str, Any]:
+        """Stop the server on ``port`` unless somebody still holds it."""
+        return call("stop", start=False, port=port, force=force)
+
+    def snapshot(self) -> dict[str, Any]:
+        """The servers, holders and queue the machine's broker reports."""
+        return call("status", start=False)
+
     def drop(self, info: ServerInfo, *, grace_s: float = 5.0) -> None:
         """Let go of the lease ``info`` was granted under."""
         call("drop", info=info_dict(info), grace_s=grace_s, start=False)

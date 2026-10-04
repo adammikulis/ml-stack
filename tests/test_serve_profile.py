@@ -20,7 +20,7 @@ from conftest import write_gguf
 from ml_stack.asking import Asking
 from ml_stack.client import Reply
 from ml_stack.graph.conversation import converse
-from ml_stack.serve import cli as serve_cli, ops as serve_ops, profile as prof
+from ml_stack.serve import cli as serve_cli, holding, ops as serve_ops, profile as prof
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, add, asking_for, profile_for, profiles, record, said
 
@@ -312,7 +312,14 @@ def leases(monkeypatch, tmp_path):
             return SimpleNamespace(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                                    pid=None, adopted=True)
 
+    def up(spec, *, manager, **kw):
+        seen.append(spec)
+        return holding.Hold(id="lease", shape="s", model=str(spec.model), context=spec.context,
+                            parallel=spec.parallel, status="ready", port=spec.port or 1,
+                            base_url=f"http://127.0.0.1:{spec.port or 1}", adopted=True)
+
     monkeypatch.setattr(serve_ops, "ServerManager", Manager)
+    monkeypatch.setattr(holding, "up", up)
     monkeypatch.setattr("ml_stack.hub.located", lambda name, **k: Path(f"/models/{name}"))
     return seen
 

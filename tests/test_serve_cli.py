@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import replace
 
 import pytest
 from conftest import (
@@ -23,10 +24,11 @@ from conftest import (
     write_gguf,
 )
 
+from ml_stack import hub
 from ml_stack.client import is_healthy
 from ml_stack.client.counters import Speculative
-from ml_stack.serve import cli, ops
-from ml_stack.serve.backend import ServerInfo, ServerSpec
+from ml_stack.serve import cli, holding, lifecycle_cli, ops
+from ml_stack.serve.backend import ServerSpec
 from ml_stack.serve.ports import free_port
 from ml_stack.testing import FakeLlamaServer, FakePreflight, Served
 from ml_stack.testing.registry import record_server
@@ -67,6 +69,20 @@ def record(state, port: int, *, pid: int, owner_pid: int) -> None:
         "port": port, "pid": pid, "owner_pid": owner_pid, "backend": "llama.cpp",
         "model": MODEL, "base_url": f"http://127.0.0.1:{port}",
     }}))
+
+
+def asking(monkeypatch, seen, *, leave=False):
+    """`up` as far as asking the broker: what it asks is kept in ``seen``, and (``leave``)
+    the command is left there instead of holding anything."""
+    def up(spec, *, manager, **kw):
+        seen["spec"] = spec
+        if leave:
+            raise SystemExit(0)
+        return holding.Hold(id="lease", shape="s", model=str(spec.model), context=spec.context,
+                            parallel=spec.parallel, status="ready", port=spec.port or 1,
+                            base_url=f"http://127.0.0.1:{spec.port or 1}", adopted=True)
+
+    monkeypatch.setattr(holding, "up", up)
 
 
 class TestStatus:
@@ -180,83 +196,15 @@ class TestStatus:
 
 
 class TestUp:
-    def test_it_adopts_a_compatible_server(self, serving, state, capsys):
-        instance = serving()
-        assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
-
-        out = capsys.readouterr().out
-        assert out.startswith("adopted ")
-        assert instance.base_url in out
-
-    def test_adoption_is_reported_as_adoption_in_json(self, serving, state, capsys):
-        instance = serving()
-        assert cli.main(["up", MODEL, "--port", str(instance.port), "--json"]) == 0
-
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["adopted"] is True
-        assert payload["base_url"] == instance.base_url
-
-    def test_it_refuses_a_different_shape_on_a_busy_port(self, serving, state, capsys):
-        """Adopting the wrong shape is what makes a caller reload the weights it
-        already had."""
-        instance = serving()
-        code = cli.main(["up", MODEL, "--port", str(instance.port),
-                         "--parallel", "4", "--context", "32768"])
-
-        assert code == 2
-        err = capsys.readouterr().err
-        assert "slots: asked for 4, serving 1" in err
-        assert "context: asked for 8192 per slot, serving 4096" in err
-        assert is_healthy(instance.base_url), "the refusal must not have stopped it"
-
-    def test_up_adopts_a_matching_orphan_and_records_it_as_its_own(self, serving, state,
-                                                                    capsys):
-        """After `up` has adopted it, the orphan is on the record under the server's own
-        pid -- the way `up` records a server it started -- so `status` no longer calls
-        it orphaned and `down` stops it."""
-        instance = serving()
-        orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-        try:
-            record(state, instance.port, pid=orphan.pid, owner_pid=999_999_998)
-            assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
-            got = capsys.readouterr()
-            assert f"adopted {instance.base_url}" in got.out
-            assert "orphaned" in got.err
-            assert orphan.poll() is None, "the matching server is kept"
-            left = json.loads(state.read_text())[str(instance.port)]
-            assert left["pid"] == orphan.pid and left["owner_pid"] == orphan.pid
-
-            assert cli.main(["status", "--port", str(instance.port)]) == 0
-            out = capsys.readouterr().out
-            assert "orphaned" not in out and "started by 'ml-stack-serve up'" in out
-        finally:
-            if orphan.poll() is None:
-                orphan.kill()
-            orphan.wait()
-
-    def test_it_refuses_a_different_model_on_a_busy_port(self, serving, state, capsys):
-        instance = serving()
-        code = cli.main(["up", "other-8B-Q4_K_M.gguf", "--port", str(instance.port)])
-
-        assert code == 2
-        err = capsys.readouterr().err
-        assert f"model: asked for 'other-8B-Q4_K_M.gguf', serving '{MODEL}'" in err
 
     def test_the_flags_default_to_the_modules_own_shape(self, state, monkeypatch, capsys):
         seen: dict[str, object] = {}
-
-        def lease(self, spec, *, timeout=300.0, **kw):
-            seen["spec"] = spec
-            seen["timeout"] = timeout
-            return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
-                              pid=None, backend="llama.cpp", adopted=True)
-
-        monkeypatch.setattr(ops.ServerManager, "lease", lease)
+        asking(monkeypatch, seen)
         assert cli.main(["up", MODEL]) == 0
 
         spec = seen["spec"]
         default = ServerSpec(model="")
-        assert spec.port == default.port
+        assert spec.port == 0, "the caller does not pick the port; the broker does"
         assert spec.context == default.context
         assert spec.parallel == default.parallel
         assert str(spec.model) == MODEL
@@ -379,9 +327,10 @@ class TestTellingTheFleet:
 
         return Serving(root / "serving.json")
 
-    def test_putting_a_model_up_announces_it(self, serving, state, tmp_path):
+    def test_putting_a_model_up_announces_it(self, serving, state, tmp_path, monkeypatch):
         root = tmp_path / "traind"
         root.mkdir()
+        asking(monkeypatch, {})
         instance = serving(slots=2)
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--parallel", "2",
                          "--root", str(root)]) == 0
@@ -390,11 +339,12 @@ class TestTellingTheFleet:
         assert served[0].slots == 2
         assert served[0].models == [MODEL]
 
-    def test_with_no_root_it_announces_under_the_state_root(self, serving, state, tmp_path):
+    def test_with_no_root_it_announces_under_the_state_root(self, serving, state, tmp_path, monkeypatch):
         from ml_stack import home
 
         root = home.state("traind")
         root.mkdir(parents=True)
+        asking(monkeypatch, {})
         instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
         assert [s.port for s in self.beacon(root).all()] == [instance.port]
@@ -416,9 +366,10 @@ class TestTellingTheFleet:
             proc.wait(timeout=5)
         assert self.beacon(root).all() == [], "the beacon still points at a dead port"
 
-    def test_a_machine_with_no_fleet_is_not_given_one(self, serving, state, tmp_path):
+    def test_a_machine_with_no_fleet_is_not_given_one(self, serving, state, tmp_path, monkeypatch):
         """Announcing is for machines in a fleet; the rest get no stray files."""
         root = tmp_path / "never-set-up"
+        asking(monkeypatch, {})
         instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--root", str(root)]) == 0
         assert not root.exists()
@@ -587,7 +538,6 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     """The whole path -- lease, then the backend's launch -- against a stand-in that answers
     `--help` without `--draft-max`. Nothing is started; the refusal names the nearest."""
     import subprocess as sp
-    from dataclasses import replace
 
     from ml_stack.serve import backend
     from ml_stack.serve.backend import flags_of
@@ -615,20 +565,18 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     monkeypatch.setattr(sp, "Popen",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("started")))
 
-    real_lease = ops.ServerManager.lease
+    real = lifecycle_cli._asked_spec
 
-    def lease(self, spec, **kw):
-        # The real lease, with the retired flag put on the argv and a port nobody holds.
-        from ml_stack.serve.ports import free_port
-        return real_lease(self, replace(spec, extra_args=("--draft-max", "3"),
-                                        port=free_port()), **kw)
+    def asked(args, model, extra):
+        # the spec as asked, with the retired flag put on the argv
+        return replace(real(args, model, extra), extra_args=("--draft-max", "3"))
 
-    monkeypatch.setattr(ops.ServerManager, "lease", lease)
-    code = cli.main(["up", str(gguf), "--binary", str(binary), "--port", str(free_port())])
+    monkeypatch.setattr(lifecycle_cli, "_asked_spec", asked)
+    monkeypatch.setattr(hub, "room", lambda: 1 << 40)
+    code = cli.main(["up", str(gguf), "--binary", str(binary), "--no-profile"])
     err = capsys.readouterr().err
     assert code == 2
-    assert err.strip().splitlines()[-1] == (
-        "this llama-server has no --draft-max; it has --spec-draft-n-max")
+    assert "this llama-server has no --draft-max; it has --spec-draft-n-max" in err
 
 
 class TestPreflightOnly:
@@ -1015,13 +963,10 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
         def __init__(self, *a, **k):
             self.backend = types.SimpleNamespace(binary=None)
 
-        def lease(self, spec, **kw):
-            seen["spec"] = spec
-            raise SystemExit(0)
-
     import types
 
     monkeypatch.setattr(ops, "ServerManager", Manager)
+    asking(monkeypatch, seen, leave=True)
     monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
     model = tmp_path / "tiny.gguf"
     model.write_bytes(b"x")
@@ -1054,11 +999,8 @@ def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypat
         def __init__(self, *a, **k):
             self.backend = types.SimpleNamespace(binary=None)
 
-        def lease(self, spec, **kw):
-            seen["spec"] = spec
-            raise SystemExit(0)
-
     monkeypatch.setattr(ops, "ServerManager", Manager)
+    asking(monkeypatch, seen, leave=True)
     monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
     model = tmp_path / "tiny.gguf"
     model.write_bytes(b"x")

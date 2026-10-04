@@ -63,6 +63,14 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('FOO=1 git add -A', "and still stages everything"),
     ('CUDA_VISIBLE_DEVICES=0 llama-server -m model.gguf', "and still starts a server by hand"),
     ('FOO=1 nohup ml-stack-bench run &', "and still backgrounds a job nobody watches"),
+    ('./build/bin/llama-server -m x.gguf --port 8081', "a built binary run by hand"),
+    ('sudo llama-server -m x.gguf', "through sudo"),
+    ('exec llama-server', "no arguments at all"),
+    ('cd x && llama-server -m a.gguf', "after a cd"),
+    ('ML_STACK_BROKER_LOCAL=1 ml-stack-serve up m.gguf', "a private broker with no queue"),
+    ('ml-stack-serve up m.gguf --anyway', "a flag that skipped the lease"),
+    ('ml-stack-serve up m.gguf --context 256k --direct', "a direct start"),
+    ('ml-stack-serve up m.gguf --no-broker', "a start that skips the broker"),
 ])
 def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     assert guard(command) == BLOCKED, why
@@ -72,6 +80,9 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git status',
     'python3 -m pytest tests -q',
     'ml-stack-serve up model.gguf --port 8080',
+    'ml-stack-serve up Qwen3.8-27B-UD-Q4_K_XL.gguf --context 256k --kv q8_0 --no-wait',
+    'ml-stack-serve down Qwen3.8-27B',
+    'ls /opt/homebrew/bin/llama-server',
     'ml-stack-bench sweep --serve foo.gguf --smoke',
     'pgrep -fl llama-server',
     'grep -rn llama-server src/',
@@ -121,3 +132,11 @@ def test_the_guard_can_be_switched_off_for_a_session():
     """MLSTACK_GUARD=off is the escape hatch; needing it means a rule is wrong, but it must work."""
     assert guard("pkill -f llama-server", MLSTACK_GUARD="off") == ALLOWED
 
+
+
+def test_the_refusal_names_the_command_that_leases():
+    done = subprocess.run(
+        [str(GUARD)], text=True, capture_output=True,
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "llama-server -m x"}}))
+    assert done.returncode == BLOCKED
+    assert "ml-stack-serve up MODEL" in done.stderr and "ml-stack-serve down" in done.stderr

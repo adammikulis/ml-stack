@@ -4,23 +4,28 @@ slots in place, stopping it, and switching the binary it is served by."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import threading
+from dataclasses import replace
+from pathlib import Path
 
-from ml_stack import hub
+from ml_stack import hub, limits as limits_mod, platform
 from ml_stack.client import thinking
 from ml_stack.command import flag, option
 from ml_stack.log import say, warn
-from ml_stack.serve import build, ops, quant_guard
-from ml_stack.serve.backend import ServerFailed, ServerSpec, UnknownFlag, parse_context
+from ml_stack.serve import build, holding, ops, quant_guard
+from ml_stack.serve.backend import ServerFailed, ServerSpec, parse_context
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.ops import Refused
 from ml_stack.serve.profile import ASK, WORKLOADS, profile_for, resolved
 from ml_stack.serve.quant_guard import BlockedQuant
 from ml_stack.serve.serving import said_cache, split_cache_type
 from ml_stack.serve.weights import DEFAULT_TIMEOUT_S
+from ml_stack.units import human_bytes, parse_duration
 
 __all__ = ["OPTIONS_BUILD", "OPTIONS_DOWN", "OPTIONS_ESCALATE", "OPTIONS_UP",
-           "cmd_build", "cmd_down", "cmd_escalate", "cmd_up", "from_profile"]
+           "cmd_build", "cmd_down", "cmd_escalate", "cmd_hold", "cmd_up", "from_profile"]
 
 _SPEC = ServerSpec(model="")
 DEFAULT_PORT = _SPEC.port
@@ -135,8 +140,10 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
 
 OPTIONS_UP = [
     flag("model", help="path to a .gguf file, or hf:owner/repo/file.gguf"),
-    option("port", default=DEFAULT_PORT,
-           help=f"port to serve on (default: {DEFAULT_PORT})"),
+    option("port", default=0,
+           help="a port you would like. The broker picks the port and uses this one only "
+                "when it is free; a port held by another process is never taken or "
+                "fought over (default: the broker picks)"),
     option("context", type=parse_context, default=DEFAULT_CONTEXT,
            help=f"tokens across all slots -- 32768, 256k, 1m (default: "
                 f"{DEFAULT_CONTEXT}). Beyond what the model trained at, YaRN is "
@@ -145,12 +152,17 @@ OPTIONS_UP = [
     option("parallel", default=DEFAULT_PARALLEL,
            help=f"slots to serve at once (default: {DEFAULT_PARALLEL})"),
     flag("--escalate", action="store_true",
-         help="when a server is already up with fewer slots than --parallel asks for, "
-              "grow (or split, or summarise and split) it rather than refusing -- "
-              "keeps every live conversation"),
-    option("timeout",
-           help="seconds to wait for it to load (default: scales with the weights on "
-                f"disk -- 60s + 1.5s/GB, floor {DEFAULT_TIMEOUT:.0f}s)"),
+         help="refused: `ml-stack-serve escalate PORT` grows the slots of a server you hold"),
+    flag("--wait", action=argparse.BooleanOptionalAction, default=True,
+         help="when memory is short the lease queues behind the others: --wait (the "
+              "default) prints the queue position and waits for the server, --no-wait "
+              "returns at once with the lease queued"),
+    flag("--patience", type=float, default=holding.DEFAULT_WAIT_S, metavar="SECONDS",
+         help="how long the lease may wait in the queue before it is given up "
+              "(default: %(default)s)"),
+    flag("--idle", default="", metavar="DURATION",
+         help="release the lease after the server has been unused this long, e.g. 10m "
+              "(default: `ml-stack-serve limits --idle`, else held until `down`)"),
     option("json", help="print one JSON object instead of the human line"),
     flag("--preflight-only", action="store_true",
          help="run every check a load would run -- shards present, architecture this "
@@ -253,10 +265,6 @@ OPTIONS_UP = [
          help=f"which workload the profile is for: "
               f"{'; '.join(f'{k}, {v}' for k, v in WORKLOADS.items())} "
               f"(default: {ASK})"),
-    flag("--anyway", action="store_true",
-         help="start the server even while a measurement holds this card; both its "
-              "timings and anything measured through this server are then two models "
-              "sharing a GPU"),
     flag("--iq", choices=quant_guard.MODES, default="",
          help="what an IQ-family quantisation on Apple silicon gets: warn (default; one "
               "warning, may be slower and less accurate than a K-quant), off (no warning) "
@@ -301,35 +309,63 @@ def cmd_up(args: argparse.Namespace) -> int:
         say(report.said())
         return 0 if report.ok else 1
 
+    if getattr(args, "escalate", False):
+        warn("error: up no longer grows a server; `ml-stack-serve escalate PORT` does")
+        return 2
+    return _lease(args, spec, manager, chosen=chosen, profile=profile)
+
+
+def _idle_seconds(args: argparse.Namespace) -> float:
+    asked = str(getattr(args, "idle", "") or "")
+    return float(parse_duration(asked)) if asked else float(limits_mod.read().idle_s or 0.0)
+
+
+def _lease(args: argparse.Namespace, spec: ServerSpec, manager: object, *, chosen: str,
+           profile: object | None) -> int:
+    """``up``: ask the broker for a lease with this shape and hold it."""
+    ask = args.model
     try:
-        started = ops.up(spec, manager=manager, timeout=args.timeout,
-                         escalate=bool(getattr(args, "escalate", False)),
-                         anyway=bool(getattr(args, "anyway", False)),
-                         root=args.root, say=warn, on_event=_print_event)
-    except UnknownFlag as exc:
-        # Refused before the load, not at the end of it: the build was asked what it
-        # accepts and the answer is printed one flag per line, with the nearest it has.
-        warn(exc)
+        quant_guard.enforce(spec.model, gpu_layers=spec.n_gpu_layers,
+                            asked=str(getattr(args, "iq", "") or ""), who="ml-stack-serve up")
+        weight = holding.check_fits(spec, ask=str(ask))
+        held = holding.up(
+            spec, manager=manager, say=warn,
+            terms=holding.Terms(wait_s=float(args.patience), wait=bool(args.wait),
+                                idle_s=_idle_seconds(args), port=int(args.port or 0),
+                                weight=weight))
+    except holding.Refusal as no:
+        for line in no.lines:
+            warn(line)
         return 2
     except (ServerFailed, BinaryNotFound, OSError) as exc:
         warn(f"error: {exc}")
         return 3 if isinstance(exc, BlockedQuant) else 2
 
-    info, told = started.info, started.announced
+    told = ""
+    if held.status == "ready":
+        told = ops.announce(args.root, replace(spec, port=held.port))
+        if args.port and int(args.port) != held.port:
+            warn(f"port {args.port} was only a request; the broker picked {held.port}")
     if args.json:
-        say(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid,
-                        "adopted": info.adopted, "model": str(spec.model),
+        say(json.dumps({"base_url": held.base_url, "port": held.port, "lease": held.id,
+                        "status": held.status, "adopted": held.adopted,
+                        "holder_pid": held.pid, "model": str(spec.model),
                         "context": spec.context, "parallel": spec.parallel,
                         "draft": str(spec.draft or ""),
                         "draft_cache_type": said_cache(spec.spec_draft_type_k,
                                                        spec.spec_draft_type_v),
                         "announced": told.startswith("announced")}, indent=2))
         return 0
-
-    where = f" (pid {info.pid})" if info.pid else ""
-    say(f"{'adopted' if info.adopted else 'started'} {info.base_url}{where}")
+    if held.status != "ready":
+        say(f"queued lease {held.id} for {Path(str(spec.model)).name}")
+        return 0
+    say(f"{'adopted' if held.adopted else 'started'} {held.base_url} (lease {held.id}, "
+        f"held by pid {held.pid}"
+        + (f", {human_bytes(held.memory)}" if held.memory else "") + ")")
     if chosen:
         say(f"  with {chosen}")
+    if profile is None:
+        say("  no measured profile: served with the defaults the broker uses for this shape")
     if spec.draft:
         say(f"  guessing ahead with {str(spec.draft).rsplit('/', 1)[-1]}")
     if spec.spec_draft_type_k or spec.spec_draft_type_v:
@@ -343,9 +379,19 @@ def cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hold(args: argparse.Namespace) -> int:
+    """``ml-stack-serve hold ID`` -- the process `up` starts to hold its lease (not typed by
+    hand)."""
+    stop = threading.Event()
+    platform.on_quit(lambda *_: stop.set())
+    return holding.run_holder(args.id, manager=ops.manager_for(), stop=stop)
+
+
 OPTIONS_DOWN = [
-    option("port", default=DEFAULT_PORT,
-           help=f"port of the server to stop (default: {DEFAULT_PORT})"),
+    flag("target", nargs="?", default="", metavar="MODEL_OR_PORT_OR_LEASE",
+         help="the lease to release: a lease id, a port, or part of a model name. The "
+              "server is stopped only when no other lease uses it"),
+    option("port", default=0, help="a port, as an alternative to the positional"),
     flag("--orphans", action="store_true",
          help="instead of a port: stop every recorded server whose leasing process has "
               "gone, and nothing else"),
@@ -367,8 +413,20 @@ def cmd_down(args: argparse.Namespace) -> int:
                 f"{stopped.owner_pid}")
         return 0
 
+    which = str(getattr(args, "target", "") or (args.port or ""))
+    manager = ops.manager_for()
+    found = [h for h in holding.holds() if h.id == which] or holding.target(which)
+    if found:
+        for released, said_of in holding.down(found, manager=manager):
+            say(f"released lease {released.id} on port {released.port}: {said_of}")
+            with contextlib.suppress(OSError):
+                warn(ops.withdraw(args.root, released.port))
+        return 0
+    if not which.isdigit():
+        say(f"no lease held for {which or 'anything'}; `ml-stack-serve status` lists them")
+        return 1
     try:
-        stopped, said = ops.down(args.port, root=args.root)
+        stopped, said = ops.down(int(which), root=args.root)
     except Refused as no:
         if len(no.lines) == 1:
             say(no.lines[0])

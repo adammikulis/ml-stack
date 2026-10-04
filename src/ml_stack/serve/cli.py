@@ -8,7 +8,7 @@ escalate, build), `slots_cli`, `profile_cli`, `fit_cli`, `machine_cli` (memory, 
 
 from __future__ import annotations
 
-from ml_stack.command import Group
+from ml_stack.command import Group, flag
 from ml_stack.serve import (
     broker_cli,
     fit_cli,
@@ -36,6 +36,11 @@ COMMANDS.add(
     "up", lifecycle_cli.cmd_up,
     help="serve a model, or adopt the one already serving it",
     options=lifecycle_cli.OPTIONS_UP, allow_abbrev=False)
+
+COMMANDS.add(
+    "hold", lifecycle_cli.cmd_hold,
+    help="the process `up` starts to hold its lease; not run by hand",
+    options=[flag("id", help="the lease id `up` wrote")])
 
 COMMANDS.add(
     "profile", profile_cli.cmd_profile,

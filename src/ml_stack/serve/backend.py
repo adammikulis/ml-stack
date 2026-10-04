@@ -18,7 +18,7 @@ from typing import Any
 from ml_stack import home, sentinel
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
-from ml_stack.serve import confined as confinement, exit_guard
+from ml_stack.serve import confined as confinement, exit_guard, grant
 from ml_stack.serve.binary import child_env, require_binary
 from ml_stack.serve.leases import recorded_servers
 from ml_stack.serve.logs import prune
@@ -446,16 +446,18 @@ class Lease:
 
     A backend launches nothing without one, so a server this code base spawns is recorded
     by construction -- before the process exists, with the pid filled in after -- and
-    "a server nobody recorded" cannot come out of the library. Adam: "this wouldn't
-    happen in the first place if we ensured that it wasn't possible to have an untracked
-    server." Only `ServerManager` makes these; a test that wants a server goes through a
-    manager on a temporary state file, the way everything else does.
+    "a server nobody recorded" cannot come out of the library. Only `ServerManager` makes
+    these, inside the broker's `grant.broker_grant()`; a test that wants a server goes
+    through a manager and a broker on a temporary state file.
     """
 
     port: int
     owner_pid: int
     state_file: str
     stop_on_exit: bool = True
+
+    def __post_init__(self) -> None:
+        grant.require()
 
 
 class ServerBackend(ABC):
@@ -494,6 +496,7 @@ def launch(  # noqa: PLR0913 - the independent facts of one spawn; a bundle type
     The server stops with this process when the lease says ``stop_on_exit``. Raises
     ``ServerFailed`` with the log's tail when it exits or never answers.
     """
+    grant.require(lease, Lease)
     port = lease.port
     started_at = time.monotonic()
     with log_path.open("wb") as log_handle:
