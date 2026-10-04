@@ -11,7 +11,7 @@ WEB = Path(__file__).parent / "web"
 COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
 COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view",
-              "chat-view", "wired-memory", "models-view", "settings-view", "fit-model", "fit-view",
+              "chat-view", "board-view", "wired-memory", "models-view", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view",
               "workspace-jobs", "data-view",
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",

@@ -1,0 +1,36 @@
+<style>
+board-view { display:contents; }
+board-view .board-workspace { padding:24px; width:100%; min-width:0; }
+board-view .board-workspace h1 { margin:0 0 6px; }
+board-view .board-workspace .sub { margin:0 0 18px; }
+board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420px; }
+@media(max-width:640px) { board-view .board-workspace { padding:16px; } board-view ml-board { height:72dvh; } }
+</style>
+<template>
+  <section class="board-workspace" hidden>
+    <h1>Board</h1>
+    <p class="sub">Follow channels and threads, message agents, and participate as yourself.</p>
+    <div id="board-mount"></div>
+  </section>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  class BoardView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.host = this.querySelector('section');
+      this.mount = this.querySelector('#board-mount');
+      M.onRoute(route => {
+        this.host.hidden = route !== 'board';
+        if (route === 'board') {
+          this.viewer ||= M.el('ml-board', {endpoint:'/ui/board', 'channel-feed':''});
+          this.mount.append(this.viewer);
+        } else this.viewer?.remove();
+      });
+    }
+  }
+  customElements.define('board-view', BoardView);
+})();
+</script>

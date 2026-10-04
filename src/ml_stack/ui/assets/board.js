@@ -37,7 +37,7 @@ const STYLES = `
 .shell { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; height: 100%;
   min-height: inherit; border: 1px solid var(--ml-line); border-radius: var(--ml-radius);
   background: var(--ml-surface); overflow: hidden; }
-@media (max-width: 560px) { .shell { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .shell { grid-template-columns: 1fr; grid-template-rows:auto minmax(0,1fr); } nav { max-height:180px; } }
 nav { border-right: 1px solid var(--ml-line); background: var(--ml-sunken); overflow-y: auto;
   padding: 8px 0; }
 nav h3 { margin: 10px 14px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
@@ -64,6 +64,9 @@ main h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
 .msg .who { font-weight: 600; font-size: 13px; }
 .msg pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .cut { color: var(--ml-yellow-ink); font-size: 12px; }
+.channel-tabs { display:flex; gap:8px; margin:0 0 12px; }
+.channel-tabs button { background:var(--ml-sunken); border:1px solid var(--ml-line); border-radius:6px; padding:5px 12px; cursor:pointer; }
+.channel-tabs button[aria-pressed=true] { color:var(--ml-accent-ink); border-color:var(--ml-accent); }
 .back { all: unset; cursor: pointer; color: var(--ml-accent-ink); font-size: 13px; }
 .back:focus-visible { outline: 2px solid var(--ml-focus); outline-offset: 2px; }
 .composer { display: grid; gap: 6px; margin-top: 12px; padding-top: 10px;
@@ -83,12 +86,19 @@ nav .new input { flex: 1; min-width: 0; font: inherit; color: var(--ml-text);
 `;
 
 class MlBoard extends MlElement {
-  static props = { endpoint: "string", interval: "number", readonly: "bool" };
+  static props = { endpoint: "string", interval: "number", readonly: "bool", channelFeed:"bool" };
   static styles = STYLES;
 
   build() {
-    this.view = { kind: "none" };
+    this.storageKey = `ml-stack-board:${this.base()}`;
+    this.view = this.restoredView();
+    this.requests = new Set();
+    this.drafts = this.restoredDrafts();
+    this.viewRevision = 0;
+    this.agents = [];
+    this.channelTab = this.channelFeed ? "messages" : "threads";
     this.boards = [];
+    this.items = [];
     this.dms = [];
     this.head = "";
     this.delay = POLL_MIN;
@@ -111,7 +121,9 @@ class MlBoard extends MlElement {
 
   disconnectedCallback() {
     this.stopped = true;
+    this.loadRevision = (this.loadRevision || 0) + 1;
     clearTimeout(this.timer);
+    for (const controller of this.requests) controller.abort();
   }
 
   base() {
@@ -119,23 +131,57 @@ class MlBoard extends MlElement {
     return e.endsWith("/") ? e.slice(0, -1) : e;
   }
 
-  async send(doc) {
-    const r = await fetch(`${this.base()}/post`, {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(doc) });
-    const out = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(line(out.error || r.status, 160));
-    return out;
+  restoredView() {
+    try {
+      const raw = localStorage.getItem(this.storageKey);
+      if (raw?.length > 2048) return {kind:"none"};
+      const view = JSON.parse(raw);
+      if (!view || !["board", "thread", "dm"].includes(view.kind)) return {kind:"none"};
+      if (view.kind === "thread" && (!Number.isSafeInteger(view.root) || view.root < 1)) return {kind:"none"};
+      if ([view.name, view.board, view.a, view.b].some(value => value !== undefined && (typeof value !== "string" || value.length > 64))) return {kind:"none"};
+      return view;
+    } catch { return {kind:"none"}; }
   }
 
-  async get(route, params = {}) {
-    const q = new URLSearchParams(params).toString();
-    const r = await fetch(`${this.base()}/${route}${q ? `?${q}` : ""}`, {
-      method: "GET", credentials: "same-origin", headers: { Accept: "application/json" } });
-    if (!r.ok) throw new Error(`${r.status}`);
-    return r.json();
+  restoredDrafts() {
+    try {
+      const raw = sessionStorage.getItem(`${this.storageKey}:drafts`);
+      if (!raw || raw.length > 1000000) return new Map();
+      const entries = JSON.parse(raw);
+      if (!Array.isArray(entries) || entries.length > 50) return new Map();
+      return new Map(entries.filter(entry => Array.isArray(entry) && typeof entry[0] === "string" && entry[0].length < 512
+        && typeof entry[1]?.body === "string" && entry[1].body.length <= POST_MAX
+        && typeof entry[1]?.subject === "string" && entry[1].subject.length <= 200));
+    } catch { return new Map(); }
   }
+
+  rememberDraft() {
+    this.drafts.set(JSON.stringify(this.target()), {...this.draft});
+    try { sessionStorage.setItem(`${this.storageKey}:drafts`, JSON.stringify([...this.drafts].slice(-50))); } catch {}
+  }
+
+  remember() {
+    try { localStorage.setItem(this.storageKey, JSON.stringify(this.view)); } catch {}
+  }
+
+  async request(route, params = {}, document = null) {
+    const controller = new AbortController();
+    this.requests.add(controller);
+    const query = new URLSearchParams(params).toString();
+    try {
+      const response = await fetch(`${this.base()}/${route}${query ? `?${query}` : ""}`, {
+        method: document ? "POST" : "GET", credentials:"same-origin", signal:controller.signal,
+        headers:{Accept:"application/json", ...(document ? {"Content-Type":"application/json"} : {}),
+                 ...(this.base().startsWith("/ui/") ? globalThis.fleetModel?.headers || {"X-ML-Stack-UI":"1"} : {})},
+        ...(document ? {body:JSON.stringify(document)} : {})});
+      const answer = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(line(answer.error || response.status, 160));
+      return answer;
+    } finally { this.requests.delete(controller); }
+  }
+
+  send(document) { return this.request("post", {}, document); }
+  get(route, params = {}) { return this.request(route, params); }
 
   schedule(pause = 0) {
     clearTimeout(this.timer);
@@ -157,34 +203,67 @@ class MlBoard extends MlElement {
   }
 
   async load() {
+    const revision = this.loadRevision = (this.loadRevision || 0) + 1;
     try {
       const [b, d, h] = await Promise.all([this.get("boards"), this.get("dms"), this.get("head")]);
+      if (revision !== this.loadRevision || this.stopped) return;
       this.seq = Math.max(this.seq, Number(h.seq) || 0);
       this.me = line(b.me ?? "", 48);
       this.boards = b.boards ?? [];
       this.dms = d.conversations ?? [];
+      if (this.base().startsWith("/ui/")) {
+        try { this.agents = (await this.get("agents")).agents || []; } catch { this.agents = []; }
+      }
       this.error = "";
-      await this.open(this.view, false);
+      const view = this.view.kind === "none" && this.boards.length
+        ? {kind:"board", name:(this.boards.find(board => board.name === "#general") || this.boards[0]).name} : this.view;
+      await this.open(view, false);
     } catch (e) {
+      if (revision !== this.loadRevision || this.stopped) return;
       this.error = `The workspace did not answer (${line(e.message, 40)}).`;
     }
     this.update();
   }
 
   async open(view, render = true) {
+    const previous = JSON.stringify(this.target());
+    if (this.draftKey !== undefined) this.drafts.set(previous, {...this.draft});
+    if (this.drafts.size > 50) this.drafts.delete(this.drafts.keys().next().value);
     this.view = view;
+    this.draftKey = JSON.stringify(this.target());
+    this.draft = this.drafts.get(this.draftKey) || {body:"", subject:"", error:""};
+    this.remember();
+    const revision = ++this.viewRevision;
+    if (render) { this.loading = true; this.items = []; this.update(); }
     try {
-      if (view.kind === "board") this.items = (await this.get("threads", { board: view.name })).threads;
-      else if (view.kind === "thread") this.items = (await this.get("thread", { root: view.root })).messages;
-      else if (view.kind === "dm") this.items = (await this.get("dm", { a: view.a, b: view.b })).messages;
-      else this.items = [];
+      let items = [];
+      if (view.kind === "board") items = this.channelTab === "messages"
+        ? (await this.get("messages", {board:view.name})).messages
+        : (await this.get("threads", {board:view.name})).threads;
+      else if (view.kind === "thread") items = (await this.get("thread", {root:view.root})).messages;
+      else if (view.kind === "dm") items = (await this.get("dm", {a:view.a, b:view.b})).messages;
+      if (revision !== this.viewRevision) return;
+      this.items = items || [];
       this.error = "";
-    } catch (e) {
-      this.items = [];
-      this.error = `That did not load (${line(e.message, 40)}).`;
+    } catch (error) {
+      if (revision !== this.viewRevision || this.stopped) return;
+      this.items = []; this.error = `That did not load (${line(error.message, 160)}).`;
     }
+    this.loading = false;
     if (render) this.update();
-    this.emit("ml-board-view", { kind: view.kind });
+    this.emit("ml-board-view", {kind:view.kind});
+  }
+
+  async markRead() {
+    const messages = this.view.kind === "board" && this.channelTab === "threads"
+      ? this.items.map(thread => thread.root) : this.items.map(message => message.seq);
+    const through = Math.max(0, ...messages.map(Number).filter(Number.isSafeInteger));
+    const target = this.view.kind === "dm" ? this.target()?.to : this.view.board || this.view.name;
+    if (!through || !target) return;
+    try {
+      await this.request("ack", {}, {through, ...(target.startsWith("#") ? {board:target} : {to:target})});
+      await this.load();
+    } catch (error) { this.error = line(error.message, 160); this.update(); }
   }
 
   update() {
@@ -193,16 +272,19 @@ class MlBoard extends MlElement {
       type: "button", "aria-current": current ? "true" : null, onclick },
     h("span", {}, line(label, 60)), count ? h("span", { class: "count" }, String(count)) : null);
     this.nav.replaceChildren(
-      h("h3", {}, "Boards"),
-      ...this.boards.map((b) => item(b.name, b.unread, this.view.kind !== "none" && this.view.name === b.name,
+      h("h3", {}, "Channels"),
+      ...this.boards.map((b) => item(b.name, b.unread, this.view.name === b.name || this.view.board === b.name,
         () => this.open({ kind: "board", name: b.name }))),
       h("h3", {}, "Direct messages"),
       ...(this.readonly || !this.me ? [] : [this.newDm()]),
       ...this.dms.map((c) => item(`${c.a} and ${c.b}`, c.unread,
         this.view.kind === "dm" && this.view.a === c.a && this.view.b === c.b,
-        () => this.open({ kind: "dm", a: c.a, b: c.b }))));
+        () => this.open({ kind: "dm", a: c.a, b: c.b }))),
+      ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.map(agent =>
+        item(agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
+          () => this.open({kind:"dm", a:this.me, b:agent.id})))] : []));
     this.feed.replaceChildren(...this.pane());
-    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error)]);
+    const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error), this.loading]);
     if (key !== this.composerKey) {
       this.composerKey = key;
       const node = this.error ? null : this.composer();
@@ -211,7 +293,10 @@ class MlBoard extends MlElement {
   }
 
   newDm() {
-    const box = h("input", { type: "text", maxlength: "48", "aria-label": "Message an agent", placeholder: "agent id" });
+    const box = this.agents.length
+      ? h("select", {"aria-label":"Message an agent"}, h("option", {value:""}, "Choose an agent…"),
+          ...this.agents.map(agent => h("option", {value:agent.id}, line(agent.id, 48))))
+      : h("input", {type:"text", maxlength:"48", "aria-label":"Message an agent", placeholder:"agent id"});
     const open = () => {
       const name = line(box.value, 48);
       if (name) this.open({ kind: "dm", a: this.me, b: name });
@@ -230,41 +315,54 @@ class MlBoard extends MlElement {
 
   composer() {
     const to = this.target();
-    if (this.readonly || !to) return null;
+    if (this.readonly || !to || this.loading) return null;
     const text = h("textarea", { "aria-label": "Message", maxlength: String(POST_MAX) });
     text.value = this.draft.body;
-    text.addEventListener("input", () => { this.draft.body = text.value; });
+    text.addEventListener("input", () => { this.draft.body = text.value; this.rememberDraft(); });
     const subject = this.view.kind === "board" ? h("input", { type: "text", maxlength: "200", "aria-label": "Subject",
       placeholder: "subject (optional)", value: this.draft.subject }) : null;
-    subject?.addEventListener("input", () => { this.draft.subject = subject.value; });
+    subject?.addEventListener("input", () => { this.draft.subject = subject.value; this.rememberDraft(); });
     const go = h("button", { type: "button" }, "Send");
     const post = async () => {
-      if (!text.value.trim()) return;
-      go.disabled = true;
+      if (go.disabled || !text.value.trim()) return;
+      const targetKey = JSON.stringify(to);
+      go.disabled = true; go.textContent = "Sending…";
       try {
         await this.send({ ...to, body: text.value, subject: subject ? subject.value : "" });
-        this.draft = { body: "", subject: "", error: "" };
+        const cleared = {body:"", subject:"", error:""};
+        this.drafts.set(targetKey, cleared);
+        if (JSON.stringify(this.target()) === targetKey) this.draft = cleared;
+        this.rememberDraft();
         text.value = "";
         if (subject) subject.value = "";
-        go.disabled = false;
+        go.disabled = false; go.textContent = "Send";
         await this.load();
       } catch (e) {
-        this.draft.error = line(e.message, 160);
-        go.disabled = false;
+        const failed = {...(this.drafts.get(targetKey) || {}), error:line(e.message, 160)};
+        this.drafts.set(targetKey, failed);
+        if (JSON.stringify(this.target()) === targetKey) this.draft = failed;
+        go.disabled = false; go.textContent = "Send";
         this.update();
       }
     };
     go.addEventListener("click", post);
-    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) post(); });
+    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } });
     return h("div", { class: "composer" }, subject, text, go,
       this.draft.error ? h("div", { class: "err", role: "alert" }, this.draft.error) : null);
   }
 
   pane() {
     const v = this.view;
-    if (this.error) return [h("p", { class: "state error", role: "alert" }, this.error)];
+    if (this.error) return [h("p", {class:"state error", role:"alert"}, this.error),
+      h("button", {class:"back", type:"button", onclick:() => this.load()}, "Retry")];
+    if (this.loading) return [h("p", {class:"state", role:"status"}, "Loading conversation…")];
     if (v.kind === "none") return [h("p", { class: "state" }, "Choose a board or a conversation.")];
-    if (v.kind === "board") return [this.title(line(v.name, 60), this.readonly ? "read only" : "live"), ...this.threads()];
+    if (v.kind === "board") return [this.title(line(v.name, 60), this.readonly ? "read only" : "live"),
+      h("div", {class:"channel-tabs"}, ...["messages", "threads"].map(mode => h("button", {
+        type:"button", "aria-pressed":String(this.channelTab === mode), onclick:() => {
+          this.channelTab = mode; this.open(this.view);
+        }}, mode === "messages" ? "Messages" : "Threads"))),
+      ...(this.channelTab === "messages" ? this.messages("") : this.threads())];
     const back = v.kind === "thread" && v.board
       ? h("button", { class: "back", type: "button", onclick: () => this.open({ kind: "board", name: v.board }) },
         `Back to ${line(v.board, 60)}`) : null;
@@ -274,7 +372,8 @@ class MlBoard extends MlElement {
   }
 
   title(text, badge) {
-    return h("header", {}, h("h2", {}, text), h("span", { class: "badge" }, badge));
+    return h("header", {}, h("h2", {}, text), h("span", {class:"badge"}, badge),
+      this.base().startsWith("/ui/") ? h("button", {class:"back", type:"button", onclick:() => this.markRead()}, "Mark read") : null);
   }
 
   threads() {
@@ -293,7 +392,9 @@ class MlBoard extends MlElement {
         h("span", { class: "meta" }, `  ${line(m.type, 16)}, ${when(m.ts)}${m.held ? ", held in quarantine" : ""}`)),
       m.subject ? h("div", { class: "meta" }, line(m.subject)) : null,
       h("pre", {}, body(m.body)),
-      m.truncated ? h("div", { class: "cut" }, "Shortened for display.") : null));
+      m.truncated ? h("div", { class: "cut" }, "Shortened for display.") : null,
+      this.view.kind === "board" ? h("button", {class:"back", type:"button", onclick:() =>
+        this.open({kind:"thread", root:Number(m.thread || m.seq), board:this.view.name})}, "Reply in thread") : null));
   }
 }
 define("ml-board", MlBoard);

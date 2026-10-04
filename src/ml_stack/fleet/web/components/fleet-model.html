@@ -88,7 +88,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   };
 
   // ------------------------------------------------------------- which screen is showing
-  const IN_APP = ["chat", "models", "data", "training", "gym", "benchmarks", "cluster", "tools", "settings", "fit"];
+  const IN_APP = ["chat", "board", "models", "data", "training", "gym", "benchmarks", "cluster", "tools", "settings", "fit"];
   const available = (name) => IN_APP.includes(name) && !!document.querySelector(`${name}-view`);
   M.requestedRoute = "";
   const watchers = [];

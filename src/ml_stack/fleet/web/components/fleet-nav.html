@@ -2,6 +2,13 @@
 fleet-nav { display: contents; }
 .nav-search { width:100%; min-width:0; margin:12px 0; padding:9px 11px; background:var(--bg);
   color:var(--text); border:1px solid var(--line); border-radius:8px; }
+.nav-empty { margin:8px 10px; color:var(--muted); font-size:12px; line-height:1.6; }
+@media(max-width:640px) {
+  fleet-nav .sidebar { padding-top:14px; }
+  fleet-nav .nav-search { margin:10px 0 0; }
+  fleet-nav nav.tabs { overflow-x:auto; overflow-y:hidden; min-width:0; padding-bottom:4px; }
+  fleet-nav .nav-link { min-height:44px; }
+}
 .workspace-jobs-indicator { font-size:12px; padding:6px 10px; border-radius:20px;
   width:auto; margin:0; white-space:nowrap; background:var(--bg); color:var(--muted); border:1px solid var(--line); }
 </style>
@@ -9,9 +16,10 @@ fleet-nav { display: contents; }
   <aside class="sidebar" aria-label="Workspace navigation">
     <a class="brand" href="#chat"><span class="dot"></span>ml-stack</a>
     <div class="sidebar-caption">Local intelligence studio</div>
-    <input class="nav-search" id="nav-search" type="search" aria-label="Search workspace"
-      placeholder="Search workspace…">
+    <input class="nav-search" id="nav-search" type="search" aria-label="Find a page"
+      placeholder="Find a page…" aria-keyshortcuts="Control+k Meta+k">
     <nav class="tabs" id="nav-tabs" aria-label="Main navigation"></nav>
+    <p class="nav-empty" id="nav-empty" role="status" hidden>No pages match. Press Escape to clear.</p>
     <footer class="sidebar-footer">
       <div class="workspace-label"><span class="pulse"></span><span id="nav-group"></span></div>
       <a href="#sign-in" id="nav-signout">Sign out</a>
@@ -28,7 +36,7 @@ fleet-nav { display: contents; }
   const M = window.fleetModel;
   const el = M.el;
   const GROUPS = [
-    ["Workspace", [["Chat", "chat", "Conversations"], ["Models", "models", "Browse & serve"],
+    ["Workspace", [["Chat", "chat", "Conversations"], ["Board", "board", "Channels, threads & agents"], ["Models", "models", "Browse & serve"],
       ["Data", "data", "Files & datasets"]]],
     ["Develop", [["Training", "training", "Recipes & runs"], ["Gym", "gym", "Environments & policies"],
       ["Benchmarks", "benchmarks", "Measure & compare"], ["Capacity", "fit", "Memory & throughput"]]],
@@ -47,13 +55,22 @@ fleet-nav { display: contents; }
       this.section = this.querySelector("#nav-section");
       this.search = this.querySelector("#nav-search");
       this.search.oninput = () => this.paint(M.route);
+      this.empty = this.querySelector("#nav-empty");
+      this.search.onkeydown = (event) => {
+        if (event.key === "Escape") { this.search.value = ""; this.paint(M.route); }
+        if (event.key === "Enter" || event.key === "ArrowDown") {
+          const first = this.tabs.querySelector("a");
+          if (first) { event.preventDefault(); event.key === "Enter" ? first.click() : first.focus(); }
+        }
+      };
       this.jobs = this.querySelector("#nav-jobs");
       this.jobs.onclick = () => M.go("training");
-      document.addEventListener("keydown", (event) => {
+      this.onKey = (event) => {
         if ((event.metaKey || event.ctrlKey) && event.key === "k") {
           event.preventDefault(); this.search.focus(); this.search.select();
         }
-      });
+      };
+      document.addEventListener("keydown", this.onKey);
       this.querySelector("#nav-signout").onclick = M.signOut;
       const skip = document.querySelector(".skip-link");
       if (skip) skip.onclick = (e) => {
@@ -63,7 +80,7 @@ fleet-nav { display: contents; }
       this.timer = setInterval(() => this.refreshJobs(), 5000);
     }
 
-    disconnectedCallback() { clearInterval(this.timer); }
+    disconnectedCallback() { clearInterval(this.timer); document.removeEventListener("keydown", this.onKey); }
 
     async refreshJobs() {
       if (!document.querySelector("training-view") || document.querySelector("#app")?.hidden || this.refreshing) return;
@@ -82,14 +99,16 @@ fleet-nav { display: contents; }
 
     paint(route) {
       this.group.textContent = M.group || (M.inCluster ? "Connected fleet" : "Local workspace");
+      const active = GROUPS.flatMap(([label, entries]) => entries.map(entry => [label, entry])).find(([, entry]) => entry[1] === route);
+      if (active) { this.heading.textContent = active[1][0]; this.section.textContent = active[0]; }
       const query = this.search.value.trim().toLowerCase();
       const groups = GROUPS.map(([label, entries]) => [label, entries.filter(here)
         .filter((entry) => !query || `${label} ${entry.join(" ")}`.toLowerCase().includes(query))])
         .filter(([, entries]) => entries.length);
+      this.empty.hidden = groups.length !== 0;
       this.tabs.replaceChildren(...groups.map(([label, entries]) =>
         el("div", { class: "nav-section" }, el("span", { class: "nav-label" }, label),
           ...entries.map(([name, key, hint]) => {
-            if (key === route) { this.heading.textContent = name; this.section.textContent = label; }
             return el("a", { class: `nav-link${key === route ? " on" : ""}`, href: `#${key}`,
               "aria-current": key === route ? "page" : null,
               onclick: (e) => { e.preventDefault(); M.go(key); } },
