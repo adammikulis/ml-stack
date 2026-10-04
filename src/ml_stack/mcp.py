@@ -228,28 +228,30 @@ def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     return found
 
 
-def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
-             draft: str = "", mmproj: str = "", extra: list[str] = [],
-             escalate: bool = False) -> dict[str, Any]:
-    """Put ``model`` (a path or ``hf:owner/repo/file.gguf``) up on ``port`` with
-    ``ml-stack-serve up``, detached; returns the log and pid, and ``serve_status`` says
-    when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``. ``escalate``
-    grows a server already up on ``port`` with fewer than ``parallel`` slots rather than
-    refusing, keeping every live conversation."""
+_NOT_A_TOOL_ARGUMENT = ("--iq", "--port", "--escalate", "--binary", "--build", "--root")
+"""``up`` flags a model may not set through ``extra``: the IQ mode is a person's, the broker
+picks the port, and growing a server, the binary and the fleet root are not a tool's to choose."""
+
+
+def serve_up(model: str, context: int = 0, parallel: int = 1, draft: str = "",
+             mmproj: str = "", extra: list[str] = []) -> dict[str, Any]:
+    """Ask for a lease on a server for ``model`` (a path or ``hf:owner/repo/file.gguf``) with
+    ``ml-stack-serve up --no-wait``, detached; returns the log and pid, and ``serve_status``
+    says when it is answering. The broker picks the port, checks the memory and queues the
+    lease when it is short. ``draft`` and ``mmproj`` take a path or ``auto``."""
     if why := quant_guard.blocked_message(model):
         return {"started": False, "blocked": why}
-    if any(str(one).startswith("--iq") for one in extra or []):
-        raise ValueError("the IQ mode is a person's to set, not a tool argument")
-    argv = ["up", _not_an_option(model, "model"), "--port", str(port), "--parallel",
-            str(parallel)]
+    for one in extra or []:
+        flag = str(one).split("=", 1)[0]
+        if flag in _NOT_A_TOOL_ARGUMENT:
+            raise ValueError(f"{flag} is a person's to set, not a tool argument")
+    argv = ["up", _not_an_option(model, "model"), "--no-wait", "--parallel", str(parallel)]
     if context:
         argv += ["--context", str(context)]
     if draft:
         argv += ["--draft", _not_an_option(draft, "draft")]
     if mmproj:
         argv += ["--mmproj", _not_an_option(mmproj, "mmproj")]
-    if escalate:
-        argv += ["--escalate"]
     argv += list(extra or [])
     return detached("ml_stack.serve.cli", argv, name=f"serve-{Path(model).name}")
 
@@ -456,7 +458,7 @@ def conversation_compact(path: str, budget: int, keep_last: int = 6, url: str = 
 _TOOLS: list[Tool] = [
     Tool("serve_status", "What is serving on this machine, and what a lease would do.",
          serve_status),
-    Tool("serve_up", "Put a model up on a port, detached; returns the log and pid.", serve_up),
+    Tool("serve_up", "Ask the broker for a lease on a server for a model, detached; it picks the port.", serve_up),
     Tool("serve_down", "Stop the server this machine started on a port.", serve_down),
     Tool("serve_escalate", "Grow the slots a running server holds, keeping every live "
                           "conversation.", serve_escalate),

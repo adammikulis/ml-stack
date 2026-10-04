@@ -67,7 +67,8 @@ class TestTheProtocol:
             "type": "array", "items": {"type": "string"}}
         assert tools["serve_status"]["inputSchema"]["properties"]["port"] == {
             "type": "integer", "default": 8080}
-        assert tools["serve_up"]["inputSchema"]["properties"]["escalate"]["type"] == "boolean"
+        assert set(tools["serve_up"]["inputSchema"]["properties"]) == {
+            "model", "context", "parallel", "draft", "mmproj", "extra"}
 
     def test_a_bad_line_and_an_unknown_method_are_answered_not_fatal(self):
         reader = io.StringIO('not json\n' + json.dumps(rpc(5, "resources/list")) + "\n")
