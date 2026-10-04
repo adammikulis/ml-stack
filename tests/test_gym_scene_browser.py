@@ -183,3 +183,49 @@ def test_motion_interpolates_snapshots_without_extrapolating(scene_page):
     assert result['settled'] == 10
     assert result['teleport'] == result['target'] == 100
     assert not errors
+
+
+def test_drone_native_positions_agent_switch_and_camera_debug(scene_page):
+    page, errors = scene_page
+    page.evaluate("""() => {
+      const s=document.querySelector('gym-scene');
+      s.update({environment:'drone',size:60,forest:[
+        {body_id:7,kind:'trees',x:8,y:9,height:5,radius:.5},
+        {body_id:8,kind:'hikers',x:2,y:3,height:1.6,radius:.25}],
+        drones:[{id:'drone-0',position:[1,2,10],rotation:[0,0,0],selected:true},
+          {id:'drone-1',position:[5,6,12],rotation:[0,0,1]}],
+        camera:{pose:{position:[1,2,10],rotation:[0,0,0]},intrinsics:{fov_degrees:90}}});
+    }""")
+    result = page.evaluate("""() => {
+      const s=document.querySelector('gym-scene');
+      return {target:s.meshes.get('drone-drone-0').userData.target.toArray(),
+        forest:s.meshes.get('forest-7').position.toArray(),bounds:s.mapBounds.min.toArray(),
+        rotors:s.meshes.get('drone-drone-0').userData.rotors.length,
+        frustum:s.meshes.get('drone-camera-frustum').geometry.getAttribute('position').count};
+    }""")
+    assert result == {'target':[1,10,2],'forest':[8,0,9],'bounds':[-30,0,-30],
+                      'rotors':4,'frustum':16}
+    scene = page.locator('gym-scene')
+    scene.get_by_label('Selected agent').select_option('drone-drone-1')
+    assert page.evaluate("document.querySelector('gym-view').selectedAgent") == 'drone-1'
+    scene.get_by_label('Sensor rays',exact=True).uncheck()
+    assert not page.evaluate("document.querySelector('gym-scene').meshes.has('drone-camera-frustum')")
+    assert not errors
+
+
+def test_drone_camera_feeds_keep_frame_provenance_and_hide_off_environment(scene_page):
+    page, errors = scene_page
+    page.evaluate("""() => {
+      const sensor=document.createElement('gym-drone-camera');
+      document.querySelector('gym-view').append(sensor);
+      sensor.update({rgb:'eHl6',thermal:'YWJj',thermal_kind:'synthetic visible-surface temperature',
+        frame_id:42,world_time:8.4,detections_visible:[{label:'warm surface',pixels:7}]});
+    }""")
+    feed = page.locator('gym-drone-camera').last
+    assert feed.get_by_alt_text('Live drone RGB camera').get_attribute('src') == 'data:image/png;base64,eHl6'
+    assert feed.get_by_alt_text('Live drone synthetic thermal camera').get_attribute('src') == 'data:image/png;base64,YWJj'
+    assert 'Frame 42 · 8.4 s' in feed.inner_text()
+    assert '1 visible heat regions' in feed.inner_text()
+    page.evaluate("document.querySelector('gym-drone-camera').update(null)")
+    assert not feed.is_visible()
+    assert not errors
