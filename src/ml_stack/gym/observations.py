@@ -4,6 +4,28 @@ from ml_stack.gym.road_rules import front_progress
 from ml_stack.gym.values import json_value
 
 
+def car_model_state(state):
+    """Named car input with indexed lidar returns and no duplicate native vector."""
+    result = {key: state[key] for key in ('environment', 'simulation_mode', 'ego', 'lane',
+                                         'navigation_normalized', 'stop_rule') if key in state}
+    sensors = state.get('sensors', {})
+    rays = sensors.get('lidar_normalized', [])
+    distance = float(sensors.get('lidar_range_m') or 0)
+    result['sensors'] = {'lidar_clear_range_m': distance, 'lidar_ray_count': len(rays),
+                         'lidar_hits_m': [[index, round(float(value) * distance, 2)]
+                                          for index, value in enumerate(rays) if round(float(value), 3) < 1]}
+    return result
+
+
+def car_navigation(vehicle):
+    """Lane geometry and navigation values from the native vehicle's current route."""
+    longitudinal, lateral = vehicle.lane.local_coordinates(vehicle.position)
+    return {'lane': {'lateral_offset_m': round(float(lateral), 3),
+                     'width_m': round(float(vehicle.lane.width_at(longitudinal)), 3),
+                     'heading_radians': round(float(vehicle.lane.heading_theta_at(longitudinal)), 3)},
+            'navigation_normalized': [round(float(value), 3) for value in vehicle.navigation.get_navi_info()]}
+
+
 def decision_state(name, env, observation):
     """Describe the current controller observation without rendering media."""
     if hasattr(env, "decision_state"):
@@ -18,6 +40,7 @@ def decision_state(name, env, observation):
                           "position_m": json_value(vehicle.position)},
                      sensors={"lidar_normalized": json_value(sensor.cloud_points),
                               "lidar_range_m": vehicle.config["lidar"]["distance"]})
+        state.update(car_navigation(vehicle))
         if hasattr(native, "stop_checkpoint"):
             state["stop_rule"] = native.stop_checkpoint.state(front_progress(native))
     elif name == "warehouse":

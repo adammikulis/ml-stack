@@ -14,7 +14,7 @@ from ml_stack.gym.decision_process import (
     decision_controller as decision_controller,
 )
 from ml_stack.gym.live_learning import create_policy, learn_rollout
-from ml_stack.gym.observations import decision_state
+from ml_stack.gym.observations import car_model_state, decision_state
 from ml_stack.gym.paths import artifact_root
 from ml_stack.gym.provenance import native_provenance
 from ml_stack.gym.vision_process import Perception, camera_provenance
@@ -257,6 +257,8 @@ class Simulation:
             else:
                 decision["reason"] = "abstained" if result["abstained"] else "stale"
         model_state = json_value(named)
+        if self.environment == 'car':
+            model_state = car_model_state(model_state)
         if model_state.get("camera", {}).get("rgb"):
             model_state["camera"] = camera_provenance(model_state["camera"])
         request = {"model_state": model_state, "observation": json_value(self.observation), "state": json_value(named),
