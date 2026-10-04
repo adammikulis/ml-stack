@@ -108,7 +108,7 @@ def test_quote_escapes_quotes_and_backslashes_and_refuses_control_characters():
 
 def test_the_profile_denies_by_default_and_grants_only_what_the_policy_names(tree):
     pol = Policy("p", read=(str(tree / "a"),), write=(str(tree / "b"),),
-                 exec=("/bin",), env={}).validated()
+                 exec=(os.path.realpath("/bin"),), env={}).validated()
     text = profile(pol, "/bin/echo", "tag1")
     assert forms(text)[1].startswith("(deny default")
     assert f'(subpath "{tree}/a")' in text and f'(subpath "{tree}/b")' in text
@@ -177,7 +177,7 @@ def test_the_command_is_found_on_the_policy_path_and_must_exist(tree):
 
 def test_bubblewrap_arguments_unshare_everything_and_bind_the_allow_list(tree):
     pol = Policy("p", read=(str(tree / "a"),), write=(str(tree / "b"),),
-                 exec=("/bin/sh",), env={"PATH": "/usr/bin", "HOME": "/work"}).validated()
+                 exec=(os.path.realpath("/bin/sh"),), env={"PATH": "/usr/bin", "HOME": "/work"}).validated()
     args = arguments(pol, "/bin/sh")
     assert args[:4] == ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv"]
     assert "--share-net" not in args
@@ -196,7 +196,7 @@ def test_bubblewrap_keeps_the_network_only_for_loopback_policies():
 def test_without_a_backend_the_command_is_not_run_and_the_refusal_is_an_event(tmp_path):
     marker = tmp_path / "ran"
     events: list[tuple[str, dict]] = []
-    pol = Policy("untrusted", read=(str(tmp_path),), write=(str(tmp_path),), exec=("/bin",),
+    pol = Policy("untrusted", read=(str(tmp_path),), write=(str(tmp_path),), exec=(os.path.realpath("/bin"),),
                  env={"PATH": "/bin"})
     with pytest.raises(sandbox.SandboxUnavailable, match="not run"):
         run(["/usr/bin/touch", str(marker)], pol, via=Container(),

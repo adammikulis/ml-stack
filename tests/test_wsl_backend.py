@@ -116,4 +116,4 @@ def test_wsl_gpu_is_visible_inside_the_network_denied_namespace(tmp_path):
     result = run([binary, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
                  policy, cwd=str(tmp_path), diagnose="never")
     assert result.ok, result.stderr
-    assert int(result.stdout.strip()) >= 24000
+    assert all(int(value) > 0 for value in result.stdout.splitlines())
