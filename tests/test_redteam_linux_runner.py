@@ -39,6 +39,8 @@ def test_container_spawn_keeps_arguments_literal_and_mounts_read_only(tmp_path):
                      "env={**os.environ,'DEV_TEST_WORKERS':'2','DEV_TEST_PYTEST_ENDPOINT':'host.docker.internal:12345','DEV_TEST_PYTEST_TOKEN':'test-token'}\n"
                      "sys.exit(subprocess.run(sys.argv[sys.argv.index('--')+1:],env=env).returncode)\n")
     broker.chmod(0o755)
+    temporary = tmp_path / "runner-tmp"
+    temporary.mkdir()
     permits = tmp_path / "permits.jsonl"
     marker = tmp_path / "injected"
     hostile = f"$(touch {marker}); --privileged; --mount=type=bind,src=/,dst=/host"
@@ -46,7 +48,8 @@ def test_container_spawn_keeps_arguments_literal_and_mounts_read_only(tmp_path):
         [str(ROOT / "scripts/test-on-linux"), "-k", hostile],
         env={**os.environ, "PATH": f"{executables}:{os.environ['PATH']}",
              "DEV_TEST_WORKERS": "2", "DOCKER_RECORD": str(record),
-             "BROKER_RECORD": str(permits), "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots")},
+             "BROKER_RECORD": str(permits), "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots"),
+             "TMPDIR": str(temporary)},
         capture_output=True, text=True, timeout=15,
     )
     assert done.returncode == 0, done.stderr
