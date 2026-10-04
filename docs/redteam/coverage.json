@@ -8423,9 +8423,9 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
-   "id": "spawn:serve/backend.py:help_of",
+   "id": "spawn:serve/backend.py:_binary_info",
    "kind": "spawn",
-   "source": "serve/backend.py:help_of",
+   "source": "serve/backend.py:_binary_info",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",
