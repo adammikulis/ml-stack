@@ -17,7 +17,7 @@ COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view"
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",
               "gym-drone-geometry", "gym-drone-camera", "gym-scene", "gym-recordings",
               "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
-MODULES = {"workspace-model": frozenset({
+MODULES = {"chat-coding": frozenset({"chat-view"}), "workspace-model": frozenset({
     "workspace-jobs", "data-view", "training-view", "tools-view", "benchmarks-view",
     "gym-world-options", "gym-recordings", "gym-model-options", "gym-view",
 })}
