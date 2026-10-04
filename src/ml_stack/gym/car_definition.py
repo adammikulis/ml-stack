@@ -5,7 +5,8 @@ import json
 from ml_stack.gym.world_files import directory, imported, record
 
 SCHEMA = {"modes": ["procedural", "manual"], "fields": {
-    "map": {"type": "text", "default": "SCSCS", "mode": "procedural", "format": "Native MetaDrive block sequence"},
+    "map": {"type": "text", "default": "SCSCS", "mode": "procedural",
+            "format": "Native MetaDrive block sequence or integer block count (1 through 24)"},
     "map_file": {"type": "file", "mode": "manual", "format": "MetaDrive PGMap metadata JSON"}},
     "constraint": "Native PG road generation or exact imported native block configurations"}
 
@@ -18,10 +19,12 @@ def build(world, seed):
     definition = {**world, "mode": world.get("mode", "procedural"), "seed": seed}
     path = directory("metadrive", definition)
     if definition["mode"] == "procedural":
-        sequence = str(world.get("map", "SCSCS"))
-        if not sequence or len(sequence) > 24:
-            raise ValueError("Native block sequence must contain 1 through 24 blocks")
-        cfg, files = {"map": sequence}, {}
+        road = world.get("map", "SCSCS")
+        count_valid = type(road) is int and 1 <= road <= 24
+        sequence_valid = isinstance(road, str) and 1 <= len(road) <= 24
+        if not (count_valid or sequence_valid):
+            raise ValueError("Native road must be a block sequence or integer block count from 1 through 24")
+        cfg, files = {"map": road}, {}
     elif definition["mode"] == "manual":
         source = imported(world["map_file"])
         saved = json.loads(source.read_text())
