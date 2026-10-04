@@ -249,6 +249,10 @@ def test_up_for_names_the_reason_and_a_second_up_is_listed_as_another_user(
     cli.main(["status", "--port", str(first["port"])])
     shown = capsys.readouterr().out
     assert "also used by" in shown and "gym run for the sensor task" in shown
+    assert cli.main(["leases"]) == 0
+    listed = capsys.readouterr().out
+    assert "workspace coding view" in listed and "gym run for the sensor task" in listed
+    assert "2 holder(s)" in listed
 
     assert cli.main(["down", path.name]) == 0
     capsys.readouterr()

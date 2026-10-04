@@ -12,7 +12,7 @@ from typing import Any
 
 from ml_stack.command import flag
 from ml_stack.log import say
-from ml_stack.serve import lease_history, ops, provenance
+from ml_stack.serve import holding, lease_history, ops, provenance
 from ml_stack.serve.broker import BrokerError
 from ml_stack.serve.leases import lease_file
 from ml_stack.units import parse_duration
@@ -71,10 +71,16 @@ def cmd_leases(args: argparse.Namespace) -> int:
         say(json.dumps({"servers": held_now["servers"], "queue": held_now["queue"]}, indent=2))
         return 0
     for held in held_now["servers"]:
-        say(f":{held['port']}  {held['model']}  {len(held['holders'])} holder(s)")
+        joined = [(hold.id, row) for hold in holding.holds() if hold.port == held["port"]
+                  for row in holding.joined(hold.id)]
+        say(f":{held['port']}  {Path(held['model']).name}  {len(held['holders']) + len(joined)} holder(s)")
         for holder in held["holders"]:
             say(f"  lease {holder['lease'][:8]}")
             for line in provenance.lines(holder, indent="    "):
+                say(line)
+        for hold_id, row in joined:
+            say(f"  joined the lease {hold_id} with `up`")
+            for line in provenance.lines(row, indent="    "):
                 say(line)
     for waiting in held_now["queue"]:
         say(f"waiting: {waiting['model']} for pid {waiting['pid']} -- {waiting.get('reason') or provenance.NO_REASON}"
