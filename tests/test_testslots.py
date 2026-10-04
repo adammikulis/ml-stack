@@ -26,7 +26,8 @@ with m.lease(want, min(2, want), label=label, say=lambda s: None) as g:
 
 
 def _env(tmp_path, budget):
-    return {**os.environ, "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots"), "DEV_TEST_BUDGET": str(budget), "DEV_TEST_WAIT_S": "60"}
+    inherited = {name: value for name, value in os.environ.items() if name not in {"DEV_TEST_REMOTE_LEASE", "DEV_TEST_LEASE"}}
+    return {**inherited, "DEV_TEST_SLOTS_DIR": str(tmp_path / "slots"), "DEV_TEST_BUDGET": str(budget), "DEV_TEST_WAIT_S": "60"}
 
 
 def _spawn(tmp_path, budget, want, hold, label):
@@ -100,23 +101,13 @@ def test_a_run_gets_fewer_workers_when_the_budget_is_partly_used_but_never_below
     assert got == {"a": 4, "b": 2}
 
 
-def test_the_queue_can_be_switched_off_explicitly(tmp_path):
-    spec = importlib.util.spec_from_file_location("testslots", SCRIPT)
-    m = importlib.util.module_from_spec(spec)
-    sys.modules["testslots"] = m
-    spec.loader.exec_module(m)
-    msgs: list[str] = []
-    old = os.environ.get("DEV_TEST_SLOTS")
-    os.environ["DEV_TEST_SLOTS"] = "off"
-    try:
-        with m.lease(7, label="x", say=msgs.append) as g:
-            assert g.workers == 7
-    finally:
-        if old is None:
-            os.environ.pop("DEV_TEST_SLOTS")
-        else:
-            os.environ["DEV_TEST_SLOTS"] = old
-    assert msgs and "disabled" in msgs[0]
+def test_disabled_environment_cannot_bypass_the_budget(tmp_path):
+    environment = {**_env(tmp_path, 1), "DEV_TEST_SLOTS": "off"}
+    result = subprocess.run([sys.executable, str(SCRIPT), "run", "--want", "7", "--min", "1", "--",
+                             sys.executable, "-c", "import os; print(os.environ['DEV_TEST_WORKERS'])"],
+                            env=environment, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "1"
 
 
 def test_the_run_command_queues_and_hands_the_granted_workers_to_the_command(tmp_path):

@@ -126,26 +126,6 @@ os.environ.setdefault("DEV_TEST_SLOTS_DIR", str(testslots.slots_dir()))
 """The machine-wide slot directory, fixed before the session moves ``HOME`` so every worker and
 every run shares one set of heavy lanes."""
 
-LANE_FILES = frozenset({
-    "test_serve_real_llama", "test_sentinel_real_model", "test_sentinel_wiring_serve",
-    "test_serve_broker",
-    "test_serve_three_callers", "test_spec_serve", "test_fleet_daemon", "test_fleet_bind",
-    "test_fleet_join", "test_fleet_bench", "test_graph_bench", "test_graph_bench_animate",
-    "test_graph_store_scale",
-})
-"""Test modules that start a model server, a broker or a daemon process, or run a benchmark;
-they hold one of the machine's heavy lanes while each test runs, as do the slow tests (a
-browser, a subprocess, a wheel build)."""
-
-
-@pytest.fixture(autouse=True)
-def _heavy_lane(request):
-    node = request.node
-    if node.get_closest_marker("slow") or Path(str(node.fspath)).stem in LANE_FILES:
-        with testslots.heavy_lane(node.nodeid):
-            yield
-    else:
-        yield
 
 
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
@@ -426,25 +406,21 @@ def fake_memory(*, total: int, available: int, wired: int):
 
 # -- a bench run, without measuring one --------------------------------------------------
 
-def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
-          chars: int = 200, error: str = "", label: str = "tried"):
+def a_row(question: str, *, expected: list[str], shown: list[str], label: str = "tried", **measurement):
     """One measured question: what was wanted, what the answer showed, what it cost."""
     from ml_stack.bench import Row
 
     return Row(label=label, question=question, expected=expected, shown=shown,
-               calls=calls, answer_chars=chars, error=error)
+               calls=measurement.get("calls", 3), answer_chars=measurement.get("chars", 200), error=measurement.get("error", ""))
 
 
-def scored_rows(label: str, *, questions: int, hits: int, seconds: float,
-                expected: str = "person:iris", miss: list[str] | None = None,
-                question: str = "q{n}?", tokens: tuple[int, int] = (0, 0),
-                draft: tuple[int, int] = (0, 0)) -> list:
-    """``hits`` of ``questions`` answered in full, the rest showing ``miss``, over
-    ``seconds`` altogether -- so the F1 of the run is ``hits / questions`` exactly.
-
-    ``tokens`` is (processed, completion) per row and ``draft`` is (guessed, taken), both
-    of which the report and the rates read; left at zero they are simply not measured.
-    """
+def scored_rows(label: str, *, questions: int, hits: int, seconds: float, **content) -> list:
+    """Create measured rows with a specified number of matching answers."""
+    expected = content.get("expected", "person:iris")
+    miss = content.get("miss", [])
+    question = content.get("question", "q{n}?")
+    tokens = content.get("tokens", (0, 0))
+    draft = content.get("draft", (0, 0))
     out = []
     for n in range(questions):
         row = a_row(question.format(n=n), expected=[expected],

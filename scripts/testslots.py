@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import fcntl
 import json
 import os
@@ -12,6 +13,16 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+HEAVY_MODULES = frozenset({
+    "test_serve_real_llama", "test_sentinel_real_model", "test_sentinel_wiring_serve",
+    "test_serve_broker",
+    "test_serve_three_callers", "test_spec_serve", "test_fleet_daemon", "test_fleet_bind",
+    "test_fleet_join", "test_fleet_bench", "test_graph_bench", "test_graph_bench_animate",
+    "test_graph_store_scale",
+})
+
+EXPORT_LEASE = contextvars.ContextVar("export_test_lease", default=True)
+CHECK_CANCELLED = contextvars.ContextVar("check_test_cancelled", default=lambda: None)
 
 def slots_dir() -> Path:
     d = Path(os.environ.get("DEV_TEST_SLOTS_DIR") or Path.home() / ".cache" / "dev-test-slots")
@@ -117,6 +128,11 @@ class Lease:
 
 
 def _reject_nested() -> None:
+    if (os.environ.get("DEV_TEST_REMOTE_LEASE")
+            and os.environ.get("DEV_TEST_REMOTE_BROKER") == str(slots_dir().resolve())):
+        import testslots_rpc
+        with testslots_rpc.request("acquire", label="nested CPU preflight", phase="collection"):
+            pass
     inherited = os.environ.get("DEV_TEST_LEASE")
     if inherited:
         try:
@@ -132,6 +148,9 @@ def _reject_nested() -> None:
 
 @contextlib.contextmanager
 def _lease_environment(path: Path, token: str) -> Iterator[None]:
+    if not EXPORT_LEASE.get():
+        yield
+        return
     previous = os.environ.get("DEV_TEST_LEASE")
     os.environ["DEV_TEST_LEASE"] = json.dumps({"path": str(path.resolve()), "token": token})
     try:
@@ -168,23 +187,20 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
     want = 0 if auto else max(1, int(want))
     minimum = max(1, int(minimum if minimum is not None else 1)) if auto \
         else max(1, min(int(minimum if minimum is not None else 1), want))
-    if os.environ.get("DEV_TEST_SLOTS", "").lower() == "off":
-        say("testslots: queue disabled by DEV_TEST_SLOTS=off")
-        yield Lease(want or max(1, (os.cpu_count() or 4) // 2), 0.0)
-        return
     if minimum > (int(os.environ["DEV_TEST_BUDGET"]) if os.environ.get("DEV_TEST_BUDGET", "").isdigit() else base_budget()):
         raise ValueError("testslots: minimum exceeds the configured CPU budget")
     d = slots_dir()
     path = d / f"{time.time_ns()}-{os.getpid()}.slot"
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX)                       # held until we exit: this is the liveness signal
-    me = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "schema_version": 1, "token": secrets.token_hex(24)}
+    me = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "version": 1, "token": secrets.token_hex(24)}
     path.write_text(json.dumps(me))
     t0 = time.time()
     deadline = t0 + float(os.environ.get("DEV_TEST_WAIT_S", "3600"))
     last_note = 0.0
     try:
         while True:
+            CHECK_CANCELLED.get()()
             cap = budget()
             with _mutex(d):
                 slots = _read(d, mine=path)
@@ -203,7 +219,7 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                 last_note = time.time()
                 say(f"testslots: waiting for {minimum}-{want or 'auto'} workers ({used}/{cap} in use, "
                     f"{len(ahead)} run(s) ahead: {', '.join(map(str, ahead)) or 'none'})")
-            time.sleep(0.4)
+            time.sleep(0.01)
         with _lease_environment(path, me["token"]):
             yield Lease(granted, time.time() - t0)
     finally:
@@ -222,15 +238,13 @@ def _lane_count() -> int:
 @contextlib.contextmanager
 def heavy_lane(label: str = "heavy test", say=lambda m: print(m, file=sys.stderr, flush=True)) -> Iterator[None]:
     """Hold one of the machine-wide HEAVY lanes while a test that spawns a multi-threaded tool runs."""
-    if os.environ.get("DEV_TEST_SLOTS", "").lower() == "off":
-        yield
-        return
     d = slots_dir()
     n = _lane_count()
     deadline = time.time() + float(os.environ.get("DEV_TEST_LANE_WAIT_S", "600"))
     fd = -1
     noted = False
     while fd < 0:
+        CHECK_CANCELLED.get()()
         for i in range(n):
             f = os.open(d / f"heavy-{i}.lane", os.O_RDWR | os.O_CREAT, 0o600)
             try:
@@ -262,6 +276,7 @@ def _run_command(argv: list[str], elastic: bool = False) -> int:
     ap.add_argument("--want", type=lambda value: 0 if value == "auto" else int(value), default=0, help="workers wanted as a ceiling (0 = auto: what the machine can spare, a fair share)")
     ap.add_argument("--min", dest="minimum", type=int, default=None)
     ap.add_argument("--label", default="command")
+    ap.add_argument("--container", action="store_true")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args(argv)
     cmd = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
@@ -269,7 +284,7 @@ def _run_command(argv: list[str], elastic: bool = False) -> int:
         ap.error("give a command after --")
     if elastic:
         import testslots_runner
-        return testslots_runner.run_pytest(cmd, a.want, a.label)
+        return testslots_runner.run_pytest(cmd, a.want, a.label, container=a.container)
     with lease(a.want, a.minimum, label=a.label) as got:
         print(f"testslots: running with {got.workers} worker(s) (waited {got.waited:.0f}s)", file=sys.stderr, flush=True)
         return subprocess.run(cmd, env={**os.environ, "DEV_TEST_WORKERS": str(got.workers)}).returncode
