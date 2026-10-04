@@ -609,21 +609,34 @@ def test_the_default_approval_raises_a_request_and_waits_for_the_stop_flag(kit):
     assert pending == [] or all(r.state != "approved" for r in pending)
 
 
-def test_a_coding_agent_without_the_codex_harness_gets_the_one_command_and_nothing_is_minted(kit, monkeypatch):
-    from ml_stack.workspace import localharness as lh
-    monkeypatch.setattr(lh, "launcher", lambda: None)
+def test_a_coding_agent_is_detached_on_the_codex_harness_and_no_second_identity_is_minted(kit, monkeypatch):
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     from ml_stack.workspace import localprofile as lp
     monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
-    with pytest.raises(ls.Unavailable, match="ml-stack-codex --model"):
-        ls.start(kit.ws, ls.Ask(profile="coding"))
-    assert kit.ws.registry.ids() == ["owner"]
-    monkeypatch.setattr(lh, "launcher", lambda: lambda *a, **k: 0)
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
     got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
     try:
         row = ls.listing(kit.ws)[0]
         assert got.name == "local-qwen3.6-35b-a3b-codex" and row["harness"] == "codex" and row["ctx"] == 262144
         assert kit.ws.registry.ids() == ["owner"]
+    finally:
+        ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
+
+
+def test_a_shared_server_with_a_smaller_context_than_asked_is_refused():
+    from ml_stack.testing.fakes import Served, fake_llama_server
+    with fake_llama_server(Served(context=32768)) as fake:
+        why = localloop.check_context(262144, fake.base_url)
+        assert "32K" in why and "256K" in why and "ml-stack-serve down" in why
+        assert localloop.check_context(32768, fake.base_url) == ""
+
+
+def test_start_records_the_started_model_as_verified(kit, monkeypatch):
+    spawned = []
+    got = ls.start(kit.ws, ls.Ask(), pick=PICK,
+                   spawn=lambda *a, **k: spawned.append(sleeper(*a, **k)) or spawned[-1])
+    try:
+        info = kit.ws.whoami_model(got.name)
+        assert info["model"] and info["model_state"] == "verified"
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)

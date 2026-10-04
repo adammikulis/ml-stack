@@ -57,6 +57,47 @@ the installers). Code in `src/` and `tests/` uses nothing newer than 3.12:
 python -m pytest tests/ -q
 ```
 
+Run tests through `scripts/test`, which queues for workers in the machine-wide budget:
+
+| tier | what it runs | about |
+|---|---|---|
+| `scripts/test quick` | the tests a change reaches (import graph, then testmon's map) | under a minute for one module |
+| `scripts/test gate` | the structural checks a merge is gated on: budgets, red-team coverage, command reference, layers, the human-floor tests | a minute |
+| `scripts/test fast` | everything not marked `slow` or `heavy` | |
+| `scripts/test full` | everything not marked `slow`; writes its wall and CPU time for the ratchet | 3 minutes on an idle 16-core machine |
+| `scripts/test all` | slow included: what CI runs | |
+| `scripts/test ratchet` | compares the last `full` run with `tests/full-tier-time.json` (10 % tolerance) | |
+
+`quick` needs a per-checkout testmon map (`.testmondata`, not committed). The first `quick` in a
+checkout runs the test files the import graph reaches and starts `scripts/test record` detached
+(three workers, a lock file, a log in `.testmondata.log`); the map is written to a scratch file and
+moved into place when the run ends, so the second `quick` is fast and never sees half a map. A
+change to something no module maps (`pyproject.toml`, `tests/conftest.py`, ...) still runs the full
+tier.
+
+`tests/full-tier-time.json` is the full tier's wall time (at a worker count) and the sum of every
+test's own time. A later run more than 10 % over either fails `scripts/test ratchet`; wall time is
+compared only at the same or a higher worker count. `scripts/test ratchet --update` records a
+lower time and refuses a higher one (`--allow-increase` is the owner's, refused for an agent). Where
+the time went, and the causes already fixed: `docs/experiments/test-durations.md`.
+
+Rules that keep the suite fast and not flaky:
+
+* A test never nests a slot lease. A test that runs `scripts/test-on-linux` or
+  `testslots.py run` inside a full run waits for slots the run holds (it deadlocked a whole run
+  for seven minutes); give the child `DEV_TEST_WORKERS` so it skips the queue.
+* A test that checks a failure path does not wait out the production timeout: pass a small one.
+* Servers a test starts shut down in milliseconds (conftest polls every 20 ms); do not add sleeps
+  to wait for them.
+* The real-state-root guard (`tests/conftest.py`, `LIVE_PATHS`) fails a run when a file under
+  `~/.ml-stack` changed. Other agents and runs append to a few logs while yours is going, so only
+  `workspace/`, `harness/`, the activity log and the sentinel's event and anchor logs are tolerated.
+  The keystore, every `.key` file, manifests, canaries, honey, requests and credentials stay guarded
+  (`tests/test_live_paths.py`). The guard cannot tell which process wrote a tolerated log; a test
+  that escapes into one of those paths is not caught.
+* A test never depends on a neighbour having run first (a module fixture it forgot to request, a
+  process-wide observer): run it alone before you push.
+
 Nothing here mocks the transport. Every client test runs a real `http.server` on a real
 socket, because the failures these modules exist to prevent are transport-shaped: a server
 that answers `/health` while still loading, one that ignores a `Range` header, one that

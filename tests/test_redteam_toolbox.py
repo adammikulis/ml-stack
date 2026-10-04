@@ -37,9 +37,10 @@ def test_hidden_text_of_these_kinds_reaches_the_text_the_model_reads(stood_up, v
 
 
 @pytest.mark.parametrize("variant", ["css_font_zero", "css_white_on_white", "css_offscreen"])
-def test_the_reader_the_agent_really_uses_removes_what_the_toolbox_leaves_in(variant):
+def test_the_reader_the_agent_really_uses_removes_what_the_toolbox_leaves_in(stood_up, variant):
     """The toolbox reads raw so the guards behind the reader are measured; `web.read`, which the
-    agent uses, takes the same CSS-hidden instruction out and says how much it took."""
+    agent uses, takes the same CSS-hidden instruction out and says how much it took. ``stood_up`` is what makes
+    ``docs.example`` resolve: without it the test passed only when a neighbour had started the lab."""
     from ml_stack import web
 
     _, body = pages.build(variant, PAYLOAD)

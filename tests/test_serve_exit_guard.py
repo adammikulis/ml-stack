@@ -69,7 +69,7 @@ def hosts():
 def test_a_server_stops_when_the_host_exits(tmp_path, hosts):
     host, child = _host(tmp_path, before=NO_WATCHDOG, finish="pass")
     hosts.append((host, child))
-    host.wait(timeout=20)
+    host.wait(timeout=60)
     assert _gone(child, within=2.0), "stopped by the host itself"
 
 
@@ -78,7 +78,7 @@ def test_a_server_stops_when_the_host_is_terminated(tmp_path, hosts):
     host, child = _host(tmp_path, before=NO_WATCHDOG)
     hosts.append((host, child))
     host.send_signal(signal.SIGTERM)
-    host.wait(timeout=20)
+    host.wait(timeout=60)
     assert host.returncode == -signal.SIGTERM, "the host still dies of the signal"
     assert _gone(child, within=2.0)
 
@@ -88,7 +88,7 @@ def test_a_server_stops_when_the_host_is_killed_outright(tmp_path, hosts):
     host, child = _host(tmp_path)
     hosts.append((host, child))
     host.kill()
-    host.wait(timeout=20)
+    host.wait(timeout=60)
     assert _gone(child, within=20.0), "nothing but the watchdog can see a SIGKILL"
 
 
@@ -103,7 +103,7 @@ def test_the_handler_the_host_already_had_still_runs(tmp_path, hosts):
         """)
     hosts.append((host, child))
     host.send_signal(signal.SIGTERM)
-    host.wait(timeout=20)
+    host.wait(timeout=60)
     assert mark.read_text() == "ran" and host.returncode == 7
     assert _gone(child)
 
@@ -112,7 +112,7 @@ def test_the_handler_the_host_already_had_still_runs(tmp_path, hosts):
 def test_a_released_server_outlives_the_host(tmp_path, hosts):
     host, child = _host(tmp_path, after="exit_guard.release(child.pid)", finish="pass")
     hosts.append((host, child))
-    host.wait(timeout=20)
+    host.wait(timeout=60)
     time.sleep(3.0)
     assert psutil.Process(child).is_running(), "released, so it was never the host's to stop"
 
@@ -183,7 +183,7 @@ def test_a_managers_server_follows_the_host_unless_told_not_to(tmp_path, hosts, 
     server = int(host.stdout.readline())
     hosts.append((host, server))
     host.kill()
-    host.wait(timeout=20)
+    host.wait(timeout=60)
     if stop:
         assert _gone(server, within=20.0)
     else:

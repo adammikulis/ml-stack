@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -16,12 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import files, home, keystore, lock
-
-try:
-    from cryptography.exceptions import InvalidTag
-except ImportError:
-    InvalidTag = ValueError  # type: ignore[assignment,misc]
-
 from ml_stack.requests.model import (
     APPROVING,
     KINDS,
@@ -35,8 +30,18 @@ from ml_stack.requests.model import (
 
 __all__ = ["DAY", "MAX_PENDING", "MAX_ROWS", "PURPOSE", "TTL_S", "Ask", "Inbox", "Refused", "Unavailable"]
 
-FAILURES = (OSError, RuntimeError, ValueError, TypeError, KeyError, InvalidTag)
-"""What reading, decrypting or writing the file can raise; each becomes `Unavailable`."""
+_PLAIN_FAILURES = (OSError, RuntimeError, ValueError, TypeError, KeyError)
+
+
+def failures() -> tuple[type[BaseException], ...]:
+    """What reading, decrypting or writing the file can raise; each becomes `Unavailable`.
+
+    ``InvalidTag`` can only be raised once ``cryptography`` has been imported (by the keystore,
+    which decrypts), so it is looked up in ``sys.modules`` rather than imported: importing this
+    package (through ``ml_stack.serve`` and ``ml_stack.client``) must load the standard library
+    and the core dependencies only."""
+    module = sys.modules.get("cryptography.exceptions")
+    return (*_PLAIN_FAILURES, module.InvalidTag) if module is not None else _PLAIN_FAILURES
 PURPOSE = "requests"
 _AAD = b"ml-stack/requests/v1"
 _MAGIC = b"MLR1"
@@ -115,7 +120,7 @@ class Inbox:
             return True
         try:
             self._cipher()
-        except FAILURES:
+        except failures():
             return False
         return True
 
@@ -140,7 +145,7 @@ class Inbox:
             rows = [Row.from_json(r) for r in doc["rows"]]
         except Unavailable:
             raise
-        except FAILURES as exc:
+        except failures() as exc:
             raise Unavailable(f"the requests file does not open: {type(exc).__name__}") from exc
         self._seen, self._rows = mark, rows
         return list(rows)
@@ -169,7 +174,7 @@ class Inbox:
                 self._save(_trim(_expire(rows, self._now()), self._now()))
         except (Unavailable, Refused):
             raise
-        except FAILURES as exc:
+        except failures() as exc:
             raise Unavailable(f"the requests file cannot be edited: {type(exc).__name__}") from exc
 
     # -- raising -------------------------------------------------------------------
@@ -311,7 +316,8 @@ def build(ask: Ask, created: float) -> Request:
     return Request(
         id=ident, kind=ask.kind,
         raised_by=Origin(shown(origin.agent, "name"), shown(origin.project, "name"),
-                         shown(origin.session, "name")),
+                         shown(origin.session, "name"), shown(origin.model, "model"),
+                         shown(origin.model_state, "label")),
         subject=shown(ask.subject, "subject"), reason=shown(ask.reason, "reason"),
         choices=make_choices(ask.choices, destructive=KINDS[ask.kind].destructive),
         created=created, expires=created + max(1.0, ask.ttl), key=shown(ask.key, "name"),

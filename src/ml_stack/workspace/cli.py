@@ -20,6 +20,7 @@ from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
     chat,
+    filecli,
     guide,
     limits,
     localcli,
@@ -34,6 +35,7 @@ from ml_stack.workspace.bus import CALL_TYPES, TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
 from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
+from ml_stack.workspace.modelid import describe
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused, fence
@@ -90,9 +92,15 @@ def _row(value: dict[str, Any]) -> str:
 def _text(value: Any) -> str:
     if isinstance(value, dict) and "text" in value and "seq" in value:
         where = f" on {value['board']}" if value.get("board") else ""
+        model = ("" if value.get("from_role") == "human"
+                 else f" ({describe(value.get('from_model', ''), value.get('from_model_state', ''))})")
         return (f"[{value['seq']}] {value['type']} from {value.get('from_label', value['from'])}"
-                f"{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
+                f"{model}{where} ({value['trust']}, no authority, {value['state']})\n{value['text']}")
+    if isinstance(value, dict) and {"block", "uses"} <= value.keys():
+        return str(value["block"]).rstrip("\n")
     if isinstance(value, dict) and value.get("authority") == "none" and "text" in value:
+        return str(value["text"])
+    if isinstance(value, dict) and "handle" in value and "line" in value and "text" in value:
         return str(value["text"])
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and ({"root", "replies"} <= v.keys() or {"members", "posts"} <= v.keys()
@@ -101,6 +109,10 @@ def _text(value: Any) -> str:
     if isinstance(value, list) and value and all(
             isinstance(v, dict) and {"type", "target", "mode"} == v.keys() for v in value):
         return _block([_row(v) for v in value], "subscriptions")
+    if isinstance(value, list) and value and all(
+            isinstance(v, dict) and {"id", "role", "model_state", "last_acted"} <= v.keys() for v in value):
+        return _block([f"{v['id']}  {v['role']}{'  child of ' + v['parent'] if v['parent'] else ''}  {describe(v['model'], v['model_state'])}"
+                       f"{'  ' + v['harness'] if v['harness'] else ''}" for v in value], "agents")
     if isinstance(value, dict) and {"kind", "key", "owner", "expires_in_s"} <= value.keys():
         soon = ", expiring soon" if value.get("expiring_soon") else ""
         return f"{value['kind']} {value['key']}  {value['owner']}  expires in {value['expires_in_s']:.0f} s{soon}"
@@ -166,13 +178,31 @@ def _mint(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 
 def _revoke(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
-    ws.revoke(token, args.name)
-    return {"revoked": args.name}
+    return {"revoked": ws.revoke(token, args.name, args.tree)}
+
+
+def _invite(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    made = ws.invite(token, args.name, _ttl(args.ttl), args.uses)
+    return {"block": onboard.snippet("", made["code"], args.name, made["project"],
+                                     (made["uses"], int(made["ttl_s"] // 60))), "uses": made["uses"]}
 
 
 def _whoami(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     who = ws.auth(token)
-    return {"id": who.id, "role": who.role, "project": ws.registry.info(who.id)["project"]}
+    if args.model:
+        ws.claim_model(token, args.model, args.harness)
+    model, state = ws.model_of(who.id)
+    return {"id": who.id, "role": who.role, "project": ws.registry.info(who.id)["project"],
+            "model": model or "unknown", "model_state": state, "harness": ws.registry.info(who.id)["harness"]}
+
+
+def _hello_model(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    return ws.claim_model(token, args.model, "", args.label_name)
+
+
+def _agents(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
+    ws.auth(token)
+    return ws.registered()
 
 
 def _send(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -248,7 +278,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"joined as {onboard.join(ws, args.code, args.name)}")
+    say(f"joined as {onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))}")
     return 0
 
 
@@ -372,7 +402,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
            help="a single-use code (default: one paste for up to 10 agents, one hour)"),
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
-        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex")],
+        flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
+        flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
+        flag("--harness", default="", help="your harness, e.g. claude-code or codex")],
      _join),
     ("setup", "guided walkthrough for several agents; --yes makes token files directly", [
         flag("agents", nargs="*", help="suggested ids (--yes: the agents to create)"),
@@ -407,8 +439,19 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
     ("mint", "print a new token for an agent id", [
         flag("name"), flag("--role", choices=ROLES, default="agent"),
         flag("--ttl-hours", type=float, default=0.0)], _mint),
-    ("revoke", "stop an agent's token working", [flag("name")], _revoke),
-    ("whoami", "who the token says you are", [], _whoami),
+    ("revoke", "stop an agent's token working, with its outstanding invites; --tree also revokes every agent below it",
+     [flag("name"), flag("--tree", action="store_true", help="revoke every descendant too")], _revoke),
+    ("invite", "a joined agent makes a one-time paste block for a new agent it starts; the new agent joins as its child", [
+        flag("--name", default="", help="a suggested id for the new agent"),
+        flag("--ttl", default="10m", help="how long the code works, e.g. 10m (at most 30m)"),
+        flag("--uses", type=int, default=1, help="how many agents may join with it (at most 3)")], _invite),
+    ("whoami", "who the token says you are; --model records your own model id as claimed", [
+        flag("--model", default="", help="the exact model id you run as (a label, never a right)"),
+        flag("--harness", default="", help="your harness, e.g. claude-code or codex")], _whoami),
+    ("hello-model", "record the model a helper LABEL of yours runs (claimed)", [
+        flag("label_name", metavar="LABEL"), flag("model", metavar="MODEL")], _hello_model),
+    ("agents", "every live identity with its role, model and whether the model is verified", [],
+     _agents),
     ("send", "send a message (BODY - reads stdin)", [
         flag("to", help="an agent id, or * for the announcements board (joined, milestone, "
                         "done, blocked only)"), flag("type", choices=CALL_TYPES),
@@ -497,6 +540,10 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),
     ("claims", "every live claim", [OWNER, flag("--kind", choices=CLAIM_KINDS, default="")],
      lambda a, w, t: w.claims.listing(a.owner, a.kind)),
+    ("attach", "post a file to a board, an agent or a thread; the message carries a handle, never the content",
+     filecli.ATTACH, filecli.attach),
+    ("file", "a file by handle (--meta, --text, --out PATH), or: list, search QUERY, delete HANDLE (a person)",
+     filecli.FILE, filecli.file),
     ("quarantine-ls", "flagged items held back", [], lambda a, w, t: w.quarantine_list()),
     ("quarantine-release", "deliver a held item, fenced; human token", [flag("qid")], _released),
     ("audit-verify", "whether every log's chain holds", [flag("--anchor", default="")],

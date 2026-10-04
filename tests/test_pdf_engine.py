@@ -258,7 +258,7 @@ def test_an_object_nested_a_hundred_thousand_deep_is_refused_not_crashed(tmp_pat
     data = one_page(b"BT /F1 12 Tf (x) Tj ET").replace(
         b"/MediaBox", b"/Junk " + deep + b" /MediaBox")
     try:
-        loaded = read(tmp_path, data, timeout_s=30.0)
+        loaded = read(tmp_path, data, timeout_s=4.0)
     except PdfRefused as refusal:
         assert str(refusal)
     else:

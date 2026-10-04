@@ -5,7 +5,15 @@ import functools
 import json
 from pathlib import Path
 
-from ml_stack import claude
+import pytest
+
+from ml_stack import claude, harnessid
+
+
+@pytest.fixture(autouse=True)
+def _no_workspace(monkeypatch):
+    monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+    monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
 
 
 def test_the_environment_points_every_model_call_at_the_server_and_nothing_elsewhere():
@@ -65,7 +73,7 @@ def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, 
 
 
 def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
-    """One slot holds the whole measured cache; `--slots N` divides it between N."""
+    """`--ctx` tokens are served in all: one slot holds them, `--slots N` divides them between N."""
     from ml_stack.serve.profile import record
 
     seen = {}
@@ -90,13 +98,13 @@ def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
     started = ["kestrel", "--port", "8899", "--claude", str(binary)]
 
     claude.launch(started, say=lambda _: None, run_claude=lambda command, env: 0)
-    assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (1, 65536), \
-        "one slot holding the whole cache the record measured across two"
+    assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (1, 262144), \
+        "one slot holding the whole 256K window"
 
     claude.launch([*started, "--slots", "4"], say=lambda _: None,
                   run_claude=lambda command, env: 0)
-    assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (4, 131072), \
-        "each slot asked for gets what one measured slot got"
+    assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (4, 262144), \
+        "four slots share the window"
 
 
 def test_launch_refuses_without_a_claude_binary(monkeypatch, capsys):

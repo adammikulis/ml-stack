@@ -15,6 +15,14 @@ from typing import Any
 
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
+from ml_stack.workspace.modelid import (
+    CLAIMED,
+    HISTORY_MAX,
+    INHERITED,
+    VERIFIED,
+    clean_harness,
+    clean_model,
+)
 
 __all__ = [
     "AGENT",
@@ -37,7 +45,7 @@ MINTS = {HUMAN: frozenset(ROLES), LEAD: frozenset({AGENT}), AGENT: frozenset()}
 AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 RESERVED = frozenset({"*", "all", "everyone", "workspace", "system", "human", "owner-token"})
 NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
-VERSION = 1
+VERSION = 2
 CAPS = ("send", "read", "claim")
 """What a delegated identity may be allowed to do; a top-level identity holds all of them."""
 
@@ -86,7 +94,12 @@ class Registry:
     def _load(self) -> dict[str, dict[str, Any]]:
         data = read_json(self.path, {})
         agents = data.get("agents") if isinstance(data, dict) else None
-        return dict(agents) if isinstance(agents, dict) else {}
+        if not isinstance(agents, dict):
+            return {}
+        if int(data.get("version", 1)) < 2:
+            agents = {n: {"model": "", "harness": "", "model_state": "", "models": [], **e}
+                      for n, e in agents.items()}
+        return dict(agents)
 
     def _save(self, agents: Mapping[str, Any]) -> None:
         write_json(self.path, {"version": VERSION, "agents": dict(agents)})
@@ -101,7 +114,63 @@ class Registry:
         entry = self._load().get(name, {})
         return {"role": str(entry.get("role", "")), "expires": float(entry.get("expires", 0.0)),
                 "revoked": bool(entry.get("revoked", not entry)), "parent": entry.get("parent", ""),
-                "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {}))}
+                "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {})),
+                "depth": int(entry.get("depth", 0)), "invited_by": str(entry.get("invited_by", "")),
+                "strikes": int(entry.get("strikes", 0)),
+                "model": str(entry.get("model", "")), "harness": str(entry.get("harness", "")),
+                "model_state": str(entry.get("model_state", "")),
+                "models": list(entry.get("models", [])),
+                "label_models": dict(entry.get("label_models", {}))}
+
+    def model_of(self, name: str, label: str = "") -> tuple[str, str]:
+        """``(model, state)`` shown for ``name`` (and its helper ``label``): the label's own
+        model, else the identity's own, else its parent's marked inherited; ``("", "")`` when none."""
+        agents = self._load()
+        entry = agents.get(name, {})
+        if label and entry.get("label_models", {}).get(label):
+            return str(entry["label_models"][label]), CLAIMED
+        if entry.get("model"):
+            return str(entry["model"]), INHERITED if label else str(entry.get("model_state") or CLAIMED)
+        parent = agents.get(str(entry.get("parent") or (name.partition("/")[0] if "/" in name else "")), {})
+        if label and parent.get("label_models", {}).get(label):
+            return str(parent["label_models"][label]), CLAIMED
+        if parent.get("model") and (label or "/" in name):
+            return str(parent["model"]), INHERITED
+        return "", ""
+
+    def record_model(self, name: str, model: str, harness: str, state: str, *,
+                     label: str = "") -> tuple[str, str]:
+        """Write ``name``'s model (or its helper ``label``'s) and return the ``(model, state)``
+        it held before; appends to the history when the model or its state changed. No
+        permission check here: callers decide who may."""
+        if state not in (VERIFIED, CLAIMED):
+            raise ValueError(f"a recorded model is {VERIFIED} or {CLAIMED}")
+        model, harness = clean_model(model) if model else "", clean_harness(harness)
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            entry = agents.get(name)
+            if entry is None or entry.get("revoked"):
+                raise ValueError(f"no agent called {name}")
+            if label:
+                if len(entry.setdefault("label_models", {})) >= 20 and label not in entry["label_models"]:
+                    raise ValueError("an agent keeps at most 20 helper models")
+                entry["label_models"][label] = model
+                self._save(agents)
+                return "", ""
+            before = (str(entry.get("model", "")), str(entry.get("model_state", "")))
+            if not model:
+                entry["harness"] = harness
+                self._save(agents)
+                return before
+            entry["model"], entry["model_state"] = model, state
+            if harness:
+                entry["harness"] = harness
+            if before != (model, state):
+                history = [*entry.get("models", []), {"model": model, "verified": state == VERIFIED,
+                                                      "since": self.clock()}]
+                entry["models"] = history[-HISTORY_MAX:]
+            self._save(agents)
+            return before
 
     def _live(self, agents: Mapping[str, Any], entry: Mapping[str, Any] | None) -> bool:
         if not entry or entry.get("revoked"):
@@ -142,6 +211,93 @@ class Registry:
         if mine >= minted or every >= live:
             raise Denied(f"{minter} holds {mine} live minted identities ({every} in all); "
                          f"the limits are {minted} and {live}")
+
+    @staticmethod
+    def _below(agents: Mapping[str, Any], name: str) -> list[str]:
+        found: list[str] = []
+        todo = [name]
+        while todo:
+            head = todo.pop()
+            for n, e in sorted(agents.items()):
+                if e.get("parent") == head and n not in found:
+                    found.append(n)
+                    todo.append(n)
+        return found
+
+    @staticmethod
+    def _root(agents: Mapping[str, Any], name: str) -> str:
+        seen = {name}
+        while (up := str(agents.get(name, {}).get("parent", ""))) and up not in seen:
+            seen.add(up)
+            name = up
+        return name
+
+    def descendants(self, name: str, live: bool = False) -> list[str]:
+        """Every identity below ``name`` (children, their children, ...), ``live`` ones only if asked."""
+        agents = self._load()
+        return [n for n in self._below(agents, name) if not live or self._live(agents, agents[n])]
+
+    def root_of(self, name: str) -> str:
+        """The top-level identity ``name`` descends from (``name`` itself when it has no parent)."""
+        return self._root(self._load(), name)
+
+    def adopt(self, parent: str, name: str, ttl_s: float, can: tuple[str, ...], limits: tuple[int, int, int]) -> str:
+        """A token for ``name``, a standard agent that is ``parent``'s child: it holds at most
+        ``parent``'s rights and lasts no longer than ``parent``'s token. ``limits`` is the most
+        live children of ``parent``, live descendants of its root and live identities in all;
+        `Denied` names the one that is full."""
+        most_children, most_tree, most_live = limits
+        if not valid_name(name):
+            raise ValueError(f"{name!r} is not a usable agent id (a-z, 0-9, . _ -; up to 48)")
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            top = agents.get(parent)
+            if top is None or not self._live(agents, top):
+                raise Denied(f"{parent} is revoked or expired")
+            if self._live(agents, agents.get(name)):
+                raise ValueError(f"{name} is registered already")
+            rights = tuple(c for c in CAPS if c in top.get("can", CAPS) and c in can)
+            kids = sum(1 for e in agents.values() if e.get("parent") == parent and self._live(agents, e))
+            if kids >= most_children:
+                raise Denied(f"{parent} has {kids} live children; the limit is {most_children}")
+            root = self._root(agents, parent)
+            tree = sum(1 for n in self._below(agents, root) if self._live(agents, agents[n]))
+            if tree >= most_tree:
+                raise Denied(f"{root} has {tree} live descendants; the limit is {most_tree}")
+            every = sum(1 for e in agents.values() if self._live(agents, e))
+            if every >= most_live:
+                raise Denied(f"the workspace holds {every} live identities; the limit is {most_live}")
+            now = self.clock()
+            stop = float(top.get("expires", 0.0))
+            secret = secrets.token_urlsafe(32)
+            agents[name] = {"role": AGENT, "hash": _hash(secret), "created": now, "minted_by": parent,
+                            "parent": parent, "invited_by": parent, "can": list(rights),
+                            "depth": int(top.get("depth", 0)) + 1,
+                            "expires": min(now + ttl_s, stop) if stop else now + ttl_s, "revoked": False}
+            self._save(agents)
+        return f"{PREFIX}{name}.{secret}"
+
+    def strike(self, name: str) -> int:
+        """Count one misbehaviour of ``name`` against its parent; the parent's strikes so far."""
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            top = agents.get(str(agents.get(name, {}).get("parent", "")))
+            if top is None:
+                return 0
+            top["strikes"] = int(top.get("strikes", 0)) + 1
+            self._save(agents)
+            return int(top["strikes"])
+
+    def revoke_tree(self, by: Identity, name: str) -> list[str]:
+        """Revoke ``name`` and everything below it, if ``by`` may revoke ``name``; the names revoked."""
+        self.revoke(by, name)
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            below = self._below(agents, name)
+            for n in below:
+                agents[n]["revoked"] = True
+            self._save(agents)
+        return [name, *below]
 
     def children(self, parent: str) -> list[str]:
         """The live delegated identities of ``parent``."""

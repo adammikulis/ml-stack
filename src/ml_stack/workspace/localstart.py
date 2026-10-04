@@ -122,6 +122,7 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         if ws.registry.role_of(name):
             ws.registry.revoke(onboard.SETUP, name)
         _mint(ws, name, projects.describe(folder_) if folder_ else {})
+        _record_model(ws, name, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
@@ -136,15 +137,11 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
 
 
 def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project: str) -> Started:
-    """A coding agent runs on the Codex harness, which mints its own identity and serves the model
-    at 256K through the broker; this detaches it and records the pid. Without the harness the
-    person gets the one command to run."""
+    """A coding agent runs on the Codex harness, whose seat mints its own identity and serves the
+    model at 256K through the broker; this detaches it and records the pid."""
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
     if problem:
         raise Unavailable(problem, hint)
-    if lh.launcher() is None:
-        raise Unavailable("the Codex harness is not in this build yet",
-                          lh.stub_command(chosen.ref or chosen.name, project))
     role = roles.get(ask.role).name
     name = la.check_name(ask.name or f"{localmodel.agent_name(chosen.name)}-{lh.CODEX}")
     with held(la.folder(ws) / "start.lock"):
@@ -206,6 +203,15 @@ def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = Non
         path.unlink(missing_ok=True)
     ws.audit("local-agent.stop", onboard.SETUP.id, agent=name, forced=forced, lease=freed)
     return Stopped(name, running, forced, freed, notes)
+
+
+def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick) -> None:
+    """Record the model ml-stack started the agent on as verified; only a person's start reaches this."""
+    try:
+        ws.set_model(name, chosen.name, lh.OWN, verified=True, terminal=(True, True), env={})
+    except ValueError:
+        ws.set_model(name, localmodel.short_name(chosen.name), lh.OWN, verified=True,
+                     terminal=(True, True), env={})
 
 
 def _release(lease: str) -> bool:

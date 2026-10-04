@@ -14,7 +14,7 @@ from ml_stack.workspace.chain import ChainLog, held
 __all__ = ["BROADCAST", "CALL_TYPES", "TYPES", "Bus", "mentions_me"]
 
 BROADCAST = "*"
-TYPES = ("task", "status", "handoff", "question", "answer", "claim", "release", "note")
+TYPES = ("task", "status", "handoff", "question", "answer", "claim", "release", "note", "file")
 CALL_TYPES = (*TYPES, "joined", "milestone", "done", "blocked")
 VERSION = 1
 CANCEL_SLICE_S = 0.25

@@ -121,11 +121,11 @@ class BoardApi:
                 and r["to"].startswith("#") and (not name or r["to"] == name)
                 and self.ws.bus.live(r)]
 
-    def _show(self, row: dict[str, Any], short: int = 0) -> dict[str, Any]:
+    def _show(self, row: dict[str, Any], short: int = 0, who: Identity | None = None) -> dict[str, Any]:
         cap = self.ws.limits.board_message_chars
         cut = {**row, "body": plain.text(row["body"], cap)[0],
                "subject": plain.line(row["subject"], self.ws.limits.subject_chars)}
-        out = self.ws.deliver(cut, cap=short)
+        out = self.ws.deliver(cut, cap=short, reader=who)
         out["board"] = row["to"]
         out["mentions"] = list(row.get("mentions", []))
         out["truncated"] = len(row["body"]) > cap
@@ -138,7 +138,11 @@ class BoardApi:
                 "to": row["to"], "ts": row["ts"], "thread": row.get("thread") or row["seq"],
                 "reply_to": row.get("reply_to", 0), "mentions": list(row.get("mentions", [])),
                 "subject": plain.line(row["subject"], self.ws.limits.subject_chars), "body": body,
-                "held": bool(row["held"]), "truncated": cut}
+                "held": bool(row["held"]), "truncated": cut,
+                **({"file": {k: row["file"][k] for k in ("id", "name", "size", "type", "text")}}
+                   if row.get("file") else {}),
+                "model": "" if row["role"] == "human" else row.get("model", ""),
+                "model_state": "" if row["role"] == "human" else row.get("model_state", "")}
 
     # -- boards ---------------------------------------------------------------------------
     def list(self, token: str) -> list[dict[str, Any]]:
@@ -295,7 +299,7 @@ class BoardApi:
         newest = rows[-(limit if limit > 0 else lim.read_items):]
         out, used = Held(), 0
         for r in newest:
-            shown = self._show(r, 0 if limit > 0 else lim.read_item_chars)
+            shown = self._show(r, 0 if limit > 0 else lim.read_item_chars, who)
             used += len(shown["text"])
             if used > (lim.board_read_chars if limit > 0 else lim.read_total_chars) and out:
                 break
@@ -343,7 +347,7 @@ class BoardApi:
         self._pair_ok(who, a, other)
         out = []
         for r in self._pair_rows(a, other)[-max(limit, 0):]:
-            shown = self._show(r)
+            shown = self._show(r, 0, who)
             shown["direction"] = "sent" if r["from"] == a else "received"
             out.append(shown)
         if mark and out and a == who.id:
@@ -384,7 +388,7 @@ class BoardApi:
         boards = self.store.state()[0]
         found = [r for r in self._rows() if who.id in r.get("mentions", []) and r["from"] != who.id
                  and self.can_read(who, r["to"], boards)]
-        return [self._show(r) for r in found[-max(limit, 0):]]
+        return [self._show(r, 0, who) for r in found[-max(limit, 0):]]
 
     # -- subscriptions --------------------------------------------------------------------
     def _target_ok(self, who: Identity, stype: str, target: str) -> str:
@@ -575,7 +579,7 @@ class BoardApi:
         newest = rows[-1]["seq"] if rows else max(after, 0)
         if after >= 0 and len(found) == limit:
             newest = found[-1]["seq"]
-        return {"messages": [self._plain(r) if plain_text else self._show(r, lim.read_item_chars)
+        return {"messages": [self._plain(r) if plain_text else self._show(r, lim.read_item_chars, who)
                              for r in found],
                 "seq": newest}
 

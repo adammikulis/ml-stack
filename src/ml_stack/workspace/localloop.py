@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ml_stack import chat as chatting
-from ml_stack.client import Client, Request, Transport
+from ml_stack.client import Client, Request, Transport, serving_params
 from ml_stack.serve import broker_wire
 from ml_stack.workspace import (
     localagent as la,
@@ -84,9 +84,15 @@ def client_on(base_url: str) -> Any:
     return Client(base_url, request=Request(n_predict=4096, slot=0), transport=Transport(timeout=600.0))
 
 
-def record_model_identity(ws: Workspace, name: str, lease: dict[str, Any]) -> None:
-    """Seam for feat/model-identity: record the served model alias as verified with
-    ``workspace.set_model`` once it exists on integration/dev. It does nothing until then."""
+def check_context(want: int, base_url: str, read: Callable[..., Any] | None = None) -> str:
+    """Why the server at ``base_url`` cannot hold ``want`` tokens per slot, or an empty string. The
+    broker shares a server by model, so a server up with a smaller context is handed out as is."""
+    params = (read or serving_params)(base_url)
+    have = int(getattr(params, "n_ctx", 0) or 0)
+    if have and have < want:
+        return (f"a server for this model is already up with {have // 1024}K context, below the "
+                f"{want // 1024}K asked; stop it (`ml-stack-serve down`) and start the agent again")
+    return ""
 
 
 def caps_of(agent: la.Agent) -> Caps:
@@ -102,6 +108,9 @@ def lease_model(agent: la.Agent, *, wait_s: float = LEASE_WAIT_S) -> Held:
                             "cache_type_v": "q8_0", "cache_idle_slots": True}
     grant = broker_wire.lease(PURPOSE, [agent.model], spec=spec, weight=agent.size_bytes,
                               timeout=wait_s)
+    if why := check_context(agent.ctx, str(grant.base_url)):
+        broker_wire.release(grant.lease)
+        raise RuntimeError(why)
     return Held(client_on(str(grant.base_url)), {"id": grant.lease, "port": grant.port, "model": grant.model,
                          "shared": grant.shared}, lambda: broker_wire.release(grant.lease))
 
@@ -251,7 +260,6 @@ def run(ws: Workspace, name: str, settings: Settings | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as err:
         status.update(state="failed", detail=plain.line(err, 300), lease={})
         return 1
-    record_model_identity(ws, name, held.lease)
     status.update(lease=held.lease, detail="", effort=agent.effort, max_effort=agent.max_effort)
     code = 0
     try:
