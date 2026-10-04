@@ -182,7 +182,7 @@ def route_names(node: ast.Compare | ast.Call, where: str) -> list[str]:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 names.append(arg.value + "*")
         return [n for n in names if n.startswith("/") and len(n) > 2]
-    if not any(isinstance(op, (ast.Eq, ast.In)) for op in node.ops):
+    if not any(isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops):
         return []
     sides = [node.left, *node.comparators]
     if not any(ROUTE_NAME.search(ast.unparse(s)) for s in sides
