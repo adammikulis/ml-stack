@@ -14,9 +14,8 @@ import pytest
 
 from ml_stack import sandbox
 from ml_stack.sandbox import AllowUnsandboxed, Limits, Net, Policy
+from ml_stack.sandbox.policies import SYSTEM_EXEC
 from ml_stack.sandbox.seatbelt import Seatbelt
-
-SYSTEM_EXEC = ("/bin", "/usr/bin", "/usr/sbin", "/sbin")
 
 
 @pytest.fixture
