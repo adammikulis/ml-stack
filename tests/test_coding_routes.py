@@ -116,3 +116,17 @@ def test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn(coding_api
     assert "status 2" in status["error"]
     assert not kit.ws.registry.role_of(f"chat-{conversation.id}")
     assert len(server.ui.conversations.get(conversation.id).messages) == 1
+
+
+def test_joined_coding_session_is_required_before_starting_a_worker(coding_api, monkeypatch):
+    from ml_stack.fleet import routes
+
+    server, conversation, _kit = coding_api
+    monkeypatch.setattr(routes, "in_cluster", lambda _: True)
+    assert post(server, conversation.id, "start", {"message": "unsigned"})[0] == 401
+    assert server.ui.conversations.get(conversation.id).messages == []
+    cookie = server.ui.sessions.cookie_header(server.ui.sessions.open("person"))
+    status, _result, _headers = server.call(f"/ui/coding/{conversation.id}/start", method="POST",
+        body={"message": "signed"}, cookie=cookie,
+        headers={"Origin": f"http://127.0.0.1:{server.port}", "Sec-Fetch-Site": "same-origin"})
+    assert status == 202
