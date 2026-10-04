@@ -1,5 +1,7 @@
 """Live-world configuration and selected-agent controls in the browser."""
 
+import json
+
 import pytest
 import test_fleet_page as fleet_page
 
@@ -87,4 +89,62 @@ def test_applying_online_ppo_creates_policy_without_resetting_world(gym_page):
     assert len(result) == 1 and result[0]['command'] == 'controller'
     assert result[0]['payload']['learning_mode'] == 'online'
     assert result[0]['payload']['checkpoint'] == ''
+    assert not errors
+
+
+@pytest.mark.parametrize('layout', ['S', 'SC', '3'])
+def test_road_layout_is_the_only_map_source_in_start_request(gym_page, layout):
+    page, errors = gym_page
+    page.route('**/ui/gym/sessions', lambda route: route.fulfill(
+        status=200, content_type='application/json',
+        body=json.dumps({'ok': True, 'id': 'map-config-proof', 'status': 'paused',
+                         'environment': 'car', 'sequence': 0})))
+    page.evaluate("document.querySelector('gym-view').stream=async()=>{}")
+    page.get_by_label('Road layout', exact=True).select_option(layout)
+    assert page.get_by_label('map', exact=True).count() == 0
+    with page.expect_request(lambda request: request.method == 'POST' and request.url.endswith('/ui/gym/sessions')) as sent:
+        page.get_by_role('button', name='Start session', exact=True).click()
+    config = sent.value.post_data_json['config']
+    assert config['world']['map'] == (3 if layout == '3' else layout)
+    assert 'map' not in config
+    assert page.evaluate("""() => {const gym=document.querySelector('gym-view');
+      return gym.worldOptions.fields.map.input === gym.nativeFields.map;}""")
+    page.evaluate("document.querySelector('gym-view').session=null")
+    assert not errors
+
+
+def test_manual_source_hides_road_layout_and_warehouse_has_no_registration_override(gym_page):
+    page, errors = gym_page
+    page.get_by_label('World source', exact=True).select_option('manual')
+    assert not page.get_by_label('Road layout', exact=True).is_visible()
+    page.get_by_label('World source', exact=True).select_option('procedural')
+    page.get_by_label('Road layout', exact=True).select_option('SC')
+    page.get_by_label('Environment', exact=True).select_option('warehouse')
+    assert page.get_by_label('Warehouse scenario', exact=True).count() == 0
+    assert 'env_id' not in page.evaluate("document.querySelector('gym-view').nativeConfig()")
+    page.get_by_label('Environment', exact=True).select_option('car')
+    assert page.get_by_label('Road layout', exact=True).input_value() == 'SC'
+    assert not errors
+
+
+def test_attach_restores_map_from_world_definition(gym_page):
+    page, errors = gym_page
+    snapshot = {'ok': True, 'id': 'attached-map', 'environment': 'car', 'controller': 'native-idm',
+                'sequence': 0, 'status': 'paused', 'config': {
+                    'simulation_mode': 'world', 'map': 'SCSCS',
+                    'world': {'mode': 'procedural', 'map': 'SC'}}}
+    page.route('**/ui/gym/sessions/attached-map', lambda route: route.fulfill(
+        status=200, content_type='application/json', body=json.dumps(snapshot)))
+    page.evaluate("""() => {const g=document.querySelector('gym-view');g.stream=async()=>{};
+        const option=document.createElement('option');option.value='attached-map';
+        option.textContent='Saved country road';g.live.append(option);}""")
+    page.locator('gym-view #config > details > summary').click()
+    page.get_by_label('Live sessions', exact=True).select_option('attached-map')
+    page.get_by_role('button', name='Attach to live session', exact=True).click()
+    page.wait_for_function("""() => {const g=document.querySelector('gym-view');
+        return g.session === 'attached-map' && g.nativeFields.map.value === 'SC';}""")
+    assert page.get_by_label('Road layout', exact=True).input_value() == 'SC'
+    assert page.evaluate("document.querySelector('gym-view').worldOptions.value().world.map") == 'SC'
+    assert 'map' not in json.loads(page.get_by_label('Additional native settings (JSON)').input_value())
+    page.evaluate("document.querySelector('gym-view').session=null")
     assert not errors
