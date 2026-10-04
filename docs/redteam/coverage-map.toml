@@ -25,6 +25,9 @@ tests = [
   "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
   "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
   "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+  "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+  "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+  "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right",
 ]
 note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
 
@@ -57,6 +60,7 @@ tests = [
   "tests/test_workspace_quiet.py::test_a_new_agent_has_no_subscriptions_and_its_inbox_holds_no_board_traffic",
   "tests/test_workspace_quiet.py::test_the_lead_and_the_person_cannot_leave_announcements_and_an_agent_can_only_mute",
   "tests/test_workspace_quiet.py::test_message_text_never_changes_a_subscription",
+  "tests/test_workspace_model.py::test_a_hostile_model_or_harness_is_refused_everywhere",
   "tests/test_redteam_board.py::test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read",
 ]
 note = "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, quiet defaults, a person's board membership"

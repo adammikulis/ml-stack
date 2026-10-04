@@ -149,11 +149,12 @@ def pick_name(ws: Workspace, wanted: str) -> str:
     return name
 
 
-def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0, model: str = "",
-         harness: str = "") -> str:
+def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0,
+         claim: tuple[str, str] = ("", "")) -> str:
     """Redeem an invite under the id ``wanted`` (suffixed when taken): write the agent's token
     file and return the id. Open to an agent; the role is always the standard agent role. A
-    ``model`` and ``harness`` are recorded as claimed."""
+    ``claim`` of ``(model, harness)`` is recorded as claimed."""
+    model, harness = claim
     if model:
         clean_model(model)
     clean_harness(harness)

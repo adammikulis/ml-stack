@@ -15,7 +15,14 @@ from typing import Any
 
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.modelid import CLAIMED, HISTORY_MAX, INHERITED, VERIFIED, clean_harness, clean_model
+from ml_stack.workspace.modelid import (
+    CLAIMED,
+    HISTORY_MAX,
+    INHERITED,
+    VERIFIED,
+    clean_harness,
+    clean_model,
+)
 
 __all__ = [
     "AGENT",

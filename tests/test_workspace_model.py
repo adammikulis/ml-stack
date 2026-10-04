@@ -14,8 +14,8 @@ from ml_stack.workspace.identity import Registry
 from ml_stack.workspace.modelid import clean_harness, clean_model
 
 PERSON = {"terminal": (True, True), "env": {}}
-HOSTILE = ["a\nb", "a‮b", "<b>x</b>", "x" * 81, "a b", "-lead", "a;rm", "x`y`", "a\x00b",
-           "ａｂ", "model x"]
+HOSTILE = ["a\nb", "a\u202eb", "<b>x</b>", "x" * 81, "a b", "-lead", "a;rm", "x`y`", "a\x00b",
+           "\uff41\uff42", "model\u2028x"]
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def test_a_hostile_model_or_harness_is_refused_everywhere(kit, text):
         kit.ws.set_model("alice", text, **PERSON)
     code = kit.ws.invites.create("zed", 600.0)
     with pytest.raises(ValueError):
-        onboard.join(kit.ws, code, "zed", model=text)
+        onboard.join(kit.ws, code, "zed", claim=(text, ""))
     assert kit.ws.model_of("alice") == ("", "")
     assert kit.ws.registry.role_of("zed") == ""
     if text:
@@ -75,8 +75,8 @@ def test_join_records_a_claimed_model_and_the_code_is_kept_when_it_is_refused(ki
     code = ws.invites.create("codex", 600.0)
     tokens.prepare(ws.base)
     with pytest.raises(ValueError):
-        onboard.join(ws, code, "codex", model="bad model")
-    name = onboard.join(ws, code, "codex", model="gpt-5.1", harness="codex")
+        onboard.join(ws, code, "codex", claim=("bad model", ""))
+    name = onboard.join(ws, code, "codex", claim=("gpt-5.1", "codex"))
     assert ws.model_of(name) == ("gpt-5.1", "claimed")
     assert ws.registry.info(name)["harness"] == "codex"
     other = ws.invites.create("zed", 600.0)

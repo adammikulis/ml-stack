@@ -38,6 +38,13 @@ class SendOptions(TypedDict, total=False):
     label: str
 
 
+class ProcessOptions(TypedDict, total=False):
+    """What `Workspace.set_model` takes to judge the calling process: its tty state and environment."""
+
+    terminal: tuple[bool, bool]
+    env: Mapping[str, str]
+
+
 class ReadOptions(TypedDict, total=False):
     """What `Workspace.wait` takes besides its timeout: how much to show."""
 
@@ -197,11 +204,10 @@ class Workspace:
         return self.registry.model_of(name, label)
 
     def set_model(self, name: str, model: str, harness: str = "", *, verified: bool = True,
-                  terminal: tuple[bool, bool] | None = None,
-                  env: Mapping[str, str] | None = None) -> None:
+                  **process: Unpack[ProcessOptions]) -> None:
         """Record ``name``'s model from a launcher or a person at a terminal; ``verified`` says
         ml-stack itself started the agent and knows the model. Refused from an agent's process."""
-        human.require_person("recording an agent's model", terminal, env)
+        human.require_person("recording an agent's model", process.get("terminal"), process.get("env"))
         clean_model(model)
         self._record_model(name, model, harness, VERIFIED if verified else CLAIMED)
 

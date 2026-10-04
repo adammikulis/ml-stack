@@ -259,7 +259,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"joined as {onboard.join(ws, args.code, args.name, model=args.model, harness=args.harness)}")
+    say(f"joined as {onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))}")
     return 0
 
 
