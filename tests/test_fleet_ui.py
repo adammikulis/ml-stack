@@ -77,8 +77,9 @@ def _free_port() -> int:
 class Serving:
     """A real daemon with the UI mounted, bound on every interface."""
 
-    def __init__(self, tmp_path, name="studio", setup_token="", schedule=None):
+    def __init__(self, tmp_path, name="studio", setup_token="", schedule=None, secure=True):
         self.schedule = schedule
+        self.secure = secure
         root = tmp_path / "traind"
         self.files = root / "files"
         self.files.mkdir(parents=True)
@@ -93,9 +94,9 @@ class Serving:
         self.ui.settings_path = tmp_path / "settings.json"
         self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
+        context = tls.server_context(tls.identity(tmp_path / "tls", name)) if secure else None
         self.httpd = LimitedServer(
-            ("0.0.0.0", self.port),
-            tls=tls.server_context(tls.identity(tmp_path / "tls", name)),
+            ("0.0.0.0", self.port), tls=context,
             handler=make_handler(Daemon(self.runner, self.files, token, name, ui=self.ui,
                          schedule=schedule, tokens=self._cluster_tokens,
                          cluster_key_path=self.keyfile, ui_from_lan=True,
@@ -117,7 +118,8 @@ class Serving:
         if cookie:
             sent["Cookie"] = cookie
         sent.update(headers or {})
-        conn = (http.client.HTTPConnection(host, self.port, timeout=10) if host == "127.0.0.1"
+        conn = (http.client.HTTPConnection(host, self.port, timeout=10)
+                if host == "127.0.0.1" or not self.secure
                 else http.client.HTTPSConnection(host, self.port, timeout=10, context=unverified_context()))
         try:
             conn.request(method, path, body=data, headers=sent)
@@ -260,6 +262,25 @@ class TestFirstRunIsNotUpForGrabs:
             assert ok == 200, body
         finally:
             s.close()
+
+
+class TestThePassphraseNeverCrossesPlainHttp:
+    def test_another_machine_is_refused_the_interface_when_it_would_be_plain_http(self, tmp_path):
+        plain = Serving(tmp_path, secure=False)
+        try:
+            for path, method in (("/ui/setup", "GET"), ("/ui/session", "POST")):
+                status, body, _ = plain.call(path, method=method, body={"passphrase": WORDS}
+                                             if method == "POST" else None, host=primary_ip())
+                assert status == 403 and "TLS only" in body["error"], (path, status, body)
+            assert plain.call("/ui/setup")[0] == 200
+        finally:
+            plain.close()
+
+    def test_over_tls_the_same_request_reaches_the_sign_in(self, serving):
+        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "home"})
+        status, _, headers = serving.call("/ui/session", method="POST",
+                                          body={"passphrase": WORDS}, host=primary_ip())
+        assert status == 200 and "Set-Cookie" in headers
 
 
 class TestJoiningTwice:
