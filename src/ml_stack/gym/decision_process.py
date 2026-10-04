@@ -2,7 +2,6 @@
 
 import contextlib
 import json
-import os
 import queue
 import subprocess
 import sys
@@ -12,7 +11,7 @@ from pathlib import Path
 
 from ml_stack.decide.pointer import PointerDecider
 from ml_stack.decide.sources import local_source
-from ml_stack.gym.transport import interpreter
+from ml_stack.gym.transport import interpreter, python_environment
 from ml_stack.platform import start_process, terminate_process_group
 from ml_stack.serve.exit_guard import protect, release
 
@@ -40,7 +39,7 @@ class DecisionProcess:
         self.handle = start_process(
             [interpreter(), "-m", module, json.dumps(checkpoint)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr,
-            text=True, bufsize=1, env={**os.environ, "OMP_NUM_THREADS": "1",
+            text=True, bufsize=1, env={**python_environment(), "OMP_NUM_THREADS": "1",
                                       "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"})
         protect(self.handle.pid)
         threading.Thread(target=self.read, daemon=True).start()
