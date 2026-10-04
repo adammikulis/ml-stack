@@ -347,6 +347,40 @@ class TestSeat:
         with pytest.raises(Denied):
             ws.auth(secret)
 
+    def test_the_seat_is_subscribed_to_announcements_as_a_digest_and_to_tasks(self, person, tmp_path):
+        from ml_stack.workspace import Workspace
+        from ml_stack.workspace.boards import GENERAL
+
+        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+        subs = Workspace(seat.base).board.store.state()[1]["local-test-codex"]
+        assert subs[("board", GENERAL)]["mode"] == "digest" and ("kind", "task") in subs
+        assert ("mentions", "") in subs
+
+    def test_ending_the_session_revokes_the_identity_and_removes_the_files(self, person, monkeypatch, tmp_path):
+        from ml_stack.workspace import Denied, Workspace, tokens
+
+        seen = {}
+        monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
+        monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen")
+        monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
+        binary = tmp_path / "codex"
+        binary.write_text("#!/bin/sh\n")
+        (tmp_path / "proj").mkdir()
+
+        def run(command, env):
+            ws = Workspace()
+            seen["token"] = tokens.load(ws.base, "local-qwen-codex")
+            assert ws.auth(seen["token"]).id == "local-qwen-codex"
+            seen["home"] = Path(env["CODEX_HOME"])
+            return 0
+
+        assert codex.launch(["--codex", str(binary), "--project", str(tmp_path / "proj")], say=lambda _: None,
+                            run_codex=run) == 0
+        with pytest.raises(Denied):
+            Workspace().auth(seen["token"])
+        assert not (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
+        assert not seen["home"].exists()
+
     def test_a_launcher_an_agent_started_is_not_minted_and_acts_as_its_parent(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDECODE", "1")
         said = []
