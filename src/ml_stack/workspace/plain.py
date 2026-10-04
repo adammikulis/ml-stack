@@ -6,7 +6,7 @@ import re
 
 __all__ = ["line", "name_ok", "text"]
 
-HIDDEN = re.compile("[\x00-\x1f\x7f-\x9f؜​-‏ -‮⁠-⁯﻿]")
+HIDDEN = re.compile(r"[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]")
 BOARD = re.compile(r"^#[a-z0-9][a-z0-9._-]{0,39}$")
 
 
