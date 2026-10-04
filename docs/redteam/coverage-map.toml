@@ -15,6 +15,13 @@ uncovered = 54
 partial = 202
 
 [[group]]
+match = ["spawn:gym/transport.py:Process.start"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py"]
+note = "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
+
+[[group]]
 match = ["desktop:app/src-tauri/capabilities/main.json"]
 status = "covered"
 count = 1
