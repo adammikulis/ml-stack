@@ -37,7 +37,7 @@ hidden = [
     # Reached only through a lazy import, so nothing static points at it.
     "ml_stack.serve", "psutil", "ladybug._lbug", "ladybug._lbug_capi",
     "ml_stack.graph.store", "ml_stack.graph.cypher",
-    "ml_stack.workspace.fleet_routes",
+    "ml_stack.workspace.fleet_routes", "ml_stack.workspace.coding_routes",
 ]
 
 a = Analysis(["launcher-headless.py"], datas=datas, hiddenimports=hidden,

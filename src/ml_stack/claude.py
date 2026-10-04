@@ -41,6 +41,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from ml_stack import harnessing, serverkeys
 from ml_stack.log import say
@@ -119,12 +120,14 @@ def parser() -> argparse.ArgumentParser:
 
 
 def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = say,
-           run_claude: Callable[..., int] | None = None) -> int:
+           run_claude: Callable[..., int] | None = None,
+           seat_factory: Callable[..., Any] | None = None) -> int:
     """Lease the model, run ``claude`` inside the lease with the session's hooks, return its exit code."""
     words = list(sys.argv[1:] if argv is None else argv)
     ours, extra = (words[: words.index("--")], words[words.index("--") + 1:]) \
         if "--" in words else (words, [])
     args = parser().parse_args(ours)
+    args.seat_factory = seat_factory
     binary = args.claude or shutil.which("claude") or ""
     if not binary:
         say("error: no `claude` on PATH; install Claude Code or pass --claude PATH")

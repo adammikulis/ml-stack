@@ -21,6 +21,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from ml_stack import harnessing, serverkeys
 from ml_stack.chatpolicy import READ_ONLY
@@ -83,12 +84,14 @@ def environment(home: Path, base: Mapping[str, str] | None = None, key: str = ""
 
 
 def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = say,
-           run_codex: Callable[..., int] | None = None) -> int:
+           run_codex: Callable[..., int] | None = None,
+           seat_factory: Callable[..., Any] | None = None) -> int:
     """Lease the model, run ``codex`` inside the lease with this run's home, return its exit code."""
     words = list(sys.argv[1:] if argv is None else argv)
     ours, extra = (words[: words.index("--")], words[words.index("--") + 1:]) \
         if "--" in words else (words, [])
     args = harnessing.parser("codex", "Codex", DEFAULT_PORT, DEFAULT_SLOTS).parse_args(ours)
+    args.seat_factory = seat_factory
     binary = args.codex or shutil.which("codex") or ""
     if not binary:
         say("error: no `codex` on PATH; install Codex or pass --codex PATH")
