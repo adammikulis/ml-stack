@@ -10,7 +10,7 @@ Each example supports procedural and manual definitions using its simulator's fo
 
 | Example | Procedural definition | Manual definition |
 | --- | --- | --- |
-| Smart car | Seeded MetaDrive PG blocks, such as `SCSCS` | Native PGMap metadata JSON |
+| Smart car | Seeded MetaDrive PG blocks, such as `SCSCS`, or an integer block count | Native PGMap metadata JSON |
 | Warehouse | Seeded RWARE shelves and aisles | RWARE ASCII layout |
 | Traffic | Seeded SUMO network and demand | SUMO network and route XML |
 | Traffic and driving | Seeded SUMO intersection imported into MetaDrive | SUMO network and route XML |
@@ -19,6 +19,10 @@ Manual files use paths relative to the workspace files directory. Imports reject
 paths and paths escaping that directory. World manifests retain the definition and file
 hashes. The combined traffic example supports one signal-controlled intersection: SUMO owns
 signals, demand, and routes; MetaDrive owns vehicle dynamics and sensors.
+
+Episode resets select a native scenario seed. Procedural car roads regenerate for that seed;
+manual car roads retain their authored geometry across scenario seeds. Persistent-world task
+resets retain the existing world and its seed.
 
 In the car world, MetaDrive manages active vehicles and respawns arrivals. **Native driving policy** uses IDM to drive
 the watched car and the other cars with native continuous steering and acceleration. The
