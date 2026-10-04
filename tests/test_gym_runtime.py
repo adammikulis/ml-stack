@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack.gym import adapters, catalog, simulation as runtime
+from ml_stack.gym import adapters, catalog, decision_process, simulation as runtime
 from ml_stack.gym.cli import argument_parser
 from ml_stack.gym.provenance import native_provenance
 from ml_stack.gym.runtime import SessionManager
@@ -169,8 +169,8 @@ def test_decider_abstention_holds_with_probability_telemetry():
 
 def test_decision_controller_uses_cpu(simulation, monkeypatch):
     requests = []
-    monkeypatch.setattr(runtime, "PointerDecider", lambda **kwargs: requests.append(kwargs))
-    simulation.command("controller", {"controller": "decider"})
+    monkeypatch.setattr(decision_process, "PointerDecider", lambda **kwargs: requests.append(kwargs))
+    decision_process.decision_controller()
     assert requests == [{"device": "cpu"}]
 
 
@@ -229,3 +229,65 @@ def test_external_worker_lifecycle_and_recording():
     finally:
         assert manager.close(identifier)["status"] == "closed"
     assert identifier not in manager.sessions
+
+
+class PendingDecider:
+    status, error, pending = "ready", None, None
+
+    def __init__(self, checkpoint=None):
+        self.event, self.closed = None, False
+
+    def poll(self):
+        event, self.event = self.event, None
+        if event:
+            self.pending = None
+        return event
+
+    def submit(self, request):
+        if self.pending is None:
+            self.pending = request
+            return True
+        return False
+
+    def close(self):
+        self.closed = True
+
+
+def test_pending_decision_keeps_physics_and_pause_responsive(simulation, monkeypatch):
+    monkeypatch.setattr(runtime, "DecisionProcess", PendingDecider)
+    simulation.command("controller", {"controller": "decider"})
+    decider = simulation.decider
+    simulation.command("play", {})
+    began = time.monotonic()
+    for _ in range(10):
+        simulation.step()
+    assert time.monotonic() - began < .5
+    assert simulation.state["sequence"] == 11
+    assert decider.pending["sequence"] == 1
+    assert simulation.state["decision"]["fallback"]
+    assert simulation.state["decision"]["choice"] == "hold"
+    simulation.command("pause", {})
+    assert decider.closed and simulation.decider is None
+    assert simulation.state["status"] == "paused"
+
+
+@pytest.mark.parametrize("case", [
+    (.1, 0, False, True), (3, 0, False, False), (.1, -1, False, False), (.1, 0, True, False)])
+def test_async_result_preserves_input_and_rejects_stale_revision(
+        simulation, monkeypatch, case):
+    age, revision, abstained, accepted = case
+    monkeypatch.setattr(runtime, "DecisionProcess", PendingDecider)
+    simulation.command("controller", {"controller": "decider"})
+    simulation.step()
+    request = dict(simulation.decider.pending)
+    request.update(timestamp=time.monotonic() - age,
+                   revision=simulation.control_revision + revision,
+                   choice="move", probabilities={"move": .9}, abstained=abstained,
+                   model="actual model", backend="pointer", latency_ms=90)
+    simulation.decider.event = {"status": "ready", "result": request}
+    simulation.step()
+    assert simulation.state["decision"]["fallback"] is not accepted
+    assert simulation.state["decision_result"]["sequence"] == 1
+    assert simulation.state["decision_result"]["observation"] == [2]
+    assert simulation.state["action"] == int(accepted)
+    assert simulation.state["transition"]["sequence"] == 3
