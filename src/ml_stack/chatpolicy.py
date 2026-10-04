@@ -16,7 +16,7 @@ from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
 from ml_stack.net.cli import command as security_command
 from ml_stack.sentinel.human import agent_may
 
-__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "HumanOnlyRail",
+__all__ = ["CONFIRM", "FENCED", "HUMAN_ONLY", "READ", "HumanOnlyRail", "catalog",
            "refusal_for", "review_view"]
 
 READ = frozenset({
@@ -75,7 +75,13 @@ HUMAN_ONLY: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
 
 _TOOL_NAME = re.compile(
     r"quarantin|releas|purg|approv|grant|mint|sentinel|security|baseline|honey|polic|guard|rail|"
-    r"unblock|role|permission|privilege|rule|always", re.I)
+    r"unblock|role|permission|privilege|rule|always|classif", re.I)
+
+
+def catalog() -> dict[str, str]:
+    """The destructive-action label of each tool the agent has built in: reads are ``safe``, every
+    tool that waits for a yes is ``reversible``."""
+    return {**dict.fromkeys(CONFIRM, "reversible"), **dict.fromkeys(READ, "safe")}
 
 
 def refusal_for(text: str) -> tuple[str, str] | None:

@@ -23,7 +23,8 @@ A plan step names a tool first and every value the call will carry
 the tool matches and each of its values appears in a step; the step then covers that one call.
 A call outside the plan asks. A run that has read text from outside (a model card, a log) asks
 for every acting call whatever the role, in one question that names why. A path outside
-ml-stack's state always asks.
+ml-stack's state always asks. A call the destructive-action classifier labels destructive or unsure asks in every role, and no
+Always rule can be saved for it ([destructive actions](destructive-actions.md)).
 
 ## Every question has three answers
 

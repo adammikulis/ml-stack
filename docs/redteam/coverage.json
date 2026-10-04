@@ -1,10 +1,10 @@
 {
- "surfaces": 564,
+ "surfaces": 566,
  "by_status": {
   "covered": 259,
   "partial": 202,
   "uncovered": 54,
-  "n/a": 49,
+  "n/a": 51,
   "unmapped": 0
  },
  "by_kind": {
@@ -33,7 +33,7 @@
    "covered": 9,
    "partial": 0,
    "uncovered": 0,
-   "n/a": 5,
+   "n/a": 7,
    "unmapped": 0
   },
   "egress": {
@@ -1293,6 +1293,26 @@
    "id": "desktop:fleet/settings.py:_has_battery",
    "kind": "desktop",
    "source": "fleet/settings.py:_has_battery",
+   "trust": "names of peers, sessions, files",
+   "attacker": "attacker text reaches a dialog, notification or shell command",
+   "status": "n/a",
+   "tests": [],
+   "note": "fixed scripts that read the battery, focus or login item; no text from outside"
+  },
+  {
+   "id": "desktop:guard/argscan.py:<module>",
+   "kind": "desktop",
+   "source": "guard/argscan.py:<module>",
+   "trust": "names of peers, sessions, files",
+   "attacker": "attacker text reaches a dialog, notification or shell command",
+   "status": "n/a",
+   "tests": [],
+   "note": "fixed scripts that read the battery, focus or login item; no text from outside"
+  },
+  {
+   "id": "desktop:guard/shellcmds.py:<module>",
+   "kind": "desktop",
+   "source": "guard/shellcmds.py:<module>",
    "trust": "names of peers, sessions, files",
    "attacker": "attacker text reaches a dialog, notification or shell command",
    "status": "n/a",

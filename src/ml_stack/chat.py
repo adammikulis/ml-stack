@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import os
 import re
 import secrets
 import sys
@@ -37,6 +38,8 @@ from ml_stack import (
 from ml_stack.agent import Compacted, Compacting, Compaction
 from ml_stack.command import Group, flag, option
 from ml_stack.guard import NOTICE, parse_call
+from ml_stack.guard.destructive_model import from_environment
+from ml_stack.guard.destructive_rail import DestructiveRail, default_roots
 from ml_stack.guard.native import screen as native_screen
 from ml_stack.guard.policy import Limits, ToolPolicyRail
 from ml_stack.guard.secrets import SecretRail
@@ -283,9 +286,14 @@ class Chat:
         self.gate = roles.RoleRail(self.role, self.names, self.plan, extension=self.extension,
                                    rules=self.rules)
         self.person.rules = self.rules
+        floors = {**dict.fromkeys(self.extension.reads, "safe"),
+                  **dict.fromkeys(self.extension.asks, "reversible")}
         mine = list(self.guard) if self.guard is not None else [
             policy.HumanOnlyRail(),
             ToolPolicyRail(limits=Limits(calls=self.role.max_calls)), self.gate,
+            DestructiveRail(roots=default_roots(), model=from_environment(os.environ),
+                            catalog=policy.catalog(), floors=floors,
+                            skip={*roles.OWN, *self.extension.asks_itself}),
             UntrustedRail(external=policy.FENCED), SecretRail(),
             TaintRail(registries={"models": do.on_disk_ids}), *self.extra]
         self.limits = next((r for r in mine if isinstance(r, ToolPolicyRail)), ToolPolicyRail())
