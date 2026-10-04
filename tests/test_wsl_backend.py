@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from ml_stack.fleet import wsl
+from ml_stack.platform import launch
 from ml_stack.sandbox import run
 from ml_stack.sandbox.bubblewrap import Bubblewrap
 from ml_stack.sandbox.policies import runtime_reads, system_env
@@ -33,6 +34,52 @@ def test_wsl_refuses_missing_confinement(monkeypatch):
         "kernel": "microsoft-standard-WSL2", "python": [3, 12], "bwrap": None}))
     with pytest.raises(wsl.WSLError, match="bubblewrap"):
         wsl.prepare()
+
+
+def test_owned_process_preserves_hostile_arguments_without_a_shell(tmp_path):
+    marker = tmp_path / "injected"
+    payload = f"; touch {marker}; $(touch {marker}) `touch {marker}`\n"
+    output = tmp_path / "arguments.json"
+    script = "import json,pathlib,sys; pathlib.Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))"
+    child = launch([sys.executable, "-c", script, str(output), payload])
+    assert child.wait(timeout=10) == 0
+    assert json.loads(output.read_text()) == [payload]
+    assert not marker.exists()
+
+
+def test_wsl_read_preserves_hostile_text_and_unicode(monkeypatch, tmp_path):
+    marker = tmp_path / "injected"
+    payload = f"$(touch {marker}); `touch {marker}` \u2603\n"
+    script = "import json,sys; print(json.dumps(sys.argv[1:], ensure_ascii=False))"
+    monkeypatch.setattr(wsl, "command", lambda *args: [sys.executable, "-c", script, *args])
+    assert json.loads(wsl._read("program", payload)) == ["program", payload]
+    assert not marker.exists()
+
+
+def test_wsl_installer_passes_a_hostile_source_path_as_one_argument(monkeypatch):
+    source = "/tmp/source path; $(touch injected) `touch injected`"
+    calls = []
+
+    def read(*args):
+        if args[0] == "python3":
+            return json.dumps({"kernel": "microsoft-standard-WSL2", "python": [3, 12],
+                               "bwrap": "/usr/bin/bwrap", "home": "/home/test"})
+        if args[0] == "wslpath":
+            return source
+        return ""
+
+    def install(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(wsl, "_read", read)
+    monkeypatch.setattr(wsl, "command", lambda *args: ["wsl.exe", "--exec", *args])
+    monkeypatch.setattr(wsl.subprocess, "run", install)
+    assert wsl.prepare().endswith("/bin/python")
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv[argv.index("-e") + 1].startswith(source + "[")
+    assert not kwargs.get("shell")
 
 
 def test_model_namespace_allows_granted_reads_and_denies_host_loopback(tmp_path):
@@ -93,7 +140,8 @@ with socket.socket(socket.AF_UNIX) as server:
             assert process.poll() is None, diagnostics.read_text()
             time.sleep(.02)
         assert Path(target).exists(), "relay child did not create its Unix socket: " + diagnostics.read_text()
-        payload = b"request" * 16000
+        payload = (b"GET /../../private HTTP/1.1\r\nOrigin: https://hostile.invalid\r\n"
+                   b"\r\n$(touch injected)\x00\xff") * 2000
         try:
             client = socket.create_connection(("127.0.0.1", port), timeout=3)
         except ConnectionRefusedError as exc:

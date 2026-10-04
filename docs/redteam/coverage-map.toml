@@ -373,6 +373,16 @@ status = "n/a"
 note = "fixed git argv over the checkout scripts/test is run in, in a throwaway index; no model, peer or file name reaches it"
 
 [[group]]
+match = ["spawn:platform.py:launch", "spawn:fleet/wsl.py:_read", "spawn:fleet/wsl.py:prepare"]
+status = "covered"
+tests = [
+  "tests/test_wsl_backend.py::test_owned_process_preserves_hostile_arguments_without_a_shell",
+  "tests/test_wsl_backend.py::test_wsl_read_preserves_hostile_text_and_unicode",
+  "tests/test_wsl_backend.py::test_wsl_installer_passes_a_hostile_source_path_as_one_argument",
+]
+note = "shell metacharacters remain argv values; the WSL installer source path is one pip argument"
+
+[[group]]
 match = ["spawn:*"]
 status = "partial"
 tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]
@@ -400,6 +410,13 @@ tests = [
   "tests/test_redteam_iq_override.py::test_a_lease_ask_through_the_broker_is_refused_whatever_the_options_say",
 ]
 note = "the lease broker on loopback: its wire is exercised by the guard tests and by hostile start and lease frames that try to lower the IQ mode; other hostile frames are not sent"
+
+[[group]]
+match = ["listener:serve/socket_relay.py:supervise"]
+status = "covered"
+tests = ["tests/test_wsl_backend.py::test_relay_preserves_stream_and_releases_port_on_child_exit",
+         "tests/test_serverkeys.py"]
+note = "loopback relays opaque hostile HTTP and binary bytes through the private Unix socket; the managed model command includes its API key"
 
 [[group]]
 match = ["listener:*"]
