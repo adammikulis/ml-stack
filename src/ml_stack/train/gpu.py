@@ -25,7 +25,7 @@ def hold(purpose: str, *, wait_s: float = 0.0, wire: Any = broker_wire) -> Itera
         busy = [s for s in wire.status(start=False)["servers"] if s["holders"] or s["loading"]]
     except (BrokerError, OSError):
         busy = []
-    if busy:
+    if busy and wait_s <= 0:
         who = "; ".join(f"{s['model']} on port {s['port']} held by "
                         f"{[h['label'] or h['pid'] for h in s['holders']]}" for s in busy)
         raise DecideError(f"the GPU is in use: {who}. Release it, or wait until it is free")

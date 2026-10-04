@@ -204,14 +204,18 @@ maximum input age are under **Advanced options**. The Live sessions selector rea
 to an active worker after a page reload.
 
 Pause, reset, single-step, and speed controls act on the physics worker. Decision loading
-and inference run in a separate CPU process with one outstanding request. Native physics
+and inference run in a separate process with one outstanding request. Auto device selects an
+available accelerator and waits for the maintained broker’s exclusive GPU claim before
+loading weights; held serving models and training jobs are never displaced. Advanced
+options allow CPU inference explicitly. Queued, loading and actual device status are visible. Native physics
 continues while loading or waiting, using explicit straight braking for cars, hold/noop
 for drones and warehouse robots, and the current signal phase for traffic. An abstaining,
 stale or failed model never becomes a silently substituted native policy. Readiness and
 the reason for fallback remain visible. Pause cancels the inference process; resume loads
-it again. Reset, actor selection and controller changes invalidate previous results.
+it again. Pause also cancels camera perception and releases its serving lease; a paused
+world retains neither model resource. Reset, actor selection and controller changes invalidate previous results.
 
-The default model is `StrandsAgents/strands-decider-2B-hobson-v19` on the CPU. Its files
+The default model is `StrandsAgents/strands-decider-2B-hobson-v19` with auto device selection. Its files
 must already be available through the existing decision-model installation workflow.
 Loading verifies metadata and hashes and refuses pickled model files. The default maximum
 decision input age is one second; `decision_max_age_s` accepts one through thirty seconds.
@@ -220,8 +224,9 @@ result is explicitly reported stale. See [decision models](decision-models.md).
 
 Drone camera perception is optional and has a separate **Vision model** dropdown. It lists
 all locally discovered vision models, with SmolVLM 256M as the speed default. Installed
-GGUF models also require their vision projector. FastVLM MLX/CoreML downloads are labelled
-unsupported until that runtime is implemented. The asynchronous vision child acquires a
+GGUF models also require their vision projector. The official Apple FastVLM safetensors
+bundle and MLX/CoreML formats are visible with runtime support marked unavailable until
+their native runtime is implemented. The asynchronous vision child acquires a
 normal serving-broker lease; it queues behind existing model workloads and never forces
 GPU availability. It submits only actual RGB and synthetic visible-surface temperature
 camera pixels, with an explicit synthetic-thermal disclaimer. This is not a thermal-trained
@@ -242,7 +247,9 @@ sequence, actor, revision, probability scores and latency in `decision_result`, 
 from the current transition.
 Decision models receive named specialist state alongside the native numeric observation;
 the submitted model input appears in `decision_result.model_state`; raw source state stays in
-`decision_result.state`. Camera pixels are replaced by capture metadata for the text-only
+`decision_result.state`. Car inputs use native lane geometry, navigation, stop-rule state
+and indexed obstacle ranges, with unobstructed lidar rays represented by range and count.
+The raw sensor arrays remain in the recorded evidence. Camera pixels are replaced by capture metadata for the text-only
 pointer model, while the vision model receives the image pixels. PPO receives the numeric observation.
 Camera previews remain in the live stream and are omitted from saved trajectories by
 default. Set `record_frames` to `true` to save separate PNG files with frame references.

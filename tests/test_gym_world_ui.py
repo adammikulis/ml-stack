@@ -17,6 +17,8 @@ pytestmark = pytest.mark.slow
 def gym_page(joined, open_page):
     page, errors = open_page(joined, cookie=joined.cookie, path='/ui/#gym')
     page.wait_for_function("document.querySelector('gym-view')?.catalogue.length > 0")
+    page.get_by_label('Environment', exact=True).select_option('car')
+    page.get_by_label('Simulation mode', exact=True).select_option('world')
     return page, errors
 
 
@@ -42,6 +44,26 @@ def test_world_modes_manual_validation_and_online_checkpoint(gym_page):
     assert not page.get_by_label('Policy learning', exact=True).is_visible()
     assert page.evaluate("document.querySelector('gym-view').worldOptions.value().learning_mode") == 'frozen'
     assert not errors
+
+
+def test_drone_online_learning_is_explicit_ppo_and_freeze_keeps_session(gym_page):
+    page, errors = gym_page
+    page.get_by_label('Environment', exact=True).select_option('drone')
+    page.get_by_label('Controller', exact=True).select_option('native-patrol')
+    assert page.get_by_label('Policy learning', exact=True).input_value() == 'frozen'
+    assert page.locator('gym-world-options option[value="online"]').is_disabled()
+    page.get_by_label('Controller', exact=True).select_option('ppo')
+    page.get_by_label('Policy learning', exact=True).select_option('online')
+    result = page.evaluate("""async () => {
+      const g=document.querySelector('gym-view'),calls=[];g.session='persistent-drone';
+      g.control=async(command,payload)=>calls.push({command,payload});
+      const online=g.worldOptions.value();g.worldOptions.learning.value='frozen';
+      g.checkpoint.value='/tmp/drone-policy.zip';await g.worldOptions.applyLearning();
+      const session=g.session;g.session=null;return {online,calls,session};
+    }""")
+    assert result['online']['learning_mode'] == 'online'
+    assert result['calls'] == [{'command': 'learning', 'payload': {'mode': 'frozen'}}]
+    assert result['session'] == 'persistent-drone' and not errors
 
 
 def test_selected_actor_has_own_telemetry_and_explicit_control_handoff(gym_page):
