@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -98,6 +99,42 @@ def _alive(path: Path) -> bool:
         os.close(fd)
 
 
+def _owns_inode(fd: int, path: Path) -> bool:
+    try:
+        held, published = os.fstat(fd), path.stat()
+        return (held.st_dev, held.st_ino) == (published.st_dev, published.st_ino)
+    except OSError:
+        return False
+
+
+def _valid_record(data: object) -> bool:
+    if not isinstance(data, dict):
+        return False
+    numbers = ("pid", "want", "minimum", "granted")
+    if any(type(data.get(key)) is not int for key in numbers):
+        return False
+    return (data["pid"] > 0 and data["want"] >= 0 and data["minimum"] > 0
+            and data["granted"] >= 0 and (not data["want"] or max(data["minimum"], data["granted"]) <= data["want"])
+            and isinstance(data.get("label"), str) and isinstance(data.get("token"), str)
+            and type(data.get("backfills", 0)) is int and 0 <= data.get("backfills", 0) <= 2)
+
+
+def _publish(path: Path, record: dict) -> int:
+    """Publish a complete record whose inode already holds its liveness flock."""
+    fd, name = tempfile.mkstemp(dir=path.parent, suffix=".pending")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        with os.fdopen(fd, "w", closefd=False) as stream:
+            json.dump(record, stream)
+        Path(name).replace(path)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
 def _read(d: Path, mine: Path | None = None) -> list[Slot]:
     out: list[Slot] = []
     for p in sorted(d.glob("*.slot")):
@@ -106,7 +143,9 @@ def _read(d: Path, mine: Path | None = None) -> list[Slot]:
                 p.unlink()
             continue
         try:
-            out.append(Slot(p, json.loads(p.read_text() or "{}")))
+            data = json.loads(p.read_text())
+            if _valid_record(data):
+                out.append(Slot(p, data))
         except (OSError, ValueError):
             continue
     return out
@@ -178,6 +217,25 @@ def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int, int]) -> int
     return min(want, cap - used)
 
 
+def _restore_inode(path: Path, record: dict, fd: int) -> int:
+    if _owns_inode(fd, path):
+        return fd
+    replacement = _publish(path, record)
+    os.close(fd)
+    return replacement
+
+
+def _own_records(directory: Path, path: Path, record: dict) -> list[Slot]:
+    slots = _read(directory, mine=path)
+    owned = next((slot for slot in slots if slot.path == path), None)
+    if owned is None:
+        path.write_text(json.dumps(record))
+        return _read(directory, mine=path)
+    if owned.data["token"] != record["token"] or owned.granted != record["granted"]:
+        raise RuntimeError("testslots: lease record ownership changed")
+    return slots
+
+
 @contextlib.contextmanager
 def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True)
           ) -> Iterator[Lease]:
@@ -190,20 +248,21 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
     if minimum > (int(os.environ["DEV_TEST_BUDGET"]) if os.environ.get("DEV_TEST_BUDGET", "").isdigit() else base_budget()):
         raise ValueError("testslots: minimum exceeds the configured CPU budget")
     d = slots_dir()
-    path = d / f"{time.time_ns()}-{os.getpid()}.slot"
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    fcntl.flock(fd, fcntl.LOCK_EX)                       # held until we exit: this is the liveness signal
+    path = d / f"{time.time_ns()}-{os.getpid()}-{secrets.token_hex(8)}.slot"
     me = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "version": 1, "token": secrets.token_hex(24)}
-    path.write_text(json.dumps(me))
-    t0 = time.time()
+    t0 = time.monotonic()
     deadline = t0 + float(os.environ.get("DEV_TEST_WAIT_S", "3600"))
-    last_note = 0.0
+    with _mutex(d):
+        fd = _publish(path, me)
+    last_note = t0
+    last_state = None
     try:
         while True:
             CHECK_CANCELLED.get()()
             cap = budget()
             with _mutex(d):
-                slots = _read(d, mine=path)
+                fd = _restore_inode(path, me, fd)
+                slots = _own_records(d, path, me)
                 waiting = [s for s in slots if s.granted == 0]
                 used = sum(s.granted for s in slots)
                 granted = _grant(Slot(path, me), waiting, (cap, used, sum(slot.granted > 0 for slot in slots)))
@@ -212,20 +271,23 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                     path.write_text(json.dumps(me))
                     break
                 ahead = [s.data.get("label") for s in waiting if s.path != path and s.path < path]
-            if time.time() > deadline:
-                raise TimeoutError(f"testslots: waited {time.time() - t0:.0f}s for {minimum} of {cap} workers "
+            now = time.monotonic()
+            if now > deadline:
+                raise TimeoutError(f"testslots: waited {now - t0:.0f}s for {minimum} of {cap} workers "
                                    f"({used} in use); see `python scripts/testslots.py status`")
-            if time.time() - last_note > 20:
-                last_note = time.time()
+            state = (minimum, want, cap, used, tuple(ahead))
+            if now - last_note >= 20 or (state != last_state and now - last_note >= 1):
+                last_note, last_state = now, state
                 say(f"testslots: waiting for {minimum}-{want or 'auto'} workers ({used}/{cap} in use, "
                     f"{len(ahead)} run(s) ahead: {', '.join(map(str, ahead)) or 'none'})")
             time.sleep(0.01)
         with _lease_environment(path, me["token"]):
-            yield Lease(granted, time.time() - t0)
+            yield Lease(granted, time.monotonic() - t0)
     finally:
-        with contextlib.suppress(OSError):
-            path.unlink()
-        os.close(fd)
+        with _mutex(d):
+            with contextlib.suppress(OSError):
+                path.unlink()
+            os.close(fd)
 
 
 def _lane_count() -> int:
