@@ -12,7 +12,7 @@
 
 [ratchet]
 uncovered = 54
-partial = 201
+partial = 200
 
 # -- coding harnesses on a local model -----------------------------------------------------
 [[group]]
