@@ -15,7 +15,7 @@ from typing import Any
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.sentinel.human import HumanRequired
-from ml_stack.workspace import guide, limits, onboard, project, tokens
+from ml_stack.workspace import boardroute, guide, limits, onboard, project, tokens
 from ml_stack.workspace.boards import MODES, STYPES
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.chain import ChainBroken
@@ -283,14 +283,13 @@ def _ttl(text: str) -> float:
 
 
 def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
-    from ml_stack.workspace import boardroute
-
-    server = boardroute.serve(ws, args.port)
-    say(f"the Board, read-only, for the person: http://127.0.0.1:{server.server_address[1]}/")
+    listener = boardroute.serve(ws, args.port)
+    say(f"the Board, read-only, for the person: http://127.0.0.1:{listener.port}/")
+    listener.start()
     try:
-        server.serve_forever()
+        threading.Event().wait()
     except KeyboardInterrupt:
-        server.server_close()
+        listener.stop()
     return 0
 
 

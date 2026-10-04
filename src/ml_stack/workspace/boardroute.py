@@ -9,26 +9,27 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from http.server import BaseHTTPRequestHandler
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from ml_stack import activity
+from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
 from ml_stack.graph.guard import host_ok, refusal
-from ml_stack.http import Server
 from ml_stack.ui import assets
 from ml_stack.workspace import plain, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["MAX_BODY", "PREFIX", "respond", "serve"]
+__all__ = ["MAX_BODY", "PREFIX", "Request", "respond", "serve"]
 
 PREFIX = "/board/"
 MAX_BODY = 512 * 1024
 SAFE = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
         "Content-Security-Policy": "default-src 'none'", "Referrer-Policy": "no-referrer"}
 Reply = tuple[int, dict[str, str], bytes]
+
 
 
 def _json(status: int, body: Any) -> Reply:
@@ -51,8 +52,9 @@ def _board(query: Mapping[str, list[str]]) -> str:
 
 
 def _checked(method: str, headers: Mapping[str, str], port: int) -> Reply | None:
-    if method not in ("GET", "HEAD"):
-        return _json(405, {"error": "this route only reads"})[0], {"Allow": "GET, HEAD"}, b""
+    if method != "GET":
+        _, headers, blob = _json(405, {"error": "this route only reads"})
+        return 405, {**headers, "Allow": "GET"}, blob
     found = refusal(method, dict(headers), port)
     if found:
         return _json(found[0], {"error": found[1]})
@@ -66,16 +68,26 @@ def _checked(method: str, headers: Mapping[str, str], port: int) -> Reply | None
     return None
 
 
-def respond(ws: Workspace, method: str, target: str, headers: Mapping[str, str], port: int,
-            *, signed_in: bool = True) -> Reply:
-    """The answer to one request. ``headers`` is keyed by lower-case name; ``signed_in`` is
-    the host page's own check that the person is the one asking."""
-    refused = _checked(method, headers, port)
+@dataclass(frozen=True, slots=True)
+class Request:
+    """One request: its method, target, lower-case-keyed headers, the port it came in on, and
+    whether the host page has checked that the person is the one asking."""
+
+    method: str
+    target: str
+    headers: Mapping[str, str] = field(default_factory=dict)
+    port: int = 0
+    signed_in: bool = True
+
+
+def respond(ws: Workspace, req: Request) -> Reply:
+    """The answer to one request."""
+    refused = _checked(req.method, req.headers, req.port)
     if refused:
         return refused
-    if not signed_in:
+    if not req.signed_in:
         return _json(401, {"error": "sign in first"})
-    parts = urlsplit(target)
+    parts = urlsplit(req.target)
     if not parts.path.startswith(PREFIX):
         return _json(404, {"error": "no such route"})
     query, api = parse_qs(parts.query, max_num_fields=8), ws.board
@@ -113,47 +125,38 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
     raise ValueError("no such route")
 
 
-class _Handler(BaseHTTPRequestHandler):
-    workspace: Workspace
-    page: bytes = b""
+def _page(req: Request) -> Reply:
+    bad = _checked(req.method, req.headers, req.port)
+    if bad:
+        return bad
+    path = urlsplit(req.target).path
+    if path in ("/", "/board"):
+        return 200, {**SAFE, "Content-Type": "text/html; charset=utf-8",
+                     "Content-Security-Policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; "
+                                                "style-src 'self' 'unsafe-inline'; connect-src 'self'"}, PAGE.encode()
+    name = path.removeprefix("/ui/ml-ui/")
+    found = assets().get(name) if path.startswith("/ui/ml-ui/") else None
+    if found is None:
+        return 404, SAFE, b""
+    kind = "text/css" if name.endswith(".css") else "text/javascript" if name.endswith(".js") \
+        else "application/json"
+    return 200, {**SAFE, "Content-Type": f"{kind}; charset=utf-8"}, found.read_bytes()
 
-    def _send(self, status: int, headers: Mapping[str, str], body: bytes) -> None:
-        self.send_response(status)
-        for k, v in headers.items():
-            self.send_header(k, v)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
 
-    def _handle(self) -> None:
-        port = int(self.server.server_address[1])
-        lowered = {k.lower(): v for k, v in self.headers.items()}
-        path = urlsplit(self.path).path
-        if self.command in ("GET", "HEAD") and not path.startswith(PREFIX):
-            bad = _checked(self.command, lowered, port)
-            if bad:
-                return self._send(*bad[:3])
-            if path in ("/", "/board"):
-                return self._send(200, {**SAFE, "Content-Type": "text/html; charset=utf-8",
-                                        "Content-Security-Policy":
-                                        "default-src 'none'; script-src 'self' 'unsafe-inline'; "
-                                        "style-src 'self' 'unsafe-inline'; connect-src 'self'"},
-                                  self.page)
-            name = path.removeprefix("/ui/ml-ui/")
-            found = assets().get(name) if path.startswith("/ui/ml-ui/") else None
-            if found is not None:
-                kind = "text/css" if name.endswith(".css") else "text/javascript" \
-                    if name.endswith(".js") else "application/json"
-                return self._send(200, {**SAFE, "Content-Type": f"{kind}; charset=utf-8"},
-                                  found.read_bytes())
-            return self._send(404, SAFE, b"")
-        self._send(*respond(self.workspace, self.command, self.path, lowered, port))
+class _Route:
+    """The dispatch function of a listener: the Board route, the page and the assets."""
 
-    do_GET = do_HEAD = do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _handle
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+        self.port = 0
 
-    def log_message(self, *args: Any) -> None:
-        return
+    def __call__(self, call: Call) -> WebReply:
+        req = Request(call.method, call.path, {k.lower(): v for k, v in call.headers.items()},
+                      self.port)
+        board = urlsplit(call.path).path.startswith(PREFIX)
+        status, headers, body = respond(self.ws, req) if board else _page(req)
+        kind = headers.pop("Content-Type", "application/octet-stream")
+        return WebReply(status, body, headers, kind)
 
 
 PAGE = """<!doctype html><meta charset="utf-8"><title>Board</title>
@@ -163,8 +166,10 @@ PAGE = """<!doctype html><meta charset="utf-8"><title>Board</title>
 <script type="module" src="/ui/ml-ui/ml-ui.js"></script>"""
 
 
-def serve(ws: Workspace, port: int = 0) -> Server:
-    """A loopback server for the Board page and its route; the caller runs ``serve_forever``."""
-    handler = type("BoardHandler", (_Handler,), {"workspace": ws, "page": PAGE.encode()})
-    return Server(("127.0.0.1", port), handler)
-
+def serve(ws: Workspace, port: int = 0) -> Listener:
+    """A loopback listener for the Board page and its route; the caller calls ``start`` and
+    ``stop``."""
+    route = _Route(ws)
+    listener = Listener(route, ("127.0.0.1", port))
+    route.port = listener.port
+    return listener

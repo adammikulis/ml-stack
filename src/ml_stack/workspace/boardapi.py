@@ -7,8 +7,8 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from ml_stack.workspace import plain
-from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.boards import GENERAL, MODES, STYPES, Boards
+from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
 from ml_stack.workspace.screen import NEUTRAL, Refused, fence
 

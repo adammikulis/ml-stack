@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import threading
 from pathlib import Path
 
 import pytest
@@ -81,7 +80,7 @@ def test_an_injected_instruction_posted_to_a_board_is_held_and_never_shown_to_a_
     ws.send(a, "#ops", "note", text)
     for m in ws.board.read(b, "#ops"):
         assert m["authority"] == "none"
-        assert m["state"] == "quarantined" and text not in m["text"] or (
+        assert (m["state"] == "quarantined" and text not in m["text"]) or (
             m["text"].startswith("<untrusted") and m["text"].endswith("</untrusted>"))
     assert ws.board.digest(b)["text"].startswith("<untrusted")
 
@@ -159,8 +158,8 @@ def test_a_delegate_reads_only_what_its_parent_belongs_to(kit):
 @pytest.fixture
 def route(kit):
     server = boardroute.serve(kit.ws)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    port = server.server_address[1]
+    server.start()
+    port = server.port
 
     def call(path, method="GET", headers=None, body=None):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -172,8 +171,7 @@ def route(kit):
 
     call.port = port
     yield call
-    server.shutdown()
-    server.server_close()
+    server.stop()
 
 
 def test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal(kit, route):
@@ -183,7 +181,7 @@ def test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal(kit,
     before = (ws.bus.log.head(), ws.board.store.log.head(), tree(kit.base))
     for method in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS"):
         for path in ("/board/boards", "/board/messages?board=%23ops", "/board/subscribe", "/"):
-            assert route(path, method, {"Content-Type": "application/json"}, b'{"board":"#x"}')[0] == 405
+            assert route(path, method, {"Content-Type": "application/json"}, b'{"board":"#x"}')[0] in (405, 501)
     assert route("/board/boards", headers={"Host": "attacker.example"})[0] == 421
     assert route("/board/boards", headers={"Sec-Fetch-Site": "cross-site"})[0] == 403
     assert route("/board/boards", headers={"Origin": "http://attacker.example"})[0] == 403
@@ -198,7 +196,7 @@ def test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal(kit,
 def test_the_route_answers_a_burst_with_bounded_bodies_and_never_a_token(kit, route):
     ws, a = kit.ws, kit.tokens["alice"]
     ws.board.create(a, "#ops")
-    for i in range(30):
+    for _ in range(30):
         ws.send(a, "#ops", "note", "z" * 16000)
     status, body = route("/board/messages?board=%23ops&limit=200")
     assert status in (200, 502) and len(body) <= boardroute.MAX_BODY

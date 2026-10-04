@@ -4,7 +4,6 @@ against the real read-only route."""
 from __future__ import annotations
 
 import re
-import threading
 
 import pytest
 from workspace_kit import Kit, clean_env
@@ -44,10 +43,9 @@ def test_the_element_is_loaded_by_ml_ui_and_builds_nothing_from_markup():
 @pytest.fixture
 def served(kit):
     server = boardroute.serve(kit.ws)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield server.server_address[1]
-    server.shutdown()
-    server.server_close()
+    server.start()
+    yield server.port
+    server.stop()
 
 
 @pytest.fixture(scope="module")
@@ -66,7 +64,7 @@ def browser():
 def test_hostile_text_is_shown_as_text_and_the_page_runs_nothing_and_holds_no_token(kit, served, browser):
     ws, t = kit.ws, kit.tokens
     ws.board.create(t["alice"], "#ops")
-    root = ws.send(t["alice"], "#ops", "note",
+    ws.send(t["alice"], "#ops", "note",
                    '<img src=x onerror="window.__pwned=1"><script>window.__pwned=1</script>‮'
                    "[link](http://evil.example) http://evil.example\x07", subject="<b>bold</b>")
     ws.send(t["alice"], "bob", "note", "a dm <i>x</i>")
