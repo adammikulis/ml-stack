@@ -26,6 +26,20 @@ tests = [
 ]
 note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
 
+# -- the Board ------------------------------------------------------------------------------
+[[group]]
+match = ["egress:workspace/boardroute.py:*", "listener:workspace/cli.py:_board_serve",
+         "parser:workspace/boardroute.py", "human:workspace/boardapi.py:*",
+         "human:workspace/service.py:Workspace.mint"]
+status = "covered"
+tests = [
+  "tests/test_redteam_board.py::test_the_route_never_writes_and_refuses_other_hosts_sites_and_traversal",
+  "tests/test_redteam_board.py::test_an_agent_cannot_read_another_board_or_pair_through_any_command",
+  "tests/test_redteam_board.py::test_boards_and_subscriptions_cannot_be_made_without_limit",
+  "tests/test_workspace_board.py::test_the_route_reads_only_and_checks_host_origin_and_fetch_site",
+]
+note = "the read-only loopback route, board and conversation privacy, board and subscription caps, a person's board membership"
+
 # -- HTTP routes and handlers --------------------------------------------------------------
 [[group]]
 match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
