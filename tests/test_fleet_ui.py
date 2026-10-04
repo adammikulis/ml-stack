@@ -491,6 +491,14 @@ class TestThrottle:
         t.failed("1.2.3.4")
         t.succeeded("1.2.3.4")
         assert t.blocked_for("1.2.3.4") == 0
+        assert t.acquire()
+
+    def test_one_derivation_at_a_time(self):
+        """scrypt is ~32MB a call on an unauthenticated route; a sign-in waits for the one running."""
+        t = Throttle(slots=1, wait_s=0.05)
+        assert t.acquire()
+        assert not t.acquire(), "a second derivation ran concurrently"
+        t.release()
 
 
 class TestPreferences:

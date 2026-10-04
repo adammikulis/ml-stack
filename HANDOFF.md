@@ -1090,8 +1090,8 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
 - [ ] **File and model downloads and the `/infer` stream are signed and not sealed by the
   application.** They travel inside the daemon's TLS; with `ML_STACK_FLEET_TLS=off` they are
   readable on the segment. Sealing them needs a framed stream of sealed chunks.
-- [ ] **A machine that joined from a recovery file holds no passphrase**, so it cannot take other
-  machines in by passphrase and the web interface cannot sign it in by passphrase.
+- [ ] **A machine that joined from a recovery file holds no hash of the passphrase**, so it cannot
+  take other machines in by passphrase and the web interface cannot sign it in by passphrase.
 - [ ] **Two machines that start a new cluster of one name at the same moment each make a key.**
   The join handshake finds a cluster that exists; nothing makes the second wait for the first.
 - [ ] **`web.py`, `scrape/` and `ingest/run.py` still fetch through `http.check` and urllib.**

@@ -52,9 +52,11 @@ fingerprint as an identity, confirm to each other, and the daemon sends the key 
 exchange's key. An eavesdropper or an impersonator gets at most one online guess per attempt. A
 daemon counts every attempt per source address: five in ten minutes without a success locks that
 address out for ten minutes, thirty from all addresses lock the handshake for ten minutes, and
-each attempt is logged with its source and outcome. The passphrase is kept in the operating
-system's keystore on each machine that joined with it, and only a machine that holds it takes
-others in.
+each attempt is logged with its source and outcome. Each machine that joined with the
+passphrase keeps a scrypt hash of it beside the key (`cluster.json`, mode 600), which is the
+exchange's password; only a machine that holds it takes others in or checks a sign-in, and anyone
+who can read that file already holds the key. The passphrase itself is kept in the operating
+system's keystore.
 
 ## Who can do what
 

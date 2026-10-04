@@ -158,7 +158,10 @@ The first machine to join a cluster makes its key: 256 random bits that no passp
 A machine that joins later runs a password-authenticated key exchange (SPAKE2) with a daemon
 already in the cluster: both sides prove they know the passphrase, the passphrase is never
 sent and a listener cannot test a guess against anything it captures, and the daemon then sends
-the cluster key sealed under the key the exchange made. The exchange binds the daemon's
+the cluster key sealed under the key the exchange made. The exchange's password is a scrypt hash
+of the passphrase under the cluster's name; each machine that joined with the passphrase keeps
+that hash in `cluster.json` beside the key (mode 600), so a daemon started at logon takes
+machines in and checks a sign-in without reading the keystore. The exchange binds the daemon's
 certificate fingerprint, so a machine impersonating it is refused. A daemon counts every attempt
 against the address it came from; five attempts in ten minutes without a success lock that
 address out for ten minutes, and every attempt is logged with its source and outcome. A
@@ -176,8 +179,8 @@ removes the stored passphrase with the cluster.
 `ml-stack-fleet recovery export FILE` writes the cluster's group and key to a mode 600 file,
 and `ml-stack-fleet recovery import FILE` joins a machine from it. The file is a replacement for
 the passphrase when joining; it does not reveal the passphrase. Anyone holding it can run commands
-on every machine in the cluster. A machine that joined from a file holds no passphrase, so it
-cannot take other machines in or sign the web interface in by passphrase.
+on every machine in the cluster. A machine that joined from a file holds no hash of the passphrase,
+so it cannot take other machines in or sign the web interface in by passphrase.
 
 With neither the passphrase nor a recovery file, run `ml-stack-fleet leave` on every machine,
 then join each with a new passphrase.

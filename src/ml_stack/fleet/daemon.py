@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, keystore, macauth, sentinel
+from ml_stack import home, macauth, sentinel
 from ml_stack.files import write_text
 from ml_stack.hub import default_roots
 from ml_stack.log import say, warn
@@ -29,7 +29,7 @@ from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
 
-from . import autostart, recovery, tls, updates as updating
+from . import autostart, tls, updates as updating
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
@@ -203,12 +203,6 @@ def serve_forever(root: Path | str | None = None,
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
 
-    def passphrase_of(group: str) -> str | None:
-        try:
-            return recovery.recall(group, cluster_key_path)
-        except keystore.KeystoreError:
-            return None
-
     def fingerprint() -> str:
         offered = served_cert()
         return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
@@ -221,7 +215,7 @@ def serve_forever(root: Path | str | None = None,
         cluster_key_path=cluster_key_path, tokens=every_token,
         bench=bench_host[0], hosting=hosting,
         decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan,
-        joining=Joining(lambda: memberships(cluster_key_path), passphrase_of, fingerprint)))
+        joining=Joining(lambda: memberships(cluster_key_path), fingerprint)))
     listening = [bind_address(host, lan=lan or setup_from_lan, joined=key is not None)]
     widen = threading.Event()
     cert: list[tls.Identity | None] = [None]
