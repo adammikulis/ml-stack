@@ -23,7 +23,7 @@ def test_catalogue_probe_executes_hostile_interpreter_path_without_shell(tmp_pat
     monkeypatch.setenv("ML_STACK_GYM_PYTHON", str(executable))
     monkeypatch.setenv("PYTHONPATH", str(source))
     monkeypatch.chdir(tmp_path)
-    assert {row["id"] for row in catalogue()} == {"car", "warehouse", "traffic", "traffic-driving"}
+    assert {row["id"] for row in catalogue()} == {"car", "warehouse", "traffic", "traffic-driving", "drone"}
     assert not (tmp_path / "catalog-marker").exists()
 
 

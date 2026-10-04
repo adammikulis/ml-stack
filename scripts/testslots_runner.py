@@ -5,6 +5,7 @@ import contextlib
 import os
 import subprocess
 import time
+from pathlib import Path
 
 import testslots
 import testslots_rpc
@@ -28,7 +29,7 @@ def run_pytest(command: list[str], want: int = 0, label: str = "pytest", env: di
             for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
                 environment.setdefault(name, "1")
             command = [part.replace("{workers}", str(workers)) for part in command]
-            process = subprocess.Popen(command, env=environment)
+            process = subprocess.Popen(command, env=environment, cwd=Path(__file__).resolve().parent.parent)
             deadline = time.monotonic() + float(environment.get("DEV_TEST_WAIT_S", "3600"))
             while not admission.ready.wait(.01):
                 if process.poll() is not None:
