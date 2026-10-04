@@ -280,6 +280,8 @@ class Simulation:
             if self.controller == "ppo" and self.learning_mode == "online":
                 raise ValueError("Switch to frozen mode before single stepping PPO")
             self.step()
+        else:
+            raise ValueError(payload.get("error", f"Unknown simulation command: {command}"))
 
 
 def worker(settings, commands, updates):
