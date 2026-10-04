@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -13,11 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.person import AGENT_MARKERS, HumanRequired, require_person
 
 __all__ = ["AGENT_MARKERS", "GRANT_TTL_S", "HumanGrant", "HumanRequired", "agent_may", "mint", "mint_clicked", "mint_pressed", "protect", "require_person"]
-
-AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
-"""Environment variables whose presence means an agent started this process."""
 
 GRANT_TTL_S = 120.0
 _MINT = object()
@@ -30,10 +27,6 @@ _FORBIDDEN = (
 _PROTECTED: set[str] = set()
 _STATE_DIR = re.compile(r"ml-stack/+sentinel")
 _VERBS = re.compile(r"\b(?:release|purge|unquarantine|disable|mode|baseline)\b")
-
-
-class HumanRequired(PermissionError):
-    """An action that only a person at a terminal may take was asked for by something else."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,20 +47,6 @@ class HumanGrant:
             raise HumanRequired(f"this grant is for {self.action} {self.subject}")
         if (time.time() if now is None else now) > self.expires:
             raise HumanRequired("the grant expired")
-
-
-def require_person(action: str, terminal: tuple[bool, bool] | None = None,
-                   env: Mapping[str, str] | None = None) -> None:
-    """Raise `HumanRequired` unless stdin and stdout are terminals and no agent marker is
-    set. Every way of minting a grant goes through this first."""
-    env = os.environ if env is None else env
-    tty_in, tty_out = terminal or (sys.stdin.isatty(), sys.stdout.isatty())
-    marked = [name for name in AGENT_MARKERS if env.get(name)]
-    if marked:
-        raise HumanRequired(f"{action} is for a person; this process was started by an agent "
-                            f"({marked[0]} is set)")
-    if not (tty_in and tty_out):
-        raise HumanRequired(f"{action} needs a terminal on stdin and stdout")
 
 
 def mint(action: str, subject: str, *, typed: Callable[[str], str] = input,

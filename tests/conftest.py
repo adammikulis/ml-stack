@@ -534,6 +534,20 @@ def _no_real_keychain(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fake_keyring(monkeypatch):
+    """The keyring is a dictionary unless a test installs its own: code that keeps an encrypted
+    store (the request inbox, the activity log) never needs the person's keystore."""
+    import keyring
+
+    from tests.memory_keys import MemoryRing
+
+    before = keyring.get_keyring()
+    keyring.set_keyring(MemoryRing())
+    yield
+    keyring.set_keyring(before)
+
+
+@pytest.fixture(autouse=True)
 def _activity_log_is_quiet(request, monkeypatch):
     """Only the activity tests write the activity log; everywhere else `record` does nothing, so
     a test about something else never asks the keystore for the log's key."""
