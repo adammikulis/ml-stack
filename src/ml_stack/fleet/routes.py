@@ -189,7 +189,7 @@ class PageRoutes:
 def found_clusters(routes: Any) -> bool:
     """Answer with the clusters on this machine and those the network offers."""
     ui = routes.ui
-    found = known_clusters(ui.cluster_key_path, self_names=(ui.name,))
+    found = known_clusters(ui.cluster_key_path, port=ui.discovery_port, self_names=(ui.name,))
     routes.send(200, {"found": [c.public() for c in found]})
     return True
 
