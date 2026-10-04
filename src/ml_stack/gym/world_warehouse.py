@@ -1,15 +1,17 @@
 """Persistent RWARE robots and orders with separate learning task boundaries."""
 
-from importlib import import_module
-
-import gymnasium as gym
-
+from ml_stack.gym.episode_environment import make_episode
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.worlds import configure_world
 
 
 def make_warehouse_world(config, seed=0):
     """Construct native RWARE once and keep robots and orders across task resets."""
+    import gymnasium as gym
+
+    class WarehouseWorld(WarehouseWorldState, gym.Wrapper):
+        pass
+
     cfg = dict(config or {})
     task_horizon = int(cfg.pop('task_horizon', cfg.get('max_steps', 500)))
     if task_horizon < 1:
@@ -19,11 +21,11 @@ def make_warehouse_world(config, seed=0):
     initial_seed = int(cfg.get('world', {}).get('seed', seed))
     cfg, provenance = configure_world('warehouse', cfg, initial_seed)
     cfg.update(max_steps=None, max_inactivity_steps=None)
-    native = import_module('ml_stack.gym.adapters').make_environment('warehouse', cfg)
+    native = make_episode('warehouse', cfg)
     return WarehouseWorld(native, provenance, initial_seed, task_horizon)
 
 
-class WarehouseWorld(gym.Wrapper):
+class WarehouseWorldState:
     def __init__(self, native, provenance, seed, task_horizon):
         super().__init__(native)
         self.native, self.world_provenance = native.unwrapped, provenance
