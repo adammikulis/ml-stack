@@ -19,6 +19,7 @@
       chat.querySelector("#chat-model-close").onclick = () => this.dialog.close();
       this.search.oninput = () => this.render();
       this.search.onkeydown = (event) => {
+        if (event.key === "Escape") { event.preventDefault(); this.dialog.close(); return; }
         if (event.key === "Enter") {
           const first = this.list.querySelector("button:not(:disabled)");
           if (first) { event.preventDefault(); first.click(); }

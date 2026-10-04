@@ -68,7 +68,7 @@
         chat.picker.prepend(el("option", { value: "" }, "Choose a coding model…"));
         chat.picker.value = "";
       }
-      chat.pickrow.hidden = !models.length && !selected;
+      chat.pickrow.hidden = !models.length && !selected && !chat.modelPicker?.library.some((one) => one.servable);
       chat.askrow.hidden = !models.length && !selected;
       chat.options.hidden = !models.length && !selected;
       chat.none.hidden = !!models.length;
