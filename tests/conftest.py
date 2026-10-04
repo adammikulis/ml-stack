@@ -874,9 +874,11 @@ def points_at(link) -> str:
 
 #: Names at the top of the real state root that a process outside the suite rewrites on
 #: its own: a running broker's holders, record and lock, the edit guard's cache, and the
-#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content.
+#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content. `workspace` is
+#: the agents' shared hub: any agent on the machine sending a message mid-run failed the run with a
+#: write the suite never made (a flake that grows with the number of agents).
 LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
-                          "servers.lock", "logs", "guard"})
+                          "servers.lock", "logs", "guard", "workspace"})
 
 
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
