@@ -1,7 +1,7 @@
 {
- "surfaces": 640,
+ "surfaces": 644,
  "by_status": {
-  "covered": 327,
+  "covered": 331,
   "partial": 200,
   "uncovered": 54,
   "n/a": 59,
@@ -79,14 +79,14 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 55,
+   "covered": 57,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 58,
+   "covered": 59,
    "partial": 60,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 28,
+   "covered": 29,
    "partial": 63,
    "uncovered": 0,
    "n/a": 1,
@@ -5860,6 +5860,42 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/coding_routes.py",
+   "kind": "parser",
+   "source": "workspace/coding_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
+   "id": "parser:workspace/coding_turns.py",
+   "kind": "parser",
+   "source": "workspace/coding_turns.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
    "id": "parser:workspace/filestore.py",
    "kind": "parser",
    "source": "workspace/filestore.py",
@@ -7700,6 +7736,24 @@
    "note": "the catch-all that holds a served request; its hold decision is tested, hostile framing is not"
   },
   {
+   "id": "route:workspace/coding_routes.py:/ui/coding/*",
+   "kind": "route",
+   "source": "workspace/coding_routes.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
    "id": "route:workspace/fleet_routes.py:/ui/board/*",
    "kind": "route",
    "source": "workspace/fleet_routes.py:route",
@@ -8971,6 +9025,24 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:workspace/coding_turns.py:Manager._process",
+   "kind": "spawn",
+   "source": "workspace/coding_turns.py:Manager._process",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
   },
   {
    "id": "spawn:workspace/guide.py:clipboard",
