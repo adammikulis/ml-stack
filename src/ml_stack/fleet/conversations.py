@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import write_json
+from ml_stack.fleet.conversation_settings import checked
 
 __all__ = ["Conversation", "Conversations", "Message"]
 
@@ -35,9 +36,11 @@ class Conversation:
     model: str = ""
     created: float = field(default_factory=time.time)
     messages: list[Message] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=checked)
 
     def public(self, *, full: bool = True) -> dict[str, Any]:
-        out: dict[str, Any] = {"id": self.id, "title": self.title,
+        out: dict[str, Any] = {"version": 1, "id": self.id, "title": self.title,
+                               "settings": dict(self.settings),
                                "model": self.model, "created": self.created,
                                "count": len(self.messages)}
         if full:
@@ -71,8 +74,8 @@ class Conversations:
             return None
         return self._read(self._path(cid))
 
-    def start(self, model: str = "", title: str = "") -> Conversation:
-        made = Conversation(id=uuid.uuid4().hex[:12], title=title, model=model)
+    def start(self, model: str = "", title: str = "", settings: dict | None = None) -> Conversation:
+        made = Conversation(id=uuid.uuid4().hex[:12], title=title, model=model, settings=checked(settings))
         self._write(made)
         return made
 
@@ -86,11 +89,22 @@ class Conversations:
         self._write(found)
         return found
 
-    def rename(self, cid: str, title: str) -> Conversation | None:
+    def update(self, cid: str, *, model: str | None = None, settings: dict | None = None, title: str | None = None) -> Conversation | None:
         found = self.get(cid)
         if found is None:
             return None
-        found.title = title.strip()[:TITLE_CHARS]
+        if settings is not None:
+            if not isinstance(settings, dict):
+                raise ValueError("conversation settings must be an object")
+            found.settings = checked({**found.settings, **settings})
+        if model is not None:
+            if not isinstance(model, str):
+                raise ValueError("model must be text")
+            found.model = model
+        if title is not None:
+            if not isinstance(title, str):
+                raise ValueError("title must be text")
+            found.title = title.strip()[:TITLE_CHARS]
         self._write(found)
         return found
 
@@ -117,7 +131,8 @@ class Conversations:
             raw = json.loads(path.read_text())
         except (OSError, ValueError):
             return None
-        if not isinstance(raw, dict) or not raw.get("id"):
+        if (not isinstance(raw, dict) or not _safe(str(raw.get("id") or ""))
+                or raw["id"] != path.stem or raw.get("version", 1) != 1):
             return None
         messages = []
         for row in raw.get("messages") or []:
@@ -127,10 +142,13 @@ class Conversations:
                                         at=float(row.get("at") or 0)))
             except (KeyError, TypeError, ValueError):
                 continue
-        return Conversation(id=str(raw["id"]), title=str(raw.get("title") or ""),
-                            model=str(raw.get("model") or ""),
-                            created=float(raw.get("created") or 0),
-                            messages=messages)
+        try:
+            return Conversation(id=str(raw["id"]), title=str(raw.get("title") or ""),
+                                model=str(raw.get("model") or ""),
+                                created=float(raw.get("created") or 0),
+                                messages=messages, settings=checked(raw.get("settings")))
+        except (TypeError, ValueError):
+            return None
 
     def _write(self, chat: Conversation) -> None:
         write_json(self._path(chat.id), chat.public())
