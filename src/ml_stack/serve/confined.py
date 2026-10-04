@@ -14,6 +14,7 @@ from pathlib import Path
 from ml_stack import sandbox
 from ml_stack.sandbox import policies
 from ml_stack.sandbox.policy import Net
+from ml_stack.serve.socket_relay import arguments
 
 __all__ = ["ENV", "Confined", "confine", "wanted"]
 
@@ -88,7 +89,5 @@ def confine(argv: Sequence[str], env: Mapping[str, str], binary: Path, *,
     if chosen is None:
         raise sandbox.SandboxUnavailable("no sandbox backend for the model server")
     if socket_path:
-        from ml_stack.serve.socket_relay import arguments
-
         wrapped = arguments(wrapped, port, socket_path)
     return Confined(wrapped, dict(held.env), tag, chosen, began, str(Path(os.path.realpath(binary)).parent))

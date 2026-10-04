@@ -16,6 +16,7 @@ from .discovery import (
     memberships,
 )
 from .updates import state
+from .wsl import WSLError, prepare, start
 
 __all__ = ["already_running", "last_screen", "main", "wait_for_health"]
 
@@ -100,8 +101,6 @@ def main(argv: list[str] | None = None) -> int:
 
     linux_executable = None
     if sys.platform == "win32":
-        from .wsl import WSLError, prepare
-
         try:
             linux_executable = prepare()
         except (WSLError, OSError) as exc:
@@ -119,8 +118,6 @@ def main(argv: list[str] | None = None) -> int:
     threading.Thread(target=open_when_ready, daemon=True).start()
     arguments = ["--port", str(known.port), *rest]
     if sys.platform == "win32":
-        from .wsl import WSLError, start
-
         try:
             return start(arguments, executable=linux_executable)
         except (WSLError, OSError) as exc:
