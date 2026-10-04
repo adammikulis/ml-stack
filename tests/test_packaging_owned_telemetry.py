@@ -60,7 +60,7 @@ def test_wrong_distribution_or_old_owned_wheel_is_refused(builder, tmp_path, nam
     wheel = tmp_path / 'bad.whl'
     with zipfile.ZipFile(wheel, 'w') as archive:
         archive.writestr('owned.dist-info/METADATA', f'Name: {name}\nVersion: {version}\n')
-    with pytest.raises(SystemExit, match='metal-smi>=1.1.0'):
+    with pytest.raises(SystemExit, match=r'metal-smi>=1\.1\.0'):
         builder._telemetry_metadata(wheel)
 
 
