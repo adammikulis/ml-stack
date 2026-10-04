@@ -13,7 +13,7 @@ Each example supports procedural and manual definitions using its simulator's fo
 | Smart car | Seeded MetaDrive PG blocks, such as `SCSCS` | Native PGMap metadata JSON |
 | Warehouse | Seeded RWARE shelves and aisles | RWARE ASCII layout |
 | Traffic | Seeded SUMO network and demand | SUMO network and route XML |
-| Smart traffic city | Seeded SUMO intersection imported into MetaDrive | SUMO network and route XML |
+| Traffic and driving | Seeded SUMO intersection imported into MetaDrive | SUMO network and route XML |
 
 Manual files use paths relative to the workspace files directory. Imports reject absolute
 paths and paths escaping that directory. World manifests retain the definition and file
