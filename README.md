@@ -83,6 +83,9 @@ curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging
 
 **Windows**, in PowerShell:
 
+The application runs in Ubuntu on WSL and opens in your Windows browser.
+[Windows runtime setup](docs/windows-runtime.md) lists the Linux packages and GPU requirements.
+
 ```
 irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 ```

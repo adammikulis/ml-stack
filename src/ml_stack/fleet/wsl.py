@@ -28,7 +28,8 @@ def command(*args: str) -> list[str]:
 
 
 def _read(*args: str) -> str:
-    done = subprocess.run(command(*args), capture_output=True, text=True, timeout=60)
+    done = subprocess.run(command(*args), capture_output=True, text=True,
+                          encoding="utf-8", timeout=60)
     if done.returncode:
         detail = (done.stderr or done.stdout).strip().replace("\x00", "")
         raise WSLError(f"WSL could not run {args[0]}: {detail}")
