@@ -27,6 +27,7 @@ import dataclasses
 import inspect
 import io
 import json
+import re
 import secrets
 import sys
 import time
@@ -180,6 +181,25 @@ def _not_an_option(value: str, what: str) -> str:
     return value
 
 
+def _confined(path: str) -> Path:
+    """``path`` resolved, or ``ValueError`` unless it lies under the MCP home or the working directory."""
+    resolved = Path(path).expanduser().resolve()
+    for root in (mcp_home().resolve(), Path.cwd().resolve()):
+        if resolved == root or root in resolved.parents:
+            return resolved
+    raise ValueError(f"{path!r} is outside the MCP home and the working directory")
+
+
+def _local_server(url: str) -> str:
+    """``url`` when it is the address of a server this machine's broker holds, else ``ValueError``."""
+    from ml_stack.serve import ops
+
+    held = {ops.base_url_for(port).rstrip("/") for port in ops.recorded_servers(ops.lease_file())}
+    if url.rstrip("/") not in held:
+        raise ValueError(f"{url!r} is not a server this machine is serving")
+    return url
+
+
 def _check_type(name: str, value: Any, hint: Any) -> None:
     """Raise ``TypeError`` unless ``value`` is what the tool's hint for ``name`` declares."""
     if typing.get_origin(hint) is list:
@@ -304,13 +324,39 @@ def models_fetch(reference: str) -> dict[str, Any]:
                     name=f"fetch-{reference.rsplit('/', 1)[-1]}")
 
 
+_BENCH_COMMANDS = ("sweep", "run")
+_BENCH_FLAGS = frozenset({
+    "--serve", "--context", "--parallel", "--serve-draft", "--serve-kv", "--serve-kv-unified",
+    "--no-serve-kv-unified", "--profile", "--no-profile", "--serve-label", "--no-draft",
+    "--label-suffix", "--serve-mlock", "--serve-no-flash-attn", "--serve-mmproj", "--n-max",
+    "--reasoning-budget", "--plain-only", "--resume", "--shortlist", "--shortlist-for",
+    "--margin", "--smoke", "--sample", "--short", "--trace", "--no-trace", "--temperature",
+    "--top-p", "--top-k", "--min-p", "--n-predict", "--card", "--anyway", "--ceiling", "--yes",
+    "--no-selfcheck", "--no-smoke", "--per-question", "--no-queue", "--no-prefetch",
+})
+"""The ``ml-stack-bench`` subcommands and flags a tool may pass: none takes a path to run, a
+store or kept file to read or write, or an endpoint to call."""
+
+
+def _checked_bench_argv(argv: list[str]) -> list[str]:
+    """``argv`` unchanged when it is an allowed subcommand with allowed flags; else ``ValueError``."""
+    words = [str(a) for a in argv]
+    if not words or words[0] not in _BENCH_COMMANDS:
+        raise ValueError(f"bench_run takes one of {', '.join(_BENCH_COMMANDS)} first")
+    for word in words[1:]:
+        if word.startswith("-") and not re.fullmatch(r"-\d+(\.\d+)?", word):
+            if word.split("=", 1)[0] not in _BENCH_FLAGS:
+                raise ValueError(f"{word.split('=', 1)[0]} is not a flag bench_run accepts")
+    return words
+
+
 def bench_run(argv: list[str]) -> dict[str, Any]:
     """Start ``ml-stack-bench argv`` (e.g. ``["sweep", "--serve", "hf:...", "--smoke"]``)
     detached, exactly as ``--detach`` would; returns the log path, pid and argv, and
     ``bench_status`` follows it."""
     from ml_stack.bench.underway import detach, measuring_file
 
-    log = detach(list(argv))
+    log = detach(_checked_bench_argv(argv))
     try:
         held = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -398,7 +444,7 @@ def speech_transcribe(path: str, provider: str = "", language: str = "") -> dict
     (``ml-stack-speech transcribe``); ``language`` is guessed when it is not given."""
     from ml_stack.speech.service import transcribe
 
-    return _plain(transcribe(Path(path).expanduser(), provider=provider or None,
+    return _plain(transcribe(_confined(path), provider=provider or None,
                              language=language or None))
 
 
@@ -442,14 +488,15 @@ def conversation_compact(path: str, budget: int, keep_last: int = 6, url: str = 
     repeated calls dropped, the oldest messages summarised by the model at ``url`` (removed
     outright when there is none). ``write`` replaces the file; removed text is kept under
     ``~/.ml-stack/compaction``."""
-    messages = json.loads(Path(path).read_text(encoding="utf-8"))
-    client = Client(url) if url else None
+    target = _confined(path)
+    client = Client(_local_server(url)) if url else None
+    messages = json.loads(target.read_text(encoding="utf-8"))
     fitted = compact(messages, budget=budget, count=Counter(client), using=Compaction(
         keep_last=keep_last, summarize=bool(url),
         summarizer=model_summarizer(client) if client else None,
         spill=Spill(Transcript())))
     if write and fitted.strategy_used != "none":
-        Path(path).write_text(json.dumps(fitted.messages, indent=2), encoding="utf-8")
+        target.write_text(json.dumps(fitted.messages, indent=2), encoding="utf-8")
     return {"strategy": fitted.strategy_used, "dropped": fitted.dropped_count,
             "tokens_before": fitted.tokens_before, "tokens_after": fitted.tokens_after,
             "notes": list(fitted.notes), "written": write and fitted.strategy_used != "none"}

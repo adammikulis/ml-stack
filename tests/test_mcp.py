@@ -179,7 +179,8 @@ class TestTheTools:
 
 
 class TestTheCompactTool:
-    def test_it_fits_a_chat_file_to_a_budget_and_rewrites_it(self, tmp_path):
+    def test_it_fits_a_chat_file_to_a_budget_and_rewrites_it(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         chat = [{"role": "system", "content": "s"}, {"role": "user", "content": "go"}]
         for n in range(5):
             chat += [{"role": "assistant", "content": None, "tool_calls": [
@@ -246,7 +247,8 @@ class TestTheSpeechTools:
         assert found["asr"]["auto"] == "fake"
         assert found["tts"]["providers"][0]["name"] == "fake-voice"
 
-    def test_speech_transcribe_returns_the_text_and_its_segments(self, tmp_path):
+    def test_speech_transcribe_returns_the_text_and_its_segments(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         clip = tmp_path / "clip.wav"
         clip.write_bytes(self.wav.encode(b"\x00\x00" * 1600, sample_rate=16000))
         (reply,) = drive(rpc(1, "tools/call", name="speech_transcribe",
@@ -264,6 +266,7 @@ class TestTheSpeechTools:
         assert self.wav.decode(out.read_bytes())[1].sample_rate == 16000
 
     def test_no_engine_is_an_error_result_rather_than_a_crash(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
         from ml_stack import speech as package
         from ml_stack.speech import Registry
 
