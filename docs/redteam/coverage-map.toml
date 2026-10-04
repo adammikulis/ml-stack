@@ -93,6 +93,13 @@ tests = ["tests/test_redteam_bubblewrap.py"]
 note = "actual executable paths containing shell syntax remain literal, control characters cannot execute, probes are single-flight and invalidate on binary changes, stalled probes are killed"
 
 [[group]]
+match = ["spawn:gym/decision_process.py:DecisionProcess.__init__"]
+status = "covered"
+count = 1
+tests = ["tests/test_gym_decision_process.py"]
+note = "actual model child keeps hostile checkpoint and interpreter text literal; stalled inference admits one request and closes within a bounded grace period"
+
+[[group]]
 match = ["spawn:platform.py:start_process"]
 status = "covered"
 count = 1
