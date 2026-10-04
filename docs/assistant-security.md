@@ -82,8 +82,29 @@ filter to catch every attempt.
 
 These are never offered to any model, role or connector, and no stored fact, saved rule or
 channel message can unlock them: releasing a quarantine, approving a network host, minting a
-grant, changing guard or sentinel policy, changing a role, and creating a saved rule. A person
-does them at their own screen.
+grant, changing guard or sentinel policy, changing a role, creating a saved rule, and changing
+the GPU wiring limit (`iogpu.wired_limit_mb`) or the boot-time daemon that keeps it. A person
+does them at their own screen: the Settings slider and `ml-stack-serve memory` refuse a process
+an agent started, an access token, another web page and another machine, and the password goes
+only into macOS's own dialog or sudo.
+
+Exception, bounded: `ml-stack-workspace invite` is not on the floor. A joined agent may mint a
+one-time invite code for a new agent, and only that: not a token, not a grant, not a lead or
+human identity. The joiner is a standard-role child of the issuer with at most the issuer's
+rights, so nothing can be escalated through it; the code is single-use by default (at most 3),
+lasts at most 30 minutes and is stored as a hash; the person's limits cap outstanding invites,
+invites per hour, depth (at most 2, default 1) and live descendants, and only the person can
+raise them. The call asks the person first by default (`approve-first`), is refused to a
+read-only session, is announced and audited, and `revoke --tree` removes the whole subtree.
+Nothing the agent read can create one: the chat assistant has no tool for it and a write
+containing a live code is refused. `connect`'s shared code, minting tokens, and everything else
+above remain person-only.
+
+## Surface inventory
+
+| Surface | Reaches | Guard |
+| --- | --- | --- |
+| `ml-stack-workspace invite` (agent token) | a new agent's identity in the workspace | role policy (read-only refuses, approve-first asks the person), limits only the person raises, child holds at most the issuer's rights, code stored as a hash and refused in any stored write, announced and audited, `revoke --tree` |
 
 ## What a new integration must bring
 

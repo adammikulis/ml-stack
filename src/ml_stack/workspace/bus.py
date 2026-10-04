@@ -11,17 +11,19 @@ from ml_stack.files import read_json, write_json
 from ml_stack.workspace import wake
 from ml_stack.workspace.chain import ChainLog, held
 
-__all__ = ["BROADCAST", "TYPES", "Bus", "mentions_me"]
+__all__ = ["BROADCAST", "CALL_TYPES", "TYPES", "Bus", "mentions_me"]
 
 BROADCAST = "*"
-TYPES = ("task", "status", "handoff", "question", "answer", "claim", "release", "note")
+TYPES = ("task", "status", "handoff", "question", "answer", "claim", "release", "note", "file")
+CALL_TYPES = (*TYPES, "joined", "milestone", "done", "blocked")
 VERSION = 1
 CANCEL_SLICE_S = 0.25
 
 
 def mentions_me(row: dict[str, Any], me: str) -> bool:
-    """Whether ``row`` is addressed to ``me`` or to everyone, and was not sent by ``me``."""
-    return row["from"] != me and row["to"] in (me, BROADCAST)
+    """Whether ``row`` is addressed to ``me`` and was not sent by ``me``. A ``*`` row (from an
+    older log) is not: broadcasts are announcements and never land in an inbox."""
+    return row["from"] != me and row["to"] == me
 
 
 class _Index:
@@ -56,7 +58,7 @@ class Bus:
     def append(self, row: dict[str, Any]) -> dict[str, Any]:
         """Add a message row, wake its recipient's waiters; returns it with its sequence number."""
         made = self.log.append({"kind": "msg", **row})
-        wake.signal(self.base / "wake", None if made["to"] == BROADCAST else [made["to"]])
+        wake.signal(self.base / "wake", [made["to"]])
         return made
 
     def live(self, row: dict[str, Any]) -> bool:

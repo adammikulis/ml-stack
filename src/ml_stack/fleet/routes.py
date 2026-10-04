@@ -25,6 +25,7 @@ from .discovery import (
 )
 from .page import COMPONENTS, render
 from .pausing import minutes_of
+from .room_routes import RoomRoutes
 from .session import parse_cookie
 
 ASSETS = Path(__file__).parent / "web"
@@ -852,7 +853,7 @@ class JobRoutes:
 
 
 class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
-             ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
+             RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:

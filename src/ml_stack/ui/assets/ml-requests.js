@@ -131,7 +131,7 @@ class MlRequests extends MlElement {
   group(key, rows) {
     const [agent, project] = key.split("\u0000");
     const live = rows.filter((r) => r.state === "pending");
-    const nodes = [h("h3", {}, `${plain(agent, 64) || "unknown agent"} / ${plain(project, 64) || "no project"}`)];
+    const nodes = [h("h3", {}, `${plain(rows[0].who || agent, 160) || "unknown agent"} / ${plain(project, 64) || "no project"}`)];
     const kinds = new Set(live.map((r) => r.kind));
     const bulkable = live.length > 1 && kinds.size === 1 && live.every((r) => !r.destructive && !r.human_only);
     if (bulkable) nodes.push(this.bulkBox(key, live));

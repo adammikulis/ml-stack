@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ml_stack.workspace import plain
-from ml_stack.workspace.boards import GENERAL, MODES, STYPES, Boards
+from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_MARK, GENERAL, MODES, STYPES, Boards
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
 from ml_stack.workspace.screen import NEUTRAL, Refused, fence
@@ -29,6 +29,12 @@ def data_line(value: object, width: int = 120) -> str:
     for pattern, repl in NEUTRAL:
         out = pattern.sub(repl, out)
     return out
+
+
+class Held(list):  # type: ignore[type-arg]
+    """A list of results that also says how many more were held back by the default caps."""
+
+    held: int = 0
 
 
 @dataclass(slots=True)
@@ -75,7 +81,7 @@ class BoardApi:
         found = (boards or self.store.state()[0]).get(name)
         if found is None:
             return False
-        return who.role != AGENT or name == GENERAL or self._root(who) in found["members"]
+        return who.role != AGENT or name in (GENERAL, ANNOUNCE) or self._root(who) in found["members"]
 
     def require_read(self, who: Identity, name: str) -> None:
         """`Denied` unless ``who`` may read ``name``; says the same for a board that is absent."""
@@ -99,6 +105,9 @@ class BoardApi:
 
     def prepare(self, who: Identity, to: str, body: str, reply_to: int) -> list[str]:
         """Checks a board post; returns the registered identities its text mentions."""
+        if to == ANNOUNCE:
+            raise Refused(f"{ANNOUNCE} takes only `announce KIND TEXT` (joined, milestone, done, "
+                          f"blocked; one line); to answer one, send the poster a direct message")
         self.require_post(who, to)
         parent = self.ws.bus.get(reply_to) if reply_to else None
         if parent is not None and parent["to"] != to:
@@ -112,11 +121,11 @@ class BoardApi:
                 and r["to"].startswith("#") and (not name or r["to"] == name)
                 and self.ws.bus.live(r)]
 
-    def _show(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _show(self, row: dict[str, Any], short: int = 0, who: Identity | None = None) -> dict[str, Any]:
         cap = self.ws.limits.board_message_chars
         cut = {**row, "body": plain.text(row["body"], cap)[0],
                "subject": plain.line(row["subject"], self.ws.limits.subject_chars)}
-        out = self.ws.deliver(cut)
+        out = self.ws.deliver(cut, cap=short, reader=who)
         out["board"] = row["to"]
         out["mentions"] = list(row.get("mentions", []))
         out["truncated"] = len(row["body"]) > cap
@@ -129,7 +138,11 @@ class BoardApi:
                 "to": row["to"], "ts": row["ts"], "thread": row.get("thread") or row["seq"],
                 "reply_to": row.get("reply_to", 0), "mentions": list(row.get("mentions", [])),
                 "subject": plain.line(row["subject"], self.ws.limits.subject_chars), "body": body,
-                "held": bool(row["held"]), "truncated": cut}
+                "held": bool(row["held"]), "truncated": cut,
+                **({"file": {k: row["file"][k] for k in ("id", "name", "size", "type", "text")}}
+                   if row.get("file") else {}),
+                "model": "" if row["role"] == "human" else row.get("model", ""),
+                "model_state": "" if row["role"] == "human" else row.get("model_state", "")}
 
     # -- boards ---------------------------------------------------------------------------
     def list(self, token: str) -> list[dict[str, Any]]:
@@ -158,7 +171,7 @@ class BoardApi:
         who = self._who(token)
         self._top(who, "create boards")
         lim = self.ws.limits
-        if not plain.name_ok(name) or name == GENERAL:
+        if not plain.name_ok(name) or name in (GENERAL, ANNOUNCE):
             raise ValueError("a board name is # then lowercase letters, digits, . _ - (up to 40)")
         self.ws._check(who, "the board title", 400, title)
         with self.store.locked():
@@ -174,7 +187,7 @@ class BoardApi:
                                "open": not private, "project": "",
                                "title": plain.line(title, 60)})
         self.ws.audit("board.create", who.id, board=name)
-        self._subscribe(who, "board", name, "inbox", quiet=True)
+        self._subscribe(who, "board", name, "digest", "quiet")
         return {"board": name, "open": not private}
 
     def _admit(self, who: Identity, name: str, member: str, boards: dict[str, Any]) -> None:
@@ -203,7 +216,7 @@ class BoardApi:
                              f"member or the person to add you")
             self._admit(who, name, who.id, boards)
         self.ws.audit("board.join", who.id, board=name)
-        self._subscribe(who, "board", name, "inbox", quiet=True)
+        self._subscribe(who, "board", name, "digest", "quiet")
         return {"joined": name}
 
     def leave(self, token: str, name: str) -> dict[str, Any]:
@@ -238,8 +251,8 @@ class BoardApi:
         return {"added": member, "to": name}
 
     def place(self, member: str, project: dict[str, str]) -> list[str]:
-        """Put a newly joined agent on its project's board and subscribe it as the person's
-        setup would: the project board in full, `#general` for mentions."""
+        """Put a newly joined agent on its project's board. It is subscribed to nothing: its
+        inbox carries direct messages and mentions, and `#announcements` arrives as a roll-up."""
         who = Identity(member, AGENT)
         names = []
         if project:
@@ -250,9 +263,7 @@ class BoardApi:
                     self._admit(who, name, member, boards)
                 except Refused:
                     return names
-            self._subscribe(who, "board", name, "inbox", quiet=True)
             names.append(name)
-        self._subscribe(who, "mentions", "", "inbox", quiet=True)
         return names
 
     # -- threads and reads ----------------------------------------------------------------
@@ -276,19 +287,24 @@ class BoardApi:
         ranked = sorted(found.values(), key=lambda t: (t["last"], t["root"]), reverse=True)
         return [{**t, "authority": "none"} for t in ranked[:max(limit, 0)]]
 
-    def read(self, token: str, name: str, limit: int = 50, after: int = 0,
+    def read(self, token: str, name: str, limit: int = 0, after: int = 0,
              mark: bool = True) -> list[dict[str, Any]]:
-        """Messages on ``name`` after ``after``, oldest first, fenced; marks the board read."""
+        """Messages on ``name`` after ``after``, oldest first, fenced; marks the board read.
+        By default the newest few, each cut short; a ``limit`` widens it. The result's ``held``
+        says how many more there were."""
         who = self._who(token)
         self.require_read(who, name)
-        rows = [r for r in self._rows(name) if r["seq"] > after][-max(limit, 0):]
-        out, used = [], 0
-        for r in rows:
-            shown = self._show(r)
+        rows = [r for r in self._rows(name) if r["seq"] > after]
+        lim = self.ws.limits
+        newest = rows[-(limit if limit > 0 else lim.read_items):]
+        out, used = Held(), 0
+        for r in newest:
+            shown = self._show(r, 0 if limit > 0 else lim.read_item_chars, who)
             used += len(shown["text"])
-            if used > self.ws.limits.board_read_chars:
+            if used > (lim.board_read_chars if limit > 0 else lim.read_total_chars) and out:
                 break
             out.append(shown)
+        out.held = len(rows) - len(out)
         if mark and out:
             self.store.mark(who.id, name, out[-1]["seq"])
         return out
@@ -331,7 +347,7 @@ class BoardApi:
         self._pair_ok(who, a, other)
         out = []
         for r in self._pair_rows(a, other)[-max(limit, 0):]:
-            shown = self._show(r)
+            shown = self._show(r, 0, who)
             shown["direction"] = "sent" if r["from"] == a else "received"
             out.append(shown)
         if mark and out and a == who.id:
@@ -372,7 +388,7 @@ class BoardApi:
         boards = self.store.state()[0]
         found = [r for r in self._rows() if who.id in r.get("mentions", []) and r["from"] != who.id
                  and self.can_read(who, r["to"], boards)]
-        return [self._show(r) for r in found[-max(limit, 0):]]
+        return [self._show(r, 0, who) for r in found[-max(limit, 0):]]
 
     # -- subscriptions --------------------------------------------------------------------
     def _target_ok(self, who: Identity, stype: str, target: str) -> str:
@@ -399,30 +415,58 @@ class BoardApi:
             target = str(int(root.get("thread") or root["seq"]))
         return target
 
+    def _head(self) -> int:
+        rows = self.ws.bus.log.rows()
+        return int(rows[-1]["seq"]) if rows else 0
+
     def _subscribe(self, who: Identity, stype: str, target: str, mode: str,
-                   quiet: bool = False) -> dict[str, Any]:
+                   how: str = "") -> dict[str, Any]:
+        quiet, force = how == "quiet", how == "force"
+        lim = self.ws.limits
         with self.store.locked():
             mine = self.store.state()[1].get(who.id, {})
             key = (stype, target)
-            if key not in mine and len(mine) >= self.ws.limits.subs_per_identity:
+            if key not in mine and len(mine) >= lim.subs_per_identity:
                 if quiet:
                     return {}
                 self.ws.audit("write.refused", who.id, what="subscription", why="cap")
                 raise Refused(f"{who.id} has {len(mine)} subscriptions; the limit is "
-                              f"{self.ws.limits.subs_per_identity}")
+                              f"{lim.subs_per_identity}")
+            cost = ""
+            loud = sum(1 for (t, _), m in mine.items() if m == "inbox" and t != "mentions")
+            if mode == "inbox" and stype != "mentions" and mine.get(key) != "inbox":
+                if loud >= lim.inbox_subs_free and not force:
+                    self.ws.audit("write.refused", who.id, what="subscription", why="loud")
+                    raise Refused(
+                        f"{who.id} already has {loud} inbox subscriptions; every message on "
+                        f"{stype} {plain.line(target, 48) or '(any)'} would reach your inbox "
+                        f"and your context, and wake `wait`. Use --mode digest (a roll-up you "
+                        f"read when you choose) or add --force to accept the cost")
+                if loud >= lim.inbox_subs_free:
+                    cost = "forced: each new message here now enters your inbox and context"
             if mine.get(key) != mode:
                 self.store.append({"kind": "sub", "op": "set", "who": who.id, "stype": stype,
-                                   "target": target, "mode": mode})
-        return {"type": stype, "target": target, "mode": mode}
+                                   "target": target, "mode": mode, "since": self._head()})
+        out = {"type": stype, "target": target, "mode": mode}
+        if cost:
+            out["cost"] = cost
+        return out
 
     def subscribe(self, token: str, stype: str, target: str = "",
-                  mode: str = "inbox") -> dict[str, Any]:
-        """Subscribe the caller to a board, thread, agent, message kind or mentions."""
+                  mode: str = "inbox", force: bool = False) -> dict[str, Any]:
+        """Subscribe the caller to a board, thread, agent, message kind or mentions. Only
+        messages after this moment are delivered; the backlog is `board read`."""
         who = self._who(token)
         self._top(who, "subscribe")
         if mode not in MODES:
             raise ValueError(f"mode must be one of {', '.join(MODES)}")
-        made = self._subscribe(who, stype, self._target_ok(who, stype, target), mode)
+        target = self._target_ok(who, stype, target)
+        if (stype, target) == ("board", ANNOUNCE):
+            if who.role != AGENT:
+                raise Denied(f"{ANNOUNCE} always reaches a lead or a person")
+            if mode == "inbox":
+                raise ValueError(f"{ANNOUNCE} is a roll-up, never inbox: use digest or silent")
+        made = self._subscribe(who, stype, target, mode, "force" if force else "")
         self.ws.audit("board.subscribe", who.id, type=stype, mode=mode)
         return made
 
@@ -433,6 +477,10 @@ class BoardApi:
         if stype not in STYPES:
             raise ValueError(f"unsubscribe from one of {', '.join(STYPES)}")
         key = (stype, "" if stype == "mentions" else target)
+        if key == ("board", ANNOUNCE):
+            if who.role != AGENT:
+                raise Denied(f"{ANNOUNCE} always reaches a lead or a person")
+            return self.subscribe(token, "board", ANNOUNCE, "silent")
         with self.store.locked():
             if key not in self.store.state()[1].get(who.id, {}):
                 raise ValueError("no such subscription")
@@ -450,33 +498,52 @@ class BoardApi:
 
     # -- delivery -------------------------------------------------------------------------
     @staticmethod
-    def _mode(mine: dict[tuple[str, str], str], row: dict[str, Any], me: str) -> str:
+    def _match(mine: dict[tuple[str, str], str], row: dict[str, Any],
+               me: str) -> tuple[tuple[str, str] | None, str]:
+        """The subscription that decides how ``row`` reaches ``me``, and its mode. Defaults with
+        no subscription: a mention reaches the inbox, `#announcements` a roll-up, the rest
+        nothing."""
+        if row["to"] == ANNOUNCE:
+            key = ("board", ANNOUNCE)
+            return key, "silent" if mine.get(key) == "silent" else "digest"
         thread = str(int(row.get("thread") or row["seq"]))
-        for key in (("thread", thread), ("mentions", "") if me in row["mentions"] else None,
-                    ("board", row["to"])):
-            if key in mine:
-                return mine[key]
+        if ("thread", thread) in mine:
+            return ("thread", thread), mine[("thread", thread)]
+        if me in row["mentions"]:
+            return ("mentions", ""), mine.get(("mentions", ""), "inbox")
+        if ("board", row["to"]) in mine:
+            return ("board", row["to"]), mine[("board", row["to"])]
         for (kind, value), mode in mine.items():
             if kind == "agent" and (row["from"] == value or row["from"].startswith(value + "/")):
-                return mode
-        return mine.get(("kind", row["type"]), "")
+                return (kind, value), mode
+        key = ("kind", row["type"])
+        return (key, mine[key]) if key in mine else (None, "")
 
     def routed(self, who: Identity, after: int, mode: str) -> list[dict[str, Any]]:
-        """Live board messages after ``after`` that ``who``'s subscriptions deliver as ``mode``."""
-        boards, subs = self.store.state()
-        mine = subs.get(who.id)
-        if who.parent or not mine:
+        """Live board messages after ``after`` that ``who``'s subscriptions deliver as ``mode``;
+        a subscription delivers nothing from before it was made."""
+        if who.parent:
             return []
-        return [r for r in self._rows(after=after) if r["from"] != who.id
-                and self.can_read(who, r["to"], boards)
-                and self._mode(mine, {**r, "mentions": r.get("mentions", [])}, who.id) == mode]
+        boards, subs = self.store.state()
+        mine, since = subs.get(who.id, {}), self.store.sinces().get(who.id, {})
+        found = []
+        for r in self._rows(after=after):
+            if r["seq"] <= after or r["from"] == who.id or not self.can_read(who, r["to"], boards):
+                continue
+            key, got = self._match(mine, {**r, "mentions": r.get("mentions", [])}, who.id)
+            if got == mode and (key is None or key[0] == "mentions"
+                                or r["seq"] > since.get(key, 0)):
+                found.append(r)
+        return found
 
     def listeners(self, row: dict[str, Any]) -> list[str]:
-        """The identities whose subscriptions deliver ``row`` to their inbox."""
+        """The identities whose subscriptions (or a mention) deliver ``row`` to their inbox."""
         boards, subs = self.store.state()
         full = {**row, "mentions": row.get("mentions", [])}
-        return [m for m, mine in subs.items() if m != row["from"] and self._mode(mine, full, m)
-                == "inbox" and self.can_read(Identity(m, AGENT), row["to"], boards)]
+        who = dict.fromkeys([*subs, *full["mentions"]])
+        return [m for m in who if m != row["from"]
+                and self._match(subs.get(m, {}), full, m)[1] == "inbox"
+                and self.can_read(Identity(m, AGENT), row["to"], boards)]
 
     def wake_names(self, row: dict[str, Any]) -> list[str]:
         """The wake-pipe names to signal for ``row``: its recipient and subscribers by plain id,
@@ -503,13 +570,17 @@ class BoardApi:
         if plain_text and who.role != HUMAN:
             raise Denied("only the person's token reads messages unfenced")
         member = self._scope(who, board, thread, dm, between)
+        lim = self.ws.limits
+        if not plain_text:  # the same default caps as every other agent-facing read
+            limit, backlog = min(limit, lim.read_items), min(backlog, lim.read_items)
         rows = self.ws.bus.log.after(0 if after < 0 else after)
         found = [r for r in rows if r["kind"] == "msg" and self.ws.bus.live(r) and member(r)]
         found = found[-backlog:] if after < 0 and backlog > 0 else [] if after < 0 else found[:limit]
         newest = rows[-1]["seq"] if rows else max(after, 0)
         if after >= 0 and len(found) == limit:
             newest = found[-1]["seq"]
-        return {"messages": [self._plain(r) if plain_text else self._show(r) for r in found],
+        return {"messages": [self._plain(r) if plain_text else self._show(r, lim.read_item_chars, who)
+                             for r in found],
                 "seq": newest}
 
     def _scope(self, who: Identity, board: str, thread: int, dm: str,
@@ -581,10 +652,35 @@ class BoardApi:
         lines += [f"[{r['seq']}] {r['from']}: {data_line(r['body'], 200)}" for r in recent]
         return self._digested(lines, f"thread#{root}", {"messages": len(rows)})
 
+    def rollup(self, token: str, ack: bool = False) -> dict[str, Any] | None:
+        """The newest few unseen `#announcements` as one-liners, oldest first, with how many
+        more there are; None when there is nothing. Never wakes anything; ``ack`` marks them
+        all seen."""
+        who = self._who(token)
+        mine = self.store.state()[1].get(who.id, {})
+        if mine.get(("board", ANNOUNCE)) == "silent":
+            return None
+        seen = self.store.marks(who.id).get(ANNOUNCE_MARK, 0)
+        rows = [r for r in self._rows(ANNOUNCE) if r["seq"] > seen and r["from"] != who.id]
+        if not rows:
+            return None
+        top = self.ws.limits.announce_rollup
+        lines = [f"[{r['seq']}] {r['type']} {r['from']}"
+                 f"{'/' + r['label'] if r.get('label') else ''}: {data_line(r['body'], 200)}"
+                 for r in rows[-top:]]
+        more = len(rows) - len(lines)
+        if more:
+            lines.insert(0, f"(+{more} older announcements; `digest` lists them)")
+        if ack:
+            self.store.mark(who.id, ANNOUNCE_MARK, rows[-1]["seq"])
+        return self._digested(lines, "announcements", {"messages": len(rows), "more": more})
+
     # -- the summary ----------------------------------------------------------------------
     def summary(self, token: str) -> dict[str, Any]:
         """The caller's boards and unread counts, and unread direct messages."""
         listing = self.list(token)
         return {"boards": [{"name": b["name"], "unread": b["unread"], "member": b["member"]}
                            for b in listing],
+                "unread_lines": [f"{b['unread']} unread on {b['name']}" for b in listing
+                                 if b["unread"]],
                 "dms_unread": sum(p["unread"] for p in self.dm_list(token))}

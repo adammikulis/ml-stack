@@ -562,6 +562,15 @@ directory. What it does not do yet:
   made and when `scratch-ls` runs, not on each write.
 - [ ] **Embedding search over notes** through the graph store; keyword search through
   `graph.search.lexical` is what exists.
+- [ ] **Embedding search over files**: `file search` ranks words with `graph.search.lexical`
+  fused per word; vectors are not used.
+- [ ] **A request to the person for a held file**: a held file waits in the quarantine
+  (`quarantine-ls`); nothing raises a `requests` item for it.
+- [ ] **The verified or claimed model on a file's `posted_by` edge**, once model identity is
+  on the integration branch; the edge carries `agent-claimed` only.
+- [ ] **The Board page lists a file's download on its message** but has no per-board file list.
+- [ ] **Files outlive their message only for the person**: `gc` shreds the content of a
+  file once its messages are pruned; a longer-lived file store needs its own retention.
 
 ## Measurements
 

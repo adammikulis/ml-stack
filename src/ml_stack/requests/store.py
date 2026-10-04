@@ -311,7 +311,8 @@ def build(ask: Ask, created: float) -> Request:
     return Request(
         id=ident, kind=ask.kind,
         raised_by=Origin(shown(origin.agent, "name"), shown(origin.project, "name"),
-                         shown(origin.session, "name")),
+                         shown(origin.session, "name"), shown(origin.model, "model"),
+                         shown(origin.model_state, "label")),
         subject=shown(ask.subject, "subject"), reason=shown(ask.reason, "reason"),
         choices=make_choices(ask.choices, destructive=KINDS[ask.kind].destructive),
         created=created, expires=created + max(1.0, ask.ttl), key=shown(ask.key, "name"),

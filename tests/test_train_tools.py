@@ -291,7 +291,7 @@ class TestRecipe:
         ids, labels = render(tokenizer, row["messages"], row["tools"], context=512)
 
         assert len(ids) == len(labels)
-        read = tokenizer.decode([i for i, lab in zip(ids, labels) if lab == IGNORE])
+        read = tokenizer.decode([i for i, lab in zip(ids, labels, strict=False) if lab == IGNORE])
         answer = tokenizer.decode([lab for lab in labels if lab != IGNORE])
         assert row["messages"][1]["content"] in read
         assert "<start_function_declaration>" in read

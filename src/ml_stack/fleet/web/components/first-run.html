@@ -8,7 +8,7 @@
   const el = M.el;
   const api = M.api;
 
-  const STEPS = 7;
+  const STEPS = 8;
 
   class FirstRun extends HTMLElement {
     connectedCallback() {
@@ -55,6 +55,7 @@
       if (s === 3) return this.startStep();
       if (s === 4) return this.runStep();
       if (s === 5) return this.awayStep();
+      if (s === 6) return this.wiredStep();
       return this.doneStep();
     }
 
@@ -370,6 +371,22 @@
         go);
     }
 
+    // Give models more memory: the slider, skippable.
+    async wiredStep() {
+      const r = await api("/ui/room");
+      if (!r.machine || !r.machine.supported) return this.go(7);
+      const next = el("button", {}, "Continue");
+      next.onclick = () => this.go(7);
+      this.show(
+        this.steps(6, () => this.go(5)),
+        el("h1", {}, "Give models more memory?"),
+        el("p", { class: "sub" },
+          "Large models need more of this computer's memory than macOS gives the GPU by default. "
+          + "You can skip this and change it later in Settings."),
+        document.createElement("wired-memory"),
+        el("button", { class: "ghost", onclick: () => this.go(7) }, "Skip"), next);
+    }
+
     // The last step. Not a command: telling someone to open a terminal is the same wall
     // as telling them to paste a 32-byte key, one layer up.
     doneStep() {
@@ -385,7 +402,7 @@
 
       if (!joined) {
         return this.show(
-          this.steps(6),
+          this.steps(7),
           el("h1", {}, `“${st.name}” is ready`),
           el("p", { class: "sub" },
             "It is on its own: it will run models and train here, and nothing else on your "
@@ -420,7 +437,7 @@
           el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
 
       this.show(
-        this.steps(6),
+        this.steps(7),
         el("h1", {}, `Joined “${joined.group}”`),
         el("p", { class: "sub" }, "Now add your other machines. On each one:"),
         el("ol", { class: "howto" },

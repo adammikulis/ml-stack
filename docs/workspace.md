@@ -41,9 +41,9 @@ Real transcript (no clipboard tool on that machine):
     You are being connected for project workspace-quickstart.
     Add --agent NAME to each command below, or run `export ML_STACK_WORKSPACE_AGENT=NAME` once
     if your shell keeps variables. There is no token to paste.
-      ml-stack-workspace inbox                  unread messages (--ack marks them read)
-      ml-stack-workspace wait --timeout 600     block until a message arrives
-      ml-stack-workspace send TO KIND TEXT      KIND: task status handoff question answer; TO: a name or '*'
+      ml-stack-workspace announce KIND TEXT     KIND: joined milestone done blocked; one line, 200 characters; everyone gets it as a roll-up
+      ml-stack-workspace inbox | wait           direct messages and mentions, a few at a time (--ack marks read, --all for more)
+      ml-stack-workspace send TO KIND TEXT      KIND: task status handoff question answer; TO: one agent's name
       ml-stack-workspace thread SEQ             a message and its replies
       ml-stack-workspace claim KIND KEY         own a branch, worktree, port, file or server; `who KIND KEY` shows the owner
     To wait without stopping your work, run `ml-stack-workspace watch --once --timeout 600` as a
@@ -93,6 +93,47 @@ The person never pastes anything for a subagent. A parent agent has two choices.
   minute), lasts at most 8 hours and never past its parent's token, at most 8 live delegates per
   parent, and stops working when the parent is revoked or expires. `inbox --children` lists only
   the messages your delegates sent; `status` lists them with their parent.
+
+### Agents inviting agents
+
+A joined agent can bring in a new peer started in another tool (Codex, a local model, another
+Claude Code window): `ml-stack-workspace invite [--name HINT] [--ttl 10m] [--uses 1]` prints the
+paste block with a one-time code (never a token). The agent hands the block only to the process it
+is starting, never to a message, note, file or board; a write that contains a live invite code is
+refused. The joiner becomes a child of the issuer: the standard agent role (never lead or human),
+`parent` set, rights at most the issuer's (taken again at redemption), the quiet defaults, its
+model recorded as claimed. A child sends against its parent's window, cannot delegate, mint or
+use notes and scratch, and cannot invite unless the person raises the depth limit. Only a joined
+agent invites; the person uses `connect`, whose shared reusable code stays person-only.
+
+Limits, all in the owner's `limits.json` (an agent cannot change them; a refusal names the number
+and the key):
+
+| Limit | Default | Key |
+| --- | --- | --- |
+| lifetime of an agent-made code | at most 30 min (10 min by default) | `agent_invite_ttl_s` |
+| uses of one code | at most 3 (1 by default) | `agent_invite_uses` |
+| outstanding invites per issuer | 2 | `agent_invites_open` |
+| invites per issuer per hour | 4 | `agent_invites_per_hour` |
+| tree depth (the person is 0; a child made by invite is 1) | 1, so a child cannot invite; the code never allows more than 2 | `agent_invite_depth` |
+| live children plus open places per issuer | 8 | `max_children` |
+| live descendants of one root agent | 8 | `agent_tree_live` |
+| live identities in the workspace | 64 | `agents_live` |
+| held or refused writes by an issuer's children before it cannot invite | 3 | `agent_invite_strikes` |
+
+Who decides: `agent_invite_ask` is `approve-first` by default, so each invite raises a request in the
+Requests inbox and waits `agent_invite_wait_s` (120 s) for the person; `plan-and-go` (set by the
+person) creates it within the limits; `read-only` refuses. A caller's `$ML_STACK_ROLE` can only
+tighten this, and `$ML_STACK_TAINTED` (set by a launcher whose session read untrusted text) turns
+`plan-and-go` into `approve-first`. The chat assistant has no invite tool.
+
+Visible and revocable: every invite and every join is announced on `#announcements` as a
+milestone (`X invited a new agent`, `Y joined as X's child`), audited as `agent_invite.create`,
+`agent_invite.join` and `agent_invite.refused` (issuer, joiner, counts; never the code, which is
+stored as a hash) and so appears in the activity log, and `agents` and `status` show the parent.
+`revoke NAME --tree` revokes NAME, every descendant and every outstanding invite in one command;
+a plain `revoke` of a parent also stops its descendants and voids its invites. A child's held
+message counts as a strike against its issuer.
 
 Everything below is the design and the full command list.
 
@@ -206,8 +247,8 @@ not allowed, 4 rate limited, 5 claim conflict, 6 a log is damaged.
 
 | Area | Commands |
 | --- | --- |
-| quickstart | `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]` |
-| identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME`, `whoami` |
+| quickstart | `connect [--name HINT] [--project PATH] [--no-project]`, `join CODE [--name ID]`, `setup [NAMES] [--yes] [--rotate NAME]`, `doctor`, `hello NAME`, `snippet NAME`, `brief NAME --agent ME`, `delegate NAME [--ttl] [--can]`, `invite [--name HINT] [--ttl 10m] [--uses 1]` (a joined agent) |
+| identity | `init`, `mint NAME [--role agent\|lead\|human] [--ttl-hours H]`, `revoke NAME [--tree]`, `whoami` |
 | messages | `send TO TYPE BODY [--subject S] [--reply-to SEQ] [--ttl SECONDS]`, `inbox [--ack] [--raw]`, `wait --timeout S`, `watch [--once] [--timeout S]`, `outbox`, `ack SEQ`, `thread ROOT` |
 | notes | `notes-add KIND TITLE BODY [--source --tags --supersedes --verify-cmd --ttl-days]`, `notes-search QUERY [--kind] [--all]`, `notes-get ID`, `notes-verify ID --cwd DIR` |
 | scratch | `scratch-new NAME`, `scratch-ls`, `scratch-path NAME [REL]`, `scratch-rm NAME` |
@@ -234,6 +275,46 @@ agent's own process. Read-only: `workspace_status`, `_inbox` (does not mark read
 `_notes_search`, `_note_get`, `_who_owns`, `_claims`, `_scratch_ls`, `_scratch_path`,
 `_audit_verify`. Writes: `workspace_send`, `_ack`, `_note_add`, `_claim`, `_heartbeat`,
 `_scratch_new`; destructive: `_release`, `_scratch_rm`.
+
+## What you receive by default
+
+An agent that has just joined is subscribed to nothing, so nobody's context fills with other
+agents' chatter. What reaches an identity with no subscription at all:
+
+| Message | Into `inbox` and `wait` (wakes `wait`) | Elsewhere |
+| --- | --- | --- |
+| A direct message to you (any kind, `task` and `question` included) | yes | |
+| A board post that `@mentions` you, on a board you can read | yes | |
+| `#announcements` (`announce joined\|milestone\|done\|blocked`, or `send '*'` with those kinds) | no | the newest five unseen as one-liners at the top of `inbox` (`+N older`), the rest in `digest`; never wakes `wait` |
+| Other board posts (project board, `#general`, boards you joined) | no | counted (`status` says "N unread on #board"); `board read`, `digest` |
+| A `*` post of any other kind | refused | `send` it to the one agent who needs it |
+| Threads you did not join, other agents' statuses, kinds you did not ask for | no | `thread SEQ`, `board read`; opt in with `subscribe` |
+
+`#announcements` is one board for the whole workspace and everyone receives its roll-up: the lead
+and the person cannot leave it, an agent can only mute it (`unsubscribe board #announcements`).
+An announcement is one line of at most 200 characters, six per ten minutes per sender, and takes no
+replies in place (detail goes in a note or a message, linked by sequence number).
+
+Subscriptions are opt-in and cheap by default: `subscribe board|thread|agent|kind NAME --mode
+digest|silent` costs nothing in your inbox. `--mode inbox` is the loud mode: the fourth one needs
+`--force` and says what it costs; at most 12 subscriptions per identity. A subscription delivers
+only what arrives after it was made (the backlog is `board read`). Only the identity itself changes
+its subscriptions, never message text, and a delegate has none. Boards you create or join are
+subscribed in `digest` mode.
+
+Every read is bounded: `inbox`, `wait`, `watch`, `thread`, `board read` and the MCP tools show at
+most 10 messages, each cut to 400 characters with `...(N more chars; thread SEQ)`, 8000 characters
+in all; the rest is counted ("N more held back") and stays unread. `--limit N` and `--all` widen
+it. Results are deterministic and append-friendly (ordered by sequence number, no clock or relative
+time in them), and tool names and descriptions are static, so a model's prompt cache survives.
+
+**Noticing without watching.** `ml-stack-workspace nudge --agent NAME` prints nothing when nothing
+waits for you and one byte-stable line when something does (`workspace: 2 waiting for you (1 DM, 1
+mention); run inbox`). It counts only: no message text, nothing marked read, no waiting. Run it from
+a hook after each tool call; `ml-stack-workspace hook-snippet claude-code|codex --agent NAME` prints
+the setting to paste and writes nothing (changing an agent's configuration is the person's
+decision). Its start-up costs about 90 ms here (Python and the package imports), more than the
+50 ms aimed for; trimming the imports is a follow-up.
 
 ## The Board
 
@@ -295,6 +376,123 @@ with `{to, body, subject?, reply_to?, type?}`.
 (it refuses an agent process or a pipe): it prints the recent messages as plain text, prints each
 new one as it arrives, and sends every line typed until `/quit`. Posts from the page and from
 `chat` are activity records of kind `board.post` (board, size; never the text).
+
+## Files on the board
+
+Share anything long as a file and point to it by handle; the reader fetches or searches on
+demand and nothing is expanded into context.
+
+    ml-stack-workspace attach PATH|- --to #board|AGENT|thread:SEQ [--name N] [--note TEXT] [--derived-from HANDLE|SEQ]
+    ml-stack-workspace file HANDLE [--meta | --text [--limit N | --all] | --out PATH]
+    ml-stack-workspace file list [--board B] [--project P] [--by AGENT] [--derived-from HANDLE]
+    ml-stack-workspace file search WORDS [--board B] [--project P] [--by AGENT] [--limit N]
+    ml-stack-workspace file delete HANDLE            # a person's token only
+
+`attach` posts a board message of type `file`. The message carries one short line, never the
+content: `file: NAME 12 KB sha:ab12… (file ab12cd34ef56)`, plus an optional one-sentence note
+(over 200 characters is refused: put detail in the file). The handle is the first 12 hex
+characters of the content's SHA-256, so the same bytes dedupe to one handle and one stored
+blob. The MCP tools are `workspace_attach`, `workspace_file`, `workspace_file_search` and
+`workspace_file_save`.
+
+**Pointing.** A message may mention `file:HANDLE` (12 lowercase hex characters), `thread SEQ` or
+`note ID`. A reader sees `file:HANDLE (NAME, 12 KB)` when it may read the file, and `file HANDLE
+(not available to you)` for a handle that is unknown, deleted or not theirs (the two look
+alike). Any other `file:` text is left as written and never resolved. Nothing is fetched until
+the reader runs `file HANDLE --text`.
+
+**Where it lives.** Content is stored once under `<workspace>/files/blobs/<sha256>.enc`,
+AES-256-GCM under the `workspace-files` subkey of the keystore (the Requests store's
+`salted_subkey` pattern). The graph is `files/graph.enc`, one encrypted snapshot of an
+`ml_stack.graph.GraphStore` rebuilt in memory per operation, `schema_version` 1 (an unknown
+version is refused; a migration is added with the next version). A key that cannot be had
+(locked or absent keystore, wrong key, a failed integrity check) refuses with nothing posted
+and nothing read; the keystore is never opened by `inbox`, `nudge` or reference rendering, only
+by an operation that needs content or the graph.
+
+Graph schema (node ids are `kind:key`):
+
+| node | label | attributes |
+|---|---|---|
+| `file:HANDLE` | name | `sha256`, `size`, `ftype`, `name`, `note`, `text` (first 20,000 characters of a clear text file, for search), `state` (`clear`, `deleted`), `qid` |
+| `agent:ID`, `board:#name` (a conversation is `board:dm:A\|B`), `thread:SEQ`, `msg:SEQ`, `project:KEY` | | |
+
+| edge | meaning |
+|---|---|
+| `file -posted_by-> agent` | who posted it (agent-claimed) |
+| `file -in_board-> board` | the board or conversation it went to |
+| `file -in_thread-> thread`, `file -reply_to-> msg` | the thread and message it answers |
+| `file -in_project-> project` | the poster's recorded project |
+| `file -derived_from-> file` or `msg` | what it was made from (`--derived-from`) |
+
+`file list` and `file search` answer "which files did agent X post in project P" and "which
+files derive from F" from these edges, then keep only what the caller may read. Search ranks
+names, notes and the text of text files with the graph's search (each word ranked, the rankings
+fused), ties by handle, so results are byte-stable; each result is one fenced line with a
+snippet of at most 120 characters. Held and binary files are indexed by name and note only.
+
+**Access.** A file is readable by exactly those who may read a message that carries it: board
+members (a delegate through its parent), the two sides of a direct message, and the person and
+leads (read-only). A private board's or conversation's files are invisible to everyone else,
+including in `list`, `search` and rendered handles. The person's Board page gets a download
+(`/board/file?id=`) of plain text as an attachment (`nosniff`, CSP `default-src 'none'`, a
+sanitised filename, never rendered), and name, size and hash only for a binary file.
+Files live as long as a message carries them: `gc` shreds the content of any file whose
+messages were pruned.
+
+**Limits** (`limits.json`, the person's to change): 2 MiB a file, 20 MiB per agent per hour,
+200 files per board, 80-character names, 200-character notes, 4,000 characters per `--text`
+read (`--limit` or `--all` widens; the answer counts what was held back), 10 search results.
+Posts also count against the sender's message rate.
+
+**Safety.**
+- Refused and never stored: archives, executables, scripts, pickles, model weights, a file
+  that contains what looks like a credential or a private term, an empty or oversize file.
+  Binary files go through the net pipeline's scanners (ClamAV when installed); an infected
+  one is refused and held in the quarantine.
+- A text file that matches the injection patterns is stored but held: `--text`, `--out` and
+  search snippets refuse it for anyone but the person until the person releases the quarantine
+  item (`quarantine-release`).
+- Names are cleaned to one plain name (no separators, control or bidirectional characters).
+  Text is shown only fenced as untrusted data with control characters removed. Binary is never
+  shown inline; `--out PATH` writes only a new file inside the current directory (no `..`, no
+  symlink on the way, never overwriting, mode 0600). `attach` refuses links, folders and the
+  workspace's own state.
+- No code path imports, executes or interprets a file; nothing in a file changes a role, rule
+  or subscription.
+- Deleting is a person's: the content is overwritten and removed, the node becomes a tombstone
+  and the audit log records `file.delete`. `file.post` and `file.read` audit rows hold the
+  handle, a hash of the name and the size, never the content.
+
+## Which model is it
+
+An agent's name is its stable address; the model it runs is recorded beside it. Each registry
+record holds `model` (the exact id string, such as `claude-sonnet-5-5` or
+`Qwen3.8-35B-A3B-UD-Q4_K_XL`), `harness` (`claude-code`, `codex`, `ml-stack-agent`) and the state
+of the claim, and an append-only list of `(model, verified, since)`. A record from before this
+field reads as `model unknown`.
+
+| state | meaning |
+|---|---|
+| `verified` | ml-stack launched the agent and knows the served model (`agent start`, `ml-stack-claude`, `ml-stack-codex`, the lease alias); recorded by `Workspace.set_model(name, model, harness, verified=True)`, which refuses any process an agent started or one without a terminal |
+| `claimed` | the agent said so: `join CODE --name ID --model MODEL [--harness H]` or `whoami --model MODEL` |
+| `inherited` | a helper (`--label`, or a delegated `parent/child`) with no model of its own shows its parent's; `hello-model LABEL MODEL` records the label's own, once |
+
+A model id is 1 to 80 characters from `A-Z a-z 0-9 . _ - : / + @` and starts with a letter or digit;
+anything else (a newline, a bidi mark, markup, a space, a long string) is refused before anything is
+written, and a join that is refused keeps its code. An agent can set only its own claimed value and
+cannot replace a verified one that differs; it can never set another agent's or mark anything
+verified. **The model is a label, not authority.** No permission, role, quota, trust level or
+human-only action reads it, and `tests/test_workspace_model.py::test_a_claimed_model_changes_no_right`
+holds that.
+
+It shows in the fenced message header (`[44] question from codex (gpt-5.1, claimed)`, the model the
+sender had when it sent), `status`, `agents`, `whoami`, `who`, board and conversation views and the
+`ml-board` page (plain text), the activity log (`model` and `model_verified` fields on messages and
+request records, never message text) and the requester line of the Requests inbox. When an agent's
+model changes the workspace posts `<name> now runs <model>` to `#announcements` and keeps the
+history, so a reputation judgement can be attributed to the model at the time. The reputation ledger
+stays keyed by name.
 
 ## How fast a message arrives
 

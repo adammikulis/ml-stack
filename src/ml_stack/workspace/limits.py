@@ -46,13 +46,39 @@ class Limits:
     boards_total: int = 200
     boards_joined: int = 32
     board_members: int = 64
-    subs_per_identity: int = 50
+    subs_per_identity: int = 12
+    inbox_subs_free: int = 3
+    read_items: int = 10
+    read_item_chars: int = 400
+    read_total_chars: int = 8_000
+    announce_chars: int = 200
+    announce_per_window: int = 6
+    announce_window_s: float = 600.0
+    announce_rollup: int = 5
     board_message_chars: int = 4_000
     board_read_chars: int = 60_000
     digest_lines: int = 40
     unread_per_sender: int = 100
     mints_per_identity: int = 16
     agents_live: int = 64
+    file_bytes: int = 2 * 1024 * 1024
+    file_bytes_per_hour: int = 20 * 1024 * 1024
+    files_per_board: int = 200
+    file_name_chars: int = 80
+    file_note_chars: int = 200
+    file_text_chars: int = 4_000
+    file_search_results: int = 10
+    file_snippet_chars: int = 120
+    file_index_chars: int = 20_000
+    agent_invite_ttl_s: float = 1_800.0
+    agent_invite_uses: int = 3
+    agent_invites_open: int = 2
+    agent_invites_per_hour: int = 4
+    agent_invite_depth: int = 1
+    agent_tree_live: int = 8
+    agent_invite_strikes: int = 3
+    agent_invite_ask: str = "approve-first"
+    agent_invite_wait_s: float = 120.0
     verify_allow: list[list[str]] = field(default_factory=list)
 
 

@@ -167,6 +167,7 @@ ml-stack-jobs = "ml_stack.jobs:main"
 ml-stack-workspace = "ml_stack.workspace.cli:main"
 ml-stack-suite = "ml_stack.train.suite:main"
 ml-stack-claude = "ml_stack.claude:main"
+ml-stack-codex = "ml_stack.codex:launch"
 ml-stack-agent = "ml_stack.harness:main"
 # a rendered graph page served on loopback, with the model behind it
 ml-stack-graph = "ml_stack.graph.serve:main"
