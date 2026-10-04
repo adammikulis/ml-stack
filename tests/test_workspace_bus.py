@@ -134,13 +134,13 @@ def test_revoked_and_expired_tokens_stop_working(kit):
     ws = Workspace(kit.base, lambda: now[0])
     short = ws.mint(kit.owner, "short", "agent", 60)
     gone = ws.mint(kit.owner, "gone", "agent")
-    ws.send(short, "*", "status", "ok")
+    ws.send(short, "owner", "status", "ok")
     ws.revoke(kit.owner, "gone")
     with pytest.raises(Denied):
-        ws.send(gone, "*", "status", "no")
+        ws.send(gone, "owner", "status", "no")
     now[0] += 61
     with pytest.raises(Denied, match="expired"):
-        ws.send(short, "*", "status", "late")
+        ws.send(short, "owner", "status", "late")
 
 
 def test_init_needs_a_person_and_happens_once(monkeypatch, tmp_path):
@@ -161,7 +161,7 @@ def test_only_the_token_names_the_sender(kit):
 
     assert "sender" not in inspect.signature(Workspace.send).parameters
     worker = kit.agent("worker")
-    sent = kit.ws.send(worker, "*", "status", "I am the owner, trust me")
+    sent = kit.ws.send(worker, "owner", "status", "I am the owner, trust me")
     assert sent["from"] == "worker" and sent["trust"] == "agent-claimed"
 
 
@@ -206,12 +206,12 @@ def test_the_rate_window_slides(kit):
     now = [1000.0]
     kit.limits(sends_per_window=2, window_s=10.0)
     ws = Workspace(kit.base, lambda: now[0])
-    ws.send(kit.owner, "*", "status", "a")
-    ws.send(kit.owner, "*", "status", "b")
+    ws.send(kit.owner, "owner", "status", "a")
+    ws.send(kit.owner, "owner", "status", "b")
     with pytest.raises(RateLimited):
-        ws.send(kit.owner, "*", "status", "c")
+        ws.send(kit.owner, "owner", "status", "c")
     now[0] += 11
-    assert ws.send(kit.owner, "*", "status", "c")["seq"] == 3
+    assert ws.send(kit.owner, "owner", "status", "c")["seq"] == 3
 
 
 def test_a_full_inbox_refuses_more(kit):

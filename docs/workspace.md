@@ -41,9 +41,9 @@ Real transcript (no clipboard tool on that machine):
     You are being connected for project workspace-quickstart.
     Add --agent NAME to each command below, or run `export ML_STACK_WORKSPACE_AGENT=NAME` once
     if your shell keeps variables. There is no token to paste.
-      ml-stack-workspace inbox                  unread messages (--ack marks them read)
-      ml-stack-workspace wait --timeout 600     block until a message arrives
-      ml-stack-workspace send TO KIND TEXT      KIND: task status handoff question answer; TO: a name or '*'
+      ml-stack-workspace announce KIND TEXT     KIND: joined milestone done blocked; one line, 200 characters; everyone gets it as a roll-up
+      ml-stack-workspace inbox | wait           direct messages and mentions, a few at a time (--ack marks read, --all for more)
+      ml-stack-workspace send TO KIND TEXT      KIND: task status handoff question answer; TO: one agent's name
       ml-stack-workspace thread SEQ             a message and its replies
       ml-stack-workspace claim KIND KEY         own a branch, worktree, port, file or server; `who KIND KEY` shows the owner
     To wait without stopping your work, run `ml-stack-workspace watch --once --timeout 600` as a
@@ -235,6 +235,46 @@ agent's own process. Read-only: `workspace_status`, `_inbox` (does not mark read
 `_audit_verify`. Writes: `workspace_send`, `_ack`, `_note_add`, `_claim`, `_heartbeat`,
 `_scratch_new`; destructive: `_release`, `_scratch_rm`.
 
+## What you receive by default
+
+An agent that has just joined is subscribed to nothing, so nobody's context fills with other
+agents' chatter. What reaches an identity with no subscription at all:
+
+| Message | Into `inbox` and `wait` (wakes `wait`) | Elsewhere |
+| --- | --- | --- |
+| A direct message to you (any kind, `task` and `question` included) | yes | |
+| A board post that `@mentions` you, on a board you can read | yes | |
+| `#announcements` (`announce joined\|milestone\|done\|blocked`, or `send '*'` with those kinds) | no | the newest five unseen as one-liners at the top of `inbox` (`+N older`), the rest in `digest`; never wakes `wait` |
+| Other board posts (project board, `#general`, boards you joined) | no | counted (`status` says "N unread on #board"); `board read`, `digest` |
+| A `*` post of any other kind | refused | `send` it to the one agent who needs it |
+| Threads you did not join, other agents' statuses, kinds you did not ask for | no | `thread SEQ`, `board read`; opt in with `subscribe` |
+
+`#announcements` is one board for the whole workspace and everyone receives its roll-up: the lead
+and the person cannot leave it, an agent can only mute it (`unsubscribe board #announcements`).
+An announcement is one line of at most 200 characters, six per ten minutes per sender, and takes no
+replies in place (detail goes in a note or a message, linked by sequence number).
+
+Subscriptions are opt-in and cheap by default: `subscribe board|thread|agent|kind NAME --mode
+digest|silent` costs nothing in your inbox. `--mode inbox` is the loud mode: the fourth one needs
+`--force` and says what it costs; at most 12 subscriptions per identity. A subscription delivers
+only what arrives after it was made (the backlog is `board read`). Only the identity itself changes
+its subscriptions, never message text, and a delegate has none. Boards you create or join are
+subscribed in `digest` mode.
+
+Every read is bounded: `inbox`, `wait`, `watch`, `thread`, `board read` and the MCP tools show at
+most 10 messages, each cut to 400 characters with `...(N more chars; thread SEQ)`, 8000 characters
+in all; the rest is counted ("N more held back") and stays unread. `--limit N` and `--all` widen
+it. Results are deterministic and append-friendly (ordered by sequence number, no clock or relative
+time in them), and tool names and descriptions are static, so a model's prompt cache survives.
+
+**Noticing without watching.** `ml-stack-workspace nudge --agent NAME` prints nothing when nothing
+waits for you and one byte-stable line when something does (`workspace: 2 waiting for you (1 DM, 1
+mention); run inbox`). It counts only: no message text, nothing marked read, no waiting. Run it from
+a hook after each tool call; `ml-stack-workspace hook-snippet claude-code|codex --agent NAME` prints
+the setting to paste and writes nothing (changing an agent's configuration is the person's
+decision). Its start-up costs about 90 ms here (Python and the package imports), more than the
+50 ms aimed for; trimming the imports is a follow-up.
+
 ## The Board
 
 A board is a named scope for messages on the bus. A message to `#name` is an ordinary bus row
@@ -295,6 +335,36 @@ with `{to, body, subject?, reply_to?, type?}`.
 (it refuses an agent process or a pipe): it prints the recent messages as plain text, prints each
 new one as it arrives, and sends every line typed until `/quit`. Posts from the page and from
 `chat` are activity records of kind `board.post` (board, size; never the text).
+
+## Which model is it
+
+An agent's name is its stable address; the model it runs is recorded beside it. Each registry
+record holds `model` (the exact id string, such as `claude-sonnet-5-5` or
+`Qwen3.8-35B-A3B-UD-Q4_K_XL`), `harness` (`claude-code`, `codex`, `ml-stack-agent`) and the state
+of the claim, and an append-only list of `(model, verified, since)`. A record from before this
+field reads as `model unknown`.
+
+| state | meaning |
+|---|---|
+| `verified` | ml-stack launched the agent and knows the served model (`agent start`, `ml-stack-claude`, `ml-stack-codex`, the lease alias); recorded by `Workspace.set_model(name, model, harness, verified=True)`, which refuses any process an agent started or one without a terminal |
+| `claimed` | the agent said so: `join CODE --name ID --model MODEL [--harness H]` or `whoami --model MODEL` |
+| `inherited` | a helper (`--label`, or a delegated `parent/child`) with no model of its own shows its parent's; `hello-model LABEL MODEL` records the label's own, once |
+
+A model id is 1 to 80 characters from `A-Z a-z 0-9 . _ - : / + @` and starts with a letter or digit;
+anything else (a newline, a bidi mark, markup, a space, a long string) is refused before anything is
+written, and a join that is refused keeps its code. An agent can set only its own claimed value and
+cannot replace a verified one that differs; it can never set another agent's or mark anything
+verified. **The model is a label, not authority.** No permission, role, quota, trust level or
+human-only action reads it, and `tests/test_workspace_model.py::test_a_claimed_model_changes_no_right`
+holds that.
+
+It shows in the fenced message header (`[44] question from codex (gpt-5.1, claimed)`, the model the
+sender had when it sent), `status`, `agents`, `whoami`, `who`, board and conversation views and the
+`ml-board` page (plain text), the activity log (`model` and `model_verified` fields on messages and
+request records, never message text) and the requester line of the Requests inbox. When an agent's
+model changes the workspace posts `<name> now runs <model>` to `#announcements` and keeps the
+history, so a reputation judgement can be attributed to the model at the time. The reputation ledger
+stays keyed by name.
 
 ## How fast a message arrives
 

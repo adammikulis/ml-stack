@@ -298,7 +298,7 @@ class TestWorkspaceCommands:
         hostile = "x; touch /tmp/pwned $(id) `id`"
         assert harnessid.announce(harnessid.Seat(hostile, "claude-code"), "t", lambda _: None)
         argv = Path(f"{exe}.argv").read_text().splitlines()
-        assert argv == ["send", "*", "joined", "t", "--agent", "claude-code", "--label", hostile]
+        assert argv == ["announce", "joined", "t", "--agent", "claude-code", "--label", hostile]
         assert harnesshook.nudge(hostile) == "nudge text"
         assert hostile in Path(f"{exe}.argv").read_text().splitlines()
 
@@ -347,14 +347,25 @@ class TestSeat:
         with pytest.raises(Denied):
             ws.auth(secret)
 
-    def test_the_seat_is_subscribed_to_announcements_as_a_digest_and_to_tasks(self, person, tmp_path):
+    def test_the_seat_is_on_the_project_board_with_the_quiet_defaults(self, person, tmp_path):
         from ml_stack.workspace import Workspace
-        from ml_stack.workspace.boards import GENERAL
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        seat = harnessid.invite("local-test-codex", project, "claude-code", lambda _: None)
+        boards, subs = Workspace(seat.base).board.store.state()
+        assert any("local-test-codex" in b["members"] for k, b in boards.items() if k != "#general")
+        assert not subs.get("local-test-codex")
+
+    def test_a_person_started_launcher_records_the_verified_model_and_an_agent_one_does_not(self, person, monkeypatch, tmp_path):
+        from ml_stack.workspace import Workspace
 
         seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
-        subs = Workspace(seat.base).board.store.state()[1]["local-test-codex"]
-        assert subs[("board", GENERAL)] == "digest" and ("kind", "task") in subs
-        assert ("mentions", "") in subs
+        assert seat.record_model("qwen-27b", "codex") is True
+        assert "qwen-27b" in json.dumps(Workspace(seat.base).registry.info("local-test-codex"))
+        monkeypatch.setenv("CLAUDECODE", "1")
+        assert seat.record_model("other", "codex") is False
+        assert harnessid.Seat("x", "p").record_model("m", "codex") is False
 
     def test_ending_the_session_revokes_the_identity_and_removes_the_files(self, person, monkeypatch, tmp_path):
         from ml_stack.workspace import Denied, Workspace, tokens

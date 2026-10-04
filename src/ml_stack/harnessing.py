@@ -251,7 +251,8 @@ def opened(args: argparse.Namespace, harness: str, served: tuple[str, str, int],
     seat = None
     try:
         seat = harnessid.invite(harnessid.agent_name(alias, harness, args.name), cwd, args.parent, say)
-        seat.record_model(alias, harness)
+        if not seat.record_model(alias, harness):
+            say(f"the model of {seat.name} ({alias}, {harness}) is not recorded: a person-started launcher records it")
         pre = hook_command("pre", role=args.role, label=seat.name, root=cwd, protect=protected_paths(files))
         post = hook_command("post", role=args.role, label=seat.name, root=cwd, protect=[])
         harnessid.announce(seat, f"{harness} on {alias} ({args.role}), project {cwd.name}", say)

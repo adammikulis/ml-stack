@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack.workspace import Denied, Workspace, onboard, tokens
-from ml_stack.workspace.boards import GENERAL
 from ml_stack.workspace.identity import valid_name
 from ml_stack.workspace.project import describe
 
@@ -54,12 +53,14 @@ class Seat:
         return ["--agent", self.parent, "--label", self.name] if self.parent else ["--agent", self.name]
 
     def record_model(self, alias: str, harness: str) -> bool:
-        """Record the served alias and harness as the agent's verified model where the workspace
-        can (``Workspace.set_model``); False where it cannot yet."""
-        setter = getattr(Workspace(self.base), "set_model", None) if self.minted else None
-        if setter is None:
+        """Record the served alias and harness as the agent's verified model
+        (``Workspace.set_model``, person-only); False for an unminted seat or a refusal."""
+        if not self.minted:
             return False
-        setter(self.name, alias, harness)
+        try:
+            Workspace(self.base).set_model(self.name, alias, harness, verified=True)
+        except (Denied, ValueError, PermissionError):
+            return False
         return True
 
     def revoke(self) -> bool:
@@ -104,9 +105,6 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
         if found:
             ws.registry.set_project(onboard.SETUP, name, found)
         ws.board.place(name, found)
-        token = tokens.load(ws.base, name)
-        ws.board.subscribe(token, "board", GENERAL, "digest")
-        ws.board.subscribe(token, "kind", "task", "inbox")
     except (Denied, ValueError, OSError) as why:
         say(f"not minted: {why}. Run `ml-stack-workspace setup --agents {name}` yourself, or pass "
             f"--as {parent} to act as that agent")
@@ -120,7 +118,7 @@ def announce(seat: Seat, text: str, say: Callable[[str], None]) -> bool:
     ok = False
     if exe:
         try:
-            done = subprocess.run([exe, "send", "*", "joined", text[:180], *seat.flags()], capture_output=True,
+            done = subprocess.run([exe, "announce", "joined", text[:180], *seat.flags()], capture_output=True,
                                   text=True, timeout=SENDER_WAIT_S, check=False, stdin=subprocess.DEVNULL,
                                   env={**os.environ, "ML_STACK_NONINTERACTIVE": "1"})
             ok = done.returncode == 0

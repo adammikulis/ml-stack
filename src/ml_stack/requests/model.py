@@ -19,7 +19,7 @@ STATES = (PENDING, *RESOLVED)
 VIAS = ("terminal", "ui", "dialog")
 """The three ways a person answers: a terminal at a tty, the UI's browser session, the desktop dialog."""
 
-MOST = {"subject": 300, "reason": 700, "name": 64, "label": 40, "effect": 200}
+MOST = {"model": 80, "subject": 300, "reason": 700, "name": 64, "label": 40, "effect": 200}
 APPROVING = frozenset({"allow-once", "allow-always", "approve", "approve-other", "release"})
 """Choices that let the thing asked about go ahead; every other choice, and expiry, does not."""
 
@@ -83,6 +83,16 @@ class Origin:
     agent: str = ""
     project: str = ""
     session: str = ""
+    model: str = ""
+    model_state: str = ""
+
+    @property
+    def who(self) -> str:
+        """``agent (model, state)`` for a person's eyes; ``agent (model unknown)`` when none."""
+        if not self.agent:
+            return ""
+        return f"{self.agent} ({self.model}, {self.model_state or 'claimed'})" if self.model \
+            else f"{self.agent} (model unknown)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +143,8 @@ class Request:
         return cls(
             id=str(row["id"]), kind=str(row["kind"]),
             raised_by=Origin(str(origin.get("agent", "")), str(origin.get("project", "")),
-                             str(origin.get("session", ""))),
+                             str(origin.get("session", "")), str(origin.get("model", "")),
+                             str(origin.get("model_state", ""))),
             subject=str(row["subject"]), reason=str(row["reason"]),
             choices=tuple(Choice(str(a), str(b), str(c)) for a, b, c in row["choices"]),
             created=float(row["created"]), expires=float(row["expires"]), state=str(row["state"]),
@@ -143,7 +154,8 @@ class Request:
 
 
 def _origin(origin: Origin) -> dict[str, str]:
-    return {"agent": origin.agent, "project": origin.project, "session": origin.session}
+    return {"agent": origin.agent, "project": origin.project, "session": origin.session,
+            "model": origin.model, "model_state": origin.model_state}
 
 
 def fingerprint(request: Request) -> str:

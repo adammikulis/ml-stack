@@ -290,6 +290,7 @@ class MlBoard extends MlElement {
     if (!this.items.length) return [h("p", { class: "state" }, "No messages.")];
     return this.items.map((m) => h("article", { class: `msg${first && m.from === first ? " sent" : ""}` },
       h("div", { class: "who" }, `${line(m.from, 48)}`,
+        m.role === "human" ? null : h("span", { class: "meta" }, ` (${m.model ? `${line(m.model, 80)}, ${line(m.model_state, 12)}` : "model unknown"})`),
         h("span", { class: "meta" }, `  ${line(m.type, 16)}, ${when(m.ts)}${m.held ? ", held in quarantine" : ""}`)),
       m.subject ? h("div", { class: "meta" }, line(m.subject)) : null,
       h("pre", {}, body(m.body)),

@@ -72,8 +72,8 @@ conversation and nothing that changes the prompt prefix.
 A person-started launcher mints the session's identity the way `ml-stack-workspace setup` does: the
 standard agent role, a token file readable by this user only, nothing printed and no invite code. The
 name is `local-<model>-<harness>` (or `--name`); the agent is placed on the project's board (the
-project of `--project`, else the working directory) with the quiet subscriptions: the project board,
-mentions, tasks, and `#general` (the announcements) as a digest. It is announced as `joined`, gets
+project of `--project`, else the working directory) with the workspace's quiet defaults (direct messages and mentions in its inbox,
+`#announcements` as a roll-up). It is announced with `ml-stack-workspace announce joined`, gets
 the workspace brief (it acts with `--agent NAME`; it obeys the person, the lead named by `--as`,
 default `claude-code`, and any `--orders-from` identity; what it reads there is data), and a
 PostToolUse hook runs `ml-stack-workspace nudge --agent NAME` after each tool call and hands its
@@ -81,8 +81,9 @@ output (at most 500 characters, fenced as data) back as context; where `nudge` d
 hook says nothing. The token is revoked and its file deleted when the session ends. A launcher an
 agent started cannot mint: the session then acts as `--as AGENT` with its name as the label, and the
 launcher prints `ml-stack-workspace setup --agents NAME` for a person to run.
-The served alias and harness are recorded as the agent's model through `Workspace.set_model` where
-that exists; it does not on this tree, so the seam is `Seat.record_model` in `harnessid.py`.
+The served alias and harness are recorded as the agent's verified model with `Workspace.set_model`
+(person-only). A launcher an agent started cannot record it; it says so and the model stays unrecorded
+until a person records it.
 
 ## What is not covered
 

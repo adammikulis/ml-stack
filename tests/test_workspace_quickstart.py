@@ -137,7 +137,8 @@ def test_agent_env_and_flag_find_the_right_token_and_one_cannot_pose_as_another(
     via_env = child(["whoami", "--json"], base, ML_STACK_WORKSPACE_AGENT="codex")
     assert json.loads(via_env.stdout)["id"] == "codex"
     via_flag = child(["whoami", "--json", "--agent", "lead"], base)
-    assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}}
+    assert json.loads(via_flag.stdout) == {"id": "lead", "role": "lead", "project": {}, "model": "unknown",
+                                           "model_state": "", "harness": ""}
     (base / "tokens" / "codex").write_text((base / "tokens" / "lead").read_text())
     swapped = child(["whoami", "--agent", "codex"], base)
     assert swapped.returncode == 3 and "another agent" in swapped.stderr
@@ -483,7 +484,7 @@ def test_connect_waits_for_a_second_process_to_join_then_checks_it_answers(base)
     term.until("codex joined.")
     term.until("Sent a 'workspace ready'" if False else "workspace ready")
     child(["inbox", "--ack", "--agent", "codex"], base)
-    child(["send", "*", "status", "connected", "--agent", "codex"], base)
+    child(["announce", "joined", "connected", "--agent", "codex"], base)
     term.until("codex answered. Connected.")
     term.until("Paste the same block into more agents")
     assert term.finish() == 0
@@ -516,7 +517,7 @@ def test_setup_walks_through_six_steps_with_a_scripted_person(base):
     code = CODE.search(term.until("Step 4 of 6") and term.until("Waiting for the agent")).group(1)
     child(["join", code, "--name", "codex"], base)
     term.until("workspace ready")
-    child(["send", "*", "status", "connected", "--agent", "codex"], base)
+    child(["announce", "joined", "connected", "--agent", "codex"], base)
     term.until("Docs: docs/workspace.md")
     assert term.finish() == 0
     for n in range(1, 7):
