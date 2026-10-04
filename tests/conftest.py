@@ -280,6 +280,21 @@ def _no_machine_state(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_reputation_observer_leaks():
+    """The process-wide reputation observer a test installs does not outlive it. One that did made
+    ``127.0.0.1`` a "watch" host for whichever test ran next on the same xdist worker, so a
+    llama.cpp test failed or passed by which neighbours it was scheduled beside."""
+    from ml_stack.sentinel import observers
+
+    before = observers.installed()
+    yield
+    if observers.installed() is not before:
+        observers.uninstall()
+        if before is not None:
+            observers.install(before)
+
+
+@pytest.fixture(autouse=True)
 def _no_broker_left(_no_machine_state):
     """Fails a test that leaves a broker running under its temporary state root, and stops it."""
     yield
@@ -874,11 +889,13 @@ def points_at(link) -> str:
 
 #: Names at the top of the real state root that a process outside the suite rewrites on
 #: its own: a running broker's holders, record and lock, the edit guard's cache, and the
-#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content. `workspace` is
-#: the agents' shared hub: any agent on the machine sending a message mid-run failed the run with a
-#: write the suite never made (a flake that grows with the number of agents).
+#: lease file and server logs, which `_real_cache_and_state_untouched` reads by content. `workspace`,
+#: `activity` and `sentinel` are written live by every other agent's tool use and by the end of every other
+#: test run on the machine; they failed this run with writes it never made (a flake that grows with the
+#: number of agents). A test cannot reach them by accident: HOME and ML_STACK_HOME are moved.
 LIVE_WRITERS = frozenset({"broker-leases.json", "broker.json", "broker.lock", "servers.json",
-                          "servers.lock", "logs", "guard", "workspace"})
+                          "servers.lock", "logs", "guard", "workspace", "activity",
+                          "sentinel"})
 
 
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:

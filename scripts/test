@@ -6,6 +6,11 @@
     scripts/test full      every test not marked slow
     scripts/test slow      only the tests marked slow
     scripts/test all       everything, slow included: what CI runs
+    scripts/test gate      the structural checks a merge is gated on (budgets, red-team coverage,
+                           command reference, layers, human floors): a minute or two
+    scripts/test record    build this checkout's testmon map in the foreground (quick starts it
+                           in the background by itself the first time)
+    scripts/test ratchet   compare the last full run's wall and CPU time with tests/full-tier-time.json
     scripts/test heavy --junit J   rewrite tests/heavy-modules.txt from a pytest --junitxml file J
 
 Every tier queues for workers in the machine-wide budget (scripts/testslots.py) and runs with
@@ -32,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
 import testslots
+import testtime
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE = "0.2dev"
@@ -56,11 +62,24 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     print("+", " ".join(command), flush=True)
     began = time.monotonic()
     status = subprocess.run(shown, cwd=ROOT, env=env, check=False).returncode
+    wall = time.monotonic() - began
+    if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
+        measured(command, junit, wall)
     if junit is not None:
         from ml_stack.activity.gate import Run, record_run
-        record_run(Run(ROOT, tier, command, junit, status, time.monotonic() - began))
+        record_run(Run(ROOT, tier, command, junit, status, wall))
         junit.unlink(missing_ok=True)
     return status
+
+
+def measured(command: list[str], junit: Path, wall: float) -> None:
+    """Remember this full run's time for ``scripts/test ratchet``."""
+    try:
+        cpu, count = testtime.cpu_seconds(junit.read_text(encoding="utf-8"))
+        workers = int(command[command.index("-n") + 1])
+    except (OSError, ValueError, IndexError):
+        return
+    testtime.save(ROOT / testtime.LAST, testtime.Timing(wall, cpu, workers, count))
 
 
 def testmon_env() -> dict[str, str]:
@@ -98,8 +117,10 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
     why = [f"{p}: nothing says which tests it affects" for p in picked.unmapped]
     if testmon_missing():
         why = ["pytest-testmon is not installed (pip install -e '.[test]')", *why]
+    elif not (ROOT / DATAFILE).exists() and not picked.unmapped:
+        return first_quick(args, picked, tier, rest)
     elif not (ROOT / DATAFILE).exists():
-        why = [f"no {DATAFILE} in this checkout yet; this run records it", *why]
+        why = [f"no {DATAFILE} in this checkout yet and a changed path maps to nothing", *why]
     if why:
         for line in why[:8]:
             print(f"quick: {line}")
@@ -120,6 +141,99 @@ def quick(args: argparse.Namespace, rest: list[str]) -> int:
                                  testmon_env(), "quick")))
 
 
+def first_quick(args: argparse.Namespace, picked: affected.Selection, tier: list[str],
+                rest: list[str]) -> int:
+    """The first quick run in a checkout: the test files the import graph reaches now, and the
+    testmon map built in the background so the second run is fast. Nothing waits on the map."""
+    direct = sorted(picked.files)
+    print(f"quick: no {DATAFILE} here yet; running the {len(direct)} test file(s) that import or "
+          "name a changed module, and building the map in the background")
+    start_recording()
+    if not direct:
+        return 0
+    return clean(run(pytest_command(min(args.workers, len(direct)), *tier, *direct, *rest),
+                     tier="quick"))
+
+
+def start_recording() -> None:
+    """Start ``scripts/test record`` detached unless one is already running for this checkout."""
+    lock = ROOT / f"{DATAFILE}.building"
+    try:
+        pid = int(lock.read_text(encoding="utf-8").split()[0])
+        os.kill(pid, 0)
+        print(f"quick: the map is already being built (pid {pid})")
+        return
+    except (OSError, ValueError, IndexError):
+        pass
+    log = ROOT / f"{DATAFILE}.log"
+    child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "record"], cwd=ROOT,
+                             stdin=subprocess.DEVNULL, stdout=log.open("ab"), stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    lock.write_text(f"{child.pid}\n", encoding="utf-8")
+    print(f"quick: building the map in pid {child.pid}, log {log.name}")
+
+
+def record(args: argparse.Namespace) -> int:
+    """Run the full tier once under testmon into a scratch file and move it into place when done.
+
+    Never leaves a half-written map where ``quick`` looks for one: pytest writes to
+    ``.testmondata.new`` and the rename is the last step.
+    """
+    lock = ROOT / f"{DATAFILE}.building"
+    lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    scratch = ROOT / f"{DATAFILE}.new"
+    for stale in ROOT.glob(f"{DATAFILE}.new*"):
+        stale.unlink(missing_ok=True)
+    env = {**os.environ, "TESTMON_DATAFILE": str(scratch)}
+    try:
+        with testslots.lease(max(0, args.workers), label="ml-stack: testmon map") as got:
+            status = run(pytest_command(max(1, min(got.workers, 8)), "--testmon-noselect", *FULL), env,
+                         "record")
+        if scratch.exists():
+            scratch.replace(ROOT / DATAFILE)
+            for extra in ROOT.glob(f"{DATAFILE}.new-*"):
+                extra.replace(ROOT / (DATAFILE + extra.name[len(scratch.name):]))
+        return status
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def gate(args: argparse.Namespace, rest: list[str]) -> int:
+    """The structural checks a merge is gated on, in this order, all of them reported."""
+    steps = [
+        ("budgets", [sys.executable, "scripts/budgets"]),
+        ("redteam coverage", [sys.executable, "scripts/redteam_coverage.py", "--check"]),
+        ("command reference", [sys.executable, "scripts/reference", "--write"]),
+        ("structure tests", [*pytest_command(max(1, min(args.workers, 6)),
+                                             "tests/test_layers.py", "tests/test_budgets.py",
+                                             "tests/test_budget_floors.py",
+                                             "tests/test_budget_ratchet.py",
+                                             "tests/test_redteam_human_floor.py",
+                                             "tests/test_requests_floor.py",
+                                             "tests/test_onboard_human.py",
+                                             "tests/test_cli_reference.py", *rest)]),
+    ]
+    failed = []
+    for name, command in steps:
+        if name == "command reference":
+            before = subprocess.run(["git", "diff", "--", "docs/commands.md"], cwd=ROOT,
+                                    capture_output=True, text=True, check=False).stdout
+        began = time.monotonic()
+        print(f"gate: {name}", flush=True)
+        status = subprocess.run(command, cwd=ROOT, check=False).returncode
+        if name == "command reference":
+            after = subprocess.run(["git", "diff", "--", "docs/commands.md"], cwd=ROOT,
+                                   capture_output=True, text=True, check=False).stdout
+            if after != before:
+                print("gate: docs/commands.md changed; commit the regenerated table")
+                status = 1
+        print(f"gate: {name} {'ok' if status == 0 else 'FAILED'} in {time.monotonic() - began:.0f} s")
+        if status:
+            failed.append(name)
+    print("gate: " + ("every structural check passed" if not failed else "failed: " + ", ".join(failed)))
+    return 1 if failed else 0
+
+
 def heavy(junit: Path, over: float) -> int:
     """Rewrite the heavy-module list with every module whose tests took ``over`` seconds."""
     totals: dict[str, float] = {}
@@ -137,7 +251,10 @@ def main() -> int:
     """Parse the tier and run it."""
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy"])
+    parser.add_argument("tier", choices=["quick", "fast", "full", "slow", "all", "heavy", "gate", "record", "ratchet"])
+    parser.add_argument("--update", action="store_true", help="ratchet: record a lower time")
+    parser.add_argument("--allow-increase", action="store_true",
+                        help="ratchet --update: record a higher time (refused for an agent)")
     parser.add_argument("--junit", type=Path, help="heavy: the junit file to read")
     parser.add_argument("--over", type=float, default=12.0, help="heavy: seconds per module")
     parser.add_argument("-n", "--workers", type=int, default=0,
@@ -148,11 +265,20 @@ def main() -> int:
     args, rest = parser.parse_known_args()
     if args.tier == "heavy":
         return heavy(args.junit, args.over)
+    if args.tier == "ratchet":
+        if args.allow_increase and os.environ.get("CLAUDECODE"):
+            print("ratchet: --allow-increase is refused when CLAUDECODE is set; the owner raises it")
+            return 1
+        return testtime.check(ROOT, args.update, args.allow_increase)
+    if args.tier == "record":
+        return record(args)          # takes its own lease: a nested one would wait on itself
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
     with testslots.lease(max(0, args.workers), label=f"ml-stack: {args.tier}") as got:
         args.workers = got.workers if args.workers <= 0 else min(args.workers, got.workers)
         if args.tier == "quick":
             return quick(args, rest)
+        if args.tier == "gate":
+            return gate(args, rest)
         return run(pytest_command(args.workers, *tiers[args.tier], *rest), tier=args.tier)
 
 
