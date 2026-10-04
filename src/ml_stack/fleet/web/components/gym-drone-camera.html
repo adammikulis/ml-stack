@@ -32,7 +32,8 @@ gym-drone-camera[hidden] { display:none; }
       }
       const detections = camera.detections_visible || [];
       this.querySelector('.drone-camera-meta').textContent =
-        'Frame '+camera.frame_id+' · '+Number(camera.world_time || 0).toFixed(1)+' s · '
+        'Controlled camera: '+(camera.agent_id || 'unknown agent')+' · Frame '+camera.frame_id
+        +' · '+Number(camera.world_time || 0).toFixed(1)+' s · '
         +camera.thermal_kind+' · '+detections.length+' visible heat regions';
     }
   }

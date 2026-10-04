@@ -185,7 +185,7 @@ def test_motion_interpolates_snapshots_without_extrapolating(scene_page):
     assert not errors
 
 
-def test_drone_native_positions_agent_switch_and_camera_debug(scene_page):
+def test_drone_native_positions_agent_switch_and_camera_debug(scene_page, tmp_path):
     page, errors = scene_page
     page.evaluate("""() => {
       const s=document.querySelector('gym-scene');
@@ -205,6 +205,18 @@ def test_drone_native_positions_agent_switch_and_camera_debug(scene_page):
     }""")
     assert result == {'target':[1,10,2],'forest':[8,0,9],'bounds':[-30,0,-30],
                       'rotors':4,'frustum':16}
+    trunk = page.evaluate("""() => {
+      const trunk=document.querySelector('gym-scene').meshes.get('forest-7').children[0];
+      return {height:trunk.geometry.parameters.height,radius:trunk.geometry.parameters.radiusTop,
+        top:trunk.position.y+trunk.geometry.parameters.height/2};
+    }""")
+    assert trunk == {'height':2.25,'radius':.15,'top':2.25}
+    page.evaluate("""() => {
+      const scene=document.querySelector('gym-scene');
+      scene.follow=false; scene.camera.position.set(14,8,18);
+      scene.controls.target.set(8,2.5,9); scene.controls.update();
+    }""")
+    page.locator('gym-scene').screenshot(path=str(tmp_path / 'web-forest.png'))
     scene = page.locator('gym-scene')
     scene.get_by_label('Selected agent').select_option('drone-drone-1')
     assert page.evaluate("document.querySelector('gym-view').selectedAgent") == 'drone-1'
@@ -219,13 +231,14 @@ def test_drone_camera_feeds_keep_frame_provenance_and_hide_off_environment(scene
       const sensor=document.createElement('gym-drone-camera');
       document.querySelector('gym-view').append(sensor);
       sensor.update({rgb:'eHl6',thermal:'YWJj',thermal_kind:'synthetic visible-surface temperature',
-        frame_id:42,world_time:8.4,detections_visible:[{label:'warm surface',pixels:7}]});
+        agent_id:'drone-1',frame_id:42,world_time:8.4,detections_visible:[{label:'warm surface',pixels:7}]});
     }""")
     feed = page.locator('gym-drone-camera').last
     assert feed.get_by_alt_text('Live drone RGB camera').get_attribute('src') == 'data:image/png;base64,eHl6'
     assert feed.get_by_alt_text('Live drone synthetic thermal camera').get_attribute('src') == 'data:image/png;base64,YWJj'
     assert 'Frame 42 · 8.4 s' in feed.inner_text()
     assert '1 visible heat regions' in feed.inner_text()
+    assert 'Controlled camera: drone-1' in feed.inner_text()
     feed.evaluate("node => node.update(null)")
     assert not feed.is_visible()
     assert not errors
