@@ -174,8 +174,6 @@ class UI:
 
     def peers(self, *, force: bool = False) -> list[dict[str, Any]]:
         """Everyone on the LAN, cached briefly. The browser cannot do this itself."""
-        from .discovery import memberships
-
         age, cached = self._peers
         if not force and time.time() - age < DISCOVER_CACHE_S:
             return cached
@@ -185,10 +183,13 @@ class UI:
         # One machine in two of your clusters is one machine, listed once, with the
         # clusters you share with it. Each cluster is advertised separately, so the
         # same daemon answers on each with a beacon of its own.
-        by_address: dict[str, dict[str, Any]] = {}
+        local = self.itself()
+        local["clusters"] = [member.group for member in joined]
+        by_address: dict[str, dict[str, Any]] = {local["machine"]: local}
         for member in joined:
             for beacon in discover(member.key, timeout_s=1.5, port=self.discovery_port):
-                row = by_address.get(beacon.base_url)
+                identity = beacon.machine or beacon.base_url
+                row = by_address.get(identity)
                 if row is None:
                     row = beacon.public()
                     row["host"] = beacon.host
@@ -196,7 +197,7 @@ class UI:
                     row["called"] = beacon.name
                     row["is_self"] = beacon.machine == machine_id()
                     row["clusters"] = []
-                    by_address[beacon.base_url] = row
+                    by_address[identity] = row
                 if member.group not in row["clusters"]:
                     row["clusters"].append(member.group)
         found = sorted(named_apart(list(by_address.values())),
