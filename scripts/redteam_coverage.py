@@ -326,6 +326,13 @@ def discover() -> dict[str, Surface]:
             finder(found, where, tree)
     find_scripts(found)
     find_tools(found)
+    for kind, name in (
+        ("desktop", "app/src-tauri/capabilities/main.json"),
+        ("spawn", "scripts/test-on-linux"),
+        ("spawn", "gym/transport.py:Process.start"),
+        ("route", "fleet/gym_recording_routes.py:/ui/gym/recordings*"),
+    ):
+        add(found, kind, name, name)
     return dict(sorted(found.items()))
 
 

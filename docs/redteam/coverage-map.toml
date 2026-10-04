@@ -14,6 +14,20 @@
 uncovered = 54
 partial = 202
 
+[[group]]
+match = ["desktop:app/src-tauri/capabilities/main.json"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_desktop_capabilities.py"]
+note = "compiled Tauri authority rejects foreign origins and windows, shell execution and filesystem reads"
+
+[[group]]
+match = ["spawn:scripts/test-on-linux"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_linux_runner.py", "tests/test_running_on_linux.py::test_the_runner_says_which_command_told_it_docker_is_missing"]
+note = "hostile pytest text remains literal argv; source mount is read-only, no privileged or host-network flags, temporary config and staging are removed"
+
 # -- the human-only floor ------------------------------------------------------------------
 [[group]]
 match = ["human:*"]
@@ -30,7 +44,7 @@ note = "grant minting, release and purge, signing keys, host approval, vault rek
 [[group]]
 match = ["route:fleet/gym_routes.py:*", "route:fleet/gym_recording_routes.py:*", "route:fleet/workspace_routes.py:*"]
 status = "covered"
-count = 9
+count = 10
 tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py",
          "tests/test_fleet_workspace_routes.py"]
 note = "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
