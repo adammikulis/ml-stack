@@ -96,7 +96,8 @@ READ_DIRS = ("ingest", "hub", "scrape", "sources", "datasheet", "gguf", "media",
 READ_FILES = ("web.py", "markup.py", "chat.py", "do.py", "files.py", "messages.py", "roles.py",
               "rules.py", "extraction.py", "records.py", "jsonl/__init__.py",
               "gym/world_files.py", "gym/car_definition.py", "gym/drone_definition.py", "gym/traffic_world.py",
-              "fleet/request_fields.py", "fleet/gym_recording_routes.py", "fleet/workspace_routes.py")
+              "fleet/request_fields.py", "fleet/gym_recording_routes.py", "fleet/workspace_routes.py",
+              "fleet/board_routes.py")
 FORCED = ("hub/cards.py", "hub/discover.py", "hub/listing.py", "workspace/notes.py",
           "workspace/service.py", "memory/recall.py", "memory/tools.py", "sandbox/policies.py",
           "sentinel/review.py", "decide/questions.py", "decide/pointer_prompt.py",
