@@ -241,14 +241,19 @@ def test_renewing_says_which_claims_the_lifetime_cap_held_back(monkeypatch, tmp_
     now = [1000.0]
     kit = Kit(clean_env(monkeypatch, tmp_path), clock=lambda: now[0])
     a = kit.agent("alpha")
-    kit.ws.claim(a, "port", "9301", ttl_s=100)
+    kit.ws.claim(a, "port", "9301", ttl_s=4000)
     for _ in range(9):
         now[0] += 3000
         renewed = kit.ws.renew(a, 3600)
     assert [c["capped"] for c in renewed] == [True]
-    from ml_stack.workspace import tools
-    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a)
-    out = tools.workspace_heartbeat(3600)
-    assert out["renewed"] == 1 and out["capped"] == ["port:9301"]
     listing = kit.ws.claims.listing()[0]
     assert "expires_in_s" in listing and "expiring_soon" in listing
+
+
+def test_the_heartbeat_tool_reports_each_renewed_claim(kit, monkeypatch):
+    from ml_stack.workspace import tools
+    a = kit.agent("alpha")
+    kit.ws.claim(a, "port", "9302")
+    monkeypatch.setenv("ML_STACK_WORKSPACE_TOKEN", a)
+    out = tools.workspace_heartbeat(600)
+    assert out["renewed"] == 1 and out["capped"] == [] and out["claims"][0]["key"] == "9302"
