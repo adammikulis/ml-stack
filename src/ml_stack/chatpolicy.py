@@ -70,12 +70,17 @@ HUMAN_ONLY: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
          r"|upgrad\w*|admin|escalat\w*|grant\w*|chang\w*|switch\w*|set)\b"
          r"|\b(?:runner|operator|reader)\b.{0,20}\b(?:roles?|mode)\b",
          "/role NAME, typed at the prompt"),
+        ("answer, approve, deny or cancel a request waiting for a person",
+         r"\b(?:answer\w*|approv\w*|den(?:y|ies)|cancel\w*|resolv\w*|dismiss\w*|withdraw\w*)\b.{0,40}"
+         r"\b(?:requests?|inbox|confirmations?)\b|\bml[-_ ]stack[-_ ]requests\b"
+         r"|\b(?:requests?|inbox)\b.{0,30}\b(?:answer\w*|approv\w*|cancel\w*)\b",
+         "ml-stack-requests answer ID CHOICE, at a terminal"),
     ))
 """Actions only a person at a terminal can take: what it is, how it is spelled, the command."""
 
 _TOOL_NAME = re.compile(
     r"quarantin|releas|purg|approv|grant|mint|sentinel|security|baseline|honey|polic|guard|rail|"
-    r"unblock|role|permission|privilege|rule|always|classif", re.I)
+    r"unblock|role|permission|privilege|rule|always|classif|request|answer", re.I)
 
 
 def catalog() -> dict[str, str]:
@@ -103,6 +108,8 @@ def _command_for(name: str) -> tuple[str, str]:
     low = name.lower()
     if re.search(r"quarantin|releas|purg|unblock", low):
         return HUMAN_ONLY[0][0], HUMAN_ONLY[0][2]
+    if re.search(r"request|answer", low):
+        return HUMAN_ONLY[6][0], HUMAN_ONLY[6][2]
     if re.search(r"approv|host", low):
         return HUMAN_ONLY[1][0], HUMAN_ONLY[1][2]
     if re.search(r"grant|mint", low):

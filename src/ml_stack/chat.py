@@ -32,6 +32,7 @@ from ml_stack import (
     home,
     mcp,
     memory,
+    requests,
     roles,
     rules as saved,
 )
@@ -688,6 +689,7 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
     session.model = args.model or session.model
     activity.bind_session(session.id)
     activity.attach()
+    person.origin = requests.Origin("ml-stack-chat", Path.cwd().name, session.id)
 
     def connect(ref: str) -> Any:
         client = do.client_for(argparse.Namespace(**{**vars(args), "model": ref, "url": ""}))

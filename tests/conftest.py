@@ -72,6 +72,8 @@ def _no_desktop_notifications() -> None:
 
 
 _no_desktop_notifications()
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
+"""A child process a test starts has no keyring that works, so it can never reach the person's own keystore."""
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
@@ -536,6 +538,20 @@ def _no_real_keychain(monkeypatch):
     for backend in real_keystore_classes():
         for method in ("get_password", "set_password", "delete_password"):
             monkeypatch.setattr(backend, method, refuse_the_real_keystore)
+
+
+@pytest.fixture(autouse=True)
+def _fake_keyring(monkeypatch):
+    """The keyring is a dictionary unless a test installs its own: code that keeps an encrypted
+    store (the request inbox, the activity log) never needs the person's keystore."""
+    import keyring
+
+    from tests.memory_keys import MemoryRing
+
+    before = keyring.get_keyring()
+    keyring.set_keyring(MemoryRing())
+    yield
+    keyring.set_keyring(before)
 
 
 @pytest.fixture(autouse=True)
