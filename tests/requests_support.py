@@ -13,10 +13,10 @@ import pytest
 from keyring.backend import KeyringBackend
 
 from ml_stack import keystore
-from ml_stack.person import AGENT_MARKERS
 from ml_stack.http import Server
-from ml_stack.requests import Ask, Origin
 from ml_stack.inbox.route import MAX_BODY, RequestsApp
+from ml_stack.person import AGENT_MARKERS
+from ml_stack.requests import Ask, Origin
 
 HERE = str(Path(__file__).resolve().parent)
 SRC = str(Path(__file__).resolve().parent.parent / "src")
