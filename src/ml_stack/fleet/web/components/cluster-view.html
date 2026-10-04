@@ -56,10 +56,10 @@
         caption: `${Math.round(d.cpu_pct)}% busy` }));
     }
 
-    if (d.vram_total_gb) {
+    if (d.vram_total_gb && !d.unified_memory && d.vendor !== "apple") {
       const used = d.vram_total_gb - (d.vram_free_gb ?? d.vram_total_gb);
       meters.push(M.ui("ml-meter", {
-        label: d.vendor === "apple" ? "unified memory" : "video memory",
+        label: "video memory",
         capacity: d.vram_total_gb, value: Math.max(0, used), compact: true,
         caption: `${gb(d.vram_free_gb)} free of ${gb(d.vram_total_gb)}` }));
     }
@@ -107,11 +107,17 @@
       (d.labels || []).length
         ? el("div", { class: "labels" }, d.labels.map((l) => el("span", { class: "label" }, l)))
         : null,
-      (p.serving || []).length
-        ? el("div", { class: "labels" },
-            el("span", { class: "why" }, "serving"),
-            p.serving.map((s) => el("span", { class: "label" }, s)))
-        : null,
+      el("div", { class: "loaded-models" },
+        el("h3", {}, "Loaded models"),
+        ...(d.serving || []).length
+          ? d.serving.flatMap((server) => (server.models || []).map((model) =>
+              el("div", { class: "row" },
+                el("b", {}, model),
+                el("span", { class: "why" },
+                  [server.context ? `${Number(server.context).toLocaleString()} tokens` : "",
+                    server.mtp ? "MTP" : "", `${server.slots || 1} slot(s)`]
+                    .filter(Boolean).join(" · ")))))
+          : [el("div", { class: "hint" }, "No models loaded")] ),
       ...meters,
       el("div", { class: "state" },
         el("span", { class: `pulse ${state.cls}` }),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -12,6 +13,7 @@ __all__ = ["apple_telemetry", "gpu_power", "report", "torch_report", "vendor_of"
 #: ``metal_smi.gpu_power`` integrates over a sampling window and blocks for about a
 #: second and a quarter, so a reading is kept this long rather than taken per caller.
 POWER_SAMPLE_S = 5.0
+_LOG = logging.getLogger(__name__)
 
 _last_power: dict[str, Any] = {"at": 0.0, "reading": {}}
 
@@ -59,7 +61,7 @@ def torch_report() -> dict[str, Any]:
         out["vram_free_gb"] = round(free / 2**30, 2)
         out["vram_total_gb"] = round(total / 2**30, 2)
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     return out
 
 
@@ -77,7 +79,7 @@ def apple_telemetry() -> dict[str, Any]:
             if isinstance(value, (int, float)):
                 out[key] = round(float(value), 1)
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     try:
         gpu = gpu_power()
         for key, name in (("power_w", "gpu_power_w"), ("clock_mhz", "gpu_freq_mhz"),
@@ -88,7 +90,7 @@ def apple_telemetry() -> dict[str, Any]:
         if gpu.get("throttled"):
             out["throttled"] = True
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     try:
         stats = metal_smi.system_gpu_stats()
         if stats.get("model"):
@@ -98,7 +100,7 @@ def apple_telemetry() -> dict[str, Any]:
         if stats.get("gpu_core_count"):
             out["gpu_cores"] = int(stats["gpu_core_count"])
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     return out
 
 
@@ -117,9 +119,9 @@ def mlx_report() -> dict[str, Any]:
     try:
         limit = mx.metal.device_info().get("max_recommended_working_set_size")
         if limit:
-            out["vram_free_gb"] = out["vram_total_gb"] = round(limit / 2**30, 2)
+            out["gpu_working_set_limit_gb"] = round(limit / 2**30, 2)
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     return out
 
 
@@ -130,7 +132,7 @@ def report() -> dict[str, Any]:
         from ml_stack.backend import available
         out["backends"] = list(available())
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     try:
         from ml_stack.backend import detect_device
         profile = detect_device()
@@ -140,11 +142,12 @@ def report() -> dict[str, Any]:
             out["memory_gb"] = round(profile.total_memory_gb, 2)
         out["unified_memory"] = profile.unified_memory
     except Exception:                                 # noqa: BLE001
-        pass
+        _LOG.debug("Accelerator probe unavailable", exc_info=True)
     for probe in (torch_report, mlx_report, gpu_telemetry, apple_telemetry):
         try:
             found = probe()
         except Exception:                             # noqa: BLE001
+            _LOG.debug("Accelerator probe unavailable", exc_info=True)
             continue
         if not found.get("accelerator"):
             found.pop("accelerator", None)
