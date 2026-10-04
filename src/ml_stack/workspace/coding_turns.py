@@ -16,9 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import coding, roles
+from ml_stack import coding, platform, roles
 from ml_stack.fleet import conversation_graph as graph
 from ml_stack.fleet.conversation_types import safe
+from ml_stack.fleet.conversations import Conversations
 from ml_stack.serve.process import kill_process_tree
 from ml_stack.workspace import coding_events, localstart, project
 from ml_stack.workspace.harness_seat import Seat
@@ -234,7 +235,7 @@ class Manager:
         if turn.cancelled.is_set():
             return 0
         with (home / "stderr.log").open("w") as errors:
-            process = subprocess.Popen(command, env=environment, cwd=folder, stdin=subprocess.PIPE,
+            process = platform.start_process(command, env=environment, cwd=folder, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=errors, text=True, bufsize=1)
             turn.process = process
             turn.state = "running"
@@ -268,8 +269,6 @@ class Manager:
 
 
 def worker(root, cid, conversation, prompt, output) -> None:
-    from ml_stack.fleet.conversations import Conversations
-
     turn = Turn(cid, output=output)
     def stop(signum, frame):
         turn.cancelled.set()
