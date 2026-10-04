@@ -54,7 +54,7 @@ def test_the_runner_never_lets_the_credential_helper_be_consulted():
 
 
 def test_the_runner_installs_what_ci_installs():
-    text = RUNNER.read_text(encoding="utf-8")
+    text = (RUNNER.parent / "test-on-linux-setup").read_text(encoding="utf-8")
     install = next(s["run"] for s in steps() if s.get("name") == "install test dependencies")
     for package in ("pytest-xdist", "numpy", "psutil", "pillow", "networkx", "gguf",
                     "safetensors"):
@@ -73,7 +73,7 @@ def test_the_runner_says_which_command_told_it_docker_is_missing(tmp_path):
     (fake / "python3").write_text("#!/bin/sh\nprintf called > " + shlex.quote(str(marker)) + "\nexit 97\n")
     (fake / "python3").chmod(0o755)
     done = subprocess.run([str(RUNNER), "-q"], capture_output=True, text=True,
-                          env={**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "DEV_TEST_WORKERS": ""},
+                          env={"PATH": f"{fake}:{os.defpath}", "DEV_TEST_WORKERS": ""},
                           timeout=10)
     assert done.returncode == 2, done.stdout
     assert not marker.exists(), "Docker preflight must complete before acquiring test workers"
@@ -83,7 +83,7 @@ def test_the_runner_says_which_command_told_it_docker_is_missing(tmp_path):
 def test_the_runner_passes_pytest_arguments_through():
     text = RUNNER.read_text(encoding="utf-8")
     assert 'PYTEST_ARGS=("$@")' in text
-    assert 'PYTEST_ARGS+=(-n 0)' in text, "--single has to reach pytest"
+    assert 'PYTEST_ARGS+=(-n 0)' in (RUNNER.parent / "test-on-linux-exec").read_text(), "--single has to reach pytest"
 
 
 def test_one_matrix_entry_runs_the_suite_in_a_single_process():
