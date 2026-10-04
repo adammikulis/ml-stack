@@ -7,6 +7,8 @@
       <div id="chat-list"></div>
     </aside>
     <div class="talk">
+      <header class="chat-toolbar"><h1 id="chat-title">New chat</h1>
+        <span class="chat-status" id="chat-status">Chat</span></header>
       <div class="pickrow" id="chat-pickrow" hidden>
         <label for="model">Model</label><select id="model"></select>
       </div>
@@ -25,9 +27,20 @@
         <textarea id="ask" rows="3" placeholder="Message your model…" aria-label="Message"></textarea>
         <button id="chat-send">Send</button><button class="ghost" id="chat-stop" hidden>Stop</button>
       </div>
-      <div class="chat-hint">⌘ / Ctrl + Enter to send · Conversations are saved on this machine</div>
+      <div class="chat-hint">Enter to send · Shift + Enter for a new line · Saved on this machine</div>
     </div>
   </main>
+  <dialog id="chat-manage" aria-labelledby="chat-manage-title">
+    <form id="chat-manage-form">
+      <h2 id="chat-manage-title">Rename conversation</h2>
+      <label for="chat-name">Conversation name</label>
+      <input id="chat-name" maxlength="60" required>
+      <p id="chat-manage-description" class="hint" hidden></p>
+      <div class="err" id="chat-manage-error" role="status"></div>
+      <div class="chat-dialog-actions"><button type="button" class="ghost" id="chat-manage-cancel">Cancel</button>
+        <button type="submit" id="chat-manage-confirm">Save name</button></div>
+    </form>
+  </dialog>
 </template>
 <script>
 (function () {
@@ -54,18 +67,32 @@
       this.stop = this.querySelector("#chat-stop");
       this.newChat = this.querySelector("#chat-new");
       this.search = this.querySelector("#chat-search");
+      this.heading = this.querySelector("#chat-title");
+      this.dialog = this.querySelector("#chat-manage");
+      this.dialogForm = this.querySelector("#chat-manage-form");
+      this.nameInput = this.querySelector("#chat-name");
+      this.dialogConfirm = this.querySelector("#chat-manage-confirm");
+      this.dialogForm.onsubmit = (event) => { event.preventDefault(); this.manage(); };
+      this.querySelector("#chat-manage-cancel").onclick = () => this.dialog.close();
       this.open = null;
       this.messages = [];
+      this.savedSettings = { mode: "chat", temperature: null };
       this.searchEpoch = 0;
       this.loadEpoch = 0;
       this.send.onclick = () => this.ask();
+      this.picker.onchange = () => { this.updateReadiness(); this.saveSettings(); };
+      this.temperature.onchange = () => this.saveSettings();
       this.stop.onclick = () => this.request?.abort();
       this.newChat.onclick = () => {
         if (this.request) return;
         this.open = null;
+        localStorage.removeItem("ml-stack.chat.selected");
+        this.heading.textContent = "New chat";
         this.loadEpoch++;
         this.input.value = "";
         this.messages = [];
+        this.savedSettings = { mode: "chat", temperature: null };
+        this.temperature.value = "";
         this.welcome();
         this.note.replaceChildren();
         this.paintList();
@@ -76,7 +103,7 @@
         this.searchTimer = setTimeout(() => this.paintList(), 180);
       };
       this.input.onkeydown = (e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.ask(); }
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.ask(); }
       };
       M.onRoute((route) => {
         const on = route === "chat";
@@ -128,9 +155,32 @@
         this.askrow.hidden = !available.length;
         this.none.hidden = !!available.length;
         this.options.hidden = !available.length;
+        this.updateReadiness();
         await this.paintList();
-        if (this.open) await this.load(this.open);
+        const selectedChat = this.open || localStorage.getItem("ml-stack.chat.selected");
+        if (selectedChat) await this.load(selectedChat);
       } catch (error) { this.showError(error.message); }
+    }
+
+    settings() {
+      return { ...this.savedSettings, temperature: this.temperature.value === "" ? null : Number(this.temperature.value) };
+    }
+
+    saveSettings() {
+      if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
+      this.savedSettings = this.settings();
+      if (!this.open) return;
+      const id = this.open, payload = { model: this.picker.value, settings: this.savedSettings };
+      this.savePending = (this.savePending || Promise.resolve()).then(async () => {
+        const saved = await api(`/ui/conversations/${id}`, { method: "POST", body: JSON.stringify(payload) });
+        if (M.refused(saved)) return;
+        if (!saved.ok) throw new Error(saved.error || "Could not save conversation settings.");
+      }).catch((error) => { if (this.open === id) this.showError(error.message); });
+      return this.savePending;
+    }
+
+    updateReadiness() {
+      this.send.disabled = !this.picker.value || !!this.picker.selectedOptions[0]?.disabled;
     }
 
     showError(message) {
@@ -149,17 +199,57 @@
             el("a", { href: "#chat", onclick: (e) => {
               e.preventDefault(); if (!this.request) this.load(c.id).then(() => this.paintList());
             } }, c.title || "New chat"),
-            el("button", { class: "ghost small", "aria-label": `Delete ${c.title || "chat"}`,
-              onclick: async () => {
-                if (this.request) return;
-                const removed = await api(`/ui/conversations/${c.id}`, { method: "DELETE" });
-                if (!removed.ok) return this.showError(removed.error || "Could not delete the conversation.");
-                if (this.open === c.id) { this.open = null; this.messages = []; this.welcome(); }
-                this.paintList();
-              } }, "Delete"))));
+            el("details", { class: "chat-row-menu" },
+              el("summary", { "aria-label": `Options for ${c.title || "New chat"}` }, "•••"),
+              el("div", {},
+                el("button", { class: "ghost small", onclick: () => this.openManage(c, "rename") }, "Rename"),
+                el("button", { class: "ghost small", onclick: () => this.openManage(c, "delete") }, "Delete"))))));
         if (!rows.length) this.sidebar.append(el("p", { class: "hint" },
           this.search.value.trim() ? "No conversations match your search." : "Your conversations will appear here."));
       } catch (error) { this.showError(error.message); }
+    }
+
+    openManage(conversation, action) {
+      if (this.request) return;
+      this.sidebar.querySelectorAll("details[open]").forEach((menu) => { menu.open = false; });
+      this.managing = { conversation, action };
+      const deleting = action === "delete";
+      this.querySelector("#chat-manage-title").textContent = deleting ? "Delete conversation?" : "Rename conversation";
+      this.nameInput.value = conversation.title || "New chat";
+      this.nameInput.hidden = this.nameInput.previousElementSibling.hidden = deleting;
+      this.nameInput.required = !deleting;
+      const description = this.querySelector("#chat-manage-description");
+      description.hidden = !deleting;
+      description.textContent = `“${conversation.title || "New chat"}” and its messages will be removed.`;
+      this.querySelector("#chat-manage-error").textContent = "";
+      this.dialogConfirm.textContent = deleting ? "Delete conversation" : "Save name";
+      this.dialogConfirm.classList.toggle("danger", deleting);
+      this.dialog.showModal();
+      if (!deleting) { this.nameInput.focus(); this.nameInput.select(); }
+    }
+
+    async manage() {
+      const { conversation, action } = this.managing;
+      const deleting = action === "delete";
+      this.dialogConfirm.disabled = true;
+      try {
+        if (!deleting && !this.nameInput.value.trim()) throw new Error("Enter a conversation name.");
+        const changed = await api(`/ui/conversations/${conversation.id}`, {
+          method: deleting ? "DELETE" : "POST",
+          ...(!deleting ? { body: JSON.stringify({ title: this.nameInput.value.trim() }) } : {}) });
+        if (M.refused(changed)) return;
+        if (!changed.ok) throw new Error(changed.error || "Could not update the conversation.");
+        if (this.open === conversation.id) {
+          if (deleting) {
+            this.open = null; this.messages = []; this.heading.textContent = "New chat";
+            localStorage.removeItem("ml-stack.chat.selected");
+            this.welcome();
+          } else this.heading.textContent = changed.title || this.nameInput.value.trim();
+        }
+        this.dialog.close();
+        await this.paintList();
+      } catch (error) { this.querySelector("#chat-manage-error").textContent = error.message; }
+      finally { this.dialogConfirm.disabled = false; }
     }
 
     async load(id) {
@@ -168,20 +258,38 @@
       try {
         const one = await api(`/ui/conversations/${id}`);
         if (epoch !== this.loadEpoch || M.refused(one)) return;
+        if (one.status === 404) {
+          this.open = null; this.messages = []; this.heading.textContent = "New chat";
+          localStorage.removeItem("ml-stack.chat.selected");
+          this.welcome();
+          this.note.textContent = "This conversation was removed.";
+          return;
+        }
         if (!one.ok) throw new Error(one.error || "Could not open the conversation.");
         this.open = id;
+        localStorage.setItem("ml-stack.chat.selected", id);
+        this.heading.textContent = one.title || "New chat";
         this.messages = one.messages || [];
+        this.savedSettings = one.settings || { mode: "chat", temperature: null };
+        this.temperature.value = this.savedSettings.temperature ?? "";
         this.list.replaceChildren();
         for (const m of this.messages) this.say(m.role, m.content);
         if (!this.messages.length) this.welcome();
-        if (one.model) this.picker.value = one.model;
+        if (one.model) {
+          if (![...this.picker.options].some((option) => option.value === one.model)) {
+            this.picker.append(el("option", { value: one.model, disabled: "" }, `${one.model} — not running`));
+          }
+          this.picker.value = one.model;
+        }
+        this.updateReadiness();
         this.note.replaceChildren();
       } catch (error) { this.showError(error.message); }
     }
 
     async ask() {
       const text = this.input.value.trim();
-      if (!text || !this.picker.value || this.request) return;
+      if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
+      if (!text || !this.picker.value || this.picker.selectedOptions[0]?.disabled || this.request) return;
       this.request = new AbortController();
       this.list.setAttribute("aria-busy", "true");
       this.note.replaceChildren();
@@ -189,18 +297,21 @@
       this.stop.hidden = false;
       this.newChat.disabled = this.picker.disabled = true;
       this.temperature.disabled = true;
-      let reply;
+      let reply, userBody, accepted = false;
       try {
+        await this.savePending;
         if (!this.open) {
           const made = await api("/ui/conversations", { method: "POST", signal: this.request.signal,
-            body: JSON.stringify({ model: this.picker.value }) });
+            body: JSON.stringify({ model: this.picker.value, settings: this.settings() }) });
           if (M.refused(made)) return;
           if (!made.ok) throw new Error(made.error || "Could not start the conversation.");
           this.open = made.id;
+          localStorage.setItem("ml-stack.chat.selected", made.id);
         }
         this.input.value = "";
+        if (this.heading.textContent === "New chat") this.heading.textContent = text.replace(/\s+/g, " ").slice(0, 60);
         this.list.querySelector(".chat-welcome")?.remove();
-        this.say("user", text);
+        userBody = this.say("user", text);
         reply = this.say("assistant", "");
         const messages = [...this.messages, { role: "user", content: text }];
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
@@ -211,12 +322,14 @@
           if (r.status === 401) M.signIn();
           throw new Error(why.error || "The model could not answer. Try sending again.");
         }
+        accepted = true;
         this.messages = messages;
         await this.stream(r, reply);
       } catch (error) {
         if (error.name === "AbortError") this.note.textContent = "Generation stopped.";
         else this.showError(error.message || "The connection to the model ended.");
         if (reply && !reply.dataset.text) reply.closest(".msg").remove();
+        if (!accepted) userBody?.closest(".msg").remove();
         if (error.name !== "AbortError" && !reply?.dataset.text) this.input.value = text;
       } finally {
         if (reply?.dataset.text) {
