@@ -178,6 +178,7 @@ class Loop:
     def perform(self, row: dict[str, Any], why: str) -> tuple[str, str, int]:
         """Run the task through the chat agent under the agent's role: ``(reply kind, text, rounds)``."""
         if self.execute:
+            self.status.update(reputation=work_reputation.brief(self.ws, self.token))
             return self.execute(self.agent, row, why, self.stopped)
         state = lt.TaskState(ceiling=self.agent.max_effort)
         level = self.level(row)

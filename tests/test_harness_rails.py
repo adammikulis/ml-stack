@@ -522,6 +522,7 @@ def test_workspace_hook_binds_own_identity_and_keeps_human_commands_blocked(line
 
 @pytest.mark.parametrize("name,role,action", [
     ("mcp__workspace__workspace_inbox", "read-only", "allow"),
+    ("mcp__workspace__workspace_reputation", "read-only", "allow"),
     ("mcp__workspace__workspace_send", "plan-and-go", "allow"),
     ("mcp__workspace__workspace_send", "approve-first", "ask"),
     ("mcp__workspace__workspace_send", "read-only", "deny"),

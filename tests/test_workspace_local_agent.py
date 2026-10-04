@@ -673,6 +673,8 @@ def test_coding_tasks_reuse_the_registered_seat_and_reply_on_each_thread(kit, mo
         reply = kit.ws.thread(authority, sent["seq"])[-1]
         assert reply["from"] == identity and "Completed coding task" in reply["text"]
     assert len(seen) == 2 and kit.ws.registry.role_of(identity) == "agent"
+    assert all("Verified-work reputation" in prompt and identity in prompt for prompt in seen)
+    assert "Verified-work reputation" in la.status_of(kit.ws, agent.name)["reputation"]
 
 
 def test_empty_native_result_is_an_error_without_completed_activity(kit, monkeypatch, tmp_path):
@@ -681,6 +683,7 @@ def test_empty_native_result_is_an_error_without_completed_activity(kit, monkeyp
     events = []
     monkeypatch.setattr(localcoding.BoundManager, "_run", lambda *args: None)
     monkeypatch.setattr(localcoding.activity, "record", lambda kind, **fields: events.append(fields))
+    tokens.store(kit.base, "local-qwen", kit.agent("local-qwen"))
     agent = la.Agent("local-qwen", "model.gguf", profile="coding", project=str(tmp_path))
     row = {"seq": 1, "from": "lead", "text": "work"}
     kind, text, steps = localcoding.perform(kit.ws, agent, row, "authorized", lambda: False)

@@ -93,3 +93,10 @@ how many earlier records remain in the encrypted ledger. **Load earlier verifica
 evidence** retrieves another page. Agents use the read-only
 `workspace_reputation(agent, offset)` tool, and their task context includes their own and team
 completion counts as data without additional authority.
+
+Native Claude and Codex coding workers receive the same bounded reputation brief
+using their registered child identity, and expose the read-only
+`workspace_reputation` tool through their scoped workspace MCP server. Their
+worker status includes the brief. History links local display aliases to the
+registered identity saved in the worker record and identifies that binding next
+to the verified completion count.
