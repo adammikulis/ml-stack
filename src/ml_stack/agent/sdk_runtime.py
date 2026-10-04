@@ -19,7 +19,10 @@ from openai.types.responses import (
 )
 
 from ml_stack.agent.events import Denied, Done, Repair, ToolCall, ToolResult
+from ml_stack.agent.loop import _completion_tokens, _inject, _overflowed, _task_of
 from ml_stack.agent.schema import from_mcp, index_by_name
+from ml_stack.guard import start
+from ml_stack.http import ServerError
 from ml_stack.interventions import Call
 
 
@@ -116,7 +119,6 @@ class Runtime(Model):
 
     async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
         input = args[1] if len(args) > 1 else kwargs['input']
-        from ml_stack.agent.loop import _completion_tokens, _inject
         owner = self.owner
         incoming = Converter.items_to_messages(input[self.consumed:])
         if self.consumed:
@@ -175,8 +177,6 @@ class Runtime(Model):
                                                        total_tokens=count), response_id=None)
 
     async def ask(self) -> Any:
-        from ml_stack.agent.loop import _overflowed
-        from ml_stack.http import ServerError
         owner = self.owner
         reply = None
         for attempt in (0, 1):
@@ -201,8 +201,6 @@ class Runtime(Model):
 
 async def execute(owner: Any, task: Any):
     """Yield application events from a bounded SDK run."""
-    from ml_stack.agent.loop import _task_of
-    from ml_stack.guard import start
     messages = [{'role': 'user', 'content': task}] if isinstance(task, str) else task
     schemas = from_mcp(listed := await owner.tools.list_tools(), owner.budget.profile)
     rail = start(owner._items(listed), offered=schemas, task=_task_of(messages),

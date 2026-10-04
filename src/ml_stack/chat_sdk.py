@@ -7,7 +7,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from agents import Agent, Model, RunConfig, Runner
+from agents import Agent, FunctionTool, Model, ModelSettings, RunConfig, Runner
 from agents.agent import ToolsToFinalOutputResult
 from agents.exceptions import MaxTurnsExceeded
 from agents.models.interface import ModelResponse
@@ -71,7 +71,6 @@ class Conversation(Model):
 
 
 async def _execute(chat: Any, schemas: list, run_by: dict, out: Any) -> bool:
-    from agents import FunctionTool, ModelSettings
 
     from ml_stack.chat import NUDGE
     model = Conversation(chat, schemas, run_by, out)
