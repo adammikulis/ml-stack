@@ -50,6 +50,7 @@ def test_packaged_simulation_and_desktop_boundaries_are_inventoried():
         "spawn:scripts/test-on-linux",
         "spawn:gym/transport.py:Process.start",
         "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
+        "route:workspace/fleet_routes.py:/ui/board/*",
     } <= found.keys()
 
 
