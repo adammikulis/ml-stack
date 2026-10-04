@@ -14,6 +14,11 @@
 uncovered = 54
 partial = 200
 
+[[group]]
+match = ["spawn:fleet/environment.py:Environment.host_python"]
+status = "n/a"
+note = "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
+
 # -- saved Coding conversations -------------------------------------------------------------
 [[group]]
 match = ["route:workspace/coding_routes.py:/ui/coding/*", "parser:workspace/coding_routes.py",
