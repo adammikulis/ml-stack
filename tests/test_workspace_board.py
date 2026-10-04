@@ -464,3 +464,17 @@ def test_the_commands_drive_boards_dms_subscriptions_and_status(kit):
     status = json.loads(run(b, "status", "--json").stdout)
     assert {"name": "#ops", "unread": 0, "member": True} in status["boards"]
     assert "board list" in onboard.snippet("bob")
+
+
+def test_a_subscription_never_delivers_from_a_board_the_subscriber_cannot_read(kit):
+    ws, t = kit.ws, kit.tokens
+    ws.board.create(t["alice"], "#vault", private=True)
+    ws.board.subscribe(t["bob"], "agent", "alice")
+    ws.board.subscribe(t["bob"], "kind", "question")
+    ws.board.subscribe(t["bob"], "mentions")
+    send(kit, "alice", "#vault", "secret for @bob", kind="question")
+    assert ws.inbox(t["bob"]) == [] and ws.board.digest(t["bob"])["messages"] == 0
+    assert ws.wait(t["bob"], 0.3) == []
+    ws.board.add(t["alice"], "#vault", "bob")
+    send(kit, "alice", "#vault", "now visible", kind="question")
+    assert len(ws.inbox(t["bob"])) == 1
