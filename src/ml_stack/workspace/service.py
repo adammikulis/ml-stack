@@ -35,6 +35,13 @@ class SendOptions(TypedDict, total=False):
     label: str
 
 
+class ReadOptions(TypedDict, total=False):
+    """What `Workspace.wait` takes besides its timeout: how much to show."""
+
+    limit: int
+    widen: bool
+
+
 class NoteOptions(TypedDict, total=False):
     """What `Workspace.note_add` takes besides the kind, title and body. Trust is not here."""
 
@@ -346,8 +353,7 @@ class Workspace:
         return [self.deliver(r, raw=True) for r in self.bus.outbox(who.id, limit)]
 
     def wait(self, token: str, timeout_s: float, ack: bool = False, raw: bool = False,
-             cancel: Callable[[], bool] | None = None, limit: int = 0,
-             widen: bool = False) -> Held:
+             cancel: Callable[[], bool] | None = None, **opts: Unpack[ReadOptions]) -> Held:
         """Block until there is something to read, ``timeout_s`` passes or ``cancel()`` is true."""
         who = self.auth(token)
         self._may(who, "read")
@@ -362,7 +368,8 @@ class Workspace:
                 waiter.sleep(left if cancel is None else min(left, CANCEL_SLICE_S))
         finally:
             waiter.close()
-        out = self._present(found, limit, widen, raw)
+        given = _only(dict(opts), ReadOptions)
+        out = self._present(found, int(given.get("limit", 0)), bool(given.get("widen", False)), raw)
         if ack and out:
             self.bus.ack(who.id, out[-1]["seq"])
         return out

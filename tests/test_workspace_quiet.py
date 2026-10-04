@@ -168,7 +168,7 @@ def test_the_inbox_shows_a_few_cut_messages_counts_the_rest_and_ack_keeps_them(k
 def test_the_total_bytes_of_one_call_are_capped_too(kit):
     kit.limits(read_item_chars=400, read_total_chars=1500, sends_per_window=1000)
     ws, t = kit.ws, kit.t
-    for i in range(8):
+    for _ in range(8):
         ws.send(t["alice"], "bob", "note", "q" * 600)
     got = ws.inbox(t["bob"])
     assert 1 <= len(got) < 8 and got.held == 8 - len(got)

@@ -7,8 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from ml_stack.workspace import plain
-from ml_stack.workspace.boards import (
-    ANNOUNCE, ANNOUNCE_MARK, GENERAL, MODES, STYPES, Boards)
+from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_MARK, GENERAL, MODES, STYPES, Boards
 from ml_stack.workspace.bus import TYPES
 from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, valid_id
 from ml_stack.workspace.screen import NEUTRAL, Refused, fence
@@ -158,7 +157,7 @@ class BoardApi:
                                "open": not private, "project": "",
                                "title": plain.line(title, 60)})
         self.ws.audit("board.create", who.id, board=name)
-        self._subscribe(who, "board", name, "digest", quiet=True)
+        self._subscribe(who, "board", name, "digest", "quiet")
         return {"board": name, "open": not private}
 
     def _admit(self, who: Identity, name: str, member: str, boards: dict[str, Any]) -> None:
@@ -187,7 +186,7 @@ class BoardApi:
                              f"member or the person to add you")
             self._admit(who, name, who.id, boards)
         self.ws.audit("board.join", who.id, board=name)
-        self._subscribe(who, "board", name, "digest", quiet=True)
+        self._subscribe(who, "board", name, "digest", "quiet")
         return {"joined": name}
 
     def leave(self, token: str, name: str) -> dict[str, Any]:
@@ -394,7 +393,8 @@ class BoardApi:
         return int(rows[-1]["seq"]) if rows else 0
 
     def _subscribe(self, who: Identity, stype: str, target: str, mode: str,
-                   quiet: bool = False, force: bool = False) -> dict[str, Any]:
+                   how: str = "") -> dict[str, Any]:
+        quiet, force = how == "quiet", how == "force"
         lim = self.ws.limits
         with self.store.locked():
             mine = self.store.state()[1].get(who.id, {})
@@ -439,7 +439,7 @@ class BoardApi:
                 raise Denied(f"{ANNOUNCE} always reaches a lead or a person")
             if mode == "inbox":
                 raise ValueError(f"{ANNOUNCE} is a roll-up, never inbox: use digest or silent")
-        made = self._subscribe(who, stype, target, mode, force=force)
+        made = self._subscribe(who, stype, target, mode, "force" if force else "")
         self.ws.audit("board.subscribe", who.id, type=stype, mode=mode)
         return made
 
