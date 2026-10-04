@@ -55,7 +55,7 @@ def _save(entries: dict[str, dict]) -> None:
 
 def issue(port: int) -> str:
     """A new key for the server about to start on ``port``, recorded for `for_url`."""
-    key = secrets.token_urlsafe(32)
+    key = secrets.token_hex(32)
     entries = {p: e for p, e in _entries().items() if _live(e)}
     entries[str(int(port))] = {"key": key, "pid": 0, "at": time.time()}
     _save(entries)

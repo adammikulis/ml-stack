@@ -104,3 +104,8 @@ def test_claude_and_codex_run_with_the_servers_key(tmp_path):
     assert claude.environment("http://127.0.0.1:9", "m", base={})["ANTHROPIC_AUTH_TOKEN"] == "local"
     assert codex.environment(tmp_path, {}, key=key)[codex.KEY_ENV] == key
     assert f'env_key = "{codex.KEY_ENV}"' in codex.config_toml("http://127.0.0.1:8123", "m", 0, ("a", "b", 1.0))
+
+
+def test_a_key_never_starts_with_a_dash(monkeypatch):
+    monkeypatch.setattr(serverkeys, "_save", lambda entries: None)
+    assert all(not serverkeys.issue(9000).startswith("-") for _ in range(400))
