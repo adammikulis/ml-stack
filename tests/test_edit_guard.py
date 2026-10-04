@@ -174,6 +174,7 @@ def test_a_guard_that_cannot_run_does_not_stop_the_work(tree, tmp_path):
     alone = tmp_path / "elsewhere" / "hooks"
     alone.mkdir(parents=True)
     shutil.copy2(GUARD, alone / GUARD.name)
+    shutil.copy2(GUARD.parent / "rules_loader.py", alone / "rules_loader.py")
     code, said = run(write(tree, "three.py", RENAMED), cache=tmp_path / "cache",
                      guard=alone / GUARD.name)
     assert code == ALLOWED

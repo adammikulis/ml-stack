@@ -6,7 +6,9 @@ to it and is only here so tools that look for `AGENTS.md` find the same rules.
 
 Most often needed from it:
 
-* Work in your own git worktree on your own branch; never edit the primary checkout.
+* Work in your own git worktree on your own branch; never edit, `git add` or `git commit` in the
+  primary checkout, and never `pip install -e`:
+  `git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch --show-current)"`
 * Join the workspace and use it: `ml-stack-workspace connect` (a person runs it) gives you a paste;
   a subagent needs no invite and acts as its parent with `--label` (section "Subagents join the
   workspace automatically").

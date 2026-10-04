@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ml_stack import worktreerules
 from ml_stack.chatpolicy import APPROVE_FIRST, PLAN_AND_GO, READ_ONLY, refusal_for
 from ml_stack.guard.destructive import classify, reason_text
 from ml_stack.interventions import Call
@@ -54,6 +55,27 @@ def _shell_line(name: str, args: dict[str, Any] | None) -> str:
         return ""
     line = args.get("command", args.get("cmd", ""))
     return " ".join(map(str, line)) if isinstance(line, list) else str(line)
+
+
+def _primary_refusal(name: str, args: dict[str, Any] | None, cwd: str) -> str:
+    """Why a write or git command in the primary checkout is refused, empty when it is not one."""
+    if not args or not cwd:
+        return ""
+    if name in SHELL_TOOLS:
+        return worktreerules.bash_refusal(_shell_line(name, args), cwd)
+    if CATALOG.get(name) != "reversible":
+        return ""
+    paths = [str(args.get(key) or "") for key in ("file_path", "notebook_path", "path")]
+    for value in args.values():
+        if isinstance(value, str) and "*** Begin Patch" in value:
+            paths += worktreerules.patch_paths(value)
+    return worktreerules.edit_refusal(paths, cwd)
+
+
+def primary_decision(name: str, args: dict[str, Any] | None, cwd: str) -> Decision | None:
+    """A deny for a write or git command that changes the primary checkout, else None."""
+    why = _primary_refusal(name, args, cwd)
+    return _denied("destructive", why) if why else None
 
 
 def decide(role: str, name: str, args: dict[str, Any] | None, *, roots: Sequence[str] = (),

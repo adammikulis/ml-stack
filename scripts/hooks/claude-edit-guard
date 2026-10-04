@@ -2,14 +2,15 @@
 """Refuse an edit under src/ml_stack that writes a routine the tree already has, or
 leaves a file over its line limit.
 
-Claude Code runs this before every Write, Edit and MultiEdit. An exit code of 2 blocks
+Claude Code runs this before every Write, Edit, MultiEdit and NotebookEdit. A target inside
+the primary checkout is refused first (src/ml_stack/worktreerules.py). An exit code of 2 blocks
 the edit and hands the message back; a rule that is a suggestion rather than a certainty
 prints on stdout and lets the edit through. MLSTACK_GUARD=off disables it for a session.
 
 Wire it in as a PreToolUse hook on Write|Edit|MultiEdit in a project's
 `.claude/settings.json`:
 
-    {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit", "hooks": [
+    {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit|NotebookEdit", "hooks": [
         {"type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-edit-guard"}]}]}}
 """
 
@@ -26,7 +27,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-TOOLS = {"Write", "Edit", "MultiEdit"}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rules_loader
+
+TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 BLOCKED, ALLOWED = 2, 0
 DOCSTRING_LINES = 12
 MAX_PARAMS = 8
@@ -300,8 +304,17 @@ def main() -> int:
     tool = event.get("tool_name")
     if tool not in TOOLS:
         return ALLOWED
+    given = event.get("tool_input") or {}
+    rules = rules_loader.load()
+    if rules is not None:
+        why = rules.edit_refusal([given.get("file_path") or given.get("notebook_path") or ""],
+                                 event.get("cwd") or "")
+        if why:
+            return refuse(why)
+    if tool == "NotebookEdit":
+        return ALLOWED
     try:
-        return check(tool, event.get("tool_input") or {})
+        return check(tool, given)
     except Exception as bad:
         print(f"note: claude-edit-guard did not run ({bad.__class__.__name__}: {bad})")
         return ALLOWED

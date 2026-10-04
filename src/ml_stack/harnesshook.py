@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from ml_stack import requests
-from ml_stack.harnesspolicy import Decision, decide
+from ml_stack.harnesspolicy import Decision, decide, primary_decision
 from ml_stack.keystore import ENV_NONINTERACTIVE
 
 __all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
@@ -72,8 +72,9 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     event = HOOK_EVENTS["pre"]
     args = payload.get("tool_input")
     try:
-        decision = decide(role, str(payload.get("tool_name", "")), args if isinstance(args, dict) else None,
-                          roots=roots, protected=protected)
+        name, given = str(payload.get("tool_name", "")), args if isinstance(args, dict) else None
+        decision = (primary_decision(name, given, str(payload.get("cwd", "")))
+                    or decide(role, name, given, roots=roots, protected=protected))
     except FAILURES:
         decision = Decision("ask", "unsure", "the call could not be classified", "tool_call_destructive")
     if decision.action == "allow":

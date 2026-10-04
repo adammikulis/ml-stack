@@ -27,6 +27,19 @@ instead. Wire it into a project's `.claude/settings.json` (the docstring shows t
 `MLSTACK_GUARD=off` disables it for a session. Both hooks are tested:
 `tests/test_no_real_names.py` and `tests/test_bash_guard.py`.
 
+The worktree rule is in `src/ml_stack/worktreerules.py` and reaches every harness. Claude Code
+runs `claude-edit-guard` (Write, Edit, MultiEdit, NotebookEdit) and `claude-bash-guard` before
+a tool call; both refuse a write inside the primary checkout (the first entry of `git worktree
+list`), a git command that changes its tree (`add`, `commit`, `checkout`, `switch`, `reset`,
+`restore`, `stash`, `rebase`, `cherry-pick`, `am`, `apply`, and any `merge` that is not
+`--ff-only <branch>`) and a `pip install -e` of a tree that is not the primary checkout.
+`claude-subagent-start` (SubagentStart) puts the rule and the development branch in each
+subagent's context, and `.claude/settings.json` sets `worktree.baseRef` to `head` so worktrees
+branch from the development branch. `ml_stack.harnesshook pre` applies the same refusal to Codex
+and local-model sessions the launchers start (add a `[[hooks.PreToolUse]]` entry running it to a
+Codex config the launchers did not write), and `scripts/hooks/primary-only` refuses a commit by an
+agent in the primary checkout or on the development branch. Tests: `tests/test_worktree_rules.py`.
+
 What `no-real-names` takes for a name, and what stands a name-shaped pair down, is data:
 `contracts/name-shapes.json` holds the place prefixes and suffixes (a gazetteer's
 "North Carolina", "Colorado River"), the job-title endings (a role catalogue's

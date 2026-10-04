@@ -308,6 +308,18 @@ leave it and say so.
 - The main session lands each branch it asked for, or the agent does, but one of them does, the
   same day. A branch nobody lands is work nobody has.
 
+Hooks and the agent definition enforce this. `.claude/settings.json` sets `worktree.baseRef` to
+`head`, so a worktree made by `isolation: worktree` branches from the primary checkout's branch,
+and wires a SubagentStart hook that gives every subagent the rule and the branch name.
+`.claude/agents/branch-worker.md` is the implementer agent (Sonnet, isolated, with the standing
+preamble). `scripts/hooks/claude-edit-guard` and `claude-bash-guard` refuse a write, a
+tree-changing git command (`add`, `commit`, `checkout`, `reset`, `stash`, `rebase`, a merge that
+is not `--ff-only <branch>`) and a `pip install -e` of any other tree when they run against the
+primary checkout; `ml_stack.harnesshook` applies the same refusal to Codex and local-model
+sessions, and `scripts/hooks/primary-only` (in pre-commit) refuses an agent's commit in the
+primary checkout or on the development branch. All of it reads `src/ml_stack/worktreerules.py`;
+`MLSTACK_GUARD=off` turns it off.
+
 A new worktree has no `dist/`, and one test builds a real environment out of it: run
 `python packaging/build.py` there before trusting a full test run.
 
