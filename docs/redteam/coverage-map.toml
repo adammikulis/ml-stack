@@ -28,6 +28,19 @@ tests = [
 ]
 note = "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
 
+# -- the wiring limit ---------------------------------------------------------------------
+[[group]]
+match = ["route:fleet/room_routes.py:*", "spawn:serve/wired.py:*", "spawn:serve/wired_apply.py:*"]
+status = "covered"
+tests = [
+  "tests/test_redteam_wired.py::test_no_model_tool_chat_tool_or_slash_command_touches_the_wiring_limit",
+  "tests/test_redteam_wired.py::test_a_command_run_by_an_agent_is_refused_before_anything_is_written",
+  "tests/test_redteam_wired.py::test_a_model_name_is_a_lookup_and_never_a_command",
+  "tests/test_redteam_wired.py::test_a_hostile_number_never_reaches_the_runner",
+  "tests/test_redteam_wired.py::test_a_token_or_a_foreign_page_cannot_reach_any_changing_route",
+]
+note = "raising the GPU wiring limit is person-only: agent processes, tokens, foreign pages, hostile numbers and model names are refused and the privileged call is never reached"
+
 # -- the Board ------------------------------------------------------------------------------
 [[group]]
 match = ["egress:workspace/boardroute.py:*", "listener:workspace/cli.py:_board_serve",

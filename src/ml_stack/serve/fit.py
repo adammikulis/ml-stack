@@ -88,7 +88,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ml_stack.hub import pretty_name
@@ -309,7 +309,7 @@ class Fit:
             spec=spec, build=build or measured.build,
             draft_per_token=measured.draft_per_token, draft_per_seq=measured.draft_per_seq,
             draft_cache_type=measured.draft_cache_type,
-            measured_at=when or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            measured_at=when or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             context=context, parallel=parallel, kv_layers=measured.kv_layers,
             recurrent_layers=measured.recurrent_layers, swa_cells=measured.swa_cells,
             weights_gpu=measured.weights_gpu, weights_cpu=measured.weights_cpu,

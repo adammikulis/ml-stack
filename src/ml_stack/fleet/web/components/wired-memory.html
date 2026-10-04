@@ -1,0 +1,144 @@
+<!-- wired-memory: the GPU memory limit as a slider, sized for a model, kept across restarts if asked -->
+<style>
+wired-memory { display: block; }
+wired-memory .room-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
+wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
+</style>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const { el, api } = M;
+  const GIB = 1024 ** 3;
+  const gib = (n) => `${(n / GIB).toFixed(1)} GiB`;
+  const gbOf = (mb) => `${(mb / 1024).toFixed(1)} GB`;
+  const ctxName = (n) => (n % 1024 === 0 ? `${n / 1024}K` : String(n));
+  const FACT = "Setting this needs administrator rights, so keeping it after a restart installs a "
+    + "small boot-time service that runs when the computer starts, before anyone logs in. "
+    + "That covers logging in too.";
+
+  class WiredMemory extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.uid = (WiredMemory.count = (WiredMemory.count || 0) + 1);
+      this.busy = false;
+      this.keep = false;
+      this.load();
+    }
+
+    async load(model) {
+      const q = model ? new URLSearchParams(model) : null;
+      const r = await api(q ? `/ui/room?${q}` : "/ui/room");
+      if (M.refused(r)) return;
+      if (r.error && !r.machine) { this.replaceChildren(el("div", { class: "err" }, r.error)); return; }
+      this.data = r;
+      if (this.keep === false && r.machine.kept) this.keep = true;
+      if (this.value === undefined) this.value = r.machine.live_mb || r.machine.default_mb;
+      this.draw();
+    }
+
+    marks(m, plan) {
+      const out = [{ value: m.default_mb, label: "default" }];
+      if (plan) {
+        for (const row of plan.table) {
+          if ([131072, 262144].includes(row.context) && row.fits) {
+            out.push({ value: row.limit_mb, label: `${ctxName(row.context)} ${plan.kv}` });
+          }
+        }
+      }
+      out.push({ value: m.max_mb, label: "most" });
+      return out.filter((x) => x.value >= m.default_mb && x.value <= m.max_mb);
+    }
+
+    readout(m) {
+      const left = m.total - this.value * 1024 * 1024;
+      const warn = left < m.warn_below_bytes
+        ? "Under 12 GiB is left for everything else; the rest of the machine may swap." : "";
+      return [`${gbOf(this.value)} for models, ${gib(left)} left for everything else`, warn];
+    }
+
+    pickers(r) {
+      const select = (id, values, label, current) => el("label", {}, label + " ",
+        el("select", { id: `${id}-${this.uid}`, onchange: () => this.sized() },
+          ...values.map(([v, t]) => el("option", { value: v, ...(v === current ? { selected: "1" } : {}) }, t))));
+      this.selModel = select("room-model", [["", "no model chosen"],
+        ...r.models.map((x) => [x, x.split("/").pop()])], "Size it for", this.chosen?.model || "");
+      this.selCtx = select("room-ctx", r.contexts.map((c) => [String(c), ctxName(c)]), "context",
+        this.chosen?.ctx || "131072");
+      this.selKv = select("room-kv", r.kv_types.map((k) => [k, k]), "KV cache", this.chosen?.kv || "q8_0");
+      this.mtp = el("input", { type: "checkbox", id: `room-mtp-${this.uid}`, checked: "1", onchange: () => this.sized() });
+      return el("div", { class: "room-pick" }, this.selModel, this.selCtx, this.selKv,
+        el("label", {}, this.mtp, " MTP head shared"));
+    }
+
+    sized() {
+      const model = this.selModel.querySelector("select").value;
+      this.chosen = { model, ctx: this.selCtx.querySelector("select").value,
+                      kv: this.selKv.querySelector("select").value };
+      this.load(model ? { ...this.chosen, mtp: this.mtp.checked ? "1" : "0" } : null);
+    }
+
+    draw() {
+      const { machine: m, plan } = this.data;
+      if (!m.supported) { this.replaceChildren(); return; }
+      const slider = M.ui("ml-slider", {
+        label: "Memory models may use", min: m.default_mb, max: m.max_mb, step: 1024,
+        value: Math.min(Math.max(this.value, m.default_mb), m.max_mb),
+        marks: this.marks(m, plan),
+        hint: "Models and their cache must fit under this limit. The rest is for everything else." });
+      slider.className = "wired-slider";
+      const note = el("div", { class: "why" });
+      const paint = () => {
+        const [line, warn] = this.readout(m);
+        slider.valueText = gbOf(this.value);
+        note.replaceChildren(...M.kids(line, warn ? el("div", { class: "err" }, warn) : null));
+      };
+      slider.addEventListener("input", (e) => { this.value = e.detail.value; paint(); });
+      paint();
+      const verdict = plan
+        ? el("div", { class: plan.fits ? "ok" : "err" }, !plan.fits
+          ? `Does not fit at ${ctxName(plan.context)}; ${plan.largest_context
+              ? `${ctxName(plan.largest_context)} would` : "no context length would"}.`
+          : `${plan.model.replace(/\.gguf$/, "")} at ${ctxName(plan.context)} needs ${gbOf(plan.proposed_mb)}.`) : null;
+      const suggest = plan && plan.fits ? el("button", { class: "ghost small room-suggest",
+        onclick: () => { this.value = plan.proposed_mb; this.draw(); } },
+        `Use ${gbOf(plan.proposed_mb)}`) : null;
+      const keep = el("input", { type: "checkbox", id: `wired-keep-${this.uid}`, class: "wired-keep", ...(this.keep ? { checked: "1" } : {}) });
+      keep.onchange = () => { this.keep = keep.checked; };
+      const apply = el("button", { class: "wired-apply", onclick: () => this.change("/ui/room/apply",
+        { mb: this.value, keep: this.keep }) }, `Apply ${gbOf(this.value)}`);
+      const back = el("button", { class: "ghost small wired-back",
+        onclick: () => this.change("/ui/room/reset", {}) }, "Back to default");
+      const state = m.kept
+        ? `Kept after restart at ${m.kept_mb} MB.` + (m.drift ? ` The live value is ${m.live_mb} MB: it differs from the kept one.` : "")
+        : "Not kept after a restart: this lasts until the computer restarts.";
+      this.buttons = [apply, back];
+      this.status = el("div", { class: "wired-status" });
+      this.replaceChildren(...M.kids(slider, note, this.pickers(this.data), verdict,
+        el("div", { class: "room-actions" }, apply, suggest, back),
+        el("label", { class: "opt", for: `wired-keep-${this.uid}` }, keep, M.row("Keep this after restart", FACT)),
+        el("div", { class: m.drift ? "err" : "hint" }, state),
+        el("div", { class: "hint" }, "macOS asks for your password in its own window; it is never typed here."),
+        this.status));
+    }
+
+    async change(path, body) {
+      if (this.busy) return;
+      this.busy = true;
+      this.buttons.forEach((b) => { b.disabled = true; });
+      this.status.replaceChildren(el("div", { class: "hint" },
+        el("span", { class: "spin" }), " Waiting for the macOS password window..."));
+      const r = await api(path, { method: "POST", body: JSON.stringify(body) });
+      this.busy = false;
+      const done = r.ok === true;
+      if (r.machine) this.data.machine = r.machine;
+      if (done) { this.value = r.machine.live_mb || r.machine.default_mb; this.keep = r.machine.kept; }
+      this.draw();
+      this.status.replaceChildren(done
+        ? el("div", { class: "ok" }, `The limit is now ${r.after_mb} MB (it was ${r.before_mb} MB).`)
+        : el("div", { class: "err" }, r.error || r.message || "not changed"));
+    }
+  }
+  customElements.define("wired-memory", WiredMemory);
+})();
+</script>
