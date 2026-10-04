@@ -76,3 +76,19 @@ Only the repository owner can change these.
   workflows from pull requests.
 - Tag ruleset for `v*`: restrict creation to the owner; block deletion and force updates.
 - The README one-line installers fetch `packaging/install.sh` from `main`. Pin a tag in the URL when you document one.
+
+## Standalone conversation smoke test
+
+The frozen daemon includes the Ladybug graph engine, native bindings and the package metadata
+that declares UI route extensions. Tensor, dataframe, world and benchmark dependencies remain
+outside this profile. Plain conversation history opens without installing search extensions.
+
+After building the standalone daemon, run its socket lifecycle check through the shared broker:
+
+```sh
+ML_STACK_FROZEN_BINARY=dist/bundle/ml-stack-headless python scripts/test slow -n 1 tests/test_packaging_conversations.py
+```
+
+Use the executable with the `.exe` suffix on Windows. The test uses isolated daemon and workspace
+roots, checks the maintained Board extension discovered from bundled metadata, imports an existing
+conversation and verifies edits and deletion across a restart. It starts no model server.
