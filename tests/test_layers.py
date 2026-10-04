@@ -25,7 +25,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "markup", "sandbox",
               "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
               "records", "requests", "person", "safetext", "serverkeys",
-              "subscribers", "taint", "telemetry", "ui", "units")),
+              "subscribers", "taint", "tar_libraries", "telemetry", "ui", "units")),
     ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
     ("machine", ("doctor", "fleet", "serve", "setup")),
