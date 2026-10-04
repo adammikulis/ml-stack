@@ -53,12 +53,14 @@ def perform(ws, agent, row, why, stopped):
     finally:
         finished.set()
         watcher.join(timeout=1)
+    if not turn.error and not turn.cancelled.is_set() and not turn.text.strip():
+        turn.error = "The coding harness ended without an answer"
     activity.record("agent.task", actor=actor, subject=f"Workspace task {row['seq']}",
                     outcome="cancelled" if turn.cancelled.is_set() else "error" if turn.error else "completed",
                     refs=refs, meta={"source": "workspace", "session": turn.session, "model": agent.model_name})
     if turn.error or turn.cancelled.is_set():
         return "status", turn.error or "The coding task was cancelled", 1
-    return "answer", turn.text or "The harness ended without an answer", 1
+    return "answer", turn.text, 1
 
 
 def run_detached(argv: list[str] | None = None) -> int:
