@@ -145,12 +145,13 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
     from ml_stack.activity import writer
     from ml_stack.activity.log import ActivityLog
     from ml_stack.activity.schema import build
-    from ml_stack.workspace import work_reputation
+    from ml_stack.workspace import localagent, work_reputation
 
     tokens.store(work.base, tokens.OWNER_FILE, work.owner)
     monkeypatch.setattr(work_reputation, 'WorkLedger', lambda: work.ledger)
     log = ActivityLog(tmp_path / 'activity', key=lambda: bytes(range(32)))
-    log.add(build('agent.task', ts=work.ws.clock(), actor=work.agent_id, session='native-session',
+    localagent.save(work.ws, localagent.Agent('local-qwen', 'qwen.gguf', identity=work.agent_id))
+    log.add(build('agent.task', ts=work.ws.clock(), actor='local-qwen', session='native-session',
                   subject='Simulator check', outcome='completed'))
     monkeypatch.setattr(writer, 'log', lambda: log)
     verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
@@ -165,6 +166,7 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
             viewer.get_by_text(f"Task {work.task['seq']} · verified by lead", exact=True).click()
             expect(viewer.get_by_text('native regression suite', exact=False)).to_be_visible()
             expect(viewer.get_by_text('result.json', exact=False)).to_be_visible()
+            expect(viewer.get_by_text(f'Registered identity: {work.agent_id}', exact=True)).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path='/private/tmp/ml-stack-work-reputation-history.png', full_page=True)
     finally:

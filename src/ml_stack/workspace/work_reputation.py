@@ -8,9 +8,10 @@ from contextlib import contextmanager
 from typing import Any
 
 from ml_stack import activity
+from ml_stack.files import read_json
 from ml_stack.reputation.work import WorkLedger
 from ml_stack.workspace import tokens
-from ml_stack.workspace.identity import HUMAN, Denied, valid_id
+from ml_stack.workspace.identity import HUMAN, Denied, valid_id, valid_name
 from ml_stack.workspace.service import Workspace
 
 _HEX = re.compile(r'[0-9a-f]{64}')
@@ -100,10 +101,23 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
     for item in team:
         item['evidence_held'] = max(0, len(item['evidence']) - offset - 20)
         item['evidence'] = item['evidence'][offset:offset + 20]
+    aliases: dict[str, list[str]] = {}
+    for path in (ws.base / 'local-agents').glob('*.json'):
+        name = path.stem
+        if not valid_name(name) or name.endswith('.status'):
+            continue
+        saved = read_json(path, None)
+        if isinstance(saved, dict) and saved.get('version') == 1 and saved.get('name') == name:
+            identity = saved.get('identity') or name
+            if isinstance(identity, str) and valid_id(identity):
+                aliases.setdefault(identity, []).append(name)
+    for item in team:
+        item['aliases'] = aliases.get(item['agent'], [])
     known = {item['agent'] for item in team}
     for name in ws.registry.ids():
         if name not in known and ws.registry.info(name)['role'] != HUMAN:
-            team.append({'agent': name, 'score': 0, 'verified_tasks': 0, 'evidence': []})
+            team.append({'agent': name, 'score': 0, 'verified_tasks': 0, 'evidence': [],
+                         'aliases': aliases.get(name, [])})
     own = next((item for item in team if item['agent'] == who.id),
                {'agent': who.id, 'score': 0, 'verified_tasks': 0, 'evidence': []})
     return {'own': own, 'team': [item for item in team if not agent or item['agent'] == agent],

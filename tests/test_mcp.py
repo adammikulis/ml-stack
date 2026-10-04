@@ -308,7 +308,8 @@ class TestTheCommand:
 
 def test_workspace_subset_rejects_server_admin_tools(monkeypatch):
     names = {"workspace_inbox", "workspace_send", "workspace_thread", "workspace_claim",
-             "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status"}
+             "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status",
+             "workspace_reputation"}
     monkeypatch.setattr(server, "TOOLS", list(server.TOOLS))
     monkeypatch.setattr(server, "_BY_NAME", dict(server._BY_NAME))
     listing = rpc(1, "tools/list")

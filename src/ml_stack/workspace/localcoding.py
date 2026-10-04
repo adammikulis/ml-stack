@@ -8,7 +8,7 @@ import time
 
 from ml_stack import activity
 from ml_stack.fleet.conversations import Conversations
-from ml_stack.workspace import localagent as la, localloop
+from ml_stack.workspace import localagent as la, localloop, tokens, work_reputation
 from ml_stack.workspace.coding_turns import Manager, Turn
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.service import Workspace
@@ -27,6 +27,9 @@ class BoundManager(Manager):
 
 def perform(ws, agent, row, why, stopped):
     """Run one authorized inbox task and return its native harness result."""
+    actor = agent.identity or agent.name
+    reputation = work_reputation.brief(ws, tokens.load(ws.base, actor))
+    la.Status(ws, agent.name).update(reputation=reputation)
     store = Conversations(la.folder(ws) / f"{agent.name}-chats")
     conversation = store.start(model=agent.model, title=f"Workspace task {row['seq']}", settings={
         "mode": "coding", "harness": agent.harness, "role": agent.role,
@@ -44,12 +47,11 @@ def perform(ws, agent, row, why, stopped):
 
     watcher = threading.Thread(target=supervise, daemon=True)
     watcher.start()
-    actor = agent.identity or agent.name
-    refs = {"workspace_message": str(row["seq"]), "conversation": conversation.id, "project": agent.project}
+    refs = {"agent": actor, "workspace_message": str(row["seq"]), "conversation": conversation.id, "project": agent.project}
     activity.record("agent.task", actor=actor, subject=f"Workspace task {row['seq']}",
                     outcome="started", refs=refs, meta={"source": "workspace", "model": agent.model_name})
     try:
-        manager._run(turn, conversation, localloop._frame(row, why))
+        manager._run(turn, conversation, localloop._frame(row, why, reputation))
     finally:
         finished.set()
         watcher.join(timeout=1)

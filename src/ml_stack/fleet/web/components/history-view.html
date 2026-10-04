@@ -79,10 +79,11 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    if(this.data?.drops?.dropped)this.note.textContent+=` · ${this.data.drops.dropped} dropped records`;
   }
   standing(actor){
-   const standing=this.reputation?.team?.find(item=>item.agent===actor||`agent:${item.agent}`===actor);
+   const standing=this.reputation?.team?.find(item=>item.agent===actor||`agent:${item.agent}`===actor||(item.aliases||[]).includes(actor.replace(/^agent:/,'')));
    if(!standing)return null;
    const box=E('details',{class:'history-action',open:this.openReputation.has(actor)},E('summary',{},`${standing.score} verified completion credits`));
    box.ontoggle=()=>box.open?this.openReputation.add(actor):this.openReputation.delete(actor);
+   if(standing.agent!==actor)box.append(E('p',{class:'intro'},`Registered identity: ${standing.agent}`));
    if(standing.evidence_held)box.append(E('p',{class:'intro'},`Showing 20 recent verifications; ${standing.evidence_held} earlier verifications remain in the encrypted ledger.`));
    for(const evidence of standing.evidence||[]){
     const detail=E('details',{open:this.openActions.has(evidence.id)},E('summary',{},`Task ${evidence.task} · verified by ${evidence.verifier}`));
