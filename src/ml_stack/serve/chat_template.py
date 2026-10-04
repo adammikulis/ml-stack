@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
-import tempfile
 from pathlib import Path
+
+from ml_stack import home
+from ml_stack.files import write_text
 
 __all__ = ["LATE_SYSTEM", "forgiving", "needs_forgiving", "template_of",
            "trained_context", "written_beside"]
@@ -48,10 +51,13 @@ def written_beside(model: str | Path, *, where: str | Path | None = None) -> Pat
     template = template_of(model)
     if not needs_forgiving(template):
         return None
-    root = Path(where) if where is not None else Path(tempfile.mkdtemp(prefix="ml-stack-tpl-"))
+    patched = forgiving(template)
+    digest = hashlib.sha256(patched.encode()).hexdigest()[:16]
+    root = Path(where) if where is not None else home.cache("chat-templates", digest)
     root.mkdir(parents=True, exist_ok=True)
     out = root / (Path(model).stem + ".jinja")
-    out.write_text(forgiving(template), encoding="utf-8")
+    if not out.exists() or out.read_text(encoding="utf-8") != patched:
+        write_text(out, patched)
     return out
 
 
