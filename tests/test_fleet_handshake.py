@@ -62,7 +62,7 @@ class Machine:
 
         self.joining.handle = record
         token = load_or_create_token(root, self.member.key)
-        self.httpd = http.Server(("0.0.0.0", 0), make_handler(
+        self.httpd = http.Server(("0.0.0.0", 0), make_handler(  # noqa: S104 - native LAN fixture
             Daemon(self.runner, root / "files", token, name="a", joining=self.joining)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.port = self.httpd.server_port
