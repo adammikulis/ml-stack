@@ -1,6 +1,13 @@
-# The agent loop
+# The agent runtime
 
-`ml_stack.agent` runs a model against tools until it answers, and streams what happens.
+`ml_stack.agent` uses the OpenAI Agents Python SDK to run a model against tools and stream
+application events. Install `ml-stack[agents]`; standard installations include this extra.
+`ml-stack-chat` and Fleet chat also use the SDK. Claude and Codex remain coding harness options.
+
+Local runs use an explicit managed model endpoint. The SDK does not select a hosted model or
+export traces to OpenAI. Existing conversation stores keep history; there is no second SDK
+conversation database. Tool approvals, roles, sentinel checks, result screening, and context
+compaction remain applied by ml-stack's adapters. The SDK owns turn progression and tool execution.
 
 ```python
 from ml_stack.agent import Agent, Budget, Compaction, FunctionTools, McpTools

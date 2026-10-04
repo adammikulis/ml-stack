@@ -369,26 +369,8 @@ class Chat:
         self.messages.append({"role": "user", "content": body})
         out = Outcome(messages=self.messages)
         asked0, began = self.person.asked, time.monotonic()
-        exhausted, nudged = True, False
-        for _ in range(self.rounds):
-            said, calls = self._say(schemas)
-            if not calls:
-                self.messages.append({"role": "assistant", "content": said})
-                if not self.task or nudged:
-                    exhausted = False
-                    break
-                nudged = True
-                self.messages.append({"role": "user", "content": NUDGE})
-                continue
-            out.rounds += 1
-            self.messages.append({"role": "assistant", "content": said, "tool_calls": calls})
-            for call in calls:
-                self._answer(call, run_by, out)
-                if self.person.finished or self.person.left:
-                    break
-            if self.person.finished or self.person.left:
-                exhausted = False
-                break
+        from ml_stack.chat_sdk import execute
+        exhausted = execute(self, schemas, run_by, out)
         out.seconds = round(time.monotonic() - began, 2)
         out.asked = self.person.asked - asked0
         out.done, out.summary = self.person.finished, self.person.summary
