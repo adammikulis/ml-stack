@@ -108,6 +108,25 @@ def test_a_hostile_model_name_is_one_argument_never_a_shell_line(tmp_path, spawn
     assert spawned.commands[1].count(name) == 2 and "up" in spawned.commands[1]
 
 
+def test_serve_up_has_no_port_and_no_escalate_and_extra_cannot_smuggle_them(spawned):
+    """The broker picks the port and growing a server is a person's: neither is an argument
+    a model can pass, by name or through `extra`."""
+    import inspect
+
+    params = set(inspect.signature(mcp.serve_up).parameters)
+    assert not params & {"port", "escalate", "binary", "build", "root"}
+    properties = next(t for t in mcp.TOOLS if t.name == "serve_up").schema()["properties"]
+    assert not set(properties) & {"port", "escalate"}
+    for flag in ("--port", "--port=9", "--escalate", "--iq", "--binary", "--build"):
+        with pytest.raises(ValueError):
+            mcp.serve_up("x.gguf", extra=[flag, "9"])
+    for arguments in ({"model": "x", "port": 9}, {"model": "x", "escalate": True}):
+        assert mcp.call("serve_up", arguments)["isError"]
+    assert not spawned.commands
+    mcp.serve_up("x.gguf", context=4096)
+    assert "--no-wait" in spawned.commands[0] and "--port" not in spawned.commands[0]
+
+
 def test_a_reference_that_starts_with_a_dash_is_not_an_option(tmp_path, spawned):
     answer = mcp.call("models_fetch", {"reference": "--bogus-flag"})
     argv = spawned.commands[0] if spawned.commands else []
