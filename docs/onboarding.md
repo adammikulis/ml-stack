@@ -1,5 +1,20 @@
 # Onboarding devices on the local network
 
+The first-run wizard offers a model download alongside the optional model server.
+Choose a model, tick its download box, and select **Install and continue** to accept.
+**Not now** leaves downloads for the Models screen. Downloads run in the background;
+the model is loaded only when requested through the serving broker.
+
+The default on a nominal 24 GiB or larger GPU is Qwen3.8 27B in UD-Q4_K_XL,
+with its matching Q4_0 MTP head. The tier uses the rounded capacity of the largest
+individual card, including cards reporting slightly below their advertised capacity.
+It does not add memory from separate cards or use host RAM as VRAM. Shared GPU memory
+uses its configured GPU limit. Smaller cards receive a smaller Qwen recommendation.
+The wizard shows capacity and current free memory separately: a busy card can download
+its model, and starting it checks free memory for weights, the head and its context.
+The 27B weights and head are published together in
+[the model repository](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/tree/main).
+
 Status: the design is complete; the parts that can be tried on one machine are built and
 tested (see "What is built"). Issue: *Zero-install onboarding of devices on the local network*.
 Branch `agent/lan-onboarding`, which builds on `agent/hardening` (signed requests, pinned TLS,

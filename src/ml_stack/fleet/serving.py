@@ -12,7 +12,13 @@ from typing import Any
 
 from ml_stack.client.settings import Transport
 from ml_stack.files import write_json
+from ml_stack.hub.probe import machine_memory
+from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
+from ml_stack.serve.estimate import Setup, estimate, verdict
+from ml_stack.serve.preflight import read_gguf_header
 from ml_stack.units import human_bytes
+
+from .models import draft_beside
 
 __all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
            "discover_serving", "start_model", "stop_model"]
@@ -120,25 +126,27 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
     ``parallel`` asks for, rather than refusing -- see
     :meth:`~ml_stack.serve.ServerManager.escalate`.
     """
-    from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-
     if manager is None:
         from .llama import ensure_server
         manager = ServerManager(
             backend=LlamaServerBackend(binary=ensure_server(root)))
 
-    from .models import draft_beside
-
     if port is None:
         port = free_port()
     parallel = max(1, int(parallel))
-    extra: tuple[str, ...] = ()
     draft = draft_beside(Path(model_path))
+    kind = ""
     if draft is not None:
-        # -md is what this build calls --spec-draft-model.
-        extra = ("-md", str(draft), "-ngld", "99")
+        found = read_gguf_header(draft)
+        arch = found.get("general.architecture")
+        if found.get(f"{arch}.nextn_predict_layers"):
+            kind = "draft-mtp"
+    sizing = estimate(model_path, Setup(context=int(context), parallel=parallel, draft=draft))
+    if verdict(sizing, machine_memory()) == "red":
+        raise NoRoom(f"{Path(model_path).name}: not enough free memory for the model, head and context")
     lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
-                                     parallel=parallel, extra_args=extra),
+                                     parallel=parallel, draft=str(draft) if draft else None,
+                                     spec_type=kind, spec_draft_ngl=99 if draft else None),
                           escalate=escalate,
                           reason=f"fleet serving of {Path(model_path).name}")
     served = None

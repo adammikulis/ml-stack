@@ -30,6 +30,7 @@ from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .room_routes import RoomRoutes
 from .session import parse_cookie
+from .startup_models import choices
 
 ASSETS = Path(__file__).parent / "web"
 
@@ -406,6 +407,11 @@ class ModelRoutes:
     """The models here and elsewhere, what may be downloaded, and what is being served."""
 
     def route(self) -> bool:
+        if self.path == "/ui/models/startup" and self.method == "GET":
+            ui = self.ui
+            self.send(200, choices(disk_gb=ui.models.free_gb() if ui.models else 0,
+                                   installed=(m.name for m in ui.models.all()) if ui.models else ()))
+            return True
         if self.path == "/ui/models/popular" and self.method == "GET":
             return self._popular()
         if self.path == "/ui/models":

@@ -1,7 +1,7 @@
 {
- "surfaces": 611,
+ "surfaces": 612,
  "by_status": {
-  "covered": 298,
+  "covered": 299,
   "partial": 201,
   "uncovered": 54,
   "n/a": 58,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 46,
+   "covered": 47,
    "partial": 61,
    "uncovered": 0,
    "n/a": 0,
@@ -6679,6 +6679,18 @@
     "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/models/startup",
+   "kind": "route",
+   "source": "fleet/routes.py:ModelRoutes.route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_startup_models.py::StartupModelTests::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"
+   ],
+   "note": ""
   },
   {
    "id": "route:fleet/routes.py:/ui/peers",

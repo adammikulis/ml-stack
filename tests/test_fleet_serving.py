@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import threading
 import time
 import urllib.error
@@ -306,7 +307,7 @@ def manager(tmp_path, llama_binary):
 @pytest.fixture
 def gguf(tmp_path):
     path = tmp_path / "Qwen3-4B-Q4_K_M.gguf"
-    path.write_bytes(b"GGUF" + b"\x00" * 64)
+    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
     return path
 
 
@@ -366,13 +367,13 @@ class TestStartingAModelWithoutTheInterface:
         from ml_stack.hub import DRAFT_MARK
 
         draft = gguf.with_suffix(DRAFT_MARK + gguf.suffix)
-        draft.write_bytes(b"GGUF" + b"\x00" * 64)
+        draft.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 0))
 
         started = start_model(tmp_path, gguf, manager=manager)
         stop_model(started)
         argv = json.loads((tmp_path / "argv.json").read_text())
         assert argv[argv.index("-md") + 1] == str(draft)
-        assert argv[argv.index("-ngld") + 1] == "99"
+        assert argv[argv.index("--spec-draft-ngl") + 1] == "99"
 
     def test_a_given_port_is_the_one_used(self, tmp_path, manager, gguf):
         from ml_stack.fleet.serving import start_model, stop_model

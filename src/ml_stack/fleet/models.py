@@ -514,8 +514,7 @@ class Downloads:
                                          autodownload=autodownload)
                 if draft:
                     row.note = f"Getting the draft for {got.name}"
-                    with contextlib.suppress(ModelError, OSError):  # still runs without it
-                        self.models.ensure_draft(got, draft, key=key, on_progress=progress)
+                    self.models.ensure_draft(got, draft, key=key, on_progress=progress)
                 row.state = "done"
                 row.name = got.name
                 row.done = row.total = got.size
