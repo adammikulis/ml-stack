@@ -1,13 +1,12 @@
 """Simulation libraries and installation diagnostics."""
 
 import json
-import os
 import shutil
 import subprocess
 import sys
 from importlib.util import find_spec
 
-from ml_stack.gym.transport import interpreter
+from ml_stack.gym.transport import interpreter, python_environment
 from ml_stack.gym.worlds import schema
 
 CAR_ACTIONS = [f"{steer} {drive}" for steer in ("left", "straight", "right")
@@ -63,7 +62,7 @@ def catalogue():
 
 def probe(python):
     """Ask one installed interpreter without forwarding parent interpreter routing."""
-    environment = dict(os.environ)
+    environment = python_environment()
     environment.pop("ML_STACK_GYM_PYTHON", None)
     environment.pop("ML_STACK_GYM_PYTHONS", None)
     result = subprocess.run([python, "-m", "ml_stack.gym.cli", "catalogue"],
