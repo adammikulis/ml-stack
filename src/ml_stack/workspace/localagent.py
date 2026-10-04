@@ -90,7 +90,8 @@ class Agent:
     model_name: str = ""
     size_bytes: int = 0
     role: str = roles.DEFAULT
-    think: bool = False
+    effort: str = "off"
+    max_effort: str = "medium"
     project: str = ""
     orders_from: tuple[str, ...] = DEFAULT_ORDERS_FROM
     started: float = 0.0

@@ -17,13 +17,13 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ml_stack import chat as chatting
-from ml_stack.workspace import localagent as la, localtools as lt, plain, tokens
+from ml_stack.workspace import localagent as la, localeffort as le, localtools as lt, plain, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["Caps", "Held", "Settings", "lease_model", "main", "run"]
+__all__ = ["Caps", "Held", "Settings", "client_on", "lease_model", "main", "run"]
 
 logger = logging.getLogger("ml_stack.localagent")
 PURPOSE = "local-agent"
@@ -69,21 +69,24 @@ class _Wake(BaseException):
     """Raised by the stop signal while the loop is only waiting."""
 
 
+def client_on(base_url: str) -> Any:
+    """A client on slot 0 of the server at ``base_url``: the same slot every task, so the
+    server's prompt cache keeps the prefix the system message and tool list make."""
+    from ml_stack.client import Client, Request, Transport
+
+    return Client(base_url, request=Request(n_predict=4096, slot=0), transport=Transport(timeout=600.0))
+
+
 def lease_model(agent: la.Agent, *, wait_s: float = LEASE_WAIT_S) -> Held:
     """Lease the agent's model from the broker (memory admission and the queue are its) and talk to
-    it: thinking off unless the person chose it on, multi-token prediction on when ml-stack has it."""
-    from ml_stack.client import Client, Request, Transport
+    it: thinking per request, off unless the effort says otherwise, multi-token prediction on when ml-stack has it."""
     from ml_stack.serve import broker_wire
 
     spec: dict[str, Any] = {"context": CONTEXT, "parallel": 1, "cache_type_k": "q8_0",
-                            "cache_type_v": "q8_0"}
-    if not agent.think:
-        spec["reasoning_budget"] = 0
+                            "cache_type_v": "q8_0", "cache_idle_slots": True}
     grant = broker_wire.lease(PURPOSE, [agent.model], spec=spec, weight=agent.size_bytes,
                               timeout=wait_s)
-    client = Client(str(grant.base_url), request=Request(n_predict=4096),
-                    transport=Transport(timeout=600.0))
-    return Held(client, {"id": grant.lease, "port": grant.port, "model": grant.model,
+    return Held(client_on(str(grant.base_url)), {"id": grant.lease, "port": grant.port, "model": grant.model,
                          "shared": grant.shared}, lambda: broker_wire.release(grant.lease))
 
 
@@ -105,12 +108,13 @@ class Loop:
     """One agent's loop over a workspace: the record, token, model, caps and status it works with."""
 
     def __init__(self, ws: Workspace, agent: la.Agent, held: Held, settings: Settings,
-                 stopped: Callable[[], bool]) -> None:
+                 wiring: tuple[Callable[[], bool], la.Status]) -> None:
         self.ws, self.agent, self.held = ws, agent, held
-        self.caps, self.approval, self.stopped = settings.caps, settings.approval, stopped
+        self.caps, self.approval = settings.caps, settings.approval
         self.token = tokens.load(ws.base, agent.name)
-        self.status = la.Status(ws, agent.name)
+        self.stopped, self.status = wiring
         self.steps = self.tasks = self.ignored = 0
+        self.effort = agent.effort
 
     def obeyed(self, sender: str) -> bool:
         probe = {"from": sender, "state": "clear", "type": "task", "to": self.agent.name}
@@ -134,11 +138,19 @@ class Loop:
         self.status.update(state="idle", detail="", steps=self.steps, tasks=self.tasks,
                            last_message={**seen, "reply": kind, "summary": plain.line(text, 160)})
 
+    def level(self, row: dict[str, Any]) -> str:
+        """This task's effort: the rule table's pick for ``auto``, else the level the agent holds
+        (the person's choice, or what the model set for itself last task); never above the ceiling."""
+        if self.effort == le.AUTO:
+            return le.pick_for(str(row.get("raw") or ""), self.agent.max_effort)
+        return le.clamp(self.effort, self.agent.max_effort)
+
     def perform(self, row: dict[str, Any], why: str) -> tuple[str, str, int]:
         """Run the task through the chat agent under the agent's role: ``(reply kind, text, rounds)``."""
-        state = lt.TaskState()
+        state = lt.TaskState(ceiling=self.agent.max_effort)
+        level = self.level(row)
         person = lt.Unattended(self.agent.name, state, self.approval)
-        guarded = lt.Guarded(self.held.client, think=self.agent.think, seconds=self.caps.seconds,
+        guarded = lt.Guarded(self.held.client, effort=level, seconds=self.caps.seconds,
                              steps=self.caps.steps, stop=self.stopped)
         extension = lt.workspace_extension(self.ws, self.token, self.agent.name, state, self.obeyed)
         agent = chatting.Chat(guarded, person, tools=chatting.tools_for_chat(person=person),
@@ -150,6 +162,10 @@ class Loop:
             out = agent.turn(_frame(row, why))
         except lt.TaskStopped as stop:
             return "status", f"stopped: {stop}", guarded.used
+        finally:
+            if state.effort:
+                self.effort = state.effort
+                self.status.update(effort=self.effort)
         if state.needs:
             self.status.update(needs=[{"what": n.what, "why": n.reason} for n in state.needs])
         if out.done:
@@ -217,10 +233,10 @@ def run(ws: Workspace, name: str, settings: Settings | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as err:
         status.update(state="failed", detail=plain.line(err, 300), lease={})
         return 1
-    status.update(lease=held.lease, detail="")
+    status.update(lease=held.lease, detail="", effort=agent.effort, max_effort=agent.max_effort)
     code = 0
     try:
-        Loop(ws, agent, held, settings, stopped).serve(idle)
+        Loop(ws, agent, held, settings, (stopped, status)).serve(idle)
     except _Wake:
         pass
     except Denied as err:

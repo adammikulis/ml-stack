@@ -7,7 +7,7 @@ import "./controls.js";
 import { MlElement, define, h } from "./base.js";
 import { fmt } from "./format.js";
 
-const HIDDEN = /[\u0000-\u001f\u007f-\u009f؜​-‏ -‮⁠-⁯﻿]/g;
+const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
 const POLL_MIN = 3000;
 const POLL_MAX = 60000;
 
@@ -69,8 +69,9 @@ class MlAgents extends MlElement {
     this.projectField = h("input", { type: "text", id: "project", spellcheck: "false", autocomplete: "off",
       placeholder: "optional" });
     this.role = h("ml-select", { label: "What it may do", value: "" });
-    this.think = h("ml-toggle", { label: "Let it think first", hint: "Off is faster", "on-label": "On",
-      "off-label": "Off" });
+    this.effort = h("ml-select", { label: "Effort", hint: "Off thinks least and answers fastest", value: "off" });
+    this.ceiling = h("ml-select", { label: "Most it may give itself", hint: "It can raise its own effort up to this",
+      value: "medium" });
     this.go = h("button", { class: "go", type: "button", onclick: () => this.start() }, "Start a local agent");
     this.note = h("span", { class: "note", role: "status", "aria-live": "polite" });
     this.preview = h("p", { class: "note" });
@@ -83,7 +84,7 @@ class MlAgents extends MlElement {
           h("div", {}, h("label", { for: "model" }, "Model"), this.modelField),
           h("div", {}, h("label", { for: "name" }, "Name"), this.nameField),
           h("div", {}, h("label", { for: "project" }, "Project folder"), this.projectField),
-          this.role, this.think),
+          this.role, this.effort, this.ceiling),
         this.rolesEl, this.preview,
         h("div", { class: "row" }, this.go, this.note)),
       h("section", {}, h("h2", {}, "Running agents"), this.list));
@@ -126,6 +127,11 @@ class MlAgents extends MlElement {
         this.roleList = data.roles ?? [];
         this.role.options = this.roleList.map((r) => ({ value: r.name, label: r.name }));
         this.role.value = line(data.default_role, 40);
+        const levels = (data.efforts ?? []).map((e) => ({ value: e, label: e }));
+        this.effort.options = levels;
+        this.ceiling.options = levels.filter((l) => l.value !== "auto");
+        this.effort.value = line(data.default_effort, 12);
+        this.ceiling.value = line(data.default_max_effort, 12);
       }
       this.failed = false;
       this.delay = nextDelay(this.delay, false);
@@ -150,7 +156,7 @@ class MlAgents extends MlElement {
     try {
       const got = await this.call("start", {
         model: this.modelField.value.trim() || "auto", name: this.nameField.value.trim(),
-        role: this.role.value, think: !!this.think.checked, project: this.projectField.value.trim() });
+        role: this.role.value, effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim() });
       this.say(got.already ? `${line(got.name, 48)} is already running.` : `${line(got.name, 48)} started.`, false);
     } catch (e) {
       this.say(`${line(e.message, 300)}${e.hint ? ` Run: ${line(e.hint, 200)}` : ""}`, true);
@@ -202,7 +208,8 @@ class MlAgents extends MlElement {
         h("span", { class: "spacer" }),
         h("button", { class: "stop", type: "button", onclick: () => this.stop(a.name) }, "Stop")),
       h("div", { class: "meta" },
-        `${line(a.model, 80)}, ${line(a.role, 40)}${a.think ? ", thinking on" : ""}`
+        `${line(a.model, 80)}, ${line(a.role, 40)}`
+        + `, effort ${line(a.effort, 12)} (ceiling ${line(a.max_effort, 12)})`
         + `, ${fmt(a.memory_bytes, "bytes-iec")} held, ${Number(a.tasks) || 0} tasks, ${Number(a.steps) || 0} steps`),
       a.detail ? h("div", { class: "meta" }, line(a.detail, 200)) : null,
       h("div", { class: "meta" }, last));

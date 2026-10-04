@@ -10,7 +10,13 @@ from ml_stack import roles
 from ml_stack.command import flag
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
-from ml_stack.workspace import localagent as la, localmodel, localstart as ls, plain
+from ml_stack.workspace import (
+    localagent as la,
+    localeffort as le,
+    localmodel,
+    localstart as ls,
+    plain,
+)
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["ACTIONS", "OPTIONS", "run"]
@@ -27,7 +33,10 @@ OPTIONS = [
     flag("--role", default=roles.DEFAULT, choices=list(roles.ROLES),
          help="what it may do (`/role` in ml-stack-chat describes them); default: %(default)s"),
     flag("--project", default="", metavar="PATH", help="the project folder it works for"),
-    flag("--think", default="off", choices=("off", "on"), help="let the model think before it answers"),
+    flag("--effort", default=le.DEFAULT, choices=[*le.LEVELS, le.AUTO],
+         help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
+    flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
+         help="the most effort the model may give itself with set_effort; default: %(default)s"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
@@ -66,8 +75,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
         return 1
     say(f"model: {pick.name} ({pick.note})")
     try:
-        got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.think == "on", args.project,
-                                  la.check_orders(args.orders_from.split(","))), pick=pick)
+        got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
+                                  args.project, la.check_orders(args.orders_from.split(","))), pick=pick)
     except ls.Unavailable as err:
         warn(str(err))
         return 1

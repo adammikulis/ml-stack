@@ -14,7 +14,7 @@ from typing import Any
 
 from ml_stack import jobs, roles
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import localagent as la, localmodel, onboard, tokens
+from ml_stack.workspace import localagent as la, localeffort as le, localmodel, onboard, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT
 from ml_stack.workspace.service import Workspace
@@ -40,7 +40,8 @@ class Ask:
     model: str = localmodel.AUTO
     name: str = ""
     role: str = roles.DEFAULT
-    think: bool = False
+    effort: str = "off"
+    max_effort: str = "medium"
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
 
@@ -85,6 +86,8 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     from ml_stack.workspace import project as projects
 
     role = roles.get(ask.role).name
+    ceiling = le.valid(ask.max_effort)
+    effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
     folder_ = la.check_project(ask.project, ws.base)
     orders = la.check_orders(list(ask.orders_from))
     chosen = pick or localmodel.choose(ask.model)
@@ -104,7 +107,7 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         _mint(ws, name, projects.describe(folder_) if folder_ else {})
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
-                         size_bytes=chosen.size_bytes, role=role, think=ask.think,
+                         size_bytes=chosen.size_bytes, role=role, effort=effort, max_effort=ceiling,
                          project=folder_, orders_from=orders, started=time.time())
         la.save(ws, agent)
         job = (spawn or jobs.detach)(LOOP, [name], log=la.log_file(ws, name), kind=name,
@@ -176,7 +179,7 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         state = str(status.get("state") or "starting") if live else (
             "failed" if status.get("state") == "failed" else "stopped")
         out.append({
-            "name": name, "model": agent.model_name, "role": agent.role, "think": agent.think,
+            "name": name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort,
             "project": Path(agent.project).name if agent.project else "", "running": live,
             "state": state, "detail": str(status.get("detail") or ""),
             "steps": int(status.get("steps") or 0), "tasks": int(status.get("tasks") or 0),

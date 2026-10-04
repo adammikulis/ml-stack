@@ -17,7 +17,14 @@ from urllib.parse import urlsplit
 from ml_stack import roles
 from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
 from ml_stack.graph.guard import host_ok, refusal
-from ml_stack.workspace import boardroute, localagent as la, localmodel, localstart as ls, plain
+from ml_stack.workspace import (
+    boardroute,
+    localagent as la,
+    localeffort as le,
+    localmodel,
+    localstart as ls,
+    plain,
+)
 from ml_stack.workspace.boardroute import Reply, Request, _checked, _json
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.service import Workspace
@@ -27,7 +34,7 @@ __all__ = ["COOKIE", "PREFIX", "respond", "serve", "session_ok"]
 PREFIX = "/agents/"
 COOKIE = "ml_session"
 BODY_MAX = 4096
-START_KEYS = {"model": str, "name": str, "role": str, "think": bool, "project": str}
+START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "project": str}
 STOP_WAIT_S = 10.0
 
 
@@ -62,7 +69,8 @@ def _model_view() -> dict[str, Any]:
 
 def _read(ws: Workspace, route: str) -> Any:
     if route == "list":
-        return {"agents": ls.listing(ws), "roles": la.role_choices(), "default_role": roles.DEFAULT,
+        return {"agents": ls.listing(ws), "roles": la.role_choices(), "default_role": roles.DEFAULT, "efforts": [*le.LEVELS, le.AUTO],
+                "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX,
                 "orders_from": list(la.DEFAULT_ORDERS_FROM)}
     if route == "model":
         return _model_view()
@@ -86,8 +94,8 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
         data = _typed(body, START_KEYS)
         try:
             got = ls.start(ws, ls.Ask(data.get("model") or localmodel.AUTO, data.get("name", ""),
-                                      data.get("role") or roles.DEFAULT, bool(data.get("think")),
-                                      data.get("project", "")))
+                                      data.get("role") or roles.DEFAULT, data.get("effort") or le.DEFAULT,
+                                      data.get("max_effort") or le.DEFAULT_MAX, data.get("project", "")))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}
         return 200, {"name": got.name, "pid": got.pid, "model": plain.line(got.model, 80),
