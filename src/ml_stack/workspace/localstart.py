@@ -194,11 +194,12 @@ def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = Non
             freed = bool((release or _release)(lease))
         except (OSError, RuntimeError) as err:
             notes.append(f"the lease was not released now ({err}); it ends with the process")
-    if ws.registry.role_of(name):
-        ws.registry.revoke(onboard.SETUP, name)
-    tokens_file = tokens.directory(ws.base) / name
+    identity = agent.identity or name
+    if ws.registry.role_of(identity):
+        ws.registry.revoke(onboard.SETUP, identity)
+    tokens_file = tokens.directory(ws.base) / identity.replace("/", "~")
     tokens_file.unlink(missing_ok=True)
-    for path in (la.stop_file(ws, name), la.folder(ws) / f"{name}.json",
+    for path in (la.stop_file(ws, name), la.pause_file(ws, name), la.folder(ws) / f"{name}.json",
                  la.folder(ws) / f"{name}.status.json", la.folder(ws) / "jobs" / f"{name}.json"):
         path.unlink(missing_ok=True)
     ws.audit("local-agent.stop", onboard.SETUP.id, agent=name, forced=forced, lease=freed)
@@ -218,6 +219,19 @@ def _release(lease: str) -> bool:
     return bool(broker_wire.release(lease))
 
 
+
+def pause(ws: Workspace, name: str, paused: bool) -> dict[str, Any]:
+    """Pause or resume queued tasks; an active task finishes before pausing."""
+    name = la.check_name(name)
+    if la.load(ws, name) is None:
+        raise ValueError(f"no local agent called {name}")
+    flag = la.pause_file(ws, name)
+    if paused:
+        flag.write_text("paused\n", encoding="utf-8")
+    else:
+        flag.unlink(missing_ok=True)
+    return {"name": name, "paused": paused}
+
 def listing(ws: Workspace) -> list[dict[str, Any]]:
     """Every local agent: its model, role, state, steps, last message, memory held and lease."""
     out = []
@@ -229,7 +243,7 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         state = str(status.get("state") or "starting") if live else (
             "failed" if status.get("state") == "failed" else "stopped")
         out.append({
-            "name": name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx,
+            "name": name, "identity": agent.identity or name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx,
             "project": Path(agent.project).name if agent.project else "", "running": live,
             "state": state, "detail": str(status.get("detail") or ""),
             "steps": int(status.get("steps") or 0), "tasks": int(status.get("tasks") or 0),
@@ -237,6 +251,6 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
             "last_message": status.get("last_message") or {},
             "memory_bytes": agent.size_bytes if live and state != "failed" else 0,
             "lease": bool((status.get("lease") or {}).get("id")) and live,
-            "orders_from": list(agent.orders_from), "started": agent.started,
+            "paused": la.pause_file(ws, name).exists(), "orders_from": list(agent.orders_from), "started": agent.started,
             "beat": float(status.get("beat") or 0.0)})
     return out

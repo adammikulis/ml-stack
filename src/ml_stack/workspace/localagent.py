@@ -85,6 +85,7 @@ class Agent:
 
     name: str
     model: str
+    identity: str = ""
     model_name: str = ""
     size_bytes: int = 0
     role: str = roles.DEFAULT
@@ -111,6 +112,11 @@ def _paths(ws: Workspace, name: str) -> dict[str, Path]:
     base = folder(ws)
     return {"record": base / f"{name}.json", "status": base / f"{name}.status.json",
             "stop": base / f"{name}.stop", "log": base / f"{name}.log"}
+
+
+def pause_file(ws: Workspace, name: str) -> Path:
+    """The file that pauses the worker before its next queued task."""
+    return folder(ws) / f"{check_name(name)}.pause"
 
 
 def stop_file(ws: Workspace, name: str) -> Path:

@@ -103,6 +103,9 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}
         return 200, {"name": got.name, "pid": got.pid, "model": plain.line(got.model, 80),
                      "role": got.role, "already": got.already}
+    if route in ("pause", "resume"):
+        name = _typed(body, {"name": str}).get("name", "")
+        return 200, ls.pause(ws, name, route == "pause")
     if route == "stop":
         name = _typed(body, {"name": str}).get("name", "")
         done = ls.stop(ws, name, wait_s=STOP_WAIT_S)

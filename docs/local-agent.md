@@ -79,3 +79,17 @@ Flash-Next is used only when named with `--model`. Before starting, the memory e
 context; when it does not fit, `start` says the longest context that does and prints the person-only
 `ml-stack-serve memory --for ... --apply`. Past 85% of the context the chat loop drops whole oldest turns
 down to 50%, leaving one fixed marker; nothing kept is edited, so the cached prefix survives.
+
+
+Coding agents retain their registered workspace identity and process authorized inbox tasks
+serially through the maintained native harness. The parent worker reads task data and posts
+threaded results; the model does not need workspace shell access to finish or report a job.
+Each task has a graph conversation, native session, bounded runtime and cancellable process.
+The task role and native sandbox remain in force. An idle worker waits without running inference.
+
+The local-agent routes accept POST `/agents/pause` and `/agents/resume` with `{"name":"NAME"}`
+under the same person-session guard as start/stop. Pause takes effect before the next task; an
+active task finishes first. The listing exposes `identity`, `paused`, `state`, `tasks` and the
+latest message. Stopping a delegated worker revokes its child token, preserving its parent.
+`agent.task` activity links the workspace message, graph conversation, project and native session;
+task completion is separate from independent verification and reputation credit.

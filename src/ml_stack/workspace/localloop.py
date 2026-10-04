@@ -63,6 +63,7 @@ class Settings:
     cancel: threading.Event | None = None
     signals: bool = False
     serve: Callable[[la.Agent], Held] | None = None
+    execute: Callable[[la.Agent, dict, str, Callable[[], bool]], tuple[str, str, int]] | None = None
 
 
 @dataclass(slots=True)
@@ -139,7 +140,8 @@ class Loop:
         self.caps = settings.caps or caps_of(agent)
         self.approval = (functools.partial(lt.ask_a_person, stop=self.stopped)
                          if settings.approval is lt.ask_a_person else settings.approval)
-        self.token = tokens.load(ws.base, agent.name)
+        self.execute = settings.execute
+        self.token = tokens.load(ws.base, agent.identity or agent.name)
         self.steps = self.tasks = self.ignored = 0
         self.effort = agent.effort
 
@@ -174,6 +176,8 @@ class Loop:
 
     def perform(self, row: dict[str, Any], why: str) -> tuple[str, str, int]:
         """Run the task through the chat agent under the agent's role: ``(reply kind, text, rounds)``."""
+        if self.execute:
+            return self.execute(self.agent, row, why, self.stopped)
         state = lt.TaskState(ceiling=self.agent.max_effort)
         level = self.level(row)
         person = lt.Unattended(self.agent.name, state, self.approval)
@@ -221,7 +225,11 @@ class Loop:
     def serve(self, idle: list[bool]) -> None:
         """Wait for messages and handle each, until stopped."""
         while not self.stopped():
-            self.status.update(state="idle")
+            if la.pause_file(self.ws, self.agent.name).exists():
+                self.status.update(state="paused", detail="Queued tasks wait until resumed")
+                time.sleep(0.2)
+                continue
+            self.status.update(state="idle", detail="Waiting for an authorized task")
             idle[0] = True
             try:
                 rows = self.ws.wait(self.token, IDLE_S, ack=False, raw=True)
@@ -230,6 +238,8 @@ class Loop:
             for row in rows:
                 if self.stopped():
                     return
+                if la.pause_file(self.ws, self.agent.name).exists():
+                    break
                 self.handle(row)
                 self.ws.ack(self.token, row["seq"])
 

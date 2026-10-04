@@ -640,3 +640,80 @@ def test_start_records_the_started_model_as_verified(kit, monkeypatch):
         assert info["model"] and info["model_state"] == "verified"
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
+
+
+def test_coding_tasks_reuse_the_registered_seat_and_reply_on_each_thread(kit, monkeypatch, tmp_path):
+    from ml_stack.workspace import localcoding
+
+    authority = kit.agent("a")
+    issued = kit.ws.delegate(authority, "qwen")
+    identity = issued["id"]
+    agent = la.Agent("local-qwen", "model.gguf", identity=identity, profile="coding",
+                     harness="codex", role=roles.PLAN_AND_GO, project=str(tmp_path), orders_from=("a",))
+    la.save(kit.ws, agent)
+    seen = []
+
+    def native(manager, turn, conversation, prompt):
+        seat = manager._seat("ignored", tmp_path, "ignored", lambda _: None)
+        assert seat.name == identity and not seat.minted
+        assert conversation.settings["context"] == agent.ctx
+        assert conversation.settings["role"] == roles.PLAN_AND_GO
+        assert kit.ws.auth(tokens.load(kit.base, identity)).id == identity
+        seen.append(prompt)
+        turn.text = "Completed coding task"
+
+    monkeypatch.setattr(localcoding.BoundManager, "_run", native)
+    settings = localloop.Settings(execute=lambda a, row, why, stop: localcoding.perform(kit.ws, a, row, why, stop))
+    loop = localloop.Loop(kit.ws, agent, localloop.Held(None, {}), settings,
+                         (lambda: False, la.Status(kit.ws, agent.name)))
+    for text in ("implement first task", "implement second task"):
+        sent = kit.ws.send(authority, identity, "task", text)
+        row = next(r for r in kit.ws.inbox(tokens.load(kit.base, identity), raw=True) if r["seq"] == sent["seq"])
+        loop.handle(row)
+        reply = kit.ws.thread(authority, sent["seq"])[-1]
+        assert reply["from"] == identity and "Completed coding task" in reply["text"]
+    assert len(seen) == 2 and kit.ws.registry.role_of(identity) == "agent"
+
+
+def test_stopping_a_delegated_worker_revokes_only_its_private_identity(kit):
+    parent = kit.agent("parent")
+    child = kit.ws.delegate(parent, "local-qwen")
+    la.save(kit.ws, la.Agent("local-qwen", "model", identity=child["id"]))
+    ls.stop(kit.ws, "local-qwen", release=lambda _: True)
+    assert kit.ws.auth(parent).id == "parent"
+    assert not kit.ws.registry.role_of(child["id"])
+    assert not Path(child["token_file"]).exists()
+
+
+def test_paused_coding_worker_keeps_tasks_queued_until_resume(kit, monkeypatch):
+    authority = kit.agent("lead", role="lead")
+    child = kit.ws.delegate(authority, "qwen")
+    agent = la.Agent("local-qwen", "model", identity=child["id"], profile="coding", harness="codex")
+    la.save(kit.ws, agent)
+    cancel = threading.Event()
+    acted = threading.Event()
+    seen = []
+    ls.pause(kit.ws, agent.name, True)
+    sent = kit.ws.send(authority, child["id"], "task", "work")
+
+    def execute(agent, row, why, stopped):
+        seen.append(row["seq"])
+        acted.set()
+        cancel.set()
+        return "answer", "finished", 1
+
+    thread = threading.Thread(target=lambda: localloop.run(kit.ws, agent.name, localloop.Settings(
+        cancel=cancel, serve=lambda _: localloop.Held(None, {}), execute=execute)))
+    thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and la.status_of(kit.ws, agent.name).get("state") != "paused":
+            time.sleep(.01)
+        assert la.status_of(kit.ws, agent.name)["state"] == "paused" and not acted.is_set()
+        ls.pause(kit.ws, agent.name, False)
+        assert acted.wait(5)
+    finally:
+        cancel.set()
+        thread.join(timeout=6)
+    assert not thread.is_alive() and seen == [sent["seq"]]
+    assert kit.ws.thread(authority, sent["seq"])[-1]["from"] == child["id"]
