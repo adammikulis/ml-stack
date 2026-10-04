@@ -5,9 +5,7 @@ import math
 from importlib import import_module
 from pathlib import Path
 
-import gymnasium as gym
-import numpy as np
-
+from ml_stack.gym.cosim import make_cosim
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.traffic_world import xml
 from ml_stack.gym.world_files import record
@@ -16,6 +14,11 @@ from ml_stack.gym.worlds import configure_world
 
 def make_traffic_world(config, seed=0, combined=False):
     """Initialize traffic once and expose bounded learning tasks over its live clock."""
+    import gymnasium as gym
+
+    class TrafficWorld(TrafficWorldState, gym.Env):
+        pass
+
     cfg = dict(config or {})
     task_horizon = int(cfg.pop('task_horizon', cfg.get('num_seconds', 300)))
     cfg.pop('simulation_mode', None)
@@ -27,15 +30,12 @@ def make_traffic_world(config, seed=0, combined=False):
     if task_horizon < 1 or not math.isfinite(period) or not .5 <= period <= 60:
         raise ValueError('task_horizon must be positive and world_demand_period in [0.5, 60]')
     cfg.update(num_seconds=float('inf'), single_agent=True, use_gui=False)
-    if combined:
-        native = import_module('ml_stack.gym.cosim').make_cosim(cfg)
-    else:
-        native = import_module('sumo_rl').SumoEnvironment(**cfg)
+    native = make_cosim(cfg) if combined else import_module('sumo_rl').SumoEnvironment(**cfg)
     return TrafficWorld(native, cfg, provenance, {'seed': initial_seed, 'horizon': task_horizon,
                                                   'period': period, 'mode': mode})
 
 
-class TrafficWorld(gym.Env):
+class TrafficWorldState:
     def __init__(self, native, config, provenance, settings):
         self.native, self.config, self.world_provenance = native, config, provenance
         self.initial_seed, self.task_horizon = settings['seed'], settings['horizon']
@@ -52,6 +52,7 @@ class TrafficWorld(gym.Env):
         return self.native
 
     def reset(self, *, seed=None, options=None):
+        import numpy as np
         super().reset(seed=seed)
         if options:
             raise ValueError('Construct a new world to change native traffic configuration')
@@ -78,7 +79,7 @@ class TrafficWorld(gym.Env):
             self.next_depart = max(ends) + self.period
             path = Path(self.world_provenance['manifest']).parent
             definition = path / 'continuing-demand.json'
-            definition.write_text(json.dumps({'native_api': 'TraCI route.add/vehicle.add',
+            definition.write_text(json.dumps({'schema_version': 1, 'native_api': 'TraCI route.add/vehicle.add',
                                              'seed': self.initial_seed, 'period_seconds': self.period,
                                              'starts_at_seconds': self.next_depart, 'routes': templates}, indent=2))
             files = {name: item['path'] for name, item in self.world_provenance['files'].items()}
