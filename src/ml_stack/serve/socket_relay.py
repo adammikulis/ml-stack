@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 __all__ = ["arguments", "main"]
@@ -28,8 +29,11 @@ def _copy(client: socket.socket, target: str, stopping: threading.Event) -> None
             with selectors.DefaultSelector() as reader:
                 reader.register(client, selectors.EVENT_READ, model)
                 reader.register(model, selectors.EVENT_READ, client)
-                while not stopping.is_set() and reader.get_map():
-                    for ready, _ in reader.select(0.25):
+                while reader.get_map():
+                    events = reader.select(0.25)
+                    if stopping.is_set() and not events:
+                        return
+                    for ready, _ in events:
                         data = ready.fileobj.recv(65536)
                         if data:
                             ready.data.sendall(data)
@@ -73,30 +77,33 @@ def main(argv: list[str] | None = None) -> int:
     port, target, *command = args
     stopping = threading.Event()
     workers: list[threading.Thread] = []
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", int(port)))
-        listener.listen(32)
-        child = subprocess.Popen(command)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", int(port)))
+            listener.listen(32)
+            child = subprocess.Popen(command)
 
-        def stop(_number: int, _frame: object) -> None:
-            stopping.set()
-            child.terminate()
+            def stop(_number: int, _frame: object) -> None:
+                stopping.set()
+                child.terminate()
 
-        signal.signal(signal.SIGTERM, stop)
-        signal.signal(signal.SIGINT, stop)
-        accepting = threading.Thread(target=_accept, args=(listener, target, stopping, workers), daemon=True)
-        accepting.start()
-        try:
-            return child.wait()
-        finally:
-            listener.close()
-            accepting.join(1)
-            for worker in workers:
-                worker.join(1)
-            stopping.set()
-            with contextlib.suppress(OSError):
-                Path(target).unlink(missing_ok=True)
-                Path(target).parent.rmdir()
+            signal.signal(signal.SIGTERM, stop)
+            signal.signal(signal.SIGINT, stop)
+            accepting = threading.Thread(target=_accept, args=(listener, target, stopping, workers), daemon=True)
+            accepting.start()
+            try:
+                return child.wait()
+            finally:
+                stopping.set()
+                listener.close()
+                accepting.join(1)
+                deadline = time.monotonic() + 1
+                for worker in workers:
+                    worker.join(max(0, deadline - time.monotonic()))
+    finally:
+        with contextlib.suppress(OSError):
+            Path(target).unlink(missing_ok=True)
+            Path(target).parent.rmdir()
 
 
 if __name__ == "__main__":

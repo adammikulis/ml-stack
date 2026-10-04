@@ -80,6 +80,11 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
     """Run the Linux daemon with model confinement enabled."""
     executable = executable or prepare()
     arguments = list(argv)
+    environment = ["ML_STACK_SANDBOX_SERVE=1"]
+    for name in ("ML_STACK_HOME", "ML_STACK_CACHE"):
+        if value := os.environ.get(name):
+            translated = _read("wslpath", "-a", "-u", str(Path(value).resolve()))
+            environment.append(name + "=" + translated)
     for index, arg in enumerate(arguments):
         name, separator, value = arg.partition("=")
         if name not in {"--root", "--bench-home", "--cluster-key"}:
@@ -88,13 +93,13 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
             if index + 1 >= len(arguments):
                 continue
             value = arguments[index + 1]
-        if Path(value).is_absolute():
-            value = _read("wslpath", "-a", "-u", value)
+        if not value.startswith("/"):
+            value = _read("wslpath", "-a", "-u", str(Path(value).resolve()))
             if separator:
                 arguments[index] = name + "=" + value
             else:
                 arguments[index + 1] = value
-    process = subprocess.Popen(command("env", "ML_STACK_SANDBOX_SERVE=1", executable,
+    process = subprocess.Popen(command("env", *environment, executable,
                                        "-m", "ml_stack.fleet.wsl_daemon", *arguments),
                                stdin=subprocess.PIPE)
     try:
