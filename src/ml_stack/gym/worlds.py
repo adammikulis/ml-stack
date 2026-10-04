@@ -1,9 +1,9 @@
 """Per-example native world construction and UI configuration descriptors."""
 
-from importlib import import_module
-
-from ml_stack.gym.car_definition import SCHEMA
+from ml_stack.gym.car_definition import SCHEMA, build as build_car
 from ml_stack.gym.traffic import traffic_defaults
+from ml_stack.gym.traffic_world import build as build_traffic
+from ml_stack.gym.warehouse_world import build as build_warehouse
 from ml_stack.gym.world_schema import TRAFFIC, WAREHOUSE
 
 
@@ -23,13 +23,13 @@ def configure_world(environment, config, seed=0):
     world = cfg.pop('world', {})
     seed = cfg.pop('world_seed', seed)
     if environment == 'car':
-        native, provenance = import_module('ml_stack.gym.car_definition').build(world, seed)
+        native, provenance = build_car(world, seed)
     elif environment == 'warehouse':
-        native, provenance = import_module('ml_stack.gym.warehouse_world').build(world, seed)
+        native, provenance = build_warehouse(world, seed)
         cfg.setdefault('request_queue_size', native['n_agents'])
     elif environment in {'traffic', 'traffic-driving'}:
         cfg = traffic_defaults(cfg)
-        native, provenance = import_module('ml_stack.gym.traffic_world').build(world, seed)
+        native, provenance = build_traffic(world, seed)
     else:
         return cfg, None
     return {**cfg, **native}, provenance

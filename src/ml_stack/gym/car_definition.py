@@ -13,6 +13,8 @@ SCHEMA = {"modes": ["procedural", "manual"], "fields": {
 def build(world, seed):
     """Return native PG map settings and their definition provenance."""
     seed = int(world.get("seed", seed))
+    if not 0 <= seed < 2**31:
+        raise ValueError("World seed must be between zero and 2147483647")
     definition = {**world, "mode": world.get("mode", "procedural"), "seed": seed}
     path = directory("metadrive", definition)
     if definition["mode"] == "procedural":
@@ -30,4 +32,4 @@ def build(world, seed):
         files = {"map_file": source}
     else:
         raise ValueError("Car world mode must be procedural or manual")
-    return cfg, record(path, "metadrive", definition, files)
+    return {**cfg, "world_seed": seed, "start_seed": seed, "num_scenarios": 1}, record(path, "metadrive", definition, files)
