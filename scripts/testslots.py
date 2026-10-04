@@ -1,39 +1,11 @@
-"""A machine-wide CPU budget for test runs, shared by every checkout and every agent.
-
-Problem: many agents each start a full test suite with several xdist workers at once, the machine saturates
-(load average >> cores) and every run slows down, so everything waits on everything. This module makes test runs
-queue instead: a run asks for `want` workers, waits (strictly first come, first served) until the shared budget has
-room for at least `minimum`, runs with what it was granted, and gives the workers back when it exits (also when it is
-killed: the lock dies with the process).
-
-Protocol (stdlib only, so other repos can carry an identical copy and share the same budget):
-  * directory  $DEV_TEST_SLOTS_DIR or ~/.cache/dev-test-slots
-  * every participant creates `<time_ns>-<pid>.slot` (JSON: label, pid, want, minimum, granted, since) and holds an
-    exclusive flock on it for as long as it lives, waiting or running. A slot whose flock can be taken is stale
-    (its owner died) and is removed by whoever notices.
-  * `mutex.lock` serialises decisions. Only the OLDEST waiting slot may be granted (no starvation); it gets
-    min(want, budget - granted_total) workers once that is >= minimum.
-  * budget = $DEV_TEST_BUDGET, else LOAD-AWARE: 3/4 of the cores normally, up to all the cores while the 1-minute load
-    average is under 3/4 of the cores (the machine is idle: use it), down to half of the base while it is over twice the
-    cores (it is already saturated: back off). Thresholds: $DEV_TEST_LOAD_LOW / $DEV_TEST_LOAD_HIGH (multiples of cores).
-    The cap is re-evaluated every time a waiting run is considered; running leases are never shrunk.
-  * HEAVY LANES: a few tests spawn multi-threaded tools (one `kicad-cli` DRC can use 8 cores). Those tests wrap
-    themselves in `heavy_lane()`: at most $DEV_TEST_HEAVY_LANES (default cores/4, min 2) of them run at the same time
-    machine-wide, across all runs. A lane is a leaf resource (a test holding one waits for nothing else), so it cannot
-    deadlock; after $DEV_TEST_LANE_WAIT_S (default 600) a test runs anyway and says so.
-  * $DEV_TEST_WAIT_S bounds the wait (default 3600 s); $DEV_TEST_SLOTS=off disables the queue (explicit, logged).
-
-CLI:  python scripts/testslots.py status
-      python scripts/testslots.py run --want 4 --min 2 --label NAME -- COMMAND ARGS...
-            (queues, then runs COMMAND with DEV_TEST_WORKERS=<granted> in its environment; use it for any test
-             command, e.g.  ... -- sh -c 'pytest -n $DEV_TEST_WORKERS tests')
-"""
+"""Machine-wide, flock-backed CPU permits and subprocess admission for test runs."""
 from __future__ import annotations
 
 import contextlib
 import fcntl
 import json
 import os
+import secrets
 import sys
 import time
 from collections.abc import Iterator
@@ -52,21 +24,18 @@ def _cores() -> int:
 
 
 def base_budget(cores: int | None = None) -> int:
-    return max(2, (cores or _cores()) * 3 // 4)
+    return max(1, (cores or _cores()) - max(0, int(os.environ.get("DEV_TEST_RESERVED_CORES", "1"))))
 
 
 def cap_for(load1: float | None, cores: int | None = None, low: float | None = None, high: float | None = None) -> int:
     """The worker cap for a given 1-minute load average (pure, so it can be tested)."""
     cores = cores or _cores()
-    low = low if low is not None else float(os.environ.get("DEV_TEST_LOAD_LOW", "0.75"))
     high = high if high is not None else float(os.environ.get("DEV_TEST_LOAD_HIGH", "2.0"))
     base = base_budget(cores)
     if load1 is None:
         return base
-    if load1 < low * cores:
-        return max(base, cores)
     if load1 > high * cores:
-        return max(2, base // 2)
+        return max(1, base // 2)
     return base
 
 
@@ -147,46 +116,82 @@ class Lease:
     waited: float
 
 
+def _reject_nested() -> None:
+    inherited = os.environ.get("DEV_TEST_LEASE")
+    if inherited:
+        try:
+            descriptor = json.loads(inherited)
+            inherited_path = Path(descriptor["path"])
+            record = json.loads(inherited_path.read_text())
+            if (inherited_path.parent.resolve() == slots_dir().resolve()
+                    and record.get("token") == descriptor["token"] and _alive(inherited_path)):
+                raise RuntimeError("testslots: nested CPU run inside a live test lease; run it after releasing the parent permit")
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+
+@contextlib.contextmanager
+def _lease_environment(path: Path, token: str) -> Iterator[None]:
+    previous = os.environ.get("DEV_TEST_LEASE")
+    os.environ["DEV_TEST_LEASE"] = json.dumps({"path": str(path.resolve()), "token": token})
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("DEV_TEST_LEASE", None)
+        else:
+            os.environ["DEV_TEST_LEASE"] = previous
+
+
+def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int]) -> int:
+    path, want, minimum = me.path, me.data["want"], me.data["minimum"]
+    cap, used = capacity
+    if not waiting or cap - used < minimum:
+        return 0
+    first = waiting[0]
+    if first.path != path:
+        if cap - used >= first.data["minimum"] or first.data.get("backfills", 0) >= 2:
+            return 0
+        first.data["backfills"] = first.data.get("backfills", 0) + 1
+        first.path.write_text(json.dumps(first.data))
+    if not want:
+        return min(cap - used, max(minimum, cap // max(1, len(waiting) + bool(used))))
+    return min(want, cap - used)
+
+
 @contextlib.contextmanager
 def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambda m: print(m, file=sys.stderr, flush=True)
           ) -> Iterator[Lease]:
-    """Wait for `minimum`..`want` workers of the shared budget; yield what was granted. Released on exit or death.
-
-    ``want=0`` is *auto*: take what the machine can spare, never more than a fair share when other runs are
-    running or queued (budget / runs). A lone run on an idle machine gets the whole load-aware budget; the budget
-    itself falls with the load, so a busy machine grants less. A fixed ``want`` is a ceiling, not a target."""
+    """Acquire a bounded FIFO CPU lease, released on context exit or process death."""
+    _reject_nested()
     auto = int(want) <= 0
     want = 0 if auto else max(1, int(want))
-    minimum = max(1, int(minimum if minimum is not None else 2)) if auto \
-        else max(1, min(int(minimum if minimum is not None else min(2, want)), want))
+    minimum = max(1, int(minimum if minimum is not None else 1)) if auto \
+        else max(1, min(int(minimum if minimum is not None else 1), want))
     if os.environ.get("DEV_TEST_SLOTS", "").lower() == "off":
         say("testslots: queue disabled by DEV_TEST_SLOTS=off")
         yield Lease(want or max(1, (os.cpu_count() or 4) // 2), 0.0)
         return
+    if minimum > (int(os.environ["DEV_TEST_BUDGET"]) if os.environ.get("DEV_TEST_BUDGET", "").isdigit() else base_budget()):
+        raise ValueError("testslots: minimum exceeds the configured CPU budget")
     d = slots_dir()
     path = d / f"{time.time_ns()}-{os.getpid()}.slot"
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX)                       # held until we exit: this is the liveness signal
-    me = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time()}
+    me = {"label": label, "pid": os.getpid(), "want": want, "minimum": minimum, "granted": 0, "since": time.time(), "schema_version": 1, "token": secrets.token_hex(24)}
     path.write_text(json.dumps(me))
     t0 = time.time()
     deadline = t0 + float(os.environ.get("DEV_TEST_WAIT_S", "3600"))
     last_note = 0.0
-    granted = 0
     try:
         while True:
-            cap = max(budget(), minimum)                 # re-read every poll: load falls while a run waits
+            cap = budget()
             with _mutex(d):
                 slots = _read(d, mine=path)
                 waiting = [s for s in slots if s.granted == 0]
                 used = sum(s.granted for s in slots)
-                head = waiting[0].path if waiting else None
-                if head == path and cap - used >= minimum:
-                    if auto:
-                        runs = len([x for x in slots if x.granted > 0]) + len(waiting)
-                        granted = min(cap - used, max(minimum, cap // max(1, runs)))
-                    else:
-                        granted = min(want, cap - used)
+                granted = _grant(Slot(path, me), waiting, (cap, used))
+                if granted:
                     me["granted"] = granted
                     path.write_text(json.dumps(me))
                     break
@@ -199,7 +204,8 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                 say(f"testslots: waiting for {minimum}-{want or 'auto'} workers ({used}/{cap} in use, "
                     f"{len(ahead)} run(s) ahead: {', '.join(map(str, ahead)) or 'none'})")
             time.sleep(0.4)
-        yield Lease(granted, time.time() - t0)
+        with _lease_environment(path, me["token"]):
+            yield Lease(granted, time.time() - t0)
     finally:
         with contextlib.suppress(OSError):
             path.unlink()
@@ -237,8 +243,7 @@ def heavy_lane(label: str = "heavy test", say=lambda m: print(m, file=sys.stderr
         if fd >= 0:
             break
         if time.time() > deadline:
-            say(f"testslots: no heavy lane free after the wait limit; running {label} anyway")
-            break
+            raise TimeoutError(f"testslots: no heavy lane free for {label} before the wait limit")
         if not noted:
             noted = True
             say(f"testslots: {label} waits for one of {n} heavy lanes")
@@ -250,11 +255,11 @@ def heavy_lane(label: str = "heavy test", say=lambda m: print(m, file=sys.stderr
             os.close(fd)                                  # closing releases the flock
 
 
-def _run_command(argv: list[str]) -> int:
+def _run_command(argv: list[str], elastic: bool = False) -> int:
     import argparse
     import subprocess
     ap = argparse.ArgumentParser(prog="testslots run")
-    ap.add_argument("--want", type=int, default=0, help="workers wanted as a ceiling (0 = auto: what the machine can spare, a fair share)")
+    ap.add_argument("--want", type=lambda value: 0 if value == "auto" else int(value), default=0, help="workers wanted as a ceiling (0 = auto: what the machine can spare, a fair share)")
     ap.add_argument("--min", dest="minimum", type=int, default=None)
     ap.add_argument("--label", default="command")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -262,6 +267,9 @@ def _run_command(argv: list[str]) -> int:
     cmd = a.cmd[1:] if a.cmd[:1] == ["--"] else a.cmd
     if not cmd:
         ap.error("give a command after --")
+    if elastic:
+        import testslots_runner
+        return testslots_runner.run_pytest(cmd, a.want, a.label)
     with lease(a.want, a.minimum, label=a.label) as got:
         print(f"testslots: running with {got.workers} worker(s) (waited {got.waited:.0f}s)", file=sys.stderr, flush=True)
         return subprocess.run(cmd, env={**os.environ, "DEV_TEST_WORKERS": str(got.workers)}).returncode
@@ -269,6 +277,8 @@ def _run_command(argv: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["pytest"]:
+        return _run_command(argv[1:], elastic=True)
     if argv[:1] == ["run"]:
         return _run_command(argv[1:])
     if argv[:1] != ["status"]:
