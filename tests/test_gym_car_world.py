@@ -6,7 +6,37 @@ import pytest
 
 from ml_stack.gym import simulation
 from ml_stack.gym.adapters import make_environment
+from ml_stack.gym.car_definition import build
 from ml_stack.gym.values import json_value
+
+
+@pytest.mark.parametrize("road", [True, False, 0, 25, 3., None, [], "", "S" * 25])
+def test_car_definition_rejects_non_native_road_values(road):
+    with pytest.raises(ValueError, match="block sequence or integer block count"):
+        build({"map": road}, 2)
+
+
+@pytest.mark.slow
+def test_native_numeric_road_count_keeps_integer_and_seeded_geometry():
+    pytest.importorskip("metadrive")
+    config = {"simulation_mode": "world", "num_agents": 2, "traffic_density": 0.,
+              "world": {"map": 3, "seed": 2}}
+    lanes = None
+    for _ in range(2):
+        env = make_environment("car", config)
+        try:
+            env.reset(seed=99)
+            assert env.native.config["map"] == 3
+            assert type(env.native.config["map"]) is int
+            assert len(env.native.current_map.blocks) == 4
+            assert env.native.current_seed == 2
+            current = json_value(env.native.current_map.get_boundary_line_vector(3))
+            if lanes is not None:
+                assert current == lanes
+            lanes = current
+            env.step(None)
+        finally:
+            env.close()
 
 
 @pytest.mark.slow
