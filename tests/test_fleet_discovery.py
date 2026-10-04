@@ -440,15 +440,15 @@ def test_a_daemon_in_its_own_root_runs_training_while_some_other_home_is_measuri
     from ml_stack.lock import only_one
 
     elsewhere = tmp_path / "somebody-elses-home" / "bench"
-    with only_one(elsewhere / "measuring.lock", announce=lambda *a, **k: None):
-        with _booted(tmp_path) as (keyfile, _disco, http_port, log):
-            rtx = _driver(keyfile, http_port)
-            assert rtx.health()["measuring"] is False, log.read_text(errors="replace")
-            out = tmp_path / "proof.txt"
-            job = _probe(rtx, out)
-            final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
-            assert final["state"] == "done", rtx.log(job["id"])
-            assert out.read_text() == "ran"
+    with (only_one(elsewhere / "measuring.lock", announce=lambda *a, **k: None),
+          _booted(tmp_path) as (keyfile, _disco, http_port, log)):
+        rtx = _driver(keyfile, http_port)
+        assert rtx.health()["measuring"] is False, log.read_text(errors="replace")
+        out = tmp_path / "proof.txt"
+        job = _probe(rtx, out)
+        final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
+        assert final["state"] == "done", rtx.log(job["id"])
+        assert out.read_text() == "ran"
     said = log.read_text(errors="replace")
     assert f"bench {tmp_path / 'bench'}" in said, said
     assert "holding" not in said
@@ -482,7 +482,7 @@ def test_a_daemon_pointed_at_a_held_bench_home_keeps_training_queued_and_says_so
 
 
 def test_find_one_says_why_when_no_peer_matches(traind):
-    keyfile, disco_port, _, log = traind
+    keyfile, disco_port, _, _log = traind
     with pytest.raises(DiscoveryError, match="no peer matches"):
         Peer.find_one(name="not-this-box", cluster_key_path=keyfile,
                                timeout_s=3.0, port=disco_port)
@@ -519,7 +519,7 @@ def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
 
 
 def test_peers_ls_reports_the_running_daemon(traind):
-    keyfile, disco_port, http_port, log = traind
+    keyfile, disco_port, http_port, _log = traind
     env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": str(REPO / "src")}
     r = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers",
