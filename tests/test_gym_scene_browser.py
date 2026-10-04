@@ -157,3 +157,29 @@ def test_driver_camera_button_and_shortcut_use_selected_car(scene_page):
     page.keyboard.press('c')
     page.wait_for_function("document.querySelector('gym-scene').cameraMode==='driver'")
     assert not errors
+
+
+def test_motion_interpolates_snapshots_without_extrapolating(scene_page):
+    page, errors = scene_page
+    result = page.evaluate("""() => {
+      const s=document.querySelector('gym-scene');
+      cancelAnimationFrame(s.animation); s.follow=false;
+      const car=s.meshes.get('vehicle-ego');
+      car.position.set(0,0,0); car.rotation.y=3.1;
+      car.userData.target.set(0,0,0); car.userData.heading=3.1;
+      car.userData.received=performance.now()-100;
+      s.keep('vehicle-ego',()=>null,[10,0],-3.1);
+      const start=car.userData.received; car.userData.duration=100;
+      s.animate(start+50); cancelAnimationFrame(s.animation);
+      const halfway={x:car.position.x,yaw:car.rotation.y};
+      s.animate(start+1000); cancelAnimationFrame(s.animation);
+      const settled=car.position.x;
+      s.keep('vehicle-ego',()=>null,[100,0],0);
+      s.animate(performance.now()); cancelAnimationFrame(s.animation);
+      return {halfway,settled,teleport:car.position.x,target:car.userData.target.x};
+    }""")
+    assert result['halfway']['x'] == pytest.approx(5)
+    assert result['halfway']['yaw'] == pytest.approx(3.141592653589793)
+    assert result['settled'] == 10
+    assert result['teleport'] == result['target'] == 100
+    assert not errors
