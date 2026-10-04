@@ -276,6 +276,7 @@ class TestLaunch:
                             run_codex=run) == 3
         assert seen["config"]["model_context_window"] == 262144
         scope = seen["config"]["mcp_servers"]["workspace"]
+        assert scope["required"] is True
         assert scope["command"] == sys.executable
         assert scope["args"][-1] == "--workspace-only"
         assert scope["env"]["ML_STACK_WORKSPACE_TOKEN"] == "assigned-test-seat"
