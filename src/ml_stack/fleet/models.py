@@ -22,6 +22,7 @@ from ml_stack.httpguard import Limits, Refused, stream
 from ml_stack.net import sniff
 from ml_stack.safenames import Unsafe, safe_filename
 
+from .model_library import library
 from .weights import ModelError, resolve
 
 __all__ = ["CHUNK", "Downloads", "Getting", "Model", "Models", "caches",
@@ -169,6 +170,15 @@ class Models:
             return None
         stat = found.stat()
         return Model(found.name, found, stat.st_size, stat.st_mtime)
+
+    def library(self) -> list[dict[str, Any]]:
+        """Grouped installed models for the person-facing library."""
+        return library(self.roots)
+
+    def library_model(self, path: str) -> Model | None:
+        """A complete supported primary model at its exact discovered path."""
+        row = next((row for row in self.library() if row['path'] == path and row['servable']), None)
+        return Model(Path(path).name, Path(path), row['size_bytes'], row['mtime']) if row else None
 
     def find_draft(self, name: str) -> Model | None:
         """A draft by its exact filename. Drafts are fetched, never listed."""
@@ -534,5 +544,4 @@ class Downloads:
                 del self.getting[key]
             rows = sorted(self.getting.values(), key=lambda r: r.started_at)
         return rows
-
 

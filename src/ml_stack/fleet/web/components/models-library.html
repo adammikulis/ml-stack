@@ -1,0 +1,52 @@
+<script>
+(function(){const M=window.fleetModel,E=M.el;
+class ModelsLibrary extends HTMLElement{
+ connectedCallback(){
+  if(this.wired)return;this.wired=true;this.filters={};
+  this.append(E('h2',{},'On this machine'));
+  const controls=E('div',{class:'searchrow'});this.append(controls);
+  this.search=E('input',{type:'search',placeholder:'Search installed models','aria-label':'Search installed models',oninput:()=>this.draw()});controls.append(this.search);
+  for(const field of ['family','format','quantization','kind','status']){
+   const label={quantization:'Quantization',kind:'Capability'}[field]||field[0].toUpperCase()+field.slice(1);
+   const select=E('select',{'aria-label':label,onchange:()=>this.draw()});this.filters[field]=select;
+   controls.append(E('label',{},label,select));
+  }
+  this.sort=E('select',{'aria-label':'Sort installed models',onchange:()=>this.draw()},
+   E('option',{value:'name'},'Name'),E('option',{value:'size'},'Size · largest first'),E('option',{value:'recent'},'Recently installed'));
+  controls.append(E('label',{},'Sort',this.sort));this.rows=E('div');this.append(this.rows);
+ }
+ update(models,run,serve,halt){
+  this.models=models;this.run=run;this.serve=serve;this.halt=halt;
+  for(const [field,select] of Object.entries(this.filters)){
+   const selected=select.value,values=[...new Set(models.map(row=>this.status(row,field)))].filter(Boolean).sort();
+   select.replaceChildren(E('option',{value:''},'All'),...values.map(value=>E('option',{value},value)));
+   select.value=values.includes(selected)?selected:'';
+  }this.draw();
+ }
+ server(row){return (this.run.running||[]).find(server=>(server.models||[]).some(name=>name===row.path||name===row.path.split('/').pop()));}
+ status(row,field){return field==='status'&&this.server(row)?'running':row[field];}
+ draw(){
+  if(!this.models)return;
+  const search=this.search.value.trim().toLowerCase();
+  const rows=this.models.filter(row=>(!search||[row.name,row.repo,row.family,row.quantization].join(' ').toLowerCase().includes(search))&&
+   Object.entries(this.filters).every(([field,select])=>!select.value||this.status(row,field)===select.value));
+  rows.sort((a,b)=>this.sort.value==='size'?b.size_bytes-a.size_bytes:this.sort.value==='recent'?b.mtime-a.mtime:a.name.localeCompare(b.name));
+  const families=new Map();for(const row of rows){if(!families.has(row.family))families.set(row.family,[]);families.get(row.family).push(row);}
+  this.rows.replaceChildren(...[...families].map(([family,models])=>E('section',{'data-family':family},E('h3',{},family),...models.map(row=>this.entry(row)))));
+  if(!rows.length)this.rows.append(E('p',{class:'hint'},this.models.length?'No installed models match these filters.':'No installed models yet.'));
+ }
+ entry(row){
+  const server=this.server(row),status=server?'running':row.status;
+  const details=E('details',{},E('summary',{},'Files and model details'),E('p',{class:'why'},
+   `${row.shards} shard${row.shards===1?'':'s'} expected · ${row.is_complete?'complete':'incomplete'} · ${M.fileSize(row.size_bytes)} total`),
+   E('code',{},row.path),E('ul',{},...(row.files||[]).map(file=>E('li',{},file.name+' · '+M.fileSize(file.size_bytes)))));
+  details.append(E('p',{class:'why'},[row.architecture,row.parameters?`${(row.parameters/1e9).toFixed(2)}B parameters`:'',row.context_length?`Context length: ${row.context_length.toLocaleString()} tokens`:'',row.source,row.repo].filter(Boolean).join(' · ')));
+  if(row.companion)details.append(E('p',{},'Vision projector: '+row.companion.name));
+  if(row.copies?.length)details.append(E('p',{},'Other copies: '+row.copies.join(', ')));
+  const action=server?E('button',{class:'ghost small',onclick:()=>this.halt(server.port)},'Stop server'):
+   E('button',{class:'ghost small',...(!row.servable||!this.run.can_serve?{disabled:'true'}:{}),onclick:()=>this.serve(row.path,row.name)},'Serve model');
+  return E('article',{'data-model':row.id},E('div',{class:'row'},E('span',{},E('b',{},row.name),E('span',{class:'why'},
+   [row.format.toUpperCase(),row.quantization,row.kind,M.fileSize(row.size_bytes),status].filter(Boolean).join(' · '))),action),details);
+ }
+}customElements.define('models-library',ModelsLibrary);})();
+</script>

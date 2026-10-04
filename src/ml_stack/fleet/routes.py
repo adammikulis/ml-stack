@@ -477,6 +477,7 @@ class ModelRoutes:
                 elsewhere.setdefault(str(row.get("name")), []).append(str(beacon.get("name")))
         self.send(200, {
             "here": [m.public() for m in ui.models.all()],
+            "library": ui.models.library(),
             "elsewhere": [{"name": n, "peers": p}
                           for n, p in sorted(elsewhere.items()) if n not in here],
             "free_gb": free,
@@ -556,7 +557,11 @@ class ModelRoutes:
                                      "machine on your network can serve one instead"})
             return True
         req = self.body()
-        found = ui.models.find(str(req.get("name") or "")) if ui.models else None
+        path = req.get("path")
+        found = ui.models.library_model(path) if ui.models and isinstance(path, str) else None
+        if found is None and not path and ui.models:
+            legacy = ui.models.find(str(req.get("name") or ""))
+            found = ui.models.library_model(str(legacy.path)) if legacy else None
         if found is None:
             self.send(404, {"error": "no such model on this machine"})
             return True
