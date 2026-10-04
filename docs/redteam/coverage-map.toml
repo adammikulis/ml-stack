@@ -12,7 +12,22 @@
 
 [ratchet]
 uncovered = 54
-partial = 202
+partial = 201
+
+# -- coding harnesses on a local model -----------------------------------------------------
+[[group]]
+match = ["spawn:claude.py:launch", "spawn:codex.py:launch", "spawn:harnesshook.py:nudge",
+         "spawn:harnessid.py:announce"]
+status = "covered"
+tests = [
+  "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+  "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+  "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+  "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
+  "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+  "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role",
+]
+note = "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
 
 # -- files on the board ---------------------------------------------------------------------
 [[group]]

@@ -1,10 +1,10 @@
 {
- "surfaces": 600,
+ "surfaces": 604,
  "by_status": {
-  "covered": 289,
-  "partial": 202,
+  "covered": 293,
+  "partial": 201,
   "uncovered": 54,
-  "n/a": 55,
+  "n/a": 56,
   "unmapped": 0
  },
  "by_kind": {
@@ -19,7 +19,7 @@
    "covered": 7,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 24,
+   "n/a": 25,
    "unmapped": 0
   },
   "context": {
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 16,
-   "partial": 64,
+   "covered": 20,
+   "partial": 63,
    "uncovered": 0,
    "n/a": 1,
    "unmapped": 0
@@ -560,6 +560,16 @@
    "id": "cli:ml-stack-claude",
    "kind": "cli",
    "source": "ml_stack.claude:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
+   "id": "cli:ml-stack-codex",
+   "kind": "cli",
+   "source": "ml_stack.codex:launch",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "n/a",
@@ -7527,11 +7537,33 @@
    "source": "claude.py:launch",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
+  },
+  {
+   "id": "spawn:codex.py:launch",
+   "kind": "spawn",
+   "source": "codex.py:launch",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+   ],
+   "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
   {
    "id": "spawn:credentials/writing.py:_owner_only_windows",
@@ -7917,6 +7949,40 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:harnesshook.py:nudge",
+   "kind": "spawn",
+   "source": "harnesshook.py:nudge",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+   ],
+   "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
+  },
+  {
+   "id": "spawn:harnessid.py:announce",
+   "kind": "spawn",
+   "source": "harnessid.py:announce",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+   ],
+   "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
   {
    "id": "spawn:hub/memory.py:machine_room",
