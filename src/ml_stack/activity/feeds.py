@@ -45,7 +45,8 @@ def mirror_requests() -> None:
 def _request(kind: str, request: requests.Request, outcome: str, via: str, actor: str) -> None:
     writer.record(kind, actor=actor or request.raised_by.agent or "system", subject=request.id, outcome=outcome,
                   refs={"kind": request.kind, "agent": request.raised_by.agent, "project": request.raised_by.project},
-                  meta={"choice": request.answer, "via": via})
+                  meta={"choice": request.answer, "via": via, "model": request.raised_by.model,
+                        "model_verified": request.raised_by.model_state == "verified"})
 
 
 def attach() -> None:
@@ -114,7 +115,9 @@ def _one(row: dict[str, Any], bus: dict[int, dict[str, Any]]) -> bool:
         return writer.record(
             "workspace.message", actor=who, subject=f"msg:{row.get('msg')}", outcome="held" if row.get("held") else "sent",
             refs={"from": who, "to": row.get("to", ""), "thread": sent.get("thread", "")},
-            meta={"type": row.get("type", ""), "size": len(str(sent.get("body", "")))}, ts=row.get("ts"))
+            meta={"type": row.get("type", ""), "size": len(str(sent.get("body", ""))),
+                  "model": row.get("model", ""), "model_verified": bool(row.get("verified", False))},
+            ts=row.get("ts"))
     if event in _CLAIMS:
         return writer.record("workspace.claim", actor=who, subject=f"{detail.get('kind')}:{detail.get('key')}",
                              outcome=_CLAIMS[event], refs={"claim": f"{detail.get('kind')}:{detail.get('key')}"},

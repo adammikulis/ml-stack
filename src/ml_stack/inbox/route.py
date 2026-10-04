@@ -82,7 +82,8 @@ def _error(status: int, text: str) -> Reply:
 def view(request: Request) -> dict[str, Any]:
     """A request as the page shows it: its words, choices, state, and the fingerprint an answer must carry."""
     return {"id": request.id, "kind": request.kind, "state": request.state, "subject": request.subject,
-            "reason": request.reason, "agent": request.raised_by.agent, "project": request.raised_by.project,
+            "reason": request.reason, "agent": request.raised_by.agent, "model": request.raised_by.model,
+            "model_state": request.raised_by.model_state, "who": request.raised_by.who, "project": request.raised_by.project,
             "created": request.created, "expires": request.expires, "answer": request.answer,
             "answered_by": request.answered_by, "answered_at": request.answered_at,
             "human_only": request.human_only, "destructive": request.destructive,
