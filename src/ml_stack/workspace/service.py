@@ -340,6 +340,20 @@ class Workspace:
         posted = self.board.routed(who, self.bus.cursor(who.id), "inbox")
         return sorted([*direct, *posted], key=lambda r: r["seq"])[:limit]
 
+    def nudge(self, token: str) -> str:
+        """One short line counting what waits for the token's owner, or "" when nothing does.
+        Counts only: no text, nothing marked read, nothing waited for."""
+        who = self.auth(token)
+        self._may(who, "read")
+        found = self._unread(who, 1 << 30)
+        direct = sum(1 for r in found if r["to"] == who.id)
+        mentioned = sum(1 for r in found if r["to"] != who.id and who.id in r.get("mentions", []))
+        other = len(found) - direct - mentioned
+        parts = [f"{n} {word}{'s' if n > 1 and word != 'subscribed' else ''}"
+                 for n, word in ((direct, "DM"), (mentioned, "mention"), (other, "subscribed"))
+                 if n]
+        return f"workspace: {len(found)} waiting for you ({', '.join(parts)}); run inbox" if found else ""
+
     def ack(self, token: str, seq: int) -> int:
         """Mark everything up to ``seq`` as read; returns the new cursor."""
         who = self.auth(token)

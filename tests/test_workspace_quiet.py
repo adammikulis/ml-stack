@@ -246,3 +246,32 @@ def test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static(kit)
                        sort_keys=True)
     assert before == after
     assert ws.board.rollup(t["bob"])["text"].index("hello") < ws.board.rollup(t["bob"])["text"].index("later")
+
+
+def test_nudge_is_silent_when_empty_one_stable_line_when_not_and_never_shows_text_or_acks(kit):
+    ws, t = kit.ws, kit.t
+    ws.board.create(t["alice"], "#ops")
+    ws.board.join(t["bob"], "#ops")
+    assert cli(kit.base, t["bob"], "nudge").stdout == ""
+    ws.announce(t["alice"], "done", "announcements wait for nobody")
+    ws.send(t["alice"], "#ops", "note", "plain post")
+    assert cli(kit.base, t["bob"], "nudge").stdout == ""
+    ws.send(t["alice"], "bob", "task", "SECRET-BODY do it")
+    ws.send(t["alice"], "#ops", "note", "hey @bob SECRET-BODY")
+    first = cli(kit.base, t["bob"], "nudge")
+    assert first.returncode == 0 and first.stderr == ""
+    assert first.stdout == "workspace: 2 waiting for you (1 DM, 1 mention); run inbox\n"
+    assert "SECRET" not in first.stdout
+    assert cli(kit.base, t["bob"], "nudge").stdout == first.stdout
+    assert len(ws.inbox(t["bob"])) == 2 and ws.bus.cursor("bob") == 0
+    ws.inbox(t["bob"], ack=True)
+    assert cli(kit.base, t["bob"], "nudge").stdout == ""
+
+
+def test_hook_snippet_prints_the_setting_and_writes_nothing(kit, tmp_path):
+    before = set(tmp_path.rglob("*"))
+    out = cli(kit.base, "", "hook-snippet", "claude-code", "--agent", "bob").stdout
+    assert '"PostToolUse"' in out and "nudge --agent bob" in out
+    assert 'notify = ["ml-stack-workspace", "nudge", "--agent", "bob"]' in cli(
+        kit.base, "", "hook-snippet", "codex", "--agent", "bob").stdout
+    assert set(tmp_path.rglob("*")) == before

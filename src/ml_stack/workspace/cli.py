@@ -303,6 +303,18 @@ def _ttl(text: str) -> float:
     return float(text[:-1]) * units[text[-1]] if text and text[-1] in units else float(text or 0)
 
 
+def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
+    say(onboard.hook_snippet(args.tool, args.agent or "NAME"), end="")
+    return 0
+
+
+def _nudging(args: argparse.Namespace) -> int:
+    line = Workspace().nudge(_token(args))
+    if line:
+        say(line)
+    return 0
+
+
 def _board_serve(args: argparse.Namespace, ws: Workspace) -> int:
     listener = boardroute.serve(ws, args.port)
     say(f"the Board, read-only, for the person: http://127.0.0.1:{listener.port}/")
@@ -342,6 +354,8 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
      _hello),
     ("snippet", "print the paste block for AGENT (no secret in it)", [flag("name")],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
+    ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
+     [flag("tool", choices=("claude-code", "codex"))], _hook_snippet),
     ("brief", "print the short brief a parent pastes into a subagent's prompt", [flag("name")],
      _brief),
 )
@@ -503,6 +517,9 @@ for _name, _help, _options, _handler in BARE:
                           *_options])
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
+COMMANDS.add("nudge", _guarded(_nudging),
+             help="print one line counting what waits for you (nothing when nothing does); for hooks",
+             options=COMMON)
 COMMANDS.add("watch", _guarded(_watching),
              help="print messages as they arrive; --once exits after one",
              options=[*COMMON, *WIDEN, flag("--once", action="store_true"),

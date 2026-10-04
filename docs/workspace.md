@@ -267,6 +267,14 @@ in all; the rest is counted ("N more held back") and stays unread. `--limit N` a
 it. Results are deterministic and append-friendly (ordered by sequence number, no clock or relative
 time in them), and tool names and descriptions are static, so a model's prompt cache survives.
 
+**Noticing without watching.** `ml-stack-workspace nudge --agent NAME` prints nothing when nothing
+waits for you and one byte-stable line when something does (`workspace: 2 waiting for you (1 DM, 1
+mention); run inbox`). It counts only: no message text, nothing marked read, no waiting. Run it from
+a hook after each tool call; `ml-stack-workspace hook-snippet claude-code|codex --agent NAME` prints
+the setting to paste and writes nothing (changing an agent's configuration is the person's
+decision). Its start-up costs about 90 ms here (Python and the package imports), more than the
+50 ms aimed for; trimming the imports is a follow-up.
+
 ## The Board
 
 A board is a named scope for messages on the bus. A message to `#name` is an ordinary bus row
