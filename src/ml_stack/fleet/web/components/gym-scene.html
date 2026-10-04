@@ -222,6 +222,7 @@ gym-scene canvas { display:block; width:100%; height:100%; }
       this.dispose(this.scenery); this.scenery.clear();
       const bounds = new T.Box3();
       for (const road of state.roads || []) for (const p of road.points || []) bounds.expandByPoint(new T.Vector3(p[0], 0, p[1]));
+      if (state.environment === 'drone') bounds.set(new T.Vector3(-state.size/2,0,-state.size/2),new T.Vector3(state.size/2,0,state.size/2));
       if (bounds.isEmpty()) bounds.set(new T.Vector3(-20, 0, -20), new T.Vector3(20, 0, 20));
       this.mapBounds = bounds.clone();
       const size = bounds.getSize(new T.Vector3()), center = bounds.getCenter(new T.Vector3());
@@ -267,7 +268,7 @@ gym-scene canvas { display:block; width:100%; height:100%; }
       this.pending = state;
       if (!this.objects) return;
       const T = this.T;
-      const mapKey = state.environment + ':' + (state.roads || []).map(r => [r.id,r.width,r.points?.[0],r.points?.at(-1)].join(',')).join('|');
+      const mapKey = state.environment + ':' + (state.environment === 'drone' ? JSON.stringify(state.forest) : '') + (state.roads || []).map(r => [r.id,r.width,r.points?.[0],r.points?.at(-1)].join(',')).join('|');
       if (mapKey !== this.mapKey) {
         this.mapKey = mapKey;
         for (const mesh of this.meshes.values()) this.dispose(mesh);
@@ -307,6 +308,7 @@ gym-scene canvas { display:block; width:100%; height:100%; }
             [(a[0]+b[0])/2,(a[1]+b[1])/2,.06],Math.atan2(b[0]-a[0],b[1]-a[1]));
         }
       }
+      if (state.environment === 'drone') window.gymDroneGeometry.update(this,state);
       this.updateAgents(state);
       this.sensorLines(state);
       this.vectors(state);
@@ -319,10 +321,11 @@ gym-scene canvas { display:block; width:100%; height:100%; }
       const previousIndex = this.agents?.findIndex(a => a.key === this.focusKey) ?? -1;
       this.agents = [
         ...(state.vehicles || []).map((actor,index) => ({actor,index,kind:'vehicle',id:String(actor.id ?? index),key:'vehicle-'+(actor.id ?? index)})),
+        ...(state.drones || []).map((actor,index) => ({actor,index,kind:'drone',id:String(actor.id ?? index),key:'drone-'+(actor.id ?? index)})),
         ...(state.robots || []).map((actor,index) => ({actor,index,kind:'robot',id:String(actor.id ?? index),key:'robot-'+(actor.id ?? index)})),
       ];
       if (!this.agents.some(a => a.key === this.focusKey) && (this.focusKey || this.agents.length)) {
-        const ego = this.agents.find(a => a.actor.ego || a.actor.id === state.vehicle?.id);
+        const ego = this.agents.find(a => a.actor.ego || a.actor.selected || a.actor.id === state.vehicle?.id);
         this.selectAgent((previousIndex >= 0 ? this.agents[previousIndex % this.agents.length] : ego || this.agents[0])?.key,false);
       }
       this.toolbarControls.update(this.agents,this.agents.find(a => a.key === this.focusKey));
@@ -422,6 +425,7 @@ gym-scene canvas { display:block; width:100%; height:100%; }
         const difference = Math.atan2(Math.sin(data.heading - data.fromHeading), Math.cos(data.heading - data.fromHeading));
         if (mesh.type !== 'ArrowHelper') mesh.rotation.y = data.fromHeading + difference * blend;
       }
+      window.gymDroneGeometry.animate(this,dt);
       const ego = this.meshes.get(this.focusKey);
       for (const [key, mesh] of this.meshes) {
         if (key.startsWith('vehicle-') || key.startsWith('robot-'))
