@@ -1,8 +1,20 @@
 <!-- settings-view: what this machine does, what it can train with, and taking it off again -->
+<style>
+settings-view .settings-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 24px; }
+settings-view .settings-toolbar button { width:auto; margin:0; }
+settings-view #settings-note { margin-top:12px; min-height:24px; }
+settings-view #settings-libs .library-kind { display:inline-block; font-size:11px; border:1px solid var(--line); border-radius:20px; padding:2px 8px; margin:4px 0; }
+settings-view #settings-libs { scroll-margin-top:20px; }
+settings-view [aria-busy="true"] { opacity:.8; }
+</style>
 <template>
   <main id="settings" hidden>
     <h1>Settings</h1>
     <p class="sub" id="settings-sub"></p>
+    <div class="settings-toolbar">
+      <button class="ghost" id="settings-open-libraries" type="button">Libraries &amp; simulators</button>
+      <span class="hint">Install capabilities once and reuse them across launches.</span>
+    </div>
     <div class="two">
       <div id="settings-left"></div>
       <div id="settings-right">
@@ -22,7 +34,7 @@
       <div class="group" id="settings-again"></div>
       <div class="group" id="settings-removal"></div>
     </details>
-    <div id="settings-note"></div>
+    <div id="settings-note" role="status" aria-live="polite"></div>
   </main>
 </template>
 <script>
@@ -40,10 +52,21 @@
       this.note = this.querySelector("#settings-note");
       this.save = this.querySelector("#settings-save");
       this.save.onclick = () => this.apply();
+      this.querySelector("#settings-open-libraries").onclick = () => {
+        this.querySelector("#settings-advanced").open = true;
+        this.querySelector("#settings-libs").scrollIntoView({behavior:"smooth", block:"start"});
+      };
       M.onRoute((route) => {
         const on = route === "settings";
         this.box.hidden = !on;
-        if (on) this.draw();
+        if (on) this.loadSettings();
+      });
+    }
+
+    loadSettings() {
+      this.draw().catch(error => {
+        this.note.replaceChildren(el("div", {class:"err"}, error.message),
+          el("button", {class:"ghost small", onclick:() => this.loadSettings()}, "Retry loading settings"));
       });
     }
 
@@ -63,8 +86,11 @@
     }
 
     async draw() {
+      this.save.disabled = true;
+      this.note.textContent = "Loading preferences…";
       const s = await api("/ui/settings");
       if (M.refused(s)) return;
+      if (!s.ok) throw Error(s.error || "Could not load preferences.");
       const cur = s.settings || {};
       M.group = s.group || "";
       this.pick = {
@@ -136,53 +162,75 @@
         el("button", { class: "ghost small",
           onclick: () => M.go("first-run") }, "Run setup again"));
 
-      this.drawLibraries();
-      this.drawUpdates(status);
-      this.drawRemoval();
+      this.save.disabled = false;
+      this.note.replaceChildren();
+      this.drawLibraries().catch(error => this.libraryError(error));
+      this.drawUpdates(status).catch(() => { status.textContent = "Could not check for updates right now."; });
+      this.drawRemoval().catch(error => {
+        this.querySelector("#settings-removal").replaceChildren(el("h2", {}, "Remove ml-stack"),
+          el("div", {class:"err"}, error.message));
+      });
     }
 
     async apply() {
-      const save = this.save;
-      save.disabled = true;
-      save.innerHTML = '<span class="spin"></span> Saving…';
-      const r = await api("/ui/settings", { method: "POST", body: JSON.stringify({
-        ...this.pick, labels: this.pick.labels ? this.pick.labels.split(",") : [] }) });
-      save.disabled = false;
-      save.textContent = "Save";
-      this.note.replaceChildren(r.manual
-        ? el("div", {}, el("div", { class: "err" }, r.manual_why || "Needs permission."),
-            el("pre", { class: "cmd" }, r.manual))
-        : el("div", { class: "ok" }, "Saved."));
+      this.save.disabled = true;
+      this.save.textContent = "Saving…";
+      this.box.setAttribute("aria-busy", "true");
+      try {
+        const result = await api("/ui/settings", {method:"POST", body:JSON.stringify({
+          ...this.pick, labels:this.pick.labels ? this.pick.labels.split(",") : []})});
+        if (!result.ok) throw Error(result.error || "Could not save preferences.");
+        this.note.replaceChildren(result.manual
+          ? el("div", {}, el("div", {class:"err"}, result.manual_why || "Needs permission."),
+              el("pre", {class:"cmd"}, result.manual))
+          : el("div", {class:"ok"}, "Preferences saved."));
+      } catch (error) { this.note.replaceChildren(el("div", {class:"err"}, error.message)); }
+      finally {
+        this.save.disabled = false;
+        this.save.textContent = "Save";
+        this.box.setAttribute("aria-busy", "false");
+      }
+    }
+
+    libraryError(error) {
+      this.querySelector("#settings-libs").replaceChildren(el("h2", {}, "Libraries & simulators"),
+        el("div", {class:"err", role:"status"}, error.message),
+        el("button", {class:"ghost small", onclick:() => this.drawLibraries().catch(error => this.libraryError(error))}, "Retry"));
     }
 
     async drawLibraries() {
       const libs = this.querySelector("#settings-libs");
       libs.hidden = false;
       libs.replaceChildren(
-        el("h2", {}, "What this machine can train with"),
+        el("h2", {}, "Libraries & simulators"),
         el("div", { class: "hint" }, el("span", { class: "spin" }), " Looking…"));
       const L = await api("/ui/libraries");
-      if (L.status === 501) { libs.hidden = true; return; }
+      if (!L.ok) {
+        libs.replaceChildren(el("h2", {}, "Libraries & simulators"),
+          el("div", {class:"err", role:"status"}, L.error || "Could not load installed libraries."),
+          el("button", {class:"ghost small", onclick:() => this.drawLibraries().catch(error => this.libraryError(error))}, "Retry"));
+        return;
+      }
       const want = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
       const boxes = (L.libraries || []).map((lib) => {
         const input = el("input", { type: "checkbox", id: `lib-${lib.name}`,
-                                    ...(lib.installed || (!L.ready && lib.default)
-                                        ? { checked: "1" } : {}) });
-        if (!lib.installed && !L.ready && lib.default) want.add(lib.name);
+                                    ...(lib.installed ? { checked: "1" } : {}) });
         input.onchange = () => {
           if (input.checked) want.add(lib.name); else want.delete(lib.name);
         };
         return el("label", { class: "opt", for: `lib-${lib.name}` }, input,
           el("span", {},
             el("b", {}, lib.title),
+            el("span", {class:"library-kind"}, lib.installed ? "Installed" : "Available to install"),
             el("span", { class: "why" },
               `${lib.blurb} · ${lib.size_mb >= 1000
                 ? (lib.size_mb / 1000).toFixed(1) + " GB" : lib.size_mb + " MB"}`
-              + (lib.version ? ` · installed ${lib.version}` : ""))));
+              + (lib.version ? ` · version ${lib.version}` : "")
+              + (lib.python_version ? ` · Python ${lib.python_version}` : ""))));
       });
 
-      const apply = el("button", { class: "ghost" }, "Apply");
-      const out = el("div");
+      const apply = el("button", { class: "ghost" }, "Apply library changes");
+      const out = el("div", {role:"status", "aria-live":"polite"});
       apply.onclick = async () => {
         const before = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
         const install = [...want].filter((n) => !before.has(n));
@@ -192,23 +240,29 @@
           return;
         }
         apply.disabled = true;
-        apply.innerHTML = '<span class="spin"></span> This can take a while…';
-        const r = await api("/ui/libraries", { method: "POST",
-          body: JSON.stringify({ install, remove }) });
-        apply.disabled = false;
-        apply.textContent = "Apply";
-        const failed = Object.entries(r.changed || {}).filter(([, v]) => !v.ok);
-        out.replaceChildren(failed.length
-          ? el("div", { class: "err" },
-              failed.map(([k, v]) => `${k}: ${v.error}`).join("; "))
-          : el("div", { class: "ok" }, "Done."));
+        apply.textContent = "Installing libraries…";
+        for (const box of libs.querySelectorAll("input")) box.disabled = true;
+        try {
+          const result = await api("/ui/libraries", {method:"POST", body:JSON.stringify({install, remove})});
+          if (!result.ok) throw Error(result.error || "Could not change installed libraries.");
+          const failed = Object.entries(result.changed || {}).filter(([, value]) => !value.ok);
+          if (failed.length) throw Error(failed.map(([name, value]) => `${name}: ${value.error}`).join("; "));
+          await this.drawLibraries();
+          const success = el("div", {class:"ok", role:"status"}, "Library changes applied. Installed simulators are ready to reopen.");
+          libs.append(success);
+        } catch (error) { out.replaceChildren(el("div", {class:"err"}, error.message)); }
+        finally {
+          apply.disabled = false; apply.textContent = "Apply library changes";
+          for (const box of libs.querySelectorAll("input")) box.disabled = false;
+        }
       };
 
       libs.replaceChildren(
-        el("h2", {}, "What this machine can train with"),
+        el("h2", {}, "Libraries & simulators"),
         el("div", { class: "hint" },
-          L.ready ? "Installed alongside ml-stack, not in your system Python."
-                  : "Nothing installed yet. Tick what this machine should be able to do."),
+          (L.libraries || []).some(lib => lib.installed)
+            ? "Installed in managed environments. Uncheck a library to remove it; shared dependencies are retained."
+            : "Choose the capabilities you need. Simulator runtimes are remembered after installation."),
         ...boxes, apply, out);
     }
 
