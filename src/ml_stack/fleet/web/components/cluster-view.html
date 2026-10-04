@@ -114,8 +114,8 @@
               el("div", { class: "row" },
                 el("b", {}, model),
                 el("span", { class: "why" },
-                  [server.context ? `${Number(server.context).toLocaleString()} tokens` : "",
-                    server.mtp ? "MTP" : "", `${server.slots || 1} slot(s)`]
+                  [(server.slot_context || server.context) ? `${Number(server.slot_context || server.context).toLocaleString()} tokens` : "",
+                    server.draft_status === "active" ? "MTP active" : server.spec_type === "draft-mtp" ? "MTP configured" : "", `${server.slots || 1} slot(s)`]
                     .filter(Boolean).join(" · ")))))
           : [el("div", { class: "hint" }, "No models loaded")] ),
       ...meters,
