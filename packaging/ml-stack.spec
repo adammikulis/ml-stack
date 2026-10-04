@@ -34,7 +34,7 @@ hidden = [
     "ml_stack.fleet.peers", "ml_stack.fleet.launch",
     "ml_stack.fleet.ui", "ml_stack.fleet.autostart",
     "ml_stack.fleet.telemetry", "ml_stack.fleet.settings",
-    "ml_stack.agent.sdk_runtime", "ml_stack.chat_sdk",
+    "ml_stack.agent.sdk_runtime", "ml_stack.agent.conversation",
     "ml_stack.fleet.sdk_chat", "ml_stack.client.sdk", "agents", "openai", "httpx",
     "ml_stack.fleet.chat", "ml_stack.fleet.conversations", "ml_stack.fleet.llama",
     "ml_stack.contracts", "ml_stack.client", "ml_stack.media",

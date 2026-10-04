@@ -369,8 +369,8 @@ class Chat:
         self.messages.append({"role": "user", "content": body})
         out = Outcome(messages=self.messages)
         asked0, began = self.person.asked, time.monotonic()
-        from ml_stack.chat_sdk import execute
-        exhausted = execute(self, schemas, run_by, out)
+        from ml_stack.agent.conversation import execute
+        exhausted = execute(self, schemas, run_by, out, NUDGE)
         out.seconds = round(time.monotonic() - began, 2)
         out.asked = self.person.asked - asked0
         out.done, out.summary = self.person.finished, self.person.summary

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .chat import ChatError, find, reply_text, targets
 from .conversation_routes import ConversationRoutes
 from .discovery import derive_token, load_cluster_key
 
@@ -19,7 +20,6 @@ class ChatRoutes(ConversationRoutes):
         return super().route()
 
     def _chat(self) -> bool:
-        from .chat import targets
         ui = self.ui
         key = load_cluster_key(ui.cluster_key_path)
         available = targets(ui.peers() if key is not None else [], ui.serving,
@@ -32,7 +32,6 @@ class ChatRoutes(ConversationRoutes):
         return super().route()
 
     def _say(self, available: list) -> bool:
-        from .chat import ChatError, find, reply_text
         try:
             from .sdk_chat import stream
         except ImportError:

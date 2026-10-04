@@ -1,10 +1,10 @@
 {
- "surfaces": 654,
+ "surfaces": 657,
  "by_status": {
   "covered": 339,
-  "partial": 200,
+  "partial": 201,
   "uncovered": 54,
-  "n/a": 61,
+  "n/a": 63,
   "unmapped": 0
  },
  "by_kind": {
@@ -26,7 +26,7 @@
    "covered": 8,
    "partial": 0,
    "uncovered": 4,
-   "n/a": 14,
+   "n/a": 16,
    "unmapped": 0
   },
   "desktop": {
@@ -38,7 +38,7 @@
   },
   "egress": {
    "covered": 30,
-   "partial": 46,
+   "partial": 47,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -977,6 +977,16 @@
    "note": ""
   },
   {
+   "id": "context:agent/sdk_runtime.py",
+   "kind": "context",
+   "source": "agent/sdk_runtime.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+  },
+  {
    "id": "context:agent/summarise.py",
    "kind": "context",
    "source": "agent/summarise.py",
@@ -1053,6 +1063,16 @@
     "tests/test_taint_flows.py"
    ],
    "note": ""
+  },
+  {
+   "id": "context:chat_sdk.py",
+   "kind": "context",
+   "source": "chat_sdk.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
   },
   {
    "id": "context:client/chat.py",
@@ -1672,6 +1692,18 @@
    "id": "egress:client/ollama.py:fetch",
    "kind": "egress",
    "source": "client/ollama.py:fetch",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:client/sdk.py:_open_response",
+   "kind": "egress",
+   "source": "client/sdk.py:_open_response",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
    "status": "partial",

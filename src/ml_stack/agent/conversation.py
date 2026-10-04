@@ -70,9 +70,8 @@ class Conversation(Model):
                                        final_output=person.summary)
 
 
-async def _execute(chat: Any, schemas: list, run_by: dict, out: Any) -> bool:
+async def _execute(chat: Any, schemas: list, run_by: dict, out: Any, nudge: str) -> bool:
 
-    from ml_stack.chat import NUDGE
     model = Conversation(chat, schemas, run_by, out)
     tools = [FunctionTool(name=s['function']['name'], description=s['function'].get('description', ''),
                           params_json_schema=s['function'].get('parameters') or {'type': 'object'},
@@ -89,7 +88,7 @@ async def _execute(chat: Any, schemas: list, run_by: dict, out: Any) -> bool:
         if chat.task and not (chat.person.finished or chat.person.left):
             if model.steps >= chat.rounds:
                 return True
-            chat.messages.append({'role': 'user', 'content': NUDGE})
+            chat.messages.append({'role': 'user', 'content': nudge})
             await Runner.run(model.agent, input_items(chat.messages),
                              max_turns=chat.rounds - model.steps,
                              run_config=RunConfig(tracing_disabled=True))
@@ -98,6 +97,6 @@ async def _execute(chat: Any, schemas: list, run_by: dict, out: Any) -> bool:
         return True
 
 
-def execute(chat: Any, schemas: list, run_by: dict, out: Any) -> bool:
+def execute(chat: Any, schemas: list, run_by: dict, out: Any, nudge: str) -> bool:
     """Run one chat turn and return whether its turn budget was exhausted."""
-    return asyncio.run(_execute(chat, schemas, run_by, out))
+    return asyncio.run(_execute(chat, schemas, run_by, out, nudge))

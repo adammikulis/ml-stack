@@ -9,9 +9,12 @@ import socket
 from collections.abc import Iterator
 from typing import Any
 
-from agents import Agent, ModelSettings, RunConfig, Runner
+from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner
+from agents.exceptions import AgentsException
+from openai import APIError
 
 from ml_stack.client.sdk import local_client
+from ml_stack.http import ServerError
 
 from .chat import ChatError
 
@@ -23,8 +26,6 @@ def _disconnected(connection: Any) -> bool:
 
 
 async def _events(target: Any, payload: dict[str, Any], connection: Any):
-    from agents import OpenAIChatCompletionsModel
-
     client = local_client(target, payload["model"])
     agent = Agent(name="Chat", model=OpenAIChatCompletionsModel(payload["model"], client),
                   model_settings=ModelSettings(temperature=payload.get("temperature")))
@@ -64,7 +65,7 @@ def stream(target: Any, payload: dict[str, Any], *, connection: Any = None) -> I
                 yield loop.run_until_complete(anext(events))
             except StopAsyncIteration:
                 break
-    except Exception as exc:
+    except (AgentsException, APIError, ServerError, OSError, ValueError) as exc:
         raise ChatError(str(exc)) from exc
     finally:
         loop.run_until_complete(events.aclose())
