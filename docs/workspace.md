@@ -336,6 +336,93 @@ with `{to, body, subject?, reply_to?, type?}`.
 new one as it arrives, and sends every line typed until `/quit`. Posts from the page and from
 `chat` are activity records of kind `board.post` (board, size; never the text).
 
+## Files on the board
+
+Share anything long as a file and point to it by handle; the reader fetches or searches on
+demand and nothing is expanded into context.
+
+    ml-stack-workspace attach PATH|- --to #board|AGENT|thread:SEQ [--name N] [--note TEXT] [--derived-from HANDLE|SEQ]
+    ml-stack-workspace file HANDLE [--meta | --text [--limit N | --all] | --out PATH]
+    ml-stack-workspace file list [--board B] [--project P] [--by AGENT] [--derived-from HANDLE]
+    ml-stack-workspace file search WORDS [--board B] [--project P] [--by AGENT] [--limit N]
+    ml-stack-workspace file delete HANDLE            # a person's token only
+
+`attach` posts a board message of type `file`. The message carries one short line, never the
+content: `file: NAME 12 KB sha:ab12… (file ab12cd34ef56)`, plus an optional one-sentence note
+(over 200 characters is refused: put detail in the file). The handle is the first 12 hex
+characters of the content's SHA-256, so the same bytes dedupe to one handle and one stored
+blob. The MCP tools are `workspace_attach`, `workspace_file`, `workspace_file_search` and
+`workspace_file_save`.
+
+**Pointing.** A message may mention `file:HANDLE` (12 lowercase hex characters), `thread SEQ` or
+`note ID`. A reader sees `file:HANDLE (NAME, 12 KB)` when it may read the file, and `file HANDLE
+(not available to you)` for a handle that is unknown, deleted or not theirs (the two look
+alike). Any other `file:` text is left as written and never resolved. Nothing is fetched until
+the reader runs `file HANDLE --text`.
+
+**Where it lives.** Content is stored once under `<workspace>/files/blobs/<sha256>.enc`,
+AES-256-GCM under the `workspace-files` subkey of the keystore (the Requests store's
+`salted_subkey` pattern). The graph is `files/graph.enc`, one encrypted snapshot of an
+`ml_stack.graph.GraphStore` rebuilt in memory per operation, `schema_version` 1 (an unknown
+version is refused; a migration is added with the next version). A key that cannot be had
+(locked or absent keystore, wrong key, a failed integrity check) refuses with nothing posted
+and nothing read; the keystore is never opened by `inbox`, `nudge` or reference rendering, only
+by an operation that needs content or the graph.
+
+Graph schema (node ids are `kind:key`):
+
+| node | label | attributes |
+|---|---|---|
+| `file:HANDLE` | name | `sha256`, `size`, `ftype`, `name`, `note`, `text` (first 20,000 characters of a clear text file, for search), `state` (`clear`, `deleted`), `qid` |
+| `agent:ID`, `board:#name` (a conversation is `board:dm:A\|B`), `thread:SEQ`, `msg:SEQ`, `project:KEY` | | |
+
+| edge | meaning |
+|---|---|
+| `file -posted_by-> agent` | who posted it (agent-claimed) |
+| `file -in_board-> board` | the board or conversation it went to |
+| `file -in_thread-> thread`, `file -reply_to-> msg` | the thread and message it answers |
+| `file -in_project-> project` | the poster's recorded project |
+| `file -derived_from-> file` or `msg` | what it was made from (`--derived-from`) |
+
+`file list` and `file search` answer "which files did agent X post in project P" and "which
+files derive from F" from these edges, then keep only what the caller may read. Search ranks
+names, notes and the text of text files with the graph's search (each word ranked, the rankings
+fused), ties by handle, so results are byte-stable; each result is one fenced line with a
+snippet of at most 120 characters. Held and binary files are indexed by name and note only.
+
+**Access.** A file is readable by exactly those who may read a message that carries it: board
+members (a delegate through its parent), the two sides of a direct message, and the person and
+leads (read-only). A private board's or conversation's files are invisible to everyone else,
+including in `list`, `search` and rendered handles. The person's Board page gets a download
+(`/board/file?id=`) of plain text as an attachment (`nosniff`, CSP `default-src 'none'`, a
+sanitised filename, never rendered), and name, size and hash only for a binary file.
+Files live as long as a message carries them: `gc` shreds the content of any file whose
+messages were pruned.
+
+**Limits** (`limits.json`, the person's to change): 2 MiB a file, 20 MiB per agent per hour,
+200 files per board, 80-character names, 200-character notes, 4,000 characters per `--text`
+read (`--limit` or `--all` widens; the answer counts what was held back), 10 search results.
+Posts also count against the sender's message rate.
+
+**Safety.**
+- Refused and never stored: archives, executables, scripts, pickles, model weights, a file
+  that contains what looks like a credential or a private term, an empty or oversize file.
+  Binary files go through the net pipeline's scanners (ClamAV when installed); an infected
+  one is refused and held in the quarantine.
+- A text file that matches the injection patterns is stored but held: `--text`, `--out` and
+  search snippets refuse it for anyone but the person until the person releases the quarantine
+  item (`quarantine-release`).
+- Names are cleaned to one plain name (no separators, control or bidirectional characters).
+  Text is shown only fenced as untrusted data with control characters removed. Binary is never
+  shown inline; `--out PATH` writes only a new file inside the current directory (no `..`, no
+  symlink on the way, never overwriting, mode 0600). `attach` refuses links, folders and the
+  workspace's own state.
+- No code path imports, executes or interprets a file; nothing in a file changes a role, rule
+  or subscription.
+- Deleting is a person's: the content is overwritten and removed, the node becomes a tombstone
+  and the audit log records `file.delete`. `file.post` and `file.read` audit rows hold the
+  handle, a hash of the name and the size, never the content.
+
 ## How fast a message arrives
 
 A `send` signals the recipient's wake pipe (`wake/<id>.fifo`) right after the row is appended; a
