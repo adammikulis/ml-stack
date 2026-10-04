@@ -90,9 +90,23 @@ Three lines on a new machine:
 
 ```
 pip install git+https://github.com/adammikulis/ml-stack
-ml-stack-fleet join --persist
+ml-stack-fleet join --group "Cedar lab" --persist
 ml-stack-fleet status
 ```
+
+First-time setup lists nearby password clusters by name, with a **Join** button. Select a
+cluster, then enter its passphrase to confirm. Refresh repeats the LAN search; manual
+entry remains available when discovery is blocked. Names in that list are unverified
+LAN hints: the passphrase handshake authenticates the cluster before membership is saved.
+If a selected cluster disappears, joining fails rather than creating a replacement.
+
+A cluster name is required when creating or joining with a passphrase. Names are at most
+64 characters, without control characters. In a terminal, use `--group NAME` (or answer
+the required name prompt); random-key creation uses `ml-stack-peers init --group NAME`.
+Existing memberships retain their recorded names. Manual entry creates a new cluster
+when no matching cluster answers, so use exactly the same name and passphrase on each
+machine. Joining explicitly may save the passphrase to the keystore; merely discovering
+nearby clusters never reads or writes it.
 
 `join` runs the checks serving depends on (the memory a model may use, a llama-server --
 downloaded if there is none), asks for the passphrase every machine shares (or takes

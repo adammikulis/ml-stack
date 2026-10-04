@@ -34,7 +34,6 @@ from ml_stack.units import human_bytes
 
 from . import recovery
 from .discovery import (
-    DEFAULT_CLUSTER,
     Beacon,
     DiscoveryError,
     default_port,
@@ -44,6 +43,7 @@ from .discovery import (
     leave as leave_cluster,
     memberships,
     named_apart,
+    require_name,
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
 from .onboard.cli import COMMANDS as ONBOARD_COMMANDS, add_commands, run as run_onboarding
@@ -433,7 +433,7 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
 
 
 # -- the join ---------------------------------------------------------------------------
-def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_CLUSTER,
+def join_machine(*, name: str = "", passphrase: str = "", group: str = "",
                  persist: bool = False, track: str = "", port: int = HTTP_PORT,
                  root: Path | str | None = None,
                  cluster_key_path: Path | str | None = None,
@@ -456,7 +456,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
     """
     root = home.expand(root) if root else default_root()
     root.mkdir(parents=True, exist_ok=True)
-    group = (group or "").strip() or DEFAULT_CLUSTER
+    group = require_name(group) if passphrase else group.strip()
     joined = Joined(name=name, port=port, root=root, group=group)
     if track:
         joined.tracking = remember_track(root, track)
@@ -626,10 +626,10 @@ def _passphrase_from(args: argparse.Namespace, key: Path | str | None) -> str:
 
 def cmd_join(args: argparse.Namespace) -> int:
     words = _passphrase_from(args, args.cluster_key)
-    # An install script sets these rather than answering prompts it has no terminal for.
     name = args.name or os.environ.get("ML_STACK_NAME", "").strip()
-    group = args.group if args.group != DEFAULT_CLUSTER else (
-        os.environ.get("ML_STACK_CLUSTER", "").strip() or DEFAULT_CLUSTER)
+    group = args.group or os.environ.get("ML_STACK_CLUSTER", "").strip()
+    if words and not group and sys.stdin.isatty():
+        group = input("Cluster name: ").strip()
     joined = join_machine(name=name, passphrase=words, group=group,
                           persist=args.persist, track=args.track, port=args.port,
                           root=args.root,
@@ -816,8 +816,8 @@ def main(argv: list[str] | None = None) -> int:
     join_p.add_argument("--passphrase", default="",
                         help="the words every machine shares; prompted for in a terminal "
                              "when the machine is in no cluster yet")
-    join_p.add_argument("--group", default=DEFAULT_CLUSTER,
-                        help=f"which cluster the words belong to (default: {DEFAULT_CLUSTER})")
+    join_p.add_argument("--group", default="",
+                        help="required cluster name when joining with a passphrase")
     join_p.add_argument("--track", default="",
                         help="follow a branch instead of releases, e.g. 'main': this "
                              "machine pulls, reinstalls if the packaging moved and "

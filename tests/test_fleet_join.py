@@ -234,7 +234,7 @@ class TestJoin:
         # so a short deadline measures the same fall-through in three seconds instead of twenty
         joined = join_machine(passphrase=WORDS, persist=True, port=tcp, root=tmp_path,
                               cluster_key_path=key, start=start, persist_with=installs,
-                              discovery_port=udp, say=lambda s: None, wait_s=3.0)
+                              discovery_port=udp, say=lambda s: None, wait_s=3.0, group="ml-stack")
         assert asked == ["login"] and joined.persisted and joined.persist_note == ""
 
         def refuses(mode: str, **kw) -> Autostart:
@@ -251,7 +251,7 @@ class TestJoin:
         with pytest.raises(JoinError) as left:
             join_machine(passphrase=WORDS, port=_free_tcp(), root=tmp_path / "r",
                          cluster_key_path=key, start=lambda *a: 99, wait_s=0.6,
-                         discovery_port=udp, say=lambda s: None)
+                         discovery_port=udp, say=lambda s: None, group="ml-stack")
         assert "traind.log" in str(left.value)
 
 

@@ -12,6 +12,7 @@ from typing import Any
 from ml_stack.ui import assets as ui_assets
 
 from . import recovery
+from . import lan_clusters
 from .conversation_routes import ConversationRoutes
 from .discovery import (
     DiscoveryError,
@@ -19,6 +20,7 @@ from .discovery import (
     in_cluster,
     load_cluster_key,
     memberships,
+    require_name,
 )
 from .onboard.joining import join_by_passphrase
 from .extension_routes import ExtensionRoutes
@@ -196,6 +198,18 @@ class SetupRoutes:
             return True
         if self.path == "/ui/setup/join" and self.method == "POST":
             return self._join()
+        if self.path == "/ui/setup/clusters" and self.method == "GET":
+            why = self._may_setup() if not in_cluster(self.ui.cluster_key_path) else ""
+            if why:
+                self.send(403, {"error": why})
+            elif in_cluster(self.ui.cluster_key_path) and not self.ui.authed(self.cookie):
+                self.send(401, {"error": "sign in to discover clusters"})
+            else:
+                try:
+                    self.send(200, {"clusters": lan_clusters.nearby(port=self.ui.discovery_port)})
+                except OSError:
+                    self.send(503, {"error": "LAN discovery is unavailable; enter the cluster name manually."})
+            return True
         if self.path == "/ui/setup/suggest" and self.method == "GET":
             return self._suggest()
         if self.path in ("/ui/setup/prefs", "/ui/setup/done") and self.method == "POST":
@@ -219,8 +233,11 @@ class SetupRoutes:
                 return True
         req = self.body()
         try:
+            if not isinstance(req.get("existing", False), bool):
+                raise DiscoveryError("existing cluster selection must be true or false")
             state, sid = ui.join(str(req.get("passphrase") or ""),
-                                 str(req.get("group") or ""), self.client_ip)
+                                 require_name(req.get("group")), self.client_ip,
+                                 existing=req.get("existing") is True)
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})
@@ -724,8 +741,8 @@ class ClusterRoutes:
         if self.method == "POST":
             req = self.body()
             words = str(req.get("passphrase") or "")
-            group = str(req.get("group") or "").strip() or "ml-stack"
             try:
+                group = require_name(req.get("group"))
                 join_by_passphrase(words, group, ui.cluster_key_path)
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
@@ -753,7 +770,7 @@ class ClusterRoutes:
             return True
         try:
             self.send(200, self.ui.join_fleet(
-                passphrase=words, group=str(req.get("group") or ""),
+                passphrase=words, group=require_name(req.get("group")) if words else "",
                 persist=bool(req.get("persist")), name=str(req.get("name") or "")))
         except (JoinError, DiscoveryError) as exc:
             self.send(400, {"error": str(exc)})

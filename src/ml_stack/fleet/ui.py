@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack.home import machine_id
 from ml_stack.http import Server, ServerError, open_stream
 
-from . import pausing, recovery
+from . import lan_clusters, pausing, recovery
 from .discovery import (
     DiscoveryError,
     cluster_group,
@@ -23,6 +23,7 @@ from .discovery import (
     load_cluster_key,
     memberships,
     named_apart,
+    require_name,
 )
 from .join import default_root
 from .onboard.joining import join_by_passphrase, matches
@@ -205,17 +206,18 @@ class UI:
         return found
 
     # -- actions ---------------------------------------------------------
-    def join(self, passphrase: str, group: str, source: str) -> tuple[dict[str, Any], str]:
+    def join(self, passphrase: str, group: str, source: str, *, existing: bool = False) -> tuple[dict[str, Any], str]:
         """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
+        group = require_name(group)
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
         try:
-            join_by_passphrase(passphrase, group or "ml-stack", self.cluster_key_path)
+            join_by_passphrase(passphrase, group, self.cluster_key_path)
         except DiscoveryError:
             self.throttle.failed(source)
             raise
-        recovery.remember(passphrase, group or "ml-stack", self.cluster_key_path)
+        recovery.remember(passphrase, group, self.cluster_key_path)
         self.throttle.succeeded(source)
         self._peers = (0.0, [])
         if self.on_join is not None:

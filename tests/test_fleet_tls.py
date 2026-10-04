@@ -232,7 +232,7 @@ def test_an_advertised_certificate_is_pinned_by_discovery_over_real_sockets(tmp_
         probe.bind(("", 0))
         udp = probe.getsockname()[1]
     ident = tls.identity(tmp_path / "tls", "d")
-    key = create_cluster_key(tmp_path / "k").encode()
+    key = create_cluster_key(tmp_path / "k", group="ml-stack").encode()
     tell = Advertiser(Beacon(name="d", port=8770, cert=ident.beacon), key, port=udp,
                       interval_s=30).start()
     try:

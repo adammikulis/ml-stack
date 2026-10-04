@@ -1102,7 +1102,7 @@ def test_sweep_fleet_discovers_a_real_daemon_and_measures_on_it_for_real(tmp_pat
     from ml_stack.testing.fakes import fake_llama_binary
 
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     disco_port = _free_port(socket.SOCK_DGRAM)
     booted = [_boot_daemon(tmp_path, name, keyfile=keyfile, disco_port=disco_port)
               for name in ("quill", "lantern")]

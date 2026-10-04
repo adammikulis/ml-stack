@@ -291,6 +291,7 @@ def serve_forever(root: Path | str | None = None,
 
         for group, member in joined.items():
             if group in advertisers:
+                advertisers[group].joinable = bool(member.join)
                 continue
             try:
                 offered = served_cert()
@@ -303,8 +304,9 @@ def serve_forever(root: Path | str | None = None,
             try:
                 # Not group=: that is the multicast address every cluster shares.
                 # Clusters are told apart by the key their beacons are signed with.
-                advertisers[group] = Advertiser(beacon, member.key, cluster=group,
-                                                refresh=refresh).start()
+                tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
+                tell.joinable = bool(member.join)
+                advertisers[group] = tell.start()
             except DiscoveryError as exc:
                 say(f"  discovery OFF for {group}: {exc}")
 

@@ -246,7 +246,7 @@ class TestFirstRunIsNotUpForGrabs:
         """Whoever reaches an unjoined daemon first would own it. Being on the LAN is
         not enough; you have to be on the box, or use ssh and the CLI."""
         status, body, _ = serving.call("/ui/setup/join", method="POST",
-                                       body={"passphrase": WORDS},
+                                       body={"passphrase": WORDS, "group": "ml-stack"},
                                        host=primary_ip())
         assert status == 403
         assert "ssh" in body["error"]
@@ -256,7 +256,7 @@ class TestFirstRunIsNotUpForGrabs:
         """DNS rebinding: a page anywhere can point a domain at 127.0.0.1 and POST to
         it. Loopback-only buys nothing without checking what it was addressed to."""
         status, body, _ = serving.call(
-            "/ui/setup/join", method="POST", body={"passphrase": WORDS},
+            "/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "ml-stack"},
             headers={"Host": f"evil.example.com:{serving.port}"})
         assert status == 403
         assert "hostname" in body["error"]
@@ -280,10 +280,10 @@ class TestFirstRunIsNotUpForGrabs:
         s = Serving(tmp_path, setup_token="abc123xyz")
         try:
             refused, _, _ = s.call("/ui/setup/join", method="POST",
-                                   body={"passphrase": WORDS}, host=primary_ip())
+                                   body={"passphrase": WORDS, "group": "ml-stack"}, host=primary_ip())
             assert refused == 403
             ok, body, _ = s.call("/ui/setup/join", method="POST",
-                                 body={"passphrase": WORDS}, host=primary_ip(),
+                                 body={"passphrase": WORDS, "group": "ml-stack"}, host=primary_ip(),
                                  headers={"X-ML-Stack-Setup": "abc123xyz"})
             assert ok == 200, body
         finally:
@@ -310,19 +310,19 @@ class TestThePassphraseNeverCrossesPlainHttp:
 
 
 class TestJoiningTwice:
-    def test_a_cluster_with_no_name_is_the_same_one_either_way(self, serving):
+    def test_a_named_cluster_is_the_same_one_either_way(self, serving):
         """The wizard and the Clusters box must derive the same key from the same
         words, or two machines set up different ways never see each other."""
         from ml_stack.fleet.discovery import memberships
 
         status, body, headers = serving.call("/ui/setup/join", method="POST",
-                                             body={"passphrase": WORDS})
+                                             body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200, body
         cookie = headers["Set-Cookie"].split(";")[0]
         first = memberships(serving.keyfile)[0]
 
         status, body, _ = serving.call("/ui/clusters", method="POST", cookie=cookie,
-                                       body={"passphrase": WORDS})
+                                       body={"passphrase": WORDS, "group": "ml-stack"})
         assert status == 200, body
         rows = memberships(serving.keyfile)
         assert [m.group for m in rows] == [first.group]
@@ -716,7 +716,7 @@ class TestSettingsScreen:
         assert "autostart" in body and "version" in body
 
     def test_settings_need_a_session(self, serving):
-        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
+        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS, "group": "ml-stack"})
         assert serving.call("/ui/settings")[0] == 401
 
     def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):
