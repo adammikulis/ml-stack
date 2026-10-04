@@ -83,6 +83,7 @@
       const st = this.state;
       const rows = el("div");
       const nearby = el("div", { "aria-live": "polite" });
+      const recovery = el("div");
       const note = el("div", { class: "hint", "aria-live": "polite" });
       const pass = el("input", { type: "password", id: "p1", value: st.pass,
         autocomplete: "current-password", placeholder: "Cluster passphrase" });
@@ -102,6 +103,7 @@
           } }, "Leave"))));
       };
       const choose = (name) => {
+        recovery.replaceChildren();
         selected = name;
         grp.value = name;
         grp.readOnly = true;
@@ -111,6 +113,7 @@
         pass.focus(); check();
       };
       const manual = el("button", { class: "ghost small", onclick: () => {
+        recovery.replaceChildren();
         selected = null; grp.readOnly = false; grp.value = pass.value = "";
         add.textContent = "Create or join manually";
         note.textContent = "Enter a cluster name and its passphrase. A new cluster is created if none answers.";
@@ -123,7 +126,13 @@
         try {
           const result = await api("/ui/setup/clusters");
           nearby.replaceChildren(...(result.clusters || []).map((c) => el("div", { class: "row" },
-            el("b", {}, c.group), el("button", { class: "ghost small", onclick: () => choose(c.group) }, "Join"))));
+            el("b", {}, c.group), el("button", { class: "ghost small", onclick: () => {
+              if (c.method !== "recovery") { choose(c.group); return; }
+              selected = null; grp.value = pass.value = ""; check();
+              recovery.replaceChildren(window.setupRecovery(c.group, async () => {
+                draw((await api("/ui/clusters")).clusters || []);
+              }));
+            } }, c.method === "recovery" ? "Join with recovery file" : "Join"))));
           if (!nearby.childNodes.length) nearby.textContent = result.error || "No nearby clusters found. Refresh or enter a name manually.";
         } catch { nearby.textContent = "Could not discover clusters. Refresh or enter a name manually."; }
         finally { refresh.disabled = false; }
@@ -145,7 +154,7 @@
       };
       this.show(this.steps(1, () => { remember(); this.go(0); }), el("h1", {}, "Clusters"),
         el("p", { class: "sub" }, "Join a named cluster on this LAN, or create one. You can also continue with this machine on its own."),
-        rows, el("h2", {}, "Nearby clusters"), nearby, refresh, manual,
+        rows, el("h2", {}, "Nearby clusters"), nearby, refresh, recovery, manual,
         el("label", { for: "g" }, "Cluster name (required)"), grp,
         el("label", { for: "p1" }, "Cluster passphrase"), pass, add, note,
         el("button", { onclick: () => { remember(); this.go(2); } }, "Continue"));

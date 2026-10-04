@@ -94,8 +94,11 @@ ml-stack-fleet join --group "Cedar lab" --persist
 ml-stack-fleet status
 ```
 
-First-time setup lists nearby password clusters by name, with a **Join** button. Select a
-cluster, then enter its passphrase to confirm. Refresh repeats the LAN search; manual
+First-time setup lists nearby clusters by name. Password clusters offer **Join**: select
+one, then enter its passphrase to confirm. Random-key clusters offer **Join with recovery
+file**: choose a file exported by a cluster owner. The app checks the file’s name and key
+and authenticates a live beacon before saving membership. Recovery-file joining never
+touches the keystore. Refresh repeats the LAN search; manual
 entry remains available when discovery is blocked. Names in that list are unverified
 LAN hints: the passphrase handshake authenticates the cluster before membership is saved.
 If a selected cluster disappears, joining fails rather than creating a replacement.

@@ -23,6 +23,7 @@ from .discovery import (
     _write_memberships,
     clusters_path,
     memberships,
+    require_name,
 )
 
 PURPOSE = "fleet-passphrase"
@@ -99,18 +100,37 @@ def export_recovery(file: Path | str, group: str = "", path: Path | str | None =
     return held
 
 
-def import_recovery(file: Path | str, path: Path | str | None = None) -> Membership:
-    """Join the cluster a recovery file describes, replacing any membership of the same group."""
-    text = home.expand(file).read_text()
+def parse_recovery(text: str) -> Membership:
+    """Read the cluster name, salt and key from bounded recovery-file text."""
     try:
+        if not isinstance(text, str) or len(text.encode("utf-8")) > 8192:
+            raise ValueError("recovery file is too large")
         data = json.loads("\n".join(ln for ln in text.splitlines() if not ln.startswith("#")))
-        member = Membership(group=str(data["group"]), key=str(data["key"]).encode(), salt=str(data.get("salt") or ""))
-    except (ValueError, KeyError, TypeError) as exc:
-        raise DiscoveryError(f"{file} is not a recovery file") from exc
-    if not member.key:
-        raise DiscoveryError(f"{file} is not a recovery file")
+        if not isinstance(data, dict) or not isinstance(data.get("key"), str):
+            raise ValueError("invalid recovery object")
+        key = data["key"]
+        salt = data.get("salt", "")
+        if not isinstance(salt, str) or len(base64.b64decode(key + "=" * (-len(key) % 4), altchars=b"-_", validate=True)) != 32:
+            raise ValueError("invalid recovery key")
+        member = Membership(group=require_name(data.get("group")), key=key.encode("ascii"), salt=salt)
+        if salt and not 16 <= len(member.salt_bytes()) <= 64:
+            raise ValueError("invalid recovery salt")
+        return member
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise DiscoveryError("not a valid cluster recovery file") from exc
+
+
+def adopt_recovery(member: Membership, path: Path | str | None = None) -> Membership:
+    """Save a parsed membership, replacing only the same named cluster."""
     _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
     return member
+
+
+def import_recovery(file: Path | str, path: Path | str | None = None) -> Membership:
+    """Join from a recovery file, replacing any membership of the same cluster."""
+    with home.expand(file).open() as source:
+        member = parse_recovery(source.read(8193))
+    return adopt_recovery(member, path)
 
 
 def add_commands(sub: Any) -> None:
