@@ -35,6 +35,7 @@ usage: llama-server [options]
 common params:
 
 -h,    --help, --usage                  print usage and exit
+--api-key KEY                           API key to use for authentication
 -c,    --ctx-size N                     size of the prompt context (default: 4096, -1 = auto)
 -m,    --model FNAME                    model path (default: models/7B/ggml-model-f16.gguf)
 -ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM

@@ -19,7 +19,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate, macauth
+from ml_stack import gate, macauth, serverkeys
 from ml_stack.httpguard import Limits, Refused, resolve, split
 
 USER_AGENT = "ml-stack"
@@ -154,6 +154,8 @@ def build_request(url: str, *, data: bytes | None = None, method: str | None = N
         sent.update(macauth.sign(secret, verb, url, data))
     elif token:
         sent["Authorization"] = f"Bearer {token}"
+    elif "Authorization" not in sent and (leased := serverkeys.for_url(url)):
+        sent["Authorization"] = f"Bearer {leased}"
     return urllib.request.Request(url, data=data, method=verb, headers=sent)  # noqa: S310 - http(s) only
 
 

@@ -42,7 +42,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from ml_stack import harnessing
+from ml_stack import harnessing, serverkeys
 from ml_stack.log import say
 
 __all__ = ["environment", "launch", "main", "settings"]
@@ -70,7 +70,7 @@ def environment(base_url: str, alias: str, *, offline: bool = True, context: int
     env = dict(os.environ if base is None else base)
     env.pop("ANTHROPIC_API_KEY", None)
     env["ANTHROPIC_BASE_URL"] = base_url.rstrip("/")
-    env["ANTHROPIC_AUTH_TOKEN"] = "local"  # noqa: S105 - the local server checks nothing
+    env["ANTHROPIC_AUTH_TOKEN"] = serverkeys.for_url(base_url) or "local"
     if context:
         env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(int(context))
         if context >= MIN_COMPACT_WINDOW:

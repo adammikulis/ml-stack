@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from ml_stack import harnessing
+from ml_stack import harnessing, serverkeys
 from ml_stack.chatpolicy import READ_ONLY
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
 from ml_stack.log import say
@@ -30,6 +30,7 @@ from ml_stack.log import say
 __all__ = ["config_toml", "environment", "launch", "policy_flags"]
 
 PROVIDER = "mlstack"
+KEY_ENV = "MLSTACK_API_KEY"
 COMPACT_SHARE = 0.9
 
 
@@ -53,7 +54,7 @@ def config_toml(base_url: str, alias: str, window: int, hooks: tuple[str, str, f
         "", "[shell_environment_policy]", 'inherit = "core"',
         "", "[features]", "hooks = true",
         "", f"[model_providers.{PROVIDER}]", 'name = "ml-stack"',
-        f"base_url = {_q(base_url.rstrip('/') + '/v1')}", 'wire_api = "responses"',
+        f"base_url = {_q(base_url.rstrip('/') + '/v1')}", 'wire_api = "responses"', f"env_key = {_q(KEY_ENV)}",
         "", "[[hooks.PreToolUse]]", 'matcher = ".*"',
         "", "[[hooks.PreToolUse.hooks]]", 'type = "command"', f"command = {_q(pre)}",
         f"timeout = {int(wait) + 30}", 'statusMessage = "ml-stack: checking the call"',
@@ -71,12 +72,13 @@ def policy_flags(role: str) -> list[str]:
     return ["--sandbox", "workspace-write", "--ask-for-approval", "on-request"]
 
 
-def environment(home: Path, base: Mapping[str, str] | None = None) -> dict[str, str]:
-    """The process environment Codex runs with: its own home, no real API key."""
+def environment(home: Path, base: Mapping[str, str] | None = None, key: str = "") -> dict[str, str]:
+    """The process environment Codex runs with: its own home and the local server's key, no real API key."""
     env = dict(os.environ if base is None else base)
     for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY"):
         env.pop(name, None)
     env["CODEX_HOME"] = str(home)
+    env[KEY_ENV] = key or "local"
     return env
 
 
@@ -134,7 +136,7 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
             say(f"role {args.role}; Bash, apply_patch and MCP calls go through ml-stack's classifier "
                 f"(CODEX_HOME {path.parent}, outside the working tree)")
             flags = [*policy_flags(args.role), "--dangerously-bypass-hook-trust", "--cd", str(run.cwd)]
-            return int(runner([binary, *flags, *extra], environment(run.files.path)))
+            return int(runner([binary, *flags, *extra], environment(run.files.path, key=serverkeys.for_url(base_url))))
     except ValueError as why:
         say(f"error: {why}")
         return 2

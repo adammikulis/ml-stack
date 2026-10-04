@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, sentinel
+from ml_stack import home, sentinel, serverkeys
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
 from ml_stack.serve import confined as confinement, exit_guard, grant
@@ -186,7 +186,7 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
         cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
         slot_prompt_similarity=0.5, slot_save_path="slots", chat_template_file="t.jinja",
-        cache_type_k="q8_0",
+        cache_type_k="q8_0", api_key="k",
         cache_type_v="q8_0", mlock=True, reasoning_budget=2048, rope_scaling="yarn",
         rope_scale=4.0, yarn_orig_ctx=32768, yarn_ext_factor=1.0, yarn_attn_factor=1.0,
         yarn_beta_fast=32.0, yarn_beta_slow=1.0)
@@ -259,6 +259,7 @@ class ServerSpec:
     mmproj: str | Path | None = None
     flash_attn: bool = True
     jinja: bool = True
+    api_key: str = ""
     # A small model of the same family, guessing ahead so the large one only has to agree.
     # Same two forms as `model`: a path, or hf:owner/repo[/file.gguf].
     draft: str | Path | None = None
@@ -570,6 +571,8 @@ class LlamaServerBackend(ServerBackend):
     def command(self, spec: ServerSpec) -> list[str]:
         """Build the argv."""
         argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
+        if spec.api_key:
+            argv += ["--api-key", spec.api_key]
         argv += self._model_source_argv(spec)
         argv += self._companion_argv(spec)
         argv += self._speculative_argv(spec)
@@ -798,6 +801,7 @@ class LlamaServerBackend(ServerBackend):
             if not model.is_file():
                 raise ServerFailed(f"no model file at {model}")
 
+        spec = replace(spec, api_key=serverkeys.issue(spec.port))
         argv = self.command(spec)
         if starting.get("check_flags", True):
             argv = self.checked(argv)
@@ -817,7 +821,8 @@ class LlamaServerBackend(ServerBackend):
             # directory" is its whole complaint.
             Path(spec.slot_save_path).mkdir(parents=True, exist_ok=True)
         log_path = server_log("llama-server", spec.port)
-        logger.info("starting: %s", " ".join(argv))
+        logger.info("starting: %s", " ".join("***" if prev == "--api-key" else a
+                                             for prev, a in zip(["", *argv], argv, strict=False)))
 
         extra_env = {}
         if spec.slot_save_path:
@@ -840,6 +845,7 @@ class LlamaServerBackend(ServerBackend):
             refused = confined.refusals() if confined else ""
             raise ServerFailed(f"{failure}\n{refused}" if refused else str(failure)) from failure
 
+        serverkeys.bind(spec.port, process.pid)
         warmup_s = None
         if starting.get("warmup_request", True):
             warmup_s = self._warm_up(base_url, timeout=timeout)
