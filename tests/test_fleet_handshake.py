@@ -399,3 +399,10 @@ def test_an_answer_altered_after_it_was_sealed_is_refused_by_the_peer(served):
             opens.open(200, headers, altered)
     with pytest.raises(http.ServerError, match="did not authenticate"):
         opens.open(404, headers, answer)
+
+
+def test_the_join_secret_is_stable_trimmed_and_belongs_to_one_cluster():
+    assert join_secret(WORDS, "lab") == join_secret(f"  {WORDS}\n", "lab")
+    assert join_secret(WORDS, "lab") != join_secret(WORDS, "home")
+    assert join_secret(WORDS, "lab") != join_secret("other words", "lab")
+    assert WORDS not in join_secret(WORDS, "lab")
