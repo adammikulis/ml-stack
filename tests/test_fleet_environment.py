@@ -255,3 +255,25 @@ def test_built_wheel_metadata_has_no_direct_dependencies():
             metadata = archive.read(metadata_file).decode()
         requirements = [line.removeprefix('Requires-Dist: ') for line in metadata.splitlines() if line.startswith('Requires-Dist: ')]
         assert requirements and all(Requirement(requirement).url is None for requirement in requirements)
+
+
+def test_unavailable_pyenv_shim_is_not_an_environment_builder(tmp_path, monkeypatch):
+    import subprocess
+    from ml_stack.fleet import environment
+    version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
+    monkeypatch.setattr(environment.shutil, 'which', lambda _name: '/tmp/shims/python')
+    monkeypatch.setattr(environment.subprocess, 'run', lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args[0], 127, '', 'pyenv: command not found'))
+    assert Environment(tmp_path, python_version=version).host_python() is None
+
+
+def test_python_builder_uses_verified_executable_not_shim(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    from ml_stack.fleet import environment
+    version = '3.12' if sys.version_info[:2] != (3, 12) else '3.13'
+    monkeypatch.setattr(environment.shutil, 'which', lambda _name: '/tmp/shims/python')
+    monkeypatch.setattr(environment.subprocess, 'run', lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args[0], 0,
+                            json.dumps(['/tmp/real/python', [int(v) for v in version.split('.')]]), ''))
+    assert str(Environment(tmp_path, python_version=version).host_python()) == '/tmp/real/python'

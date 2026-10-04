@@ -25,6 +25,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       if (k === "class") n.className = v;
       else if (k === "html") n.innerHTML = v;
       else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (["disabled", "checked", "selected", "hidden", "required", "multiple", "readonly", "open"].includes(k) && typeof v === "boolean") n.toggleAttribute(k, v);
       else if (v !== null && v !== undefined) n.setAttribute(k, v);
     }
     for (const kid of kids.flat()) {

@@ -36,6 +36,12 @@ def test_context_length_uses_tokens_and_saves_the_chosen_limit(joined, open_page
     page.wait_for_selector('#settings-note .ok')
     _, saved, _ = joined.call('/ui/settings', cookie=joined.cookie)
     assert saved['settings']['context'] == 1048576
+    assert page.evaluate('''() => {
+      const el = window.fleetModel.el;
+      return !el('option', {disabled: false}).disabled
+        && el('option', {disabled: true}).disabled
+        && el('div', {'aria-expanded': false}).getAttribute('aria-expanded') === 'false';
+    }''')
     assert not errors
 
 

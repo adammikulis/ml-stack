@@ -154,7 +154,18 @@ class Environment:
         if not getattr(sys, "frozen", False) and self.python_version == current:
             return Path(sys.executable)
         found = shutil.which(f"python{self.python_version}")
-        return Path(found) if found else None
+        if not found:
+            return None
+        try:
+            checked = subprocess.run(
+                [found, "-c", "import json,sys;print(json.dumps([sys.executable,sys.version_info[:2]]))"],
+                capture_output=True, text=True, timeout=10)
+            if checked.returncode:
+                return None
+            executable, version = json.loads(checked.stdout)
+            return Path(executable) if ".".join(map(str, version)) == self.python_version else None
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            return None
 
     # -- fetching one --------------------------------------------------
     def standalone_python(self) -> Path | None:
