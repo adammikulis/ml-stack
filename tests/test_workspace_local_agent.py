@@ -609,7 +609,7 @@ def test_the_default_approval_raises_a_request_and_waits_for_the_stop_flag(kit):
     assert pending == [] or all(r.state != "approved" for r in pending)
 
 
-def test_a_coding_agent_is_detached_on_the_codex_harness_and_no_second_identity_is_minted(kit, monkeypatch):
+def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit, monkeypatch):
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     from ml_stack.workspace import localprofile as lp
     monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
@@ -618,7 +618,7 @@ def test_a_coding_agent_is_detached_on_the_codex_harness_and_no_second_identity_
     try:
         row = ls.listing(kit.ws)[0]
         assert got.name == "local-qwen3.6-35b-a3b-codex" and row["harness"] == "codex" and row["ctx"] == 262144
-        assert kit.ws.registry.ids() == ["owner"]
+        assert sorted(kit.ws.registry.ids()) == sorted(["owner", got.name])
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 

@@ -56,6 +56,7 @@ class Ask:
     ctx: int = 0
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
+    harness: str = lh.CODEX
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,21 +144,24 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
     if problem:
         raise Unavailable(problem, hint)
     role = roles.get(ask.role).name
-    name = la.check_name(ask.name or f"{localmodel.agent_name(chosen.name)}-{lh.CODEX}")
+    if ask.harness not in ("codex", "claude"):
+        raise ValueError("coding harness is codex or claude")
+    name = la.check_name(ask.name or f"{localmodel.agent_name(chosen.name)}-{ask.harness}")
     with held(la.folder(ws) / "start.lock"):
         have = la.load(ws, name)
         if have is not None and la.alive(have):
             return Started(name, have.pid, have.model_name, have.role, already=True)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
-                         size_bytes=chosen.size_bytes, role=role, profile="coding", harness=lh.CODEX,
+                         size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
                          ctx=ctx, project=project, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
+        _mint(ws, name, project)
         la.save(ws, agent)
         job = jobs.detach(lh.RUNNER, [name], log=la.log_file(ws, name), kind=name,
                           home=la.folder(ws) / "jobs")
         la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
                             log=str(job.log)))
-    ws.audit("local-agent.start", onboard.SETUP.id, agent=name, role=role, harness=lh.CODEX)
+    ws.audit("local-agent.start", onboard.SETUP.id, agent=name, role=role, harness=ask.harness)
     return Started(name, job.pid, chosen.name, role)
 
 

@@ -42,6 +42,7 @@ OPTIONS = [
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--profile", default="chat", choices=["chat", "coding"],
          help="chat: 32K context and small per-task caps; coding: 256K context, Qwen3.8-27B and larger caps"),
+    flag("--harness", default="codex", choices=["codex", "claude"], help="native coding harness"),
     flag("--ctx", default="", metavar="TOKENS", help="context to serve, such as 32768, 32k or 256k (default: the profile's)"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
 ]
@@ -80,7 +81,7 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(","))), pick=pick)
+                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick)
     except ls.Unavailable as err:
         warn(str(err))
         return 1

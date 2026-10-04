@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import importlib.util
+import os
 import shlex
 import shutil
 import stat
@@ -34,6 +36,7 @@ __all__ = [
     "Session", "SessionFiles",
     "Want",
     "admitted",
+    "binary_for",
     "check_role",
     "config_for",
     "hook_command",
@@ -102,6 +105,17 @@ def window_of(base_url: str) -> int:
         return 0
     return int(params.n_ctx) // max(1, int(params.total_slots or 1))
 
+
+
+def binary_for(name: str) -> str:
+    """The installed harness executable, including the maintained Claude SDK's bundled CLI."""
+    if binary := shutil.which(name):
+        return binary
+    if name == "claude" and (spec := importlib.util.find_spec("claude_agent_sdk")) and spec.origin:
+        binary = Path(spec.origin).parent / "_bundled" / ("claude.exe" if os.name == "nt" else "claude")
+        if binary.is_file() and os.access(binary, os.X_OK):
+            return str(binary)
+    return ""
 
 def admitted(found: str, ctx: int, say: Callable[[str], None], *, plan: Callable[..., object] | None = None) -> bool:
     """Whether the wired-memory limit now holds ``found`` at ``ctx``; when it does not, the
