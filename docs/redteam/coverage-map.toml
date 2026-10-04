@@ -86,6 +86,14 @@ tests = [
 note = "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
 
 [[group]]
+match = ["route:fleet/conversation_routes.py:/ui/conversations*"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
+         "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"]
+note = "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
+
+[[group]]
 match = ["spawn:fleet/environment.py:Environment.build_environment"]
 status = "covered"
 count = 1

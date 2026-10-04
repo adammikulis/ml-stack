@@ -256,6 +256,8 @@
       if (this.request) return;
       const epoch = ++this.loadEpoch;
       try {
+        await this.savePending;
+        if (epoch !== this.loadEpoch) return;
         const one = await api(`/ui/conversations/${id}`);
         if (epoch !== this.loadEpoch || M.refused(one)) return;
         if (one.status === 404) {

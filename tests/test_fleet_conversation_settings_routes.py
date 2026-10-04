@@ -47,3 +47,14 @@ def test_invalid_updates_return_400_without_changing_the_chat(conversation_api, 
     assert kept.title == "Kept"
     assert kept.model == "small"
     assert kept.settings == made.settings
+
+
+def test_conversation_mutations_require_ui_authority(conversation_api):
+    served = conversation_api
+    made = served.ui.conversations.start(title="Protected")
+    for method, payload in (("POST", {"title": "Changed"}), ("DELETE", None)):
+        path = f"/ui/conversations/{made.id}"
+        assert served.call(path, method=method, body=payload, ui_header=False)[0] == 403
+        assert served.call(path, method=method, body=payload,
+                           headers={"Origin": "https://foreign.invalid"})[0] == 403
+    assert served.ui.conversations.get(made.id).title == "Protected"
