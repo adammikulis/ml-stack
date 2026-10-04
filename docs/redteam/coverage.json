@@ -1,10 +1,10 @@
 {
- "surfaces": 604,
+ "surfaces": 607,
  "by_status": {
-  "covered": 293,
+  "covered": 295,
   "partial": 201,
   "uncovered": 54,
-  "n/a": 56,
+  "n/a": 57,
   "unmapped": 0
  },
  "by_kind": {
@@ -26,7 +26,7 @@
    "covered": 7,
    "partial": 0,
    "uncovered": 4,
-   "n/a": 12,
+   "n/a": 13,
    "unmapped": 0
   },
   "desktop": {
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 58,
+   "covered": 59,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,7 +79,7 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 47,
+   "covered": 48,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
@@ -1192,6 +1192,16 @@
     "tests/test_decide_questions.py"
    ],
    "note": ""
+  },
+  {
+   "id": "context:workspace/localprofile.py",
+   "kind": "context",
+   "source": "workspace/localprofile.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
   },
   {
    "id": "desktop:desktop.py:_mac",
@@ -3385,6 +3395,26 @@
    "id": "human:workspace/identity.py:Registry.set_project",
    "kind": "human",
    "source": "workspace/identity.py:Registry.set_project",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/localcli.py:run",
+   "kind": "human",
+   "source": "workspace/localcli.py:run",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -5648,6 +5678,24 @@
     "tests/test_workspace_files.py::test_the_content_is_never_plaintext_on_disk_and_the_message_carries_only_the_handle"
    ],
    "note": "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
+  },
+  {
+   "id": "parser:workspace/localroute.py",
+   "kind": "parser",
+   "source": "workspace/localroute.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
+    "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
+    "tests/test_workspace_local_agent.py::test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused",
+    "tests/test_redteam_local_agent.py::test_an_injection_from_a_sender_the_agent_does_not_obey_reaches_no_model",
+    "tests/test_redteam_local_agent.py::test_an_injection_in_a_persons_task_gets_a_model_that_obeys_it_nothing_beyond_its_role",
+    "tests/test_redteam_local_agent.py::test_no_tool_the_model_is_offered_starts_stops_or_widens_an_agent",
+    "tests/test_redteam_local_agent.py::test_start_and_stop_refuse_an_agent_process_and_leave_the_state_alone"
+   ],
+   "note": "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
   },
   {
    "id": "parser:workspace/notes.py",
