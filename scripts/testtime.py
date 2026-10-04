@@ -15,6 +15,7 @@ workers it had. A full run writes what it measured to ``.full-tier-last.json`` (
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,8 @@ class Timing:
     cpu_s: float
     workers: int
     tests: int
+    load: float = 0.0
+    """The machine's one-minute load average when the run began; only kept in the last-run file."""
 
 
 def cpu_seconds(junit_text: str) -> tuple[float, int]:
@@ -46,16 +49,22 @@ def load(path: Path) -> Timing | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return Timing(float(data["wall_s"]), float(data["cpu_s"]), int(data["workers"]),
-                      int(data.get("tests", 0)))
+                      int(data.get("tests", 0)), float(data.get("load", 0.0)))
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
 def save(path: Path, timing: Timing) -> None:
     """Write a timing as sorted, rounded JSON."""
-    body = {"cpu_s": round(timing.cpu_s), "tests": timing.tests, "wall_s": round(timing.wall_s),
+    body = {"load": round(timing.load, 1)} if timing.load else {}
+    body |= {"cpu_s": round(timing.cpu_s), "tests": timing.tests, "wall_s": round(timing.wall_s),
             "workers": timing.workers}
     path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def busy(now: Timing) -> bool:
+    """Whether the machine was too loaded for the wall time to say anything about the tests."""
+    return now.load > (os.cpu_count() or 4) / 2
 
 
 def verdict(recorded: Timing, now: Timing) -> list[str]:
@@ -64,7 +73,7 @@ def verdict(recorded: Timing, now: Timing) -> list[str]:
     if now.cpu_s > recorded.cpu_s * (1 + TOLERANCE):
         over.append(f"CPU time {now.cpu_s:.0f} s is more than {TOLERANCE:.0%} over the recorded "
                     f"{recorded.cpu_s:.0f} s")
-    if now.workers >= recorded.workers and now.wall_s > recorded.wall_s * (1 + TOLERANCE):
+    if not busy(now) and now.workers >= recorded.workers and now.wall_s > recorded.wall_s * (1 + TOLERANCE):
         over.append(f"wall time {now.wall_s:.0f} s on {now.workers} workers is more than "
                     f"{TOLERANCE:.0%} over the recorded {recorded.wall_s:.0f} s on "
                     f"{recorded.workers}")
@@ -77,7 +86,7 @@ def lowered(recorded: Timing | None, now: Timing) -> Timing:
     if recorded is None:
         return now
     wall, workers = recorded.wall_s, recorded.workers
-    if now.workers >= recorded.workers and now.wall_s < recorded.wall_s:
+    if not busy(now) and now.workers >= recorded.workers and now.wall_s < recorded.wall_s:
         wall, workers = now.wall_s, now.workers
     return Timing(wall, min(recorded.cpu_s, now.cpu_s), workers, now.tests)
 
@@ -104,6 +113,8 @@ def check(root: Path, update: bool = False, allow_increase: bool = False) -> int
     over = verdict(recorded, now)
     print(f"ratchet: now wall {now.wall_s:.0f} s ({now.workers} workers), CPU {now.cpu_s:.0f} s; "
           f"recorded wall {recorded.wall_s:.0f} s ({recorded.workers}), CPU {recorded.cpu_s:.0f} s")
+    if busy(now):
+        print(f"ratchet: wall time not compared: the load was {now.load:.0f} when the run began")
     for line in over:
         print(f"ratchet: {line}")
     return 1 if over else 0

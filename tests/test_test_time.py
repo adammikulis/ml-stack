@@ -62,3 +62,10 @@ def test_an_unreadable_record_is_none(tmp_path, bad):
     path = tmp_path / "r.json"
     path.write_text(bad)
     assert testtime.load(path) is None
+
+
+def test_wall_time_is_not_compared_when_the_machine_was_busy(tmp_path):
+    seeded(tmp_path, Timing(300, 2000, 16, 9000), Timing(900, 2000, 16, 9000, load=400.0))
+    assert testtime.check(tmp_path) == 0
+    testtime.save(tmp_path / testtime.LAST, Timing(900, 2000, 16, 9000, load=0.0))
+    assert testtime.check(tmp_path) == 1
