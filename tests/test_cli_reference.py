@@ -52,3 +52,17 @@ def test_the_script_prints_what_the_page_holds():
     ran = subprocess.run([sys.executable, str(REPO / "scripts" / "reference")],
                          capture_output=True, text=True, check=True)
     assert ran.stdout.splitlines() == committed()
+
+
+def test_reference_check_rejects_a_stale_table_without_writing(tmp_path):
+    page = tmp_path / "commands.md"
+    original = PAGE.read_text()
+    page.write_text(original)
+    command = [sys.executable, str(REPO / "scripts/reference"), "--check", "--page", str(page)]
+    assert subprocess.run(command, capture_output=True).returncode == 0
+    stale = original.replace("| `ml-stack-gym", "| `stale-gym", 1)
+    assert stale != original
+    page.write_text(stale)
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 1 and "stale" in result.stderr
+    assert page.read_text() == stale
