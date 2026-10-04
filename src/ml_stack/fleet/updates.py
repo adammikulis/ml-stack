@@ -205,12 +205,13 @@ def download(asset: dict[str, Any], into: Path | str, *, on_progress: Any = None
     into.mkdir(parents=True, exist_ok=True)
     target = into / name
     progress = (lambda done, total: on_progress(done, total)) if on_progress else None
+    hooks = on_progress if isinstance(on_progress, net.Hooks) else net.Hooks(progress=progress)
     try:
         net.download(str(asset["browser_download_url"]), target, net.Want(
             sha256=want, size=int(asset.get("size") or 0), require_digest=True,
             allow_unscanned=allow_unscanned, library_links=library_links,
             max_bytes=8 << 30, purpose="release download"),
-            hooks=net.Hooks(progress=progress))
+            hooks=hooks)
     except net.ChecksumMismatch:
         raise UpdateError("the download does not match the digest GitHub reports for it") from None
     except (net.Blocked, net.Truncated, ServerError, OSError, Refused) as exc:

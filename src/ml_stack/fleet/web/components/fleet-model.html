@@ -10,6 +10,16 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
 
   M.MIN_PASS = 5;
 
+  M.downloadMessage = function (g) {
+    if (g.error) return g.error;
+    const parts = [g.note || (g.phase === "mtp" ? "Downloading MTP head" : "Downloading model")];
+    if (g.speed_bps > 0) parts.push(`${M.fileSize(g.speed_bps)}/s`);
+    if (g.eta_s !== null && g.eta_s !== undefined) {
+      parts.push(`about ${Math.max(1, Math.ceil(g.eta_s / 60))} min left`);
+    }
+    return parts.join(" · ");
+  };
+
   /** One call to the daemon: `{ok, status, ...body}`. */
   M.api = async function (path, opts = {}) {
     const r = await fetch(path, { ...opts, headers: { ...H, ...(opts.headers || {}) } });

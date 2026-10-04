@@ -257,7 +257,7 @@ def download(url: str, dest: Path | str, want: Want | None = None, pipeline: Pip
     if hooks.phase:
         hooks.phase("verifying")
     return _finish(pipe, staged, final, want, Arrival(url, shown.url, shown.status,
-                                                      tuple(shown.redirects), shown.headers, host))
+                       tuple(shown.redirects), shown.headers, host, hooks.phase))
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +270,7 @@ class Arrival:
     redirects: tuple[str, ...]
     headers: dict[str, str]
     host: str
+    phase: Callable[[str], None] | None = None
 
 
 def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
@@ -297,6 +298,8 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
                           library_links=want.library_links)
     if not verdict.ok:
         raise _reject(pipe, staged, note, "; ".join(verdict.problems))
+    if arrival.phase:
+        arrival.phase("scanning")
     summary = pipe.scan_policy.scan(staged, verdict.kind, pipe.scanners)
     keep, why = pipe.scan_policy.decide(verdict.kind, summary, allow_unscanned=want.allow_unscanned)
     if not keep:
@@ -304,6 +307,8 @@ def _finish(pipe: Pipeline, staged: Path, final: Path, want: Want,
         raise _reject(pipe, staged, note, why, ScanHit if hit else Blocked)
     warnings = (*verdict.warnings, *(w for r in summary.results for w in r.warnings),
                 *(r.detail for r in summary.results if r.outcome == Outcome.NO_SCANNER))
+    if arrival.phase:
+        arrival.phase("installing")
     _promote(staged, final)
     observed.downloaded(url)
     _pin_pulled(final, verdict.kind, want, digest, arrival)

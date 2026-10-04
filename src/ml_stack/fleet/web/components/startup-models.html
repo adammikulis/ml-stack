@@ -54,8 +54,7 @@
       status.replaceChildren(M.ui("ml-progress", {
         label: g.name, format: "bytes", done: g.done || 0, total: g.total || 0,
         state: g.state === "failed" ? "failed" : g.state === "done" ? "done" : "running",
-        message: g.error || (g.state === "done"
-          ? "Downloaded. Open Models to run it." : g.note || "Downloading in the background."),
+        message: g.state === "done" ? "Downloaded. Open Models to run it." : M.downloadMessage(g),
       }));
     };
     const poll = async (id) => {

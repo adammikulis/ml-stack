@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from ml_stack.safenames import Unsafe, unpack
 from ml_stack.serve.backend import devices_of
 from ml_stack.tar_libraries import unpack as unpack_libraries
 
+from .download_progress import Transfer
 from .updates import UpdateError, download
 
 __all__ = ["LlamaError", "asset_for_this_machine", "cache_dir",
@@ -159,11 +161,11 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
         on_progress(f"Downloading {asset['name']}")
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            archive = download(asset, tmp, library_links=True)
+            archive = _download(asset, tmp, on_progress)
         except UpdateError as exc:
             raise LlamaError(str(exc)) from None
         if on_progress:
-            on_progress("Unpacking it")
+            on_progress(f"Extracting {asset['name']}")
         staging = Path(tmp) / "unpacked"
         _unpack(archive, staging)
         found = next(iter(staging.rglob(SERVER)), None)
@@ -172,10 +174,12 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
         _install(found.parent, vendor)
         if companion is not None:
             try:
-                runtime = download(companion, tmp, library_links=True)
+                runtime = _download(companion, tmp, on_progress)
             except UpdateError as exc:
                 raise LlamaError(str(exc)) from None
             runtime_staging = Path(tmp) / "runtime"
+            if on_progress:
+                on_progress(f"Extracting {companion['name']}")
             _unpack(runtime, runtime_staging)
             for library in runtime_staging.rglob("*.so*"):
                 shutil.copy2(library, vendor / library.name)
@@ -183,9 +187,32 @@ def ensure_server(root: Path | str, *, on_progress: Any = None,
     got = find_server(vendor)
     if got is None:
         raise LlamaError("the downloaded server is not where it was expected")
+    if on_progress:
+        on_progress("Checking the installed server and CUDA devices")
     if needs_cuda and not cuda_ready(got):
         raise LlamaError("the installed llama-server cannot initialize a CUDA device; check the NVIDIA driver")
     return got
+
+
+def _download(asset: dict[str, Any], into: str, report: Any) -> Path:
+    transfer = Transfer()
+    last = [0.0]
+
+    def progress(done: int, total: int) -> None:
+        transfer.update(done, total)
+        now = time.monotonic()
+        if report and (now - last[0] >= 1 or done == total):
+            report(f"Downloading {asset['name']}: {transfer.text()}")
+            last[0] = now
+
+    def phase(name: str) -> None:
+        if report:
+            report(f"{name.capitalize()} {asset['name']}")
+
+    if report:
+        report(f"Downloading {asset['name']} ({int(asset.get('size') or 0) / (1 << 20):.1f} MB)")
+    return download(asset, into, library_links=True,
+                    on_progress=net.Hooks(progress=progress, phase=phase))
 
 
 def _unpack(archive: Path, into: Path) -> None:

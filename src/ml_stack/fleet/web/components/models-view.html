@@ -253,7 +253,7 @@
       M.ui("ml-progress", {
         label: g.name, format: "bytes", done: g.done, total: g.total || 0,
         state: g.state === "failed" ? "failed" : "running",
-        message: g.state === "failed" ? g.error : g.total ? "" : (g.note || "Starting…"),
+        message: M.downloadMessage(g),
       })));
   }
 

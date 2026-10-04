@@ -19,9 +19,11 @@ from typing import Any
 from ml_stack import hub
 from ml_stack.files import UNVERSIONED, promote, read_json, version_of, versioned, write_json
 from ml_stack.httpguard import Limits, Refused, stream
+from ml_stack.log import say
 from ml_stack.net import sniff
 from ml_stack.safenames import Unsafe, safe_filename
 
+from .download_progress import Transfer
 from .weights import ModelError, resolve
 
 __all__ = ["CHUNK", "Downloads", "Getting", "Model", "Models", "caches",
@@ -466,12 +468,18 @@ class Getting:
     error: str = ""
     started_at: float = field(default_factory=time.time)
     finished_at: float = 0.0
+    phase: str = "model"
+    transfer: Transfer = field(default_factory=Transfer)
+    pending_draft: bool = False
 
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name, "source": self.source,
                 "state": self.state, "note": self.note, "done": self.done,
                 "total": self.total, "error": self.error,
-                "started_at": self.started_at, "finished_at": self.finished_at}
+                "started_at": self.started_at, "finished_at": self.finished_at,
+                "phase": self.phase, "speed_bps": self.transfer.speed,
+                "eta_s": (self.transfer.eta if self.state == "getting"
+                          and not self.pending_draft else None)}
 
 
 class Downloads:
@@ -492,7 +500,7 @@ class Downloads:
                 if row.state == "getting" and row.name == name:
                     return row
         row = Getting(id=f"{int(time.time())}-{secrets.token_hex(3)}",
-                      name=name, source=source)
+                      name=name, source=source, pending_draft=bool(draft))
         with self._lock:
             self.getting[row.id] = row
         threading.Thread(target=self._run, args=(row, key, autodownload, draft),
@@ -503,21 +511,40 @@ class Downloads:
              draft: str = "") -> None:
         with self._sem:
             try:
+                offset = 0
+                last = 0.0
+
                 def progress(done: int, total: int) -> None:
-                    row.done, row.total = done, total
+                    nonlocal last
+                    row.transfer.update(done, total)
+                    row.done = offset + done
+                    row.total = offset + total if total else 0
+                    now = time.monotonic()
+                    if now - last >= 1 or done == total:
+                        say(f"  {row.note or row.name}: {row.transfer.text()}")
+                        last = now
 
                 def note(text: str) -> None:
                     row.note = text
+                    say(f"  {text}")
 
                 got = self.models.ensure(row.name, source=row.source, key=key,
                                          on_progress=progress, on_note=note,
                                          autodownload=autodownload)
                 if draft:
-                    row.note = f"Getting the draft for {got.name}"
-                    self.models.ensure_draft(got, draft, key=key, on_progress=progress)
+                    offset = got.size
+                    row.phase = "mtp"
+                    row.pending_draft = False
+                    row.transfer = Transfer()
+                    row.total = 0
+                    note(f"Downloading the MTP head for {got.name}")
+                    head = self.models.ensure_draft(got, draft, key=key, on_progress=progress)
+                    offset += head.stat().st_size
                 row.state = "done"
                 row.name = got.name
-                row.done = row.total = got.size
+                row.done = row.total = offset or got.size
+                row.note = "Model and MTP head ready" if draft else "Model ready"
+                say(f"  {row.note}: {row.name}")
             except Exception as exc:                  # noqa: BLE001
                 row.state = "failed"
                 row.error = str(exc)

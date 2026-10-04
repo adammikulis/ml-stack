@@ -78,15 +78,19 @@ class CudaServerInstallTests(unittest.TestCase):
 
     def test_both_archives_are_downloaded_and_runtime_is_beside_server(self):
         server, runtime = self.archives()
+        messages = []
         with patch.object(self.llama, "_tokens", return_value=(self.token,)), patch.object(
                 self.llama, "latest", return_value=self.release), patch.object(
                 self.llama.shutil, "which", return_value=None), patch.object(
                 self.llama, "download", side_effect=[server, runtime]) as download, patch.object(
                 self.llama, "cuda_ready", return_value=True):
-            binary = self.llama.ensure_server(self.root)
+            binary = self.llama.ensure_server(self.root, on_progress=messages.append)
             self.assertEqual(download.call_args_list[0].args[0], self.asset)
             self.assertEqual(download.call_args_list[1].args[0], self.companion)
             self.assertEqual((binary.parent / "libcudart.so").read_text(), "runtime")
+            self.assertTrue(any(self.companion['name'] in message for message in messages))
+            self.assertTrue(any(message.startswith('Extracting') for message in messages))
+            self.assertEqual(messages[-1], 'Checking the installed server and CUDA devices')
 
     def test_runtime_without_github_digest_is_refused(self):
         server, _runtime = self.archives()
