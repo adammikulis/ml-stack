@@ -6,13 +6,14 @@ import contextlib
 import selectors
 import signal
 import socket
-import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
-__all__ = ["arguments", "main"]
+from ml_stack.platform import launch
+
+__all__ = ["arguments", "supervise"]
 
 
 def arguments(argv: list[str], port: int, path: str) -> list[str]:
@@ -71,7 +72,7 @@ def _accept(listener: socket.socket, target: str, stopping: threading.Event,
         worker.start()
 
 
-def main(argv: list[str] | None = None) -> int:
+def supervise(argv: list[str] | None = None) -> int:
     """Serve a confined command through loopback until it exits."""
     args = sys.argv[1:] if argv is None else argv
     port, target, *command = args
@@ -81,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.bind(("127.0.0.1", int(port)))
             listener.listen(32)
-            child = subprocess.Popen(command)
+            child = launch(command)
 
             def stop(_number: int, _frame: object) -> None:
                 stopping.set()
@@ -107,4 +108,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(supervise())

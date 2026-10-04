@@ -35,7 +35,7 @@ import signal
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +43,7 @@ __all__ = [
     "detached_kwargs",
     "is_apple_silicon",
     "is_windows",
+    "launch",
     "on_quit",
     "private_file",
     "process_group_kwargs",
@@ -73,6 +74,11 @@ def applescript_quote(text: str) -> str:
 
 
 # -- starting and stopping a child -----------------------------------------------------
+def launch(argv: Sequence[str], *, stdin: int | None = None) -> subprocess.Popen[bytes]:
+    """Start an owned child process with the requested input handle."""
+    return subprocess.Popen(argv, stdin=stdin)
+
+
 def process_group_kwargs() -> dict[str, Any]:
     """The ``Popen`` keywords that put a child in a process group of its own.
 

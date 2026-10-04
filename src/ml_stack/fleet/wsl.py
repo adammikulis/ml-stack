@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from ml_stack.log import say
+from ml_stack.platform import launch
 
 __all__ = ["WSLError", "command", "prepare", "start"]
 
@@ -100,7 +101,7 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
                 arguments[index] = name + "=" + value
             else:
                 arguments[index + 1] = value
-    process = subprocess.Popen(command("env", *environment, executable,
+    process = launch(command("env", *environment, executable,
                                        "-m", "ml_stack.fleet.wsl_daemon", *arguments),
                                stdin=subprocess.PIPE)
     try:
