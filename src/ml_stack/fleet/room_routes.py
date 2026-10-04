@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import urllib.parse
 
 from ml_stack import hub
@@ -25,7 +26,7 @@ def _origin_ok(origin: str, host: str) -> bool:
 def _machine(hooks: wired.Hooks) -> dict[str, object]:
     total = hooks.total_bytes()
     kept = wired_apply.state(hooks)
-    return {"total": total, "default_mb": int(total * 0.75) // wired.MIB,
+    return {"supported": (hooks.system or platform.system()) == "Darwin", "total": total, "default_mb": int(total * 0.75) // wired.MIB,
             "max_mb": wired.max_mb(total), "min_mb": wired.MIN_MB,
             "warn_below_bytes": wired.warn_below_bytes(total),
             "reserve_bytes": wired.reserve_bytes(total), "live_mb": kept.live_mb,

@@ -40,12 +40,13 @@ def room(tmp_path):
         s.close()
 
 
-def test_the_page_carries_the_card_on_the_models_screen(room):
+def test_the_page_carries_the_slider_on_the_models_and_settings_screens(room):
     from ml_stack.fleet.page import render
 
     page = render()
-    assert "<room-card>" in page and "Make room for this model" in page
-    assert "customElements.define(\"room-card\"" in page
+    assert page.count("<wired-memory>") == 2 and "Make room for this model" in page
+    assert 'customElements.define("wired-memory"' in page
+    assert "Keep this after restart" in page
     assert room.call("/ui/")[0] == 200
 
 
