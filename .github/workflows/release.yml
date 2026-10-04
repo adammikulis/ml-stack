@@ -14,6 +14,10 @@ on:
         type: string
         required: false
         default: ""
+    secrets:
+      RELEASE_SIGNING_KEY:
+        description: the Ed25519 private key the downloads are signed with
+        required: false
   workflow_dispatch:
 
 permissions:

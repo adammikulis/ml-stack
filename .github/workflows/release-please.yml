@@ -64,3 +64,4 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.propose.outputs.tag }}
+    secrets: inherit

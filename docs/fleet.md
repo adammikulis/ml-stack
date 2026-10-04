@@ -168,8 +168,10 @@ waiting for a release:
 ml-stack-fleet join --persist --track main     # or: ml-stack-traind --track main
 ```
 
-Every five minutes it asks `git ls-remote` for the head of `main`, and when it has moved:
-`git pull --ff-only` (never a merge -- a checkout holding commits `main` does not have is
+Every five minutes it asks `git ls-remote` for the head of `main`, and when it has moved it
+fetches it and checks the tip commit's signature against the release key (`docs/release.md`);
+an unsigned commit, or one signed by another key, is not pulled. Then `git merge --ff-only
+FETCH_HEAD` (never any other merge -- a checkout holding commits `main` does not have is
 reported and left alone, because resetting somebody's work in progress at three in the
 morning is unforgivable), `pip install -e .` only if `pyproject.toml` or a lock file moved,
 and then a restart -- `launchctl kickstart` or `systemctl restart` where a login service is
@@ -181,10 +183,9 @@ benchmark measuring (the same lock `ml-stack-bench status` reads, so a run start
 keyboard counts) and no model loaded. A machine part way through a sweep is left alone
 until it is not, however new the code is.
 
-Be honest about what this is: **it runs code nobody reviewed, minutes after it is pushed**.
-That is the right trade for a machine in the next room that you would otherwise have to walk
-over to, and the wrong one for anything else. `--track off` goes back to releases, and it is
-off unless asked for. It is remembered in the daemon's settings, so it is asked for once and
+What this is: **it runs a signed commit minutes after it is pushed**, with no review between
+the signature and the machine. `--track off` goes back to releases, and it is off unless asked
+for. It is remembered in the daemon's settings, so it is asked for once and
 survives a reboot.
 
 Discovery is multicast on UDP port **8771** (`239.255.77.70`, TTL 1 -- it never leaves the

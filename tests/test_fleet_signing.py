@@ -19,7 +19,6 @@ import pytest
 from ml_stack.fleet import signing, updates
 
 
-
 def _zip(text: str) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:

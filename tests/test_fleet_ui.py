@@ -949,7 +949,8 @@ class TestUpdatingItself:
         monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
             "0.2.0", "", "", ({"name": "ml-stack-macos-arm64.zip"},), 0))
         monkeypatch.setattr(updates, "asset_for", lambda r, key="": r.assets[0])
-        monkeypatch.setattr(updates, "download", lambda a, into, **k: tmp_path / "a.zip")
+        monkeypatch.setattr(updates, "download_release",
+                            lambda r, a, into, **k: tmp_path / "a.zip")
         monkeypatch.setattr(updates, "install", lambda a: seen.setdefault("put", a))
 
         got = updates.apply_if_newer()

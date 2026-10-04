@@ -12,6 +12,12 @@ dialog (`ML_STACK_NOTIFY`), MTP draft heads on by default, the typed `decide()` 
 
 Open, and known limits (each is a task or a gap, not a done item):
 
+- [ ] **The release signing key does not exist yet.** `ssh-keygen -t ed25519`, put the private
+  key in the repository secret `RELEASE_SIGNING_KEY`, paste the public line into
+  `signing.RELEASE_KEY`. Until then `release.yml` fails at "sign the downloads" and the updater
+  and `--track` refuse everything (`docs/release.md`). `packaging/install.sh` and `install.ps1`
+  still install an unsigned download.
+
 - [ ] **No real OS keystore prompt has been driven by hand.** Tests use fakes and the real-keystore
   guard stays on; what a person sees on a first Keychain prompt is as documented in `docs/keystore.md`
   and unobserved.

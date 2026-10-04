@@ -35,8 +35,7 @@ from ml_stack import net
 from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable
 from ml_stack.httpguard import Refused
-from ml_stack.net import git as netgit
-from ml_stack.net import provenance
+from ml_stack.net import git as netgit, provenance
 from ml_stack.safenames import Unsafe, safe_filename, unpack
 
 from . import signing
