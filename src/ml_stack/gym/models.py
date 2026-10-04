@@ -12,12 +12,12 @@ SMOL = "ggml-org/SmolVLM-256M-Instruct-GGUF"
 def vision_row(model):
     """Describe runtime support independently from downloaded model files."""
     supported = model.format == "gguf" and model.mmproj is not None
-    installed = model.is_complete and model.path.is_file()
+    installed = model.is_complete and model.path.exists()
     if model.mmproj is not None:
         installed = installed and model.mmproj.is_file()
     reason = "" if supported else "This format is not supported by the Gym llama.cpp vision runtime"
     if "fastvlm" in model.name.lower() and model.format != "gguf":
-        reason = "FastVLM MLX/CoreML weights are downloaded; an MLX/CoreML vision runtime is required"
+        reason = "FastVLM weights are downloaded; their native vision runtime is not implemented in Gym"
     return {"id": model.id, "label": model.name, "model": str(model.path),
             "format": model.format, "backend": "llama.cpp" if supported else None,
             "mmproj": str(model.mmproj) if model.mmproj else None,
