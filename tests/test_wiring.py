@@ -12,6 +12,7 @@ REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "src" / "ml_stack"
 
 STANDALONE = {
+    "coding": "called by the workspace runner as ml_stack.coding.launch_coding_agent",
     "datasheet": "loaded by name as python:ml_stack.datasheet:tools, never imported",
     "redteam": "run as python -m ml_stack.redteam, never imported",
     "web": "loaded by name as python:ml_stack.web:tools, never imported",

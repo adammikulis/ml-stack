@@ -112,5 +112,6 @@ def test_the_report_and_the_refusals(cmp):
     for argv in (["--model", "Qwen3.8-Flash-Next-UD-Q4_K_XL"], []):
         assert cmp.main(argv) == 2
     done = subprocess.run([sys.executable, str(SCRIPT), "--on", "http://127.0.0.1:1", "--dry-run"],
-                          capture_output=True, text=True, check=False)
+                          capture_output=True, text=True, check=False,
+                          env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(SCRIPT.parent.parent / "src")})
     assert done.returncode == 0 and "ml_stack.claude" in done.stdout and "ml_stack.codex" in done.stdout
