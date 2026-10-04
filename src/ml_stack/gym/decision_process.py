@@ -15,7 +15,7 @@ from ml_stack.gym.transport import interpreter, python_environment
 from ml_stack.platform import start_process, terminate_process_group
 from ml_stack.serve import broker_wire
 from ml_stack.serve.exit_guard import protect, release
-from ml_stack.train.gpu import hold
+from ml_stack.serve.gpu import hold
 
 
 def decision_controller(checkpoint=None, device="cpu"):
