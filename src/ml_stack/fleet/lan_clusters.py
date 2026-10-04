@@ -11,7 +11,7 @@ from typing import Any
 from . import discovery
 
 
-def _hint(raw: bytes, nonce: str) -> str | None:
+def _hint(raw: bytes, nonce: str) -> dict[str, str] | None:
     if len(raw) > 2048:
         return None
     try:
@@ -20,10 +20,13 @@ def _hint(raw: bytes, nonce: str) -> str | None:
             return None
         if msg.get("kind") != "salt" or msg.get("nonce") != nonce:
             return None
+        name = discovery.require_name(msg.get("group"))
+        if msg.get("salt") == "":
+            return {"group": name, "method": "recovery"}
         salt = base64.urlsafe_b64decode(msg["salt"] + "==")
         if not 16 <= len(salt) <= 64:
             return None
-        return discovery.require_name(msg.get("group"))
+        return {"group": name}
     except (ValueError, TypeError, KeyError, discovery.DiscoveryError):
         return None
 
@@ -32,7 +35,7 @@ def nearby(*, timeout_s: float = 1.5, port: int | None = None) -> list[dict[str,
     """Unverified cluster-name hints; joining separately authenticates the response."""
     nonce = secrets.token_hex(16)
     hello = json.dumps({"v": discovery.PROTOCOL, "kind": "hello", "nonce": nonce}).encode()
-    groups: set[str] = set()
+    groups: dict[tuple[str, str], dict[str, str]] = {}
     sources: dict[str, int] = {}
     target_port = port if port is not None else discovery.default_port()
     with discovery._socket(broadcast=True, bind=("", 0)) as sock:
@@ -51,8 +54,8 @@ def nearby(*, timeout_s: float = 1.5, port: int | None = None) -> list[dict[str,
                 continue
             group = _hint(raw, nonce)
             if group:
-                groups.add(group)
-    return [{"group": name} for name in sorted(groups, key=str.casefold)]
+                groups[(group["group"], group.get("method", "passphrase"))] = group
+    return sorted(groups.values(), key=lambda row: row["group"].casefold())
 
 
 def verified_salt(passphrase: str, group: str) -> discovery.Salting:
