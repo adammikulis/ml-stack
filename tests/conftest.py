@@ -1046,9 +1046,9 @@ def leased(backend, spec, **starting):
     return ServerManager(backend=backend, state_file=state).lease(spec, roam=False, **starting)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def playwright():
-    """The one Playwright this worker gets; a second in the same thread refuses."""
+    """The shared Playwright context for this test module."""
     pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
     with pw.sync_playwright() as play:
         yield play
