@@ -91,7 +91,7 @@ wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
       const paint = () => {
         const [line, warn] = this.readout(m);
         slider.valueText = gbOf(this.value);
-        note.replaceChildren(line, warn ? el("div", { class: "err" }, warn) : null);
+        note.replaceChildren(...M.kids(line, warn ? el("div", { class: "err" }, warn) : null));
       };
       slider.addEventListener("input", (e) => { this.value = e.detail.value; paint(); });
       paint();
@@ -114,12 +114,12 @@ wired-memory .room-actions { display: flex; gap: 8px; margin: 10px 0; }
         : "Not kept after a restart: this lasts until the computer restarts.";
       this.buttons = [apply, back];
       this.status = el("div", { class: "wired-status" });
-      this.replaceChildren(slider, note, this.pickers(this.data), verdict,
+      this.replaceChildren(...M.kids(slider, note, this.pickers(this.data), verdict,
         el("div", { class: "room-actions" }, apply, suggest, back),
         el("label", { class: "opt", for: `wired-keep-${this.uid}` }, keep, M.row("Keep this after restart", FACT)),
         el("div", { class: m.drift ? "err" : "hint" }, state),
         el("div", { class: "hint" }, "macOS asks for your password in its own window; it is never typed here."),
-        this.status);
+        this.status));
     }
 
     async change(path, body) {
