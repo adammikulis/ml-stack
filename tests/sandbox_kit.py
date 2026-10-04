@@ -4,6 +4,7 @@ for running this interpreter, and a loopback listener."""
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -14,9 +15,8 @@ import pytest
 
 from ml_stack import sandbox
 from ml_stack.sandbox import AllowUnsandboxed, Limits, Net, Policy
+from ml_stack.sandbox.policies import SYSTEM_EXEC
 from ml_stack.sandbox.seatbelt import Seatbelt
-
-SYSTEM_EXEC = ("/bin", "/usr/bin", "/usr/sbin", "/sbin")
 
 
 @pytest.fixture
@@ -35,6 +35,24 @@ def no_sandbox_here() -> AllowUnsandboxed | None:
     if sandbox.backend().available().ok:
         return None
     return AllowUnsandboxed("this test host has no sandbox and the test is not about one")
+
+
+def require_native_sandbox() -> None:
+    """Skip native success tests when the host cannot run a confined process."""
+    state = sandbox.backend().available()
+    if not state.ok:
+        pytest.skip(state.reason)
+    executable = os.path.realpath(shutil.which("true") or "/bin/true")
+    held = Policy("native-probe", exec=(executable,), env={},
+                  limits=Limits(wall_seconds=3, output_bytes=4096))
+    result = sandbox.run([executable], held, diagnose="never")
+    error = result.stderr.lower()
+    namespace_denied = "namespace" in error and any(
+        message in error for message in ("operation not permitted", "permission denied",
+                                        "not allow non-privileged user namespaces"))
+    if not result.ok and namespace_denied:
+        pytest.skip(f"native sandbox namespace unavailable: {result.stderr.strip()[:300]}")
+    assert result.ok, f"native sandbox probe failed: {result.stderr}"
 
 
 def runtime_reads() -> list[str]:
