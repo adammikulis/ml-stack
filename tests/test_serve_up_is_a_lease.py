@@ -127,12 +127,13 @@ def test_a_lease_queues_when_memory_is_short_and_starts_when_it_frees(
     second = gguf(tmp_path, "second.gguf", 900)
     code, up_first_out, _ = up(capsys, first, "--json")
     assert code == 0
-    machine.free = 100 * MIB  # what the first took; the second no longer fits beside it
+    machine.free = 1200 * MIB  # the second fits by its file size, not by its estimate (KV, runtime)
 
     code, out, err = up(capsys, second, "--no-wait")
     assert code == 0 and "queued" in (out + err)
     cli.main(["status", "--port", str(json.loads(up_first_out)["port"])])
     assert "queued" in capsys.readouterr().out
+    time.sleep(2.0)  # long enough for a broker that would admit it to have started it
     assert [h.status for h in holding.holds() if "second" in h.model] == ["queued"]
 
     assert cli.main(["down", "first"]) == 0

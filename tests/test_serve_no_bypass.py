@@ -129,6 +129,28 @@ def test_the_private_starts_are_only_reached_by_the_manager_and_the_broker():
     assert not found, where(found)
 
 
+def test_the_grant_is_only_opened_by_the_broker():
+    """`broker_grant` is what lets a `Lease` exist; opening it anywhere else is a start that
+    no queue, admission or port choice stood behind."""
+    found = {name for name, tree in parsed().items() for n in ast.walk(tree)
+             if (isinstance(n, ast.Name) and n.id == "broker_grant")
+             or (isinstance(n, ast.Attribute) and n.attr == "broker_grant")}
+    assert found <= {"serve/grant.py", "serve/broker.py"}, where(found)
+    assert "serve/broker.py" in found
+
+
+def test_the_up_command_reaches_a_server_only_through_a_lease():
+    """`up` and `down` call the holder's helpers, never a manager's start, a backend or the
+    private starts: the one way from the command line to a server is the broker's lease."""
+    for name in ("serve/lifecycle_cli.py", "serve/holding.py"):
+        reached = {called_name(c) for c in calls(parsed()[name])}
+        assert not reached & {"_start_server", "launch", "Lease", "Popen", "claim_port"}, (
+            f"{name}: {where(reached)}")
+    assert "lease" not in {called_name(c) for c in calls(parsed()["serve/lifecycle_cli.py"])}
+    assert "lease" in {called_name(c) for c in calls(parsed()["serve/holding.py"])}, (
+        "the holder asks the broker for its lease")
+
+
 def test_a_broker_is_only_built_where_the_machines_is_chosen():
     found = {name for name, tree in parsed().items()
              for c in calls(tree) if called_name(c) == "Broker"}
