@@ -53,10 +53,11 @@ def test_names_required_before_any_key_is_written(tmp_path, name):
     assert not discovery.memberships(tmp_path / "client.key")
 
 
+@pytest.mark.redteam
 def test_malformed_stale_and_oversized_hints_are_ignored():
     packet = {"v": discovery.PROTOCOL, "kind": "salt", "nonce": "fresh", "group": "Cedar lab",
               "salt": base64.urlsafe_b64encode(b"s" * 16).decode()}
-    assert lan_clusters._hint(json.dumps(packet).encode(), "fresh") == "Cedar lab"
+    assert lan_clusters._hint(json.dumps(packet).encode(), "fresh") == {"group": "Cedar lab"}
     assert lan_clusters._hint(json.dumps(packet).encode(), "stale") is None
     for bad in ([], None, {**packet, "group": False}, {**packet, "salt": []}, {**packet, "salt": "s"}):
         assert lan_clusters._hint(json.dumps(bad).encode(), "fresh") is None
@@ -87,6 +88,7 @@ def test_setup_api_rejects_missing_or_nonstring_names(serving, name):
     assert not discovery.memberships(serving.keyfile)
 
 
+@pytest.mark.redteam
 def test_prejoin_discovery_obeys_setup_boundary(serving, monkeypatch):
     monkeypatch.setattr(lan_clusters, "nearby", lambda **kwargs: [{"group": "Cedar lab"}])
     status, body, _ = serving.call("/ui/setup/clusters")
@@ -147,3 +149,87 @@ def test_existing_selection_requires_a_boolean(serving, selection):
         "group": "Cedar lab", "passphrase": WORDS, "existing": selection})
     assert status == 400 and "selection" in body["error"]
     assert not discovery.memberships(serving.keyfile)
+
+
+@pytest.fixture
+def random_cluster(tmp_path, serving, monkeypatch):
+    from ml_stack.fleet import recovery
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("", 0))
+        port = probe.getsockname()[1]
+    serving.ui.discovery_port = port
+    keyfile = tmp_path / "random-host.key"
+    key = discovery.create_cluster_key(keyfile, group="Pine workshop").encode()
+    tell = discovery.Advertiser(discovery.Beacon(name="tower"), key, port=port)
+    tell.cluster_name = "Pine workshop"
+    exported = tmp_path / "pine.recovery"
+    recovery.export_recovery(exported, path=keyfile)
+    with tell:
+        yield exported.read_text(), key
+
+
+@pytest.mark.redteam
+def test_random_key_hint_and_upload_authenticate_without_keystore(serving, random_cluster, monkeypatch):
+    from ml_stack import keystore
+
+    def forbidden():
+        raise AssertionError("random-key onboarding must not touch the keystore")
+
+    monkeypatch.setattr(keystore, "default", forbidden)
+    text, key = random_cluster
+    status, body, _ = serving.call("/ui/setup/clusters")
+    assert status == 200 and body["clusters"] == [{"group": "Pine workshop", "method": "recovery"}]
+    status, body, headers = serving.call("/ui/setup/recovery", method="POST", body={
+        "group": "Pine workshop", "recovery": text})
+    assert status == 200 and body["group"] == "Pine workshop" and "Set-Cookie" in headers
+    assert discovery.load_cluster_key(serving.keyfile) == key
+    assert key.decode() not in json.dumps(body)
+    assert serving.call("/ui/setup/recovery", method="POST", body={
+        "group": "Pine workshop", "recovery": text})[0] == 401
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("bad", [None, [], {}, "null", "[]", "{}", "x" * 8193])
+def test_hostile_recovery_upload_never_writes_membership(serving, bad):
+    status, _, _ = serving.call("/ui/setup/recovery", method="POST", body={
+        "group": "Pine workshop", "recovery": bad})
+    assert status == 400 and not discovery.memberships(serving.keyfile)
+
+
+@pytest.mark.redteam
+def test_wrong_name_wrong_key_and_cross_origin_cannot_import(serving, random_cluster):
+    text, _ = random_cluster
+    body = {"group": "Other workshop", "recovery": text}
+    assert serving.call("/ui/setup/recovery", method="POST", body=body)[0] == 400
+    data = json.loads("\n".join(line for line in text.splitlines() if not line.startswith("#")))
+    data["key"] = base64.urlsafe_b64encode(b"x" * 32).decode().rstrip("=")
+    body = {"group": "Pine workshop", "recovery": json.dumps(data)}
+    assert serving.call("/ui/setup/recovery", method="POST", body=body)[0] == 400
+    body["recovery"] = text
+    assert serving.call("/ui/setup/recovery", method="POST", body=body, ui_header=False)[0] == 403
+    assert serving.call("/ui/setup/recovery", method="POST", body=body,
+                        headers={"Host": "hostile.invalid"})[0] == 403
+    assert not discovery.memberships(serving.keyfile)
+
+
+@pytest.mark.slow
+def test_browser_random_cluster_recovery_picker(serving, random_cluster, playwright):
+    from playwright.sync_api import expect
+
+    text, key = random_cluster
+    with playwright.chromium.launch(headless=True) as browser:
+        page = browser.new_page(viewport={"width": 390, "height": 844})
+        page.goto(f"http://127.0.0.1:{serving.port}/ui/")
+        wizard = page.locator("first-run")
+        wizard.get_by_role("button", name="Continue", exact=True).click()
+        wizard.get_by_role("button", name="Join with recovery file", exact=True).click()
+        expect(wizard.get_by_role("button", name="Join Pine workshop with recovery file", exact=True)).to_be_disabled()
+        wizard.locator("#cluster-recovery-file").set_input_files({
+            "name": "pine.recovery", "mimeType": "text/plain", "buffer": text.encode()})
+        wizard.get_by_role("button", name="Join Pine workshop with recovery file", exact=True).click()
+        expect(wizard.get_by_text("Joined Pine workshop.", exact=True)).to_be_visible()
+        assert discovery.load_cluster_key(serving.keyfile) == key
+        assert key.decode() not in page.content()
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path="/private/tmp/ml-stack-random-lan-mobile.png", full_page=True)

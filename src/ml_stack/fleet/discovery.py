@@ -637,7 +637,7 @@ class Advertiser:
                 continue
             except OSError:
                 break
-            if self.salt and _asks_for_salt(raw):
+            if (self.salt or self.cluster_name) and _asks_for_salt(raw):
                 self._tell_salt(sock, raw, addr)
                 continue
             msg = _verify(self.key, raw, kind="who")

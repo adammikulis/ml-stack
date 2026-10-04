@@ -28,6 +28,7 @@ from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .room_routes import RoomRoutes
 from .session import parse_cookie
+from .setup_recovery_routes import SetupRecoveryRoutes
 from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"
@@ -833,7 +834,7 @@ class JobRoutes:
         return True
 
 
-class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
+class Router(PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
              RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
              WorkspaceRoutes, GymRecordingRoutes, GymRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
