@@ -10,6 +10,7 @@ from pathlib import Path
 from ml_stack.decide.pins import STRANDS
 from ml_stack.decide.pointer import PointerDecider
 from ml_stack.decide.sources import local_source
+from ml_stack.files import write_json
 from ml_stack.gym.adapters import actions, json_value, make_environment, render_state
 from ml_stack.gym.live_learning import create_policy, learn_rollout
 from ml_stack.gym.observations import decision_state
@@ -88,6 +89,7 @@ class Simulation:
             self.policy = decision_controller(decision_checkpoint)
             settings["model"] = str(decision_checkpoint or STRANDS)
             settings["device"] = "cpu"
+        settings["version"] = 1
         self.settings = settings
         self.path = artifact_root() / settings["id"]
         self.path.mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,7 @@ class Simulation:
         settings.setdefault("model", checkpoint if self.controller == "ppo" else
                             "MetaDrive IDM" if self.controller == "native-idm" else None)
         settings.setdefault("device", "cpu")
-        (self.path / "manifest.json").write_text(json.dumps(settings))
+        write_json(self.path / "manifest.json", settings)
         if self.controller == "ppo":
             if not checkpoint and not (self.world and self.learning_mode == "online"):
                 self.env.close()
@@ -135,7 +137,7 @@ class Simulation:
         self.seed = seed
         self.settings["seed"] = seed
         self.state["seed"] = seed
-        (self.path / "manifest.json").write_text(json.dumps(self.settings))
+        write_json(self.path / "manifest.json", self.settings)
         self.state["episode_id"] += 1
         self.state["sequence"] += 1
         self.state.update(status="paused", observation=json_value(self.observation), info=json_value(info),
@@ -230,7 +232,7 @@ class Simulation:
                 self.settings["config"][field] = payload[field]
         self.state["config"] = dict(self.settings["config"])
         self.state.update(model=self.settings["model"], device=self.settings["device"])
-        (self.path / "manifest.json").write_text(json.dumps(self.settings))
+        write_json(self.path / "manifest.json", self.settings)
 
     def command(self, command, payload):
         if command == "play":
@@ -262,7 +264,7 @@ class Simulation:
             self.state["learning_mode"] = mode
             self.settings["config"]["learning_mode"] = mode
             self.state["config"]["learning_mode"] = mode
-            (self.path / "manifest.json").write_text(json.dumps(self.settings))
+            write_json(self.path / "manifest.json", self.settings)
         elif command == "agent":
             if not self.world or not hasattr(self.env, "select_agent"):
                 raise ValueError("This environment does not expose individually controllable agents")
