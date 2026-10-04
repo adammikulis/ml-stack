@@ -247,6 +247,7 @@ def test_a_verify_with_nothing_to_re_run_says_so_rather_than_printing_nothing(ca
 
 def _mini(root: Path, test_body: str) -> None:
     (root / "src" / "ml_stack" / "toy").mkdir(parents=True)
+    (root / "src" / "ml_stack" / "__init__.py").write_text('', encoding="utf-8")
     (root / "src" / "ml_stack" / "toy" / "count.py").write_text(
         "def over(n):\n    if n > 3:\n        return 'many'\n    return 'few'\n", encoding="utf-8")
     (root / "tests").mkdir()
