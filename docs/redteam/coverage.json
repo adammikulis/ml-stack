@@ -1,8 +1,8 @@
 {
- "surfaces": 613,
+ "surfaces": 615,
  "by_status": {
   "covered": 300,
-  "partial": 201,
+  "partial": 203,
   "uncovered": 54,
   "n/a": 58,
   "unmapped": 0
@@ -101,7 +101,7 @@
   },
   "spawn": {
    "covered": 20,
-   "partial": 63,
+   "partial": 65,
    "uncovered": 0,
    "n/a": 1,
    "unmapped": 0
@@ -8658,6 +8658,30 @@
    "id": "spawn:workspace/notes.py:Notes.verify",
    "kind": "spawn",
    "source": "workspace/notes.py:Notes.verify",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:worktreerules.py:checkouts",
+   "kind": "spawn",
+   "source": "worktreerules.py:checkouts",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:worktreerules.py:commit_refusal",
+   "kind": "spawn",
+   "source": "worktreerules.py:commit_refusal",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "partial",
