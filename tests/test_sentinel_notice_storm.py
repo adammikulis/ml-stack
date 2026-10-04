@@ -42,7 +42,10 @@ def desk(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if k not in ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")}
     env.update(PATH=f"{shims}{os.pathsep}{env['PATH']}", DESK_LOG=str(log), ML_STACK_NOTIFY="system",
-               PYTHONPATH=SRC, ML_STACK_HOME=os.environ["ML_STACK_HOME"])
+               PYTHONPATH=os.pathsep.join([SRC, str(Path(__file__).parent)]),
+               ML_STACK_HOME=os.environ["ML_STACK_HOME"],
+               PYTHON_KEYRING_BACKEND="onboard_support.FileKeyring",
+               ML_STACK_TEST_KEYRING=str(tmp_path / "keyring.json"))
     return env, log
 
 

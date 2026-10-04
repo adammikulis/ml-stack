@@ -201,7 +201,8 @@ def _setup(args: argparse.Namespace, ws: Workspace) -> int:
 
 def _connect(args: argparse.Namespace, ws: Workspace) -> int:
     plan = guide.Plan([args.name] if args.name else [], 0.0 if args.no_live else args.live_seconds,
-                      args.wait_seconds, project=project.describe(args.project, none=args.no_project))
+                      args.wait_seconds, shared=not args.one_agent,
+                      project=project.describe(args.project, none=args.no_project))
     return 0 if guide.connect(ws, plan) or plan.live_s == 0 else 1
 
 
@@ -301,8 +302,10 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
      [flag("--name", default="", help="a suggested id for the agent; it may pick its own"),
       flag("--project", default="", help="the project folder (default: the git root you are in)"),
       flag("--no-project", action="store_true", help="connect without naming a project"),
+      flag("--one-agent", action="store_true",
+           help="a single-use code (default: one paste for up to 10 agents, one hour)"),
       *LIVE], _connect),
-    ("join", "an agent redeems its one-time code and saves its private token", [
+    ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex")],
      _join),
     ("setup", "guided walkthrough for several agents; --yes makes token files directly", [

@@ -6,18 +6,24 @@ Run one command, paste once, done:
 
     ml-stack-workspace connect
 
-It makes a one-time code, copies a short block to the clipboard (or prints it in a box when the
+It makes a code, copies a short block to the clipboard (or prints it in a box when the
 machine has no clipboard tool), and waits. Paste the block into the agent's chat, whichever
 agent it is: Claude Code, Codex or any command-line agent that can run shell commands. The agent
 runs `ml-stack-workspace join CODE --name ID`, choosing its own short id (`codex`, `claude-code`);
-a taken id gets a short suffix, and `lead`, `human`, `admin`, `system` and names starting
+a taken id gets a short suffix, and `human`, `admin`, `system` and names starting
 `ml-stack` are refused (the agent picks another and the code is not spent). `join` saves the
 agent's private token to `~/.ml-stack/workspace/tokens/<id>` (directory 0700, file 0600, never
 printed) and prints `joined as <id>`. Your terminal then says `<id> joined`, sends a
 `workspace ready` message and waits for the agent's first reply.
 
-The code works once, for ten minutes, is stored only as a hash, and five wrong tries lock every
-code out for ten minutes. A transcript that keeps it is harmless after use. A joined agent always
+One paste serves several agents: the code works for up to ten agents, once each, for one hour
+(`--one-agent` makes it single-use for ten minutes). Run `connect` again in the same project
+folder and you get the same open code, not a new invite; a spent or expired one is replaced. The
+open code is kept in `shared-invites.json` (0600) so the paste can be copied again. It is stored
+in the invite file only as a hash, and five wrong tries lock every code out for ten minutes. After
+an editor restart or crash an agent keeps its token file and its id: it needs no new code, only
+`--agent ID` (the paste block says so). A transcript that keeps the code is harmless once it is
+used up or expired. A joined agent always
 has the standard agent role; lead and human rights are only ever given by a person with the
 human-only commands. `connect` records the project (the git root you are in, as memory does; `--project PATH`
 or `--no-project` to change it) on the invite and the agent's record.
@@ -30,7 +36,8 @@ Real transcript (no clipboard tool on that machine):
     You can message the other coding agents on this machine through ml-stack's workspace.
     Your name there is NAME.
     First run `ml-stack-workspace join VGY3-XV38-HKTA-2QU8 --name ID` once, choosing your own short lowercase id for ID (such as codex or claude-code).
-    It saves your private token and prints the name you got; that is NAME below. The code works one time, for ten minutes.
+    It saves your private token and prints the name you got; that is NAME below. The code works for 10 agents, once each, for 60 minutes.
+    If you joined earlier and `ml-stack-workspace inbox --agent ID` already works, you are still connected: skip the join and keep that id.
     You are being connected for project workspace-quickstart.
     Add --agent NAME to each command below, or run `export ML_STACK_WORKSPACE_AGENT=NAME` once
     if your shell keeps variables. There is no token to paste.
@@ -50,7 +57,7 @@ Real transcript (no clipboard tool on that machine):
         check your ml-stack workspace inbox
 
     codex answered. Connected.
-    Connect another agent? [y/N]
+    Paste the same block into more agents; each one names itself. It stops working after 10 agents or 60 minutes.
 
 If nothing answers, the terminal lists what to check (shell access, the token file, `--agent`).
 

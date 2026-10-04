@@ -35,13 +35,18 @@ from ml_stack.log import warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.events import Event, Severity
 
-__all__ = ["COOLDOWN_S", "ENV_NONINTERACTIVE", "NOTICE", "RATE_WINDOW_S", "READ_CEILING",
+__all__ = ["COOLDOWN_S", "ENV_NONINTERACTIVE", "ENV_NO_REAL", "NOTICE", "RATE_WINDOW_S", "READ_CEILING",
            "UNLOCK_COMMAND", "WRITE_CEILING", "Keystore", "KeystoreBusy", "KeystoreDenied", "KeystoreError",
            "KeystoreLocked", "KeystoreMissing", "KeystoreUnavailable", "Wires", "aead", "default", "hkdf",
-           "interactive", "os_user", "scrypt_key"]
+           "interactive", "is_real", "os_user", "scrypt_key"]
 
 SERVICE = "ml-stack"
 ENV_NONINTERACTIVE = "ML_STACK_NONINTERACTIVE"
+ENV_NO_REAL = "ML_STACK_NO_REAL_KEYSTORE"
+"""Set by the test suite for itself and every process it starts: the machine's own keystore is
+treated as absent, so a test child can never store or prompt for a Keychain item."""
+REAL_BACKENDS = ("keyring.backends.macOS", "keyring.backends.SecretService",
+                 "keyring.backends.Windows", "keyring.backends.kwallet")
 UNLOCK_COMMAND = "ml-stack-security unlock"
 READ_CEILING = 600
 WRITE_CEILING = 5
@@ -60,6 +65,12 @@ _VERSION = 1
 _JITTER = random.SystemRandom()
 logger = logging.getLogger("ml_stack.keystore")
 logger.addHandler(logging.NullHandler())
+
+
+def is_real(ring: Any) -> bool:
+    """Whether ``ring`` (or any backend a chainer holds) talks to the machine's own keystore."""
+    parts = getattr(ring, "backends", None) or [ring]
+    return any(type(part).__module__.startswith(REAL_BACKENDS) for part in parts)
 
 
 class KeystoreError(RuntimeError):
@@ -255,6 +266,8 @@ class Keystore:
             usable = float(getattr(keyring.get_keyring(), "priority", 0)) > 0
         except (keyring.errors.KeyringError, AttributeError, TypeError, ValueError, OSError):
             usable = False
+        if usable and os.environ.get(ENV_NO_REAL) and is_real(keyring.get_keyring()):
+            raise KeystoreUnavailable(f"the machine's own keystore is switched off ({ENV_NO_REAL})")
         if not usable:
             raise KeystoreUnavailable("this machine has no usable OS keystore (macOS Keychain, "
                                       "Linux Secret Service)")

@@ -38,6 +38,8 @@ class Limits:
     child_sends_per_window: int = 10
     child_ttl_s: float = 28_800.0
     invite_ttl_s: float = 600.0
+    shared_invite_ttl_s: float = 3_600.0
+    shared_invite_uses: int = 10
     invite_failures: int = 5
     verify_timeout_s: float = 60.0
     boards_created: int = 5
