@@ -121,6 +121,9 @@ installed package metadata records that source URL.
 
 ## Native procedural and manual worlds
 
+See [Persistent simulator worlds](live-worlds.md) for live actor lifecycles, frozen and online
+learning, agent inspection and control, and exact trajectory recording.
+
 World construction is configured under `config.world`. Its `mode` is `procedural` or
 `manual`, and its `seed` records the world definition independently of the controller's
 random seed. World construction does not determine episode limits or reset behavior;
