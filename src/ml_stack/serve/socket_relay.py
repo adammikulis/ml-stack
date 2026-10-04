@@ -17,7 +17,7 @@ __all__ = ["arguments", "main"]
 
 def arguments(argv: list[str], port: int, path: str) -> list[str]:
     """The relay supervisor command for an already confined command."""
-    return [sys.executable, "-m", __name__, str(port), path, *argv]
+    return [sys.executable, str(Path(__file__).resolve()), str(port), path, *argv]
 
 
 def _copy(client: socket.socket, target: str, stopping: threading.Event) -> None:
