@@ -8,9 +8,6 @@ from importlib.metadata import version
 from pathlib import Path
 from xml.etree import ElementTree
 
-import numpy as np
-from defusedxml.ElementTree import fromstring
-
 from ml_stack.gym.world_files import digest, directory, imported, record
 from ml_stack.lock import only_one
 
@@ -23,6 +20,8 @@ def bounded(value, low, high, name):
 
 
 def build(spec=None, seed=0):
+    import numpy as np
+
     spec = dict(spec or {})
     mode = spec.pop('mode', 'procedural')
     seed = int(spec.pop('seed', seed))
@@ -64,6 +63,7 @@ def build(spec=None, seed=0):
     return {'net_file': str(net), 'route_file': str(routes), 'sumo_seed': seed}, provenance
 
 def xml(path, expected):
+    from defusedxml.ElementTree import fromstring
     data = Path(path).read_bytes()
     if b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():
         raise ValueError('World XML cannot contain document types or entities')

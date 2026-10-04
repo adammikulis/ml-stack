@@ -5,7 +5,7 @@ import queue
 
 import pytest
 
-from ml_stack.gym import simulation
+from ml_stack.gym import simulation, training
 from ml_stack.gym.live_learning import learn_rollout
 
 
@@ -16,6 +16,7 @@ def test_online_ppo_changes_weights_and_frozen_mode_preserves_them(tmp_path, mon
     pytest.importorskip("rware")
     torch.set_num_threads(1)
     monkeypatch.setattr(simulation, "artifact_root", lambda: tmp_path)
+    monkeypatch.setattr(training, "artifact_root", lambda: tmp_path)
     live = simulation.Simulation({"id": "live", "environment": "warehouse", "seed": 11,
         "controller": "ppo", "config": {"simulation_mode": "world", "learning_mode": "online",
                                          "task_horizon": 3, "world": {"seed": 11}}})
@@ -35,6 +36,8 @@ def test_online_ppo_changes_weights_and_frozen_mode_preserves_them(tmp_path, mon
         assert live.state["info"]["world_reset_count"] == 1
         assert live.state["episode_id"] > 1
         assert (live.path / "policy.zip").is_file()
+        reloaded = training.load_policy(live.path / "policy.zip", live.env)
+        assert all(torch.equal(a, b) for a, b in zip(learned, reloaded.policy.parameters(), strict=True))
         live.command("learning", {"mode": "frozen"})
         for _ in range(6):
             live.step()
