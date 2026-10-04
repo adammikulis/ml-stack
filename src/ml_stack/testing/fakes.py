@@ -328,6 +328,7 @@ class FakeServe:
         manager: ServerManager | None = None,
         **spec_kwargs: object,
     ) -> Iterator[ServerInfo]:
+        spec_kwargs.pop("reason", None)
         spec = ServerSpec(model=model, port=port if port is not None else 1,
                           context=context, **spec_kwargs)  # type: ignore[arg-type]
         self.leased.append(spec)

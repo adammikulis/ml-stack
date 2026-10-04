@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""A SubagentStart hook: puts the worktree rule and the development branch in a subagent's context."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rules_loader  # noqa: E402
+
+
+def main() -> int:
+    event = json.load(sys.stdin)
+    rules = rules_loader.load()
+    found = rules.checkouts(event.get("cwd") or ".") if rules else None
+    if not found:
+        return 0
+    primary = found[1]
+    dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
+                         capture_output=True, text=True, check=False).stdout.strip()
+    text = (f"Worktree rule: the primary checkout {primary} is on the development branch {dev} and "
+            f"changes only by landing a branch. Work in your own worktree on your own branch cut "
+            f"from {dev}: `git log -1` there must contain the tip of {dev}, otherwise run "
+            f"`git reset --hard {dev}` in your worktree. Never edit, `git add`, `git commit` or "
+            f"`pip install -e` in {primary}; add files by name; never push or merge.")
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                             "additionalContext": text}}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

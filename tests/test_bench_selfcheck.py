@@ -352,3 +352,26 @@ def test_a_raw_serve_arg_passes_the_self_check_for_the_real_preflight_to_judge(t
                       "--serve-arg=-ub", "--serve-arg=2048", "--serve-mlock",
                       "--label-suffix=-ub2048"])
     assert "ub2048" in said or said
+
+
+def test_a_fleet_sweep_passes_the_self_check_on_the_line_a_peer_would_run(monkeypatch, capsys,
+                                                                         tmp_path):
+    import ml_stack.lock
+    from ml_stack.bench import ops
+
+    def taken(*a, **k):
+        raise AssertionError("a fleet sweep took the measuring lock before dispatching")
+
+    monkeypatch.setattr(ml_stack.lock, "only_one", taken)
+    monkeypatch.setattr(ops, "fleet_planned", lambda *a, **k: ops.Fleeted())
+    assert bench.main(["sweep", "--fleet", "--peers", "box", "--serve", "tiny.gguf", "--smoke",
+                       "--kept", str(tmp_path / "runs.ladybug")]) == 0
+    said = capsys.readouterr().out
+    assert said.splitlines()[0].startswith("selfcheck: ok (") and "FAILED" not in said
+
+
+def test_a_fleet_sweep_with_no_command_line_is_refused_in_plain_words(capsys):
+    from argparse import Namespace
+
+    assert bench._fleet_sweep(Namespace(serve=["m.gguf"], peers="", kept="x")) == 2
+    assert "this run has none" in capsys.readouterr().err

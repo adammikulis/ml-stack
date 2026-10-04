@@ -20,7 +20,13 @@ from pathlib import Path
 from typing import IO, Any
 
 from ml_stack import requests
-from ml_stack.harnesspolicy import Decision, _shell_line, decide, workspace_authority
+from ml_stack.harnesspolicy import (
+    Decision,
+    _shell_line,
+    decide,
+    primary_decision,
+    workspace_authority,
+)
 from ml_stack.keystore import ENV_NONINTERACTIVE
 
 __all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
@@ -74,8 +80,9 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     try:
         name = str(payload.get("tool_name", ""))
         inputs = args if isinstance(args, dict) else None
-        decision = workspace_authority(_shell_line(name, inputs), label) or decide(
-            role, name, inputs, roots=roots, protected=protected)
+        decision = (primary_decision(name, inputs, str(payload.get("cwd", "")))
+                    or workspace_authority(_shell_line(name, inputs), label)
+                    or decide(role, name, inputs, roots=roots, protected=protected))
     except FAILURES:
         decision = Decision("ask", "unsure", "the call could not be classified", "tool_call_destructive")
     if decision.action == "allow":

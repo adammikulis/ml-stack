@@ -1,7 +1,7 @@
 {
- "surfaces": 662,
+ "surfaces": 664,
  "by_status": {
-  "covered": 344,
+  "covered": 346,
   "partial": 201,
   "uncovered": 54,
   "n/a": 63,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 28,
+   "covered": 30,
    "partial": 63,
    "uncovered": 0,
    "n/a": 2,
@@ -9398,6 +9398,30 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:worktreerules.py:checkouts",
+   "kind": "spawn",
+   "source": "worktreerules.py:checkouts",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"
+   ],
+   "note": "git is run with argv only; the paths come from a tool call and are one argument each"
+  },
+  {
+   "id": "spawn:worktreerules.py:commit_refusal",
+   "kind": "spawn",
+   "source": "worktreerules.py:commit_refusal",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"
+   ],
+   "note": "git is run with argv only; the paths come from a tool call and are one argument each"
   }
  ]
 }

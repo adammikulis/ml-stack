@@ -9,9 +9,12 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.chat import forget_server
@@ -71,13 +74,28 @@ class Measuring(ServerFailed):
     """A measurement holds the card, so no second model is loaded onto it."""
 
 
+ASKING: ContextVar[int] = ContextVar("ml_stack_serve_asking", default=0)
+"""The pid of the process a broker is starting a server for."""
+
+
 def measurement_on_the_card() -> dict[str, Any] | None:
     """The measurement holding the bench's lock, or None when nothing is or this process
-    is the holder."""
+    or the process being served for is the holder."""
     held = measuring()
     if not held or self_or_ancestor(held.get("pid")):
         return None
+    asker = ASKING.get()
+    if asker and (held.get("pid") == asker or _descends_from(asker, held.get("pid"))):
+        return None
     return held
+
+
+def _descends_from(pid: int, ancestor: Any) -> bool:
+    """Whether ``ancestor`` is one of the processes that started ``pid``."""
+    try:
+        return any(p.pid == ancestor for p in psutil.Process(pid).parents())
+    except psutil.Error:
+        return False
 
 
 def measurement_said(held: dict[str, Any]) -> str:

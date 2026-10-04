@@ -117,3 +117,73 @@ def test_the_process_holding_the_lock_serves_its_own_model(tmp_path):
 
     info = manager.lease(_spec(), roam=False, timeout=1.0)
     assert backend.started == [info.port], "the holder is not refused by its own lock"
+
+
+def _broker(tmp_path, backend):
+    from ml_stack.serve.broker import Broker
+
+    manager = ServerManager(backend=backend, state_file=tmp_path / "servers.json")
+    return Broker(manager, idle_s=3600.0, room=lambda: None, scan=lambda: [])
+
+
+def _ask(model: str, pid: int):
+    from ml_stack.serve.broker import Ask
+
+    return Ask(purpose="bench", models=(model,), pid=pid, label=f"pid {pid}",
+               spec={"context": 512})
+
+
+def _sleeper():
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+def test_a_broker_does_not_refuse_the_measurement_that_asked(tmp_path, stranger):
+    _measuring(stranger, ["sweep", "--serve", "m.gguf"])
+    backend = _Backend()
+    grant = _broker(tmp_path, backend).lease(_ask("m.gguf", stranger), timeout=5)
+    assert backend.started == [grant.port]
+
+
+def test_a_broker_does_not_refuse_a_child_of_the_measurement():
+    from ml_stack.serve.manager import ASKING, measurement_on_the_card
+
+    child = _sleeper()
+    try:
+        _measuring(os.getpid(), ["sweep"])
+        token = ASKING.set(child.pid)
+        try:
+            assert measurement_on_the_card() is None
+        finally:
+            ASKING.reset(token)
+    finally:
+        child.kill()
+        child.wait(timeout=10)
+
+
+def test_a_broker_still_refuses_for_another_live_measurement(tmp_path, stranger):
+    from ml_stack.serve.broker import BrokerError
+
+    other = _sleeper()
+    try:
+        _measuring(stranger, ["sweep", "--serve", "m.gguf"])
+        backend = _Backend()
+        with pytest.raises(BrokerError, match="the card is being measured by"):
+            _broker(tmp_path, backend).lease(_ask("m.gguf", other.pid), timeout=0.3)
+        assert backend.started == []
+    finally:
+        other.kill()
+        other.wait(timeout=10)
+
+
+def test_a_dead_measurement_does_not_refuse(tmp_path):
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(timeout=10)
+    holder = _sleeper()
+    try:
+        _measuring(gone.pid, ["sweep"])
+        backend = _Backend()
+        grant = _broker(tmp_path, backend).lease(_ask("m.gguf", holder.pid), timeout=5)
+        assert backend.started == [grant.port]
+    finally:
+        holder.kill()
+        holder.wait(timeout=10)

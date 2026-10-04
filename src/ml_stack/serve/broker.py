@@ -33,7 +33,7 @@ from ml_stack.serve import canaries, grant, guarded, lease_history, provenance, 
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager, Starting
+from ml_stack.serve.manager import ASKING, BESIDE_HEADROOM, Measuring, ServerManager, Starting
 from ml_stack.serve.matching import model_matches
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free
 from ml_stack.serve.preflight import PreflightFailed
@@ -582,9 +582,13 @@ class Broker:
     def _start(self, waiting: Waiting, placeholder: Held) -> Grant:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
-            with grant.broker_grant():
-                info = self._manager_for(waiting.ask.options)._start_server(
-                    spec, how=Starting(roam=False, who=waiting.ask.label))
+            token = ASKING.set(waiting.ask.pid)
+            try:
+                with grant.broker_grant():
+                    info = self._manager_for(waiting.ask.options)._start_server(
+                        spec, how=Starting(roam=False, who=waiting.ask.label))
+            finally:
+                ASKING.reset(token)
         except Measuring:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
