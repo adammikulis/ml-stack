@@ -29,7 +29,7 @@ Backends sit behind one `Backend` protocol (`available`, `wrap`, `denials`):
 | Backend | Where | State |
 |---|---|---|
 | `seatbelt` | macOS, `sandbox-exec -p <profile> -- argv` | implemented, tested against the real tool |
-| `bubblewrap` | Linux, `bwrap --unshare-all --die-with-parent --new-session --clearenv ...` | argv built and tested; never run on Linux |
+| `bubblewrap` | Linux, `bwrap --unshare-all --die-with-parent --new-session --clearenv ...` | read grants, network denial, model relay and GPU discovery tested on WSL |
 | `container` | any | stub that raises `NotImplementedError`; plan below |
 | none | | `run` raises `SandboxUnavailable` and does not start the command |
 
