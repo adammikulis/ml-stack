@@ -83,7 +83,7 @@ jobs:
       - name: install test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap rustc cargo
           python -m pip install --upgrade pip build
           python -m pip install pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors
           # the store, the Hub client and the page reader: 150 tests build a real store,
