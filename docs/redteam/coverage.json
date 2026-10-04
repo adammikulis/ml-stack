@@ -1,7 +1,7 @@
 {
- "surfaces": 612,
+ "surfaces": 616,
  "by_status": {
-  "covered": 299,
+  "covered": 303,
   "partial": 201,
   "uncovered": 54,
   "n/a": 58,
@@ -65,7 +65,7 @@
    "unmapped": 0
   },
   "listener": {
-   "covered": 1,
+   "covered": 2,
    "partial": 5,
    "uncovered": 0,
    "n/a": 9,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 20,
+   "covered": 23,
    "partial": 63,
    "uncovered": 0,
    "n/a": 1,
@@ -3895,6 +3895,19 @@
    "status": "n/a",
    "tests": [],
    "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
+   "id": "listener:serve/socket_relay.py:supervise",
+   "kind": "listener",
+   "source": "serve/socket_relay.py:supervise",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "covered",
+   "tests": [
+    "tests/test_wsl_backend.py::test_relay_preserves_stream_and_releases_port_on_child_exit",
+    "tests/test_serverkeys.py"
+   ],
+   "note": "loopback relays opaque hostile HTTP and binary bytes through the private Unix socket; the managed model command includes its API key"
   },
   {
    "id": "listener:setup.py:_port_free",
@@ -8113,6 +8126,34 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:fleet/wsl.py:_read",
+   "kind": "spawn",
+   "source": "fleet/wsl.py:_read",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_wsl_backend.py::test_owned_process_preserves_hostile_arguments_without_a_shell",
+    "tests/test_wsl_backend.py::test_wsl_read_preserves_hostile_text_and_unicode",
+    "tests/test_wsl_backend.py::test_wsl_installer_passes_a_hostile_source_path_as_one_argument"
+   ],
+   "note": "shell metacharacters remain argv values; the WSL installer source path is one pip argument"
+  },
+  {
+   "id": "spawn:fleet/wsl.py:prepare",
+   "kind": "spawn",
+   "source": "fleet/wsl.py:prepare",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_wsl_backend.py::test_owned_process_preserves_hostile_arguments_without_a_shell",
+    "tests/test_wsl_backend.py::test_wsl_read_preserves_hostile_text_and_unicode",
+    "tests/test_wsl_backend.py::test_wsl_installer_passes_a_hostile_source_path_as_one_argument"
+   ],
+   "note": "shell metacharacters remain argv values; the WSL installer source path is one pip argument"
+  },
+  {
    "id": "spawn:gguf/convert.py:_run",
    "kind": "spawn",
    "source": "gguf/convert.py:_run",
@@ -8278,6 +8319,20 @@
     "tests/test_net_scan.py"
    ],
    "note": ""
+  },
+  {
+   "id": "spawn:platform.py:launch",
+   "kind": "spawn",
+   "source": "platform.py:launch",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_wsl_backend.py::test_owned_process_preserves_hostile_arguments_without_a_shell",
+    "tests/test_wsl_backend.py::test_wsl_read_preserves_hostile_text_and_unicode",
+    "tests/test_wsl_backend.py::test_wsl_installer_passes_a_hostile_source_path_as_one_argument"
+   ],
+   "note": "shell metacharacters remain argv values; the WSL installer source path is one pip argument"
   },
   {
    "id": "spawn:platform.py:open_path",
