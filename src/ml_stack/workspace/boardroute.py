@@ -1,4 +1,4 @@
-"""The Board's read-only local route: the person's boards, threads and conversations as JSON.
+"""The person's Board reads and posts through the local HTTP route.
 
 ``respond`` answers one request; ``serve`` runs it on a loopback socket with the Board page
 and the ml-ui assets. The page holds no token: the person's identity is read here, from the
@@ -91,22 +91,23 @@ class Request:
 def respond(ws: Workspace, req: Request) -> Reply:
     """The answer to one request."""
     parts = urlsplit(req.target)
-    refused = _checked(req.method, req.headers, req.port, parts.path == PREFIX + "post")
+    refused = _checked(req.method, req.headers, req.port, parts.path in (PREFIX + "post", PREFIX + "ack"))
     if refused:
         return refused
     if not req.signed_in:
         return _json(401, {"error": "sign in first"})
     if not parts.path.startswith(PREFIX):
         return _json(404, {"error": "no such route"})
-    query, api = parse_qs(parts.query, max_num_fields=8), ws.board
+    api = ws.board
     try:
         token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     except (Denied, OSError):
         return _json(503, {"error": "the person's identity is not set up: run `ml-stack-workspace setup`"})
     try:
+        query = parse_qs(parts.query, max_num_fields=8)
         route = parts.path[len(PREFIX):]
         if req.method == "POST":
-            return _json(200, _post(ws, token, req.body))
+            return _json(200, _ack(ws, token, req.body) if route == "ack" else _post(ws, token, req.body))
         if route == "file":
             return _file(ws, token, query)
         return _json(200, _answer(api, token, route, query))
@@ -135,6 +136,13 @@ def _answer(api: Any, token: str, route: str, query: Mapping[str, list[str]]) ->
     limit = _number(query, "limit", 100, 200)
     if route == "boards":
         return {"me": api.ws.auth(token).id, "boards": api.list(token)}
+    if route == "agents":
+        me = api.ws.auth(token)
+        if me.role != HUMAN:
+            raise Denied("only the person reads the agent directory from the page")
+        return {"owner_id": me.id, "agents": [
+            {"id": row["id"], "role": row["role"]}
+            for row in api.ws.registered()[:200] if row["id"] != me.id]}
     if route == "threads":
         found = _board(query)
         activity.record("board.view", subject=found)
@@ -167,6 +175,8 @@ def _post(ws: Workspace, token: str, raw: bytes) -> dict[str, Any]:
     if not isinstance(doc, dict) or not isinstance(doc.get("to"), str) \
             or not isinstance(doc.get("body"), str) or not doc["body"].strip():
         raise ValueError("a post needs a string `to` and a non-empty string `body`")
+    if set(doc) - {"to", "body", "subject", "reply_to", "type"}:
+        raise ValueError("unknown post field")
     kind, subject, reply = doc.get("type", "note"), doc.get("subject", ""), doc.get("reply_to", 0)
     if not isinstance(kind, str) or not isinstance(subject, str) or not isinstance(reply, int) \
             or isinstance(reply, bool):
@@ -175,11 +185,40 @@ def _post(ws: Workspace, token: str, raw: bytes) -> dict[str, Any]:
     if me.role != HUMAN:
         raise Denied("only the person posts from the page")
     to = doc["to"]
+    if to == "#announcements":
+        raise Denied("announcements are posted with the workspace announce command")
     if to.startswith("#") and not ws.board.can_post(me, to):
         ws.board.join(token, to)
     sent = ws.send(token, to, kind, doc["body"], subject=subject, reply_to=reply)
     activity.record("board.post", subject=to if to.startswith("#") else "dm", meta={"size": len(doc["body"])})
     return {"seq": sent["seq"], "to": to, "thread": sent["thread"]}
+
+
+def _ack(ws: Workspace, token: str, raw: bytes) -> dict[str, Any]:
+    if len(raw) > POST_MAX:
+        raise ValueError("the request is too large")
+    doc = json.loads(raw)
+    if not isinstance(doc, dict) or set(doc) not in ({"board", "through"}, {"to", "through"}):
+        raise ValueError("ack needs through and one board or recipient")
+    seq = doc["through"]
+    if type(seq) is not int or seq <= 0:
+        raise ValueError("through is a positive message number")
+    me = ws.auth(token)
+    if me.role != HUMAN:
+        raise Denied("only the person marks page messages read")
+    name = doc.get("board", doc.get("to"))
+    if not isinstance(name, str):
+        raise ValueError("board or recipient must be text")
+    if "board" in doc:
+        visible = ws.board.ui_read(token, name, seq - 1, 1)["messages"]
+        key = name
+    else:
+        visible = ws.board.ui_dm(token, me.id, name, 200)
+        key = "dm:" + name
+    if not any(message["seq"] == seq for message in visible):
+        raise Denied("through must identify a visible message in this conversation")
+    ws.board.store.mark(me.id, key, seq)
+    return doc
 
 
 def _page(req: Request) -> Reply:

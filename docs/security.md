@@ -503,3 +503,11 @@ The Tauri window capability allows core/window-state operations and the app's cl
 closing handlers for its main window. Remote IPC origins are loopback HTTP URLs. It declares
 no filesystem, shell, process-spawn or credential plugin permission. The packaged daemon still
 runs with the launching user's OS privileges; limiting webview IPC does not sandbox the daemon.
+
+Board participation in Fleet uses the existing UI authorization: a signed-in cluster session
+or a strictly local UI on an unjoined machine. Every API request requires the UI header;
+posts also require a same-origin JSON request. The maintained Board service reads the private
+person token on the server and verifies its human role. Browser requests cannot supply a
+sender or token. Messages pass through workspace screening, permissions and rate limits,
+and remain untrusted message content. Page posts cannot write announcements. The agent
+directory exposes identifiers and roles, never credentials. Requests are capped at 32 KiB.
