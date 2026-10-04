@@ -331,6 +331,8 @@ def serve_forever(root: Path | str | None = None,
     def joined_a_cluster() -> None:
         """Announce, and listen on the network now that peers are meant to reach this."""
         start_announcing()
+        for member in memberships(cluster_key_path):
+            say(f"  joined cluster {member.group!r}")
         if not host and listening[0] == LOOPBACK:
             widen.set()
             httpd.shutdown()
@@ -358,6 +360,8 @@ def serve_forever(root: Path | str | None = None,
         f"{listening[0]}:{port}"
         + ("" if listening[0] != LOOPBACK else "  (this machine only; --lan opens it)"))
     say(f"  name  {name}")
+    for member in memberships(cluster_key_path):
+        say(f"  cluster {member.group}")
     say(f"  root  {root}")
     say(f"  bench {measuring_home}")
     say(f"  slots {slots}")
@@ -423,7 +427,7 @@ def serve_forever(root: Path | str | None = None,
             for one in advertisers.values():
                 one.beacon.cert = served_cert()
                 one.announce()
-            say(f"  joined a cluster: now listening on {ALL_INTERFACES}:{port}")
+            say(f"  listening on {ALL_INTERFACES}:{port}")
     except KeyboardInterrupt:
         pass
     finally:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 import threading
 import time
@@ -78,9 +79,21 @@ def last_screen(name: str, *, track: str = "", port: int = HTTP_PORT) -> list[st
             "  next        ml-stack-fleet status    -- who else is in the fleet"]
 
 
-def main(argv: list[str] | None = None) -> int:
-    import argparse
+def _open_when_ready(port: int, browser: bool, stopped: threading.Event) -> None:
+    waiting = time.monotonic() + 20.0
+    notified = False
+    while not stopped.is_set():
+        if _health(port) is not None:
+            if browser:
+                webbrowser.open(f"http://127.0.0.1:{port}/ui/")
+            return
+        if not notified and time.monotonic() >= waiting:
+            say("ml-stack is still starting; waiting for its web interface.")
+            notified = True
+        stopped.wait(0.15)
 
+
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack",
         description="Start ml-stack on this machine and open it in your browser.")
@@ -107,15 +120,9 @@ def main(argv: list[str] | None = None) -> int:
             warn(str(exc))
             return 1
 
-    def open_when_ready() -> None:
-        if wait_for_health(known.port) is None:
-            warn("The daemon did not start. Its output is above.")
-            return
-        if not known.no_browser:
-            webbrowser.open(url)
-
-    # Started before the daemon takes over this thread, which never returns.
-    threading.Thread(target=open_when_ready, daemon=True).start()
+    stopped = threading.Event()
+    threading.Thread(target=_open_when_ready,
+                     args=(known.port, not known.no_browser, stopped), daemon=True).start()
     arguments = ["--port", str(known.port), *rest]
     if sys.platform == "win32":
         try:
@@ -123,9 +130,14 @@ def main(argv: list[str] | None = None) -> int:
         except (WSLError, OSError) as exc:
             warn(str(exc))
             return 1
+        finally:
+            stopped.set()
     from .daemon import main as daemon_main
 
-    return daemon_main(arguments)
+    try:
+        return daemon_main(arguments)
+    finally:
+        stopped.set()
 
 
 if __name__ == "__main__":

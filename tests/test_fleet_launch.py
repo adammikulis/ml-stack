@@ -75,6 +75,42 @@ def test_the_installer_prints_it(capsys):
     assert "  machine     box" in capsys.readouterr().out
 
 
+def test_browser_waits_through_slow_startup(monkeypatch, capsys):
+    clock = iter([0.0, 21.0, 22.0])
+    answers = iter([None, None, {"name": "box"}])
+    opened = []
+    stopped = threading.Event()
+    monkeypatch.setattr(launch.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(launch, "_health", lambda port: next(answers))
+    monkeypatch.setattr(stopped, "wait", lambda seconds: False)
+    monkeypatch.setattr(launch.webbrowser, "open", opened.append)
+    launch._open_when_ready(8770, True, stopped)
+    assert opened == ["http://127.0.0.1:8770/ui/"]
+    text = capsys.readouterr().out
+    assert text.count("still starting") == 1
+    assert "did not start" not in text
+
+
+def test_browser_stops_waiting_when_daemon_exits(monkeypatch):
+    stopped = threading.Event()
+    opened = []
+
+    def health(port):
+        stopped.set()
+        return None
+
+    monkeypatch.setattr(launch, "_health", health)
+    monkeypatch.setattr(launch.webbrowser, "open", opened.append)
+    launch._open_when_ready(8770, True, stopped)
+    assert not opened
+
+
+def test_no_browser_still_waits_for_health(monkeypatch):
+    monkeypatch.setattr(launch, "_health", lambda port: {})
+    monkeypatch.setattr(launch.webbrowser, "open", lambda url: pytest.fail(url))
+    launch._open_when_ready(8770, False, threading.Event())
+
+
 def test_a_vcs_install_names_its_commit_on_the_done_screen(monkeypatch):
     from ml_stack.fleet import measuring, updates
 

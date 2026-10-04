@@ -29,7 +29,7 @@ from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
 from ml_stack.fleet.jobs import DaemonError, JobRunner
 from ml_stack.fleet.remote import Peer, PeerError
 from ml_stack.http import Server
-from tests.cluster_support import any_command
+from tests.cluster_support import any_command, join_cluster
 
 
 def _free_port() -> int:
@@ -763,6 +763,7 @@ def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
     root = tmp_path / "traind"
     (root / "files").mkdir(parents=True)
     Settings(name="briarcombe-loop").save(root / "settings.json")
+    join_cluster("copper willow river", group="default")
     port = _free_port()
     repo = Path(__file__).resolve().parent.parent
     env = {**os.environ, "PYTHONPATH": str(repo / "src"), "PYTHONUNBUFFERED": "1"}
@@ -797,6 +798,7 @@ def test_serve_forever_prefers_the_settings_name_over_the_hostname(tmp_path):
 
     assert health is not None and health["name"] == "briarcombe-loop"
     assert health["name"] != socket.gethostname()
+    assert "  cluster default" in log.read_text(errors="replace")
 
 
 def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):
