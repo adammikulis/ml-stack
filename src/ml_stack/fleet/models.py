@@ -19,6 +19,7 @@ from typing import Any
 from ml_stack import hub
 from ml_stack.files import UNVERSIONED, promote, read_json, version_of, versioned, write_json
 from ml_stack.httpguard import Limits, Refused, stream
+from ml_stack.net import sniff
 from ml_stack.safenames import Unsafe, safe_filename
 
 from .weights import ModelError, resolve
@@ -120,6 +121,20 @@ def sized(count: int) -> str:
     if count >= 2**30:
         return f"{count / 2**30:.1f}G"
     return f"{count / 2**20:.0f}M"
+
+
+def _require_weights(path: Path, name: str, stamp: Path | None = None) -> None:
+    """Delete ``path`` and raise unless it is the weights file ``name`` claims to be."""
+    low = name.lower()
+    if low.endswith(sniff.PICKLE_SUFFIXES):
+        problems: tuple[str, ...] = ("pickle-based weights are not accepted",)
+    else:
+        problems = sniff.sniff(path, sniff.expected_kind(low) or "model").problems
+    if problems:
+        path.unlink(missing_ok=True)
+        if stamp is not None:
+            stamp.unlink(missing_ok=True)
+        raise ModelError(f"{name}: not a usable weights file ({'; '.join(problems)})")
 
 
 @dataclass
@@ -252,9 +267,16 @@ class Models:
         if match is None:
             raise ModelError(f"{base_url} no longer has {name}")
         self.store.mkdir(parents=True, exist_ok=True)
-        target = self.store / str(match["name"])
+        try:
+            fname = safe_filename(Path(str(match["name"])).name)
+        except Unsafe as exc:
+            raise ModelError(f"{base_url} offered a model name that is not a file name: {exc}") from None
+        if Path(fname).suffix.lower() not in hub.WEIGHT_SUFFIXES:
+            raise ModelError(f"{base_url} offered {fname!r}, which is not a weights file")
+        target = self.store / fname
         peer.pull(str(match["name"]), target, on_progress=on_progress,
                   route="/models/")
+        _require_weights(target, fname)
         stat = target.stat()
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 
@@ -301,6 +323,7 @@ class Models:
         if got.status == 416 and start:
             size = range_total(got.headers.get("content-range", ""))
             if size is not None and size == start:
+                _require_weights(partial, target.name, stamp)
                 promote(partial, target)
                 stamp.unlink(missing_ok=True)
                 stat = target.stat()
@@ -334,6 +357,7 @@ class Models:
             raise ModelError(
                 f"{name}: got {partial.stat().st_size} of {total} bytes; "
                 f"left {partial.name} to resume from")
+        _require_weights(partial, target.name, stamp)
         promote(partial, target)
         stamp.unlink(missing_ok=True)
         stat = target.stat()

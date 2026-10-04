@@ -139,6 +139,7 @@ class Fetcher:
     def start(self, *, source: str, relpath: str, to: str,
               sha256: str = "") -> Fetch:
         target = safe_relpath(self.files_root, to)
+        safe_relpath(self.files_root, relpath)
         fetch = Fetch(id=f"{int(time.time())}-{secrets.token_hex(3)}",
                       source=source, relpath=relpath, to=to)
         with self._lock:
