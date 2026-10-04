@@ -42,8 +42,6 @@ consulted; the image is public and needs no login.
 HELP
 }
 
-ORIGINAL_ARGS=("$@")
-
 SINGLE=""
 REBUILD=""
 while [ $# -gt 0 ]; do
@@ -68,118 +66,48 @@ if ! docker info >/dev/null 2>&1; then
   exit 2
 fi
 
-# Queue for workers in the machine-wide budget, then run again holding the lease.
-if [ -z "${DEV_TEST_WORKERS:-}" ]; then
-  rm -rf "$DCFG" "$STAGE"
-  trap - EXIT
-  exec python3 "$REPO/scripts/testslots.py" run --want 4 --min 2 --label "ml-stack: test-on-linux" -- "$0" "${ORIGINAL_ARGS[@]}"
-fi
-
-git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
-(cd "$REPO" && tar -cf - --exclude .git --exclude __pycache__ .) | (cd "$STAGE/repo" && tar -xf -)
-
 PYTEST_ARGS=("$@")
 [ ${#PYTEST_ARGS[@]} -eq 0 ] && PYTEST_ARGS=(tests/ -q)
-if [ -n "$SINGLE" ]; then
-  PYTEST_ARGS+=(-n 0)
-elif ! printf '%s\n' "${PYTEST_ARGS[@]}" | grep -q -e '^-n' -e '^--numprocesses'; then
-  PYTEST_ARGS+=(-n "${DEV_TEST_WORKERS:-4}")
-fi
-
-# --init: without a real pid 1 the suite's own parent is pid 0, and a server owned by a
-# process that does not exist is an orphan to stop.
-docker run --rm -i --init \
-  ${PLATFORM:+--platform "$PLATFORM"} \
-  -v "$STAGE/repo":/src:ro \
-  -v "$VOLUME":/venv \
-  -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
-  -e PIP_CACHE_DIR=/venv/pipcache \
-  -e IMAGE="$IMAGE" \
-  -e REBUILD="$REBUILD" \
-  -w /work \
-  "$IMAGE" \
-  bash -s -- "${PYTEST_ARGS[@]}" <<'INNER'
-set -euo pipefail
-
-# Same set as ci.yml's "install test dependencies", and the same reasons.
-apt-get update -qq
-apt-get install -y -qq bubblewrap rustc cargo >/dev/null
-DEPS='pytest pytest-xdist pyyaml numpy psutil pillow networkx gguf safetensors'
-# The runners have cmake; the image has not, and tests/test_serve_build.py configures a
-# checkout with it. PyPI's wheel carries the binary, so it caches with the venv.
-DEPS="$DEPS cmake"
-EXTRAS='.[test,store,hub,web,plot,privacy,guardrails,mcp,memory,fleet-onboard,pdf]'
-if printf '%s\n' "$@" | grep -qx -- '--redteam'; then
-  EXTRAS="${EXTRAS%]},redteam]"
-fi
-
-mkdir -p /work
-tar -C /src -cf - --exclude __pycache__ . | tar -C /work -xf -
-git config --global --add safe.directory /work
-
-# Keyed by the stamp, so a concurrent run needing a different one builds a sibling
-# instead of deleting the env this run may be using.
-HASH="$( { echo "$DEPS $EXTRAS $IMAGE"; cat /work/pyproject.toml; } | sha256sum | cut -d' ' -f1)"
-ENV_DIR="/venv/$HASH/env"
-STAMP="/venv/$HASH/stamp"
-mkdir -p /venv
-[ -n "${REBUILD:-}" ] && rm -f "$STAMP"
-
-# flock serialises two runs that both need this stamp; the stamp is written last so a
-# build another run started, and has not finished, is never read as done.
-exec 9>"/venv/$HASH.lock"
-flock 9
-if [ ! -f "$STAMP" ]; then
-  echo "test-on-linux: building the shared venv for this stamp (a few minutes; cached after this)" >&2
-  rm -rf "$ENV_DIR"
-  python -m venv "$ENV_DIR"
-  "$ENV_DIR/bin/pip" install -q --upgrade pip build
-  "$ENV_DIR/bin/pip" install -q $DEPS
-  "$ENV_DIR/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
-  "$ENV_DIR/bin/pip" install -q -e "/work/$EXTRAS"
-  "$ENV_DIR/bin/python" -m spacy download en_core_web_sm
-  # Only the dependencies belong in the shared env; this run's own editable install of
-  # ml-stack goes in its private venv below.
-  "$ENV_DIR/bin/pip" uninstall -y -q ml-stack
-  touch "$STAMP"
-fi
-flock -u 9
-exec 9>&-
-
-# Sibling envs for a stamp nobody has used in days, taken non-blocking so a build another
-# run is doing right now is left alone.
-for dir in /venv/*/; do
-  dir="${dir%/}"
-  sibling="$(basename "$dir")"
-  [[ "$sibling" =~ ^[0-9a-f]{64}$ ]] || continue
-  [ "$sibling" = "$HASH" ] && continue
-  [ -f "$dir/stamp" ] || continue
-  [ -z "$(find "$dir/stamp" -mtime +4)" ] && continue
-  exec 8>"/venv/$sibling.lock"
-  flock -n 8 && rm -rf "$dir" "/venv/$sibling.lock"
-  exec 8>&-
+WANT=0
+[ -n "$SINGLE" ] && WANT=1
+# The scheduler owns the process count; explicit pytest values are ceilings.
+CLEAN_ARGS=()
+while [ ${#PYTEST_ARGS[@]} -gt 0 ]; do
+  ARG="${PYTEST_ARGS[0]}"
+  PYTEST_ARGS=("${PYTEST_ARGS[@]:1}")
+  case "$ARG" in
+    -n|--numprocesses)
+      WANT="${PYTEST_ARGS[0]}"; PYTEST_ARGS=("${PYTEST_ARGS[@]:1}") ;;
+    -n[0-9]*|--numprocesses=*) WANT="${ARG#*=}"; WANT="${WANT#-n}" ;;
+    *) CLEAN_ARGS+=("$ARG") ;;
+  esac
 done
-
-# This run's own venv, outside the shared volume, seeing the shared env's dependencies
-# through a .pth file. Its editable install of ml-stack, and the entry points that
-# registers, belong to this run alone.
-PRIV=/priv-venv
-python -m venv "$PRIV"
-PURELIB='import sysconfig; print(sysconfig.get_path("purelib"))'
-SHARED_SITE="$("$ENV_DIR/bin/python" -c "$PURELIB")"
-PRIV_SITE="$("$PRIV/bin/python" -c "$PURELIB")"
-rm -rf "$SHARED_SITE/tests"
-echo "$SHARED_SITE" > "$PRIV_SITE/shared-env.pth"
-"$PRIV/bin/pip" install -q --no-deps -e /work
-
-# As a person runs it, and as CI runs it. Root ignores a 0o500 directory, so the tests
-# that check a refusal on an unwritable path see no refusal.
-useradd --uid 1000 --create-home tester
-chown -R 1000:1000 /work /home/tester "$PRIV"
-export HOME=/home/tester
-# A fake server the tests write into a temp directory runs `python3` off PATH; the
-# private venv is the one with pytest and the rest of the deps, ahead of the shared env's
-# own bin, which still needs to be reachable for a dependency's console script (cmake).
-export PATH="$PRIV/bin:$ENV_DIR/bin:$PATH"
-exec setpriv --reuid=1000 --regid=1000 --clear-groups "$PRIV/bin/python" -m pytest "$@"
-INNER
+case "$WANT" in
+  auto) WANT=0 ;;
+  0) [ -z "$SINGLE" ] || WANT=1 ;;
+esac
+[ -n "$SINGLE" ] && WANT=1
+BROKER="${DEV_TEST_SLOTS_DIR:-$HOME/.cache/dev-test-slots}"
+mkdir -p "$BROKER"
+BROKER="$(cd "$BROKER" && pwd)"
+export DEV_TEST_SLOTS_DIR="$BROKER"
+git clone -q --no-hardlinks "$REPO" "$STAGE/repo"
+(cd "$REPO" && tar -cf - --exclude .git --exclude __pycache__ .) | (cd "$STAGE/repo" && tar -xf -)
+CONTAINER=""
+cleanup() {
+  [ -z "$CONTAINER" ] || docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$DCFG" "$STAGE"
+}
+trap cleanup EXIT
+CONTAINER="$(docker run -d --init ${PLATFORM:+--platform "$PLATFORM"} \
+  -v "$STAGE/repo":/src:ro -v "$VOLUME":/venv \
+  -e PIP_DISABLE_PIP_VERSION_CHECK=1 -e PIP_CACHE_DIR=/venv/pipcache \
+  -e IMAGE="$IMAGE" -e REBUILD="$REBUILD" \
+  -e HOST_UID=1000 -e HOST_GID=1000 \
+  -w /work "$IMAGE" sleep infinity)"
+python3 "$REPO/scripts/testslots.py" run --want 1 --min 1 --label "ml-stack: Linux setup" -- \
+  docker --config "$DCFG" exec "$CONTAINER" bash /src/scripts/test-on-linux-setup "${CLEAN_ARGS[@]}"
+export ML_STACK_LINUX_CONTAINER="$CONTAINER" ML_STACK_LINUX_DCFG="$DCFG"
+export ML_STACK_LINUX_UID=1000 ML_STACK_LINUX_GID=1000 ML_STACK_LINUX_SINGLE="$SINGLE"
+python3 "$REPO/scripts/testslots.py" pytest --container --want "$WANT" --min 1 --label "ml-stack: Linux tests" -- \
+  bash "$REPO/scripts/test-on-linux-exec" "${CLEAN_ARGS[@]}"
