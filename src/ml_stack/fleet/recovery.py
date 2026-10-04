@@ -100,11 +100,6 @@ def export_recovery(file: Path | str, group: str = "", path: Path | str | None =
     return held
 
 
-def has_passphrase(group: str, path: Path | str | None = None) -> bool:
-    """Whether a wrapped passphrase is recorded, without opening the keystore."""
-    return group in _held(path)
-
-
 def parse_recovery(text: str) -> Membership:
     """Read a named 256-bit key from bounded recovery-file text."""
     try:

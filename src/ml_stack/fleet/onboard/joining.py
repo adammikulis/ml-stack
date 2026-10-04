@@ -299,26 +299,26 @@ def join_by_passphrase(passphrase: str, group: str,
     """Join ``group``: a daemon in it gives this machine the cluster key when the passphrase is
     right; when none answers, this machine keeps its own cluster of that name or makes one."""
     group = disc.require_name(group)
-    words = disc.check_length(passphrase)
+    secret = join_secret(disc.check_length(passphrase), group)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
-        return held or disc.mint_cluster(group, path)
-    return _accept(joiners, group, words, path)
+        return held or disc.mint_cluster(group, path, join=secret)
+    return _accept(joiners, group, secret, path)
 
 
 def join_existing(passphrase: str, group: str, path: Path | str | None = None, *,
                   timeout_s: float = 1.5, port: int | None = None) -> Membership:
     """Join a selected live cluster; never create a replacement when it disappears."""
     group = disc.require_name(group)
-    words = disc.check_length(passphrase)
+    secret = join_secret(disc.check_length(passphrase), group)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
         raise DiscoveryError("cluster is no longer available; refresh nearby clusters")
-    return _accept(joiners, group, words, path)
+    return _accept(joiners, group, secret, path)
 
 
-def _accept(joiners: list[Joiner], group: str, words: str,
+def _accept(joiners: list[Joiner], group: str, secret: str,
             path: Path | str | None) -> Membership:
     refused: list[Declined] = []
     for one in joiners:

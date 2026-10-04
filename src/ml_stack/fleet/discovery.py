@@ -81,7 +81,7 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
-def mint_cluster(group: str, path: Path | str | None = None) -> Membership:
+def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "") -> Membership:
     """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
     group = require_name(group)
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
