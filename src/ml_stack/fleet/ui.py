@@ -25,7 +25,7 @@ from .discovery import (
     named_apart,
 )
 from .join import default_root
-from .onboard.joining import join_by_passphrase
+from .onboard.joining import join_by_passphrase, matches
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -535,8 +535,14 @@ class UI:
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
-        if not recovery.matches(passphrase, group or cluster_group(self.cluster_key_path) or "",
-                                self.cluster_key_path):
+        if not self.throttle.acquire():
+            raise DiscoveryError("busy checking another passphrase; try again")
+        try:
+            ok = matches(passphrase, group or cluster_group(self.cluster_key_path) or "",
+                         self.cluster_key_path)
+        finally:
+            self.throttle.release()
+        if not ok:
             self.throttle.failed(source)
             return None
         self.throttle.succeeded(source)

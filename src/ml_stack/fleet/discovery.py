@@ -71,10 +71,11 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
-def mint_cluster(group: str = DEFAULT_CLUSTER, path: Path | str | None = None) -> Membership:
+def mint_cluster(group: str = DEFAULT_CLUSTER, path: Path | str | None = None, *,
+                 join: str = "") -> Membership:
     """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
-    return adopt(Membership(group=group, key=key), path)
+    return adopt(Membership(group=group, key=key, join=join), path)
 
 
 def create_cluster_key(path: Path | str | None = None, *,
@@ -124,6 +125,9 @@ class Membership:
     group: str
     key: bytes
     """The cluster's random 256-bit key, urlsafe base64."""
+    join: str = ""
+    """What the join handshake takes as the passphrase (`onboard.joining.join_secret`); empty
+    on a machine that does not know the passphrase."""
 
     def public(self) -> dict[str, Any]:
         return {"group": self.group}
@@ -148,12 +152,12 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
         return _adopt_single(path)
     for row in raw if isinstance(raw, list) else []:
         try:
-            group, key = str(row["group"]), str(row["key"]).encode()
+            group, key, join = str(row["group"]), str(row["key"]).encode(), str(row.get("join") or "")
         except (KeyError, TypeError, AttributeError):
             continue
         if key and group not in seen:
             seen.add(group)
-            out.append(Membership(group=group, key=key))
+            out.append(Membership(group=group, key=key, join=join))
     return out
 
 
@@ -179,7 +183,7 @@ def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    write_json(listed, [{"group": m.group, "key": m.key.decode()} for m in rows])
+    write_json(listed, [{"group": m.group, "key": m.key.decode(), "join": m.join} for m in rows])
     private_file(listed)
 
 

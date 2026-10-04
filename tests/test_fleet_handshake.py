@@ -27,7 +27,7 @@ from ml_stack.fleet.discovery import (
 )
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.onboard import joining, pake
-from ml_stack.fleet.onboard.joining import Joining, join_by_passphrase
+from ml_stack.fleet.onboard.joining import Joining, join_by_passphrase, join_secret, matches
 from ml_stack.fleet.remote import Peer, PeerError
 
 WORDS = "quince larch marlow"
@@ -45,14 +45,13 @@ class Machine:
     def __init__(self, tmp_path, udp: int) -> None:
         self.keyfile = tmp_path / "a" / "cluster.key"
         self.keyfile.parent.mkdir()
-        self.member = mint_cluster("lab", self.keyfile)
+        self.member = mint_cluster("lab", self.keyfile, join=join_secret(WORDS, "lab"))
         root = tmp_path / "a" / "traind"
         (root / "files").mkdir(parents=True)
         self.runner = JobRunner(root)
         self.logged: list[str] = []
         self.captured: list[tuple[str, dict, dict]] = []
-        self.joining = Joining(lambda: memberships(self.keyfile), lambda group: WORDS,
-                               log=self.logged.append)
+        self.joining = Joining(lambda: memberships(self.keyfile), log=self.logged.append)
         handle = self.joining.handle
 
         def record(path, body, source):
@@ -129,6 +128,14 @@ def test_a_source_that_keeps_failing_is_locked_out_even_with_the_right_words(mac
     assert sum("wrong passphrase" in line for line in machine.logged) == 5
 
 
+def test_a_joined_machine_checks_a_sign_in_against_what_it_was_joined_with(machine, tmp_path, udp):
+    _join(tmp_path, udp)
+    keyfile = tmp_path / "b" / "cluster.key"
+    assert matches(WORDS, "lab", keyfile) and matches(f"  {WORDS}\n", "", keyfile)
+    assert not matches("some other words", "lab", keyfile) and not matches(WORDS, "elsewhere", keyfile)
+    assert WORDS not in keyfile.with_suffix(".json").read_text()
+
+
 def test_a_passphrase_under_five_characters_is_refused_before_anything_is_sent(machine, tmp_path, udp):
     with pytest.raises(DiscoveryError, match=r"The passphrase needs at least 5 characters\."):
         _join(tmp_path, udp, "abcd")
@@ -149,8 +156,8 @@ def test_a_captured_join_holds_nothing_to_test_a_guess_against(machine, tmp_path
     (_, start, started), (_, finish, done) = machine.captured
     for words in (WORDS, "password", "quince"):
         context = joining._context("lab", start["nonce"])
-        attacker = pake.start_initiator(words, context=context, mine=joining.CLIENT,
-                                        theirs=joining.PLAIN)
+        attacker = pake.start_initiator(join_secret(words, "lab"), context=context,
+                                        mine=joining.CLIENT, theirs=joining.PLAIN)
         try:
             attacker.receive(started["message"])
         except pake.Bad:
@@ -184,7 +191,8 @@ def test_a_finish_for_a_join_nobody_started_is_refused(machine):
 
 def test_a_finish_from_another_source_is_refused(machine):
     context = joining._context("lab", "n")
-    session = pake.start_initiator(WORDS, context=context, mine=joining.CLIENT, theirs=joining.PLAIN)
+    session = pake.start_initiator(join_secret(WORDS, "lab"), context=context, mine=joining.CLIENT,
+                                   theirs=joining.PLAIN)
     _, started = machine.joining.handle("/join/v1/start", {"group": "lab", "nonce": "n",
                                                            "message": session.message}, "10.0.0.5")
     session.receive(started["message"])
@@ -193,10 +201,10 @@ def test_a_finish_from_another_source_is_refused(machine):
     assert status == 409
 
 
-def test_a_machine_with_no_passphrase_to_check_takes_nobody_in(tmp_path):
+def test_a_machine_that_does_not_know_the_passphrase_takes_nobody_in(tmp_path):
     keyfile = tmp_path / "c.key"
     mint_cluster("lab", keyfile)
-    keeper = Joining(lambda: memberships(keyfile), lambda group: None)
+    keeper = Joining(lambda: memberships(keyfile))
     status, answer = keeper.handle("/join/v1/start", {"group": "lab", "message": "00"}, "10.0.0.5")
     assert status == 404 and "cannot take" in answer["error"]
 
@@ -209,7 +217,7 @@ def test_a_beacon_captured_off_the_network_is_not_readable_and_holds_nothing_to_
     try:
         machine.advertiser.announce()
         raw = b""
-        while not raw.startswith(discovery.MAGIC) or b"a" == raw:
+        while not raw.startswith(discovery.MAGIC):
             raw, _ = listener.recvfrom(65535)
     finally:
         listener.close()

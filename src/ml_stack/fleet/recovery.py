@@ -72,17 +72,6 @@ def recall(group: str = "", path: Path | str | None = None) -> str | None:
     return _store().unwrap(PURPOSE, group, base64.b64decode(blob)).decode()
 
 
-def matches(passphrase: str, group: str = "", path: Path | str | None = None) -> bool:
-    """Whether ``passphrase`` is the one stored for ``group`` (default: the first cluster)."""
-    import hmac
-
-    try:
-        held = recall(group, path)
-    except keystore.KeystoreError:
-        return False
-    return held is not None and hmac.compare_digest(held.strip().encode(), passphrase.strip().encode())
-
-
 def forget(group: str, path: Path | str | None = None) -> None:
     """Drop the stored passphrase for ``group``."""
     rows = _held(path)

@@ -5,11 +5,16 @@ signature, since the machine asking has no key yet. The two ends run SPAKE2 (`pa
 passphrase as the password and the daemon's certificate fingerprint as its identity; the
 daemon's confirmation reaches the new machine only after the new machine's checked out, and
 the cluster key travels sealed under the exchange's key. A listener learns nothing it can test
-a guess against, and every start counts against its source (`Joining.lockout`).
+a guess against, and every start counts against its source (`Joining.lockout`). The password the
+exchange runs on is `join_secret`, a scrypt hash of the passphrase that each machine keeps beside
+the cluster key, so a daemon needs no keystore to answer or to check a sign-in.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import http.client
 import json
 import secrets
@@ -21,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack import macauth, sealing
+from ml_stack import keystore, macauth, sealing
 from ml_stack.log import warn
 
 from .. import discovery as disc
@@ -30,7 +35,8 @@ from . import pake
 from .lan import require_local
 from .pairing import fingerprint_of, unverified_context
 
-__all__ = ["API", "Declined", "Joiner", "Joining", "find_joiners", "join_by_passphrase"]
+__all__ = ["API", "Declined", "Joiner", "Joining", "find_joiners", "join_by_passphrase", "join_secret",
+           "matches"]
 
 API = "/join/v1"
 CLIENT = "joiner"
@@ -40,6 +46,21 @@ PLAIN = "plain"
 MOST_PENDING = 16
 PENDING_S = 30.0
 MOST_BODY = 4096
+
+
+def join_secret(passphrase: str, group: str) -> str:
+    """The password the join handshake runs on: scrypt of the passphrase under the cluster's name."""
+    salt = hashlib.sha256(b"ml-stack-join-v1/" + group.encode()).digest()
+    return base64.urlsafe_b64encode(keystore.scrypt_key(passphrase.strip(), salt)).decode().rstrip("=")
+
+
+def matches(passphrase: str, group: str = "", path: Path | str | None = None) -> bool:
+    """Whether ``passphrase`` is the one cluster ``group`` (default: the first) was joined with."""
+    rows = disc.memberships(path)
+    held = next((m for m in rows if not group or m.group == group), None)
+    if held is None or not held.join:
+        return False
+    return hmac.compare_digest(join_secret(passphrase, held.group), held.join)
 
 
 class Refusal(Exception):
@@ -64,14 +85,13 @@ def _context(group: str, nonce: str) -> bytes:
 
 
 class Joining:
-    """What a daemon in a cluster answers a machine that asks to join, from where it holds the
-    passphrase (``passphrase(group)``) and its own certificate's fingerprint."""
+    """What a daemon in a cluster answers a machine that asks to join, from the clusters it holds
+    (``groups()``) and its own certificate's fingerprint."""
 
     def __init__(self, groups: Callable[[], list[Membership]],
-                 passphrase: Callable[[str], str | None],
                  fingerprint: Callable[[], str] = lambda: PLAIN,
                  log: Callable[[str], None] = warn) -> None:
-        self.groups, self.passphrase, self.fingerprint, self.log = groups, passphrase, fingerprint, log
+        self.groups, self.fingerprint, self.log = groups, fingerprint, log
         self.lockout = macauth.Lockout(failures=5, window_s=600.0, lock_s=600.0)
         self.everyone = macauth.Lockout(failures=30, window_s=600.0, lock_s=600.0)
         self.attempts: deque[tuple[float, str, str, str]] = deque(maxlen=200)
@@ -99,7 +119,8 @@ class Joining:
         if self.lockout.locked(source) or self.everyone.locked("*"):
             self._note(source, group, "refused, too many attempts")
             raise Refusal(429, "too many attempts; try again later")
-        words = self.passphrase(group) if any(m.group == group for m in self.groups()) else None
+        held = next((m for m in self.groups() if m.group == group), None)
+        words = held.join if held is not None and held.join else None
         if words is None:
             self._note(source, group, "refused, this machine cannot take machines in")
             raise Refusal(404, "this machine cannot take a machine into that cluster")
@@ -271,15 +292,15 @@ def join_by_passphrase(passphrase: str, group: str = disc.DEFAULT_CLUSTER,
                        port: int | None = None) -> Membership:
     """Join ``group``: a daemon in it gives this machine the cluster key when the passphrase is
     right; when none answers, this machine keeps its own cluster of that name or makes one."""
-    words = disc.check_length(passphrase)
+    secret = join_secret(disc.check_length(passphrase), group)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
-        return held or disc.mint_cluster(group, path)
+        return held or disc.mint_cluster(group, path, join=secret)
     refused: list[Declined] = []
     for one in joiners:
         try:
-            return disc.adopt(Membership(group=group, key=_shake(one, group, words, 10.0)), path)
+            return disc.adopt(Membership(group=group, key=_shake(one, group, secret, 10.0), join=secret), path)
         except Declined as why:
             refused.append(why)
         except DiscoveryError as why:
