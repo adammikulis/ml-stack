@@ -232,10 +232,9 @@ def test_a_post_cannot_borrow_another_identity_or_smuggle_options(kit, route):
     for extra in ({"from": "alice"}, {"role": "lead"}, {"token": kit.tokens["alice"]}, {"label": "x"}):
         body = json.dumps({"to": "#general", "body": "who am i", **extra})
         status, _ = route("/board/post", "POST", own, body)
-        assert status == 200
+        assert status == 400
     posted = kit.ws.board.ui_read(kit.owner, "#general")["messages"]
-    assert {m["from"] for m in posted} == {"owner"} and {m["role"] for m in posted} == {"human"}
-    assert all(m["label"] == "" for m in posted)
+    assert posted == []
 
 
 def test_following_and_the_live_route_give_an_agent_nothing_it_could_not_already_read(kit, route):
