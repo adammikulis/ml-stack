@@ -248,13 +248,9 @@ class Tree:
             shutil.copyfile(source, target)
 
     def imports_the_copy(self) -> bool:
-        """True when a test run in the copy reads ml_stack out of the copy first.
-
-        ``ml_stack`` is a namespace package, so every path holding one is merged; only the
-        first of them answers for a module that exists in all of them.
-        """
+        """True when a test run resolves ml_stack to the copied source directory."""
         done = self.python("-c", "import ml_stack, sys; sys.stdout.write(ml_stack.__path__[0])")
-        return done.stdout.startswith(str(self.where))
+        return done.returncode == 0 and Path(done.stdout.strip()).resolve() == (self.where / "src" / "ml_stack").resolve()
 
     def python(self, *args: str, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
         """Run the interpreter in the copy with the copy's src first on the path."""

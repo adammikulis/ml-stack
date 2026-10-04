@@ -46,12 +46,12 @@ def no_release_lookup(monkeypatch):
     monkeypatch.setattr(updates, "check", offline)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser(playwright):
     try:
         # headless is the default, said out loud: a test must never take the screen
         b = playwright.chromium.launch(headless=True)
-    except Exception as exc:                           # noqa: BLE001
+    except pw.Error as exc:
         pytest.skip(f"chromium did not launch: {exc}")
     yield b
     b.close()
