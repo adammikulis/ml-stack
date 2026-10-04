@@ -23,8 +23,9 @@ def machine(tmp_path, monkeypatch):
     hf_repo(cache, "maker/thing-GGUF", {"thing-Q4_K_M.gguf": 4000, "mmproj-thing-F16.gguf": 9})
     ollama(tmp_path / "ollama", "llama3", "latest")
     monkeypatch.setattr(hub, "default_roots", lambda _root: [cache, tmp_path / "ollama"])
-    monkeypatch.setattr(hub, "machine_memory", lambda: MachineMemory(
-        16 * GIB, 12 * GIB, True, 12 * GIB, (), "Darwin"))
+    memory = MachineMemory(16 * GIB, 12 * GIB, True, 12 * GIB, (), "Darwin")
+    monkeypatch.setattr(hub, "machine_memory", lambda: memory)
+    monkeypatch.setattr(models_cli.pick, "machine_memory", lambda: memory)
     return tmp_path
 
 
@@ -81,7 +82,8 @@ def test_fit_prints_the_breakdown_and_a_verdict(machine, capsys):
 
 def test_suggest_prints_settings_and_reasons(machine, capsys):
     _, out = run(capsys, "suggest", "thing-Q4_K_M.gguf", "--goal", "chat")
-    assert "kv q8_0" in out and "Context" in out and "alternative" in out
+    assert "kv q8_0" in out and "context " in out and "alternative" in out
+    assert "-> green" in out and "KV cache q8_0" in out
 
 
 def test_recommend_ranks_what_is_installed(machine, capsys):
