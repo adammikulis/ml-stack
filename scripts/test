@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Run the test suite one tier at a time.
-
-    scripts/test quick     only the tests a change reaches (needs pytest-testmon)
-    scripts/test fast      every test not marked slow or heavy
-    scripts/test full      every test not marked slow
-    scripts/test slow      only the tests marked slow
-    scripts/test all       everything, slow included: what CI runs
-    scripts/test heavy --junit J   rewrite tests/heavy-modules.txt from a pytest --junitxml file J
-
-Every tier queues for workers in the machine-wide budget (scripts/testslots.py) and runs with
-the number it is granted, at most ``-n``.
-
-Arguments after the tier go to pytest. ``quick`` runs the full tier in full, and says
-why, when it cannot tell what a change reaches.
-"""
+"""Run selected test tiers with shared collection and per-test CPU admission."""
 
 from __future__ import annotations
 
