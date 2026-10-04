@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
@@ -149,23 +150,34 @@ class Environment:
 
     # -- finding an interpreter -----------------------------------------
     def host_python(self) -> Path | None:
-        """A Python on this machine to build the environment with."""
+        """A verified installed Python to build the environment with."""
         current = f"{sys.version_info.major}.{sys.version_info.minor}"
         if not getattr(sys, "frozen", False) and self.python_version == current:
             return Path(sys.executable)
-        found = shutil.which(f"python{self.python_version}")
-        if not found:
-            return None
-        try:
-            checked = subprocess.run(
-                [found, "-c", "import json,sys;print(json.dumps([sys.executable,sys.version_info[:2]]))"],
-                capture_output=True, text=True, timeout=10)
-            if checked.returncode:
-                return None
-            executable, version = json.loads(checked.stdout)
-            return Path(executable) if ".".join(map(str, version)) == self.python_version else None
-        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
-            return None
+        name = f"python{self.python_version}"
+        candidates = [shutil.which(name)]
+        pyenv = shutil.which("pyenv")
+        if pyenv:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                installed = subprocess.run([pyenv, "whence", "--path", name],
+                                           capture_output=True, text=True, timeout=10)
+                if installed.returncode == 0:
+                    candidates.extend(installed.stdout.splitlines())
+        for found in candidates:
+            if not found:
+                continue
+            try:
+                checked = subprocess.run(
+                    [found, "-c", "import json,sys;print(json.dumps([sys.executable,sys.version_info[:2]]))"],
+                    capture_output=True, text=True, timeout=10)
+                if checked.returncode:
+                    continue
+                executable, version = json.loads(checked.stdout)
+                if ".".join(map(str, version)) == self.python_version:
+                    return Path(executable)
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+                continue
+        return None
 
     # -- fetching one --------------------------------------------------
     def standalone_python(self) -> Path | None:
