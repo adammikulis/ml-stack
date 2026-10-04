@@ -4,17 +4,27 @@ import importlib
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
-
-from ml_stack.fleet import tailnet
-from ml_stack.sandbox.backend import SandboxUnavailable
-from ml_stack.sandbox.policy import AllowUnsandboxed, Limits, Policy
-
-sandbox_run = importlib.import_module("ml_stack.sandbox.run")
 
 
 class WindowsStartupTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = Path(directory.name)
+        isolated = patch.dict(os.environ, {
+            "ML_STACK_HOME": str(state / "state"), "ML_STACK_CACHE": str(state / "cache"),
+            "ML_STACK_NO_REAL_KEYSTORE": "1", "PYTHON_KEYRING_BACKEND": "keyring.backends.fail.Keyring",
+            "ML_STACK_NOTIFY": "off",
+        })
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        self.sandbox_run = importlib.import_module("ml_stack.sandbox.run")
+        self.tailnet = importlib.import_module("ml_stack.fleet.tailnet")
+
     @unittest.skipUnless(os.name == "nt", "Windows startup")
     def test_startup_without_resource_module(self):
         code = """
@@ -35,6 +45,10 @@ import ml_stack.setup
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_resource_limits_refuse_without_starting_child(self):
+        from ml_stack.sandbox.backend import SandboxUnavailable
+        from ml_stack.sandbox.policy import AllowUnsandboxed, Limits, Policy
+
+        sandbox_run = self.sandbox_run
         with patch.object(sandbox_run, "resource", None), patch.object(
                 sandbox_run, "wrapped", return_value=(["command"], "", None)), patch.object(
                 sandbox_run.subprocess, "Popen") as spawn:
@@ -44,6 +58,7 @@ import ml_stack.setup
             spawn.assert_not_called()
 
     def test_tailnet_refuses_without_output_limits(self):
+        tailnet = self.tailnet
         with patch.object(tailnet, "resource", None), patch.object(
                 tailnet.subprocess, "run") as spawn:
             result = tailnet.detect(cli="tailscale")

@@ -32,7 +32,7 @@
       const m = models.find((x) => x.file === select.value);
       detail.textContent = `${m.gb} GB download`
         + (m.draft_ref ? ` + ${m.draft_gb} GB MTP draft` : "")
-        + (m.what ? `. ${m.what}` : "")
+        + (m.what ? `. ${m.what.replace(/\.$/, "")}` : "")
         + ". Downloading leaves the model ready to run from Models.";
     };
     select.onchange = draw;
