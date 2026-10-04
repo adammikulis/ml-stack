@@ -41,6 +41,17 @@ tests = [
 ]
 note = "LAN hints are bounded nonce-matching metadata; local setup or a signed-in person selects a named recovery file, validates its bounded shape, and authenticates a native HMAC beacon before any membership write; scans and recovery joins never access the keystore"
 
+[[group]]
+match = ["egress:fleet/serving.py:_identity"]
+status = "covered"
+tests = [
+  "tests/test_fleet_serving.py::TestRegistry::test_recycled_port_reports_its_actual_model_and_prunes_dead_rows",
+  "tests/test_fleet_serving.py::TestRegistry::test_invalid_persisted_ports_are_never_probed",
+  "tests/test_fleet_serving.py::TestRegistry::test_malformed_metadata_does_not_advertise_registration_claims",
+  "tests/test_fleet_serving.py::TestRegistry::test_metadata_redirect_cannot_borrow_another_endpoints_identity",
+]
+note = "Persisted registrations are claims: identity comes from the bounded local endpoint, invalid ports never probe, malformed bodies never advertise, and redirects cannot move metadata to another endpoint"
+
 # -- saved Coding conversations -------------------------------------------------------------
 [[group]]
 match = ["route:workspace/coding_routes.py:/ui/coding/*", "parser:workspace/coding_routes.py",
