@@ -162,6 +162,7 @@ class TestFirstRun:
         page.wait_for_selector("#first-run:not([hidden])")
         page.click("#first-run button:has-text('Continue')")
         page.wait_for_selector("#p1")
+        page.fill("#g", "default")
         page.fill("#p1", "abc")
         assert page.locator("#first-run button:has-text('Join')").is_disabled()
         page.fill("#p1", "correct horse battery")
@@ -265,7 +266,7 @@ class TestTheChatView:
         page.wait_for_selector("#cluster:not([hidden])")
         page.click("nav.tabs a:has-text('Chat')")
         page.wait_for_selector("#chat-none:not([hidden])")
-        assert "No model is running yet" in page.locator("#chat-none").inner_text()
+        assert "No model is running" in page.locator("#chat-none").inner_text()
         assert page.locator("#chat-askrow").is_hidden()
         assert not errors
 
@@ -286,7 +287,9 @@ class TestTheChatView:
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Chat')")
         page.wait_for_selector("#chat-list .chatrow")
+        page.get_by_label("Options for about the roof").click()
         page.click("#chat-list .chatrow button:has-text('Delete')")
+        page.get_by_role("button", name="Delete conversation", exact=True).click()
         page.wait_for_selector("#chat-list .chatrow", state="detached")
         assert not errors
 
@@ -299,6 +302,8 @@ class TestTheModelsView:
         page.click("nav.tabs a:has-text('Models')")
         page.wait_for_selector("#models-here h2")
         here = page.locator("#models-here")
+        assert "thornfield-8B (Q4_K_M)" in here.inner_text()
+        here.locator("summary").click()
         assert "thornfield-8B-Q4_K_M.gguf" in here.inner_text()
         assert "GB free on this machine" in page.locator("#models-free").inner_text()
         assert not errors
@@ -329,7 +334,7 @@ class TestTheSettingsView:
         page.check("#labels-train\\,prep")
         page.click("#settings-save")
         page.wait_for_selector("#settings-note .ok")
-        assert page.locator("#settings-note .ok").inner_text() == "Saved."
+        assert page.locator("#settings-note .ok").inner_text() == "Preferences saved."
         _, got, _ = joined.call("/ui/settings", cookie=joined.cookie)
         assert sorted(got["settings"]["labels"]) == ["prep", "train"]
         assert not errors

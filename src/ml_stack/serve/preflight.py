@@ -13,6 +13,7 @@ raises before ``Popen`` when it fails.
 
 from __future__ import annotations
 
+import logging
 import re
 import struct
 from collections.abc import Callable
@@ -257,8 +258,8 @@ def known_architectures(binary: str | Path) -> set[str]:
         from ml_stack.serve.build_platform import arches_from_source
 
         found |= arches_from_source(Path(source_dir()))
-    except Exception:  # noqa: BLE001 - no source checkout, or a table that moved
-        pass
+    except Exception as exc:  # noqa: BLE001 - no source checkout, or a table that moved
+        logging.getLogger(__name__).debug("Managed architecture table unavailable: %s", exc)
     found |= _arches(binary)
     return found
 
@@ -270,7 +271,7 @@ def source_dir() -> Path:
     return Path(src_dir())
 
 
-# ---------------------------------------------------------------- fit (weights + kv + runtime)
+# Memory required for weights, KV cache, and runtime.
 
 # Bytes per cached element for the K/V cache types llama.cpp accepts on --cache-type-k/-v.
 # Block-quantised types carry a scale per 32 elements, so the average is not the nominal

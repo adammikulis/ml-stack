@@ -226,23 +226,22 @@ def test_two_threads_asking_for_one_model_start_it_once(tmp_path, backend, machi
 def test_a_lease_does_not_wait_for_a_different_model_that_is_loading(tmp_path, backend,
                                                                        machine):
     started = backend.start
+    together = threading.Barrier(2)
 
     def slowly(*args, **kwargs):
-        time.sleep(1.2)
+        together.wait(timeout=10)
         return started(*args, **kwargs)
 
     backend.start = slowly
     paths = [weights(tmp_path, f"m{n}.gguf", 1) for n in range(2)]
     threads = [threading.Thread(target=lambda path=path: manager(tmp_path, backend).lease(
         spec(path))) for path in paths]
-    began = time.monotonic()
     for thread in threads:
         thread.start()
-        time.sleep(0.2)
     for thread in threads:
         thread.join(timeout=30)
     assert len(backend.started) == 2
-    assert time.monotonic() - began < 2.3, "the second model loaded beside the first"
+    assert not together.broken, "both model starts entered before either completed"
 
 
 def test_two_processes_that_do_not_fit_together_do_not_both_start(tmp_path, machine,

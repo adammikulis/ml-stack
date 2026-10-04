@@ -210,12 +210,13 @@ class TestProxy:
                          {"messages": [{"role": "user", "content": "hi"}]}) as r:
             assert json.loads(r.read())["choices"][0]["message"]["content"] == "hello"
 
-    def test_a_server_that_wants_a_key_it_was_not_given_answers_401(self, wired):
-        daemon, _, model = wired
+    def test_an_unauthenticated_model_identity_is_not_advertised(self, wired):
+        daemon, serving, model = wired
         model.api_key = "not-in-the-key-file"
         with pytest.raises(urllib.error.HTTPError) as exc:
             daemon.post("/infer/v1/chat/completions", {"messages": []})
-        assert exc.value.code == 401
+        assert exc.value.code == 503
+        assert serving.live(force=True) == []
 
     def test_a_plain_completion_comes_back(self, wired):
         daemon, _, _ = wired

@@ -384,7 +384,8 @@ def served(config: Config, *, say: Callable[[str], None] | None = None, reason: 
                **{**config.lease(), **over},
                reason=reason or f"{Path(config.model).name} for this run") as server:
         if say and server.adopted:
-            say(f"using the compatible server already up on {server.port} ({serving_said(server.base_url)}); it is left running")        yield server.base_url
+            say(f"using the compatible server already up on {server.port} ({serving_said(server.base_url)}); it is left running")
+        yield server.base_url
 
 
 
