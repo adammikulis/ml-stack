@@ -34,6 +34,11 @@ class Limits:
     scratch_bytes: int = 256 * 1024 * 1024
     scratch_ttl_s: float = 3 * 86_400.0
     scratch_folders: int = 16
+    max_children: int = 8
+    child_sends_per_window: int = 10
+    child_ttl_s: float = 28_800.0
+    invite_ttl_s: float = 600.0
+    invite_failures: int = 5
     verify_timeout_s: float = 60.0
     verify_allow: list[list[str]] = field(default_factory=list)
 

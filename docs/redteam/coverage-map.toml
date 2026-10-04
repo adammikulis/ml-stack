@@ -168,6 +168,10 @@ status = "covered"
 tests = [
   "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
   "tests/test_sentinel_redteam.py::test_the_command_line_refuses_release_under_an_agent_even_with_a_terminal",
+  "tests/test_redteam_human_floor.py::test_no_tool_an_agent_is_offered_sets_up_joins_delegates_or_names_the_token_directory",
+  "tests/test_redteam_human_floor.py::test_a_hostile_message_cannot_widen_a_delegate_or_leak_a_token_path",
+  "tests/test_workspace_quickstart.py::test_person_only_commands_refuse_an_agent_and_no_terminal",
+  "tests/test_workspace_quickstart.py::test_failed_redemptions_lock_every_code_out",
 ]
 
 [[group]]
@@ -222,6 +226,12 @@ tests = [
   "tests/test_redteam_spawn.py::test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell",
   "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
 ]
+
+[[group]]
+match = ["spawn:workspace/guide.py:clipboard"]
+status = "covered"
+tests = ["tests/test_workspace_quickstart.py::test_the_clipboard_gets_the_text_on_stdin_and_never_through_a_shell"]
+note = "a constant argv per tool; the pasted text goes on stdin"
 
 [[group]]
 match = ["spawn:*"]

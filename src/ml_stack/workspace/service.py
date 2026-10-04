@@ -7,11 +7,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
-from ml_stack.workspace import limits as limits_mod
+from ml_stack.workspace import limits as limits_mod, tokens
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
 from ml_stack.workspace.chain import ChainLog
 from ml_stack.workspace.claims import Claims, Conflict
-from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry
+from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry, valid_name
+from ml_stack.workspace.invites import Invites
 from ml_stack.workspace.notes import KINDS, Notes
 from ml_stack.workspace.quarantine import Quarantine
 from ml_stack.workspace.rates import RateLimited, Rates
@@ -27,6 +28,7 @@ class SendOptions(TypedDict, total=False):
     subject: str
     reply_to: int
     ttl_s: float
+    label: str
 
 
 class NoteOptions(TypedDict, total=False):
@@ -67,10 +69,12 @@ class Workspace:
     def __init__(self, base: Path | None = None, clock: Callable[[], float] = time.time) -> None:
         self.base = base or limits_mod.root()
         self.base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tokens.directory(self.base)
         self.clock = clock
         self.limits = limits_mod.load(self.base)
         self.denylist = limits_mod.denylist_path(self.base)
         self.registry = Registry(self.base, clock)
+        self.invites = Invites(self.base, self.limits.invite_failures, clock)
         self.audit_log = ChainLog(self.base / "audit.jsonl", clock)
         self.bus = Bus(self.base, clock)
         self.notes = Notes(self.base, clock)
@@ -79,6 +83,30 @@ class Workspace:
         self.scratch = Scratch(self.base, self.limits.scratch_bytes, self.limits.scratch_ttl_s,
                                self.limits.scratch_folders, clock)
         self.claims = Claims(self.base, self.limits.claim_ttl_s, clock, self._swept)
+
+    def _may(self, who: Identity, cap: str) -> None:
+        if cap not in who.can:
+            self.audit("auth.denied", who.id, reason=f"no {cap} right")
+            raise Denied(f"{who.id} was not given the right to {cap}")
+
+    def _top_level(self, who: Identity, what: str) -> None:
+        if who.parent:
+            raise Denied(f"a delegated identity cannot {what}")
+
+    def delegate(self, token: str, name: str, ttl_s: float = 0.0,
+                 can: tuple[str, ...] = ()) -> dict[str, Any]:
+        """A weaker child identity ``caller/name``: its token goes to a private file whose path is
+        returned; the value never is."""
+        who = self.auth(token)
+        cap = self.limits.child_ttl_s
+        made = self.registry.delegate(who, name, min(ttl_s, cap) if ttl_s else cap, can,
+                                      self.limits.max_children)
+        child = f"{who.id}/{name}"
+        path = tokens.store(self.base, child, made)
+        info = self.registry.info(child)
+        self.audit("delegate", who.id, child=child, can=info["can"])
+        return {"id": child, "token_file": str(path), "can": info["can"],
+                "expires": info["expires"]}
 
     # -- identity ------------------------------------------------------------------------
     def audit(self, event: str, who: str = "", **fields: Any) -> None:
@@ -119,11 +147,13 @@ class Workspace:
             self.audit("write.refused", who.id, what=what, why="size", chars=len(joined))
             raise Refused(f"{what} is {len(joined.encode())} bytes; the limit is {size_cap}")
         why = refusals(joined, self.denylist)
+        if str(tokens.directory(self.base)) in joined:
+            why = [*why, "it names the token directory"]
         if why:
             self.audit("write.refused", who.id, what=what, why="screen", chars=len(joined))
             raise Refused(f"{what} was not written: {'; '.join(why)}. Remove it and send again.")
         try:
-            self.rates.admit(who.id)
+            self.rates.admit(who.id, self.limits.child_sends_per_window if who.parent else 0)
         except RateLimited:
             self.audit("write.refused", who.id, what=what, why="rate")
             raise
@@ -144,10 +174,18 @@ class Workspace:
     def send(self, token: str, to: str, kind: str, body: str,
              **opts: Unpack[SendOptions]) -> dict[str, Any]:
         """Append a message from the token's owner; returns it as the sender sees it."""
+        return self.post(self.auth(token), to, kind, body, **opts)
+
+    def post(self, who: Identity, to: str, kind: str, body: str,
+             **opts: Unpack[SendOptions]) -> dict[str, Any]:
+        """Append a message from ``who``, an identity the caller has already established."""
+        self._may(who, "send")
         given = _only(dict(opts), SendOptions)
+        label = str(given.get("label", ""))
+        if label and not valid_name(label):
+            raise ValueError(f"{label!r} is not a usable label")
         subject, reply_to, ttl_s = (given.get("subject", ""), int(given.get("reply_to", 0)),
                                     float(given.get("ttl_s", 0.0)))
-        who = self.auth(token)
         if kind not in TYPES:
             raise ValueError(f"type must be one of {', '.join(TYPES)}")
         if not self._known(to):
@@ -169,9 +207,9 @@ class Workspace:
             "type": kind, "from": who.id, "role": who.role, "to": to, "thread": thread,
             "reply_to": reply_to, "subject": "" if qid else subject,
             "body": PLACEHOLDER.format(qid=qid, why=", ".join(flags)) if qid else body,
-            "held": qid, "flags": flags,
+            "held": qid, "flags": flags, "label": label,
             "expires": self.clock() + ttl_s if ttl_s else 0.0})
-        self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid)
+        self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label)
         return self.deliver(row, raw=True)
 
     def deliver(self, row: dict[str, Any], raw: bool = False) -> dict[str, Any]:
@@ -185,10 +223,12 @@ class Workspace:
             text = row["body"]
         else:
             text = f"subject: {row['subject']}\n{row['body']}" if row["subject"] else row["body"]
+        sender = f"{row['from']}/{row['label']}" if row.get("label") else row["from"]
         screened = fence(text, f"workspace:{row['from']}#{row['seq']}",
-                         f"{row['role']} {row['from']}, {row['type']}")
+                         f"{row['role']} {sender}, {row['type']}")
         shown_text = text if state == "quarantined" else screened.text
-        out = {"seq": row["seq"], "type": row["type"], "from": row["from"],
+        out = {"seq": row["seq"], "type": row["type"], "from": row["from"], "from_label": sender,
+               "project": self.registry.info(row["from"]).get("project", {}).get("name", ""),
                "from_role": row["role"], "to": row["to"], "ts": row["ts"],
                "thread": row.get("thread") or row["seq"], "reply_to": row.get("reply_to", 0),
                "trust": "human" if row["role"] == HUMAN else "agent-claimed",
@@ -203,6 +243,7 @@ class Workspace:
               raw: bool = False) -> list[dict[str, Any]]:
         """Unread messages for the token's owner, oldest first; ``ack`` marks them read."""
         who = self.auth(token)
+        self._may(who, "read")
         found = self.bus.inbox(who.id, limit=limit)
         if ack and found:
             self.bus.ack(who.id, found[-1]["seq"])
@@ -211,17 +252,20 @@ class Workspace:
     def ack(self, token: str, seq: int) -> int:
         """Mark everything up to ``seq`` as read; returns the new cursor."""
         who = self.auth(token)
+        self._may(who, "read")
         return self.bus.ack(who.id, seq)
 
     def outbox(self, token: str, limit: int = 50) -> list[dict[str, Any]]:
         """The last messages the token's owner sent."""
         who = self.auth(token)
+        self._may(who, "read")
         return [self.deliver(r, raw=True) for r in self.bus.outbox(who.id, limit)]
 
     def wait(self, token: str, timeout_s: float, ack: bool = False,
              raw: bool = False) -> list[dict[str, Any]]:
         """Block until there is something to read or ``timeout_s`` passes."""
         who = self.auth(token)
+        self._may(who, "read")
         found = self.bus.wait(who.id, timeout_s)
         if ack and found:
             self.bus.ack(who.id, found[-1]["seq"])
@@ -230,6 +274,7 @@ class Workspace:
     def thread(self, token: str, root: int) -> list[dict[str, Any]]:
         """A thread, to a participant, a lead or a human."""
         who = self.auth(token)
+        self._may(who, "read")
         rows = self.bus.thread(root)
         seen = who.role != AGENT or any(
             who.id == r["from"] or r["to"] in (who.id, BROADCAST) for r in rows)
@@ -245,6 +290,7 @@ class Workspace:
         source, tags = str(given.get("source", "")), list(given.get("tags", []))
         supersedes = list(given.get("supersedes", []))
         who = self.auth(token)
+        self._top_level(who, "write notes")
         cmd, ttl = str(given.get("verify_cmd", "")), float(given.get("ttl_s", 0.0))
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {', '.join(KINDS)}")
@@ -304,17 +350,21 @@ class Workspace:
     def scratch_new(self, token: str, name: str, ttl_s: float = 0.0) -> str:
         """Make a scratch folder; returns its absolute path."""
         who = self.auth(token)
+        self._top_level(who, "use scratch folders")
         path = self.scratch.new(who, name, ttl_s)
         self.audit("scratch.new", who.id, name=name)
         return str(path)
 
     def scratch_ls(self, token: str, owner: str = "") -> list[dict[str, Any]]:
         """The caller's scratch folders, or ``owner``'s for a lead or human."""
-        return self.scratch.listing(self.auth(token), owner)
+        who = self.auth(token)
+        self._top_level(who, "use scratch folders")
+        return self.scratch.listing(who, owner)
 
     def scratch_path(self, token: str, name: str, relative: str = "", owner: str = "") -> str:
         """A path inside a scratch folder; refuses one that leaves it."""
         who = self.auth(token)
+        self._top_level(who, "use scratch folders")
         try:
             return str(self.scratch.resolve(who, name, relative, owner))
         except Denied:
@@ -324,6 +374,7 @@ class Workspace:
     def scratch_rm(self, token: str, name: str, owner: str = "") -> bool:
         """Delete a scratch folder."""
         who = self.auth(token)
+        self._top_level(who, "use scratch folders")
         gone = self.scratch.remove(who, name, owner)
         self.audit("scratch.rm", who.id, name=name, owner=owner)
         return gone
@@ -337,6 +388,9 @@ class Workspace:
         """Take ownership of a branch, worktree, port, file or server."""
         given = _only(dict(opts), ClaimOptions)
         who = self.auth(token)
+        self._may(who, "claim")
+        if who.parent and not (kind in ("branch", "server") and key.startswith(who.id + "/")):
+            raise Denied(f"{who.id} may claim only a branch or server named {who.id}/...")
         self._check(who, "the claim", 1024, str(given.get("note", "")))
         try:
             made, _ = self.claims.claim(who, kind, key, given)
@@ -349,13 +403,16 @@ class Workspace:
     def release(self, token: str, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim."""
         who = self.auth(token)
+        self._may(who, "claim")
         gone = self.claims.release(who, kind, key)
         self.audit("release", who.id, kind=kind, key=gone["key"])
         return gone
 
     def heartbeat(self, token: str, ttl_s: float = 0.0) -> int:
         """Renew every claim the caller holds."""
-        return self.claims.heartbeat(self.auth(token), ttl_s)
+        who = self.auth(token)
+        self._may(who, "claim")
+        return self.claims.heartbeat(who, ttl_s)
 
     def who_owns(self, kind: str, key: str) -> dict[str, Any] | None:
         """The claim that covers ``key``, or None."""
@@ -397,8 +454,20 @@ class Workspace:
     def status(self) -> dict[str, Any]:
         """Counts, the live claims and the test-slot queue, all read-only."""
         chain = self.audit_verify()
-        return {"agents": self.registry.ids(), "messages": chain["bus"]["rows"],
+        return {"agents": self.registry.ids(), "registered": self.registered(), "messages": chain["bus"]["rows"],
                 "notes": chain["notes"]["rows"],
                 "quarantined": sum(1 for q in self.quarantine_list() if q["state"] == "quarantined"),
                 "claims": self.claims.listing(), "chains_ok": chain["ok"],
                 "testslots": testslots()}
+
+    def registered(self) -> list[dict[str, Any]]:
+        """Each live identity with its role, last audited action, unread count and expiry."""
+        last = {r["who"]: r["ts"] for r in self.audit_log.rows() if r.get("who")}
+        out = []
+        for name in self.registry.ids():
+            info = self.registry.info(name)
+            if not info["revoked"] and (not info["parent"] or self.registry.role_of(name)):
+                out.append({"id": name, "role": info["role"], "parent": info["parent"], "last_acted": last.get(name, 0.0),
+                            "unread": self.bus.pending(name), "expires": info["expires"],
+                            "project": info["project"].get("name", "")})
+        return out

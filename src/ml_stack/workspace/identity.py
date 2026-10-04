@@ -16,8 +16,18 @@ from typing import Any
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
 
-__all__ = ["AGENT", "AGENT_MARKERS", "HUMAN", "LEAD", "TOKEN_ENV", "Denied", "Identity",
-           "Registry", "valid_name"]
+__all__ = [
+    "AGENT",
+    "AGENT_MARKERS",
+    "CAPS",
+    "HUMAN",
+    "LEAD",
+    "TOKEN_ENV",
+    "Denied",
+    "Identity",
+    "Registry",
+    "valid_name",
+]
 
 TOKEN_ENV = "ML_STACK_WORKSPACE_TOKEN"  # noqa: S105
 PREFIX = "mlws1."
@@ -28,6 +38,8 @@ AGENT_MARKERS = ("CLAUDECODE", "ML_STACK_AGENT", "ML_STACK_NONINTERACTIVE")
 RESERVED = frozenset({"*", "all", "everyone", "workspace", "system", "human", "owner-token"})
 NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
 VERSION = 1
+CAPS = ("send", "read", "claim")
+"""What a delegated identity may be allowed to do; a top-level identity holds all of them."""
 
 
 class Denied(PermissionError):
@@ -40,6 +52,8 @@ class Identity:
 
     id: str
     role: str
+    parent: str = ""
+    can: tuple[str, ...] = CAPS
 
     @property
     def trust(self) -> str:
@@ -50,6 +64,12 @@ class Identity:
 def valid_name(name: str) -> bool:
     """Whether ``name`` can be an agent id."""
     return bool(NAME.match(name)) and name not in RESERVED and ".." not in name
+
+
+def valid_id(name: str) -> bool:
+    """Whether ``name`` is an agent id, or a delegated ``parent/child`` id."""
+    head, slash, tail = name.partition("/")
+    return valid_name(head) and (not slash or valid_name(tail))
 
 
 def _hash(secret: str) -> str:
@@ -76,10 +96,42 @@ class Registry:
         """Every registered id."""
         return sorted(self._load())
 
+    def info(self, name: str) -> dict[str, Any]:
+        """``name``'s role, expiry and whether it was revoked; no secret, no hash."""
+        entry = self._load().get(name, {})
+        return {"role": str(entry.get("role", "")), "expires": float(entry.get("expires", 0.0)),
+                "revoked": bool(entry.get("revoked", not entry)), "parent": entry.get("parent", ""),
+                "can": list(entry.get("can", CAPS)), "project": dict(entry.get("project", {}))}
+
+    def _live(self, agents: Mapping[str, Any], entry: Mapping[str, Any] | None) -> bool:
+        if not entry or entry.get("revoked"):
+            return False
+        if entry.get("expires") and self.clock() > float(entry["expires"]):
+            return False
+        return not entry.get("parent") or self._live(agents, agents.get(entry["parent"]))
+
     def role_of(self, name: str) -> str:
         """The role registered under ``name``, or an empty string."""
-        entry = self._load().get(name)
-        return str(entry["role"]) if entry and not entry.get("revoked") else ""
+        agents = self._load()
+        entry = agents.get(name)
+        return str(entry["role"]) if entry and self._live(agents, entry) else ""
+
+    def set_project(self, by: Identity, name: str, project: dict[str, str]) -> None:
+        """Record the project ``name`` is connected for; only a human identity may."""
+        if by.role != HUMAN:
+            raise Denied("only a person's setup sets an agent's project")
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            if name not in agents:
+                raise ValueError(f"no agent called {name}")
+            agents[name]["project"] = dict(project)
+            self._save(agents)
+
+    def children(self, parent: str) -> list[str]:
+        """The live delegated identities of ``parent``."""
+        agents = self._load()
+        return sorted(n for n, e in agents.items()
+                      if e.get("parent") == parent and self._live(agents, e))
 
     def init(self, name: str, env: Mapping[str, str] | None = None, ttl_s: float = 0.0) -> str:
         """Register the first, human identity and return its token. Refused when an agent
@@ -97,7 +149,7 @@ class Registry:
         if not valid_name(name):
             raise ValueError(f"{name!r} is not a usable agent id (a-z, 0-9, . _ -; up to 48)")
         agents = self._load()
-        if name in agents and not agents[name].get("revoked"):
+        if name in agents and self._live(agents, agents[name]):
             raise ValueError(f"{name} is registered already")
         secret = secrets.token_urlsafe(32)
         now = self.clock()
@@ -122,16 +174,46 @@ class Registry:
             entry = agents.get(name)
             if entry is None:
                 raise ValueError(f"no agent called {name}")
-            if str(entry["role"]) not in MINTS[by.role] and name != by.id:
+            mine = entry.get("parent") == by.id
+            if str(entry["role"]) not in MINTS[by.role] and name != by.id and not mine:
                 raise Denied(f"a {by.role} token cannot revoke a {entry['role']} token")
             entry["revoked"] = True
             self._save(agents)
+
+    def delegate(self, by: Identity, name: str, ttl_s: float, can: tuple[str, ...],
+                 most: int) -> str:
+        """A token for ``by``'s child ``by.id/name``: it holds at most ``by``'s rights, lasts no
+        longer than ``by``'s token, and cannot delegate."""
+        if by.parent or by.role not in (AGENT, LEAD):
+            raise Denied("only a top-level agent or lead token delegates")
+        if not valid_name(name):
+            raise ValueError(f"{name!r} is not a usable agent id (a-z, 0-9, . _ -; up to 48)")
+        wanted = tuple(dict.fromkeys(can)) or by.can
+        if not set(wanted) <= set(by.can) or not set(wanted) <= set(CAPS):
+            raise Denied(f"a child can be given {', '.join(by.can)} at most")
+        child = f"{by.id}/{name}"
+        with held(self.path.with_name("agents.lock")):
+            agents = self._load()
+            if self._live(agents, agents.get(child)):
+                raise ValueError(f"{child} is registered already")
+            if len(self.children(by.id)) >= most:
+                raise Denied(f"{by.id} has {most} live delegates already")
+            now = self.clock()
+            stop = float(agents[by.id].get("expires", 0.0))
+            secret = secrets.token_urlsafe(32)
+            agents[child] = {"role": AGENT, "hash": _hash(secret), "created": now,
+                             "minted_by": by.id, "parent": by.id, "can": list(wanted),
+                             "expires": min(now + ttl_s, stop) if stop else now + ttl_s,
+                             "revoked": False}
+            self._save(agents)
+        return f"{PREFIX}{child}.{secret}"
 
     def authenticate(self, token: str) -> Identity:
         """The identity ``token`` stands for; raises `Denied` for anything else."""
         head, _, secret = token.removeprefix(PREFIX).rpartition(".") if token.startswith(PREFIX) \
             else ("", "", "")
-        entry = self._load().get(head) if secret else None
+        agents = self._load()
+        entry = agents.get(head) if secret else None
         good = bool(entry) and hmac.compare_digest(_hash(secret), str(entry["hash"]))
         if not good or entry is None:
             raise Denied("the token is not recognised")
@@ -139,4 +221,7 @@ class Registry:
             raise Denied("the token was revoked")
         if entry.get("expires") and self.clock() > float(entry["expires"]):
             raise Denied("the token expired")
-        return Identity(head, str(entry["role"]))
+        parent = str(entry.get("parent", ""))
+        if parent and not self._live(agents, agents.get(parent)):
+            raise Denied("the token's parent was revoked or expired")
+        return Identity(head, str(entry["role"]), parent, tuple(entry.get("can", CAPS)))
