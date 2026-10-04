@@ -675,6 +675,19 @@ def test_coding_tasks_reuse_the_registered_seat_and_reply_on_each_thread(kit, mo
     assert len(seen) == 2 and kit.ws.registry.role_of(identity) == "agent"
 
 
+def test_empty_native_result_is_an_error_without_completed_activity(kit, monkeypatch, tmp_path):
+    from ml_stack.workspace import localcoding
+
+    events = []
+    monkeypatch.setattr(localcoding.BoundManager, "_run", lambda *args: None)
+    monkeypatch.setattr(localcoding.activity, "record", lambda kind, **fields: events.append(fields))
+    agent = la.Agent("local-qwen", "model.gguf", profile="coding", project=str(tmp_path))
+    row = {"seq": 1, "from": "lead", "text": "work"}
+    kind, text, steps = localcoding.perform(kit.ws, agent, row, "authorized", lambda: False)
+    assert kind == "status" and "without an answer" in text and steps == 1
+    assert [event["outcome"] for event in events] == ["started", "error"]
+
+
 def test_stopping_a_delegated_worker_revokes_only_its_private_identity(kit):
     parent = kit.agent("parent")
     child = kit.ws.delegate(parent, "local-qwen")
