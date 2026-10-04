@@ -116,13 +116,13 @@ def test_a_broadcast_wakes_every_waiter(tmp_path):
                for n in names]
     for t in threads:
         t.start()
-    time.sleep(0.5)
+    time.sleep(1.5)
     start = time.monotonic()
     Bus(tmp_path).append(msg("*", "all"))
     for t in threads:
         t.join(timeout=10)
     assert all([m["body"] for m in results[n]] == ["all"] for n in names)
-    assert time.monotonic() - start < 2.0
+    assert time.monotonic() - start < 0.5
 
 
 @pytest.mark.skipif(not wake.PIPES, reason="named pipes are not available here")
@@ -170,6 +170,28 @@ def test_an_edit_of_the_same_length_is_found_by_the_next_read_and_the_next_appen
     assert len(log.rows()) < 5
     with pytest.raises(ChainBroken):
         log.append({"body": "more"})
+
+
+def test_a_same_length_edit_shows_in_a_plain_read_of_a_warm_process(tmp_path):
+    log = ChainLog(tmp_path / "log.jsonl")
+    for i in range(5):
+        log.append({"body": f"pay {i}"})
+    assert len(log.rows()) == 5
+    path = tmp_path / "log.jsonl"
+    path.write_text(path.read_text().replace("pay 3", "pay 8"))
+    assert len(log.rows()) == 3
+
+
+def test_an_edit_hidden_behind_another_processes_append_is_refused_by_the_next_append(tmp_path):
+    mine, theirs = ChainLog(tmp_path / "log.jsonl"), ChainLog(tmp_path / "log.jsonl")
+    for i in range(5):
+        mine.append({"body": f"pay {i}"})
+    mine.rows()
+    theirs.append({"body": "other"})
+    path = tmp_path / "log.jsonl"
+    path.write_text(path.read_text().replace("pay 1", "pay 7"))
+    with pytest.raises(ChainBroken):
+        mine.append({"body": "more"})
 
 
 def test_an_edit_that_changes_the_length_is_refused_by_an_append_in_a_warm_process(tmp_path):
@@ -270,8 +292,8 @@ def test_the_indexes_follow_a_prune_and_a_replaced_log(tmp_path):
     assert [m["body"] for m in bus.outbox("a", 100)] == [f"m{i}" for i in range(6, 10)]
     assert bus.thread(8)[0]["seq"] == 8 and bus.thread(2) == []
     (tmp_path / "bus.jsonl").rename(tmp_path / "bus.old")
-    bus.append(msg("b", "fresh", "a"))
-    assert [m["body"] for m in bus.outbox("a", 100)] == ["fresh"]
+    bus.append(msg("a", "fresh", "b"))
+    assert bus.outbox("a", 100) == [] and [m["body"] for m in bus.outbox("b", 100)] == ["fresh"]
 
 
 # -- claims --------------------------------------------------------------------------------------

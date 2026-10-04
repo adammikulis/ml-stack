@@ -78,6 +78,7 @@ def test_each_budget_fails_the_run_when_its_measure_is_over(kit, tmp_path, chang
 
 def test_a_broken_chain_fails_the_run(kit, tmp_path):
     kit.agent("peer")
+    kit.ws.send(kit.owner, "peer", "note", "first")
     kit.ws.send(kit.owner, "peer", "note", "pay the invoice")
     path = kit.base / "bus.jsonl"
     path.write_text(path.read_text().replace("pay the invoice", "pay the other invoice"))
