@@ -186,9 +186,9 @@ class Manager:
                 **{f"run_{harness}": lambda command, env: self._process(turn, command, env, (home, harness, prompt, settings["project"]))})
             if result and not turn.cancelled.is_set():
                 raise RuntimeError(turn.error or f"{harness} exited with status {result}")
-        except (OSError, RuntimeError, ValueError) as error:
+        except (OSError, RuntimeError, ValueError, SystemExit) as error:
             if not turn.cancelled.is_set():
-                turn.error = str(error)
+                turn.error = f"The coding launcher stopped with status {error.code}" if isinstance(error, SystemExit) else str(error)
                 turn.emit({"error": turn.error})
         finally:
             if turn.text:

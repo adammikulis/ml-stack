@@ -106,3 +106,13 @@ def test_coding_extension_is_declared_in_installed_metadata():
     assert len(entries) == 1
     assert entries[0].value == "ml_stack.workspace.coding_routes:route"
     assert entries[0].load().__module__ == "ml_stack.workspace.coding_routes"
+
+
+def test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn(coding_api):
+    server, conversation, kit = coding_api
+    assert post(server, conversation.id, "start", {"message": "startup rejected"})[0] == 202
+    status = finished(server, conversation.id)
+    assert status["state"] == "failed"
+    assert "status 2" in status["error"]
+    assert not kit.ws.registry.role_of(f"chat-{conversation.id}")
+    assert len(server.ui.conversations.get(conversation.id).messages) == 1
