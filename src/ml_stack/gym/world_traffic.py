@@ -1,10 +1,10 @@
 """Persistent native SUMO traffic and SUMO/MetaDrive worlds."""
 
-import json
 import math
 from importlib import import_module
 from pathlib import Path
 
+from ml_stack.files import write_json
 from ml_stack.gym.cosim import make_cosim
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.traffic_world import xml
@@ -79,9 +79,9 @@ class TrafficWorldState:
             self.next_depart = max(ends) + self.period
             path = Path(self.world_provenance['manifest']).parent
             definition = path / 'continuing-demand.json'
-            definition.write_text(json.dumps({'schema_version': 1, 'native_api': 'TraCI route.add/vehicle.add',
+            write_json(definition, {'version': 1, 'native_api': 'TraCI route.add/vehicle.add',
                                              'seed': self.initial_seed, 'period_seconds': self.period,
-                                             'starts_at_seconds': self.next_depart, 'routes': templates}, indent=2))
+                                    'starts_at_seconds': self.next_depart, 'routes': templates})
             files = {name: item['path'] for name, item in self.world_provenance['files'].items()}
             files['continuing_demand'] = definition
             self.world_provenance = record(path, self.world_provenance['backend'],

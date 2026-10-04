@@ -86,6 +86,13 @@ tests = [
 note = "start and stop need the person's session, a loopback origin and JSON; hostile names, projects, roles and efforts are refused; injections in task text and a model that obeys them gain nothing beyond the role"
 
 [[group]]
+match = ["spawn:gym/transport.py:Process.start"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_gym_worker.py"]
+note = "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
+
+[[group]]
 match = ["desktop:app/src-tauri/capabilities/main.json"]
 status = "covered"
 count = 1
