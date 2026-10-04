@@ -232,7 +232,7 @@ class Loop:
             self.status.update(state="idle", detail="Waiting for an authorized task")
             idle[0] = True
             try:
-                rows = self.ws.wait(self.token, IDLE_S, ack=False, raw=True)
+                rows = self.ws.wait(self.token, IDLE_S, ack=False, raw=True, limit=1)
             finally:
                 idle[0] = False
             for row in rows:
