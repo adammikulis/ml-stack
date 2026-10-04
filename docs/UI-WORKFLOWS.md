@@ -112,3 +112,14 @@ the original files remain as backups. Subsequent edits and deletions use the gra
 Writes run in transactions under the existing file lock, including concurrent message appends.
 Chat does not request a credential or encryption key when opening its history. The standalone
 app bundles the graph engine; word and vector indexes load their extensions when used.
+
+Open **History** in the navigation to inspect recorded actions grouped by agent. Each
+agent card lists its newest actions first; open an action for its status, timestamp,
+session, model, task and project references, and available issue links. Filter by
+agent or search for a tool, model, task, or outcome. Refresh keeps expanded actions
+open, and the page refreshes every ten seconds while visible.
+
+History reads the maintained per-user activity log, with up to 500 recent actions.
+It reports unreadable or dropped records. Prompts, tool arguments, outputs, and
+message bodies are not stored there; use Board or the originating conversation
+for message content. History is read-only and requires the normal Fleet UI access.
