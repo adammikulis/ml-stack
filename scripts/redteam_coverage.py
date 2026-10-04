@@ -108,6 +108,7 @@ READ_CALLS = {"json.loads", "tomllib.loads", "tomllib.load", "struct.unpack",
 READ_ATTRS = {"read_text", "read_bytes", "readlines"}
 ROUTE_NAME = re.compile(r"path|route|tail|rest|action", re.I)
 ROUTE_DIRS = ("fleet/", "graph/", "sentinel/", "ui/")
+ROUTE_FILES = {"workspace/fleet_routes.py"}
 ROLE_VALUES = {"tool", "user", "system"}
 TRUST_BY_FILE = {
     "fleet/api.py": "peer holding the cluster key; /health open to anyone",
@@ -199,7 +200,7 @@ def route_names(node: ast.Compare | ast.Call, where: str) -> list[str]:
 
 def find_routes(found: dict[str, Surface], where: str, tree: ast.Module) -> None:
     sub = short(where)
-    if not sub.startswith(ROUTE_DIRS):
+    if not sub.startswith(ROUTE_DIRS) and sub not in ROUTE_FILES:
         return
     table = spans(tree)
     trust = next((t for k, t in TRUST_BY_FILE.items() if sub.startswith(k)), "")
