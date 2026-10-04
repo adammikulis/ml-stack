@@ -247,15 +247,15 @@ def opened(args: argparse.Namespace, harness: str, served: tuple[str, str, int],
            say: Callable[[str], None]) -> Iterator[Session]:
     """The session for one run of ``harness``: files outside the working tree, a workspace seat
     announced as joined, the hook commands. The seat is revoked and the files removed on exit."""
-    _base_url, alias, _window = served
+    base_url, alias, _window = served
     cwd = Path(args.project or Path.cwd()).resolve()
     files = session_files(cwd)
     seat = None
     try:
         invite = getattr(args, "seat_factory", None) or harnessid.invite
         seat = invite(harnessid.agent_name(alias, harness, args.name), cwd, args.parent, say)
-        if not seat.record_model(alias, harness):
-            say(f"the model of {seat.name} ({alias}, {harness}) is not recorded: a person-started launcher records it")
+        if not seat.record_model(alias, harness, base_url):
+            say(f"the model of {seat.name} ({alias}, {harness}) is not recorded: the serving endpoint and session identity must verify")
         pre = hook_command("pre", role=args.role, label=seat.name, root=cwd, protect=protected_paths(files))
         post = hook_command("post", role=args.role, label=seat.name, root=cwd, protect=[])
         harnessid.announce(seat, f"{harness} on {alias} ({args.role}), project {cwd.name}", say)
