@@ -79,7 +79,7 @@ class Simulation:
         decision_checkpoint = settings["config"].get("decision_checkpoint")
         if self.controller == "decider":
             settings["model"] = str(decision_checkpoint or STRANDS)
-            settings["device"] = "cpu"
+            settings["device"] = settings["config"].get("decision_device", "auto")
         settings["version"] = 1
         self.settings = settings
         self.path = artifact_root() / settings["id"]
@@ -89,6 +89,7 @@ class Simulation:
         checkpoint = config.pop("checkpoint", None)
         config.pop("decision_checkpoint", None)
         config.pop("decision_max_age_s", None)
+        config.pop("decision_device", None)
         config.pop("vision_model", None)
         if self.environment == "car":
             config.setdefault("render_preview", True)
@@ -215,7 +216,10 @@ class Simulation:
         self.state["status"] = "paused"
 
     def start_decider(self):
-        self.decider = DecisionProcess(self.settings["config"].get("decision_checkpoint"))
+        device = self.settings["config"].get("decision_device", "auto")
+        if device not in {"auto", "cpu"}:
+            raise ValueError("Decision device must be auto or cpu")
+        self.decider = DecisionProcess(self.settings["config"].get("decision_checkpoint"), device=device)
         self.state["decision_readiness"] = {"status": "loading", "error": None, "pending": False,
                                             "max_age_s": self.decision_max_age_s}
 
@@ -223,6 +227,7 @@ class Simulation:
         if self.decider is not None and self.decider.pending is None:
             event = self.decider.poll()
             if event:
+                self.state["device"] = event.get("device", self.state.get("device"))
                 self.state["decision_readiness"].update(status=self.decider.status, error=self.decider.error)
                 return True
         return False
@@ -238,6 +243,8 @@ class Simulation:
         if self.decider is None:
             self.start_decider()
         event = self.decider.poll()
+        if event:
+            self.state["device"] = event.get("device", self.state.get("device"))
         result = event.get("result") if event else None
         now = time.monotonic()
         decision = {"state": named, "fallback": True, "reason": self.decider.status,
@@ -267,7 +274,7 @@ class Simulation:
         self.decider.submit(request)
         self.state["decision_readiness"] = {"status": self.decider.status,
             "error": self.decider.error, "pending": self.decider.pending is not None,
-            "max_age_s": self.decision_max_age_s}
+            "max_age_s": self.decision_max_age_s, "device": self.state.get("device")}
         decision["choice"] = self.names[selected]
         return self.native_actions[selected], decision
 
@@ -314,6 +321,10 @@ class Simulation:
 
     def change_controller(self, payload):
         controller = payload["controller"]
+        if "decision_device" in payload:
+            if payload["decision_device"] not in {"auto", "cpu"}:
+                raise ValueError("Decision device must be auto or cpu")
+            self.settings["config"]["decision_device"] = payload["decision_device"]
         if "decision_max_age_s" in payload:
             age = float(payload["decision_max_age_s"])
             if not 1 <= age <= 30:
@@ -351,7 +362,8 @@ class Simulation:
             self.state["learning_mode"] = "frozen"
             self.settings["config"]["learning_mode"] = "frozen"
         self.state["controller"] = controller
-        self.settings.update(controller=controller, device="cpu",
+        self.settings.update(controller=controller, device=self.settings["config"].get("decision_device", "auto")
+                             if controller == "decider" else "cpu",
                              model=payload.get("decision_checkpoint", STRANDS) if controller == "decider"
                              else "MetaDrive IDM" if controller == "native-idm"
                              else "PyFlyt PID patrol" if controller == "native-patrol"

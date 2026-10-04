@@ -45,8 +45,8 @@ def test_catalogue_preserves_registered_and_unsupported_local_models(monkeypatch
     assert choices['vision_default'] == 'smol'
     assert choices['vision'][0]['available']
     assert choices['vision'][1]['status'] == 'unsupported'
-    assert 'MLX/CoreML' in choices['vision'][1]['reason']
-    with pytest.raises(ValueError, match='MLX/CoreML'):
+    assert 'native vision runtime is not implemented' in choices['vision'][1]['reason']
+    with pytest.raises(ValueError, match='native vision runtime'):
         models.selected_vision('fast')
     with pytest.raises(ValueError, match='not installed'):
         models.selected_vision('/outside/unregistered.gguf')

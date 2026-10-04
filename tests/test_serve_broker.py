@@ -521,3 +521,49 @@ def test_direct_native_start_reserves_gpu_until_its_lease_is_recorded(broker, mo
     info = broker.start(ServerSpec(model=models[1], port=free_port(), context=512),
                         Caller(pid=owner.pid), timeout=10)
     assert info.lease
+
+
+@pytest.mark.redteam
+def test_paused_vision_child_releases_its_broker_model_lease(tmp_path, llama_binary, models, monkeypatch):
+    from ml_stack.gym import decision_process
+    from ml_stack.gym.simulation import Simulation
+    from ml_stack.gym.vision_process import VisionProcess
+    from ml_stack.platform import start_process
+    from ml_stack.serve import broker_wire
+    from types import SimpleNamespace
+
+    monkeypatch.setenv('LLAMA_CPP_SERVER', str(llama_binary))
+    script = ('import json,time\nfrom ml_stack.serve import broker_wire\n'
+              f'g=broker_wire.lease("vision", [{models[0]!r}], spec={{"context":512}}, timeout=20)\n'
+              'print(json.dumps({"status":"ready"}),flush=True)\ntime.sleep(120)\n')
+    monkeypatch.setattr(decision_process, 'start_process', lambda argv, **kwargs:
+                        start_process([sys.executable, '-u', '-c', script], **kwargs))
+    child = VisionProcess('camera-model')
+    live = Simulation.__new__(Simulation)
+    live.decider, live.control_revision = None, 0
+    live.state = {'status': 'running'}
+    live.perception = SimpleNamespace(close=child.close)
+    try:
+        deadline = time.monotonic() + 30
+        while child.status != 'ready' and time.monotonic() < deadline:
+            child.poll()
+            time.sleep(.02)
+        assert child.status == 'ready', child.error
+        before = broker_wire.status()
+        assert any(h['pid'] == child.handle.pid for s in before['servers'] for h in s['holders'])
+        live.pause()
+        assert live.state['status'] == 'paused' and live.perception is None
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            after = broker_wire.status()
+            if not any(h['pid'] == child.handle.pid for s in after['servers'] for h in s['holders']):
+                break
+            time.sleep(.05)
+        assert not any(h['pid'] == child.handle.pid for s in after['servers'] for h in s['holders'])
+    finally:
+        child.close()
+        record = json.loads(broker_wire.record_path().read_text())
+        for server in broker_wire.status()['servers']:
+            if server['pid']:
+                kill_process_tree(server['pid'])
+        kill_process_tree(record['pid'])

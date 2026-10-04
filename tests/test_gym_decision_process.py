@@ -1,6 +1,8 @@
 """Real child-process readiness, bounded requests and stalled inference cleanup."""
 
 import json
+import contextlib
+import io
 import sys
 import time
 
@@ -10,6 +12,44 @@ from ml_stack.gym import decision_process
 from ml_stack.platform import start_process
 
 pytestmark = pytest.mark.redteam
+
+
+def test_accelerator_model_load_is_inside_exclusive_broker_claim(monkeypatch):
+    calls = []
+    @contextlib.contextmanager
+    def claim(purpose, *, wait_s):
+        calls.append(('claim', wait_s))
+        try:
+            yield
+        finally:
+            calls.append(('release',))
+    def run(checkpoint, device, output):
+        assert calls == [('claim', 600)]
+        calls.append(('load', checkpoint, device))
+        raise RuntimeError('model rejected')
+    output = io.StringIO()
+    monkeypatch.setattr(sys, 'stdout', output)
+    monkeypatch.setattr(sys, 'argv', ['worker', 'null', 'auto'])
+    monkeypatch.setattr(decision_process, 'device_name', lambda requested: 'mps')
+    monkeypatch.setattr(decision_process.broker_wire, 'status', lambda **kwargs: {'exclusive_gpu_claims': True})
+    monkeypatch.setattr(decision_process, 'hold', claim)
+    monkeypatch.setattr(decision_process, 'run_policy', run)
+    decision_process.serve()
+    assert calls == [('claim', 600), ('load', None, 'mps'), ('release',)]
+    events = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert events[0] == {'status': 'queued', 'device': 'mps'}
+    assert events[-1] == {'status': 'error', 'error': 'model rejected'}
+
+
+def test_old_broker_cannot_load_accelerator_model(monkeypatch):
+    output = io.StringIO()
+    monkeypatch.setattr(sys, 'stdout', output)
+    monkeypatch.setattr(sys, 'argv', ['worker', 'null', 'auto'])
+    monkeypatch.setattr(decision_process, 'device_name', lambda requested: 'mps')
+    monkeypatch.setattr(decision_process.broker_wire, 'status', lambda **kwargs: {})
+    monkeypatch.setattr(decision_process, 'run_policy', lambda *args: pytest.fail('GPU loaded without admission'))
+    decision_process.serve()
+    assert 'exclusive-GPU broker' in json.loads(output.getvalue().splitlines()[-1])['error']
 
 
 def child(monkeypatch, script):
@@ -86,7 +126,7 @@ def test_decision_spawn_keeps_hostile_checkpoint_as_one_json_argument(monkeypatc
     try:
         assert wait_event(process)["status"] == "ready"
         argv = json.loads(record.read_text())
-        assert argv == ["-m", "ml_stack.gym.decision_process", json.dumps(checkpoint)]
+        assert argv == ["-m", "ml_stack.gym.decision_process", json.dumps(checkpoint), "cpu"]
         assert not marker.exists()
     finally:
         process.close()
