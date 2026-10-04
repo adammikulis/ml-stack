@@ -49,6 +49,8 @@ def commands(tmp_path: Path) -> list[tuple[str, str, str, list[str], str]]:
         ("memory rekey", "ml_stack.memory.cli", "main", ["rekey"], "yes"),
         ("memory export", "ml_stack.memory.cli", "main", ["export"], "yes"),
         ("workspace init", "ml_stack.workspace.cli", "main", ["init"], "yes"),
+        ("activity export", "ml_stack.activity.cli", "main",
+         ["export", "--json", str(tmp_path / "activity-export.json")], "yes"),
     ]
 
 
@@ -95,7 +97,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
     return subprocess.CompletedProcess(child.args, child.returncode, heard.decode(errors="replace"), "")
 
 
-@pytest.mark.parametrize("index", range(9))
+@pytest.mark.parametrize("index", range(10))
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
@@ -104,7 +106,7 @@ def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path
     assert snapshot(tmp_path / "home") == before, f"{label} changed state for an agent"
 
 
-@pytest.mark.parametrize("index", range(9))
+@pytest.mark.parametrize("index", range(10))
 def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, index):
     label, module, function, argv, _ = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")

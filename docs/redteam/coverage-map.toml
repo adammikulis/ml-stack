@@ -199,6 +199,14 @@ tests = ["tests/test_credentials.py::test_a_name_that_is_not_a_name_is_refused",
          "tests/test_credentials.py::test_a_symlink_out_of_the_config_directory_is_refused"]
 
 [[group]]
+match = ["cli:ml-stack-log"]
+status = "covered"
+tests = ["tests/test_redteam_activity.py::test_text_recorded_in_the_log_reaches_an_agent_only_fenced_and_inert",
+         "tests/test_redteam_activity.py::test_a_model_that_obeys_everything_cannot_read_edit_truncate_or_disable_the_log",
+         "tests/test_activity_viewer.py::test_an_agent_cannot_export"]
+note = "the viewer is read-only; an agent's process sees records only fenced and inert, and cannot export or switch the log off"
+
+[[group]]
 match = ["cli:*"]
 status = "n/a"
 note = "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
@@ -222,6 +230,11 @@ tests = [
   "tests/test_redteam_spawn.py::test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell",
   "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
 ]
+
+[[group]]
+match = ["spawn:activity/gate.py:tree_hash"]
+status = "n/a"
+note = "fixed git argv over the checkout scripts/test is run in, in a throwaway index; no model, peer or file name reaches it"
 
 [[group]]
 match = ["spawn:*"]

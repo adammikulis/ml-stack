@@ -537,7 +537,7 @@ def _no_real_keychain(monkeypatch):
 def _activity_log_is_quiet(request, monkeypatch):
     """Only the activity tests write the activity log; everywhere else `record` does nothing, so
     a test about something else never asks the keystore for the log's key."""
-    if request.module.__name__.rpartition(".")[2].startswith("test_activity"):
+    if request.module.__name__.rpartition(".")[2].startswith(("test_activity", "test_redteam_activity")):
         return
     from ml_stack.activity import writer
 

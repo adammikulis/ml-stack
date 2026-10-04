@@ -25,6 +25,7 @@ _MINT = object()
 _FORBIDDEN = (
     "ml-stack security", "ml-stack-security", "ml_stack.sentinel", "ml_stack/sentinel",
     "ml_stack_sentinel", "sentinel.release", "sentinel.purge", "sentinel/state",
+    "ml-stack-log", "ml_stack.activity", "ml_stack/activity", "ml-stack/activity", "ml_stack_activity", "activity.log",
 )
 _PROTECTED: set[str] = set()
 _STATE_DIR = re.compile(r"ml-stack/+sentinel")

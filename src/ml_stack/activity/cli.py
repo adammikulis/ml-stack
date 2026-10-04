@@ -20,7 +20,7 @@ from ml_stack.keystore import KeystoreError
 from ml_stack.log import say, warn
 from ml_stack.sentinel.human import AGENT_MARKERS, HumanRequired, require_person
 
-__all__ = ["COMMAND", "main"]
+__all__ = ["COMMAND", "main", "viewer"]
 
 DENIED, BROKEN = 3, 1
 FILTERS = [
@@ -171,9 +171,12 @@ COMMAND.add("related", _guard(_related), help="everything an agent did that name
                      flag("--timeline", action="store_true")])
 
 
-def main(argv: list[str] | None = None) -> int:
+def viewer(argv: list[str] | None = None) -> int:
     """Run the viewer; with no command (or only options) it is ``tail``."""
     items = list(sys.argv[1:] if argv is None else argv)
     if not items or (items[0].startswith("-") and items[0] not in ("-h", "--help")):
         items = ["tail", *items]
     return COMMAND.run(items)
+
+
+main = viewer

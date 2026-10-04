@@ -49,7 +49,7 @@ class ActivityLog(EventLog):
         self.directory = Path(directory)
         limits = limits or Limits()
         super().__init__(self.directory / "activity.log", max_bytes=limits.max_bytes,
-                         keep=limits.keep, anchor=self.directory / "anchor.log")
+                         keep=limits.keep)
         self._key_from = key or self._subkey
         self._key: bytes | None = None
         self.max_age_s, self.retention_s = limits.max_age_s, limits.retention_s

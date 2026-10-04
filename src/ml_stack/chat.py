@@ -423,7 +423,7 @@ class Chat:
             self.watch.approve(" ".join(steps))
             self.plan.approve(steps)
         text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)[:CUT]
-        self._logged(asked.name, args, gate, tool, result, len(text))
+        self._logged(asked.name, args, _outcome(gate, tool, result), len(text))
         answer = text
         if asked.name not in roles.OWN and gate.allowed:
             shown = self.watch.screen_result(asked, text)
@@ -439,19 +439,22 @@ class Chat:
                              "name": asked.name, "content": answer})
 
 
-    def _logged(self, name: str, args: dict[str, Any], gate: Any, tool: Any, result: Any,
+    def _logged(self, name: str, args: dict[str, Any], how: tuple[str, dict[str, str]],
                 chars: int) -> None:
         """Record one tool call: its name, argument names and the outcome, never a value."""
-        refs = {"role": self.role.name}
-        if not gate.allowed:
-            outcome, refs["rail"] = "blocked", getattr(gate.verdict, "by", "") or "guard"
-        elif tool is None:
-            outcome = "no_such_tool"
-        else:
-            outcome = "error" if isinstance(result, dict) and "error" in result else "ok"
+        outcome, refs = how
         activity.record("agent.tool_call", actor="agent:" + (Path(self.session.model).name or "chat"),
-                        subject=name, outcome=outcome, refs=refs,
+                        subject=name, outcome=outcome, refs={"role": self.role.name, **refs},
                         meta={"arg_names": ",".join(sorted(args)), "result_chars": chars})
+
+
+def _outcome(gate: Any, tool: Any, result: Any) -> tuple[str, dict[str, str]]:
+    """How a call ended (blocked, no_such_tool, error, ok) and, when blocked, by which rail."""
+    if not gate.allowed:
+        return "blocked", {"rail": getattr(gate.verdict, "by", "") or "guard"}
+    if tool is None:
+        return "no_such_tool", {}
+    return ("error" if isinstance(result, dict) and "error" in result else "ok"), {}
 
 
 def run_task(task: str, client: Any, *,  # noqa: PLR0913
