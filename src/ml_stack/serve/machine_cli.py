@@ -22,6 +22,21 @@ OPTIONS_MEMORY = [
               "to whatever is set now"),
     flag("--write", default="", metavar="FILE",
          help="where to write it (default: ./stack.ml.wired-limit.plist)"),
+    flag("--for", dest="for_model", default="", metavar="MODEL",
+         help="size the wiring limit for this model (id, name or path)"),
+    flag("--ctx", type=int, default=131072, metavar="N",
+         help="with --for: context length in tokens (default: %(default)s)"),
+    flag("--kv", default="q8_0", choices=["q8_0", "f16", "q4_0"],
+         help="with --for: KV cache type (default: %(default)s)"),
+    flag("--mtp", action=argparse.BooleanOptionalAction, default=True,
+         help="with --for: serve with the MTP head, sharing the model's weights (default: on)"),
+    flag("--cache-ram", type=int, default=8192, metavar="MB",
+         help="with --for: the server's prompt cache cap in host RAM (default: %(default)s)"),
+    flag("--apply", action="store_true",
+         help="with --for: raise the limit for this boot (sudo, or macOS's own password "
+              "dialog when there is no terminal)"),
+    flag("--reset", action="store_true",
+         help="put the limit back to what it was before the first change"),
     flag("--limit", type=int, default=0, metavar="MB",
          help="preview: what the rest of the machine would have under this wiring "
               "limit, against what it holds now"),
@@ -34,6 +49,10 @@ def cmd_memory(args: argparse.Namespace) -> int:
     On unified memory the ceiling that matters is `iogpu.wired_limit_mb`: a runtime setting
     that goes back to the default on every reboot.
     """
+    if getattr(args, "for_model", "") or getattr(args, "reset", False):
+        from ml_stack.serve import wired_cli
+
+        return wired_cli.run(args)
     machine = ops.memory()
     total, now = machine.total, machine.room
     if not now:
