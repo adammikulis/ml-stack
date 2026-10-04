@@ -28,7 +28,7 @@ GIB = 1024**3
 
 
 @pytest.fixture
-def wired_page(joined, tmp_path, monkeypatch, open_page):
+def wired_page(joined, tmp_path, monkeypatch, open_page):  # noqa: F811
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(platform, "system", lambda: "Darwin")
     for name in wired_apply.AGENT_MARKERS:
