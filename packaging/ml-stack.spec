@@ -2,7 +2,7 @@
 import importlib.util
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules, copy_metadata
 
 
 def package_dir(name):
@@ -13,6 +13,8 @@ datas = [
     (str(package_dir("ml_stack.ui") / "assets"), "ml_stack/ui/assets"),
     (str(package_dir("ml_stack.contracts") / "_data"), "ml_stack/contracts/_data"),
     *copy_metadata("ml-stack"),
+    *copy_metadata("openai-agents"),
+    *copy_metadata("openai"),
 ]
 
 # The commit this was built from, beside ml_stack.fleet.measuring, which answers it.
@@ -32,6 +34,8 @@ hidden = [
     "ml_stack.fleet.peers", "ml_stack.fleet.launch",
     "ml_stack.fleet.ui", "ml_stack.fleet.autostart",
     "ml_stack.fleet.telemetry", "ml_stack.fleet.settings",
+    "ml_stack.agent.sdk_runtime", "ml_stack.chat_sdk",
+    "ml_stack.fleet.sdk_chat", "ml_stack.client.sdk", "agents", "openai", "httpx",
     "ml_stack.fleet.chat", "ml_stack.fleet.conversations", "ml_stack.fleet.llama",
     "ml_stack.contracts", "ml_stack.client", "ml_stack.media",
     # Reached only through a lazy import, so nothing static points at it.
@@ -40,6 +44,8 @@ hidden = [
     "ml_stack.workspace.fleet_routes", "ml_stack.workspace.coding_routes", "ml_stack.mcp",
     "ml_stack.activity.fleet_routes",
 ]
+
+hidden += collect_submodules("agents")
 
 a = Analysis(["launcher-headless.py"], datas=datas, hiddenimports=hidden,
              binaries=collect_dynamic_libs("ladybug"),
