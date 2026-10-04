@@ -266,13 +266,13 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
 
     @contextlib.contextmanager
     def fake_serve(model: Any, *, port: int | None = None, context: int = 4096,
-                   timeout: float | None = None, manager: Any = None, reason: str = "",
-                   **spec_kwargs: Any):
+                   timeout: float | None = None, manager: Any = None, **spec_kwargs: Any):
         # the spec is built for real: a keyword the server does not take fails here --
         # and then everything `start()` does before Popen: the draft resolved to a file,
         # the argv built, every flag in it checked. A spec the backend refuses is refused
         # here, naming what it refused (measured 2026-09-02: a head still named by hf:
         # file, refused in the lease after a self-check that built no argv)
+        spec_kwargs.pop("reason", None)
         spec = ServerSpec(model=model, port=port or 1, context=context, **spec_kwargs)
         backend = getattr(manager, "backend", None) or LlamaServerBackend(binary=stand_in)
         argv = backend.command(backend.resolved_draft(spec))
