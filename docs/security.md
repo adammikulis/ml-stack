@@ -461,7 +461,7 @@ are confined to their session directory; dataset exports remain under the daemon
 
 Observations, actor identifiers, scenario metadata and recorded state reach decision models as
 simulation data. A decision selects from native action labels; it does not grant shell, network,
-credential, role or rule access. An abstaining decision pauses the simulation. Checkpoints and
+credential, role or rule access. Decision inference runs in a separate CPU process with one outstanding request. Loading, pending, stale and abstaining results apply the environment’s explicit braking or hold control while native physics continues; they never impersonate a trained model. Results retain their original observation, sequence, actor, model revision, probabilities and latency separately from the current transition. Reset, actor selection and controller changes invalidate old results. Pause cancels the model process, and the existing process exit guard protects it when its owning physics worker exits. Missing verified model files appear as a readiness error. The default maximum input age is one second; `decision_max_age_s` can be set between one and thirty seconds. Checkpoints and
 scenario names are untrusted inputs: learning checkpoints must come from the trusted Gym
 artifact directory, and decision weights use the model loader's integrity checks. Frozen and
 online learning change policy updates, not the daemon account's privileges.

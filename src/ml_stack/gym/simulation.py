@@ -5,13 +5,14 @@ import json
 import logging
 import queue
 import time
-from pathlib import Path
 
 from ml_stack.decide.pins import STRANDS
-from ml_stack.decide.pointer import PointerDecider
-from ml_stack.decide.sources import local_source
 from ml_stack.files import write_json
 from ml_stack.gym.adapters import actions, json_value, make_environment, render_state
+from ml_stack.gym.decision_process import (
+    DecisionProcess,
+    decision_controller as decision_controller,
+)
 from ml_stack.gym.live_learning import create_policy, learn_rollout
 from ml_stack.gym.observations import decision_state
 from ml_stack.gym.paths import artifact_root
@@ -24,17 +25,6 @@ class DecisionHeld(RuntimeError):
     def __init__(self, decision):
         super().__init__("Decision model abstained; simulation paused")
         self.decision = decision
-
-
-def decision_controller(checkpoint=None):
-    """Load a default or verified trained pointer decider on the CPU."""
-    if not checkpoint:
-        return PointerDecider(device="cpu")
-    source = Path(checkpoint).expanduser().resolve()
-    if not source.is_dir():
-        raise ValueError("Decision checkpoint must be a local trained model directory")
-    local_source(source, download=False)
-    return PointerDecider(source, device="cpu")
 
 
 def select_action(controller, observation, choices, manual, policy=None):
@@ -81,12 +71,15 @@ class Simulation:
         self.world = settings["config"].get("simulation_mode", "episode") == "world"
         self.learning_mode = settings["config"].get("learning_mode", "frozen")
         self.control_revision = 0
+        self.decider = None
+        self.decision_max_age_s = float(settings["config"].get("decision_max_age_s", 1))
+        if not 1 <= self.decision_max_age_s <= 30:
+            raise ValueError("decision_max_age_s must be between 1 and 30 seconds")
         if self.environment == "car":
             settings["config"].setdefault("steering_magnitude", .35)
         self.running, self.speed, self.manual, self.policy = False, 10., 3 if self.environment == "car" else 0, None
         decision_checkpoint = settings["config"].get("decision_checkpoint")
         if self.controller == "decider":
-            self.policy = decision_controller(decision_checkpoint)
             settings["model"] = str(decision_checkpoint or STRANDS)
             settings["device"] = "cpu"
         settings["version"] = 1
@@ -97,13 +90,15 @@ class Simulation:
         self.record_frames = bool(config.pop("record_frames", False))
         checkpoint = config.pop("checkpoint", None)
         config.pop("decision_checkpoint", None)
+        config.pop("decision_max_age_s", None)
         if self.environment == "car":
             config.setdefault("render_preview", True)
         self.env = make_environment(self.environment, config, self.seed)
         self.observation, initial_info = self.env.reset(seed=self.seed)
         settings.update(native_provenance(self.environment, self.env))
         settings.setdefault("model", checkpoint if self.controller == "ppo" else
-                            "MetaDrive IDM" if self.controller == "native-idm" else None)
+                            "MetaDrive IDM" if self.controller == "native-idm" else
+                            "PyFlyt PID patrol" if self.controller == "native-patrol" else None)
         settings.setdefault("device", "cpu")
         write_json(self.path / "manifest.json", settings)
         if self.controller == "ppo":
@@ -123,10 +118,14 @@ class Simulation:
                       "policy_version": 0, "training_timesteps": 0, "optimizer_updates": 0,
                       "trajectory_path": str(self.path / "trajectory.jsonl")}
         self.reset({}, initial_info)
+        if self.controller == "decider":
+            self.start_decider()
 
     def reset(self, payload, initial_info=None):
         self.control_revision += 1
         self.running = False
+        if hasattr(self, "state"):
+            self.stop_decider()
         seed = int(payload.get("seed", self.seed))
         if self.world and seed != self.seed:
             raise ValueError("Create a new world to change its seed")
@@ -158,9 +157,72 @@ class Simulation:
         if self.controller == "native-idm":
             action, decision = None, {"state": named, "choice": "Native IDM driving", "probabilities": None,
                                       "model": "MetaDrive IDM", "backend": "MetaDrive", "latency_ms": 0.}
+        elif self.controller == "decider":
+            action, decision = self.decision_action(named)
+        elif self.controller == "native-patrol":
+            action, decision = None, {"state": named, "choice": "Native PID patrol", "probabilities": None,
+                                      "model": "PyFlyt PID patrol", "backend": "PyFlyt", "latency_ms": 0.}
         else:
             action, decision = select_action(self.controller, self.observation, choices, self.manual, self.policy)
         self.advance(action, decision)
+
+    def pause(self):
+        self.running = False
+        self.stop_decider()
+        self.control_revision += 1
+        self.state["status"] = "paused"
+
+    def start_decider(self):
+        self.decider = DecisionProcess(self.settings["config"].get("decision_checkpoint"))
+        self.state["decision_readiness"] = {"status": "loading", "error": None, "pending": False,
+                                            "max_age_s": self.decision_max_age_s}
+
+    def poll_loading(self):
+        if self.decider is not None and self.decider.pending is None:
+            event = self.decider.poll()
+            if event:
+                self.state["decision_readiness"].update(status=self.decider.status, error=self.decider.error)
+                return True
+        return False
+
+    def stop_decider(self):
+        if getattr(self, "decider", None) is not None:
+            self.decider.close()
+            self.decider = None
+            if hasattr(self, "state"):
+                self.state["decision_readiness"] = {"status": "unloaded", "pending": False, "error": None}
+
+    def decision_action(self, named):
+        if self.decider is None:
+            self.start_decider()
+        event = self.decider.poll()
+        result = event.get("result") if event else None
+        now = time.monotonic()
+        decision = {"state": named, "fallback": True, "reason": self.decider.status,
+                    "model": self.settings["model"], "probabilities": None}
+        selected = 3 if self.environment == "car" else 0
+        if self.environment in {"traffic", "traffic-driving"}:
+            selected = int(named.get("signals", [{"phase": 0}])[0]["phase"])
+        if result:
+            age = now - result["timestamp"]
+            self.state["decision_result"] = {**result, "input_age_s": age}
+            valid = (result["revision"] == self.control_revision
+                     and result["agent_id"] == self.state.get("agent_id")
+                     and age <= self.decision_max_age_s and not result["abstained"])
+            if valid and result["choice"] in self.names:
+                selected = self.names.index(result["choice"])
+                decision.update(fallback=False, reason="accepted", input_sequence=result["sequence"])
+            else:
+                decision["reason"] = "abstained" if result["abstained"] else "stale"
+        request = {"observation": json_value(self.observation), "state": json_value(named),
+                   "options": self.names, "sequence": self.state["sequence"], "timestamp": now,
+                   "revision": self.control_revision, "agent_id": self.state.get("agent_id")}
+        self.decider.submit(request)
+        self.state["decision_readiness"] = {"status": self.decider.status,
+            "error": self.decider.error, "pending": self.decider.pending is not None,
+            "max_age_s": self.decision_max_age_s}
+        decision["choice"] = self.names[selected]
+        return self.native_actions[selected], decision
 
     def advance(self, action, decision):
         """Record one native step from the supplied controller action."""
@@ -202,10 +264,13 @@ class Simulation:
 
     def change_controller(self, payload):
         controller = payload["controller"]
-        if controller not in {"manual", "random", "ppo", "decider", "native-idm"}:
+        self.control_revision += 1
+        if controller not in {"manual", "random", "ppo", "decider", "native-idm", "native-patrol"}:
             raise ValueError("Unknown controller")
         if controller == "native-idm" and not (self.world and self.environment == "car"):
             raise ValueError("Native IDM requires a persistent car world")
+        if controller == "native-patrol" and not (self.world and self.environment == "drone"):
+            raise ValueError("Native patrol requires a persistent drone world")
         if controller == "ppo":
             mode = payload.get("learning_mode", self.learning_mode)
             if mode not in {"online", "frozen"} or (mode == "online" and not self.world):
@@ -216,7 +281,14 @@ class Simulation:
             self.state["learning_mode"] = mode
             self.settings["config"]["learning_mode"] = mode
         elif controller == "decider":
-            self.policy = decision_controller(payload.get("decision_checkpoint"))
+            self.stop_decider()
+            if payload.get("decision_checkpoint"):
+                self.settings["config"]["decision_checkpoint"] = payload["decision_checkpoint"]
+            else:
+                self.settings["config"].pop("decision_checkpoint", None)
+            self.start_decider()
+        if controller != "decider":
+            self.stop_decider()
         self.controller = controller
         if controller != "ppo":
             self.learning_mode = "frozen"
@@ -226,6 +298,7 @@ class Simulation:
         self.settings.update(controller=controller, device="cpu",
                              model=payload.get("decision_checkpoint", STRANDS) if controller == "decider"
                              else "MetaDrive IDM" if controller == "native-idm"
+                             else "PyFlyt PID patrol" if controller == "native-patrol"
                              else payload.get("checkpoint", ""))
         for field in ("checkpoint", "decision_checkpoint"):
             if field in payload:
@@ -241,8 +314,7 @@ class Simulation:
             self.running = True
             self.state["status"] = "running"
         elif command == "pause":
-            self.running = False
-            self.state["status"] = "paused"
+            self.pause()
         elif command == "speed":
             self.speed = max(0.1, min(60., float(payload["speed"])))
             self.state["speed"] = self.speed
@@ -270,6 +342,7 @@ class Simulation:
                 raise ValueError("This environment does not expose individually controllable agents")
             self.observation, info = self.env.select_agent(payload["agent_id"])
             self.control_revision += 1
+            self.stop_decider()
             self.state.update(observation=json_value(self.observation), decision=None, action=None)
             self.state["reward"] = None
             self.state["agent_id"] = info.get("ego_actor_id")
@@ -301,6 +374,8 @@ def worker(settings, commands, updates):
                 command, payload = commands.get(timeout=1 / simulation.speed if simulation.running else .2)
             except queue.Empty:
                 if not simulation.running:
+                    if simulation.poll_loading():
+                        publish(updates, simulation.state)
                     continue
                 command, payload = "step", {}
             if command == "close":
@@ -320,6 +395,7 @@ def worker(settings, commands, updates):
                          "status": "error", "sequence": 0, "error": str(exc)})
     finally:
         if simulation is not None and hasattr(simulation, "env"):
+            simulation.stop_decider()
             simulation.env.close()
 
 
