@@ -1,10 +1,10 @@
 {
- "surfaces": 560,
+ "surfaces": 564,
  "by_status": {
-  "covered": 256,
+  "covered": 259,
   "partial": 202,
   "uncovered": 54,
-  "n/a": 48,
+  "n/a": 49,
   "unmapped": 0
  },
  "by_kind": {
@@ -16,7 +16,7 @@
    "unmapped": 0
   },
   "cli": {
-   "covered": 6,
+   "covered": 7,
    "partial": 5,
    "uncovered": 0,
    "n/a": 23,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 40,
+   "covered": 42,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -103,7 +103,7 @@
    "covered": 14,
    "partial": 64,
    "uncovered": 0,
-   "n/a": 0,
+   "n/a": 1,
    "unmapped": 0
   }
  },
@@ -663,6 +663,20 @@
    "status": "n/a",
    "tests": [],
    "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
+   "id": "cli:ml-stack-log",
+   "kind": "cli",
+   "source": "ml_stack.activity.cli:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_activity.py::test_text_recorded_in_the_log_reaches_an_agent_only_fenced_and_inert",
+    "tests/test_redteam_activity.py::test_a_model_that_obeys_everything_cannot_read_edit_truncate_or_disable_the_log",
+    "tests/test_activity_viewer.py::test_an_agent_cannot_export"
+   ],
+   "note": "the viewer is read-only; an agent's process sees records only fenced and inert, and cannot export or switch the log off"
   },
   {
    "id": "cli:ml-stack-mcp",
@@ -2373,6 +2387,36 @@
     "tests/test_pdf_engine.py"
    ],
    "note": ""
+  },
+  {
+   "id": "human:activity/cli.py:_export",
+   "kind": "human",
+   "source": "activity/cli.py:_export",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:activity/writer.py:log",
+   "kind": "human",
+   "source": "activity/writer.py:log",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
    "id": "human:chatpolicy.py:HumanOnlyRail.before_tool_call",
@@ -6555,6 +6599,16 @@
     "tests/test_roles.py::test_a_rule_is_never_created_by_text_the_model_or_a_tool_produced"
    ],
    "note": ""
+  },
+  {
+   "id": "spawn:activity/gate.py:tree_hash",
+   "kind": "spawn",
+   "source": "activity/gate.py:tree_hash",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "n/a",
+   "tests": [],
+   "note": "fixed git argv over the checkout scripts/test is run in, in a throwaway index; no model, peer or file name reaches it"
   },
   {
    "id": "spawn:backend/device.py:_detect_amd",

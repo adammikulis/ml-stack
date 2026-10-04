@@ -15,6 +15,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import gate
+from ml_stack import activity, gate
 from ml_stack.client import is_healthy, reported_models, serving_params
 from ml_stack.files import read_json, write_json
 from ml_stack.hub import free_memory
@@ -44,6 +45,25 @@ __all__ = ["Ask", "Broker", "BrokerError", "Grant", "Held", "Waiting"]
 IDLE_S = 600.0
 POLL_S = 0.5
 _SPEC_FIELDS = frozenset(f.name for f in dataclasses.fields(ServerSpec)) - {"model", "port"}
+
+
+_QUANT = re.compile(r"(?i)(?<![a-z0-9])((?:IQ|Q)\d(?:_[A-Z0-9]+)*|BF16|F16|F32)(?![a-z0-9])")
+_FLAGS = ("context", "n_gpu_layers", "parallel", "mtp", "spec_type", "flash_attn", "embedding")
+
+
+def _named(ask: Ask) -> str:
+    return "model:" + Path(ask.models[0]).name
+
+
+def _flags(ask: Ask) -> dict[str, Any]:
+    """The settings a lease record keeps: quant (from the file name), the flags that shape the
+    run, the share of the card, and the draft head's file name."""
+    quant = _QUANT.search(Path(ask.models[0]).name)
+    out: dict[str, Any] = {"quant": quant.group(1) if quant else "", "weight": ask.weight}
+    out.update({k: ask.spec[k] for k in _FLAGS if k in ask.spec})
+    if ask.spec.get("draft"):
+        out["draft"] = Path(str(ask.spec["draft"])).name
+    return out
 
 
 def who() -> str:
@@ -278,6 +298,18 @@ class Broker:
         like any other holder, so a measurement is never spoiled and never refuses a lease
         that could have had its turn."""
         caller = ask.label or f"pid-{ask.pid}"
+        try:
+            grant = self._lease(ask, caller, timeout)
+        except BrokerError as why:
+            activity.record("model.lease", subject=_named(ask), outcome="refused",
+                            refs={"for": caller, "purpose": ask.purpose}, meta={"why": str(why)})
+            raise
+        activity.record("model.lease", subject=_named(ask), outcome="shared" if grant.shared else "granted",
+                        refs={"for": caller, "purpose": ask.purpose, "lease": grant.lease},
+                        meta={"port": grant.port, **_flags(ask)})
+        return grant
+
+    def _lease(self, ask: Ask, caller: str, timeout: float) -> Grant:
         if why := guarded.caller_blocked(caller):
             raise BrokerError(why)
         guarded.report("lease", caller=caller, purpose=ask.purpose)

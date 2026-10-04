@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import (
+    activity,
     chatpolicy as policy,
     do,
     files,
@@ -296,6 +297,8 @@ class Chat:
 
     def use_role(self, name: str) -> None:
         """Run under another role from now on; only the person's typed ``/role`` calls this."""
+        activity.record("role.changed", actor="person", subject=name, refs={"session": self.session.id},
+                        meta={"was": self.role.name})
         self.role = roles.get(name)
         self.gate.set(self.role)
         self.limits.limits = replace(self.limits.limits, calls=self.role.max_calls)
@@ -420,6 +423,7 @@ class Chat:
             self.watch.approve(" ".join(steps))
             self.plan.approve(steps)
         text = json.dumps(mcp._plain(result), ensure_ascii=False, default=str)[:CUT]
+        self._logged(asked.name, args, _outcome(gate, tool, result), len(text))
         answer = text
         if asked.name not in roles.OWN and gate.allowed:
             shown = self.watch.screen_result(asked, text)
@@ -433,6 +437,24 @@ class Chat:
             person.say("   " + self.watch.screen_model(text).text[:300])
         out.messages.append({"role": "tool", "tool_call_id": call.get("id") or asked.name,
                              "name": asked.name, "content": answer})
+
+
+    def _logged(self, name: str, args: dict[str, Any], how: tuple[str, dict[str, str]],
+                chars: int) -> None:
+        """Record one tool call: its name, argument names and the outcome, never a value."""
+        outcome, refs = how
+        activity.record("agent.tool_call", actor="agent:" + (Path(self.session.model).name or "chat"),
+                        subject=name, outcome=outcome, refs={"role": self.role.name, **refs},
+                        meta={"arg_names": ",".join(sorted(args)), "result_chars": chars})
+
+
+def _outcome(gate: Any, tool: Any, result: Any) -> tuple[str, dict[str, str]]:
+    """How a call ended (blocked, no_such_tool, error, ok) and, when blocked, by which rail."""
+    if not gate.allowed:
+        return "blocked", {"rail": getattr(gate.verdict, "by", "") or "guard"}
+    if tool is None:
+        return "no_such_tool", {}
+    return ("error" if isinstance(result, dict) and "error" in result else "ok"), {}
 
 
 def run_task(task: str, client: Any, *,  # noqa: PLR0913
@@ -656,6 +678,8 @@ def serve(args: argparse.Namespace, stdin: TextIO, stdout: TextIO) -> int:
             return 1
         stdout.write(f"model: {args.model} ({why})\n")
     session.model = args.model or session.model
+    activity.bind_session(session.id)
+    activity.attach()
 
     def connect(ref: str) -> Any:
         client = do.client_for(argparse.Namespace(**{**vars(args), "model": ref, "url": ""}))

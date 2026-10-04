@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import socket
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, is_dataclass
@@ -20,7 +21,7 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.home_dir`,
 # `bench.runs` -- so anything patchable is looked up there at call time, never bound here
 # at import.
-from ml_stack import bench
+from ml_stack import activity, bench
 from ml_stack.home import machine_id, state
 
 
@@ -282,7 +283,20 @@ def save(store: str | Path, rows: Sequence[Any], *, server: dict[str, Any] | Non
     if back != record:
         differs = sorted(k for k in set(back) | set(record) if back.get(k) != record.get(k))
         raise RunNotKept(f"{key} came back from {store} changed: {', '.join(differs)} differ")
+    _logged(key, store, record)
     return key
+
+
+def _logged(key: str, store: str | Path, record: Mapping[str, Any]) -> None:
+    """Put a kept run in the activity log: the command, the model and build it measured, where
+    it is kept, never the answers."""
+    server = record["server"]
+    activity.record("bench.run", subject=record["label"], outcome="kept",
+                    refs={"key": key, "store": Path(store).name},
+                    meta={"command": " ".join(sys.argv[:6]), "kind": record.get("kind", ""),
+                          "workload": record.get("workload", ""), "rows": len(record["rows"]),
+                          **{k: Path(str(server[k])).name for k in ("model", "build", "commit")
+                             if server.get(k)}})
 
 
 def runs(store: str | Path, label: str = "") -> list[dict[str, Any]]:

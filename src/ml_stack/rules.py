@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import files, home
+from ml_stack import activity, files, home
 from ml_stack.chatpolicy import _TOOL_NAME, CONFIRM, READ, _outside_state
 
 __all__ = ["Rule", "Rules", "blocked_reason", "describe", "run_command"]
@@ -136,6 +136,8 @@ class Rules:
     def _event(self, kind: str, rule: Rule) -> None:
         line = {"ts": time.strftime("%FT%T"), "event": kind, "rule": describe(rule)}
         logger.warning("agent rule %s: %s", kind, line["rule"])
+        activity.record("rule." + kind.replace("-", "_"), actor="person", subject=rule.tool,
+                        outcome=rule.verdict, refs={"role": rule.role}, meta={"rule": line["rule"]})
         with (self.path.parent / EVENTS).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(line) + "\n")
 

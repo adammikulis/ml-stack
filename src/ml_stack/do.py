@@ -22,7 +22,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, TextIO
 
-from ml_stack import hub, mcp
+from ml_stack import activity, hub, mcp
 from ml_stack.client import ollama
 from ml_stack.interventions import Call, Confirm
 from ml_stack.log import say
@@ -406,6 +406,7 @@ class Person:
     def __init__(self, stdin: TextIO, stdout: TextIO, *, rules: Rules | None = None) -> None:
         self.stdin, self.stdout, self.rules = stdin, stdout, rules
         self.asked = 0
+        self.answer = ""
         self.left = False
         self.finished = False
         self.summary = ""
@@ -464,6 +465,15 @@ class Person:
     def confirm(self, ask: Confirm, call: Call | None = None) -> bool:
         """Put an intervention's question to the person: allow this time, always allow, never
         allow, or (anything else) no. A rule is saved only on the person's own answer."""
+        name, role = (call.name if call else ""), str(ask.details.get("role") or "")
+        activity.record("approval.asked", subject=name, refs={"role": role})
+        self.answer = "no"
+        allowed = self._confirm(ask, call)
+        activity.record("approval.answered", actor="person", subject=name, outcome=self.answer,
+                        refs={"role": role})
+        return allowed
+
+    def _confirm(self, ask: Confirm, call: Call | None) -> bool:
         what = f"{call.name}({_compact(call.arguments or {})}): " if call is not None else ""
         self.asked += 1
         self.say(f"\n! {what}{ask.question}")
@@ -475,10 +485,13 @@ class Person:
             + ("  3) never allow" if can else "") + "  [Enter = no]"
         got = (self._read(f"allow it? {menu} > ") or "").lower()
         if got in ("y", "yes", "1"):
+            self.answer = "allow_once"
             return True
         if can and got in ("3", "never"):
+            self.answer = "never"
             return self._save(call, "never", ask)
         if always and got in ("2", "a", "always"):
+            self.answer = "always"
             return self._save(call, "always", ask)
         return False
 
