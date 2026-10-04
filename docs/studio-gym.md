@@ -220,7 +220,11 @@ must already be available through the existing decision-model installation workf
 Loading verifies metadata and hashes and refuses pickled model files. The default maximum
 decision input age is one second; `decision_max_age_s` accepts one through thirty seconds.
 Slow CPU inference can exceed that limit, in which case the car continues braking and the
-result is explicitly reported stale. See [decision models](decision-models.md).
+result is explicitly reported stale. An active accelerator decider holds the exclusive
+claim until pause, stop, actor change or controller change. Vision serving therefore queues
+while that decider is loaded; use native drone patrol or CPU decisions for simultaneous
+vision perception. Claims coordinate workloads using the same maintained broker state root.
+See [decision models](decision-models.md).
 
 Drone camera perception is optional and has a separate **Vision model** dropdown. It lists
 all locally discovered vision models, with SmolVLM 256M as the speed default. Installed
@@ -328,3 +332,14 @@ Upstream references: [MetaDrive](https://metadrive-simulator.readthedocs.io/),
 [SUMO-RL](https://github.com/LucasAlegre/sumo-rl),
 [Gymnasium](https://gymnasium.farama.org/), and
 [Stable-Baselines3](https://stable-baselines3.readthedocs.io/).
+
+Installed-model acceptance is opt-in and reuses verified cached weights without downloads.
+Set `ML_STACK_ACCEPTANCE_DECIDE_CACHE` to the existing `decide` cache and
+`ML_STACK_ACCEPTANCE_DECISION_DEVICE=auto` when the accelerator is free, then run
+`tests/test_gym_native_acceptance.py::test_cached_strands_reports_native_world_decisions_without_blocking`
+through `scripts/test`. The test requires an actual applied decision within the default
+one-second freshness limit and checks pause releases its claim. The native vision case
+requires `ML_STACK_ACCEPTANCE_VISION=1`, an installed SmolVLM GGUF/projector visible through
+`ML_STACK_MODEL_PATHS`, and the existing `LLAMA_CPP_SERVER` binary. Run actual inference
+cases serially after checking owner workloads; mock HTTP and process boundary tests do not
+need an accelerator.

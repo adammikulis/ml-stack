@@ -10,17 +10,19 @@ from ml_stack.gym.observations import car_model_state
 def test_car_prompt_uses_each_sensor_once_and_keeps_grounded_lane_stop_features():
     raw = {'environment': 'car', 'simulation_mode': 'world', 'native_observation': [123.456789] * 300,
            'world_steps': 42, 'active_actor_ids': ['a', 'b'], 'applied_native_control': [.1, .2],
-           'ego': {'speed_km_h': 18, 'heading_radians': .2},
+           'ego': {'speed_km_h': 18, 'heading_radians': .2, 'position_m': [999.12345, 321.3456]},
            'lane': {'heading_radians': .1, 'lateral_offset_m': .4, 'width_m': 3.5},
-           'navigation_normalized': [.1, .2], 'stop_rule': {'distance_m': 12, 'completed': False},
+           'navigation_normalized': [.1, .2], 'stop_rule': {'distance_m': 12, 'completed': False,
+                                                         'stop_line': [[5, 4], [6, 3]]},
            'sensors': {'lidar_range_m': 50, 'lidar_normalized': [.123456789, .998765432, 1.]}}
     original = copy.deepcopy(raw)
     model = car_model_state(raw)
     assert raw == original
     assert 'native_observation' not in model and 'world_steps' not in model
     assert 'active_actor_ids' not in model and 'applied_native_control' not in model
-    assert model['ego'] == raw['ego'] and model['lane'] == raw['lane']
-    assert model['stop_rule'] == raw['stop_rule'] and model['navigation_normalized'] == [.1, .2]
+    assert model['ego'] == {'speed_km_h': 18, 'heading_radians': .2} and model['lane'] == raw['lane']
+    assert model['stop_rule'] == {'distance_m': 12, 'completed': False}
+    assert model['navigation_normalized'] == [.1, .2]
     assert model['sensors'] == {'lidar_clear_range_m': 50., 'lidar_ray_count': 3,
                                 'lidar_hits_m': [[0, 6.17], [1, 49.94]]}
 
