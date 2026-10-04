@@ -13,12 +13,15 @@ from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 
-__all__ = ["KINDS", "Claims", "Conflict", "alive", "normal"]
+__all__ = ["EXPIRING_SOON_S", "KINDS", "MAX_LIFETIME_S", "MAX_RENEW_S", "Claims", "Conflict", "alive", "normal"]
 
 KINDS = ("branch", "worktree", "port", "file", "server")
 PATH_KINDS = ("worktree", "file")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,199}$")
 VERSION = 1
+EXPIRING_SOON_S = 300.0
+MAX_RENEW_S = 3600.0
+MAX_LIFETIME_S = 8 * 3600.0
 
 
 class Conflict(RuntimeError):
@@ -69,13 +72,18 @@ def _covers(claim: dict[str, Any], kind: str, key: str) -> bool:
 
 
 class Claims:
-    """Claims with a TTL renewed by heartbeat; one whose pid has died is released on next look."""
+    """Claims with a TTL renewed by heartbeat; one whose pid has died is released on next look.
+
+    ``on_swept(claim)`` hears each claim released as expired or dead; ``on_stolen(old, new)``
+    hears a claim taken by another owner over one that had expired or died.
+    """
 
     def __init__(self, base: Path, ttl_s: float, clock: Callable[[], float] = time.time,
-                 on_swept: Callable[[dict[str, Any]], None] | None = None) -> None:
+                 on_swept: Callable[[dict[str, Any]], None] | None = None,
+                 on_stolen: Callable[[dict[str, Any], dict[str, Any]], None] | None = None) -> None:
         self.path = base / "claims.json"
         self.lock = base / "claims.lock"
-        self.ttl_s, self.clock, self.on_swept = ttl_s, clock, on_swept
+        self.ttl_s, self.clock, self.on_swept, self.on_stolen = ttl_s, clock, on_swept, on_stolen
 
     def _load(self) -> dict[str, dict[str, Any]]:
         data = read_json(self.path, {})
@@ -88,7 +96,8 @@ class Claims:
 
     def _sweep(self, claims: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         now = self.clock()
-        dead = [c for c in claims.values()
+        dead = [{**c, "reason": "expired" if c["expires"] <= now else "dead-pid"}
+                for c in claims.values()
                 if c["expires"] <= now or (c["pid"] and not alive(int(c["pid"])))]
         for claim in dead:
             claims.pop(f"{claim['kind']}:{claim['key']}", None)
@@ -118,6 +127,10 @@ class Claims:
                     "expires": now + (ttl_s or self.ttl_s), "note": note[:200]}
             claims[f"{kind}:{key}"] = made
             self._save(claims)
+            if self.on_stolen:
+                for old in swept:
+                    if old["owner"] != who.id and _covers(old, kind, key):
+                        self.on_stolen(old, made)
             return made, swept
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
@@ -135,25 +148,40 @@ class Claims:
             self._save(claims)
             return found
 
-    def heartbeat(self, who: Identity, ttl_s: float = 0.0) -> int:
-        """Renew every claim ``who`` holds; returns how many."""
+    def renew(self, who: Identity, ttl_s: float = 0.0) -> list[dict[str, Any]]:
+        """Extend every claim ``who`` holds by ``ttl_s`` (at most ``MAX_RENEW_S``) from now, never
+        past ``MAX_LIFETIME_S`` after it was first taken; returns the renewed claims, each marked
+        ``capped`` when the lifetime cap held it back."""
+        step = min(ttl_s or self.ttl_s, MAX_RENEW_S)
         with held(self.lock):
             claims = self._load()
             self._sweep(claims)
+            now = self.clock()
             mine = [c for c in claims.values() if c["owner"] == who.id]
             for claim in mine:
-                claim["expires"] = self.clock() + (ttl_s or self.ttl_s)
+                limit = claim["since"] + MAX_LIFETIME_S
+                claim["expires"] = max(claim["expires"], min(now + step, limit))
+                claim["capped"] = now + step > limit
             self._save(claims)
-            return len(mine)
+            return [dict(c) for c in mine]
+
+    def heartbeat(self, who: Identity, ttl_s: float = 0.0) -> int:
+        """Renew every claim ``who`` holds; returns how many."""
+        return len(self.renew(who, ttl_s))
 
     def listing(self, owner: str = "", kind: str = "") -> list[dict[str, Any]]:
-        """Live claims, optionally of one owner or kind."""
+        """Live claims, optionally of one owner or kind, each with ``expires_in_s`` and
+        ``expiring_soon``."""
         with held(self.lock):
             claims = self._load()
             if self._sweep(claims):
                 self._save(claims)
-        return sorted((c for c in claims.values() if (not owner or c["owner"] == owner)
-                       and (not kind or c["kind"] == kind)), key=lambda c: (c["kind"], c["key"]))
+        now, soon = self.clock(), min(EXPIRING_SOON_S, self.ttl_s / 3)
+        return sorted(({**c, "expires_in_s": round(c["expires"] - now, 1),
+                        "expiring_soon": c["expires"] - now <= soon}
+                       for c in claims.values()
+                       if (not owner or c["owner"] == owner) and (not kind or c["kind"] == kind)),
+                      key=lambda c: (c["kind"], c["key"]))
 
     def who(self, kind: str, key: str) -> dict[str, Any] | None:
         """The claim that covers ``key``, or None when nobody owns it."""
