@@ -1,4 +1,4 @@
-"""The guided `connect` and `setup` flows: a one-time invite, a paste, a live check."""
+"""The guided `connect` and `setup` flows: an invite, a paste, a live check."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from ml_stack.files import read_json, write_json
 from ml_stack.log import say
 from ml_stack.sentinel import human
 from ml_stack.workspace import onboard, tokens
@@ -46,6 +48,7 @@ class Plan:
     live_s: float = 120.0
     wait_s: float = 600.0
     yes: bool = False
+    shared: bool = True
     project: dict[str, str] = field(default_factory=dict)
 
 
@@ -91,11 +94,37 @@ def _live(ws: Workspace, name: str, plan: Plan, talk: Talk) -> bool:
     return False
 
 
+def _shared_file(ws: Workspace) -> Path:
+    return ws.base / "shared-invites.json"
+
+
+def _reuse(ws: Workspace, plan: Plan) -> str:
+    """The still-open shared code for this project, so running `connect` again in the same
+    folder hands out the same paste instead of making another invite; else an empty string."""
+    code = read_json(_shared_file(ws), {}).get(plan.project.get("key", ""), "")
+    return str(code) if code and ws.invites.state(str(code)) == "waiting" else ""
+
+
+def _remember(ws: Workspace, plan: Plan, code: str) -> None:
+    path = _shared_file(ws)
+    now = {k: v for k, v in read_json(path, {}).items() if ws.invites.state(str(v)) == "waiting"}
+    write_json(path, {**now, plan.project.get("key", ""): code})
+    path.chmod(0o600)
+
+
 def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
-    code = ws.invites.create(hint, ws.limits.invite_ttl_s, plan.project)
-    block = onboard.snippet("", code, hint, plan.project.get("name", ""))
+    lim = ws.limits
+    ttl, uses = (lim.shared_invite_ttl_s, lim.shared_invite_uses) if plan.shared else (
+        lim.invite_ttl_s, 1)
+    code = _reuse(ws, plan) or ws.invites.create(hint, ttl, plan.project, uses)
+    if plan.shared:
+        _remember(ws, plan, code)
+    block = onboard.snippet("", code, hint, plan.project.get("name", ""),
+                          (uses, int(ttl // 60)))
     if talk.copy(block):
-        say("Copied. Paste it into the agent's chat now.")
+        say("Copied. Paste it into the agent's chat now."
+            + (f" The same paste works for up to {uses} agents in the next {ttl / 60:.0f} minutes."
+               if uses > 1 else ""))
     else:
         bar = "=" * 60
         say(f"No clipboard tool found. Select and copy this block, then paste it into the "
@@ -106,14 +135,20 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
 def _connect_one(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
     """The name of the agent that joined and answered, or an empty string."""
     code = _offer(ws, hint, plan, talk)
+    before = len(ws.invites.joined(code))
     joined = _wait(plan, talk, "Waiting for the agent to join", plan.wait_s,
-                   lambda: ws.invites.state(code) != "waiting")
-    name = ws.invites.joined_as(code)
+                   lambda: len(ws.invites.joined(code)) > before)
+    name = ws.invites.joined(code)[before:][:1]
+    name = name[0] if name else ""
     if not joined or not name:
         say(f"Nobody joined. The code lasts {ws.limits.invite_ttl_s / 60:.0f} minutes; run "
             f"`ml-stack-workspace connect` again for a new one.")
         return ""
     say(f"{name} joined.")
+    if plan.shared:
+        say(f"Paste the same block into more agents; each one names itself. It stops working "
+            f"after {ws.limits.shared_invite_uses} agents or {ws.limits.shared_invite_ttl_s / 60:.0f} "
+            f"minutes. After an editor restart an agent keeps its saved name: no new code needed.")
     return name if plan.live_s > 0 and _live(ws, name, plan, talk) else ""
 
 
@@ -136,7 +171,7 @@ def connect(ws: Workspace, plan: Plan, talk: Talk | None = None) -> list[str]:
         name = _connect_one(ws, hints.pop(0) if hints else "", plan, talk)
         if name:
             answered.append(name)
-        if plan.yes or not _yes(talk, "Connect another agent?", False):
+        if plan.yes or plan.shared or not _yes(talk, "Connect another agent?", False):
             return answered
 
 
@@ -145,6 +180,7 @@ def walk(ws: Workspace, plan: Plan, talk: Talk | None = None) -> dict[str, list[
     Returns the agents that answered and the ones that did not."""
     human.require_person("workspace setup")
     talk = talk or Talk()
+    plan.shared = False
     total = 6
     _step(1, total, "what this is")
     say("The workspace lets your coding agents (Claude Code, Codex, others) send each other\n"

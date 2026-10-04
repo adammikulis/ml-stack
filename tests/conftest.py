@@ -502,6 +502,11 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
 
 
+from ml_stack.keystore import ENV_NO_REAL  # noqa: E402
+
+os.environ[ENV_NO_REAL] = "1"
+"""Every process a test starts inherits this: the machine's own keystore reads as absent to it."""
+
 REAL_KEYSTORES = (("macOS", "Keyring"), ("SecretService", "Keyring"), ("Windows", "WinVaultKeyring"),
                   ("kwallet", "DBusKeyring"))
 """The `keyring` backends that talk to the machine's own keystore: (module, class)."""

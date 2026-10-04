@@ -485,13 +485,12 @@ def test_connect_waits_for_a_second_process_to_join_then_checks_it_answers(base)
     child(["inbox", "--ack", "--agent", "codex"], base)
     child(["send", "*", "status", "connected", "--agent", "codex"], base)
     term.until("codex answered. Connected.")
-    term.until("Connect another agent?")
-    term.type("n")
+    term.until("Paste the same block into more agents")
     assert term.finish() == 0
     for secret in secrets_of(base):
         assert secret not in term.heard and secret.split(".")[-1] not in term.heard
     again = child(["join", code, "--name", "codex2"], base)
-    assert again.returncode == 3
+    assert again.returncode == 0 and again.stdout.strip() == "joined as codex2"
 
 
 def test_connect_says_what_to_check_when_nothing_answers_and_when_nobody_joins(base):
@@ -500,11 +499,9 @@ def test_connect_says_what_to_check_when_nothing_answers_and_when_nobody_joins(b
     child(["join", code, "--name", "codex"], base)
     term.until("Nothing came back from codex")
     assert "can run shell commands" in term.heard and "token file exists" in term.heard
-    term.type("n")
     assert term.finish() == 1
     quiet = Terminal(["connect", "--wait-seconds", "2"], base)
     quiet.until("Nobody joined")
-    quiet.type("n")
     quiet.finish()
 
 
@@ -617,3 +614,42 @@ def test_the_clipboard_gets_the_text_on_stdin_and_never_through_a_shell(monkeypa
     assert out.read_text() == hostile and not (tmp_path / "pwned").exists()
     monkeypatch.setenv("PATH", str(tmp_path / "nothing"))
     assert guide.clipboard("x") is False
+
+
+def test_a_shared_invite_serves_several_agents_then_stops(base, ws):
+    code = ws.invites.create("", 600.0, uses=3)
+    names = [onboard.join(ws, code, "claude-code") for _ in range(3)]
+    assert len(set(names)) == 3 and names[0] == "claude-code"
+    assert ws.invites.joined(code) == names and ws.invites.state(code) == "used"
+    with pytest.raises(Denied):
+        onboard.join(ws, code, "late")
+
+
+def test_a_closed_shared_invite_admits_no_one_more(base, ws):
+    code = ws.invites.create("", 600.0, uses=5)
+    onboard.join(ws, code, "codex")
+    ws.invites.close(code)
+    with pytest.raises(Denied):
+        onboard.join(ws, code, "other")
+
+
+def test_the_paste_block_says_how_many_agents_and_how_long(base):
+    block = onboard.snippet("", "AAAA-AAAA-AAAA-AAAA", "", "p", window=(10, 60))
+    assert "10 agents, once each, for 60 minutes" in block and "skip the join" in block
+
+
+def test_connect_again_in_the_same_project_hands_out_the_same_open_code(base, ws):
+    seen = []
+    talk = guide.Talk(ask=lambda _p: "n", sleep=lambda _s: None,
+                      copy=lambda text: seen.append(text) or True)
+    proj = {"key": "k" * 16, "name": "alpha"}
+    for _ in range(2):
+        guide.connect(ws, guide.Plan(live_s=0.0, wait_s=1.0, project=proj), talk)
+    assert CODE.search(seen[0]).group(1) == CODE.search(seen[1]).group(1)
+    other = {"key": "z" * 16, "name": "beta"}
+    guide.connect(ws, guide.Plan(live_s=0.0, wait_s=1.0, project=other), talk)
+    assert CODE.search(seen[2]).group(1) != CODE.search(seen[0]).group(1)
+    code = CODE.search(seen[0]).group(1)
+    ws.invites.close(code)
+    guide.connect(ws, guide.Plan(live_s=0.0, wait_s=1.0, project=proj), talk)
+    assert CODE.search(seen[3]).group(1) != code
