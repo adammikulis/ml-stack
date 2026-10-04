@@ -234,7 +234,7 @@ markers = [
 line-length = 100
 target-version = "py312"
 # python with no .py on it: ruff matches by extension unless the name is spelled out
-extend-include = ["scripts/budgets", "scripts/hooks/budgets",
+extend-include = ["scripts/budgets", "scripts/release-key", "scripts/hooks/budgets",
                   "scripts/hooks/claude-bash-guard", "scripts/hooks/claude-edit-guard"]
 
 [tool.ruff.lint]
