@@ -171,4 +171,15 @@ def compatible(spec: ServerSpec, entry: Mapping[str, Any], mismatches: list[str]
         return False
     if bool(entry.get("embedding")) != bool(spec.embedding):
         return False
+    if spec.mtp is not None and entry.get("mtp") is not spec.mtp:
+        return False
+    for field in ("cache_type_k", "cache_type_v", "spec_type"):
+        asked = getattr(spec, field)
+        if asked and entry.get(field) != asked:
+            return False
+    for field in ("draft", "chat_template_file"):
+        asked = getattr(spec, field)
+        loaded = entry.get(field)
+        if asked and (not loaded or Path(asked).resolve() != Path(loaded).resolve()):
+            return False
     return not (spec.mmproj and not entry.get("mmproj"))

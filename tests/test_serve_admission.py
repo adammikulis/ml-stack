@@ -307,3 +307,40 @@ def test_admission_the_estimator_and_the_bars_share_one_pair_of_thresholds():
     for share in (0.0, 0.5, 0.79, 0.8, 0.9, 0.94, 0.95, 1.2):
         assert (admission.rate(share * 100, 100) == estimate.rating(share)
                 == verdict.verdict_of(share, 1.0)), share
+
+
+@pytest.mark.parametrize("field, asked", [
+    ("cache_type_k", "q8_0"), ("cache_type_v", "q8_0"),
+    ("spec_type", "draft-mtp"), ("draft", "/models/mtp-qwen.gguf"), ("mtp", True),
+    ("chat_template_file", "/templates/shared.jinja"),
+])
+def test_reuse_requires_recorded_semantic_settings(field, asked):
+    from dataclasses import replace
+
+    spec = replace(ServerSpec(model="qwen.gguf"), **{field: asked})
+    assert not admission.compatible(spec, {}, [])
+    assert not admission.compatible(spec, {field: "wrong"}, [])
+    assert admission.compatible(spec, {field: asked}, [])
+
+
+def test_compatible_draft_paths_can_name_the_same_installed_file(tmp_path):
+    draft = tmp_path / "mtp-qwen.gguf"
+    draft.write_bytes(b"GGUF")
+    alias = tmp_path / "matching-head.gguf"
+    alias.symlink_to(draft)
+    spec = ServerSpec(model="qwen.gguf", draft=alias)
+    assert admission.compatible(spec, {"draft": str(draft)}, [])
+
+
+def test_chat_and_coding_share_matching_cache_but_not_different_cache(tmp_path, backend, machine):
+    path = weights(tmp_path, "qwen.gguf", 1)
+    managed = manager(tmp_path, backend)
+    first = managed.lease(spec(path, cache_type_k="q8_0", cache_type_v="q8_0"))
+    second = managed.lease(spec(path, cache_type_k="q8_0", cache_type_v="q8_0"))
+    assert second.port == first.port and second.adopted
+    assert len(backend.started) == 1
+    third = managed.lease(spec(path, cache_type_k="q4_0", cache_type_v="q4_0"))
+    assert third.port != first.port
+    assert len(backend.started) == 2
+    record = recorded_servers(tmp_path / "servers.json")[first.port]
+    assert record["cache_type_k"] == record["cache_type_v"] == "q8_0"
