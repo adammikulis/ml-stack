@@ -1,7 +1,7 @@
 {
- "surfaces": 639,
+ "surfaces": 640,
  "by_status": {
-  "covered": 326,
+  "covered": 327,
   "partial": 200,
   "uncovered": 54,
   "n/a": 59,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 57,
+   "covered": 58,
    "partial": 60,
    "uncovered": 0,
    "n/a": 0,
@@ -7698,6 +7698,24 @@
     "tests/test_sentinel_wiring_serve.py"
    ],
    "note": "the catch-all that holds a served request; its hold decision is tested, hostile framing is not"
+  },
+  {
+   "id": "route:workspace/fleet_routes.py:/ui/board/*",
+   "kind": "route",
+   "source": "workspace/fleet_routes.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
+    "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+    "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+    "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+    "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
+    "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+    "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope"
+   ],
+   "note": "Fleet delegates to maintained person-only Board routes after its existing UI authorization; foreign origins, missing UI header, malformed bodies, impersonation fields, oversized requests and agent owner credentials cannot send"
   },
   {
    "id": "slash-command:chat.py:/exit",
