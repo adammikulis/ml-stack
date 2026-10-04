@@ -14,13 +14,14 @@ from ml_stack.sandbox.policy import Limits, Net, Policy
 __all__ = ["SYSTEM_EXEC", "bash", "mcp_server", "model_server", "runtime_reads", "scratch",
            "system_env"]
 
-SYSTEM_EXEC = ("/bin", "/usr/bin", "/sbin", "/usr/sbin")
+SYSTEM_EXEC = tuple(dict.fromkeys(os.path.realpath(path)
+                                  for path in ("/bin", "/usr/bin", "/sbin", "/usr/sbin")))
 """The directories of system programs a shell may start."""
 
 
 def system_env(**extra: str) -> dict[str, str]:
     """A minimal environment: a PATH of system directories, a locale, and ``extra``."""
-    return {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8", **extra}
+    return {"PATH": os.pathsep.join(SYSTEM_EXEC), "LANG": "en_US.UTF-8", **extra}
 
 
 def runtime_reads() -> tuple[str, ...]:
