@@ -501,7 +501,9 @@ class ServerManager(Admitting):
             return None
 
         mismatch = serving_mismatch(spec, reported_models(base_url), serving_params(base_url))
-        if mismatch:
+        entry = self._load().get(str(spec.port), {})
+        if not admission.compatible(spec, entry, mismatch):
+            mismatch = mismatch or ["recorded cache, draft, or template settings differ"]
             raise ServerFailed(
                 f"port {spec.port} is already serving different settings -- "
                 + "; ".join(mismatch)
@@ -696,6 +698,11 @@ class ServerManager(Admitting):
             "embedding": bool(spec.embedding),
             "mmproj": bool(spec.mmproj),
             "mtp": info.mtp,
+            "cache_type_k": spec.cache_type_k,
+            "cache_type_v": spec.cache_type_v,
+            "draft": str(spec.draft or ""),
+            "spec_type": spec.spec_type,
+            "chat_template_file": str(spec.chat_template_file or ""),
             "mtp_note": info.mtp_note,
             "context": int(spec.context),
             "parallel": int(spec.parallel or 1),
