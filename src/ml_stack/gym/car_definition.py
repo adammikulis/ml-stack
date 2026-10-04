@@ -35,4 +35,4 @@ def build(world, seed):
         files = {"map_file": source}
     else:
         raise ValueError("Car world mode must be procedural or manual")
-    return {**cfg, "world_seed": seed, "start_seed": seed, "num_scenarios": 1}, record(path, "metadrive", definition, files)
+    return {**cfg, "world_seed": seed}, record(path, "metadrive", definition, files)
