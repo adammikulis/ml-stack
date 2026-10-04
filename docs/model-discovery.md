@@ -80,7 +80,7 @@ a missing shard, a short Ollama blob or a file without the GGUF magic.
 refresh=False) -> list[ModelInfo]`. `ModelInfo` has `id` (an `hf:owner/repo/file` reference
 where the repository is known, `ollama:name:tag`, else `file:<name>`), `name`, `path`, `format`,
 `size_bytes` (all shards), `quantization`, `parameters`, `architecture`, `context_length`,
-`mmproj`, `source`, `repo`, `mtime`, `is_complete`, `shards`, `verified` and `copies`. A model
+`mmproj`, `source`, `repo`, `mtime`, `is_complete`, `shards`, `verified`, `copies` and `files` (the exact discovered members). A model
 installed twice is one row: complete before incomplete, then ml-stack store, extra folders,
 Hugging Face, llama.cpp, LM Studio, Jan, GPT4All, Ollama, then the rest, then newest; the other
 paths are in `copies`. Copies are the same when size, architecture and name in the header match;
@@ -254,3 +254,16 @@ matrix is added from the formula), partial offload, a draft model, CUDA, ROCm an
 batch other than 512 beyond one 4B run (`-ub 2048`: 404 MiB in the log, 456 predicted). On unified memory
 a partial offload does not save memory, because the whole file is mapped; on the CPU side llama.cpp
 repacks weights, which takes up to one more copy of those layers.
+
+The Fleet Models page groups installed builds under their maintained model-family labels.
+A sharded GGUF build appears once, with the combined weight size and completeness status;
+its individual filenames appear in **Files and model details**. Search, family, format,
+quantization, capability and status filters combine, with name, size and recent-installation
+sorting. Projectors and draft heads are companions rather than independently runnable
+models. Incomplete builds and unsupported formats remain visible with serving disabled.
+
+`GET /ui/models` includes a `library` of grouped discovery entries alongside the existing
+file-level `here` rows used for network copies. Starting a library model submits its exact
+canonical path to `POST /ui/serving`; the daemon rechecks that it is a complete supported
+primary entry within its configured model roots. A display label cannot select a different
+format or build. Every expected GGUF shard number, including shard 1, must be present.
