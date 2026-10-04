@@ -14,7 +14,7 @@ from ml_stack.client.settings import Transport
 from ml_stack.files import write_json
 from ml_stack.hub.probe import machine_memory
 from ml_stack.serve import LlamaServerBackend, ServerManager, ServerSpec, free_port
-from ml_stack.serve.estimate import Setup, estimate, verdict
+from ml_stack.serve.estimate import DEFAULT_KV, Setup, estimate, verdict
 from ml_stack.serve.preflight import read_gguf_header
 from ml_stack.units import human_bytes
 
@@ -141,11 +141,15 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
         arch = found.get("general.architecture")
         if found.get(f"{arch}.nextn_predict_layers"):
             kind = "draft-mtp"
-    sizing = estimate(model_path, Setup(context=int(context), parallel=parallel, draft=draft))
+    sizing = estimate(model_path, Setup(context=int(context), parallel=parallel, draft=draft,
+                                       draft_cache_type=DEFAULT_KV))
     if verdict(sizing, machine_memory()) == "red":
         raise NoRoom(f"{Path(model_path).name}: not enough free memory for the model, head and context")
     lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
                                      parallel=parallel, draft=str(draft) if draft else None,
+                                     cache_type_k=DEFAULT_KV, cache_type_v=DEFAULT_KV,
+                                     spec_draft_type_k=DEFAULT_KV if draft else "",
+                                     spec_draft_type_v=DEFAULT_KV if draft else "",
                                      spec_type=kind, spec_draft_ngl=99 if draft else None),
                           escalate=escalate,
                           reason=f"fleet serving of {Path(model_path).name}")

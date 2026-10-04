@@ -68,6 +68,7 @@ def test_the_whole_serving_becomes_the_arguments_serve_takes():
         "port": 8082, "context": 131072, "parallel": 4,
         "cache_type_k": "q8_0", "cache_type_v": "q8_0",
         "draft": "hf:owner/repo/mtp-Q8_0.gguf", "spec_type": "draft-mtp", "spec_draft_max": 4,
+        "spec_draft_type_k": "q8_0", "spec_draft_type_v": "q8_0",
         "mmproj": "/models/mmproj-F16.gguf", "reasoning_budget": 0,
     }
 

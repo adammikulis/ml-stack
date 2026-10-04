@@ -21,6 +21,19 @@ caches it on first use, so there is no separate fetching step.
 
 ## Serving a model
 
+Managed serving uses `q8_0` for both K and V caches, including the prediction head.
+`--kv f16` and `--draft-kv f16` select full precision explicitly. These settings do not
+change the model weights' quantization.
+
+Memory estimates read the GGUF's KV head count, key and value dimensions, attention
+layers and recurrent state sizes. The first-run Qwen3.8 27B offer uses its published
+[text configuration](https://huggingface.co/unsloth/Qwen3.8-27B/blob/main/config.json):
+64 layers, 16 full-attention layers, 4 KV heads, and 256 values per head. Its 48 linear
+attention layers hold fixed recurrent states instead of growing token caches. Q8 stores
+34 bytes per 32 values, including its scale. Model weights, prediction-head weights and
+cache, recurrent states, and compute buffers are counted separately. Runtime estimates
+remain approximate; measured fit records take precedence.
+
 What makes this part worth having is the lifecycle, not the launcher. Every model server on
 a machine goes through one manager: it is written down *before* the process exists (the
 record carries the port, the model and the owner; the pid is filled in when the server

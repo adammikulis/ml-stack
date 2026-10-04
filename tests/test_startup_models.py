@@ -8,9 +8,20 @@ from unittest.mock import Mock, patch
 from ml_stack.fleet import routes, serving, startup_models
 from ml_stack.fleet.models import Downloads, Getting
 from ml_stack.hub.probe import GIB, Gpu, MachineMemory
+from ml_stack.serve.estimate import Setup, estimate_meta
 
 
 class StartupModelTests(unittest.TestCase):
+    def test_qwen_gqa_and_hybrid_layers_size_the_cache(self):
+        header = startup_models.QWEN_27B_HEADER
+        got = estimate_meta(header, 0, Setup(context=8192))
+        self.assertEqual(got.kv_cache_bytes, 16 * 4 * 256 * 2 * 8192 * 34 // 32)
+        self.assertEqual(got.state_bytes, 48 * ((3 * (6144 + 2 * 16 * 128)
+                                              + 128 * 6144) * 4))
+        twice = estimate_meta(header, 0, Setup(context=16384))
+        self.assertEqual(twice.kv_cache_bytes, 2 * got.kv_cache_bytes)
+        self.assertEqual(twice.state_bytes, got.state_bytes)
+
     def machine(self, capacity, free, ram=64):
         return MachineMemory(total_ram=ram * GIB, available_ram=ram * GIB,
                              gpus=(Gpu("card", int(capacity * GIB), int(free * GIB)),))
@@ -70,6 +81,11 @@ class StartupModelTests(unittest.TestCase):
                 self.assertEqual(spec.spec_type, "draft-mtp")
                 self.assertEqual(spec.draft, str(draft))
                 self.assertEqual(spec.spec_draft_ngl, 99)
+                self.assertEqual(spec.cache_type_k, "q8_0")
+                self.assertEqual(spec.cache_type_v, "q8_0")
+                self.assertEqual(spec.spec_draft_type_k, "q8_0")
+                self.assertEqual(spec.spec_draft_type_v, "q8_0")
+                self.assertTrue(spec.flash_attn)
                 self.assertFalse(spec.extra_args)
 
     def test_startup_route_refuses_untrusted_requests_and_ignores_query_paths(self):

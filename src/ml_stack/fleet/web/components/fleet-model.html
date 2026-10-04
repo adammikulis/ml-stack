@@ -78,11 +78,8 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
     return { key: "cpu", text: `${d.cpus || "?"} CPU` };
   };
 
-  // What a conversation costs to keep in memory. Two tensors per layer, per token, at
-  // two bytes each; the shape below is a 27B-class model, which is what most people end
-  // up running. A smaller model costs proportionally less.
   const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
-  const KV_MB_PER_TOKEN = 2 * 48 * 8 * 128 * 2 / (1024 * 1024);
+  const KV_MB_PER_TOKEN = 17 * 4 * 256 * 2 * (34 / 32) / (1024 * 1024);
 
   M.ctxRam = (tokens) => {
     const mb = tokens * KV_MB_PER_TOKEN;
@@ -96,11 +93,11 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
     const slider = M.ui("ml-slider", {
       label: "how much it reads", stops: CTX_STEPS,
       value: CTX_STEPS.includes(start) ? start : 8192,
-      hint: "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
-        + "smaller one costs less." });
+      hint: "Roughly a page of text per 500 tokens. Memory shown is the Qwen3.8 27B "
+        + "Q8 token cache with MTP; weights and fixed runtime buffers are additional." });
     slider.id = "ctx";
     const paint = (n) => {
-      slider.valueText = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of memory`;
+      slider.valueText = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of token cache`;
       onPick(n);
     };
     slider.addEventListener("input", (e) => paint(e.detail.value));

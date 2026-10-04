@@ -28,6 +28,20 @@ UNIFIED_16 = MachineMemory(16 * GIB, 11 * GIB, True, 12 * GIB, (), "Darwin")
 UNIFIED_64 = MachineMemory(64 * GIB, 50 * GIB, True, 48 * GIB, (), "Darwin")
 CARD_24 = MachineMemory(32 * GIB, 24 * GIB, False, 0,
                         (Gpu("card", 24 * GIB, 23 * GIB, "nvidia"),), "Linux")
+
+
+def test_draft_head_cache_counts_prediction_layers_and_requested_quant(tmp_path):
+    target = write_gguf(tmp_path / "target.gguf", dense())
+    draft = write_gguf(tmp_path / "head.gguf", {
+        "general.architecture": "qwen3_5", "qwen3_5.block_count": 64,
+        "qwen3_5.nextn_predict_layers": 1, "qwen3_5.attention.head_count_kv": 4,
+        "qwen3_5.attention.key_length": 256, "qwen3_5.attention.value_length": 256,
+    })
+    q8 = est.estimate(target, est.Setup(context=8192, draft=draft))
+    f16 = est.estimate(target, est.Setup(context=8192, draft=draft, draft_cache_type="f16"))
+    assert q8.breakdown["Draft KV cache"] == 4 * 256 * 2 * 8192 * 34 // 32
+    assert f16.breakdown["Draft KV cache"] == 4 * 256 * 2 * 8192 * 2
+    assert f16.total_bytes - q8.total_bytes == f16.gpu_bytes - q8.gpu_bytes > 0
 CPU_ONLY = MachineMemory(16 * GIB, 11 * GIB, False, 0, (), "Linux")
 
 

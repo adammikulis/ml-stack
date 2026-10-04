@@ -21,7 +21,7 @@ from pathlib import Path
 from ml_stack import hub
 from ml_stack.hub import header
 from ml_stack.hub.probe import MachineMemory
-from ml_stack.serve.preflight import _kv_estimate_bytes, _recurrent_layers
+from ml_stack.serve.preflight import _head_kv_per_token, _kv_estimate_bytes, recurrent_state_bytes
 from ml_stack.ui.verdict import THRESHOLDS, verdict_of
 
 __all__ = ["DEFAULT_KV", "Estimate", "Meter", "Setup", "estimate", "estimate_meta", "max_context", "meters", "rating", "verdict"]
@@ -72,6 +72,8 @@ class Setup:
     draft: str | Path | None = None
     mmproj_bytes: int = 0
     draft_bytes: int = 0
+    draft_cache_type: str = DEFAULT_KV
+    draft_kv_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,25 +111,6 @@ def _layers(found: Mapping[str, object]) -> tuple[str, int]:
     arch = str(found.get("general.architecture") or "")
     return arch, int(found.get(f"{arch}.block_count") or 0)  # type: ignore[call-overload]
 
-
-def recurrent_state_bytes(found: Mapping[str, object]) -> int:
-    """Bytes one sequence keeps in its recurrent layers (state-space and delta-rule layers)."""
-    arch, n_layer = _layers(found)
-    if not n_layer:
-        return 0
-
-    def key(suffix: str) -> object:
-        return found.get(f"{arch}.{suffix}")
-
-    steps = sum(_recurrent_layers(key, n_layer))
-    if not steps:
-        return 0
-    conv, inner = int(key("ssm.conv_kernel") or 0), int(key("ssm.inner_size") or 0)  # type: ignore[call-overload]
-    state, groups = int(key("ssm.state_size") or 0), int(key("ssm.group_count") or 0)  # type: ignore[call-overload]
-    if not (conv and inner and state):
-        return 0
-    per_layer = (max(conv - 1, 0) * (inner + 2 * max(groups, 1) * state) + state * inner) * 4
-    return steps * per_layer
 
 
 def _heads(found: Mapping[str, object]) -> int:
@@ -204,13 +187,13 @@ def estimate_meta(found: Mapping[str, object], weights_bytes: int,
     projector = int(use.mmproj_bytes * MMPROJ_FACTOR)
     parts = {"Weights": int(weights_bytes), "KV cache": kv, "Recurrent state": state,
              "Compute buffers": compute, "Vision projector": projector,
-             "Draft model": int(use.draft_bytes)}
+             "Draft model": int(use.draft_bytes), "Draft KV cache": int(use.draft_kv_bytes)}
     parts = {name: size for name, size in parts.items()
              if size or name in ("Weights", "KV cache")}
     total = sum(parts.values())
     share = _offload(n_layer, use.n_gpu_layers)
     gpu = int(share * (weights_bytes + kv + state) + (compute if share else 0) + projector
-              + use.draft_bytes)
+              + use.draft_bytes + use.draft_kv_bytes)
     partial = share < 1.0
     if partial:
         notes.append("part of the model runs on the CPU; compute buffers are counted twice")
@@ -263,9 +246,18 @@ def _sizes(path: Path, use: Setup) -> Setup:
     if projector is None and not use.mmproj_bytes:
         beside = [m for m in hub.discover(formats=("gguf",)) if m.path == path]
         projector = beside[0].mmproj if beside else None
+    draft_kv = use.draft_kv_bytes
+    if use.draft and not draft_kv:
+        found = read_meta(use.draft)
+        k, v = split_kv(use.draft_cache_type)
+        context = use.context * max(use.parallel, 1)
+        draft_kv = (_head_kv_per_token(found, k, v) * context
+                    or (_kv_estimate_bytes(found, context, k, v, use.batch)
+                        + recurrent_state_bytes(found) * max(use.parallel, 1)))
     return replace(
         use, mmproj_bytes=use.mmproj_bytes or (_bytes_of(projector) if projector else 0),
-        draft_bytes=use.draft_bytes or (_bytes_of(Path(use.draft)) if use.draft else 0))
+        draft_bytes=use.draft_bytes or (_bytes_of(Path(use.draft)) if use.draft else 0),
+        draft_kv_bytes=draft_kv)
 
 
 def estimate(model: str | Path, setup: Setup | None = None, **changes: object) -> Estimate:

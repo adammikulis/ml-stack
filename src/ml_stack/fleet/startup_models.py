@@ -6,11 +6,21 @@ from collections.abc import Iterable
 from typing import Any
 
 from ml_stack.hub.probe import GIB, MachineMemory, machine_memory
+from ml_stack.serve.estimate import DEFAULT_KV, Setup, estimate_meta
 from ml_stack.serve.fit import records
+from ml_stack.serve.preflight import _head_kv_per_token
 
 from .catalogue import SUGGESTED, Suggestion
 
 CONTEXT = 8192
+QWEN_27B_HEADER = {
+    "general.architecture": "qwen3_5", "qwen3_5.block_count": 64,
+    "qwen3_5.attention.head_count": 24, "qwen3_5.attention.head_count_kv": 4,
+    "qwen3_5.attention.key_length": 256, "qwen3_5.attention.value_length": 256,
+    "qwen3_5.full_attention_interval": 4, "qwen3_5.nextn_predict_layers": 1,
+    "qwen3_5.ssm.conv_kernel": 4, "qwen3_5.ssm.inner_size": 6144,
+    "qwen3_5.ssm.state_size": 128, "qwen3_5.ssm.group_count": 16,
+}
 
 
 def memory_pool(machine: MachineMemory) -> tuple[str, int, int]:
@@ -31,6 +41,12 @@ def memory_need(pick: Suggestion) -> int:
     if measured:
         row = measured[-1]
         return row.loaded() + row.cost(CONTEXT)
+    if pick.file == "Qwen3.8-27B-UD-Q4_K_XL.gguf":
+        draft_kv = (_head_kv_per_token(QWEN_27B_HEADER, DEFAULT_KV, DEFAULT_KV) * CONTEXT
+                    if pick.draft_ref else 0)
+        return estimate_meta(QWEN_27B_HEADER, int(pick.gb * GIB), Setup(
+            context=CONTEXT, draft_bytes=int(pick.draft_gb * GIB),
+            draft_kv_bytes=draft_kv)).total_bytes
     return int((pick.gb + pick.draft_gb) * GIB * 1.25) + GIB
 
 

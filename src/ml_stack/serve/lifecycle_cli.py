@@ -234,13 +234,9 @@ OPTIONS_UP = [
          help="one cache pool for every slot, masked per sequence, rather than a cache "
               "per slot; --no-kv-unified asks for the latter outright. Left unset, the "
               "build decides"),
-    flag("--draft-kv", default="", metavar="TYPE",
-         help="what the draft head's own KV cache is stored as. It is a second cache, "
-              "not the one --kv sets, and llama.cpp stores it at full size whatever "
-              "--kv says. The head only proposes and the model checks every token, so "
-              "a smaller cache here costs acceptance and never correctness. The types "
-              "this build takes are in its --help; f16 is its default. One value sets "
-              "both halves, K/V sets them apart"),
+    flag("--draft-kv", default="q8_0", metavar="TYPE",
+         help="the head's own KV cache: q8_0 by default, f16 for full precision. "
+              "One value sets both halves; K/V sets them separately"),
     flag("--mtp", action=argparse.BooleanOptionalAction, default=True,
          help="serve the model's own multi-token-prediction head when it has one that is "
               "trusted and loads (the default; ML_STACK_MTP=off turns it off everywhere). "

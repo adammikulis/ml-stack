@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -258,7 +258,7 @@ def known_architectures(binary: str | Path) -> set[str]:
 
         found |= arches_from_source(Path(source_dir()))
     except Exception:  # noqa: BLE001 - no source checkout, or a table that moved
-        pass
+        return _arches(binary)
     found |= _arches(binary)
     return found
 
@@ -269,8 +269,6 @@ def source_dir() -> Path:
 
     return Path(src_dir())
 
-
-# ---------------------------------------------------------------- fit (weights + kv + runtime)
 
 # Bytes per cached element for the K/V cache types llama.cpp accepts on --cache-type-k/-v.
 # Block-quantised types carry a scale per 32 elements, so the average is not the nominal
@@ -324,6 +322,27 @@ def _recurrent_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
     if every <= 0:
         return [False] * n_layer
     return [(il + 1) % every != 0 for il in range(n_layer)]
+
+
+def recurrent_state_bytes(found: Mapping[str, object]) -> int:
+    """Bytes one sequence keeps in its recurrent layers (state-space and delta-rule layers)."""
+    arch = str(found.get("general.architecture") or "")
+    n_layer = int(found.get(f"{arch}.block_count") or 0)
+    if not n_layer:
+        return 0
+
+    def key(suffix: str) -> object:
+        return found.get(f"{arch}.{suffix}")
+
+    steps = sum(_recurrent_layers(key, n_layer))
+    if not steps:
+        return 0
+    conv, inner = int(key("ssm.conv_kernel") or 0), int(key("ssm.inner_size") or 0)  # type: ignore[call-overload]
+    state, groups = int(key("ssm.state_size") or 0), int(key("ssm.group_count") or 0)  # type: ignore[call-overload]
+    if not (conv and inner and state):
+        return 0
+    per_layer = (max(conv - 1, 0) * (inner + 2 * max(groups, 1) * state) + state * inner) * 4
+    return steps * per_layer
 
 
 def _sliding_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
@@ -470,7 +489,7 @@ def draft_kv_estimate_bytes(
     if not ref:
         return 0
     path = home.expand(ref)
-    if not path.is_file():
+    if read_header is None and not path.is_file():
         found = _local_index().get(ref.replace("\\", "/").rsplit("/", 1)[-1])
         if found is None:
             return 0
@@ -485,7 +504,8 @@ def draft_kv_estimate_bytes(
     per_token = _head_kv_per_token(meta, type_k, type_v)
     if per_token:
         return per_token * max(0, context)
-    return _kv_estimate_bytes(meta, context, type_k, type_v)
+    return (_kv_estimate_bytes(meta, context, type_k, type_v)
+            + recurrent_state_bytes(meta) * max(1, int(getattr(spec, "parallel", 1))))
 
 
 def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes: int,
@@ -653,10 +673,12 @@ def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0,
 
     kv_bytes = _kv_estimate_bytes(meta, spec.context, spec.cache_type_k, spec.cache_type_v)
     report.kv_estimate_bytes = kv_bytes
+    state_and_draft = (recurrent_state_bytes(meta) * max(1, spec.parallel)
+                       + draft_kv_estimate_bytes(spec, read_header=read_header))
     sized = ref_bytes or _ref_bytes
     draft_bytes = sized(spec.draft)
     mmproj_bytes = sized(spec.mmproj)
-    estimate = _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes)
+    estimate = _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes + state_and_draft, limit_bytes)
     measured = _measured_fit_check(spec, limit_bytes, fits=fits)
     if measured is not None and "no measured record" not in measured.detail:
         # the record decides; the estimate is kept for the reader, never the verdict

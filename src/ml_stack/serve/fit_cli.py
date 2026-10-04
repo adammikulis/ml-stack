@@ -64,11 +64,9 @@ OPTIONS = [
          help="measure with the main model's KV cache stored as this: q8_0 (the "
               "default), f16, q4_0. A record is kept per cache type, because that is "
               "what changes the per-token cost"),
-    flag("--draft-kv", default="", metavar="TYPE",
-         help="with --draft: measure with the head's own KV cache stored as this. It "
-              "is a second cache the head keeps at the same context, and llama.cpp "
-              "stores it at full size whatever --kv says, so this is where a drafted "
-              "model's cache cost is decided"),
+    flag("--draft-kv", default="q8_0", metavar="TYPE",
+         help="the head's own KV cache: q8_0 by default, f16 for full precision. "
+              "One value sets both halves; K/V sets them separately"),
     flag("--room", action="append", default=[], metavar="SIZE",
          help="ask about a machine with this much memory instead of this one -- 24G, "
               "24576M, or a plain number of bytes. Default: what `ml-stack-serve "

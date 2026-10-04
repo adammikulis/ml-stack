@@ -146,6 +146,7 @@ def test_the_record_is_the_whole_serving_and_the_lease_it_becomes():
     assert serving.lease() == {"port": 8099, "context": 65536, "parallel": 1,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0",
                              "draft": HEAD, "spec_type": "draft-mtp", "spec_draft_max": 4,
+                             "spec_draft_type_k": "q8_0", "spec_draft_type_v": "q8_0",
                              "mmproj": "auto", "reasoning_budget": 0,
                              "extra_args": ("-ub", "2048", "--spec-draft-p-min", "0.5")}
 

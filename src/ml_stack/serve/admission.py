@@ -21,7 +21,13 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.serve.backend import ServerFailed, ServerSpec
-from ml_stack.serve.preflight import RUNTIME_ALLOWANCE_BYTES, _kv_estimate_bytes, read_gguf_header
+from ml_stack.serve.preflight import (
+    RUNTIME_ALLOWANCE_BYTES,
+    _kv_estimate_bytes,
+    draft_kv_estimate_bytes,
+    read_gguf_header,
+    recurrent_state_bytes,
+)
 from ml_stack.serve.process import pid_exists
 from ml_stack.serve.weights import weight_of
 from ml_stack.ui.verdict import THRESHOLDS, verdict_of
@@ -103,11 +109,14 @@ def estimate_bytes(spec: ServerSpec) -> int:
         return 0
     kv = 0
     try:
-        kv = _kv_estimate_bytes(read_gguf_header(Path(str(spec.model))), int(spec.context),
+        meta = read_gguf_header(Path(str(spec.model)))
+        kv = _kv_estimate_bytes(meta, int(spec.context),
                                 spec.cache_type_k or "f16", spec.cache_type_v or "f16")
+        kv += recurrent_state_bytes(meta) * max(1, spec.parallel)
     except (OSError, ValueError, struct.error):
         kv = 0
-    return weights + _size(spec.draft) + _size(spec.mmproj) + kv + RUNTIME_ALLOWANCE_BYTES
+    return (weights + _size(spec.draft) + _size(spec.mmproj) + kv
+            + draft_kv_estimate_bytes(spec) + RUNTIME_ALLOWANCE_BYTES)
 
 
 def charge(entry: Mapping[str, Any]) -> int:

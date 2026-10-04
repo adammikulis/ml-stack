@@ -96,10 +96,8 @@ class Serving:
     draft: str = ""
     draft_n_max: int | None = None      # tokens guessed ahead; None leaves the default
     draft_p_min: float | None = None    # the draft's confidence floor; None leaves the default
-    # How the draft's own KV cache is stored. It is a second cache, not the target's, and
-    # llama.cpp stores it as f16 whatever `cache_type` says. One value sets both halves;
-    # `K/V` sets them apart; "" leaves the build's own.
-    draft_cache_type: str = ""
+    # One cache type sets both draft halves; K/V sets them separately.
+    draft_cache_type: str = "q8_0"
     # Which method the head implements. "" reads it off the head's own name, which is right
     # whenever the name says so; a profile that measured one says it outright, and a head
     # that lives inside the weights -- `--spec-type draft-mtp` with no `-md` -- can only be
