@@ -99,7 +99,8 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
       else if (key === 'd' || key === 'h') {
         event.preventDefault(); const input = key === 'd' ? this.rays : this.vectors;
         input.checked = !input.checked; input.dispatchEvent(new Event('change'));
-      } else if (key === 'm') { event.preventDefault(); this.wholeMap(); }
+      } else if (key === 'c') { event.preventDefault(); this.toggleCamera(); }
+      else if (key === 'm') { event.preventDefault(); this.wholeMap(); }
       else if (key === '?') { event.preventDefault(); this.showHelp(this.help.hidden); }
       else if (key === 'escape' && !this.help.hidden) {
         event.preventDefault(); this.closeHelp();
