@@ -22,7 +22,7 @@ from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import Salting, join_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Serving
-from ml_stack.http import Server
+from ml_stack.http import Server, ServerError, open_stream
 from ml_stack.testing.fakes import FakeLlamaServer, Served
 
 PIECES = ["Hel", "lo", " there"]
@@ -168,7 +168,8 @@ class TestChattingThroughTheInterface:
 
         began = time.monotonic()
         arrived = []
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with open_stream(req.full_url, data=req.data, method=req.get_method(),
+                         headers=dict(req.header_items()), timeout=10) as r:
             while True:
                 block = r.read1(4096)
                 if not block:
@@ -261,12 +262,14 @@ class TestChattingThroughTheInterface:
 
     @pytest.mark.slow
 
-    def test_asking_for_a_model_answers_before_it_has_arrived(self, bare, tmp_path):
+    def test_asking_for_a_model_answers_before_it_has_arrived(self, bare, tmp_path, monkeypatch):
         """A multi-gigabyte fetch must not be held open inside one request."""
         import os
         import time as clock
+        from dataclasses import replace
         from http.server import BaseHTTPRequestHandler
 
+        from ml_stack.fleet import models as model_module
         from ml_stack.fleet.models import CHUNK, Downloads, Models
 
         payload = os.urandom(2 * CHUNK)
@@ -288,6 +291,9 @@ class TestChattingThroughTheInterface:
                 self.wfile.write(payload[CHUNK:])
 
         blob = Server(("127.0.0.1", _free_port()), Slow)
+        monkeypatch.setattr(model_module, "MODEL_LIMITS", replace(
+            model_module.MODEL_LIMITS,
+            allow_hosts=frozenset({f"127.0.0.1:{blob.server_address[1]}"})))
         threading.Thread(target=blob.serve_forever, daemon=True).start()
 
         ui, cookie = bare
@@ -318,12 +324,13 @@ class TestChattingThroughTheInterface:
                     saw_partial = True
                     seen.set()
                 if row["state"] != "getting":
-                    assert row["state"] == "done", row
+                    assert row["state"] == "done", row.get("error") or row
                     break
                 clock.sleep(0.05)
         finally:
             seen.set()
             blob.shutdown()
+            blob.server_close()
 
         assert saw_partial, "the screen could never show how far along it was"
         assert (models_dir / "big.gguf").read_bytes() == payload
@@ -371,7 +378,6 @@ class TestAnsweringToSeveralClusters:
         from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.discovery import derive_token, memberships
         from ml_stack.fleet.jobs import JobRunner
-        from ml_stack.http import Server
 
         root = tmp_path / "traind"
         files = root / "files"
@@ -390,19 +396,16 @@ class TestAnsweringToSeveralClusters:
         return f"http://127.0.0.1:{port}", runner, httpd
 
     def ask(self, base, token):
-        import urllib.error
-        import urllib.request
-
         # /health answers anyone with whether the daemon is there. /jobs wants a request
         # signed with the cluster's secret, which is what this is about.
         from ml_stack.http import build_request
 
         req = build_request(f"{base}/jobs", token=token)
         try:
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with open_stream(req.full_url, headers=dict(req.header_items()), timeout=5) as r:
                 return r.status
-        except urllib.error.HTTPError as exc:
-            return exc.code
+        except ServerError as exc:
+            return exc.status
 
     def test_either_cluster_can_reach_it(self, tmp_path):
         from ml_stack.fleet.discovery import derive_token, join
