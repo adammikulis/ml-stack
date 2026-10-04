@@ -598,8 +598,8 @@ OPTIONS = (
               "conversation); `rules ...` lists and edits the saved always/never rules"),
     flag("--task", default="", metavar="TEXT", help="the task, as an option instead of words"),
     flag("--role", default="", choices=["", *roles.ROLES],
-         help="reader (reads only), operator (acting calls ask; the conversation default) or "
-              "runner (the approved plan runs unasked; the task default)"),
+         help="read-only (reads only), approve-first (acting calls ask; the conversation default) or "
+              "plan-and-go (the approved plan runs unasked; the task default)"),
     flag("--model", default="", help="a model to lease (default: the best downloaded "
          "mixture-of-experts model ranked for an agent)"),
     flag("--url", default="", help="a server already up, e.g. http://127.0.0.1:8080"),
@@ -716,7 +716,7 @@ COMMAND = Group(
     "what is serving, models, downloads, benchmarks, jobs, read-only security views. Anything "
     "that starts, stops, downloads or measures asks you first (Allow this time / Always allow / "
     "Never allow; `rules` edits those), except calls the plan you approved names in the "
-    "runner role; releasing quarantine, approving a host, changing the security policy, the "
+    "plan-and-go role; releasing quarantine, approving a host, changing the security policy, the "
     "role and the rules are yours alone.",
     options=OPTIONS, run=lambda args: serve(args, sys.stdin, sys.stdout), allow_abbrev=False)
 main = COMMAND.run

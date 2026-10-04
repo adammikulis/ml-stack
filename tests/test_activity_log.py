@@ -333,7 +333,7 @@ def test_the_session_and_the_actor_come_from_the_process(person, monkeypatch):
     writer.bind_session("chat-9")
     monkeypatch.setenv(writer.ENV_ACTOR, "agent:scout")
     writer.record("net.download", subject="a")
-    writer.record("role.changed", actor="person", subject="reader")
+    writer.record("role.changed", actor="person", subject="read-only")
     first, second = entries()
     assert (first.session, first.actor, second.actor) == ("chat-9", "agent:scout", "person")
 

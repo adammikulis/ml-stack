@@ -2,7 +2,7 @@
 
 ## Current state (2026-10-03)
 
-What the docs now describe as in place: `ml-stack-chat` (roles `reader`, `operator`, `runner`, saved
+What the docs now describe as in place: `ml-stack-chat` (roles `read-only`, `approve-first`, `plan-and-go`, saved
 Always/Never rules; `ml-stack-do` is gone), graph-based encrypted agent memory per user and per
 project (`ml-stack-memory`), source reputation (`ml-stack-reputation`), the one OS keystore item
 (`ml-stack-security unlock`, `keystore`, `keystore-reset`), the single click-to-release sentinel

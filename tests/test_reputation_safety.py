@@ -178,7 +178,7 @@ def test_reputation_changes_no_role_grant_or_decision(ledger, clock):
         ledger.observe("host", host, "scan_hit")
     ledger.observe("peer", "node-1", "denial")
     assert decisions() == before
-    assert roles.ROLES["reader"].tools == frozenset(chatpolicy.READ)
+    assert roles.ROLES["read-only"].tools == frozenset(chatpolicy.READ)
 
 
 def test_no_reputation_code_grants_approves_or_releases():
