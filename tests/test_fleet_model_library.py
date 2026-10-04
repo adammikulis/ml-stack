@@ -7,8 +7,8 @@ import pytest
 import test_fleet_page as fleet_page
 from conftest import write_gguf
 
-from ml_stack.fleet.models import Models
 from ml_stack.fleet import routes
+from ml_stack.fleet.models import Models
 from ml_stack.fleet.serving import Serving
 
 browser = fleet_page.browser

@@ -525,12 +525,13 @@ def test_direct_native_start_reserves_gpu_until_its_lease_is_recorded(broker, mo
 
 @pytest.mark.redteam
 def test_paused_vision_child_releases_its_broker_model_lease(tmp_path, llama_binary, models, monkeypatch):
+    from types import SimpleNamespace
+
     from ml_stack.gym import decision_process
     from ml_stack.gym.simulation import Simulation
     from ml_stack.gym.vision_process import VisionProcess
     from ml_stack.platform import start_process
     from ml_stack.serve import broker_wire
-    from types import SimpleNamespace
 
     monkeypatch.setenv('LLAMA_CPP_SERVER', str(llama_binary))
     script = ('import json,time\nfrom ml_stack.serve import broker_wire\n'

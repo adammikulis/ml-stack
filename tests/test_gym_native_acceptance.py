@@ -1,7 +1,7 @@
 """Opt-in acceptance with installed verified Strands weights and native car physics."""
 
-import os
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -37,6 +37,26 @@ def installed_decide_cache(tmp_path, monkeypatch):
         kill_process_tree(json.loads(record.read_text())['pid'])
 
 
+def _await_native_decision(live, device, engine):
+    began = time.monotonic()
+    steps, waits = [], 0
+    while time.monotonic() - began < 120:
+        if live.state.get('decision_result') and (device == 'cpu' or not live.state['decision'].get('fallback')):
+            break
+        tick = time.monotonic()
+        live.step()
+        steps.append(time.monotonic() - tick)
+        if live.state['decision'].get('fallback'):
+            waits += 1
+            assert live.state['action'] == 3
+        assert live.env.native.engine is engine
+        assert live.state['info']['world_reset_count'] == 1
+        assert live.state['frame']
+        assert live.state.get('decision_readiness', {}).get('status') != 'error', live.state
+        time.sleep(.1)
+    return steps, waits
+
+
 def test_cached_strands_reports_native_world_decisions_without_blocking(tmp_path, monkeypatch, installed_decide_cache):
     pytest.importorskip('metadrive')
     monkeypatch.setattr(simulation, 'artifact_root', lambda: tmp_path / 'recordings')
@@ -52,22 +72,7 @@ def test_cached_strands_reports_native_world_decisions_without_blocking(tmp_path
         assert live.state['info']['render']['stop_signs']
         assert len(live.state['info']['render']['vehicles']) >= 4
         assert live.state['frame']
-        began = time.monotonic()
-        steps, waits = [], 0
-        while time.monotonic() - began < 120:
-            if live.state.get('decision_result') and (device == 'cpu' or not live.state['decision'].get('fallback')):
-                break
-            tick = time.monotonic()
-            live.step()
-            steps.append(time.monotonic() - tick)
-            if live.state['decision'].get('fallback'):
-                waits += 1
-                assert live.state['action'] == 3
-            assert live.env.native.engine is engine
-            assert live.state['info']['world_reset_count'] == 1
-            assert live.state['frame']
-            assert live.state.get('decision_readiness', {}).get('status') != 'error', live.state
-            time.sleep(.1)
+        steps, waits = _await_native_decision(live, device, engine)
         result = live.state.get('decision_result')
         assert result, live.state.get('decision_readiness')
         assert 'strands' in result['model'].lower() and result['backend']
