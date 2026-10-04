@@ -289,7 +289,8 @@ class Simulation:
 def worker(settings, commands, updates):
     simulation = None
     try:
-        simulation = Simulation(settings)
+        simulation = Simulation.__new__(Simulation)
+        simulation.__init__(settings)
         publish(updates, simulation.state)
         while True:
             if simulation.running and simulation.controller == "ppo" and simulation.learning_mode == "online":
@@ -313,12 +314,12 @@ def worker(settings, commands, updates):
                 if isinstance(exc, DecisionHeld):
                     simulation.state.update(decision=exc.decision, action=None)
             publish(updates, simulation.state)
-    except (RuntimeError, ValueError, OSError, KeyError, TypeError, ImportError, AssertionError) as exc:
+    except (RuntimeError, ValueError, OSError, KeyError, TypeError, ImportError, AssertionError, AttributeError) as exc:
         logging.exception("Simulation worker failed")
         publish(updates, {"id": settings["id"], "environment": settings["environment"],
                          "status": "error", "sequence": 0, "error": str(exc)})
     finally:
-        if simulation is not None:
+        if simulation is not None and hasattr(simulation, "env"):
             simulation.env.close()
 
 
