@@ -6,6 +6,10 @@ Open **Chat** in the sidebar. The same conversation list and message composer se
 model chat and **Coding** mode. Search saved messages, rename a conversation from its menu, or
 delete it after confirmation. Reopening a conversation restores its model and mode.
 
+The shared model picker searches names, families, and quantizations, and marks models as
+**Loaded** or **Installed**. Installed Chat choices open the Models screen so you can set
+context length before loading; loaded models are reused by Chat and compatible Coding turns.
+
 For Coding, select a downloaded model, an existing **Project directory**, **Coding agent**
 (Codex or Claude Code), and **Tool permissions**. The model preference comes from the maintained
 coding profile; unavailable models and missing command-line agents cannot start a turn.
