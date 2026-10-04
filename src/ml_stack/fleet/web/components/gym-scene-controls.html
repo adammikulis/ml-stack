@@ -30,12 +30,13 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
       this.agent = E('select',{'aria-label':'Selected agent'});
       this.agent.onchange = () => scene.selectAgent(this.agent.value);
       this.status = E('span',{class:'gym-selected-agent',role:'status'});
+      this.cameraButton = E('button',{type:'button','aria-pressed':'false',onclick:() => this.toggleCamera()},'Driver view');
       const fit = E('button',{type:'button',onclick:() => this.wholeMap()},'Whole map');
       this.helpButton = E('button',{type:'button','aria-expanded':'false','aria-controls':'gym-controls-help'},'Controls');
       this.help = E('div',{class:'gym-controls-help',id:'gym-controls-help',role:'region','aria-label':'Simulation controls',hidden:true});
       const shortcuts = [['← / →','Previous / next agent'],['Space','Play / pause simulation'],['.','Single simulation step'],
         ['V','Switch native camera / sensor scene'],['F','Follow selected agent'],['D','Toggle sensor rays'],
-        ['H','Toggle heading and control vectors'],['M','Show whole map'],['?','Toggle this controls guide'],['Esc','Close controls guide']];
+        ['C','Switch chase / driver view'],['H','Toggle heading and control vectors'],['M','Show whole map'],['?','Toggle this controls guide'],['Esc','Close controls guide']];
       this.help.append(E('p',{},'Drag to orbit · Scroll to zoom. Agent selection focuses the camera and exposes its live state.'),
         E('dl',{},...shortcuts.flatMap(([key,description]) => [E('dt',{},E('kbd',{},key)),E('dd',{},description)])),
         E('button',{type:'button',onclick:() => this.closeHelp()},'Close controls'));
@@ -44,7 +45,7 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
       this.helpButton.onfocus = () => { if (!this.suppressFocusHelp) this.showHelp(true); };
       this.onmouseleave = () => { if (!this.contains(document.activeElement)) this.showHelp(false); };
       this.append(E('div',{class:'gym-view-controls'},E('label',{},'Agent',this.agent),follow.node,rays.node,
-        vectors.node,fit,this.helpButton,this.status),this.help);
+        vectors.node,this.cameraButton,fit,this.helpButton,this.status),this.help);
       scene.followInput = this.follow;
       this.listener = event => this.key(event);
       document.addEventListener('keydown',this.listener);
@@ -75,6 +76,14 @@ gym-scene-controls { position:absolute; top:12px; left:12px; right:12px; z-index
     closeHelp() {
       this.showHelp(false); this.suppressFocusHelp = true;
       this.helpButton.focus(); this.suppressFocusHelp = false;
+    }
+
+    toggleCamera() {
+      const driver = this.scene.cameraMode !== 'driver';
+      this.scene.cameraMode = driver ? 'driver' : 'chase';
+      this.follow.checked = this.scene.follow = true;
+      this.cameraButton.textContent = driver ? 'Chase view' : 'Driver view';
+      this.cameraButton.setAttribute('aria-pressed',String(driver));
     }
 
     wholeMap() { this.scene.follow = false; this.follow.checked = false; this.scene.frameMap(); }
