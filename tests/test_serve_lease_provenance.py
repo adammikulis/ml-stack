@@ -90,6 +90,8 @@ def test_a_lease_taken_with_no_reason_says_so(broker, model, procs):
 
     assert holder_of(broker, grant.lease)["reason"] == provenance.NO_REASON
     assert provenance.NO_REASON in "\n".join(provenance.lines(holder_of(broker, grant.lease)))
+    broker.release(grant.lease)
+    assert [r["reason"] for r in lease_history.rows(broker.history_file)] == [provenance.NO_REASON]
 
 
 def test_a_second_holder_of_a_server_is_listed_with_its_own_reason(broker, model, procs):
@@ -135,14 +137,14 @@ def test_a_worktree_checkout_reads_its_own_branch(broker, model, tmp_path, procs
 
 
 def test_a_secret_in_a_parents_command_line_is_masked(broker, model, tmp_path):
+    script = tmp_path / "spawner.py"
+    script.write_text("import subprocess, sys, time\n"
+                      "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+                      "print(child.pid, flush=True)\n"
+                      "time.sleep(120)\n")
     parent = subprocess.Popen(
-        [sys.executable, "-c",
-         "import subprocess, sys, time\n"
-         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
-         "print(child.pid, flush=True)\n"
-         "time.sleep(120)\n",
-         "--api-key", "hunter2hunter2hunter2", "password=swordfish-swordfish",
-         "--token=ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+        [sys.executable, str(script), "--api-key", "hunter2hunter2hunter2",
+         "password=swordfish-swordfish", "--token=ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
         stdout=subprocess.PIPE, text=True)
     try:
         child = int(parent.stdout.readline())
@@ -152,7 +154,7 @@ def test_a_secret_in_a_parents_command_line_is_masked(broker, model, tmp_path):
         parent.kill()
         parent.wait(timeout=10)
         kill_process_tree(child)
-    assert str(parent.pid) in chain
+    assert str(parent.pid) in chain and "--api-key" in chain and "spawner.py" in chain
     for secret in ("hunter2hunter2hunter2", "swordfish", "ghp_abcdefghijklmnop"):
         assert secret not in chain, chain
 

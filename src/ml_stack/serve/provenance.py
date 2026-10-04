@@ -11,7 +11,7 @@ from typing import Any
 
 import psutil
 
-from ml_stack.sentinel.redaction import redact, redact_value
+from ml_stack.sentinel.redaction import MASK, redact, redact_value
 
 __all__ = ["ENV_FOR", "ENV_LABEL", "NO_REASON", "asked", "describe", "lines", "observe",
            "program", "record_from", "told"]
@@ -21,6 +21,7 @@ ENV_LABEL = "ML_STACK_WORKSPACE_LABEL"
 NO_REASON = "(no reason given)"
 CHAIN_DEPTH = 4
 MAX_TEXT = 200
+COMMAND_TEXT = 400
 
 
 def _line(text: Any) -> str:
@@ -42,14 +43,23 @@ def told(reason: str) -> None:
         os.environ[ENV_FOR] = reason
 
 
+def _word(word: str, before: str) -> str:
+    """One argument with secrets masked: a value after a key-like flag or `Bearer`, a token or
+    assigned secret in it. A path is masked a segment at a time."""
+    if before.lower() == "bearer":
+        return MASK
+    flag = before.lstrip("-") if before.startswith("-") and "=" not in before else ""
+    if flag:
+        return str(redact_value(word, name=flag))
+    if word.startswith(("/", "~", ".")) and "=" not in word:
+        return "/".join(redact(part) for part in word.split("/"))
+    return redact(word)
+
+
 def _argv(argv: list[str]) -> str:
-    """A command line with the value after a key-like flag masked."""
-    out: list[str] = []
-    for at, word in enumerate(argv):
-        before = argv[at - 1] if at else ""
-        flag = before.lstrip("-") if before.startswith("-") and "=" not in before else ""
-        out.append(str(redact_value(word, name=flag)))
-    return redact(" ".join(" ".join(out).split()))[:MAX_TEXT]
+    """A command line, one line, secrets masked."""
+    words = [_word(word, argv[at - 1] if at else "") for at, word in enumerate(argv)]
+    return " ".join(" ".join(words).split())[:COMMAND_TEXT]
 
 
 def _git(cwd: str) -> tuple[str, str]:
