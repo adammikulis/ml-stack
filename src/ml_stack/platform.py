@@ -52,12 +52,12 @@ def start_process(argv, **kwargs):
     return subprocess.Popen(argv, **process_group_kwargs(), **kwargs)
 
 
-def terminate_process_group(proc):
+def terminate_process_group(proc, *, force=False):
     """Terminate a child and its process group."""
     if is_windows():
-        proc.terminate()
+        proc.kill() if force else proc.terminate()
     else:
-        os.killpg(proc.pid, signal.SIGTERM)
+        os.killpg(proc.pid, signal.SIGKILL if force else signal.SIGTERM)
 
 
 def process_group_kwargs() -> dict[str, Any]:
