@@ -8,6 +8,7 @@ import json
 import re
 import socket
 import threading
+from collections import Counter
 
 import pytest
 
@@ -61,7 +62,7 @@ class Machine:
 
         self.joining.handle = record
         token = load_or_create_token(root, self.member.key)
-        self.httpd = http.Server(("127.0.0.1", 0), make_handler(
+        self.httpd = http.Server(("0.0.0.0", 0), make_handler(
             Daemon(self.runner, root / "files", token, name="a", joining=self.joining)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.port = self.httpd.server_port
@@ -113,8 +114,10 @@ def test_a_wrong_passphrase_is_refused_and_nothing_is_stored(machine, tmp_path, 
     with pytest.raises(DiscoveryError, match="none accepts that passphrase"):
         _join(tmp_path, udp, "not the words")
     assert memberships(tmp_path / "b" / "cluster.key") == []
+    sources = {a[1] for a in machine.joining.attempts}
+    assert sources
     assert [a[3] for a in machine.joining.attempts if a[3].startswith("refused")] == [
-        "refused, wrong passphrase"]
+        "refused, wrong passphrase"] * len(sources)
 
 
 def test_a_source_that_keeps_failing_is_locked_out_even_with_the_right_words(machine, tmp_path, udp):
@@ -125,7 +128,9 @@ def test_a_source_that_keeps_failing_is_locked_out_even_with_the_right_words(mac
         _join(tmp_path, udp)
     assert memberships(tmp_path / "b" / "cluster.key") == []
     assert machine.joining.attempts[-1][3] == "refused, too many attempts"
-    assert sum("wrong passphrase" in line for line in machine.logged) == 5
+    wrong = Counter(a[1] for a in machine.joining.attempts if a[3] == "refused, wrong passphrase")
+    assert wrong and set(wrong.values()) == {5}
+    assert sum("wrong passphrase" in line for line in machine.logged) == sum(wrong.values())
 
 
 def test_a_joined_machine_checks_a_sign_in_against_what_it_was_joined_with(machine, tmp_path, udp):
