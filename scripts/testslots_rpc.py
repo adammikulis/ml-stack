@@ -90,6 +90,7 @@ class Handler(socketserver.StreamRequestHandler):
                         _write(self.wfile, {"lease": identifier})
                         while not select.select([self.connection], [], [], .05)[0]:
                             self.check_connection()
+                        self.connection.settimeout(5)
                         _read(self.rfile)
                     finally:
                         with server.guard:

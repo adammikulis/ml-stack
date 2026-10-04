@@ -162,9 +162,9 @@ def _lease_environment(path: Path, token: str) -> Iterator[None]:
             os.environ["DEV_TEST_LEASE"] = previous
 
 
-def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int]) -> int:
+def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int, int]) -> int:
     path, want, minimum = me.path, me.data["want"], me.data["minimum"]
-    cap, used = capacity
+    cap, used, running = capacity
     if not waiting or cap - used < minimum:
         return 0
     first = waiting[0]
@@ -174,7 +174,7 @@ def _grant(me: Slot, waiting: list[Slot], capacity: tuple[int, int]) -> int:
         first.data["backfills"] = first.data.get("backfills", 0) + 1
         first.path.write_text(json.dumps(first.data))
     if not want:
-        return min(cap - used, max(minimum, cap // max(1, len(waiting) + bool(used))))
+        return min(cap - used, max(minimum, cap // max(1, len(waiting) + running)))
     return min(want, cap - used)
 
 
@@ -206,7 +206,7 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
                 slots = _read(d, mine=path)
                 waiting = [s for s in slots if s.granted == 0]
                 used = sum(s.granted for s in slots)
-                granted = _grant(Slot(path, me), waiting, (cap, used))
+                granted = _grant(Slot(path, me), waiting, (cap, used, sum(slot.granted > 0 for slot in slots)))
                 if granted:
                     me["granted"] = granted
                     path.write_text(json.dumps(me))
