@@ -64,12 +64,12 @@ def state_dir(tmp_path, monkeypatch):
 
 # -- the plan --------------------------------------------------------------------------------
 def test_the_plan_counts_weights_cache_and_a_margin_and_proposes_a_whole_number(tmp_path):
-    path = model(tmp_path, 20 * GIB)
+    path = model(tmp_path, 16 * GIB)
     plan = wired.plan(str(path), context=65536, total=32 * GIB, current=0, others=0)
     sizes = dict(plan.counted)
-    assert sizes["Weights"] == 20 * GIB
+    assert sizes["Weights"] == 16 * GIB
     assert sizes["KV cache"] > 0
-    assert plan.need_bytes >= 20 * GIB + sizes["KV cache"]
+    assert plan.need_bytes >= 16 * GIB + sizes["KV cache"]
     assert plan.needed_mb * 1024**2 >= plan.need_bytes + plan.margin_bytes
     assert plan.needed_mb % 256 == 0
     assert plan.fits and plan.proposed_mb == plan.needed_mb
