@@ -12,18 +12,21 @@ from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.serve import provenance
 from ml_stack.workspace import (
+    backlog,
+    issuepump,
     localagent as la,
     localeffort as le,
     localmodel,
     localprofile as lp,
     localstart as ls,
     plain,
+    tokens,
 )
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["ACTIONS", "OPTIONS", "run"]
 
-ACTIONS = ("start", "stop", "list")
+ACTIONS = ("start", "stop", "list", "backlog")
 READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
@@ -35,6 +38,7 @@ OPTIONS = [
     flag("--role", default=roles.DEFAULT, choices=list(roles.ROLES),
          help="what it may do (`/role` in ml-stack-chat describes them); default: %(default)s"),
     flag("--project", default="", metavar="PATH", help="the project folder it works for"),
+    flag("--repo", default="", metavar="OWNER/REPO", help="backlog: repository whose issues this coding worker may select"),
     flag("--effort", default=le.DEFAULT, choices=[*le.LEVELS, le.AUTO],
          help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
@@ -128,6 +132,14 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
     if args.action == "list":
         return _list(ws)
     human.require_person(f"{args.action} a local agent")
+    if args.action == "backlog":
+        if not args.target:
+            raise ValueError("agent backlog needs the existing worker's name")
+        token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        backlog.configure(ws, token, args.target, args.repo, args.project)
+        issuepump.start(ws, token, args.target)
+        say(f"{args.target} will work on open issues in {args.repo} when its inbox is empty")
+        return 0
     provenance.told(args.lease_for)
     handler: Any = _start if args.action == "start" else _stop
     return int(handler(args, ws))

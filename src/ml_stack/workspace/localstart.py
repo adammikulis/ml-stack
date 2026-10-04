@@ -16,6 +16,7 @@ from ml_stack import jobs, roles
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
+    issuepump,
     localagent as la,
     localeffort as le,
     localharness as lh,
@@ -253,6 +254,7 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
             "steps": int(status.get("steps") or 0), "tasks": int(status.get("tasks") or 0),
             "ignored": int(status.get("ignored") or 0),
             "last_message": status.get("last_message") or {},
+            "backlog": issuepump.status(ws, name),
             "memory_bytes": agent.size_bytes if live and state != "failed" else 0,
             "lease": bool((status.get("lease") or {}).get("id")) and live,
             "paused": la.pause_file(ws, name).exists(), "orders_from": list(agent.orders_from), "started": agent.started,
