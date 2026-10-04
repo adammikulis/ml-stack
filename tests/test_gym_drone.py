@@ -27,6 +27,35 @@ def native_drone(monkeypatch, tmp_path):
 
 
 @pytest.mark.slow
+def test_native_forest_visuals_preserve_tree_colliders(monkeypatch, tmp_path):
+    pytest.importorskip('PyFlyt')
+    from PIL import Image
+    monkeypatch.setenv('ML_STACK_CACHE', str(tmp_path / 'cache'))
+    monkeypatch.setenv('ML_STACK_GYM_FILES_ROOT', str(tmp_path))
+    definition = {'version': 1, 'size': 20, 'n_agents': 1,
+                  'trees': [{'x': 6, 'y': 2, 'height': 6, 'radius': .7}], 'hikers': [], 'fires': []}
+    (tmp_path / 'forest.json').write_text(json.dumps(definition))
+    env = make_environment('drone', {'simulation_mode': 'world',
+                                   'world': {'mode': 'manual', 'map_file': 'forest.json'}}, seed=2)
+    try:
+        body = env.scenery[0]['body_id']
+        collision = env.native.getCollisionShapeData(body, -1)
+        assert collision[0][2] == env.native.GEOM_CYLINDER
+        assert collision[0][3][:2] == pytest.approx((6, .7))
+        visual = env.native.getVisualShapeData(body)
+        assert len(visual) == 4 and visual[0][2] == env.native.GEOM_CYLINDER
+        assert visual[0][3][:2] == pytest.approx((2.7, .21))
+        assert all(shape[2] == env.native.GEOM_MESH for shape in visual[1:])
+        ground = env.native.getVisualShapeData(env.native.planeId)[0]
+        assert ground[7] == pytest.approx((.34, .39, .22, 1))
+        Image.fromarray(env.rgb).save(tmp_path / 'native-forest.png')
+        assert env.camera['rgb'] and env.camera['agent_id'] == 'drone-0'
+        assert env.native.getNumBodies() == 3
+    finally:
+        env.close()
+
+
+@pytest.mark.slow
 def test_native_camera_reward_and_persistent_clock(native_drone):
     import numpy as np
     from PIL import Image

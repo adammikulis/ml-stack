@@ -61,6 +61,7 @@ def capture(env, fresh=False):
     env.thermal_rgb = np.stack([normalized * 255, normalized**.5 * 180,
                                 (1 - normalized) * 80], axis=-1).astype(np.uint8)
     env.camera = {'rgb': png(env.rgb), 'thermal': png(env.thermal_rgb),
+                  'agent_id': f'drone-{env.actor}',
                   'thermal_kind': 'synthetic visible-surface temperature',
                   'intrinsics': {'width': 128, 'height': 128, 'fov_degrees': 90},
                   **drone.sensor_metadata,
@@ -71,9 +72,23 @@ def capture(env, fresh=False):
     env.depth = depth
 
 
+def tree_visual(native, height, radius):
+    """Layer the maintained Bullet cone mesh above a short trunk."""
+    scales = [[radius * (3.2 - i * .6) / .06] * 2 + [height * .48 / .165] for i in range(3)]
+    positions = [[0, 0, height * (.225 - .5)]] + [
+        [0, 0, height * (.24 + i * .17 - .5) - .005 * height * .48 / .165] for i in range(3)]
+    return native.createVisualShapeArray(
+        shapeTypes=[native.GEOM_CYLINDER] + [native.GEOM_MESH] * 3,
+        radii=[radius * .3, 0, 0, 0], lengths=[height * .45, 0, 0, 0],
+        fileNames=[''] + ['racecar/meshes/cone.obj'] * 3,
+        meshScales=[[1, 1, 1], *scales], visualFramePositions=positions,
+        rgbaColors=[[.36, .25, .14, 1], [.14, .30, .22, 1], [.21, .40, .29, 1], [.26, .47, .33, 1]])
+
+
 def forest(native, definition):
     """Construct scenery with maintained Bullet shapes and collision handling."""
     bodies, targets = [], {}
+    native.changeVisualShape(native.planeId, -1, textureUniqueId=-1, rgbaColor=[.34, .39, .22, 1])
     for kind in ['trees', 'hikers', 'fires']:
         for row in definition[kind]:
             if kind == 'trees':
@@ -83,7 +98,8 @@ def forest(native, definition):
             else:
                 height, radius, color = .4, .8, [1, .15, .02, 1]
             shape = native.createCollisionShape(native.GEOM_CYLINDER, radius=radius, height=height)
-            visual = native.createVisualShape(native.GEOM_CYLINDER, radius=radius, length=height, rgbaColor=color)
+            visual = (tree_visual(native, height, radius) if kind == 'trees' else
+                      native.createVisualShape(native.GEOM_CYLINDER, radius=radius, length=height, rgbaColor=color))
             body = native.createMultiBody(baseMass=0, baseCollisionShapeIndex=shape,
                                           baseVisualShapeIndex=visual,
                                           basePosition=[row['x'], row['y'], height / 2])
