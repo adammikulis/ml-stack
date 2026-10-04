@@ -157,8 +157,12 @@ def test_the_store_is_bounded(ledger, clock):
         clock.advance(model.DEDUP_S + 1)
     g = ledger.sealed.graph()
     assert len(g.nodes("event")) <= MAX_EVENTS
+    # clean runs are written in batches; one write per source (flush_s=0) made this loop encrypt and
+    # write the whole store a thousand times
     for n in range(MAX_SOURCES + 3):
+        ledger.flush_s = 10**9
         ledger.clean("peer", f"p{n}")
+    ledger.flush()
     assert len(ledger.sources()) <= MAX_SOURCES
 
 
