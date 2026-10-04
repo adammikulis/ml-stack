@@ -415,3 +415,11 @@ input[type="range"] {
 .chat-coding-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 #chat-activity-output { max-height:300px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:12px; }
 @media(max-width:600px) { .chat-coding-pair { grid-template-columns:1fr; gap:0; } }
+
+.chat-model-current { text-align:left; max-width:100%; overflow-wrap:anywhere; }
+#chat-model-dialog { width:min(560px,90vw); max-height:80vh; }
+#chat-model-list { overflow-y:auto; max-height:55vh; margin:16px 0; }
+.chat-model-family h3 { color:var(--muted); font-size:12px; margin:18px 0 8px; }
+.chat-model-choice { display:flex; justify-content:space-between; gap:12px; width:100%; text-align:left; margin:4px 0; }
+.chat-model-choice small { color:var(--muted); white-space:nowrap; }
+.chat-model-choice[aria-pressed="true"] { border-color:var(--accent); }

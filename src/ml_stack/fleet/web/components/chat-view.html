@@ -11,7 +11,8 @@
       <header class="chat-toolbar"><h1 id="chat-title">New chat</h1>
         <span class="chat-status" id="chat-status">Chat</span></header>
       <div class="pickrow" id="chat-pickrow" hidden>
-        <label for="model">Model</label><select id="model"></select>
+        <span>Model</span><button class="ghost chat-model-current" id="chat-model-button" aria-haspopup="dialog">Choose a model</button>
+        <select id="model" aria-label="Selected model" hidden></select>
       </div>
       <div class="hint" id="chat-none" hidden>
         No model is running yet. <a href="#models">Choose a model to serve</a>, or use one running on your fleet.
@@ -44,6 +45,11 @@
       <div class="chat-hint">Enter to send · Shift + Enter for a new line · Saved on this machine</div>
     </div>
   </main>
+  <dialog id="chat-model-dialog" aria-labelledby="chat-model-heading">
+    <h2 id="chat-model-heading">Choose a model</h2>
+    <label for="chat-model-search">Search models</label><input type="search" id="chat-model-search" placeholder="Name, family, or quantization…">
+    <div id="chat-model-list"></div><button class="ghost" id="chat-model-close">Close</button>
+  </dialog>
   <dialog id="chat-manage" aria-labelledby="chat-manage-title">
     <form id="chat-manage-form">
       <h2 id="chat-manage-title">Rename conversation</h2>
@@ -94,9 +100,10 @@
       this.searchEpoch = 0;
       this.loadEpoch = 0;
       this.send.onclick = () => this.ask();
-      this.picker.onchange = () => { this.updateReadiness(); this.saveSettings(); };
+      this.picker.onchange = () => { this.updateReadiness(); this.modelPicker.render(); this.saveSettings(); };
       this.temperature.onchange = () => this.saveSettings();
       this.coding = new window.ChatCoding(this);
+      this.modelPicker = new window.ChatModelPicker(this);
       this.newChat.onclick = () => {
         if (this.request) return;
         this.open = null;
@@ -171,6 +178,7 @@
         this.askrow.hidden = !available.length;
         this.none.hidden = !!available.length;
         this.options.hidden = !available.length;
+        await this.modelPicker.catalogue();
         await this.coding.restore(this.savedSettings, this.picker.value);
         this.updateReadiness();
         await this.paintList();

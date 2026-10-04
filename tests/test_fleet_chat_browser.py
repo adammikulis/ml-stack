@@ -115,3 +115,29 @@ def test_saved_temperature_restores_when_switching_and_reloading(chat_browser):
     page.reload()
     page.locator("chat-view #chat-options summary").click()
     expect(page.get_by_label("Temperature", exact=True)).to_have_value("0.6")
+
+
+def test_model_picker_groups_and_searches_loaded_and_installed_models(chat_browser):
+    from playwright.sync_api import expect
+
+    served, page = chat_browser
+    page.route("**/ui/models", lambda route: route.fulfill(json={"ok": True, "library": [
+        {"path": "/models/model-a.gguf", "name": "model-a", "family": "Qwen", "quantization": "Q4_K_XL", "servable": True},
+        {"path": "/models/other.gguf", "name": "Other model", "family": "Gemma", "quantization": "Q8_0", "servable": True}]}))
+    _open(served, page)
+    page.locator("chat-view #chat-model-button").click()
+    expect(page.get_by_role("heading", name="Qwen", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Gemma", exact=True)).to_be_visible()
+    expect(page.locator("chat-view #chat-model-list")).to_contain_text("Loaded · Q4_K_XL")
+    expect(page.locator("chat-view #chat-model-list")).to_contain_text("Installed · Q8_0")
+    page.get_by_label("Search models", exact=True).fill("Qwen")
+    expect(page.locator("chat-view .chat-model-choice")).to_have_count(1)
+    page.get_by_label("Search models", exact=True).press("Enter")
+    expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
+    expect(page.locator("chat-view #model")).to_have_value("model-a")
+    page.locator("chat-view #chat-model-button").click()
+    page.get_by_label("Search models", exact=True).fill("no matches")
+    expect(page.locator("chat-view #chat-model-list")).to_have_text("No models match your search.")
+    page.get_by_label("Search models", exact=True).press("Escape")
+    expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
+    assert page.locator("chat-view textarea").count() == 1
