@@ -390,3 +390,33 @@ def test_one_cache_type_reads_both_ways():
     assert split_cache_type("") == ("", "")
     assert said_cache("q8_0", "q8_0") == "q8_0"
     assert said_cache("q8_0", "q4_0") == "q8_0/q4_0"
+
+
+def test_shared_chat_and_coding_acquire_verified_broker_lease(monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from ml_stack.serve import manager
+    from ml_stack.serve.serving import Config, served
+
+    calls = []
+    released = []
+
+    @contextmanager
+    def verified(model, **settings):
+        calls.append((model, settings))
+        try:
+            yield SimpleNamespace(base_url="http://127.0.0.1:65521", port=65521, adopted=True)
+        finally:
+            released.append(True)
+
+    monkeypatch.setattr(manager, "serve", verified)
+    monkeypatch.setattr(serving_mod, "serving_said", lambda _: "262144 tokens")
+    config = Config(serving=Serving(model="qwen.gguf", slot_context=262144, draft="mtp-qwen.gguf"))
+    with served(config, chat_template_file="shared.jinja") as endpoint:
+        assert endpoint.endswith(":65521")
+        assert not released
+    assert released == [True]
+    assert calls[0][1]["context"] == 262144
+    assert calls[0][1]["draft"] == "mtp-qwen.gguf"
+    assert calls[0][1]["chat_template_file"] == "shared.jinja"
