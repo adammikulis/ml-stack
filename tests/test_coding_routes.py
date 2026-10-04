@@ -130,3 +130,32 @@ def test_joined_coding_session_is_required_before_starting_a_worker(coding_api, 
         body={"message": "signed"}, cookie=cookie,
         headers={"Origin": f"http://127.0.0.1:{server.port}", "Sec-Fetch-Site": "same-origin"})
     assert status == 202
+
+
+def test_catalogue_uses_real_modelinfo_paths_and_coding_profile(monkeypatch, tmp_path):
+    from ml_stack.hub.discover import ModelInfo
+    from ml_stack.workspace import coding_routes, localmodel
+
+    installed = ModelInfo(id="canonical", name="Qwen3.8-27B-Q4_K_XL.gguf", path=tmp_path / "model.gguf",
+                          format="gguf", size_bytes=1234, source="local")
+    monkeypatch.setattr(coding_routes.hub, "discover", lambda **kwargs: [installed])
+    calls = []
+    def choose(**kwargs):
+        calls.append(kwargs)
+        return localmodel.Pick(ref=installed.id, name=installed.name)
+    monkeypatch.setattr(coding_routes.localmodel, "choose", choose)
+    result = coding_routes.catalogue()
+    assert result["models"] == [{"name": installed.name, "ref": str(installed.path)}]
+    assert result["default_model"] == str(installed.path)
+    assert calls[0]["coding"] is True and calls[0]["search"] is False
+
+
+def test_launch_adapter_forwards_exact_context_and_mtp_head(monkeypatch):
+    from ml_stack import coding
+
+    calls = []
+    monkeypatch.setitem(coding.HARNESSES, "codex", lambda argv, **options: calls.append(argv) or 0)
+    assert coding.launch_coding_agent("/models/qwen.gguf", "read-only", "/project", context=262144,
+                                     draft="/models/mtp-qwen.gguf") == 0
+    assert calls[0][calls[0].index("--ctx") + 1] == "262144"
+    assert calls[0][calls[0].index("--draft") + 1] == "/models/mtp-qwen.gguf"

@@ -9,7 +9,8 @@ delete it after confirmation. Reopening a conversation restores its model and mo
 For Coding, select a downloaded model, an existing **Project directory**, **Coding agent**
 (Codex or Claude Code), and **Tool permissions**. The model preference comes from the maintained
 coding profile; unavailable models and missing command-line agents cannot start a turn.
-**Advanced options** holds **Context length**, in tokens. Ordinary Chat keeps Temperature there.
+**Advanced options** holds **Context length**, in tokens, and **Draft model / MTP head**
+(`auto`, `none`, or an explicit installed head path). Ordinary Chat keeps Temperature there.
 
 Coding launches through the same broker and permission hooks as the command-line harnesses;
 it never grants a human identity to the agent. Responses stream into the shared conversation.

@@ -35,6 +35,8 @@ def launch_coding_agent(model: str, role: str, project: str | Path, harness: str
     argv = [model or harnessing.DEFAULT_MODEL, "--role", role, "--project", str(project)]
     if context := options.pop("context", 0):
         argv += ["--ctx", str(context)]
+    if draft := options.pop("draft", ""):
+        argv += ["--draft", draft]
     if options.get("name"):
         argv += ["--name", options.pop("name")]
     for each in options.pop("orders_from", ()):

@@ -30,7 +30,9 @@
         <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
         </div><div data-coding hidden><label for="chat-context">Context length</label>
           <input id="chat-context" type="number" min="1024" max="1048576" step="1024" value="262144">
-          <p class="hint">Tokens available to the coding agent. Memory admission runs before the model starts.</p></div>
+          <p class="hint">Tokens available to the coding agent. Memory admission runs before the model starts.</p>
+          <label for="chat-draft">Draft model / MTP head</label><input id="chat-draft" value="auto" placeholder="auto, none, or /path/to/head.gguf">
+          <p class="hint">Auto uses a matching head when available. Use none to disable, or an explicit installed head path.</p></div>
       </details>
       <div class="messages" id="chat-messages" aria-label="Chat messages" role="log"></div>
       <div id="chat-note" role="status"></div>
