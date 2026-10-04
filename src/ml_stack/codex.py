@@ -27,6 +27,8 @@ from ml_stack import harnessing, serverkeys
 from ml_stack.chatpolicy import READ_ONLY
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
 from ml_stack.log import say
+from ml_stack.workspace import tokens
+from ml_stack.workspace.identity import TOKEN_ENV
 
 __all__ = ["config_toml", "environment", "launch", "policy_flags"]
 
@@ -133,9 +135,19 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
     binary, *extra = command
     try:
         with harnessing.opened(args, "codex", served, say) as run:
+            workspace = ["", "[mcp_servers.workspace]", f"command = {_q(sys.executable)}",
+                         'args = ["-m", "ml_stack.mcp", "--builtin", "--workspace-only"]',
+                         "startup_timeout_sec = 30", "[mcp_servers.workspace.env]"]
+            workspace += [f"{name} = {_q(value)}" for name, value in {
+                TOKEN_ENV: tokens.load(run.seat.base, run.seat.parent or run.seat.name),
+                "ML_STACK_HOME": str(run.seat.base.parent),
+                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+                "ML_STACK_AGENT": "1", "ML_STACK_NONINTERACTIVE": "1"}.items()]
             path = run.files.write("config.toml", config_toml(base_url, alias, window,
-                                                              (run.pre, run.post, harnessing.WAIT_S)))
-            run.files.write("AGENTS.md", run.brief)
+                                    (run.pre, run.post, harnessing.WAIT_S)) + "\n".join(workspace) + "\n")
+            run.files.write("AGENTS.md", run.brief + "\nUse the workspace MCP tools for inbox/send/thread/claim. "
+                            "They already carry your assigned identity; never use shell workspace commands "
+                            "inside the coding sandbox.\n")
             say(f"role {args.role}; Bash, apply_patch and MCP calls go through ml-stack's classifier "
                 f"(CODEX_HOME {path.parent}, outside the working tree)")
             flags = [*policy_flags(args.role), "--dangerously-bypass-hook-trust", "--cd", str(run.cwd)]

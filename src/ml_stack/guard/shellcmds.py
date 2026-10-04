@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.guard import codescan
+from ml_stack.guard import codescan, workspacecmds
 from ml_stack.guard.harm import Finding, outside, protected, resolve
 from ml_stack.guard.shellscan import Segment, has_expansion, has_glob, segments
 from ml_stack.guard.verbs import verb_finding, words_of
@@ -556,6 +556,8 @@ def analyse(argv: list[str], ctx: Ctx) -> list[Finding]:
     fixed = _fixed(name, args, ctx)
     if fixed is not None:
         return fixed
+    if name == "ml-stack-workspace":
+        return workspacecmds.effect(args)
     if name in HANDLERS:
         return HANDLERS[name](name, args, ctx)
     if name in READ_ONLY:

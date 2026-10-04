@@ -664,11 +664,18 @@ def main(argv: list[str] | None = None) -> int:
         prog="ml-stack-mcp",
         description="The ml-stack commands as MCP tools over stdio. Register it with "
                     "'claude mcp add ml-stack -- ml-stack-mcp'.")
+    ap.add_argument("--workspace-only", action="store_true", help="expose authenticated workspace messaging tools only")
     ap.add_argument("--list", action="store_true", help="print the tools and exit")
     ap.add_argument("--builtin", action="store_true",
                     help="speak the protocol with the built-in loop even when the mcp SDK "
                          "is installed")
     args = ap.parse_args(argv)
+    if args.workspace_only:
+        global TOOLS, _BY_NAME
+        names = {"workspace_inbox", "workspace_send", "workspace_thread", "workspace_claim",
+                 "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status"}
+        TOOLS = [tool for tool in TOOLS if tool.name in names]
+        _BY_NAME = {tool.name: tool for tool in TOOLS}
     if args.list:
         for tool in TOOLS:
             required = tool.schema().get("required", [])
