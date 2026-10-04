@@ -387,6 +387,7 @@ def test_short(case):
     process = _elastic(tmp_path, test_file, 2)
     output = process.communicate(timeout=30)
     assert process.returncode == 0, output
+    assert "testslots: waiting" not in output[1], output[1]
     records = [json.loads(line) for line in (tmp_path / "elastic.jsonl").read_text().splitlines()]
     assert len(records) == 80
     duration = max(record["end"] for record in records) - min(record["start"] for record in records)
@@ -448,3 +449,199 @@ with Path(os.environ["TEST_LOG"]).open("a") as stream:
     assert len(records) == 6
     for record in records:
         assert sum(other["start"] <= record["start"] < other["end"] for other in records) <= 2, records
+
+
+def test_live_incomplete_records_do_not_crash_admission(tmp_path):
+    import fcntl
+
+    directory = tmp_path / 'slots'
+    directory.mkdir()
+    descriptors = []
+    try:
+        for index, document in enumerate(('{}', '[]', '{"minimum":', '{"pid":true,"minimum":1}')):
+            path = directory / f'0-{index}.slot'
+            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            descriptors.append(descriptor)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            path.write_text(document)
+        processes = [_spawn(tmp_path, 2, 1, .02, f'valid-{index}') for index in range(12)]
+        assert all(process.wait(timeout=10) == 0 for process in processes)
+        records = _records(tmp_path)
+        assert len(records) == 12
+        for record in records:
+            assert sum(other['workers'] for other in records
+                       if other['start'] <= record['start'] < other['end']) <= 2
+    finally:
+        for descriptor in descriptors:
+            os.close(descriptor)
+        for process in locals().get('processes', []):
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+
+
+def test_waiter_republishes_its_unlinked_record_and_keeps_fifo_position(tmp_path):
+    module = _load()
+    holder = _spawn(tmp_path, 1, 1, 60, 'holder')
+    waiter = third = None
+    try:
+        deadline = time.monotonic() + 5
+        path = None
+        while path is None:
+            for candidate in (tmp_path / 'slots').glob('*.slot'):
+                if json.loads(candidate.read_text()).get('granted') == 1:
+                    path = candidate
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        waiter = _spawn(tmp_path, 1, 1, .02, 'waiter')
+        path = None
+        while path is None:
+            for candidate in (tmp_path / 'slots').glob('*.slot'):
+                if json.loads(candidate.read_text()).get('label') == 'waiter':
+                    path = candidate
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        original = path.stat().st_ino
+        path.unlink()
+        while not path.exists():
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        assert path.stat().st_ino != original and module._alive(path)
+        third = _spawn(tmp_path, 1, 1, .02, 'third')
+        holder.kill()
+        assert waiter.wait(timeout=5) == 0 and third.wait(timeout=5) == 0
+        assert [record['label'] for record in _records(tmp_path)] == ['waiter', 'third']
+    finally:
+        for process in (holder, waiter, third):
+            if process is not None:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+
+
+def test_concurrent_record_publication_is_complete_and_already_locked(tmp_path, monkeypatch):
+    import concurrent.futures
+    import threading
+
+    module = _load()
+    monkeypatch.setenv('DEV_TEST_SLOTS_DIR', str(tmp_path / 'slots'))
+    monkeypatch.setenv('DEV_TEST_BUDGET', '3')
+    monkeypatch.delenv('DEV_TEST_REMOTE_LEASE', raising=False)
+    monkeypatch.delenv('DEV_TEST_LEASE', raising=False)
+    (tmp_path / 'slots').mkdir()
+    original = module.json.dump
+    finished = threading.Event()
+    samples = []
+
+    def slow_dump(document, stream):
+        payload = json.dumps(document)
+        middle = len(payload) // 2
+        stream.write(payload[:middle])
+        stream.flush()
+        time.sleep(.005)
+        stream.write(payload[middle:])
+
+    monkeypatch.setattr(module.json, 'dump', slow_dump)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=13) as executor:
+            observer = executor.submit(_observe_publication, module, tmp_path, finished, samples)
+            futures = [executor.submit(_concurrent_lease, module, index) for index in range(12)]
+            try:
+                for future in futures:
+                    future.result(timeout=10)
+            finally:
+                finished.set()
+            observer.result(timeout=5)
+        assert samples and all(module._valid_record(sample) for sample in samples)
+        assert module.status()['in_use'] == 0
+    finally:
+        finished.set()
+        monkeypatch.setattr(module.json, 'dump', original)
+
+
+def _observe_publication(module, tmp_path, finished, samples):
+    while not finished.is_set():
+        with module._mutex(tmp_path / 'slots'):
+            for path in (tmp_path / 'slots').glob('*.slot'):
+                document = json.loads(path.read_text())
+                samples.append(document)
+                assert module._valid_record(document) and module._alive(path)
+        time.sleep(.001)
+
+
+def _concurrent_lease(module, index):
+    token = module.EXPORT_LEASE.set(False)
+    try:
+        with module.lease(1, label=f'concurrent-{index}', say=lambda message: None):
+            time.sleep(.01)
+    finally:
+        module.EXPORT_LEASE.reset(token)
+
+
+def test_rpc_admission_survives_a_live_incomplete_record(tmp_path, monkeypatch):
+    import concurrent.futures
+    import fcntl
+
+    rpc = _rpc_module()
+    monkeypatch.setenv('DEV_TEST_SLOTS_DIR', str(tmp_path / 'slots'))
+    monkeypatch.setenv('DEV_TEST_BUDGET', '2')
+    directory = rpc.testslots.slots_dir()
+    damaged = directory / '0-incomplete.slot'
+    descriptor = os.open(damaged, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    damaged.write_text('{}')
+    server = rpc.Admission(False)
+    try:
+        server.admitted.set()
+        server.collected.set()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_consume_rpc_permit, server) for _ in range(24)]
+            replies = [future.result(timeout=10) for future in futures]
+        assert len(set(replies)) == 24
+        deadline = time.monotonic() + 5
+        while rpc.testslots.status()['in_use']:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        assert not rpc.testslots.status()['waiting']
+    finally:
+        server.finish()
+        os.close(descriptor)
+
+
+def _consume_rpc_permit(server):
+    connection, stream = _rpc_socket(server, server.token)
+    with connection, stream:
+        reply = json.loads(stream.readline())
+        assert 'lease' in reply, reply
+        stream.write(b'{}\n')
+        stream.flush()
+        return reply['lease']
+
+
+def test_wait_notices_are_delayed_and_time_gated(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    module = _load()
+    monkeypatch.setenv('DEV_TEST_SLOTS_DIR', str(tmp_path / 'slots'))
+    monkeypatch.setenv('DEV_TEST_BUDGET', '1')
+    monkeypatch.delenv('DEV_TEST_REMOTE_LEASE', raising=False)
+    monkeypatch.delenv('DEV_TEST_LEASE', raising=False)
+    clock = [0.0]
+    notices = []
+
+    def sleep(seconds):
+        clock[0] += 1
+        if clock[0] == 26:
+            raise RuntimeError('Finished simulated wait')
+
+    monkeypatch.setattr(module, 'time', SimpleNamespace(
+        time=lambda: 100, time_ns=lambda: 100, monotonic=lambda: clock[0], sleep=sleep))
+    monkeypatch.setattr(module, 'budget', lambda: 0)
+    with pytest.raises(RuntimeError, match='Finished simulated wait'), module.lease(
+            1, say=lambda message: notices.append((clock[0], message))):
+        pass
+    assert [stamp for stamp, _ in notices] == [1, 21]
+    assert not list((tmp_path / 'slots').glob('*.slot'))

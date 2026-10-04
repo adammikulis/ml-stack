@@ -20,6 +20,17 @@ lane before their CPU permit. The `slow` marker alone does not require a lane.
 Thread-library defaults are one thread per test process; explicitly configured
 thread settings remain effective.
 
+Lease records are published as complete JSON on an already locked inode under
+the scheduler mutex. Published updates retain that inode and run under the same
+mutex. Readers skip malformed or incomplete records and retry on the next
+admission pass. A queued lease restores a missing or replaced record while
+retaining its original FIFO position and a live file lock.
+
+Normal command waits report a changed queue state at most once per second,
+or repeat unchanged status after twenty seconds. Short waits stay quiet.
+Per-test RPC waits do not print into pytest's progress output; use the shared
+status command to inspect their queue.
+
 `python scripts/testslots.py status` reports active permits and waiting work.
 A queued minimum cannot exceed the configured capacity. Small requests can fill
 a temporarily unusable gap twice before an older larger request reserves the
