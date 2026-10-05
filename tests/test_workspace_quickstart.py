@@ -682,3 +682,24 @@ def test_hosted_code_only_paste_selects_the_authenticated_coordinator(base, ws, 
     assert copied[0] in visible
     assert 'does not grant cluster membership' in visible
     assert 'Nobody joined' not in visible
+
+
+def test_remote_invitation_refuses_local_authority_before_issuing_code(base, ws):
+    with pytest.raises(ValueError, match='activate hosting first'):
+        guide.connect(ws, guide.Plan(remote=True, code_only=True), guide.Talk(copy=lambda _: False))
+    assert not ws.invites.path.exists()
+
+
+def test_expected_remote_workspace_never_redeems_at_local_registry(base):
+    answer = child(['join', 'AAAA-BBBB-CCCC-DDDD', '--workspace', 'workspace:' + 'a' * 32], base)
+    assert answer.returncode == 3
+    assert 'another coordinator workspace' in answer.stderr
+
+
+def test_person_coordinator_host_resolves_existing_owner_after_terminal_guard(base, ws):
+    tokens.store(base, tokens.OWNER_FILE, ws.init('owner'))
+    term = Terminal(['coordinator', 'host'], base)
+    term.until('workspace:')
+    assert term.finish() == 0
+    assert coordinator_config.load(base)['mode'] == 'host'
+    assert not any(secret in term.heard for secret in secrets_of(base))

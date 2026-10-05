@@ -283,7 +283,7 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
     plan = guide.Plan([args.name] if args.name else [], 0.0 if args.no_live else args.live_seconds,
                       args.wait_seconds, shared=not args.one_agent,
                       project=project.describe(args.project, none=args.no_project),
-                      code_only=getattr(args, "code_only", False))
+                      code_only=getattr(args, "code_only", False), remote=getattr(args, "remote", False))
     answered = guide.connect(ws, plan)
     return 0 if answered or plan.live_s == 0 or plan.code_only or plan.wait_s <= 0 else 1
 
@@ -292,6 +292,10 @@ def _join(args: argparse.Namespace, ws: Workspace) -> int:
     if args.coordinator:
         coordinator_client.connect(limits.root(), args.coordinator)
     remote = coordinator_client.client(limits.root())
+    expected = getattr(args, "workspace", "")
+    if expected and (not remote or remote.config["workspace"] != expected):
+        raise Denied("this invitation belongs to another coordinator workspace; "
+                     "enroll in its Fleet cluster and use the complete invitation command")
     name = remote.join(limits.root(), args.code, args.name, args.model, args.harness) if remote else onboard.join(
         ws, args.code, args.name, claim=(args.model, args.harness))
     say(f"joined as {name}")
@@ -440,11 +444,13 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
       flag("--no-project", action="store_true", help="connect without naming a project"),
       flag("--one-agent", action="store_true",
            help="a single-use code (default: one paste for up to 10 agents, one hour)"),
+      flag("--remote", action="store_true", help="require an active shared host and include its authority"),
       flag("--code-only", action="store_true", help="print and copy the invite, then exit without waiting"),
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
         flag("--coordinator", default="", help="select this enrolled Fleet coordinator before redeeming the invite"),
+        flag("--workspace", default="", help="expected coordinator workspace ID; refuses local redemption"),
         flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")],
      _join),
@@ -691,7 +697,10 @@ def _coordinator(args):
     if args.action == 'host':
         human.require_person("choose the workspace coordinator")
         ws = Workspace()
-        if ws.auth(_token(args)).role != 'human':
+        if coordinator_config.load(base).get("mode") == "remote":
+            raise Denied("this device follows another coordinator; hosting would split its authority")
+        token = _token(args) or tokens.read_file(tokens.directory(base) / tokens.OWNER_FILE)
+        if ws.auth(token).role != 'human':
             raise Denied('only the workspace person selects its coordinator')
         result = coordinator_config.save(base, {'mode': 'host', 'workspace': workspace_id(ws)})
     elif args.action == 'connect':
