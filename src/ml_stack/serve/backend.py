@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
+import json
 import logging
 import math
 import os
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home, sentinel, serverkeys
-from ml_stack.client import wait_for_health
+from ml_stack.client import families, wait_for_health
 from ml_stack.platform import process_group_kwargs
 from ml_stack.serve import confined as confinement, exit_guard, grant
 from ml_stack.serve.binary import child_env, require_binary
@@ -558,6 +559,11 @@ class LlamaServerBackend(ServerBackend):
         argv += self._cache_argv(spec)
         argv += self._runtime_argv(spec)
         argv += self._rope_argv(spec)
+        defaults = families.thinkingcap_defaults(spec.model)
+        overridden = any(flag.split("=", 1)[0] == "--chat-template-kwargs"
+                         for flag in spec.extra_args)
+        if defaults and spec.jinja and not spec.embedding and not overridden:
+            argv += ["--chat-template-kwargs", json.dumps(defaults, separators=(",", ":"))]
         argv += list(spec.extra_args)
         return argv
 

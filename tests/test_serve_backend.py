@@ -720,3 +720,19 @@ def test_start_fetches_the_projector_and_the_server_gets_a_path(monkeypatch, tmp
     assert seen[0].mmproj == str(projector) and seen[0].model == str(weights)
     assert fetched == ["hf:owner/thing-GGUF/thing-Q4_K_M.gguf",
                        "hf:owner/thing-GGUF/mmproj-thing-F16.gguf"]
+
+@pytest.mark.parametrize("overrides", [(), ("--chat-template-kwargs", '{"reasoning_effort":"medium"}'), ("--chat-template-kwargs={\"reasoning_effort\":\"low\"}",)])
+def test_thinkingcap_launch_native_effort_defaults(tmp_path, overrides):
+    spec = ServerSpec(model="ThinkingCap-Qwen3.8-27B-IQ4_XS.gguf", context=131072,
+                      reasoning_budget=512, extra_args=overrides)
+    server = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
+    argv = server.command(spec)
+    assert argv[argv.index("-c") + 1] == "131072"
+    assert argv[argv.index("--reasoning-budget") + 1] == "512"
+    if overrides:
+        assert argv[-len(overrides):] == list(overrides)
+        assert sum(arg.split("=", 1)[0] == "--chat-template-kwargs" for arg in argv) == 1
+    else:
+        assert argv[argv.index("--chat-template-kwargs") + 1] == '{"enable_thinking":true,"reasoning_effort":"xhigh"}'
+    ordinary = server.command(ServerSpec(model="Qwen3.8-27B.gguf"))
+    assert "--chat-template-kwargs" not in ordinary

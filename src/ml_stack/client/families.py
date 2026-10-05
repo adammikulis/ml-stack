@@ -52,6 +52,13 @@ def enable_thinking(on: bool) -> dict[str, Any]:
     return {"enable_thinking": on}
 
 
+def thinkingcap_defaults(model_id: Any) -> dict[str, Any]:
+    """The native template defaults for a ThinkingCap Qwen model id."""
+    named = str(model_id).lower()
+    if "thinkingcap" in named and "qwen3.8" in named:
+        return {"enable_thinking": True, "reasoning_effort": "xhigh"}
+    return {}
+
 def reasoning_effort(on: bool) -> dict[str, Any]:
     """``chat_template_kwargs`` for a harmony template, which has no thinking flag and
     reads ``reasoning_effort`` instead."""

@@ -1368,3 +1368,17 @@ def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
                     request=Request(spec_draft_max=2)).chat([{"role": "user", "content": "hi"}])
     assert len(sent) == 1, "the server is asked once, not once per client"
     chat_mod.forget_speculative()
+
+@pytest.mark.parametrize("model", ["bottlecapai/ThinkingCap-Qwen3.8-27B", "ThinkingCap-Qwen3.8-27B-IQ4_XS.gguf"])
+def test_thinkingcap_template_defaults_and_explicit_overrides(model):
+    client = Client("http://127.0.0.1:1", model=model)
+    messages = [{"role": "user", "content": "fixture"}]
+    body = client.build_body(messages)
+    assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "xhigh"}
+    assert "thinking_budget" not in body
+    assert client.build_body(messages, chat_template_kwargs={"reasoning_effort": "medium"})["chat_template_kwargs"]["reasoning_effort"] == "medium"
+    assert client.build_body(messages, reasoning_effort="low")["chat_template_kwargs"]["reasoning_effort"] == "low"
+    assert client.build_body(messages, think=False)["chat_template_kwargs"] == {"enable_thinking": False}
+    assert client.build_body(messages, chat_template_kwargs={"enable_thinking": False})["chat_template_kwargs"] == {"enable_thinking": False}
+    generic = Client("http://127.0.0.1:1", model="Qwen3.8-27B")
+    assert "chat_template_kwargs" not in generic.build_body(messages)

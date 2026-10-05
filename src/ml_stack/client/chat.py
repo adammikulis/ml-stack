@@ -298,6 +298,14 @@ class Client:
                 body["chat_template_kwargs"] = {**(extra.pop("chat_template_kwargs", None) or {}),
                                                 **asked}
         body.update(extra)
+        defaults = families.thinkingcap_defaults(self.model)
+        if defaults:
+            template = {**defaults, **(body.get("chat_template_kwargs") or {})}
+            if body.get("reasoning_effort") is not None:
+                template["reasoning_effort"] = body["reasoning_effort"]
+            if template.get("enable_thinking") is False:
+                template.pop("reasoning_effort", None)
+            body["chat_template_kwargs"] = template
 
         if self._is_hosted_openai:
             body["max_tokens"] = body.pop("n_predict", None)
