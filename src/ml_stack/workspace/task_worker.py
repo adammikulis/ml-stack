@@ -6,6 +6,7 @@ import time
 
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import localagent as la, localloop, task_coding, task_runtime, tokens
+from ml_stack.workspace.chain import held
 from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.taskboard import TaskBoard
 
@@ -14,7 +15,7 @@ def assigned(ws, identity, board):
     """Return the oldest queued task with an authenticated scheduler allocation."""
     tasks = {row['id']: row for row in board.list(tokens.load(ws.base, identity))['tasks']
              if row['state'] == 'queued'}
-    with GraphStore(ws.base / 'coordination.db') as graph:
+    with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
         allocations = [row['attrs'] for row in graph.nodes('allocation')
                        if row['attrs']['worker'] == identity and row['attrs']['task'] in tasks]
     return min(allocations, key=lambda row: tasks[row['task']]['created_at'], default=None)
