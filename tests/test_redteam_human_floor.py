@@ -9,7 +9,6 @@ terminal does the work, so a refusal is never just a command that fails.
 from __future__ import annotations
 
 import os
-import pty
 import select
 import subprocess
 import sys
@@ -20,6 +19,11 @@ import pytest
 
 from ml_stack.net.scan import CATEGORIES
 from ml_stack.sentinel import Sentinel, State
+
+if sys.platform != "win32":
+    import pty
+
+POSIX_TERMINAL = pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 HOST = "evil.example"
@@ -106,6 +110,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
 
 
 @pytest.mark.parametrize("index", range(17))
+@POSIX_TERMINAL
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
@@ -123,6 +128,7 @@ def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, i
     assert snapshot(tmp_path / "home") == before, f"{label} changed state with no terminal"
 
 
+@POSIX_TERMINAL
 def test_the_same_commands_do_their_work_for_a_person_at_a_terminal(tmp_path):
     held = seed_quarantine(tmp_path)
     approved = run_command(tmp_path, ("ml_stack.net.cli", "command", ["approve-host", HOST]),
@@ -238,6 +244,7 @@ def test_building_the_signing_keys_never_asks_the_keystore(tmp_path):
         os.environ.pop("ML_STACK_TEST_KEYRING", None)
 
 
+@POSIX_TERMINAL
 def test_workspace_init_registers_the_first_identity_for_a_person_at_a_terminal(tmp_path):
     done = run_command(tmp_path, ("ml_stack.workspace.cli", "main", ["init"]), agent=False,
                        terminal=True)
