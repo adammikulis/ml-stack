@@ -1,10 +1,4 @@
-"""``ml-stack-serve up`` is a lease from the broker, held until ``down``.
-
-Everything here runs the real command against a real broker (in this process, as the suite
-does everywhere) and a real fake llama-server binary: nothing is mocked between the command
-and the process it starts. Only the machine's memory is made up, the one thing a test cannot
-make short by really filling it.
-"""
+"""Lease commands use isolated broker discovery, private records, and fake native servers."""
 
 from __future__ import annotations
 
@@ -43,7 +37,7 @@ def machine(tmp_path, monkeypatch):
     def manager_for(binary_arg="", build=""):
         if "m" not in made:
             m = ServerManager(LlamaServerBackend(binary=binary), state_file=lease_file())
-            m._broker = Broker(m, room=lambda: memory.free)
+            m._broker = Broker(m, room=lambda: memory.free, scan=lambda: [])
             made["m"] = m
         return made["m"]
 
