@@ -58,9 +58,11 @@ def _shape_of(settings: Mapping[str, Any]) -> dict[str, Any]:
     `ServerSpec` as a dict or a lease record."""
     out: dict[str, Any] = {}
     for key in ("context", "parallel", "cache_type_k", "cache_type_v", "spec_type", "mtp",
-                "embedding"):
+                "embedding", "draft", "chat_template_file", "spec_draft_max", "spec_p_min"):
         if key in settings and settings[key] is not None:
             out[key] = settings[key]
+        elif key in settings and key in ("draft", "chat_template_file"):
+            out[key] = ""
     return out
 
 
@@ -170,7 +172,8 @@ class Held:
             want, got = asked.get(key), have.get(key)
             if isinstance(want, int) and want > 0 and isinstance(got, int) and got < want:
                 return f"port {self.port} serves {got:,} {what}, {want:,} asked"
-        for key in ("cache_type_k", "cache_type_v", "spec_type"):
+        for key in ("cache_type_k", "cache_type_v", "spec_type", "draft", "chat_template_file",
+                    "spec_draft_max", "spec_p_min"):
             want, got = asked.get(key), have.get(key)
             if want and got is not None and want != got:
                 return f"port {self.port} serves {key} {got!r}, {want!r} asked"

@@ -772,7 +772,7 @@ def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fa
     candidate=replace(info(model.name,18),path=model)
     for asked in (str(model),str(blob)):
         pick=localmodel.choose(asked,installed=[candidate],machine=BIG)
-        assert pick.ok and pick.ref==candidate.id
+        assert pick.ok and pick.ref==str(candidate.path)
     missing=tmp_path/'elsewhere'/model.name
     assert not localmodel.choose(str(missing),installed=[candidate],machine=BIG).ok
     model.unlink()

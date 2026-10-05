@@ -26,11 +26,15 @@ a link, `/agents?session=...`, that sets the browser session cookie the start an
    pid and start time are recorded, and its log is `local-agents/NAME.log`. The same name again
    reports the running agent and changes nothing.
 4. **Model lease.** The loop leases the model from the broker (memory admission and the queue are the
-   broker's) on one slot, thinking per request, multi-token prediction on where ml-stack offers it.
+   broker's) on one slot using the maintained harness profile: measured settings, the requested
+   context, q8 KV cache, an installed matching MTP head, and the maintained patched chat template.
+   Installed Hub references select the cached snapshot path without downloading. A compatible
+   managed server used by Chat or Coding is reused across ports; different head, template, cache,
+   or context requirements remain distinct.
    A refusal ends the agent with `failed` and the broker's one-line reason.
 
-`stop` writes the stop file, sends SIGTERM (SIGKILL after 20 s), releases the lease, revokes the
-token and removes the files except the log.
+`stop` stops the owned process and releases its lease. Its saved identity, token, settings and
+device account remain available for the next start.
 
 ## Taking and giving orders
 
