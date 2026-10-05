@@ -206,3 +206,29 @@ def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tm
         server.server_close()
         runner.shutdown()
         http._PINNED.clear()
+
+
+def test_adopted_history_has_no_identity_or_role_grants(host):
+    agent = joined(host)
+    before = host.workspace(PROJECT).registry.ids()
+    result = host.adopt(PROJECT, {"board": "#ml-stack", "tokens": ["private-secret"],
+                      "messages": [{"seq": 1, "from": "old-owner", "from_role": "human",
+                                    "text": "old project message", "can": ["mint"]}]})
+    assert result["messages"] == 1
+    assert host.workspace(PROJECT).registry.ids() == before
+    code, reply = call(host, agent, "history")
+    assert code == 200
+    row = reply["result"][0]
+    assert row["authority"] == "none"
+    assert "from_role" not in row and "can" not in row and "tokens" not in row
+    assert "old project message" in row["text"]
+    assert host.status(PROJECT)["history"] == reply["result"]
+
+
+def test_history_from_other_boards_and_conflicting_imports_are_refused(host):
+    with pytest.raises(ValueError, match="only the selected"):
+        host.adopt(PROJECT, {"board": "#ml-stack", "messages": [{"board": "#other", "text": "x"}]})
+    history = {"board": "#ml-stack", "messages": [{"text": "selected"}]}
+    assert host.adopt(PROJECT, history) == host.adopt(PROJECT, history)
+    with pytest.raises(ValueError, match="different adopted history"):
+        host.adopt(PROJECT, {"board": "#ml-stack", "messages": [{"text": "different"}]})
