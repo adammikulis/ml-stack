@@ -232,6 +232,9 @@ tests, running the suite, merging its own branch -- goes to a subagent, one per 
 own worktree. It does a piece itself only when handing it off would cost more: a one-line edit, a
 change that needs what only this conversation knows, a thing an agent has failed at twice.
 
+**Claude subagents run Sonnet. Opus is banned**, for every agent the main session starts,
+whatever the difficulty or the task; a brief never names an Opus model.
+
 **Delegate by capability and difficulty.** Select an available model and harness using the
 work's required capabilities, measured benchmark/task evidence, context needs, latency,
 resource availability and expected cost. The brief names the exact model/runtime and the
