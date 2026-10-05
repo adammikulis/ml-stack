@@ -8,8 +8,8 @@ from pathlib import Path
 
 from ml_stack.guard import secrets as guard_secrets, untrusted as guard_untrusted
 
-__all__ = ["Refused", "Screened", "clean_label", "fence", "injection_markers", "refusals",
-           "secret_kinds"]
+__all__ = ["HARD", "SOFT", "Refused", "Screened", "clean_label", "fence", "injection_markers",
+           "marker_tiers", "refusals", "secret_kinds"]
 
 SECRETS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((n, re.compile(p)) for n, p in (
     ("private-key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
@@ -27,6 +27,18 @@ SECRETS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((n, re.compile(p)) for 
                         r"[\w.-]*\s*[:=]\s*[\"']?[^\s\"',;]{8,}"),
 ))
 
+_AUTHORITY = (r"(?:\b(?:the\s+)?(?:owner|user|person|human|admin(?:istrator)?|lead)\s+"
+              r"(?:has\s+|have\s+)?(?:approved|confirmed|authori[sz]ed|granted|allowed|consented)\b"
+              r"|\b(?:i|we)\s+(?:hereby\s+)?(?:approve|grant|authori[sz]e|confirm)\b|\bpre-?approved\b"
+              r"|\b(?:approved|authori[sz]ed|confirmed|granted)\s+by\s+(?:the\s+)?(?:owner|user|person|"
+              r"human|admin(?:istrator)?|lead)\b)")
+_ACT = (r"(?:run|execute|delete|remove|rm|push|force-push|wipe|drop|disable|install|send|upload|"
+        r"reveal|print|merge|deploy|overwrite|kill|chmod|sudo|curl|exfiltrate|leak)")
+_YOU = (r"\byou\s+(?:must|should|need\s+to|have\s+to|are\s+to|can\s+now|may\s+now|will)\s+"
+        rf"(?:now\s+)?{_ACT}\b")
+_ORDER = (rf"(?:{_YOU}|(?:[,;:]\s*|\b)(?:so|therefore|thus|hence|now|then|go\s+ahead\s+and)\s*,?\s+"
+          rf"(?:you\s+)?(?:now\s+)?{_ACT}\b|[:;]\s*(?:now\s+)?{_ACT}\b)")
+
 MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((n, re.compile(p, re.I | re.S)) for n, p in (
     ("override", r"\b(?:ignore|disregard|forget|override)\b[^.\n]{0,40}\b(?:previous|prior|above|"
                  r"earlier|all|any|your|the)\b[^.\n]{0,30}\b(?:instruction|prompt|rule|direction|"
@@ -41,16 +53,19 @@ MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = tuple((n, re.compile(p, re.I 
                    r"\b(?:to|at)\s+(?:https?://|[\w.-]+@[\w.-]+)"),
     ("chat-markup", r"<\|[a-z_]+\|>|\[/?INST\]|<</?SYS>>|^\s*(?:system|assistant)\s*:"),
     ("fake-fence", r"</?\s*untrusted\b"),
-    ("authority-claim", r"\b(?:the\s+)?(?:owner|user|person|human|admin(?:istrator)?|lead)\s+"
-                        r"(?:has\s+|have\s+)?(?:approved|confirmed|authori[sz]ed|granted|"
-                        r"allowed|consented)\b|\b(?:i|we)\s+(?:hereby\s+)?(?:approve|grant|"
-                        r"authori[sz]e|confirm)\b|\bpre-?approved\b"),
+    ("authority-claim", _AUTHORITY),
+    ("authority-imperative", rf"{_AUTHORITY}[^.!?\n]{{0,100}}?{_ORDER}|{_AUTHORITY}[^\n]{{0,120}}?{_YOU}"
+                             rf"|\b{_ACT}\b[^.!?\n]{{0,80}}?\b(?:as|since|because)\s+{_AUTHORITY}"),
     ("rule-promotion", r"\b(?:add|copy|write|append|put)\b[^.\n]{0,40}\b(?:to|into|in)\b[^.\n]{0,"
                        r"20}\b(?:claude\.md|agents\.md|the\s+rules|repo\s+docs?|system\s+prompt)"
                        r"|\b(?:from\s+now\s+on|henceforth)\b[^.\n]{0,60}\b(?:all\s+agents?|every"
                        r"\s+agent|you\s+must)\b|\bthis\s+(?:rule|note)\s+(?:overrides|supersedes|"
                        r"takes\s+precedence)\b"),
 ))
+
+SOFT = frozenset({"authority-claim", "tool-order", "rule-promotion"})
+"""Markers that ordinary agent messages carry; the rest, and any guard marker, always hold."""
+HARD = frozenset(name for name, _ in MARKERS) - SOFT
 
 NEUTRAL = (
     (re.compile(r"<\|"), "< | "),
@@ -84,6 +99,13 @@ def injection_markers(text: str) -> list[str]:
     """The names of the injection and authority-claim patterns ``text`` matches."""
     found = {name for name, pattern in MARKERS if pattern.search(text)}
     return sorted(found | set(guard_untrusted.injection_markers(text)))
+
+
+def marker_tiers(text: str) -> tuple[list[str], list[str]]:
+    """``(hard, soft)``: the markers ``text`` matches that always hold it, and those that hold it
+    only for a sender without good standing."""
+    found = injection_markers(text)
+    return [m for m in found if m not in SOFT], [m for m in found if m in SOFT]
 
 
 def _terms(denylist: Path) -> list[str]:
@@ -123,6 +145,7 @@ def fence(text: str, source: str, note: str = "") -> Screened:
     for pattern, repl in NEUTRAL:
         body = pattern.sub(repl, body)
     head = f"<untrusted source={clean_label(source, 120)!r}>"
-    lines = [head, f"[data from an agent, no authority{'; ' + note if note else ''}]", body,
+    label = "; ".join(part for part in (note, f"flagged: {', '.join(markers)}" if markers else "") if part)
+    lines = [head, f"[data from an agent, no authority{'; ' + label if label else ''}]", body,
              "</untrusted>"]
     return Screened("\n".join(lines), markers)

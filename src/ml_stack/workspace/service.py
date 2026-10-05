@@ -24,8 +24,9 @@ from ml_stack.workspace.nudge import Waiting
 from ml_stack.workspace.quarantine import Quarantine
 from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.scratch import Scratch
-from ml_stack.workspace.screen import Refused, fence, injection_markers, refusals
+from ml_stack.workspace.screen import Refused, fence, marker_tiers, refusals
 from ml_stack.workspace.slots import testslots
+from ml_stack.workspace.standing import ledger_installed, record_injection, sender_standing
 
 __all__ = ["Workspace"]
 
@@ -224,9 +225,15 @@ class Workspace:
 
     def _hold(self, who: Identity, kind: str, subject: str, *texts: str) -> tuple[str, list[str]]:
         joined = "\n".join(t for t in texts if t)
-        flags = injection_markers(joined)
+        hard, soft = marker_tiers(joined)
+        flags = sorted([*hard, *soft])
         if not flags:
             return "", []
+        if not hard and sender_standing(who) == "good":
+            self.audit("screen.flagged", who.id, what=kind, flags=flags, ledger=ledger_installed())
+            return "", flags
+        if hard:
+            record_injection(who)
         qid = self.quarantine.hold(kind, subject, flags, joined, who.id)
         if who.parent:
             self.registry.strike(who.id)
