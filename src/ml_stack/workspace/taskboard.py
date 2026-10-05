@@ -11,6 +11,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import task_actions
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
+from ml_stack.workspace.device_accounts import account_for
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.resource_allocations import verified_binding
 from ml_stack.workspace.task_graph import link, record, save
@@ -57,9 +58,14 @@ class TaskBoard:
                                     or (creator['role'] == HUMAN and not task['assignees'])):
             raise Denied('the task requires an authorized registered worker')
 
-    def _reviewer(self, who, task: dict[str, Any]) -> None:
+    def _reviewer(self, who, task: dict[str, Any], *, economic: bool = True) -> None:
         self.ws._may(who, 'read')
         worker = task.get('worker')
+        reviewer_account = account_for(self.ws, who.id)
+        worker_account = account_for(self.ws, worker) if worker else None
+        if economic and who.role != HUMAN and reviewer_account and worker_account \
+                and reviewer_account['base_id'] == worker_account['base_id']:
+            raise Denied('independent economic review requires a different enrolled device account')
         parent = self.ws.registry.info(worker).get('parent', '') if worker else ''
         designated = who.id in task['reviewers'] and self._project_grant(who.id, task)
         if who.id == worker or not (who.role == HUMAN or designated

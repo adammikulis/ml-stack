@@ -6,13 +6,13 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from ml_stack import mcp
 from ml_stack.memory.entities import parse
 from ml_stack.memory.facts import KINDS, SOURCES, Refused, check
 from ml_stack.memory.recall import Embed, render, retrieve
 from ml_stack.memory.store import Store, Tampered
 from ml_stack.memory.union import Memory, words
 from ml_stack.memory.vault import KeyUnavailable
+from ml_stack.tool_schema import schema_of
 
 __all__ = ["ACTING", "GUIDE", "READ", "SESSION_WRITES", "guidance", "propose", "tools"]
 
@@ -137,6 +137,6 @@ def tools(*, confirm: Confirm, store: Store | None = None, project: Store | None
     def schema(fn: Callable[..., Any]) -> dict[str, Any]:
         return {"type": "function", "function": {
             "name": fn.__name__, "description": " ".join((fn.__doc__ or "").split()),
-            "parameters": mcp.schema_of(fn)}}
+            "parameters": schema_of(fn)}}
 
     return [(schema(recall), recall), (schema(remember), remember)]

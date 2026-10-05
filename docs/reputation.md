@@ -73,12 +73,14 @@ A person at a terminal only; an agent marker in the environment refuses every on
 
 ## Verified work
 
-Completion credits and work reputation are separate from source-risk scores. A person
-or the worker's registered parent verifies an authenticated task and its completion
-reply in the same thread. Passed independent checks, artifact SHA256 hashes and
-both original message hashes remain with the award. Failed checks, unrelated replies,
-self-awards and unrelated verifiers are refused. No verification write is exposed as
-an agent tool or browser endpoint.
+Completion credits and work reputation are separate from source-risk scores. New
+awards come only from the canonical task board's independently accepted review.
+The reviewer is the person, the worker's actual task-creator parent, or a designated
+peer with a live person-set project grant. The worker cannot review or award itself.
+The award binds the immutable task specification, worker proposal and review hashes;
+independent review checks replace worker-reported claims. Quality attestations are
+recorded in that authenticated review. Message threads provide discussion, not task
+state or completion authority. The previous message-based completion writer is removed.
 
 A verified completion earns 10 credits. A reviewer can add one 5-credit bonus per
 quality tier: independently validated work, a useful regression check, and demonstrated
@@ -94,19 +96,24 @@ Runs are free while the economy develops: earned credits accumulate, spent is ze
 and balance equals earned. Credits do not change permissions, safety rules, broker
 priority or baseline access. No redemption or charging is enabled. Resource usage is
 accounted separately when a reviewer supplies measured per-task counters; unknown
-values stay null. Aggregates report the measurement count and cover verified task
-evidence, not every run. One owner-enrolled base agent per installed physical device owns its economy account.
+values stay null. Aggregates report the measurement count and cover independently reviewed
+contributions, not every run; worker-reported usage is not treated as a measurement. One owner-enrolled base agent per installed physical device owns its economy account.
 Saved local worker seats bind only through person-authorized enrollment using the
 maintained device ID; workers cannot choose or steal an account. Historical worker
 evidence rolls up through those persistent graph membership edges, including after
 model changes or worker stop. Devices remain separate. Unenrolled workers remain
-explicitly unenrolled. Model and harness are immutable task provenance; they never
+explicitly unenrolled. Actual broker allocation model and runtime are immutable task provenance; they never
 create accounts or reset balances.
 
-Work reputation uses separate reviewer-supplied quality and reliability ratings from
-0 to 100, with reasons. Neither credits nor task/test counts produce ratings. A neutral
-50 prior with weight two bounds early swings; sample count and confidence accompany
-each aggregate. Without reviews the state is unrated. A future advisory pricing
+Quality uses explicit reviewer ratings from 0 to 100 with reasons and a neutral 50
+prior of weight two. Reliability uses actual independent accepted/rejected outcomes,
+with a neutral Beta(1,1) prior. Each review contributes once: an explicit reliability
+rating on that same review does not add another success. Infrastructure blocks,
+broker shortages and approval availability remain distinct and contribute no negative
+quality or reliability sample. Sample counts, outcomes and confidence accompany the
+metrics; credits and test quantity do not produce quality ratings. Historical explicit
+ratings remain recorded evidence; new canonical reliability uses verified outcomes.
+A future advisory pricing
 modifier is bounded from 0.8 to 1.2 using evidenced reliability and confidence, starts
 neutral, and guarantees baseline access; actual price remains zero. Source-risk
 standing is unchanged. All evidence uses separate work nodes in the maintained
@@ -117,7 +124,7 @@ derived from that evidence rather than a separate balance file.
 Agents can read their own and team standings as recorded evidence, which grants no
 additional permissions. History shows verified completion counts under each agent;
 open the count and then a task to inspect its verifier, checks and artifact hashes.
-The read view includes the 20 most recent evidence records per agent and reports
+The read view includes the 20 most recent award evidence records per agent and reports
 how many earlier records remain in the encrypted ledger. **Load earlier verification
 evidence** retrieves another page. Agents use the read-only
 `workspace_reputation(agent, offset)` tool, and their task context includes their own and team
@@ -129,3 +136,11 @@ using their registered child identity, and expose the read-only
 worker status includes the brief. History links local display aliases to the
 registered identity saved in the worker record and identifies that binding next
 to the verified completion count.
+
+The coordinator has one persistent workspace identity node. Replicas and relocated
+workspace directories retain that identity; filesystem paths never define account
+scope. The historical path namespace migrates once, with its origin recorded and
+award/evidence IDs and values preserved. Duplicate semantic task/review records
+refuse a merging migration rather than grant duplicate credit. Clearing all source
+reputation deletes only source-risk nodes, events and stale backups, preserving
+work awards, ratings and measured usage in the shared encrypted graph.

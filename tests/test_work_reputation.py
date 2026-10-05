@@ -7,12 +7,13 @@ import pytest
 from workspace_kit import Kit, clean_env
 
 from ml_stack.memory import vault
+from ml_stack.reputation import economy
 from ml_stack.reputation.sealed import SealedGraph
 from ml_stack.reputation.store import Ledger
 from ml_stack.reputation.work import WorkLedger
 from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.work_reputation import scope, standings, verify
+from ml_stack.workspace.work_reputation import scope, standings
 
 
 @pytest.fixture
@@ -22,8 +23,8 @@ def work(tmp_path, monkeypatch):
     delegated = kit.ws.delegate(kit.parent, 'scout')
     kit.agent_id = delegated['id']
     kit.child = tokens.read_file(Path(delegated['token_file']))
-    kit.task = kit.ws.send(kit.parent, kit.agent_id, 'task', 'Inspect the simulator.')
-    kit.done = kit.ws.send(kit.child, 'lead', 'answer', 'Validation passed.', reply_to=kit.task['seq'])
+    kit.task = {'seq': 171}
+    kit.done = {'seq': 172}
     kit.evidence = {'task': kit.task['seq'], 'completion': kit.done['seq'],
                     'checks': [{'name': 'native regression suite', 'passed': True}],
                     'artifacts': {'result.json': 'a' * 64}}
@@ -34,81 +35,63 @@ def work(tmp_path, monkeypatch):
     sealed.close()
 
 
+
+def _historical(work, evidence=None, *, ledger=None):
+    """Seed already-verified historical graph evidence without inventing canonical task state."""
+    raw = dict(work.evidence if evidence is None else evidence)
+    return (ledger or work.ledger).record({**raw, 'award': economy.assessment(raw),
+                                         'agent': raw.get('agent', work.agent_id), 'verifier': 'lead',
+                                         'workspace': scope(work.ws), 'verified_at': work.ws.clock(),
+                                         'task_hash': 'b' * 64, 'completion_hash': 'c' * 64})
+
+
 def test_verified_task_credits_once_and_reopens_with_evidence(work):
-    first = verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
-    repeated = verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    first = _historical(work)
+    repeated = _historical(work)
     assert first['credited'] and not repeated['credited']
-    assert first['task_hash'] == work.ws.bus.get(work.task['seq'])['hash']
-    assert first['completion_hash'] == work.ws.bus.get(work.done['seq'])['hash']
-    assert standings(work.ws, work.child, ledger=work.ledger)['own']['score'] == 1
+    assert first['task_hash'] == 'b' * 64
+    assert first['completion_hash'] == 'c' * 64
+    assert standings(work.ws, work.child, ledger=work.ledger)['own']['verified_tasks'] == 1
     sealed = work.ledger.sealed
     assert b'lead/scout' not in sealed.path.read_bytes() and b'result.json' not in sealed.path.read_bytes()
     sealed.close()
     reopened = WorkLedger(SealedGraph(sealed.path, keys=sealed.keys))
     try:
         result = standings(work.ws, work.child, ledger=reopened)
-        assert result['own']['score'] == 1 and result['own']['evidence'][0]['artifacts'] == {'result.json': 'a' * 64}
+        assert result['own']['verified_tasks'] == 1 and result['own']['evidence'][0]['artifacts'] == {'result.json': 'a' * 64}
     finally:
         reopened.sealed.close()
 
 
-@pytest.mark.redteam
-@pytest.mark.parametrize('actor', ['self', 'unrelated', 'missing'])
-def test_self_unrelated_and_missing_tokens_cannot_award_credit(work, actor):
-    token = work.child if actor == 'self' else work.agent('other') if actor == 'unrelated' else ''
-    with pytest.raises(Denied):
-        verify(work.ws, token, work.agent_id, work.evidence, ledger=work.ledger)
-    assert work.ledger.standings(scope(work.ws)) == []
 
 
-@pytest.mark.redteam
-@pytest.mark.parametrize('change', [
-    {'checks': [{'name': 'tests', 'passed': False}]},
-    {'checks': [{'name': 'tests', 'passed': 1}]},
-    {'artifacts': {'output': 'not-a-hash'}},
-    {'task': True}, {'completion': 999999}, {'agent': 'forged'},
-])
-def test_invalid_or_failed_evidence_never_changes_standing(work, change):
-    with pytest.raises((ValueError, Denied)):
-        verify(work.ws, work.parent, work.agent_id, {**work.evidence, **change}, ledger=work.ledger)
-    assert work.ledger.standings(scope(work.ws)) == []
 
 
-@pytest.mark.redteam
-def test_completion_from_another_agent_or_thread_is_refused(work):
-    other = work.agent('other')
-    forged = work.ws.send(other, 'lead', 'handoff', 'I did it.', reply_to=work.task['seq'])
-    with pytest.raises(Denied):
-        verify(work.ws, work.parent, work.agent_id, {**work.evidence, 'completion': forged['seq']}, ledger=work.ledger)
-    unrelated = work.ws.send(work.child, 'lead', 'handoff', 'Another task.')
-    with pytest.raises(Denied):
-        verify(work.ws, work.parent, work.agent_id, {**work.evidence, 'completion': unrelated['seq']}, ledger=work.ledger)
-    assert work.ledger.standings(scope(work.ws)) == []
 
 
-def test_human_can_verify_and_source_risk_is_separate(work):
+def test_historical_credit_and_source_risk_are_separate(work):
     source = Ledger(work.ledger.sealed.path, keys=work.ledger.sealed.keys, flush_s=0)
     try:
         before = source.observe('host', 'bad.example', 'scan_hit')
-        verify(work.ws, work.owner, work.agent_id, work.evidence, ledger=work.ledger)
+        _historical(work)
         after = source.standing('host', 'bad.example')
         assert before.state == after.state == 'bad' and before.clean == after.clean == 0
-        assert work.ledger.standings(scope(work.ws))[0]['score'] == 1
+        assert work.ledger.standings(scope(work.ws))[0]['verified_tasks'] == 1
     finally:
         source.close()
 
 
-def test_concurrent_parent_verification_credits_once(work):
+def test_concurrent_historical_record_import_is_idempotent(work):
     def credit(_):
         sealed = SealedGraph(work.ledger.sealed.path, keys=work.ledger.sealed.keys)
         try:
-            return verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=WorkLedger(sealed))['credited']
+            return _historical(work, ledger=WorkLedger(sealed))['credited']
         finally:
             sealed.close()
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(credit, range(2)))
     assert sorted(results) == [False, True]
-    assert work.ledger.standings(scope(work.ws))[0]['score'] == 1
+    assert work.ledger.standings(scope(work.ws))[0]['verified_tasks'] == 1
 
 
 @pytest.mark.redteam
@@ -129,10 +112,10 @@ def test_person_reputation_route_is_read_only_and_session_guarded(work, tmp_path
         assert server.call('/ui/work-reputation/standings', method='POST', body={}, cookie=cookie)[0] == 405
         assert server.call('/ui/work-reputation/standings?offset=-1', cookie=cookie)[0] == 400
         assert server.call('/ui/work-reputation/standings?agent=../../owner', cookie=cookie)[0] == 400
-        verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+        _historical(work)
         code, result, _ = server.call('/ui/work-reputation/standings', cookie=cookie)
         assert code == 200
-        assert next(item for item in result['team'] if item['agent'] == work.agent_id)['score'] == 1
+        assert next(item for item in result['team'] if item['agent'] == work.agent_id)['verified_tasks'] == 1
         assert work.child not in str(result) and work.owner not in str(result)
     finally:
         server.close()
@@ -155,7 +138,7 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
     log.add(build('agent.task', ts=work.ws.clock(), actor='local-qwen', session='native-session',
                   subject='Simulator check', outcome='completed'))
     monkeypatch.setattr(writer, 'log', lambda: log)
-    verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    _historical(work)
     server = Serving(tmp_path)
     server.ui.settings.setup_done = True
     try:
@@ -183,8 +166,8 @@ def test_reputation_read_requires_valid_token_and_read_capability(work):
     with pytest.raises(Denied):
         standings(work.ws, token, ledger=work.ledger)
     result = standings(work.ws, work.child, ledger=work.ledger)
-    assert result['own']['score'] == 0
-    assert any(item['agent'] == 'lead' and item['score'] == 0 for item in result['team'])
+    assert result['own']['verified_tasks'] == 0
+    assert any(item['agent'] == 'lead' and item['verified_tasks'] == 0 for item in result['team'])
 
 
 @pytest.mark.redteam
@@ -192,15 +175,15 @@ def test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awaren
     from ml_stack.workspace import localloop, localtools, tools, work_reputation
     from ml_stack.workspace.identity import TOKEN_ENV
 
-    verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    _historical(work)
     monkeypatch.setattr(work_reputation, 'WorkLedger', lambda: work.ledger)
     monkeypatch.setenv(TOKEN_ENV, work.child)
     state = localtools.TaskState()
     extension = localtools.workspace_extension(work.ws, work.child, work.agent_id, state, lambda _: True)
     functions = {schema['function']['name']: call for schema, call in extension.tools()}
     result = functions['workspace_reputation']()
-    assert result['own']['score'] == 1 and 'workspace_reputation' in extension.reads
-    assert tools.workspace_reputation()['own']['score'] == 1
+    assert result['own']['verified_tasks'] == 1 and 'workspace_reputation' in extension.reads
+    assert tools.workspace_reputation()['own']['verified_tasks'] == 1
     assert not any('verify' in name or 'award' in name for name in functions)
     frame = localloop._frame({'seq': work.task['seq'], 'from': 'lead', 'text': 'Inspect the simulator.'},
                             'parent', work_reputation.brief(work.ws, work.child))
@@ -209,20 +192,20 @@ def test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awaren
 
 
 def test_evidence_pages_keep_total_score_and_expose_earlier_records(work):
-    first = verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    first = _historical(work)
     for task in range(100, 121):
         work.ledger.record({**{key: value for key, value in first.items() if key not in ('id', 'credited')},
                             'task': task, 'verified_at': float(task)})
     first_page = standings(work.ws, work.child, agent=work.agent_id, ledger=work.ledger)['team'][0]
     next_page = standings(work.ws, work.child, agent=work.agent_id, offset=20, ledger=work.ledger)['team'][0]
-    assert first_page['score'] == next_page['score'] == 22
+    assert first_page['verified_tasks'] == next_page['verified_tasks'] == 22
     assert len(first_page['evidence']) == 20 and first_page['evidence_held'] == 2
     assert len(next_page['evidence']) == 2 and next_page['evidence_held'] == 0
     assert not {item['id'] for item in first_page['evidence']} & {item['id'] for item in next_page['evidence']}
 
 
 def test_free_economy_separates_credits_ratings_and_unknown_usage(work):
-    first = verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    first = _historical(work)
     row = standings(work.ws, work.child, ledger=work.ledger)['own']
     assert row['verified_tasks'] == 1 and row['economy']['balance'] == 10
     assert row['economy']['spent'] == 0 and row['economy']['mode'] == 'free'
@@ -246,9 +229,8 @@ def reviewed_evidence(work):
 
 def test_quality_bonus_requires_reviewed_evidence_and_does_not_multiply_by_test_count(work):
     evidence = reviewed_evidence(work)
-    first = verify(work.ws, work.parent, work.agent_id, evidence, ledger=work.ledger)
-    repeated = verify(work.ws, work.parent, work.agent_id,
-                      {**evidence, 'quality': []}, ledger=work.ledger)
+    first = _historical(work, evidence)
+    repeated = _historical(work, {**evidence, 'quality': []})
     assert first['credited'] and not repeated['credited']
     row = standings(work.ws, work.child, ledger=work.ledger)['own']
     assert row['economy']['balance'] == 15 and row['economy']['quality_credits'] == 5
@@ -272,17 +254,16 @@ def test_quality_bonus_requires_reviewed_evidence_and_does_not_multiply_by_test_
 ])
 def test_unverified_or_invalid_quality_and_resource_claims_never_credit(work, change):
     with pytest.raises(ValueError):
-        verify(work.ws, work.parent, work.agent_id, {**work.evidence, **change}, ledger=work.ledger)
+        _historical(work, {**work.evidence, **change})
     assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['balance'] == 0
 
 
 def test_model_switches_keep_one_authenticated_agent_account(work):
-    verify(work.ws, work.parent, work.agent_id, reviewed_evidence(work), ledger=work.ledger)
-    task = work.ws.send(work.parent, work.agent_id, 'task', 'Task with another model.')
-    done = work.ws.send(work.child, 'lead', 'answer', 'Completed.', reply_to=task['seq'])
+    _historical(work, reviewed_evidence(work))
+    task, done = {'seq': 173}, {'seq': 174}
     evidence = {**reviewed_evidence(work), 'task': task['seq'], 'completion': done['seq'],
                 'provenance': {'model': 'second.gguf', 'harness': 'claude'}}
-    verify(work.ws, work.parent, work.agent_id, evidence, ledger=work.ledger)
+    _historical(work, evidence)
     result = standings(work.ws, work.child, ledger=work.ledger)
     row = result['own']
     assert row['agent'] == work.agent_id and row['economy']['balance'] == 30
@@ -292,21 +273,19 @@ def test_model_switches_keep_one_authenticated_agent_account(work):
 
 
 def test_two_workers_roll_up_to_one_owner_enrolled_device_across_models(work, monkeypatch):
-    from ml_stack import home
     from ml_stack.workspace import device_agent, localagent
 
-    monkeypatch.setattr(home, 'machine_id', lambda: 'physical-one')
+    monkeypatch.setattr(device_agent, 'device_id', lambda: 'physical-one')
     localagent.save(work.ws, localagent.Agent('worker-one', 'first.gguf', identity=work.agent_id))
     account = device_agent.bind_worker(work.ws, work.owner, 'worker-one')
-    verify(work.ws, work.parent, work.agent_id, reviewed_evidence(work), ledger=work.ledger)
+    _historical(work, reviewed_evidence(work))
     another = work.ws.delegate(work.parent, 'second')
     second = another['id']
     second_token = tokens.read_file(Path(another['token_file']))
     localagent.save(work.ws, localagent.Agent('worker-two', 'second.gguf', identity=second))
     device_agent.bind_worker(work.ws, work.owner, 'worker-two')
-    task = work.ws.send(work.parent, second, 'task', 'Other model task')
-    done = work.ws.send(second_token, 'lead', 'answer', 'Completed', reply_to=task['seq'])
-    verify(work.ws, work.parent, second, {**reviewed_evidence(work), 'task': task['seq'],
+    task, done = {'seq': 173}, {'seq': 174}
+    _historical(work, {**reviewed_evidence(work), 'agent': second, 'task': task['seq'],
                                         'completion': done['seq'],
                                         'provenance': {'model': 'second.gguf', 'harness': 'claude'}},
            ledger=work.ledger)
@@ -321,16 +300,15 @@ def test_two_workers_roll_up_to_one_owner_enrolled_device_across_models(work, mo
 
 @pytest.mark.redteam
 def test_foreign_device_rebinding_and_agent_enrollment_cannot_steal_credits(work, monkeypatch):
-    from ml_stack import home
     from ml_stack.workspace import device_agent, localagent
 
     localagent.save(work.ws, localagent.Agent('worker', 'model.gguf', identity=work.agent_id))
-    monkeypatch.setattr(home, 'machine_id', lambda: 'first-device')
+    monkeypatch.setattr(device_agent, 'device_id', lambda: 'first-device')
     first = device_agent.bind_worker(work.ws, work.owner, 'worker')
-    verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    _historical(work)
     with pytest.raises(Denied):
         device_agent.bind_worker(work.ws, work.child, 'worker')
-    monkeypatch.setattr(home, 'machine_id', lambda: 'second-device')
+    monkeypatch.setattr(device_agent, 'device_id', lambda: 'second-device')
     with pytest.raises(Denied):
         device_agent.bind_worker(work.ws, work.owner, 'worker')
     second = device_agent.enroll(work.ws, work.owner)
@@ -340,7 +318,7 @@ def test_foreign_device_rebinding_and_agent_enrollment_cannot_steal_credits(work
 
 
 def test_awards_ratings_and_usage_are_linked_graph_evidence_and_migration_is_once(work, monkeypatch):
-    verify(work.ws, work.parent, work.agent_id, reviewed_evidence(work), ledger=work.ledger)
+    _historical(work, reviewed_evidence(work))
     graph = work.ledger.sealed.graph()
     assert len(graph.nodes('work_award')) == 1
     assert len(graph.nodes('work_quality_review')) == 1
@@ -359,3 +337,17 @@ def test_awards_ratings_and_usage_are_linked_graph_evidence_and_migration_is_onc
     assert work.ledger.migrate_credit_awards() == 0
     monkeypatch.setattr('ml_stack.reputation.economy.BASE_CREDITS', 1000)
     assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['balance'] == 10
+
+
+def test_forgetting_source_risk_preserves_work_awards_and_discards_stale_backup(work):
+    _historical(work)
+    source = Ledger(work.ledger.sealed.path, keys=work.ledger.sealed.keys, flush_s=0)
+    try:
+        source.observe('host', 'bad.example', 'scan_hit')
+        assert source.forget_all() == 1
+        assert source.sources() == [] and not source.sealed.prev.exists()
+        row = standings(work.ws, work.child, ledger=work.ledger)['own']
+        assert row['economy']['balance'] == 10 and row['verified_tasks'] == 1
+        assert len(work.ledger.sealed.graph().nodes('work_award')) == 1
+    finally:
+        source.close()
