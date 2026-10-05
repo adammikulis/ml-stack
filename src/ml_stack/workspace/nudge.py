@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,7 @@ def age_text(seconds: float) -> str:
 
 
 def _stamp(name: str) -> Path:
-    return Path(os.environ.get("TMPDIR") or "/tmp") / f"{name}.{os.getuid()}"
+    return Path(tempfile.gettempdir()) / f"{name}.{os.getuid()}"
 
 
 def _read_int(path: Path) -> int:
