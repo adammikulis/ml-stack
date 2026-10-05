@@ -27,7 +27,7 @@ from ml_stack.workspace.service import Workspace
 
 __all__ = ["ACTIONS", "OPTIONS", "run"]
 
-ACTIONS = ("start", "stop", "list", "backlog", "schedule", "supersede-issue")
+ACTIONS = ("start", "stop", "list", "backlog", "schedule", "supersede-issue", "resume-issue")
 READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
@@ -141,7 +141,7 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         if not args.target or not args.agent:
             raise ValueError('agent schedule requires a worker name and --agent registered-parent')
         return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target))
-    if args.action == "supersede-issue":
+    if args.action in ("supersede-issue", "resume-issue"):
         if not args.target:
             raise ValueError("supersede-issue needs the existing worker name")
         if args.agent:
@@ -149,8 +149,9 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         else:
             human.require_person("supersede a repository issue")
             token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
-        backlog.supersede(ws, token, args.target, args.issue, args.reason)
-        say(f"issue {args.issue} excluded from this repository backlog")
+        decision = backlog.supersede if args.action == "supersede-issue" else backlog.resume
+        decision(ws, token, args.target, args.issue, args.reason)
+        say(f"issue {args.issue}: {args.action} decision recorded")
         return 0
     human.require_person(f"{args.action} a local agent")
     if args.action == "backlog":

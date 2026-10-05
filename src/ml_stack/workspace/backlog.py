@@ -9,6 +9,7 @@ import subprocess
 import time
 from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
 from ml_stack.serve.process import pid_exists
@@ -70,6 +71,46 @@ def supersede(ws, token, name, number, reason):
                            'attrs': {'issue': key, 'actor': who.id, 'reason': reason, 'state': 'superseded'}})
         graph.upsert_edge({'source': decision, 'target': key, 'rel': 'supersedes-issue'})
     ws.audit('local-agent.issue-superseded', who.id, repo=repo, issue=number, reason=reason)
+    return record
+
+
+
+def resume(ws, token, name, number, reason):
+    """Authorize one blocked legacy intake retry while preserving its graph history."""
+    who, agent = ws.auth(token), la.load(ws, name)
+    ws._may(who, 'send')
+    if agent is None:
+        raise ValueError('the coding worker does not exist')
+    child = ws.auth(tokens.load(ws.base, agent.identity or name))
+    if who.role != HUMAN and child.parent != who.id:
+        raise Denied('only the person or registered worker parent may resume an issue')
+    scope = _scope(ws, agent)
+    if not scope.get('enabled') or not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError('resume requires a configured repository and positive issue number')
+    reason = line(reason, 400).strip()
+    if not reason:
+        raise ValueError('an explicit changed-condition reason is required')
+    key = f"issue:{scope['repo']}:{number}"
+    with held(ws.base / 'issue-backlog.lock'), _store(ws) as graph:
+        prior = _record(graph, key)
+        if prior.get('state') != 'blocked':
+            raise ValueError('only an explicitly blocked issue projection can resume')
+        if prior.get('owner') != (agent.identity or name):
+            raise Denied('the blocked projection belongs to another worker')
+        if any(node['attrs'].get('issue', {}).get('key') == key for node in graph.nodes('issue-dispatch')):
+            raise Denied('use canonical TaskBoard resume with its existing retry budget')
+        before, decision = f'issue-attempt:{uuid4().hex}', f'issue-recovery:{uuid4().hex}'
+        graph.upsert_node({'id': before, 'kind': 'issue-attempt', 'label': key, 'attrs': prior})
+        graph.upsert_node({'id': decision, 'kind': 'issue-recovery', 'label': key,
+                           'attrs': {'issue': key, 'actor': who.id, 'reason': reason,
+                                     'at': ws.clock(), 'retry_budget': 1}})
+        graph.upsert_edge({'source': decision, 'target': before, 'rel': 'recovers-blocked-attempt'})
+        graph.upsert_edge({'source': before, 'target': key, 'rel': 'attempted-issue'})
+        graph.upsert_edge({'source': decision, 'target': key, 'rel': 'resumes-issue'})
+        record = {**prior, 'state': 'ready', 'retry_budget': 1, 'resume_by': who.id,
+                  'resume_reason': reason, 'prior_attempt': before, 'resume_decision': decision}
+        _save(graph, key, scope['repo'], record)
+    ws.audit('local-agent.issue-resumed', who.id, issue=number, reason=reason)
     return record
 
 
@@ -154,9 +195,13 @@ def pick(ws, agent, *, fetcher=fetch, clock=time.time):
                     old.get("state") == "proposed"
                     or old.get("next_try", 0) > now):
                 continue
+            if old.get("resume_decision") and old.get("state") != "proposed" and old.get("retry_budget", 0) < 1:
+                continue
             record = {**old, "revision": issue.get("updatedAt"), "state": "working",
                       "owner": agent.identity or agent.name, "pid": os.getpid(), "started": now}
-            if old.get("revision") != issue.get("updatedAt"):
+            if old.get("resume_decision") and old.get("state") == "ready":
+                record["retry_budget"] = old["retry_budget"] - 1
+            if old.get("revision") != issue.get("updatedAt") and old.get("state") != "ready":
                 record["failures"] = 0
             _save(graph, key, repo, record)
             return {**issue, "key": key, "repo": repo, "scope": scope}, ""

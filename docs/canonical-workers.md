@@ -58,3 +58,9 @@ An obsolete repository issue can be excluded by the person or registered worker 
 `ml-stack-workspace agent supersede-issue WORKER --issue NUMBER --reason "Current owner decision" --agent PARENT`.
 The graph records the authenticated decision and its issue relationship. Subsequent
 issue edits do not remove that decision; nothing is posted to GitHub.
+
+The person or actual registered parent can explicitly recover a blocked legacy issue
+projection with `agent resume-issue WORKER --issue NUMBER --reason "Changed condition" --agent PARENT`.
+Recovery preserves the failed attempt and reason as linked graph nodes and permits
+one new intake attempt. This does not resume canonical tasks or change their retry
+budget; canonical blocked tasks use the existing TaskBoard recovery path.

@@ -153,3 +153,44 @@ def test_maintained_cli_records_parent_decision_without_person_impersonation(set
                            issue=6, reason='Owner raised the minimum interpreter version')
     assert localcli.run(args, kit.ws) == 0
     assert backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(6)])[0] is None
+
+
+def test_parent_resume_preserves_failed_attempt_and_consumes_one_retry(setup):
+    kit, parent, agent, _ = setup
+    first, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
+    backlog.finish(kit.ws, first, agent, ('status', 'Legacy approval expired'))
+    resumed = backlog.resume(kit.ws, parent, agent.name, 8, 'Canonical runtime replaces legacy execution')
+    assert resumed['failures'] == 1 and resumed['retry_budget'] == 1
+    with backlog._store(kit.ws) as graph:
+        before = graph.nodes('issue-attempt')[0]['attrs']
+        assert before['state'] == 'blocked' and before['summary'] == 'Legacy approval expired'
+        assert any(edge['rel'] == 'recovers-blocked-attempt' for edge in graph.edges())
+    second, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
+    assert second['number'] == 8
+    with backlog._store(kit.ws) as graph:
+        assert backlog._record(graph, second['key'])['retry_budget'] == 0
+    backlog.finish(kit.ws, second, agent, ('status', 'Different blocked condition'))
+    assert backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])[0] is None
+
+
+def test_issue_resume_refuses_unblocked_foreign_and_child_requests(setup):
+    kit, parent, agent, _ = setup
+    with pytest.raises(ValueError, match='explicitly blocked'):
+        backlog.resume(kit.ws, parent, agent.name, 8, 'Changed source')
+    job, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
+    backlog.finish(kit.ws, job, agent, ('status', 'Blocked'))
+    for token in (tokens.load(kit.base, agent.identity), kit.agent('other-parent')):
+        with pytest.raises(Denied, match='registered worker parent'):
+            backlog.resume(kit.ws, token, agent.name, 8, 'Changed source')
+    with backlog._store(kit.ws) as graph:
+        assert graph.nodes('issue-recovery') == []
+
+
+def test_issue_resume_cannot_bypass_canonical_task_retry_budget(setup):
+    kit, parent, agent, _ = setup
+    job, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(8)])
+    backlog.finish(kit.ws, job, agent, ('status', 'Blocked canonical task'))
+    with backlog._store(kit.ws) as graph:
+        graph.upsert_node({'id': 'dispatch', 'kind': 'issue-dispatch', 'attrs': {'issue': job}})
+    with pytest.raises(Denied, match='existing retry budget'):
+        backlog.resume(kit.ws, parent, agent.name, 8, 'Override the failure cap')
