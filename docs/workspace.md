@@ -599,3 +599,10 @@ checkout and relative source path. Native file mutations reserve both the physic
 its repository-qualified source area. Editing the same source file in another worktree is
 refused, while disjoint files remain independently claimable. `install` claims identify an
 absolute environment or target directory. These claims do not grant access to either path.
+
+## Structured Tasks
+
+The main **Tasks** view organizes canonical claims, resource leases, checkpoints, submitted
+artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
+for the person workflow, service/API contract, recovery and supported limits. Task outcomes
+are verified separately from Board discussion and worker progress reports.
