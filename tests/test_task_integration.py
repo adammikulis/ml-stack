@@ -52,6 +52,8 @@ def project(board, tmp_path, monkeypatch, request):
     repo.git(primary, 'worktree', 'add', '-b', 'source-template', str(template))
     runner = localagent.load(board.ws, 'native-worker')
     localagent.save(board.ws, replace(runner, project=str(template)))
+    if getattr(request, 'param', '') == 'human_creator':
+        board.task = board.board.create(board.owner, {**board.spec, 'source_key': 'human:native-integration'})
     with GraphStore(board.base / 'coordination.db') as graph:
         graph.drop([node['id'] for node in graph.nodes('task-worktree')])
     worktree = task_worktrees.prepare(board.ws, board.parent, board.worker_id, board.task['id'])
@@ -240,7 +242,9 @@ def test_foreign_development_branch_owner_blocks_integration_before_gates(board,
     claim = board.ws.claim(other, 'branch', '0.2dev')
     result = task_integration.integrate(board.ws, board.parent, board.task['id'])
     assert result['state'] == 'blocked' and result['blocking_owner'] == 'development-owner'
-    assert board.ws.who_owns('branch', '0.2dev') == claim
+    assert result['blocking_claim'] == claim
+    current = board.ws.who_owns('branch', '0.2dev')
+    assert {key: current[key] for key in claim} == claim
     assert not project['log'].exists()
     assert repo.git(project['primary'], 'rev-parse', 'HEAD') == project['baseline']
 
@@ -269,3 +273,14 @@ def test_task_integrate_interfaces_use_native_token_and_exact_task_id(board, pro
     assert result['state'] == 'published'
     command = next(item for item in cli.TABLE if item[0] == 'task-integrate')
     assert command[3](SimpleNamespace(id=board.task['id']), board.ws, board.parent) == result
+
+
+@pytest.mark.parametrize('project', ['human_creator'], indirect=True)
+def test_registered_parent_integrates_human_created_independently_reviewed_task(board, project):
+    task = board.board.get(board.owner, board.task['id'])
+    assert task['created_by'] != board.ws.auth(board.parent).id
+    review = board.board.review(board.owner, board.task['id'], accepted())
+    assert review['verifier'] != board.ws.auth(board.parent).id
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'published'
+    assert repo.git(project['origin'], 'rev-parse', 'refs/heads/0.2dev') == result['commit']

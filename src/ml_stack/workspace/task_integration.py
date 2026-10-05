@@ -24,8 +24,9 @@ def reviewed(ws, token: str, task_id: str) -> tuple[dict, dict]:
     if task['workspace'] != board.workspace_id or task['state'] != 'completed' \
             or not proposal or not review or not review['accepted'] or review['outcome'] != 'accepted':
         raise Denied('integration requires an independently accepted canonical proposal')
-    if who.role != HUMAN and who.id not in (task['worker'], task['created_by'], review['verifier']):
-        raise Denied('only the task worker, creator or independent reviewer may request integration')
+    parent = ws.registry.info(task['worker'])['parent']
+    if who.role != HUMAN and who.id not in (task['worker'], task['created_by'], review['verifier'], parent):
+        raise Denied('only the task worker, registered parent, creator or independent reviewer may request integration')
     reviewer = ws.registry.info(review['verifier'])
     if not ws.registry.role_of(review['verifier']):
         raise Denied('the independent reviewer authority expired or was revoked')
@@ -186,7 +187,8 @@ class DevelopmentIntegration:
                 if isinstance(error, repo.GateFailed):
                     details['checks'] = error.checks
                 if isinstance(error, Conflict):
-                    details['blocking_owner'] = error.owner
+                    details['blocking_owner'] = error.owner['owner']
+                    details['blocking_claim'] = error.owner
                 return _event(self.ws, self.record, 'blocked', **details)
             finally:
                 area = str(self.primary / '.ml-stack-integration')
