@@ -35,8 +35,27 @@ class WorkLedger:
             graph.upsert_node({'id': agent_id, 'kind': 'work_agent', 'label': evidence['agent'],
                                'attrs': {'agent': evidence['agent'], 'workspace': evidence['workspace']}})
             graph.upsert_edge({'source': agent_id, 'target': ident, 'rel': 'verified_work'})
+            _details(graph, ident, agent_id, evidence)
             return {**evidence, 'id': ident, 'credited': True}
 
+        return self.sealed.edit(change)
+
+    def migrate_credit_awards(self) -> int:
+        """Grant immutable v1 base awards to previously verified historical evidence once."""
+        def change(graph):
+            count = 0
+            for node in list(graph.nodes('work_evidence')):
+                evidence = node['attrs']
+                if evidence.get('award') is not None:
+                    continue
+                evidence = {**evidence, 'award': economy.assessment(
+                    {'checks': evidence['checks'], 'artifacts': evidence['artifacts']})}
+                graph.upsert_node({**node, 'attrs': evidence})
+                agent_id = 'work-agent:' + hashlib.sha256(
+                    f"{evidence['workspace']}:{evidence['agent']}".encode()).hexdigest()
+                _details(graph, node['id'], agent_id, evidence)
+                count += 1
+            return count
         return self.sealed.edit(change)
 
     def standings(self, workspace: str) -> list[dict[str, Any]]:
@@ -53,3 +72,31 @@ class WorkLedger:
                  'evidence': sorted(evidence, key=lambda item: -item['verified_at']),
                  **economy.summary(evidence)}
                 for agent, evidence in sorted(agents.items())]
+
+
+def _details(graph, ident, agent_id, evidence):
+    award = evidence['award']
+    node = ident + ':award'
+    graph.upsert_node({'id': node, 'kind': 'work_award', 'label': str(evidence['task']),
+                       'attrs': {key: award[key] for key in ('policy', 'currency', 'base', 'quality_bonus', 'total')}})
+    graph.upsert_edge({'source': agent_id, 'target': node, 'rel': 'earned'})
+    graph.upsert_edge({'source': node, 'target': ident, 'rel': 'justified_by'})
+    decision = ident + ':verification'
+    graph.upsert_node({'id': decision, 'kind': 'work_verification', 'label': evidence['verifier'],
+                       'attrs': {'reviewer': evidence['verifier'], 'at': evidence['verified_at'],
+                                 'checks': evidence['checks'], 'task': evidence['task'],
+                                 'completion': evidence['completion']}})
+    graph.upsert_edge({'source': decision, 'target': ident, 'rel': 'verifies'})
+    for quality in award['quality']:
+        key = ident + ':quality:' + quality['kind']
+        graph.upsert_node({'id': key, 'kind': 'work_quality_review', 'label': quality['kind'],
+                           'attrs': {**quality, 'reviewer': evidence['verifier']}})
+        graph.upsert_edge({'source': key, 'target': node, 'rel': 'earns_bonus'})
+        graph.upsert_edge({'source': key, 'target': ident, 'rel': 'supported_by'})
+    for field, kind, relation in (('review', 'work_rating', 'assesses'),
+                                   ('usage', 'work_usage', 'measures')):
+        if evidence.get(field) is not None:
+            key = ident + ':' + field
+            graph.upsert_node({'id': key, 'kind': kind, 'label': str(evidence['task']),
+                               'attrs': {**evidence[field], 'reviewer': evidence['verifier']}})
+            graph.upsert_edge({'source': key, 'target': ident, 'rel': relation})
