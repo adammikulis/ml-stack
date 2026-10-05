@@ -282,7 +282,9 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"joined as {onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))}")
+    name = onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))
+    ws.registry._record_device(name, onboard.device_metadata.current())
+    say(f"joined as {name}")
     return 0
 
 
@@ -617,7 +619,9 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        result = handler(args, Workspace(), _token(args))
+        ws, token = Workspace(), _token(args)
+        ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
+        result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)
         return 0
