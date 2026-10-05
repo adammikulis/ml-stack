@@ -14,6 +14,7 @@ from pathlib import Path
 from ml_stack.files import read_json, write_json, writing
 from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
+from ml_stack.redact import secrets
 
 from . import project_source as source, tls
 from .discovery import primary_ip
@@ -40,11 +41,13 @@ def bootstrap() -> bytes:
     module = Path(source.__file__).read_text(encoding="utf-8")
     module = module.replace("from ml_stack.home import DEFAULT_NAME", f"DEFAULT_NAME = {DEFAULT_NAME!r}")
     module = module.replace("from ml_stack.net import git", "git = _project_git")
+    module = module.replace("from ml_stack.redact.secrets import PATTERNS", "")
+    patterns = Path(secrets.__file__).read_text(encoding="utf-8")
     prefix = ("from types import SimpleNamespace\n"
               "_project_git_scope = {'__name__': 'ml_stack.net.git'}\n"
               f"exec({helpers!r}, _project_git_scope)\n"
               "_project_git = SimpleNamespace(**_project_git_scope)\n")
-    return (prefix + f"exec({module!r}, globals())\n").encode()
+    return (prefix + f"exec({patterns!r}, globals())\nexec({module!r}, globals())\n").encode()
 
 
 def identity(root: Path) -> str:

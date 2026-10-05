@@ -14,9 +14,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from ml_stack.files import promote, write_json
-from ml_stack.guard.secrets import PATTERNS
 from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
+from ml_stack.redact.secrets import PATTERNS
 
 MAX_FILE = 8 << 20
 MAX_SOURCE = 128 << 20
