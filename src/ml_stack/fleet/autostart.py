@@ -28,6 +28,7 @@ from ml_stack.files import promote
 from ml_stack.log import say, warn
 from ml_stack.platform import applescript_quote
 
+from . import wsl_startup
 from .launch import last_screen
 
 __all__ = [
@@ -257,7 +258,7 @@ def _windows_task_named(name: str) -> bool:
     return done.returncode == 0
 
 
-def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
+def _windows_install(mode: str, argv: list[str], log_dir: Path, *, start_now: bool = True) -> Autostart:
     quoted = _quote(argv)
     if mode == "boot":
         command = (f'schtasks /Create /F /TN "{LABEL}" /TR "{quoted}" '
@@ -288,8 +289,9 @@ def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     if not refused:
         # Start it now as well: a logon trigger fires at the next logon, and "starts when
         # you log in" that does nothing until tomorrow reads as broken.
-        subprocess.run(["schtasks", "/Run", "/TN", LOGIN_TASK],
-                       capture_output=True, check=False)
+        if start_now:
+            subprocess.run(["schtasks", "/Run", "/TN", LOGIN_TASK],
+                           capture_output=True, check=False)
         return Autostart(mode, installed=True, path=wrapper,
                          note=f"scheduled task {LOGIN_TASK!r} runs it at logon; "
                               f"log at {log_dir / 'traind.log'}")
@@ -381,6 +383,8 @@ def choose_model(room_bytes: int, *, want: str = "auto",
 def plan(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
          report: str = "") -> list[str]:
     """The exact command line that would be installed. Shown before anything is."""
+    if sys.platform == "win32":
+        return [sys.executable, "-m", "ml_stack.fleet.launch", "--no-browser", *_args(slots, labels, report)]
     return _executable() + _args(slots, labels, report)
 
 
@@ -389,6 +393,9 @@ def install(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
     """Arrange for the daemon to start, or explain what a human must run."""
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    if wsl_startup.guest():
+        result = wsl_startup.call("configure", mode=mode, slots=slots, labels=list(labels), report=report)
+        return Autostart(mode, installed=bool(result.get("installed")), note=str(result.get("note", "")))
     uninstall()
     if mode == "manual":
         left = _left_behind()
@@ -741,6 +748,8 @@ def _left_behind() -> str:
 
 
 def status() -> dict[str, object]:
+    if wsl_startup.guest():
+        return wsl_startup.call("status")
     """Which mode, if any, is currently installed on this machine."""
     out: dict[str, object] = {"platform": sys.platform, "mode": "manual", "paths": []}
     checks = {
@@ -793,6 +802,17 @@ def _install_system(user: str, home_dir: str, *, only_print: bool = False) -> in
     return 0
 
 
+
+def _windows_owner(request: dict[str, Any]) -> dict[str, object]:
+    mode = request["mode"]
+    subprocess.run(["schtasks", "/Delete", "/F", "/TN", LOGIN_TASK], capture_output=True, check=False)
+    _windows_startup().unlink(missing_ok=True)
+    if mode == "manual":
+        return {"installed": True, "note": "Windows login startup removed; the running launcher remains active."}
+    argv = plan(mode, slots=request["slots"], labels=tuple(request["labels"]), report=request["report"])
+    got = _windows_install(mode, argv, home.home(), start_now=False)
+    return {"installed": got.installed, "note": got.note}
+
 def main(argv: list[str] | None = None) -> int:
     """What ``packaging/install.sh`` calls rather than writing any of it in shell.
 
@@ -803,6 +823,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     import argparse
     import json as _json
+
+    if (argv or sys.argv[1:]) == ["windows-owner"]:
+        return wsl_startup.answer(status, _windows_owner)
 
     ap = argparse.ArgumentParser(prog="python -m ml_stack.fleet.autostart",
                                  description="what the installer asks about this machine")

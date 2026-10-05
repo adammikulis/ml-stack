@@ -447,7 +447,7 @@ class TestAutostartOnWindows:
         wrapper = Path(create[create.index("/TR") + 1].strip('"'))
         assert wrapper == done.path == tmp_path / "ml-stack-traind.cmd"
         body = wrapper.read_text()
-        assert '"C:\\Tools\\ml stack\\ml-stack-traind.exe" --slots 2 --label prep' in body
+        assert "-m ml_stack.fleet.launch --no-browser --slots 2 --label prep" in body
         assert str(tmp_path / "traind.log") in body, "a task's /TR cannot redirect; the wrapper does"
         assert ["schtasks", "/Run", "/TN", auto.LOGIN_TASK] in ran, "started now, not at the next logon"
         assert not (tmp_path / "startup.cmd").exists()
@@ -462,7 +462,7 @@ class TestAutostartOnWindows:
         assert done.installed
         assert done.path == tmp_path / "startup.cmd"
         assert "Startup folder" in done.note and "Access is denied" in done.note
-        assert "ml-stack-traind.exe" in done.path.read_text()
+        assert "-m ml_stack.fleet.launch --no-browser" in done.path.read_text()
 
     def test_changing_the_answer_ends_and_deletes_the_logon_task(
             self, win_autostart, monkeypatch, tmp_path):
