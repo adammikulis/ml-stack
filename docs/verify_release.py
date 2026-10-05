@@ -57,21 +57,25 @@ WORDS = "correct horse battery staple"
 
 
 # -- setup ---------------------------------------------------------------
-@check("Setup", "the same passphrase gives the same cluster key")
+@check("Setup", "cluster keys are random even when their join passphrases match")
 def _():
-    from ml_stack.fleet import key_from_passphrase
-    a = key_from_passphrase(WORDS)
-    assert a == key_from_passphrase(WORDS)
-    assert a != key_from_passphrase("something else entirely")
-    return f"{len(a)}-byte key"
+    from ml_stack.fleet.discovery import mint_cluster
+    from ml_stack.fleet.onboard.joining import join_secret
+    secret = join_secret(WORDS, "verify-setup")
+    a = mint_cluster("verify-setup", TMP / "random-a.key", join=secret)
+    b = mint_cluster("verify-setup", TMP / "random-b.key", join=secret)
+    assert a.key != b.key and a.join == b.join
+    assert secret != join_secret(WORDS, "another-group")
+    return "independent random keys; group-scoped join authentication"
 
 
 @check("Setup", "two groups on one network cannot see each other")
 def _():
-    from ml_stack.fleet import Advertiser, Beacon, discover, join_cluster
+    from ml_stack.fleet import Advertiser, Beacon, discover
+    from ml_stack.fleet.discovery import mint_cluster
     port = free_port()
-    ours = join_cluster(WORDS, path=TMP / "a.key")
-    theirs = join_cluster("a completely different phrase", path=TMP / "b.key")
+    ours = mint_cluster("ours", TMP / "a.key").key
+    theirs = mint_cluster("theirs", TMP / "b.key").key
     with Advertiser(Beacon(name="ours", port=8770), ours, port=port, interval_s=0.2), \
          Advertiser(Beacon(name="theirs", port=8771), theirs, port=port, interval_s=0.2):
         we = {b.name for b in discover(ours, timeout_s=2.0, port=port)}
@@ -82,9 +86,9 @@ def _():
 
 @check("Setup", "a passphrase shorter than the minimum is refused")
 def _():
-    from ml_stack.fleet import DiscoveryError, MIN_PASSPHRASE, key_from_passphrase
+    from ml_stack.fleet.discovery import MIN_PASSPHRASE, DiscoveryError, check_length
     try:
-        key_from_passphrase("x" * (MIN_PASSPHRASE - 1))
+        check_length("x" * (MIN_PASSPHRASE - 1))
     except DiscoveryError as exc:
         return str(exc)[:60]
     raise AssertionError("accepted a short passphrase")
@@ -92,12 +96,13 @@ def _():
 
 @check("Setup", "the group is remembered, so a passphrase can be checked later")
 def _():
-    from ml_stack.fleet import check_passphrase, cluster_group, join_cluster
+    from ml_stack.fleet.discovery import cluster_group, mint_cluster
+    from ml_stack.fleet.onboard.joining import join_secret, matches
     key = TMP / "grp.key"
-    join_cluster(WORDS, group="garage", path=key)
+    mint_cluster("garage", key, join=join_secret(WORDS, "garage"))
     assert cluster_group(key) == "garage"
-    assert check_passphrase(WORDS, path=key)
-    assert not check_passphrase("wrong words here", path=key)
+    assert matches(WORDS, path=key)
+    assert not matches("wrong words here", path=key)
     return "group 'garage'"
 
 
@@ -520,10 +525,11 @@ def _():
     import threading
     from http.server import ThreadingHTTPServer
 
-    from ml_stack.fleet import Daemon, JobRunner, Models, join_cluster, make_handler
+    from ml_stack.fleet import Daemon, JobRunner, Models, make_handler
     from ml_stack.fleet.daemon import load_or_create_token
+    from ml_stack.fleet.discovery import mint_cluster
 
-    key = join_cluster(WORDS, path=TMP / "models.key")
+    key = mint_cluster("verify-models", TMP / "models.key").key
     where = TMP / "haver"
     where.mkdir(parents=True, exist_ok=True)
     payload = os.urandom(3 * 1024 * 1024)
@@ -730,10 +736,10 @@ def _():
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    from ml_stack.fleet import Daemon, JobRunner, Serving, join_cluster, make_handler
+    from ml_stack.fleet import Daemon, JobRunner, Serving, make_handler
     from ml_stack.fleet.chat import find, reply_text, stream, targets
     from ml_stack.fleet.daemon import load_or_create_token
-    from ml_stack.fleet.discovery import derive_token
+    from ml_stack.fleet.discovery import derive_token, mint_cluster
 
     class Model(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -760,7 +766,7 @@ def _():
     model = ThreadingHTTPServer(("127.0.0.1", free_port()), Model)
     threading.Thread(target=model.serve_forever, daemon=True).start()
 
-    key = join_cluster(WORDS, path=TMP / "chat.key")
+    key = mint_cluster("verify-chat", TMP / "chat.key").key
     root = TMP / "host-daemon"
     files = root / "files"
     files.mkdir(parents=True, exist_ok=True)
