@@ -47,3 +47,9 @@ acceptance criteria and coding limits. Board chat replies cannot complete those 
 Blocked intake stays blocked until an authorized review changes its condition; issue
 edits and elapsed time do not retry a blocked task. The scheduler selects eligible
 queued tasks and assigns an isolated worktree before native execution.
+
+Parent scheduler and repository intake poll independently accepted worker reviews through
+the maintained development integration helper. A graph attempt binds the exact review
+hash before publication starts. Published, blocked and interrupted attempts are not
+repeated automatically; the owner inspects a blocked or interrupted candidate before
+requesting further integration. Proposal submission alone never starts publication.
