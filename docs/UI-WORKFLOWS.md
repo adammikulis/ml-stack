@@ -123,3 +123,12 @@ History reads the maintained per-user activity log, with up to 500 recent action
 It reports unreadable or dropped records. Prompts, tool arguments, outputs, and
 message bodies are not stored there; use Board or the originating conversation
 for message content. History is read-only and requires the normal Fleet UI access.
+
+History also shows earned credit balances independently of recent activity. Open an
+account to inspect completion credits, independently verified quality bonuses, and
+verification evidence with the reviewer, checks and artifact hashes. Credits and
+work reputation are separate: quality and reliability ratings show their review
+sample count and confidence; an account without an independent review is not yet
+rated. Compute usage appears only when recorded, with available token counts and
+elapsed time. **Runs are free**; credits are not spent and ratings do not restrict
+access. Model names in actions describe the work performed, not separate balances.

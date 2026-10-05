@@ -3,6 +3,9 @@ history-view { display:contents; }
 history-view .history-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-bottom:16px; }
 history-view .history-controls label { margin:0; flex:1 1 180px; }
 history-view .history-controls input,history-view .history-controls select { display:block; width:100%; margin-top:6px; }
+history-view .history-economy { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+history-view .history-metric { min-width:140px; padding:12px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+history-view .history-metric strong { display:block; font-size:22px; }
 history-view .history-agent { margin-bottom:16px; }
 history-view .history-agent>summary { font-size:18px; padding:4px 0; }
 history-view .history-count { color:var(--muted); font-size:13px; margin-left:10px; }
@@ -22,12 +25,15 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
 <section class="workspace" hidden>
   <h1>History</h1>
   <p class="intro">Actions grouped by agent. Open an action to see its recorded details.</p>
+  <p class="intro"><strong>Runs are free.</strong> Credits record earned work; running an agent does not spend them. Credits and ratings do not restrict access.</p>
   <div class="history-controls">
     <label>Agent<select id="history-agent"><option value="">All agents</option></select></label>
     <label>Search actions<input id="history-search" type="search" placeholder="Tool, model, task, or status…"></label>
     <button id="history-refresh" type="button">Refresh</button>
   </div>
   <p class="status" id="history-status" role="status">Loading activity…</p>
+  <section aria-label="Agent credits and work reputation"><h2>Credits and work reputation</h2><div id="history-credits"></div></section>
+  <h2>Recent actions</h2>
   <div id="history-list"></div>
   <p class="intro">Shows up to 500 recent recorded actions. Prompts, tool arguments, outputs, and message bodies are omitted from the activity log.</p>
 </section>
@@ -39,7 +45,7 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
   connectedCallback(){
    if(this.wired)return;this.wired=true;
    this.host=this.querySelector('section');this.note=this.querySelector('#history-status');
-   this.list=this.querySelector('#history-list');this.agent=this.querySelector('#history-agent');
+   this.list=this.querySelector('#history-list');this.credits=this.querySelector('#history-credits');this.agent=this.querySelector('#history-agent');
    this.search=this.querySelector('#history-search');this.refresh=this.querySelector('#history-refresh');
    this.events=[];this.openActions=new Set();this.closedAgents=new Set();this.openReputation=new Set();
    this.agent.onchange=()=>this.paint();this.search.oninput=()=>this.paint();this.refresh.onclick=()=>this.load();
@@ -56,7 +62,10 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
     this.agent.replaceChildren(E('option',{value:''},'All agents'),...[...new Set(this.events.map(e=>this.actor(e)))].sort().map(name=>E('option',{value:name},name)));
     this.agent.value=selected;this.paint();
     const reputation=await W.api('/ui/work-reputation/standings').catch(()=>null);
-    this.reputation=reputation;this.paint();
+    this.reputation=reputation;
+    const agents=new Set([...this.events.map(e=>this.actor(e)),...(reputation?.team||[]).map(item=>item.agent)]);
+    this.agent.replaceChildren(E('option',{value:''},'All agents'),...[...agents].sort().map(name=>E('option',{value:name},name)));
+    this.agent.value=selected;this.paint();
    }catch(error){W.status(this.note,error);}
    finally{this.loading=false;this.refresh.disabled=false;}
   }
@@ -64,39 +73,66 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
    const query=this.search.value.trim().toLowerCase(),groups=new Map();
    for(const event of this.events){
     const actor=this.actor(event);
-    if(this.agent.value&&actor!==this.agent.value)continue;
+    if(this.agent.value&&actor!==this.agent.value&&!(this.reputation?.team||[]).some(item=>this.matches(item,actor)&&this.matches(item,this.agent.value)))continue;
     if(query&&!JSON.stringify(event).toLowerCase().includes(query))continue;
     if(!groups.has(actor))groups.set(actor,[]);groups.get(actor).push(event);
    }
    this.list.replaceChildren(...[...groups].map(([actor,events])=>{
     const card=E('details',{class:'workspace-card history-agent',open:!this.closedAgents.has(actor)},
-      E('summary',{},actor,E('span',{class:'history-count'},`${events.length} actions`)),this.standing(actor),...events.map(event=>this.action(event)));
+      E('summary',{},actor,E('span',{class:'history-count'},`${events.length} actions`)),...events.map(event=>this.action(event)));
     card.ontoggle=()=>card.open?this.closedAgents.delete(actor):this.closedAgents.add(actor);return card;
    }));
+   const team=(this.reputation?.team||[]).filter(item=>!this.agent.value||this.matches(item,this.agent.value));
+   this.credits.replaceChildren(...team.map(item=>this.standing(item)),...(team.length?[]:[E('p',{class:'intro'},this.reputation?'No recorded standings match this agent.':'Credit and reputation records are unavailable.')]));
    const count=[...groups.values()].reduce((sum,events)=>sum+events.length,0);
    this.note.textContent=count?`${count} actions · newest first · refreshed ${new Date().toLocaleTimeString()}`:this.events.length?'No actions match these filters.':'No activity has been recorded yet.';
    if(this.data?.unreadable)this.note.textContent+=` · ${this.data.unreadable} unreadable records`;
    if(this.data?.drops?.dropped)this.note.textContent+=` · ${this.data.drops.dropped} dropped records`;
   }
-  standing(actor){
-   const standing=this.reputation?.team?.find(item=>item.agent===actor||`agent:${item.agent}`===actor||(item.aliases||[]).includes(actor.replace(/^agent:/,'')));
-   if(!standing)return null;
-   const box=E('details',{class:'history-action',open:this.openReputation.has(actor)},E('summary',{},`${standing.score} verified completion credits`));
+  matches(item,actor){return item.agent===actor||`agent:${item.agent}`===actor||[...(item.aliases||[]),...(item.members||[])].includes(actor.replace(/^agent:/,''));}
+  metric(label,value){return E('div',{class:'history-metric'},E('strong',{},String(value)),E('span',{},label));}
+  standing(standing){
+   const actor=standing.agent,economy=standing.economy,display=standing.device?.name||standing.device_name||actor;
+   const title=economy?`${display} · ${economy.balance} credits`:`${display} · ${standing.verified_tasks} verified tasks`;
+   const box=E('details',{class:'workspace-card history-action',open:this.openReputation.has(actor)},E('summary',{},title));
    box.ontoggle=()=>box.open?this.openReputation.add(actor):this.openReputation.delete(actor);
-   if(standing.agent!==actor)box.append(E('p',{class:'intro'},`Registered identity: ${standing.agent}`));
-   if(standing.evidence_held)box.append(E('p',{class:'intro'},`Showing 20 recent verifications; ${standing.evidence_held} earlier verifications remain in the encrypted ledger.`));
-   for(const evidence of standing.evidence||[]){
-    const detail=E('details',{open:this.openActions.has(evidence.id)},E('summary',{},`Task ${evidence.task} · verified by ${evidence.verifier}`));
-    detail.ontoggle=()=>detail.open?this.openActions.add(evidence.id):this.openActions.delete(evidence.id);
-    const fields=E('dl');for(const [key,value]of Object.entries(evidence))fields.append(E('dt',{},key),E('dd',{},typeof value==='object'?W.json(value):String(value)));
-    detail.append(fields);box.append(detail);
-   }
+   box.append(E('p',{class:'intro'},`Account identity: ${actor}`));
+   if(standing.members?.length)box.append(E('p',{class:'intro'},`Workers: ${standing.members.join(', ')}`));
+   const metrics=E('div',{class:'history-economy'});
+   if(economy)metrics.append(this.metric('Credit balance',economy.balance),this.metric('Credits earned',economy.earned),this.metric('Completion credits',economy.completion_credits),this.metric('Quality bonus credits',economy.quality_credits));
+   metrics.append(this.metric('Verified tasks',standing.verified_tasks));box.append(metrics);
+   if(standing.work_reputation)box.append(this.reputationDetails(standing.work_reputation));
+   else box.append(E('p',{class:'intro'},'Work reputation: no independent quality or reliability assessment recorded.'));
+   const usage=economy?.usage;
+   if(usage?.recorded&&usage.tasks)box.append(E('p',{class:'intro'},`Recorded compute usage · ${usage.tasks} tasks${usage.tokens_in!=null?` · ${usage.tokens_in} input tokens`:''}${usage.tokens_out!=null?` · ${usage.tokens_out} output tokens`:''}${usage.wall_seconds!=null?` · ${Number(usage.wall_seconds).toFixed(1)} seconds`:''}`));
+   if(standing.evidence_held)box.append(E('p',{class:'intro'},`${standing.evidence_held} earlier verifications remain in the encrypted ledger.`));
+   for(const evidence of standing.evidence||[])box.append(this.evidence(evidence));
    if(standing.evidence_held)box.append(W.button('Load earlier verification evidence',async()=>{
-    const more=await W.api(`/ui/work-reputation/standings?agent=${encodeURIComponent(standing.agent)}&offset=${standing.evidence.length}`);
-    const next=more.team.find(item=>item.agent===standing.agent);
+    const more=await W.api(`/ui/work-reputation/standings?agent=${encodeURIComponent(actor)}&offset=${standing.evidence.length}`);
+    const next=more.team.find(item=>item.agent===actor);
     if(next){standing.evidence.push(...next.evidence);standing.evidence_held=next.evidence_held;this.paint();}
    }));
    return box;
+  }
+  reputationDetails(reputation){
+   const section=E('section',{'aria-label':'Work reputation'},E('h3',{},'Work reputation'));
+   if(reputation.state!=='reviewed')section.append(E('p',{class:'intro'},'Not yet rated · no independent quality or reliability assessment recorded.'));
+   else section.append(E('div',{class:'history-economy'},this.metric('Quality · out of 100',reputation.quality),this.metric('Reliability · out of 100',reputation.reliability)),E('p',{class:'intro'},`${reputation.samples} independent reviews · ${Math.round(reputation.confidence*100)}% confidence. Ratings use a neutral starting prior; they are separate from credits and task counts.`));
+   return section;
+  }
+  evidence(evidence){
+   const detail=E('details',{open:this.openActions.has(evidence.id)},E('summary',{},`Task ${evidence.task} · verified by ${evidence.verifier}`));
+   detail.ontoggle=()=>detail.open?this.openActions.add(evidence.id):this.openActions.delete(evidence.id);
+   if(evidence.award){
+    const award=evidence.award;
+    detail.append(E('p',{},`${award.total} credits earned · ${award.base} completion + ${award.quality_bonus} quality bonus`));
+    const labels={validated:'Validated result',regression:'Regression coverage',impact:'Verified impact'};
+    for(const quality of award.quality||[])detail.append(E('section',{},E('h4',{},labels[quality.kind]||quality.kind),E('p',{},quality.reason),E('p',{class:'intro'},`Checks: ${(quality.checks||[]).join(', ')||'Not recorded'}`),E('p',{class:'intro'},`Artifacts: ${(quality.artifacts||[]).join(', ')||'Not recorded'}`)));
+   }
+   if(evidence.review)detail.append(E('h4',{},'Independent review'),E('p',{},`Quality ${evidence.review.quality}/100 · Reliability ${evidence.review.reliability}/100`),E('p',{},evidence.review.reason));
+   const fields=E('dl');
+   for(const [key,value]of Object.entries(evidence))if(key!=='award'&&key!=='review')fields.append(E('dt',{},key.replaceAll('_',' ')),E('dd',{},typeof value==='object'?W.json(value):String(value)));
+   detail.append(E('h4',{},'Verification evidence'),fields);return detail;
   }
   action(event){
    const refs=event.refs||{},meta=event.meta||{},time=new Date(event.ts*1000);
