@@ -1,13 +1,19 @@
 """Project-scoped agent authentication across a fleet transport."""
 
+import socket
 import threading
 from types import SimpleNamespace
 
 import pytest
 
+from ml_stack import http
+from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
-from ml_stack.fleet.discovery import derive_token
+from ml_stack.fleet.daemon import ALL_INTERFACES
+from ml_stack.fleet.discovery import Advertiser, Beacon, derive_token
+from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
 from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD
@@ -152,3 +158,51 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
         server.shutdown()
         server.server_close()
         runner.shutdown()
+
+
+def test_client_refuses_unsealed_response(monkeypatch):
+    class PlainResponse:
+        def __init__(self):
+            self.headers = {}
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return None
+    monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: bytes(range(32)))
+    monkeypatch.setattr("ml_stack.workspace.remote.open_stream", lambda *a, **k: PlainResponse())
+    remote = RemoteWorkspace("http://127.0.0.1:8770", PROJECT)
+    with pytest.raises(PermissionError, match="not authenticated and sealed"):
+        remote.call("agents", "agent-capability")
+
+
+def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tmp_path, monkeypatch):
+    key = bytes(range(32))
+    ident = tls.identity(tmp_path / "tls", "project-host")
+    files = tmp_path / "tls-files"
+    files.mkdir()
+    runner = JobRunner(tmp_path / "tls-jobs", files)
+    daemon = Daemon(runner, files, derive_token(key))
+    daemon.projects = host.projects
+    server = LimitedServer((ALL_INTERFACES, 0), make_handler(daemon), tls=tls.server_context(ident))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("", 0))
+        udp = probe.getsockname()[1]
+    advertiser = Advertiser(Beacon(name="project-host", port=server.server_port, cert=ident.beacon),
+                            key, port=udp, interval_s=30).start()
+    discover = Peer.discover
+    monkeypatch.setattr("ml_stack.workspace.remote.load_cluster_key", lambda path: key)
+    monkeypatch.setattr(Peer, "discover", lambda **kw: discover(key=kw["key"], port=udp, timeout_s=1))
+    http._PINNED.clear()
+    try:
+        remote = RemoteWorkspace(f"https://127.0.0.1:{server.server_port}", PROJECT)
+        assert f"127.0.0.1:{server.server_port}" in http._PINNED
+        invite = host.invite(PROJECT)
+        result = remote.join(invite["code"], "tls-mac")
+        assert remote.call("whoami", remote.token(agent=result["id"]))["id"] == "tls-mac"
+    finally:
+        advertiser.stop()
+        server.shutdown()
+        server.server_close()
+        runner.shutdown()
+        http._PINNED.clear()

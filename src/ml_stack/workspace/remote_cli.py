@@ -9,6 +9,7 @@ OPTIONS = [option("json"), flag("action", choices=("join", "whoami", "agents", "
             "read", "post", "send", "inbox", "announce", "claims", "claim", "heartbeat")),
            flag("arguments", nargs="*"), flag("--host", required=True),
            flag("--project-id", required=True), flag("--cluster-key", default=""),
+           flag("--cluster", default=""),
            flag("--name", default=""), flag("--agent", default=""),
            flag("--token-file", default=""), flag("--model", default=""),
            flag("--harness", default=""), flag("--label", default=""),
@@ -18,7 +19,8 @@ OPTIONS = [option("json"), flag("action", choices=("join", "whoami", "agents", "
 def run(args):
     """Run a project-scoped remote operation."""
     remote = RemoteWorkspace(args.host, args.project_id,
-                             cluster_key=Path(args.cluster_key) if args.cluster_key else None)
+                             cluster_key=Path(args.cluster_key) if args.cluster_key else None,
+                             cluster=args.cluster)
     values, action = args.arguments, args.action
     if action == "join":
         if len(values) != 1:

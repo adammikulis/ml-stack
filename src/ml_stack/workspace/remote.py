@@ -9,8 +9,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ml_stack import home, sealing
-from ml_stack.fleet.discovery import derive_token, load_cluster_key
+from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
 from ml_stack.fleet.onboard.lan import require_local_url
+from ml_stack.fleet.remote import Peer
 from ml_stack.http import ServerError, open_stream
 from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import Denied
@@ -19,7 +20,8 @@ from ml_stack.workspace.identity import Denied
 class RemoteWorkspace:
     """Keep a private agent capability for a selected project host."""
 
-    def __init__(self, host: str, project_id: str, *, cluster_key: Path | None = None) -> None:
+    def __init__(self, host: str, project_id: str, *, cluster_key: Path | None = None,
+                 cluster: str = "") -> None:
         parts = urlsplit(host)
         if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username
                 or parts.password or parts.query or parts.fragment or parts.path not in {"", "/"}):
@@ -29,10 +31,21 @@ class RemoteWorkspace:
         require_local_url(host)
         self.host, self.project_id = host.rstrip("/"), project_id
         self.endpoint = f"{self.host}/workspace/v1/projects/{project_id}"
-        key = load_cluster_key(cluster_key)
+        rows = memberships(cluster_key)
+        if cluster:
+            rows = [row for row in rows if row.group == cluster]
+            if len(rows) != 1:
+                raise Denied("select a cluster this device has joined")
+        elif len(rows) > 1:
+            raise Denied("select this project's cluster with --cluster NAME")
+        key = rows[0].key if rows else load_cluster_key(cluster_key)
         if key is None:
             raise Denied("join the host's cluster before attaching its project board")
         self.fleet_token = derive_token(key)
+        if parts.scheme == "https":
+            peers = Peer.discover(key=key, timeout_s=2)
+            if not any(peer.base_url.rstrip("/") == self.host for peer in peers):
+                raise Denied("the project host was not authenticated by cluster discovery; check its address and cluster")
         label = hashlib.sha256(f"{self.host}/{project_id}".encode()).hexdigest()
         self.base = home.state("workspace-remote", label)
 
@@ -47,6 +60,8 @@ class RemoteWorkspace:
             with open_stream(url, data=json.dumps(payload).encode(), method="POST",
                              token=self.fleet_token, timeout=30, guard=guard,
                              headers={"Content-Type": "application/json", sealing.HEADER: "2"}) as response:
+                if not response.headers.get(sealing.HEADER):
+                    raise Denied("project board response was not authenticated and sealed")
                 raw = response.read(512 * 1024 + 1)
                 if len(raw) > 512 * 1024:
                     raise ValueError("project board response exceeds the size limit")
