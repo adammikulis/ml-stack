@@ -37,7 +37,7 @@ def test_tasks_filters_artifacts_and_independent_review_payload(tmp_path, playwr
             expect(viewer.get_by_text('No matching tasks.', exact=True)).to_be_visible()
             viewer.get_by_label('Task status').select_option('review')
             viewer.get_by_text('Submitted proposal and artifact hashes', exact=True).click()
-            expect(viewer.get_by_text('replay.json', exact=False)).to_be_visible()
+            expect(viewer.locator('pre').filter(has_text='replay.json')).to_be_visible()
             assert viewer.locator('img').count() == 0
             viewer.get_by_text('Independently review this proposal', exact=True).click()
             viewer.get_by_label('Independent review reason').fill('Replay independently verified')

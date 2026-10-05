@@ -73,3 +73,10 @@ preserve the candidate for inspection. Only the authenticated parent or person c
 the exact completed child's delegated worktree claim. The helper never removes or locks
 another agent's worktree to clear a publication block; the recorded reason identifies the
 condition that its owner must resolve. A published integration is idempotent.
+Independent reviewers can open **Review quality — advanced** to link a validated result,
+prevented regression or demonstrated impact to specific independently passed checks and
+submitted artifact hashes. The server applies fixed, bounded bonus tiers; the interface has
+no arbitrary credit amount. Optional quality and reliability assessments require a separate
+reason. Task reliability still derives from actual accepted/rejected outcomes, with
+infrastructure blockage excluded. Leaving advanced controls untouched keeps a plain accepted
+review at completion credit and leaves quality unrated.
