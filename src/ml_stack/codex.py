@@ -21,12 +21,15 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from ml_stack import harnessing, serverkeys
 from ml_stack.chatpolicy import READ_ONLY
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
 from ml_stack.log import say
 from ml_stack.serve import provenance
+from ml_stack.workspace import tokens
+from ml_stack.workspace.identity import TOKEN_ENV
 
 __all__ = ["config_toml", "environment", "launch", "policy_flags"]
 
@@ -54,6 +57,8 @@ def config_toml(base_url: str, alias: str, window: int, hooks: tuple[str, str, f
     lines += [
         "", "[shell_environment_policy]", 'inherit = "core"',
         "", "[features]", "hooks = true",
+        "", "[features.code_mode]", "enabled = false",
+        'direct_only_tool_namespaces = ["mcp__workspace"]',
         "", f"[model_providers.{PROVIDER}]", 'name = "ml-stack"',
         f"base_url = {_q(base_url.rstrip('/') + '/v1')}", 'wire_api = "responses"', f"env_key = {_q(KEY_ENV)}",
         "", "[[hooks.PreToolUse]]", 'matcher = ".*"',
@@ -84,13 +89,15 @@ def environment(home: Path, base: Mapping[str, str] | None = None, key: str = ""
 
 
 def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = say,
-           run_codex: Callable[..., int] | None = None) -> int:
+           run_codex: Callable[..., int] | None = None,
+           seat_factory: Callable[..., Any] | None = None) -> int:
     """Lease the model, run ``codex`` inside the lease with this run's home, return its exit code."""
     words = list(sys.argv[1:] if argv is None else argv)
     ours, extra = (words[: words.index("--")], words[words.index("--") + 1:]) \
         if "--" in words else (words, [])
     args = harnessing.parser("codex", "Codex", DEFAULT_PORT, DEFAULT_SLOTS).parse_args(ours)
     provenance.told(args.lease_for)
+    args.seat_factory = seat_factory
     binary = args.codex or shutil.which("codex") or ""
     if not binary:
         say("error: no `codex` on PATH; install Codex or pass --codex PATH")
@@ -125,6 +132,21 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         return 2
 
 
+
+def workspace_config(seat) -> str:
+    """The assigned-seat MCP settings, or empty for a parent-managed inbox task."""
+    if seat.managed_inbox:
+        return ""
+    workspace = ["", "[mcp_servers.workspace]", f"command = {_q(sys.executable)}",
+         'args = ["-m", "ml_stack.mcp", "--builtin", "--workspace-only"]',
+         "startup_timeout_sec = 30", "required = true", "[mcp_servers.workspace.env]"]
+    workspace += [f"{name} = {_q(value)}" for name, value in {
+        TOKEN_ENV: tokens.load(seat.base, seat.parent or seat.name),
+        "ML_STACK_HOME": str(seat.base.parent), "ML_STACK_WORKSPACE_HOME": str(seat.base),
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        "ML_STACK_AGENT": "1", "ML_STACK_NONINTERACTIVE": "1"}.items()]
+    return "\n".join(workspace) + "\n"
+
 def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, str, int],
          say: Callable[[str], None], runner: Callable[..., int]) -> int:
     """Write this run's ``CODEX_HOME`` and run ``command`` (``codex`` and its arguments) in it."""
@@ -133,8 +155,11 @@ def _run(args: argparse.Namespace, command: Sequence[str], served: tuple[str, st
     try:
         with harnessing.opened(args, "codex", served, say) as run:
             path = run.files.write("config.toml", config_toml(base_url, alias, window,
-                                                              (run.pre, run.post, harnessing.WAIT_S)))
-            run.files.write("AGENTS.md", run.brief)
+                                    (run.pre, run.post, harnessing.WAIT_S)) + workspace_config(run.seat))
+            extra_brief = "" if run.seat.managed_inbox else (
+                "\nUse the workspace MCP tools for inbox/send/thread/claim. They already carry your "
+                "assigned identity; never use shell workspace commands inside the coding sandbox.\n")
+            run.files.write("AGENTS.md", run.brief + extra_brief)
             say(f"role {args.role}; Bash, apply_patch and MCP calls go through ml-stack's classifier "
                 f"(CODEX_HOME {path.parent}, outside the working tree)")
             flags = [*policy_flags(args.role), "--dangerously-bypass-hook-trust", "--cd", str(run.cwd)]

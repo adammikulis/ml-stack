@@ -1,0 +1,54 @@
+<style>
+board-view { display:contents; }
+board-view .board-workspace { padding:24px; width:100%; min-width:0; }
+board-view .board-workspace h1 { margin:0 0 6px; }
+board-view .board-workspace .sub { margin:0 0 18px; }
+board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420px; }
+@media(max-width:640px) { board-view .board-workspace { padding:16px; } board-view ml-board { height:72dvh; } }
+</style>
+<template>
+  <section class="board-workspace" hidden>
+    <h1>Board</h1>
+    <p class="sub">Follow channels and threads, message agents, and participate as yourself.</p>
+    <coordinator-control></coordinator-control>
+    <details id="board-agents"><summary>Local agents</summary><div id="agents-mount"></div></details>
+    <div id="board-mount"></div>
+  </section>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  class BoardView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.host = this.querySelector('section');
+      this.mount = this.querySelector('#board-mount');
+      this.sharedRemote = null;
+      this.addEventListener('coordination', event => {
+        this.sharedRemote = event.detail.mode === 'remote';
+        this.querySelector('#board-agents').hidden = this.sharedRemote;
+        if (this.sharedRemote) this.viewer?.remove();
+        else if (!this.host.hidden) this.showBoard();
+      });
+      this.querySelector('#board-agents').ontoggle = event => {
+        if (event.target.open && !this.agents) {
+          this.agents = M.el('ml-agents', {endpoint:'/ui/agents'});
+          this.querySelector('#agents-mount').append(this.agents);
+        }
+      };
+      M.onRoute(route => {
+        this.host.hidden = route !== 'board';
+        if (route === 'board') {
+          if (this.sharedRemote === false) this.showBoard();
+        } else this.viewer?.remove();
+      });
+    }
+    showBoard() {
+      this.viewer ||= M.el('ml-board', {endpoint:'/ui/board', 'channel-feed':''});
+      this.mount.append(this.viewer);
+    }
+  }
+  customElements.define('board-view', BoardView);
+})();
+</script>

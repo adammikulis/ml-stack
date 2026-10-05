@@ -372,24 +372,19 @@ def served(config: Config, *, say: Callable[[str], None] | None = None, reason: 
            **over: Any) -> Iterator[str]:
     """The base URL of a server holding ``config``'s model, for the duration of the block.
 
-    The server already up on ``config``'s port serving those weights is used as it stands
-    and left up; otherwise ``config`` is leased and the lease goes when the block ends. ``over``
+    A compatible managed server on any port is leased and left running for its other
+    holders; otherwise the broker admits a new server. The lease ends with this block. ``over``
     goes to :func:`ml_stack.serve.serve`.
     """
-    from ml_stack.serve.leases import already_up
     from ml_stack.serve.manager import serve
 
-    told = say or (lambda _line: None)
-    up = already_up(config.model, config.port)
-    if up is not None:
-        base_url = str(up["base_url"])
-        told(f"using the server already up on {config.port} ({serving_said(base_url)}); "
-             f"it is left running")
-        yield base_url
-        return
-    with serve(config.model, manager=config.serving.manager(), **config.lease(), **over,
+    with serve(config.model, manager=config.serving.manager(),
+               **{**config.lease(), **over},
                reason=reason or f"{Path(config.model).name} for this run") as server:
+        if say and server.adopted:
+            say(f"using the compatible server already up on {server.port} ({serving_said(server.base_url)}); it is left running")
         yield server.base_url
+
 
 
 def draft_for(model: str, asked: str, *, build: str = "",

@@ -92,7 +92,7 @@ def _ranked(installed: Sequence[object], machine: object | None) -> list[object]
 
 def _line(row: object) -> Pick:
     one = row.candidate  # type: ignore[attr-defined]
-    return Pick(ref=one.ref or str(one.path or one.name), name=one.name, size_bytes=one.size_bytes,
+    return Pick(ref=str(one.path or one.ref or one.name), name=one.name, size_bytes=one.size_bytes,
                 verdict=row.verdict, note=row.reason)  # type: ignore[attr-defined]
 
 
@@ -104,6 +104,16 @@ def _smaller(rows: Sequence[object], than: Pick) -> Pick | None:
     return None
 
 
+def _matches(one: object, asked: str) -> bool:
+    path = getattr(one, "path", None)
+    if Path(asked).is_absolute() or ("/" in asked and not asked.startswith("hf:")):
+        try:
+            return path is not None and Path(asked).resolve(strict=True) == Path(path).resolve(strict=True)
+        except (OSError, RuntimeError):
+            return False
+    return asked in (getattr(one, "ref", ""), getattr(one, "name", ""), Path(str(path or "")).name)
+
+
 def choose(asked: str = AUTO, *, installed: Sequence[object] | None = None,
            machine: object | None = None, search: bool = True, coding: bool = False) -> Pick:
     """The downloaded model ``asked`` names, or for ``auto`` the best downloaded mixture-of-experts
@@ -112,8 +122,7 @@ def choose(asked: str = AUTO, *, installed: Sequence[object] | None = None,
     have = list(hub.discover(formats=("gguf",)) if installed is None else installed)
     rows = _ranked(have, machine)
     if asked and asked != AUTO:
-        found = next((r for r in rows if asked in (r.candidate.ref, r.candidate.name,  # type: ignore[attr-defined]
-                                                   Path(str(r.candidate.path or "")).name)), None)  # type: ignore[attr-defined]
+        found = next((r for r in rows if _matches(r.candidate, asked)), None)  # type: ignore[attr-defined]
         if found is None:
             return Pick(problem=f"{asked} is not downloaded",
                         hint=f'ml-stack-models find "{asked}"')

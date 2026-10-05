@@ -40,6 +40,12 @@ def cmd_queue(args: argparse.Namespace) -> int:
     if args.json:
         say(json.dumps(snapshot, indent=2))
         return 0
+    runtime = snapshot.get('runtime') or {}
+    environment = runtime.get('environment') or {}
+    say(f"broker runtime: {runtime.get('compatibility', 'unknown')}, "
+        f"protocol {runtime.get('protocol') or 'unknown'}, "
+        f"source {runtime.get('source_commit') or 'unknown'}, "
+        f"interpreter {environment.get('interpreter') or 'unknown'}")
     for held in snapshot["servers"]:
         holders = ", ".join(f"pid {h['pid']} ({h['requester']}: {h['reason']})"
                             for h in held["holders"]) or "nobody"

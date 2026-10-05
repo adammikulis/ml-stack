@@ -1,6 +1,6 @@
 <!-- fleet-model: the daemon's routes, the pieces every screen builds out of, and which screen is showing -->
 <style>
-cluster-view, chat-view, models-view, settings-view, fit-view { display: contents; }
+cluster-view, chat-view, models-view, settings-view, fit-view, data-view, training-view, gym-view, benchmarks-view, tools-view { display: contents; }
 [hidden] { display: none !important; }
 </style>
 <script>
@@ -17,7 +17,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
     if (g.eta_s !== null && g.eta_s !== undefined) {
       parts.push(`about ${Math.max(1, Math.ceil(g.eta_s / 60))} min left`);
     }
-    return parts.join(" · ");
+    return parts.join(" Ã‚Â· ");
   };
 
   /** One call to the daemon: `{ok, status, ...body}`. */
@@ -35,6 +35,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
       if (k === "class") n.className = v;
       else if (k === "html") n.innerHTML = v;
       else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (["disabled", "checked", "selected", "hidden", "required", "multiple", "readonly", "open"].includes(k) && typeof v === "boolean") n.toggleAttribute(k, v);
       else if (v !== null && v !== undefined) n.setAttribute(k, v);
     }
     for (const kid of kids.flat()) {
@@ -72,41 +73,39 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   // The badge has to be right: torch's ROCm build answers True to every CUDA question,
   // so the daemon reports vendor separately and this only renders what it is told.
   M.vendorOf = function (d = {}) {
-    if (d.rocm || d.vendor === "amd") return { key: "amd", text: "AMD · ROCm" };
-    if (d.cuda || d.vendor === "nvidia") return { key: "nvidia", text: "NVIDIA · CUDA" };
-    if (d.vendor === "apple") return { key: "apple", text: "Apple · Metal" };
+    if (d.rocm || d.vendor === "amd") return { key: "amd", text: "AMD Ã‚Â· ROCm" };
+    if (d.cuda || d.vendor === "nvidia") return { key: "nvidia", text: "NVIDIA Ã‚Â· CUDA" };
+    if (d.vendor === "apple") return { key: "apple", text: "Apple Ã‚Â· Metal" };
     return { key: "cpu", text: `${d.cpus || "?"} CPU` };
   };
 
-  const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+  const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
   const KV_MB_PER_TOKEN = 17 * 4 * 256 * 2 * (34 / 32) / (1024 * 1024);
 
-  M.ctxRam = (tokens) => {
-    const mb = tokens * KV_MB_PER_TOKEN;
-    return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
-  };
-
-  M.ctxWords = (n) => (n >= 1024 ? `${Math.round(n / 1024)}k tokens` : `${n} tokens`);
-
-  /** The slider for how much a conversation reads, and what it costs. */
   M.contextPicker = function (start, onPick) {
     const slider = M.ui("ml-slider", {
-      label: "how much it reads", stops: CTX_STEPS,
+      label: "Context length", stops: CTX_STEPS,
       value: CTX_STEPS.includes(start) ? start : 8192,
-      hint: "Roughly a page of text per 500 tokens. Memory shown is the Qwen3.8 27B "
-        + "Q8 token cache with MTP; weights and fixed runtime buffers are additional." });
+      hint: "Maximum tokens in the model's context. Larger contexts require more memory." });
     slider.id = "ctx";
     const paint = (n) => {
-      slider.valueText = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of token cache`;
+      slider.valueText = `${new Intl.NumberFormat().format(n)} tokens`;
+      slider.hint = n > 262144
+        ? "Extended context: Qwen uses YaRN above its native 256K window. Larger contexts require more memory."
+        : "Maximum tokens in the modelÃ¢â‚¬â„¢s context. Larger contexts require more memory.";
       onPick(n);
     };
-    slider.addEventListener("input", (e) => paint(e.detail.value));
+    slider.addEventListener("input", (e) => {
+      if (Number.isFinite(e.detail?.value)) paint(e.detail.value);
+    });
     paint(slider.value);
     return el("div", { class: "meter" }, slider);
   };
 
   // ------------------------------------------------------------- which screen is showing
-  const IN_APP = ["cluster", "chat", "models", "projects", "settings", "fit"];
+  const IN_APP = ["tasks", "history", "chat", "board", "projects", "models", "data", "training", "gym", "benchmarks", "cluster", "tools", "settings", "fit"];
+  const available = (name) => IN_APP.includes(name) && !!document.querySelector(`${name}-view`);
+  M.requestedRoute = "";
   const watchers = [];
   M.route = "";
   M.group = "";
@@ -114,16 +113,35 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   M.signInMessage = "";
 
   /** Show one screen by name, and tell every component that is watching. */
-  M.go = function (name) {
+  M.go = function (name, remember = true) {
     if (name === "fit" && document.querySelector("models-view")) {
       name = "models";
       document.getElementById("model-capacity").open = true;
+    }
+    if (name === "cluster" && ["sign-in", "first-run"].includes(M.route) && available(M.requestedRoute)) {
+      name = M.requestedRoute;
+    }
+    if (IN_APP.includes(name) && !available(name)) name = available("cluster") ? "cluster" : "fit";
+    if (IN_APP.includes(name)) {
+      M.requestedRoute = name;
+      if (remember && location.hash !== `#${name}`) history.pushState(null, "", `#${name}`);
     }
     M.route = name;
     const app = document.getElementById("app");
     if (app) app.hidden = !IN_APP.includes(name);
     for (const fn of watchers) fn(name);
+    const workspace = document.getElementById("workspace");
+    if (workspace && IN_APP.includes(name)) workspace.scrollTop = 0;
   };
+
+  function followLocation() {
+    const name = location.hash.slice(1);
+    if (!available(name)) return;
+    M.requestedRoute = name;
+    if (IN_APP.includes(M.route) && M.route !== name) M.go(name, false);
+  }
+  window.addEventListener("popstate", followLocation);
+  window.addEventListener("hashchange", followLocation);
 
   /** Run `fn` whenever the screen changes, and now if one is already showing. */
   M.onRoute = function (fn) {
@@ -151,10 +169,24 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
 
   /** What to show when the page opens: setup, sign in, or a screen. */
   M.boot = async function () {
-    const asked = location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster";
+    const launchURL = new URL(location.href);
+    const ticket = launchURL.searchParams.get("launch_ticket");
+    if (ticket !== null) {
+      launchURL.searchParams.delete("launch_ticket");
+      history.replaceState(null, "", launchURL.pathname + launchURL.search + launchURL.hash);
+      if (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "[::1]") {
+        try { await M.api("/ui/session", {method:"POST", body:JSON.stringify({ticket})}); }
+        catch (_) { /* The ordinary sign-in view handles expired tickets. */ }
+      }
+    }
+    const hash = location.hash.slice(1);
+    const asked = available(hash) ? hash
+      : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster");
     const opened = document.querySelector(`${asked}-view`) ? asked
       : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
+    M.requestedRoute = opened;
     const setup = await M.api("/ui/setup");
+    M.group = setup.group || "";
     M.inCluster = !!setup.needs_password;
     if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
     if (!setup.needs_password) return M.go(opened);

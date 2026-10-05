@@ -1,5 +1,33 @@
 # The fleet
 
+## Chat and Coding
+
+Open **Chat** in the sidebar. The same conversation list and message composer serve ordinary
+model chat and **Coding** mode. Search saved messages, rename a conversation from its menu, or
+delete it after confirmation. Reopening a conversation restores its model and mode.
+
+The shared model picker searches names, families, and quantizations, and marks models as
+**Loaded** or **Installed**. Installed Chat choices open the Models screen so you can set
+context length before loading; loaded models are reused by Chat and compatible Coding turns.
+
+For Coding, select a downloaded model, an existing **Project directory**, **Coding agent**
+(Codex or Claude Code), and **Tool permissions**. The model preference comes from the maintained
+coding profile; unavailable models and missing command-line agents cannot start a turn.
+**Advanced options** holds **Context length**, in tokens, and **Draft model / MTP head**
+(`auto`, `none`, or an explicit installed head path). Ordinary Chat keeps Temperature there.
+
+Coding launches through the same broker and permission hooks as the command-line harnesses;
+it never grants a human identity to the agent. Responses stream into the shared conversation.
+Expand **Tool activity and session details** to inspect commands, usage and the native session identifier. **Stop**
+cancels model startup or the running harness and revokes that session's temporary workspace
+identity. Closing the tab leaves an accepted turn running; reopening its conversation reattaches.
+
+Conversation messages, model and project relationships live in the local graph store. Native
+harness session files are private to each conversation and settings fingerprint under the chat
+state root. Subsequent turns resume that session; changing the model, project or permissions starts
+fresh native context with the saved conversation. Coding works in the selected project directly;
+create a separate checkout when you want isolated edits. See [the harness rails](harnesses.md).
+
 ## Driving it from Python
 
 `ml-stack` is pure Python and pulls in nothing heavy, so the machine you drive from
@@ -67,9 +95,28 @@ Three lines on a new machine:
 
 ```
 pip install git+https://github.com/adammikulis/ml-stack
-ml-stack-fleet join --persist
+ml-stack-fleet join --group "Cedar lab" --persist
 ml-stack-fleet status
 ```
+
+First-time setup lists nearby clusters by name. Password clusters offer **Join**: select
+one, then enter its passphrase to confirm. Random-key clusters offer **Join with recovery
+file**: choose a file exported by a cluster owner. The app checks the file’s name and key
+and authenticates a live beacon before saving membership. Recovery-file joining never
+touches the keystore. Refresh repeats the LAN search; manual
+entry remains available when discovery is blocked. Names in that list are unverified
+LAN hints: the maintained SPAKE2 handshake authenticates the cluster before membership is saved.
+If a selected cluster disappears, joining fails rather than creating a replacement.
+
+A cluster name is required when creating or joining with a passphrase. Names are at most
+64 characters, without control characters. In a terminal, use `--group NAME` (or answer
+the required name prompt); random-key creation uses `ml-stack-peers init --group NAME`.
+Existing memberships retain their recorded names. Manual entry creates a new cluster
+when no matching cluster answers, so use exactly the same name and passphrase on each
+machine. Joining explicitly may save the passphrase to the keystore; merely discovering
+nearby clusters never reads or writes it. Discovery reports password joining from the membership’s stored PAKE join-secret
+presence; it never decrypts a keystore record. Random-key recovery
+joining authenticates a protocol-3 encrypted beacon using the supplied key.
 
 `join` runs the checks serving depends on (the memory a model may use, a llama-server --
 downloaded if there is none), asks for the passphrase every machine shares (or takes
@@ -87,6 +134,36 @@ COMMIT is what each peer is running and how old that commit is; UPDATES is how i
 current and when it last looked. A fleet half on one commit and half on another is the
 thing those two columns exist to make visible -- `harrowgate` above is six days behind and
 following nothing, which is a machine somebody has to visit.
+
+### Choosing the cluster
+
+In a terminal, `join` looks for clusters before it asks for the passphrase: the ones this
+machine is already in and the ones daemons on the network offer to take a machine into. They
+are listed with the machines that hold each, and the person picks a number, types a name, or
+types `n` for a new cluster (enter takes `ml-stack` when none is found):
+
+```
+Clusters found:
+  1) lab - studio, larch
+  2) home - harrowgate
+  n) a new cluster
+  Pick a number, or type a name:
+```
+
+Picking a listed cluster asks for that cluster's passphrase once; a new name asks for a
+passphrase twice and makes the cluster. `--group NAME` (or `ML_STACK_CLUSTER`) names the
+cluster and skips the question, as does a passphrase from `--passphrase` or
+`ML_STACK_PASSPHRASE`; a process with no terminal or with `ML_STACK_NONINTERACTIVE` set is never
+asked and joins `ml-stack` when no name is given. `ml-stack-peers setup` asks the same way.
+`ml-stack-fleet clusters [--json]` prints the listing without joining. The first-run page and the
+Cluster view offer the discovered clusters in a select beside a field for a new name.
+
+A name is trimmed, 1 to 64 characters, and cannot contain `/`, `\` or control characters.
+
+Daemons find clusters with the same datagram that finds a cluster by name (`join?`): an empty
+group asks every cluster, and each daemon answers once per cluster it holds with the cluster's
+name, its own name and its port. The datagram is unsealed, so anyone on the network segment who
+asks learns those three things; it carries no key and no passphrase hash.
 
 ### Adding a machine that is next to you
 

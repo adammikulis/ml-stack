@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import threading
 import time
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -23,9 +25,10 @@ from .discovery import (
     load_cluster_key,
     memberships,
     named_apart,
+    require_name,
 )
 from .join import default_root
-from .onboard.joining import cluster_action, join_by_passphrase, matches
+from .onboard.joining import cluster_action, join_by_passphrase, join_existing, matches
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -105,6 +108,7 @@ class UI:
         self.setup_token = setup_token
         self.sessions = Sessions()
         self.throttle = Throttle()
+        self._join_lock = threading.Lock()
         self._peers: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self.server_install: dict[str, Any] = {"state": "idle", "note": ""}
 
@@ -207,17 +211,34 @@ class UI:
         return found
 
     # -- actions ---------------------------------------------------------
-    def join(self, passphrase: str, group: str, source: str, mode: str = "join") -> tuple[dict[str, Any], str]:
+    @contextlib.contextmanager
+    def join_guard(self) -> Iterator[None]:
+        """Serialize cluster membership changes without waiting on another handshake."""
+        if not self._join_lock.acquire(blocking=False):
+            raise DiscoveryError("another join is in progress; try again")
+        try:
+            yield
+        finally:
+            self._join_lock.release()
+
+    def join(self, passphrase: str, group: str, source: str, mode: str | None = None, *,
+             existing: bool = False) -> tuple[dict[str, Any], str]:
         """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
+        group = require_name(group)
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
         try:
-            cluster_action(mode, passphrase, group, self.cluster_key_path)
+            with self.join_guard():
+                if mode is not None:
+                    cluster_action(mode, passphrase, group, self.cluster_key_path, port=self.discovery_port)
+                else:
+                    joiner = join_existing if existing else join_by_passphrase
+                    joiner(passphrase, group, self.cluster_key_path, port=self.discovery_port)
+                recovery.remember(passphrase, group, self.cluster_key_path)
         except DiscoveryError:
             self.throttle.failed(source)
             raise
-        recovery.remember(passphrase, group.strip(), self.cluster_key_path)
         self.throttle.succeeded(source)
         self._peers = (0.0, [])
         if self.on_join is not None:

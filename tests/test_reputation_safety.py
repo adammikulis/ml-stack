@@ -210,7 +210,8 @@ def test_no_source_name_or_event_is_on_disk_in_plaintext(ring, clock):
             assert word.encode() not in data, f"{word} is in {path}"
     delete = Ledger(clock=clock)
     delete.forget_all()
-    assert not list(home.home().rglob("graph.enc*"))
+    assert delete.sources() == []
+    assert not list(home.home().rglob("graph.enc.prev"))
 
 
 def test_a_tampered_file_is_not_trusted_and_not_overwritten_silently(ledger):

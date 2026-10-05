@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +23,7 @@ from ml_stack.hub.discover import ModelInfo
 from ml_stack.hub.probe import MachineMemory
 from ml_stack.testing.fakes import reply_from
 from ml_stack.workspace import (
+    device_agent,
     localagent as la,
     localloop,
     localmodel,
@@ -96,7 +98,7 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
 
     got = ls.start(kit.ws, ls.Ask(), pick=PICK, spawn=spawn)
     try:
-        assert got.name == "local-qwen3.6-35b-a3b" and not got.already
+        assert got.name == "local-agent" and not got.already
         tok = tokens.directory(kit.base) / got.name
         assert stat.S_IMODE(tok.stat().st_mode) == 0o600
         assert kit.ws.auth(tok.read_text().strip()).role == "agent"
@@ -108,8 +110,9 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
     finally:
         done = ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
         spawned[0].child.wait(timeout=10)
-    assert done.was_running and not kit.ws.registry.role_of(got.name)
-    assert not (tokens.directory(kit.base) / got.name).exists() and ls.listing(kit.ws) == []
+    assert done.was_running and kit.ws.registry.role_of(got.name) == "agent"
+    assert (tokens.directory(kit.base) / got.name).exists()
+    assert ls.listing(kit.ws)[0]["state"] == "stopped"
 
 
 def test_stop_releases_the_lease_the_loop_recorded(kit):
@@ -349,8 +352,10 @@ def test_a_model_that_cannot_be_leased_fails_in_one_line(kit):
 # -- the routes ---------------------------------------------------------------------------
 @pytest.fixture
 def served(kit, monkeypatch):
+    monkeypatch.setattr(device_agent, "device_id", lambda: "abcdef0123456789")
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
     listener = localroute.serve(kit.ws)
     listener.start()
     yield listener
@@ -405,13 +410,15 @@ def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(serv
     assert status == 200 and json.loads(body)["roles"] == la.role_choices()
     ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r"})
     assert ok[0] == 200 and json.loads(ok[1])["name"] == "local-r"
+    from ml_stack.workspace.device_accounts import account_for
+    assert account_for(kit.ws, "local-r")["base_id"].startswith("local-device-")
     listed = json.loads(request(served.port, "GET", "/agents/list")[1])["agents"]
     assert [a["name"] for a in listed] == ["local-r"] and "token" not in json.dumps(listed)
     for bad in ({"name": "../x"}, {"role": "root"}, {"project": "/nonexistent"}, {"extra": 1},
                 {"effort": "extreme"}, {"max_effort": "auto"}, {"effort": 3}, {"name": 5}):
         assert post(served, "start", bad)[0] == 400, bad
     assert post(served, "stop", {"name": "local-r"})[0] == 200
-    assert json.loads(request(served.port, "GET", "/agents/list")[1])["agents"] == []
+    assert json.loads(request(served.port, "GET", "/agents/list")[1])["agents"][0]["state"] == "stopped"
     status, page = request(served.port, "GET", f"/agents?session={served.session}")
     assert status == 200 and b"<ml-agents" in page
 
@@ -609,7 +616,7 @@ def test_the_default_approval_raises_a_request_and_waits_for_the_stop_flag(kit):
     assert pending == [] or all(r.state != "approved" for r in pending)
 
 
-def test_a_coding_agent_is_detached_on_the_codex_harness_and_no_second_identity_is_minted(kit, monkeypatch):
+def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit, monkeypatch):
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     from ml_stack.workspace import localprofile as lp
     monkeypatch.setattr(lp, "admit", lambda model, ctx: ("", ""))
@@ -617,8 +624,8 @@ def test_a_coding_agent_is_detached_on_the_codex_harness_and_no_second_identity_
     got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
     try:
         row = ls.listing(kit.ws)[0]
-        assert got.name == "local-qwen3.6-35b-a3b-codex" and row["harness"] == "codex" and row["ctx"] == 262144
-        assert kit.ws.registry.ids() == ["owner"]
+        assert got.name == "local-coding" and row["harness"] == "codex" and row["ctx"] == 262144
+        assert sorted(kit.ws.registry.ids()) == sorted(["owner", got.name])
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 
@@ -640,3 +647,143 @@ def test_start_records_the_started_model_as_verified(kit, monkeypatch):
         assert info["model"] and info["model_state"] == "verified"
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
+
+
+def test_coding_entrypoint_uses_canonical_worker(kit, monkeypatch):
+    from ml_stack.workspace import localcoding
+
+    seen = []
+    monkeypatch.setenv('ML_STACK_AGENT', '1')
+    monkeypatch.setenv('ML_STACK_NONINTERACTIVE', '1')
+    monkeypatch.setattr(localcoding, 'Workspace', lambda: kit.ws)
+    monkeypatch.setattr(localcoding.task_worker, 'run', lambda ws, name: seen.append((ws, name)))
+    assert localcoding.run_detached(['local-qwen']) == 0
+    assert seen == [(kit.ws, 'local-qwen')]
+
+
+def test_empty_native_result_cannot_submit_artifacts(kit, monkeypatch, tmp_path):
+    from ml_stack.workspace import task_coding
+
+    monkeypatch.setattr(task_coding.TaskManager, "_run", lambda *args: None)
+    monkeypatch.setattr(task_coding.git, 'head', lambda *_: 'a' * 40)
+    tokens.store(kit.base, "local-qwen", kit.agent("local-qwen"))
+    agent = la.Agent("local-qwen", "model.gguf", profile="coding", project=str(tmp_path))
+    task = {'id': 'task:' + 'a' * 32, 'title': 'Task', 'description': 'Work', 'acceptance': ['Checks pass']}
+    with pytest.raises(RuntimeError, match='without an answer'):
+        task_coding.perform(kit.ws, agent, task, tmp_path, (lambda: False, lambda _: None))
+    assert not (tmp_path / '.task-report.md').exists()
+
+
+def test_stopping_a_delegated_worker_preserves_its_private_identity(kit):
+    parent = kit.agent("parent")
+    child = kit.ws.delegate(parent, "local-qwen")
+    la.save(kit.ws, la.Agent("local-qwen", "model", identity=child["id"]))
+    ls.stop(kit.ws, "local-qwen", release=lambda _: True)
+    assert kit.ws.auth(parent).id == "parent"
+    assert kit.ws.registry.role_of(child["id"]) == "agent"
+    assert Path(child["token_file"]).exists()
+    assert la.load(kit.ws, "local-qwen").identity == child["id"]
+
+
+def test_paused_coding_worker_keeps_tasks_queued_until_resume(kit, monkeypatch):
+    authority = kit.agent("lead", role="lead")
+    child = kit.ws.delegate(authority, "qwen")
+    agent = la.Agent("local-qwen", "model", identity=child["id"], profile="coding", harness="codex")
+    la.save(kit.ws, agent)
+    cancel = threading.Event()
+    acted = threading.Event()
+    seen = []
+    ls.pause(kit.ws, agent.name, True)
+    sent = kit.ws.send(authority, child["id"], "task", "work")
+
+    def execute(agent, row, why, stopped):
+        seen.append(row["seq"])
+        acted.set()
+        cancel.set()
+        return "answer", "finished", 1
+
+    thread = threading.Thread(target=lambda: localloop.run(kit.ws, agent.name, localloop.Settings(
+        cancel=cancel, serve=lambda _: localloop.Held(None, {}), execute=execute)))
+    thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and la.status_of(kit.ws, agent.name).get("state") != "paused":
+            time.sleep(.01)
+        assert la.status_of(kit.ws, agent.name)["state"] == "paused" and not acted.is_set()
+        ls.pause(kit.ws, agent.name, False)
+        assert acted.wait(5)
+    finally:
+        cancel.set()
+        thread.join(timeout=6)
+    assert not thread.is_alive() and seen == [sent["seq"]]
+    assert kit.ws.thread(authority, sent["seq"])[-1]["from"] == child["id"]
+
+
+def test_stop_restart_retains_identity_and_preferences_across_models(kit):
+    parent = kit.agent('parent')
+    child = kit.ws.delegate(parent, 'qwen')
+    la.save(kit.ws, la.Agent('local-qwen', 'old-model', identity=child['id'], extra={'preference': 'saved'}))
+    secret = Path(child['token_file']).read_text()
+    ls.stop(kit.ws, 'local-qwen', release=lambda _: True)
+    spawned = []
+    got = ls.start(kit.ws, ls.Ask(name='local-qwen'), pick=PICK,
+                   spawn=lambda *a, **k: spawned.append(sleeper(*a, **k)) or spawned[-1])
+    try:
+        restored = la.load(kit.ws, got.name)
+        assert restored.identity == child['id']
+        assert restored.extra == {'preference': 'saved'}
+        assert restored.model == PICK.ref
+        assert Path(child['token_file']).read_text() == secret
+    finally:
+        ls.stop(kit.ws, got.name, release=lambda _: True, wait_s=5)
+        spawned[0].child.wait(timeout=10)
+
+
+def test_stop_never_releases_a_foreign_holder(kit, monkeypatch):
+    agent = la.Agent('local-qwen', 'model', pid=42, process_started=12.0)
+    la.save(kit.ws, agent)
+    la.Status(kit.ws, agent.name).update(lease={'id': 'foreign'})
+    monkeypatch.setattr(la, 'alive', lambda _: False)
+    monkeypatch.setattr(ls.broker_wire, 'status', lambda **_: {'servers': [
+        {'holders': [{'lease': 'foreign', 'pid': 99, 'pid_started': 12.0}]}]})
+    monkeypatch.setattr(ls.broker_wire, 'release', lambda _: pytest.fail('foreign release'))
+    assert not ls.stop(kit.ws, agent.name).lease_released
+
+
+def test_stop_retains_worker_when_broker_is_unavailable(kit, monkeypatch):
+    agent = la.Agent('local-qwen', 'model', pid=42, process_started=12.0)
+    la.save(kit.ws, agent)
+    la.Status(kit.ws, agent.name).update(lease={'id': 'owned'})
+    monkeypatch.setattr(la, 'alive', lambda _: False)
+    def unavailable(**kwargs):
+        raise OSError('broker unavailable')
+    monkeypatch.setattr(ls.broker_wire, 'status', unavailable)
+    assert not ls.stop(kit.ws, agent.name).lease_released
+    assert la.load(kit.ws, agent.name).pid == 0
+
+
+def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fallback(tmp_path):
+    blob=tmp_path/'blob'
+    blob.write_bytes(b'GGUF installed fixture')
+    snapshot=tmp_path/'snapshot'
+    snapshot.mkdir()
+    model=snapshot/'Qwen3.8-27B-Q4_K_M.gguf'
+    model.symlink_to(blob)
+    candidate=replace(info(model.name,18),path=model)
+    for asked in (str(model),str(blob)):
+        pick=localmodel.choose(asked,installed=[candidate],machine=BIG)
+        assert pick.ok and pick.ref==str(candidate.path)
+    missing=tmp_path/'elsewhere'/model.name
+    assert not localmodel.choose(str(missing),installed=[candidate],machine=BIG).ok
+    model.unlink()
+    assert not localmodel.choose(str(model),installed=[candidate],machine=BIG).ok
+
+
+@pytest.mark.parametrize('effort',['off','low','medium','high'])
+def test_reasoning_effort_never_overrides_explicit_response_budget(effort):
+    model=Script([done('answer')])
+    guarded=localtools.Guarded(model,effort=effort,limits=(60,5),stop=lambda:False)
+    guarded.chat([{'role':'user','content':'answer'}],n_predict=32000)
+    assert model.kw[-1]['n_predict'] == 32000
+    guarded.chat([{'role':'user','content':'answer'}])
+    assert 'n_predict' not in model.kw[-1]

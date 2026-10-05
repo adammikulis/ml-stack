@@ -94,7 +94,10 @@ READ_DIRS = ("ingest", "hub", "scrape", "sources", "datasheet", "gguf", "media",
              "speech", "memory", "workspace", "sentinel", "decide", "taint", "guard", "sandbox",
              "fleet/onboard", "agent", "graph")
 READ_FILES = ("web.py", "markup.py", "chat.py", "do.py", "files.py", "messages.py", "roles.py",
-              "rules.py", "extraction.py", "records.py", "jsonl/__init__.py")
+              "rules.py", "extraction.py", "records.py", "jsonl/__init__.py",
+              "gym/world_files.py", "gym/car_definition.py", "gym/drone_definition.py", "gym/traffic_world.py",
+              "fleet/request_fields.py", "fleet/gym_recording_routes.py", "fleet/workspace_routes.py",
+              "workspace/fleet_routes.py")
 FORCED = ("hub/cards.py", "hub/discover.py", "hub/listing.py", "workspace/notes.py",
           "workspace/service.py", "memory/recall.py", "memory/tools.py", "sandbox/policies.py",
           "sentinel/review.py", "decide/questions.py", "decide/pointer_prompt.py",
@@ -105,6 +108,7 @@ READ_CALLS = {"json.loads", "tomllib.loads", "tomllib.load", "struct.unpack",
 READ_ATTRS = {"read_text", "read_bytes", "readlines"}
 ROUTE_NAME = re.compile(r"path|route|tail|rest|action", re.I)
 ROUTE_DIRS = ("fleet/", "graph/", "sentinel/", "ui/")
+ROUTE_FILES = {"workspace/fleet_routes.py", "workspace/coding_routes.py", "activity/fleet_routes.py", "workspace/work_reputation.py"}
 ROLE_VALUES = {"tool", "user", "system"}
 TRUST_BY_FILE = {
     "fleet/api.py": "peer holding the cluster key; /health open to anyone",
@@ -178,7 +182,7 @@ def route_names(node: ast.Compare | ast.Call, where: str) -> list[str]:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 names.append(arg.value + "*")
         return [n for n in names if n.startswith("/") and len(n) > 2]
-    if not any(isinstance(op, (ast.Eq, ast.In)) for op in node.ops):
+    if not any(isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops):
         return []
     sides = [node.left, *node.comparators]
     if not any(ROUTE_NAME.search(ast.unparse(s)) for s in sides
@@ -196,7 +200,7 @@ def route_names(node: ast.Compare | ast.Call, where: str) -> list[str]:
 
 def find_routes(found: dict[str, Surface], where: str, tree: ast.Module) -> None:
     sub = short(where)
-    if not sub.startswith(ROUTE_DIRS):
+    if not sub.startswith(ROUTE_DIRS) and sub not in ROUTE_FILES:
         return
     table = spans(tree)
     trust = next((t for k, t in TRUST_BY_FILE.items() if sub.startswith(k)), "")
@@ -324,6 +328,17 @@ def discover() -> dict[str, Surface]:
             finder(found, where, tree)
     find_scripts(found)
     find_tools(found)
+    for kind, name, source in (
+        ("desktop", "app/src-tauri/capabilities/main.json", "app/src-tauri/capabilities/main.json"),
+        ("spawn", "scripts/test-on-linux", "scripts/test-on-linux"),
+        ("spawn", "gym/transport.py:Process.start", "src/ml_stack/gym/transport.py"),
+        ("spawn", "gym/decision_process.py:DecisionProcess.__init__", "src/ml_stack/gym/decision_process.py"),
+        ("context", "gym/vision_process.py:image_request", "src/ml_stack/gym/vision_process.py"),
+        ("spawn", "sandbox/bubblewrap.py:_probe", "src/ml_stack/sandbox/bubblewrap.py"),
+        ("route", "fleet/gym_recording_routes.py:/ui/gym/recordings*", "src/ml_stack/fleet/gym_recording_routes.py"),
+    ):
+        if (ROOT / source).is_file():
+            add(found, kind, name, source)
     return dict(sorted(found.items()))
 
 
@@ -373,8 +388,13 @@ def ref_problems(label: str, ref: str) -> list[str]:
     file = ROOT / path
     if not file.is_file():
         return [f"{label}: test file {path} does not exist"]
-    if name and not re.search(rf"def {re.escape(name)}\b", file.read_text(encoding="utf-8")):
-        return [f"{label}: {path} has no test named {name}"]
+    if name:
+        try:
+            qualified = {symbol for _start, _end, symbol in spans(ast.parse(file.read_text(encoding="utf-8")))}
+        except SyntaxError:
+            return [f"{label}: test file {path} does not parse"]
+        if name.replace('::', '.') not in qualified:
+            return [f"{label}: {path} has no test named {name}"]
     return []
 
 

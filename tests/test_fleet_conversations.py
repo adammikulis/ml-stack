@@ -37,7 +37,7 @@ class TestKeeping:
     def test_chats_are_listed_newest_first(self, store):
         a = store.start(title="older")
         b = store.start(title="newer")
-        store.rename(a.id, "older")
+        store.update(a.id, title="older")
         found = store.all()
         assert {c.id for c in found} == {a.id, b.id}
         assert found == sorted(found, key=lambda c: c.created, reverse=True)
@@ -63,12 +63,12 @@ class TestReadingBadFiles:
         assert [c.id for c in store.all()] == [good.id]
 
     def test_a_message_missing_its_role_is_dropped_not_fatal(self, store):
-        made = store.start()
-        store.append(made.id, "user", "kept")
-        path = store.root / f"{made.id}.json"
-        raw = path.read_text().replace('"role": "user"', '"rle": "user"')
-        path.write_text(raw)
-        assert store.get(made.id).messages == []
+        import json
+        store.root.mkdir(parents=True)
+        (store.root / "legacy.json").write_text(json.dumps({"id": "legacy", "created": 1,
+            "messages": [{"rle": "user", "content": "invalid"}]}))
+        assert store.get("legacy").messages == []
+
 
 
 class TestNaming:
@@ -94,3 +94,83 @@ class TestSearching:
         a = store.start(title="Everest")
         store.start(title="Kilimanjaro")
         assert [c.id for c in store.search("everest")] == [a.id]
+
+
+def test_conversation_settings_and_model_survive_reopening(store, tmp_path):
+    made = store.start(model="small", settings={"mode": "coding", "project": "/tmp/project", "effort": "low"})
+    store.append(made.id, "user", "Review the brakes")
+    store.update(made.id, model="large", settings={"temperature": .3, "max_effort": "high"}, title="Brake review")
+    again = Conversations(tmp_path / "chats").get(made.id)
+    assert again.model == "large"
+    assert again.settings["mode"] == "coding"
+    assert again.settings["project"] == "/tmp/project"
+    assert again.settings["temperature"] == .3
+    assert again.settings["effort"] == "low"
+    assert again.settings["max_effort"] == "high"
+    assert [message.content for message in again.messages] == ["Review the brakes"]
+
+
+@pytest.mark.parametrize("settings", [{"temperature": True}, {"temperature": -1}, {"temperature": float("nan")},
+                                      {"temperature": 3}, {"mode": "unknown"}, {"unknown": "setting"},
+                                      {"effort": "infinite"}, {"max_effort": "auto"}, {"role": 42}, []])
+def test_invalid_settings_leave_the_conversation_unchanged(store, settings):
+    made = store.start(title="Kept")
+    with pytest.raises(ValueError):
+        store.update(made.id, title="Changed", settings=settings)
+    assert store.get(made.id).title == "Kept"
+    assert store.get(made.id).settings == made.settings
+
+
+def test_old_saved_messages_acquire_default_settings_and_version_on_update(store):
+    import json
+    store.root.mkdir(parents=True)
+    path = store.root / "legacy.json"
+    raw = {"id": "legacy", "title": "Old chat", "model": "old-model", "created": 1,
+           "messages": [{"role": "user", "content": "Keep this message", "at": 1}]}
+    path.write_text(json.dumps(raw))
+    old = store.get("legacy")
+    assert old.model == "old-model"
+    assert old.settings["mode"] == "chat"
+    store.update("legacy", settings={"temperature": .7})
+    saved = store.get("legacy").public()
+    assert saved["version"] == 1
+    assert saved["messages"][0]["content"] == "Keep this message"
+    assert saved["settings"]["temperature"] == .7
+    assert json.loads(path.read_text()) == raw
+    store.remove("legacy")
+    assert Conversations(store.root).get("legacy") is None
+
+
+def test_conversations_link_messages_models_and_projects_in_the_graph(store):
+    from ml_stack.graph.store import GraphStore
+
+    made = store.start(model="chosen-model", settings={"project": "/tmp/project"})
+    store.append(made.id, "user", "Inspect the sensors")
+    with GraphStore(store.root / "conversations.db", buffer_pool_size=32 << 20) as graph:
+        rows = graph.query("MATCH (c:Node {id:$id})-[e:Edge]->(n:Node) "
+                           "RETURN e.rel AS relation, n.label AS label", {"id": "conversation:" + made.id})
+    assert {(row["relation"], row["label"]) for row in rows} == {
+        ("contains", "Inspect the sensors"), ("uses-model", "chosen-model"),
+        ("in-project", "/tmp/project")}
+
+
+def test_concurrent_handles_append_without_overwriting_messages(store):
+    from concurrent.futures import ThreadPoolExecutor
+
+    made = store.start()
+    def append(index):
+        Conversations(store.root).append(made.id, "user", str(index))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(append, range(12)))
+    assert sorted(int(message.content) for message in store.get(made.id).messages) == list(range(12))
+
+
+def test_plain_conversations_do_not_install_search_extensions(store, monkeypatch):
+    from ml_stack.graph.store import GraphStore
+
+    def refuse(extension):
+        raise AssertionError(f"unexpected search extension: {extension}")
+    monkeypatch.setattr(GraphStore, "load", lambda self, extension: refuse(extension))
+    made = store.start()
+    store.append(made.id, "user", "Keep this offline")
+    assert store.get(made.id).messages[0].content == "Keep this offline"

@@ -11,25 +11,27 @@ One command per tier, `scripts/test <tier>`; `-n N` asks for workers (default 4)
 argument goes to pytest. Each run queues for them in the machine-wide budget
 (`scripts/testslots.py`; `python scripts/testslots.py status`) and uses what it is granted, so
 run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default three
-quarters of the cores) and `DEV_TEST_SLOTS=off` switches the queue off.
+quarters of the cores). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.
+
+[CLAUDE.md](../CLAUDE.md#scoped-merge-gates-and-background-verification) defines when checks run: scoped merge gates, background full suites, and the current owner-directed Linux pause.
 
 | tier | what runs | when |
 | --- | --- | --- |
-| `quick` | the tests the change reaches (below) | after every edit |
-| `fast` | every test not marked `slow` or `heavy`, and not the four that import mlx while collecting | before a commit |
-| `full` | every test not marked `slow` | what bare `pytest` runs; before reporting |
+| `quick` | the tests the change reaches (below) | when relevant changed behavior needs verification |
+| `fast` | every test not marked `slow` or `heavy`, and not the four that import mlx while collecting | when broader affected coverage is justified |
+| `full` | every test not marked `slow` | background verification per batch/schedule |
 | `slow` | only the tests marked `slow` | after touching packaging, the page or the fleet |
-| `all` | everything, `--slow` included | what CI runs; before a merge |
+| `all` | everything, `--slow` included | background/CI suite, or explicit affected slow-test selectors |
 
 ```sh
 scripts/test quick --explain      # which file selected which test file
 scripts/test fast -n 2            # while a bench has the GPU
-pytest -n 0                       # one process, in file order, when a failure needs a clean order
-pytest --durations=0 --durations-min=1.8    # what is costing the wall clock
+scripts/test all tests/<affected-file>.py -n 0   # brokered sequential reproduction
+scripts/test full --durations=0 --durations-min=1.8    # scheduled background timing
 ```
 
-`-n 4` is the one to use while a measurement is running: a full `-n auto` run competes with
-the bench for cores and both get slower, and a bench's wall clock is the thing being measured.
+Use the workers granted by the maintained broker. Coordinate test concurrency with active
+benchmarks; do not reserve a fixed worker pool or bypass shared admission.
 
 ### How `quick` chooses
 

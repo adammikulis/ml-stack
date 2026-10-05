@@ -4,6 +4,7 @@
     <h1>Models</h1><p class="sub" id="models-free"></p>
     <div id="models-note" role="status"></div>
     <section class="panel" id="models-getting" hidden><h2>Downloads</h2><div id="download-rows"></div></section>
+    <section class="panel" id="models-here"><models-library></models-library></section>
     <model-browser></model-browser>
     <section class="panel" id="models-unfinished" hidden></section>
     <details class="panel capacity-panel" id="model-capacity">
@@ -41,6 +42,8 @@
         if (M.refused(m) || M.refused(run) || this.box.hidden) return;
         this.querySelector("#models-free").textContent = `${m.free_gb || 0} GiB free storage on this machine.`;
         this.browser.setInventory(m, run);
+        this.querySelector("models-library").update(m.library || [], run,
+          (path, name) => this.serve(path, name), (port) => this.halt(port));
         this.paintDownloads(m.getting || []);
         const section = this.querySelector("#models-unfinished");
         const key = JSON.stringify(m.unfinished || []);
@@ -88,14 +91,14 @@
         progress.remove(); this.progress.delete(key);
       }
     }
-    async serve(name) {
+    async serve(name, label = name) {
       if (this.starting.has(name)) return;
       this.starting.add(name);
       this.browser.setLoading(name, true);
       this.note.replaceChildren(el("div", { class: "hint" },
         el("span", { class: "spin" }), ` Starting ${name}…`));
       try {
-        const r = await api("/ui/serving", { method: "POST", body: JSON.stringify({ name }) });
+        const r = await api("/ui/serving", { method: "POST", body: JSON.stringify(name.includes("/") || name.includes("\\") ? { path: name } : { name }) });
         this.note.replaceChildren(r.error
           ? el("div", { class: "err" }, r.error)
           : el("div", { class: "ok" }, `${name} is ready. Open Chat to use it.`));
@@ -109,21 +112,45 @@
     }
 
     async halt(port) {
-      await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
-      this.draw();
-    }
-
-    async get(name, source, draft) {
-      this.note.replaceChildren(el("div", { class: "hint" },
-        el("span", { class: "spin" }), ` Getting ${name}…`));
-      const r = await api("/ui/models", { method: "POST",
-        body: JSON.stringify({ name, source, draft: draft || "" }) });
-      if (r.error) {
-        this.note.replaceChildren(el("div", { class: "err" }, r.error));
+      const stopped = await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
+      if (!stopped.ok) {
+        this.note.replaceChildren(el("div", { class:"err" }, stopped.error || "Could not stop the model server."));
         return;
       }
       this.note.replaceChildren();
       this.draw();
+    }
+
+    async get(name, source, recommendMtp = false) {
+      this.note.replaceChildren(el("p", {}, "Checking optional components?"));
+      try {
+        const found = await api("/ui/models/addons?name=" + encodeURIComponent(name) + "&source=" + encodeURIComponent(source || ""));
+        if (found.error) throw new Error(found.error);
+        const selected = {mtp: false, vision: false};
+        const choices = el("div", {class: "group"}, el("b", {}, name));
+        for (const component of found.components || []) {
+          const title = component.kind === "mtp" ? "Multi-token prediction" : "Vision";
+          if (component.status !== "available") {
+            choices.append(el("p", {class: "hint"}, title + ": " + (component.error || component.status)));
+            continue;
+          }
+          const check = el("input", {type: "checkbox"});
+          check.checked = component.kind === "mtp" && !!recommendMtp;
+          selected[component.kind] = check.checked;
+          check.onchange = () => { selected[component.kind] = check.checked; };
+          choices.append(el("label", {class: "opt"}, check, title + " ? " + M.fileSize(component.download_bytes) +
+            (component.packaging === "integrated" ? " replacement model" : " additional download")));
+        }
+        choices.append(el("button", {onclick: async () => {
+          this.note.replaceChildren(el("p", {}, "Getting " + name + "?"));
+          try {
+            const result = await api("/ui/models", {method: "POST", body: JSON.stringify({name, source, ...selected})});
+            if (result.error) throw new Error(result.error);
+            this.note.replaceChildren(); this.draw();
+          } catch (error) { this.note.replaceChildren(el("p", {class: "err"}, error.message)); }
+        }}, "Start download"), el("button", {class: "ghost", onclick: () => this.note.replaceChildren()}, "Cancel"));
+        this.note.replaceChildren(choices);
+      } catch (error) { this.note.replaceChildren(el("p", {class: "err"}, error.message)); }
     }
 
   }

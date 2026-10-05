@@ -12,10 +12,8 @@ dialog (`ML_STACK_NOTIFY`), MTP draft heads on by default, the typed `decide()` 
 
 Open, and known limits (each is a task or a gap, not a done item):
 
-- [ ] **The release signing key does not exist yet.** `ssh-keygen -t ed25519`, put the private
-  key in the repository secret `RELEASE_SIGNING_KEY`, paste the public line into
-  `signing.RELEASE_KEY`. Until then `release.yml` fails at "sign the downloads" and the updater
-  and `--track` refuse everything (`docs/release.md`). `packaging/install.sh` and `install.ps1`
+- [ ] **The release signing key does not exist yet.** Run `scripts/release-key create --write` at a
+  terminal and commit `src/ml_stack/fleet/signing.py`. `packaging/install.sh` and `install.ps1`
   still install an unsigned download.
 
 - [ ] **No real OS keystore prompt has been driven by hand.** Tests use fakes and the real-keystore
@@ -109,11 +107,9 @@ capability; every line is something that already exists not being what it says.
 - No context trimming: a task is held inside the 32768-token context by its caps. A task with large
   tool results needs a trim that drops whole oldest turns at a fixed boundary.
 - The guard's model-based screen (`native_screen`) is not attached to the local agent's chat.
-- `agent start` takes no `--think`; effort replaces it. The Agents panel is served by `board-serve`
-  only; the shell that hosts the Board needs to mount `localroute.respond` with its own session check.
 - `--orders-from` defaults to `claude-code`: whoever registers that id is obeyed.
-- The agent has no worktree of its own and no coding tools (it uses `ml-stack-chat`'s tools); a
-  `ml-stack-claude` adapter is the next piece (`docs/notes/agent-control-plane.md`).
+- The general local agent has no worktree of its own; Coding mode works in the selected project
+  directly, so edits need a separate checkout when isolation is required.
 
 ### Sentinel wiring (`docs/sentinel.md`, "What is armed by default")
 

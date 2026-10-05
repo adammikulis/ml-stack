@@ -76,7 +76,7 @@ def test_a_killed_holder_frees_its_workers(tmp_path):
     waiter = _spawn(tmp_path, 4, 4, 0.1, "waiter")
     time.sleep(1.0)
     assert waiter.poll() is None                              # still waiting behind the live holder
-    holder.send_signal(signal.SIGKILL)
+    holder.kill()
     assert waiter.wait(timeout=30) == 0
     assert [r["label"] for r in _records(tmp_path)] == ["waiter"]
 
@@ -178,7 +178,7 @@ def test_a_killed_heavy_test_frees_its_lane(tmp_path):
                               env=env)
     time.sleep(1.0)
     assert waiter.poll() is None
-    holder.send_signal(signal.SIGKILL)
+    holder.kill()
     assert waiter.wait(timeout=30) == 0
     holder.wait(timeout=10)
 
@@ -452,7 +452,7 @@ with Path(os.environ["TEST_LOG"]).open("a") as stream:
 
 
 def test_live_incomplete_records_do_not_crash_admission(tmp_path):
-    import fcntl
+    from ml_stack.lock import take
 
     directory = tmp_path / 'slots'
     directory.mkdir()
@@ -462,7 +462,7 @@ def test_live_incomplete_records_do_not_crash_admission(tmp_path):
             path = directory / f'0-{index}.slot'
             descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
             descriptors.append(descriptor)
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            assert take(descriptor)
             path.write_text(document)
         processes = [_spawn(tmp_path, 2, 1, .02, f'valid-{index}') for index in range(12)]
         assert all(process.wait(timeout=10) == 0 for process in processes)
@@ -581,7 +581,7 @@ def _concurrent_lease(module, index):
 
 def test_rpc_admission_survives_a_live_incomplete_record(tmp_path, monkeypatch):
     import concurrent.futures
-    import fcntl
+    from ml_stack.lock import take
 
     rpc = _rpc_module()
     monkeypatch.setenv('DEV_TEST_SLOTS_DIR', str(tmp_path / 'slots'))
@@ -589,7 +589,7 @@ def test_rpc_admission_survives_a_live_incomplete_record(tmp_path, monkeypatch):
     directory = rpc.testslots.slots_dir()
     damaged = directory / '0-incomplete.slot'
     descriptor = os.open(damaged, os.O_RDWR | os.O_CREAT, 0o600)
-    fcntl.flock(descriptor, fcntl.LOCK_EX)
+    assert take(descriptor)
     damaged.write_text('{}')
     server = rpc.Admission(False)
     try:

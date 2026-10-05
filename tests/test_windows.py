@@ -403,7 +403,7 @@ class TestPrivateFile:
         monkeypatch.setattr(platform_module.subprocess, "run",
                             lambda argv, **k: ran.append(list(argv)) or _ok())
         monkeypatch.setenv("USERNAME", "fixture-user")
-        create_cluster_key(tmp_path / "cluster.key")
+        create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
         assert any(argv[0] == "icacls" and argv[1].endswith("cluster.json") for argv in ran)
 
 
@@ -447,7 +447,7 @@ class TestAutostartOnWindows:
         wrapper = Path(create[create.index("/TR") + 1].strip('"'))
         assert wrapper == done.path == tmp_path / "ml-stack-traind.cmd"
         body = wrapper.read_text()
-        assert '"C:\\Tools\\ml stack\\ml-stack-traind.exe" --slots 2 --label prep' in body
+        assert "-m ml_stack.fleet.launch --no-browser --slots 2 --label prep" in body
         assert str(tmp_path / "traind.log") in body, "a task's /TR cannot redirect; the wrapper does"
         assert ["schtasks", "/Run", "/TN", auto.LOGIN_TASK] in ran, "started now, not at the next logon"
         assert not (tmp_path / "startup.cmd").exists()
@@ -462,7 +462,7 @@ class TestAutostartOnWindows:
         assert done.installed
         assert done.path == tmp_path / "startup.cmd"
         assert "Startup folder" in done.note and "Access is denied" in done.note
-        assert "ml-stack-traind.exe" in done.path.read_text()
+        assert "-m ml_stack.fleet.launch --no-browser" in done.path.read_text()
 
     def test_changing_the_answer_ends_and_deletes_the_logon_task(
             self, win_autostart, monkeypatch, tmp_path):
@@ -549,7 +549,7 @@ class TestDiscoveryAndTheFirewall:
         from ml_stack.fleet import discovery
         from ml_stack.fleet.discovery import Advertiser, Beacon, _verify
 
-        discovery.create_cluster_key(tmp_path / "cluster.key")
+        discovery.create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
         key = discovery.load_cluster_key(tmp_path / "cluster.key")
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as ear:
             ear.bind(("127.0.0.1", 0))
@@ -603,9 +603,9 @@ class TestDiscoveryAndTheFirewall:
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
         assert not [f for f in setup.look() if f.name == "firewall"]
 
-    def test_peers_init_says_how_to_copy_the_key_in_powershell(self, capsys, tmp_path):
+    def test_peers_init_uses_recovery_on_windows_to_preserve_the_name(self, capsys, tmp_path):
         from ml_stack.fleet.peers import main
 
-        assert main(["--cluster-key", str(tmp_path / "cluster.key"), "init"]) == 0
+        assert main(["--cluster-key", str(tmp_path / "cluster.key"), "init", "--group", "Cedar lab"]) == 0
         out = capsys.readouterr().out
-        assert "chmod 600" in out and "Set-Content" in out
+        assert "recovery export" in out and "recovery import" in out and "PowerShell" in out

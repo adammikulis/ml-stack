@@ -97,7 +97,7 @@ class SealedGraph:
         self._g, self._stamp = g, stamp
         return g
 
-    def edit(self, change: Callable[[GraphStore], Any]) -> Any:
+    def edit(self, change: Callable[[GraphStore], Any], *, keep_previous: bool = True) -> Any:
         """Run ``change`` on the graph under the file lock and seal the result."""
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with lock.only_one(self.path.parent / "store.lock", timeout=10, announce=lambda _: None):
@@ -105,12 +105,15 @@ class SealedGraph:
             if g is None:
                 if self.status == "locked":
                     raise vault.KeyUnavailable(self.why)
-                raise Tampered(f"{self.why}; `ml-stack-reputation forget --all` starts a new store")
+                raise Tampered(f"{self.why}; restore an authenticated backup before changing this store")
             out = change(g)
-            self._save(g)
+            self._save(g, keep_previous=keep_previous)
+            if not keep_previous:
+                self.prev.unlink(missing_ok=True)
+                self._stamp = None
             return out
 
-    def _save(self, g: GraphStore) -> None:
+    def _save(self, g: GraphStore, *, keep_previous: bool = True) -> None:
         self.path.parent.chmod(0o700)
         key = self.keys.keys(self._salt, create=True)[0]
         snap = {"schema_version": SCHEMA_VERSION, "nodes": g.nodes(), "edges": g.edges(),
@@ -119,7 +122,7 @@ class SealedGraph:
         blob = vault.seal_blob(plain, key, mode=self.keys.mode, salt=self._salt, owner=self.owner)
         with files.writing(self.path) as tmp:
             tmp.write_bytes(blob)
-            if self.status == "ok":
+            if self.status == "ok" and keep_previous:
                 files.promote(self.path, self.prev)
         main, prev = self._bytes(self.path), self._bytes(self.prev)
         self._stamp = (hashlib.sha256(main or b"").hexdigest(), hashlib.sha256(prev or b"").hexdigest())

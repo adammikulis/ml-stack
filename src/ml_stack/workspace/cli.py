@@ -15,19 +15,25 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
+from ml_stack.http import ServerError
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
     chat,
+    coordinator_client,
+    coordinator_config,
     filecli,
     guide,
     limits,
     localcli,
     localroute,
+    nudge,
     onboard,
     project,
     remote_cli,
+    task_integration,
+    task_outcomes,
     tokens,
 )
 from ml_stack.workspace.boardapi import Follow
@@ -35,22 +41,25 @@ from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
 from ml_stack.workspace.bus import CALL_TYPES, TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
+from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
 from ml_stack.workspace.modelid import describe
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused, fence
 from ml_stack.workspace.service import Workspace
+from ml_stack.workspace.taskboard import TaskBoard
 
 __all__ = ["COMMANDS", "main"]
 
 CANCELLED = threading.Event()
 LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
-CODES = ((Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
+CODES = ((ServerError, 3), (Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
          (HumanRequired, 3), (EOFError, 2), (ValueError, 2), (OSError, 2))
 Handler = Callable[[argparse.Namespace, Workspace, str], Any]
 
 COMMON = [option("json"),
+          flag("--request-id", default="", help="reuse an exact remote mutation request after a lost response"),
           flag("--token-file", default="", help=f"a file holding the sender's token "
                                                 f"(else --agent, else ${TOKEN_ENV}, "
                                                 f"else ${tokens.AGENT_ENV})"),
@@ -279,7 +288,12 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"joined as {onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))}")
+    if args.coordinator:
+        coordinator_client.connect(limits.root(), args.coordinator)
+    remote = coordinator_client.client(limits.root())
+    name = remote.join(limits.root(), args.code, args.name, args.model, args.harness) if remote else onboard.join(
+        ws, args.code, args.name, claim=(args.model, args.harness))
+    say(f"joined as {name}")
     return 0
 
 
@@ -372,9 +386,29 @@ def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _nudging(args: argparse.Namespace) -> int:
+    if args.hook:
+        return _hook(args)
     line = Workspace().nudge(_token(args))
     if line:
         say(line)
+    return 0
+
+
+def _hook(args: argparse.Namespace) -> int:
+    stdin = sys.stdin.read() if args.hook == "stop" and not sys.stdin.isatty() else ""
+    try:
+        out = nudge.output(args.hook, Workspace().waiting(_token(args)), stdin)
+    except tuple(kind for kind, _ in CODES):
+        return 0
+    if out:
+        say(out)
+    return 0
+
+
+def _install_hooks(args: argparse.Namespace, ws: Workspace) -> int:
+    path = Path(args.settings).expanduser()
+    events = onboard.install_hooks(path, args.agent or "claude-code")
+    say(f"wrote {', '.join(events)} to {path}")
     return 0
 
 
@@ -404,6 +438,7 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
+        flag("--coordinator", default="", help="select this enrolled Fleet coordinator before redeeming the invite"),
         flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")],
      _join),
@@ -430,6 +465,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
     ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
      [flag("tool", choices=("claude-code", "codex"))], _hook_snippet),
+    ("install-hooks", "write the nudge hooks (PostToolUse, Stop, UserPromptSubmit) into Claude Code's "
+     "settings; at a terminal", [flag("--settings", default="~/.claude/settings.json",
+                                      help="the Claude Code settings file")], _install_hooks),
     ("brief", "print the short brief a parent pastes into a subagent's prompt", [flag("name")],
      _brief),
 )
@@ -458,6 +496,25 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
                         "done, blocked only)"), flag("type", choices=CALL_TYPES),
         flag("body"), flag("--subject", default=""), flag("--reply-to", type=int, default=0),
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
+    ("task-create", "create a canonical task in your existing project grant", [flag("payload")],
+     lambda a, w, t: TaskBoard(w).create(t, json.loads(_body(a.payload)))),
+    ("tasks", "authorized canonical tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
+    ("task", "task lease, checkpoints, proposal and independent review", [flag("id")],
+     lambda a, w, t: TaskBoard(w).get(t, a.id)),
+    ("task-claim", "claim a queued task with an existing trusted allocation", [flag("id"), flag("allocation_id")],
+     lambda a, w, t: TaskBoard(w).claim(t, a.id, a.allocation_id)),
+    ("task-heartbeat", "renew your active canonical task lease", [flag("id")],
+     lambda a, w, t: TaskBoard(w).heartbeat(t, a.id)),
+    ("task-checkpoint", "save your active task checkpoint (JSON or - for stdin)", [flag("id"), flag("payload")],
+     lambda a, w, t: TaskBoard(w).checkpoint(t, a.id, json.loads(_body(a.payload)))),
+    ("task-submit", "submit immutable artifact hashes for review (JSON or -)", [flag("id"), flag("payload")],
+     lambda a, w, t: TaskBoard(w).submit(t, a.id, json.loads(_body(a.payload)))),
+    ("task-review", "independently review an authorized task (JSON or -)", [flag("id"), flag("payload")],
+     lambda a, w, t: task_outcomes.review(w, t, a.id, json.loads(_body(a.payload)))),
+    ("task-credit", "retry recording an authorized immutable outcome", [flag("id")],
+     lambda a, w, t: task_outcomes.credit(w, t, a.id)),
+    ("task-integrate", "gate and publish an independently accepted committed native task", [flag("id")],
+     lambda a, w, t: task_integration.integrate(w, t, a.id)),
     ("inbox", "unread messages, fenced as data", [
         *READ,
         flag("--children", action="store_true", help="only messages from your delegates")],
@@ -531,7 +588,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: {"path": w.scratch_path(t, a.name, a.relative, a.owner)}),
     ("scratch-rm", "delete a scratch folder", [flag("name"), OWNER],
      lambda a, w, t: {"removed": w.scratch_rm(t, a.name, a.owner)}),
-    ("claim", "own a branch, worktree, port, file or server", [
+    ("claim", "own a branch, worktree, port, file, area, install environment or server", [
         *CLAIM, flag("--ttl", type=float, default=0.0, help="seconds; renew with heartbeat"),
         flag("--pid", type=int, default=0, help="release when this process is gone"),
         flag("--note", default="")], _claim),
@@ -574,7 +631,16 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        result = handler(args, Workspace(), _token(args))
+        remote = coordinator_client.client(limits.root())
+        if remote:
+            options = next(options for name, _help, options, _fn in TABLE if name == args.cmd)
+            for field in ('body', 'text', 'payload'):
+                if getattr(args, field, '') == '-':
+                    setattr(args, field, _body('-'))
+            result = remote.command(coordinator_client.argv_for(args, [*COMMON, *options]),
+                                    _token(args), request_id=args.request_id)
+        else:
+            result = handler(args, Workspace(), _token(args))
         _show(args, result)
         _held_note(result)
         return 0
@@ -606,7 +672,11 @@ def _remote(args: argparse.Namespace) -> int:
 COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared project board on its host",
              options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
-    return _guarded(lambda args: handler(args, Workspace()))
+    def run(args):
+        if coordinator_client.client(limits.root()) and handler is not _join:
+            raise Denied('this is a local-only operation; this device uses a shared coordinator')
+        return handler(args, Workspace())
+    return _guarded(run)
 
 
 for _name, _help, _options, _handler in BARE:
@@ -615,9 +685,37 @@ for _name, _help, _options, _handler in BARE:
                           *_options])
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
+
+
+def _coordinator(args):
+    base = limits.root()
+    if args.action == 'host':
+        human.require_person("choose the workspace coordinator")
+        ws = Workspace()
+        if ws.auth(_token(args)).role != 'human':
+            raise Denied('only the workspace person selects its coordinator')
+        result = coordinator_config.save(base, {'mode': 'host', 'workspace': workspace_id(ws)})
+    elif args.action == 'connect':
+        result = coordinator_client.connect(base, args.name)
+    elif args.action == 'list':
+        result = [{'name': peer.name, 'endpoint': peer.base_url, **info}
+                  for peer, info in coordinator_client.discover()]
+    else:
+        result = coordinator_config.load(base) or {'mode': 'local', 'shared': False}
+    if isinstance(result, dict):
+        result = {key: value for key, value in result.items() if key != 'cert'}
+    _show(args, result)
+    return 0
+
+
+COMMANDS.add("coordinator", _guarded(_coordinator),
+             help="inspect, host or select one authenticated Fleet workspace coordinator",
+             options=[*COMMON, flag("action", choices=('status', 'list', 'host', 'connect')),
+                      flag("name", nargs='?', default='')])
 COMMANDS.add("nudge", _guarded(_nudging),
-             help="print one line counting what waits for you (nothing when nothing does); for hooks",
-             options=COMMON)
+             help="print one line summarising what waits for you (nothing when nothing does); for hooks",
+             options=[*COMMON, flag("--hook", default="", choices=("", *nudge.EVENTS),
+                                    help="print the JSON a Claude Code hook of this kind expects")])
 COMMANDS.add("watch", _guarded(_watching),
              help="print messages as they arrive; --once exits after one",
              options=[*COMMON, *WIDEN, flag("--once", action="store_true"),

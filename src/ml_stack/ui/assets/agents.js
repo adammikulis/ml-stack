@@ -66,13 +66,18 @@ class MlAgents extends MlElement {
       placeholder: "local-" });
     this.modelField = h("input", { type: "text", id: "model", spellcheck: "false", autocomplete: "off",
       value: "auto" });
+    this.modelField.addEventListener("input", () => this.update());
     this.projectField = h("input", { type: "text", id: "project", spellcheck: "false", autocomplete: "off",
       placeholder: "optional" });
-    this.role = h("ml-select", { label: "What it may do", value: "" });
-    this.effort = h("ml-select", { label: "Effort", hint: "Off thinks least and answers fastest", value: "off" });
+    this.roleControl = h("ml-select", { label: "What it may do", value: "" });
+    this.effort = h("ml-select", { label: "Reasoning effort", hint: "Off thinks least and answers fastest", value: "off" });
     this.profile = h("ml-select", { label: "Kind of work", hint: "Coding serves a 256K context with Qwen3.8-27B",
-      value: "chat", options: [{ value: "chat", label: "chat (32K)" }, { value: "coding", label: "coding (256K)" }] });
-    this.ceiling = h("ml-select", { label: "Most it may give itself", hint: "It can raise its own effort up to this",
+      value: "chat" });
+    this.profile.options = [{value:"chat",label:"Chat"},{value:"coding",label:"Coding"}];
+    this.contextField = h("input", { type:"text", id:"context", value:"32K" });
+    this.harness = h("ml-select", { label:"Harness", value:"ml-stack-agent" });
+    this.profile.addEventListener("change", event => { if (event.detail?.value) { this.contextField.value = event.detail.value === "coding" ? "256K" : "32K"; this.update(); } });
+    this.ceiling = h("ml-select", { label: "Maximum reasoning effort", hint: "It can raise its own effort up to this",
       value: "medium" });
     this.go = h("button", { class: "go", type: "button", onclick: () => this.start() }, "Start a local agent");
     this.note = h("span", { class: "note", role: "status", "aria-live": "polite" });
@@ -83,10 +88,12 @@ class MlAgents extends MlElement {
       h("section", {},
         h("h2", {}, "Start a local agent"),
         h("div", { class: "grid" },
-          h("div", {}, h("label", { for: "model" }, "Model"), this.modelField),
           h("div", {}, h("label", { for: "name" }, "Name"), this.nameField),
           h("div", {}, h("label", { for: "project" }, "Project folder"), this.projectField),
-          this.role, this.profile, this.effort, this.ceiling),
+          this.roleControl, this.profile),
+        h("details", {}, h("summary", {}, "Advanced options"),
+          h("div", {class:"grid"}, h("div", {}, h("label", {for:"model"}, "Exact model path or reference (auto selects for the kind of work)"), this.modelField), this.effort, this.ceiling, this.harness,
+            h("div", {}, h("label", {for:"context"}, "Context length"), this.contextField))),
         this.rolesEl, this.preview,
         h("div", { class: "row" }, this.go, this.note)),
       h("section", {}, h("h2", {}, "Running agents"), this.list));
@@ -115,6 +122,7 @@ class MlAgents extends MlElement {
       : { method: "POST", credentials: "same-origin",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify(body) };
+    if (this.base().startsWith("/ui/")) Object.assign(init.headers, window.fleetModel?.headers || {"X-ML-Stack-UI":"1"});
     const r = await fetch(`${this.base()}/${route}`, init);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(data.error || `${r.status}`), { hint: data.hint });
@@ -125,16 +133,19 @@ class MlAgents extends MlElement {
     try {
       const data = await this.call("list");
       this.agents = data.agents ?? [];
+      this.saved = data.saved ?? [];
+      this.harness.options = (data.harnesses ?? []).map(name => ({value:name,label:name}));
       if (!this.roleList.length) {
         this.roleList = data.roles ?? [];
-        this.role.options = this.roleList.map((r) => ({ value: r.name, label: r.name }));
-        this.role.value = line(data.default_role, 40);
+        this.roleControl.options = this.roleList.map((r) => ({ value: r.name, label: r.name }));
+        this.roleControl.value = line(data.default_role, 40);
         const levels = (data.efforts ?? []).map((e) => ({ value: e, label: e }));
         this.effort.options = levels;
         this.ceiling.options = levels.filter((l) => l.value !== "auto");
         this.effort.value = line(data.default_effort, 12);
         this.ceiling.value = line(data.default_max_effort, 12);
       }
+      if (!this.settingsLoaded && this.saved.length) { this.applySettings(this.saved[0]); this.settingsLoaded = true; }
       this.failed = false;
       this.delay = nextDelay(this.delay, false);
     } catch {
@@ -158,13 +169,23 @@ class MlAgents extends MlElement {
     try {
       const got = await this.call("start", {
         model: this.modelField.value.trim() || "auto", name: this.nameField.value.trim(),
-        role: this.role.value, profile: this.profile.value || "chat", effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim() });
+        role: this.roleControl.value, profile: this.profile.value || "chat", effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim(),
+        harness:this.harness.value, ctx:this.contextField.value.trim() });
       this.say(got.already ? `${line(got.name, 48)} is already running.` : `${line(got.name, 48)} started.`, false);
     } catch (e) {
       this.say(`${line(e.message, 300)}${e.hint ? ` Run: ${line(e.hint, 200)}` : ""}`, true);
     }
     this.busy = false;
     this.load();
+  }
+
+  applySettings(saved) {
+    this.nameField.value = saved.name; this.modelField.value = saved.model;
+    this.projectField.value = saved.project; this.roleControl.value = saved.role;
+    this.profile.value = saved.profile; this.effort.value = saved.effort;
+    this.ceiling.value = saved.max_effort; this.harness.value = saved.harness;
+    this.contextField.value = String(saved.ctx);
+    this.update();
   }
 
   async stop(name) {
@@ -189,10 +210,14 @@ class MlAgents extends MlElement {
     this.go.toggleAttribute("disabled", this.busy);
     this.rolesEl.replaceChildren(...this.roleList.map((r) =>
       h("li", {}, h("b", {}, line(r.name, 40)), ` ${line(r.summary, 200)}`)));
-    const m = this.model;
-    this.preview.textContent = !m ? "" : m.ok
-      ? `auto uses ${line(m.name, 80)}${m.size_bytes ? ` (${fmt(m.size_bytes, "bytes-iec")})` : ""}.`
-      : `${line(m.problem, 300)}${m.hint ? ` Run: ${line(m.hint, 200)}` : ""}`;
+    const selected = this.modelField.value.trim() || "auto";
+    const m = this.model?.profiles?.[this.profile.value || "chat"] || this.model;
+    this.preview.textContent = selected !== "auto"
+      ? `Selected model: ${line(selected.split(/[\\/]/).pop(), 120)}`
+      : !m ? "Checking the automatic model choice…" : m.ok
+        ? `Auto for ${this.profile.value || "chat"}: ${line(m.name, 80)}${m.size_bytes ? ` (${fmt(m.size_bytes, "bytes-iec")})` : ""}.`
+        : `${line(m.problem, 300)}${m.hint ? ` Run: ${line(m.hint, 200)}` : ""}`;
+    this.preview.title = selected === "auto" ? "" : selected;
     this.list.replaceChildren(...(this.failed
       ? [h("p", { class: "note error", role: "alert" }, "The workspace did not answer.")]
       : this.agents.length ? this.agents.map((a) => this.card(a))
@@ -208,6 +233,7 @@ class MlAgents extends MlElement {
         h("b", {}, line(a.name, 48)),
         h("ml-chip", { verdict: VERDICT[a.state] || "none", label: line(a.state, 20) }),
         h("span", { class: "spacer" }),
+        h("button", {type:"button", onclick:() => this.applySettings(this.saved.find(row => row.name === a.name))}, "Use settings"),
         h("button", { class: "stop", type: "button", onclick: () => this.stop(a.name) }, "Stop")),
       h("div", { class: "meta" },
         `${line(a.model, 80)} on ${line(a.harness, 24)}, ${line(a.role, 40)}`

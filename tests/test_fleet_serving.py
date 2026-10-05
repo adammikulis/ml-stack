@@ -9,6 +9,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler
 
 import pytest
 
@@ -55,7 +57,7 @@ class Running:
 @pytest.fixture
 def model():
     """A model server that streams a reply with real gaps between its pieces."""
-    m = FakeLlamaServer(Served(answer="hello", gap=0.25,
+    m = FakeLlamaServer(Served(model="qwen3-4b.gguf", answer="hello", gap=0.25,
                                pieces=tuple(f"tok{n}" for n in range(8))))
     try:
         yield m
@@ -74,7 +76,61 @@ def wired(tmp_path, model):
         d.close()
 
 
+@contextmanager
+def metadata_server(body, *, redirect=""):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302 if redirect else 200)
+            if redirect:
+                self.send_header("Location", redirect)
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_):
+            pass
+
+    server = Server(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+
 class TestRegistry:
+    @pytest.mark.parametrize("port", [-1, 0, 65536, True, "8080", None])
+    def test_invalid_persisted_ports_are_never_probed(self, tmp_path, port):
+        path = tmp_path / "serving.json"
+        path.write_text(json.dumps([{"port": port, "models": ["claim.gguf"]}]))
+        registry = Serving(path)
+        assert registry.all() == registry.live(force=True) == []
+
+    @pytest.mark.parametrize("body", [[], {"data": None}, {"data": 3}, {"data": [None, {"id": 3}, {"id": ""}]}])
+    def test_malformed_metadata_does_not_advertise_registration_claims(self, tmp_path, body):
+        with metadata_server(body) as port:
+            registry = Serving(tmp_path / "serving.json")
+            registry.register(port, ["claim.gguf"])
+            assert registry.live(force=True) == []
+            assert registry.all()[0].models == ["claim.gguf"]
+
+    def test_metadata_redirect_cannot_borrow_another_endpoints_identity(self, tmp_path, model):
+        with metadata_server({}, redirect=f"http://127.0.0.1:{model.port}/v1/models") as port:
+            registry = Serving(tmp_path / "serving.json")
+            registry.register(port, ["claim.gguf"])
+            assert registry.live(force=True) == []
+            assert registry.all()[0].models == ["claim.gguf"]
+
+    def test_recycled_port_reports_its_actual_model_and_prunes_dead_rows(self, tmp_path, model):
+        registry = Serving(tmp_path / "serving.json")
+        registry.register(model.port, ["stale-claim.gguf"])
+        registry.register(free_port(), ["dead-claim.gguf"])
+        live = registry.live(force=True)
+        assert [(one.port, one.models) for one in live] == [(model.port, ["qwen3-4b.gguf"])]
+        assert [(one.port, one.models) for one in registry.all()] == [(model.port, ["qwen3-4b.gguf"])]
+
     def test_a_registered_server_that_died_is_not(self, tmp_path, model):
         """Registration is a claim. A beacon advertising a model nobody can reach
         sends work to a dead port."""
@@ -155,12 +211,13 @@ class TestProxy:
                          {"messages": [{"role": "user", "content": "hi"}]}) as r:
             assert json.loads(r.read())["choices"][0]["message"]["content"] == "hello"
 
-    def test_a_server_that_wants_a_key_it_was_not_given_answers_401(self, wired):
-        daemon, _, model = wired
+    def test_an_unauthenticated_model_identity_is_not_advertised(self, wired):
+        daemon, serving, model = wired
         model.api_key = "not-in-the-key-file"
         with pytest.raises(urllib.error.HTTPError) as exc:
             daemon.post("/infer/v1/chat/completions", {"messages": []})
-        assert exc.value.code == 401
+        assert exc.value.code == 503
+        assert serving.live(force=True) == []
 
     def test_a_plain_completion_comes_back(self, wired):
         daemon, _, _ = wired

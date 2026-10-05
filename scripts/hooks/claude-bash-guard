@@ -29,6 +29,10 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rules_loader
 
 # The start of a command, past any NAME=value the caller put in front of it.
 RUN = r"(^|[;&|(]\s*|\bthen\s+|\bdo\s+|\bexec\s+)(\w+=\S*\s+)*"
@@ -147,6 +151,12 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = without_heredocs((event.get("tool_input") or {}).get("command") or "")
+    rules = rules_loader.load()
+    why = rules.bash_refusal(command, event.get("cwd") or "") if rules else ""
+    if why:
+        print(f"blocked: {why}\n\n(ml-stack scripts/hooks/claude-bash-guard. Set "
+              f"MLSTACK_GUARD=off for a person's own session.)", file=sys.stderr)
+        return 2
     command = without_search_patterns(command)
     for pattern, instead in REFUSE:
         if re.search(pattern, command, re.M):

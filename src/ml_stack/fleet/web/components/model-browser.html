@@ -163,7 +163,7 @@
             `Estimated up to ${M.ctxWords(chosen.estimated_context)} at Q8 KV; other apps reduce available memory.`) : null,
             chosen.bits_per_weight ? el("span", { class: "why" }, `${chosen.bits_per_weight} bits per weight`) : null));
         const button = this.source === "hub"
-          ? el("button", { class: "ghost small", onclick: () => this.owner.get(name, chosen.ref, chosen.draft_ref) }, "Download")
+          ? el("button", { class: "ghost small", onclick: () => this.owner.get(name, chosen.ref, !!(chosen.draft_ref || chosen.mtp_ref)) }, "Download")
           : chosen.local ? (this.run.can_serve
             ? el("button", { class: active ? "ghost small" : "small", onclick: () => active
                 ? this.owner.halt(running.get(name)) : this.owner.serve(name) }, active ? "Stop" : "Run")

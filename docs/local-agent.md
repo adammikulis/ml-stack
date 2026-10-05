@@ -26,11 +26,15 @@ a link, `/agents?session=...`, that sets the browser session cookie the start an
    pid and start time are recorded, and its log is `local-agents/NAME.log`. The same name again
    reports the running agent and changes nothing.
 4. **Model lease.** The loop leases the model from the broker (memory admission and the queue are the
-   broker's) on one slot, thinking per request, multi-token prediction on where ml-stack offers it.
+   broker's) on one slot using the maintained harness profile: measured settings, the requested
+   context, q8 KV cache, an installed matching MTP head, and the maintained patched chat template.
+   Installed Hub references select the cached snapshot path without downloading. A compatible
+   managed server used by Chat or Coding is reused across ports; different head, template, cache,
+   or context requirements remain distinct.
    A refusal ends the agent with `failed` and the broker's one-line reason.
 
-`stop` writes the stop file, sends SIGTERM (SIGKILL after 20 s), releases the lease, revokes the
-token and removes the files except the log.
+`stop` stops the owned process and releases its lease. Its saved identity, token, settings and
+device account remain available for the next start.
 
 ## Taking and giving orders
 
@@ -54,7 +58,12 @@ Caps per task: 12 tool-calling rounds, 30 tool calls, 24 model calls, 600 s, and
 
 ## Effort and the prompt cache
 
-Effort is compute only: `off` (no thinking, 2048 tokens a reply), `low`, `medium`, `high` (16384).
+Effort selects reasoning: `off`, `low`, `medium`, or `high`. Native coding sends the
+selected model family's thinking flag in `CLAUDE_CODE_EXTRA_BODY`; `off` explicitly disables
+Qwen template thinking. It does not impose an output limit from the effort level. Explicit
+caller output budgets are retained; otherwise the native harness uses its own output default.
+An explicit caller `MAX_THINKING_TOKENS=0` also disables template thinking. The runtime
+does not generate a thinking-token limit that can carry over when effort changes.
 The default is `off`. The model may raise or lower its own effort with `set_effort(level, reason)` up
 to `--max-effort` (default `medium`); above the ceiling is refused with the ceiling in the message.
 The change applies from the next task, so a task's prompt is never rewritten; it is recorded in the
@@ -73,9 +82,28 @@ checks this against a fake server.
 `--profile chat` (default) serves 32K with the caps above. `--profile coding` is 256K (`--ctx 256k`
 accepts k and K) with Qwen3.8-27B (Q4_K_XL first; `ml-stack-serve memory` rates it 27.2 GiB at 256K,
 q8_0 cache, MTP head shared) and caps of 60 rounds, 150 calls, 120 model calls and an hour. A coding
-agent runs on the Codex harness through `ml_stack.harness.launch_coding_agent(model, role, project,
+agent runs on the Codex harness through `ml_stack.coding.launch_coding_agent(model, role, project,
 harness='codex')`; until that lands `start` prints the one command to run (`localharness.stub_command`).
 Flash-Next is used only when named with `--model`. Before starting, the memory estimator checks the
 context; when it does not fit, `start` says the longest context that does and prints the person-only
 `ml-stack-serve memory --for ... --apply`. Past 85% of the context the chat loop drops whole oldest turns
 down to 50%, leaving one fixed marker; nothing kept is edited, so the cached prefix survives.
+
+
+Coding agents retain their registered workspace identity and process authorized inbox tasks
+serially through the maintained native harness. The parent worker reads task data and posts
+threaded results; the model does not need workspace shell access to finish or report a job.
+Each task has a graph conversation, native session, bounded runtime and cancellable process.
+The task role and native sandbox remain in force. An idle worker waits without running inference.
+
+The local-agent routes accept POST `/agents/pause` and `/agents/resume` with `{"name":"NAME"}`
+under the same person-session guard as start/stop. Pause takes effect before the next task; an
+active task finishes first. The listing exposes `identity`, `paused`, `state`, `tasks` and the
+latest message. Stopping a delegated worker revokes its child token, preserving its parent.
+`agent.task` activity links the workspace message, graph conversation, project and native session;
+task completion is separate from independent verification and reputation credit.
+
+Coding start accepts `harness` (`codex` or `claude`), also available as CLI `--harness`.
+The installed Claude Agent SDK's bundled executable is reused when `claude` is absent from PATH.
+The person-authorized start registers one worker identity before launching its inbox loop;
+native tasks reuse that identity rather than minting a new agent for each job.

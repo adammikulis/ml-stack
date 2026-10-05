@@ -69,6 +69,26 @@ extras are installed from -- `python packaging/build.py --wheelhouse` fills one,
 gets ml-stack and none of its extras, and the install says which parts those are. `--uninstall` takes it off and leaves the model
 cache where it is.
 
+For an owned local telemetry source checkout, build its wheel explicitly:
+
+```sh
+python packaging/build.py --metal-smi-source /path/to/metal-smi --wheelhouse
+```
+
+The builder snapshots the source into a temporary directory, builds without dependency
+wheels, and validates that its metadata provides `metal-smi>=1.1.0`. The source checkout,
+including uncommitted changes, stays untouched. The validated wheel lands beside the
+ml-stack wheel in `dist/` and is included in a standalone bundle. Dependency wheelhouse
+resolution searches both `dist/` and `dist/wheels/`; rebuilding ml-stack preserves owned
+and dependency wheels. A source option is explicit, with no machine-specific path or
+unpublished remote reference embedded in ml-stack's dependency metadata.
+
+Until `metal-smi>=1.1.0` is published on the public package index, a generic macOS
+`pip install 'ml-stack[all]'` cannot resolve telemetry from that index alone. Use the
+validated local wheel or a bundle containing it, for example
+`python -m pip install --find-links dist '.[telemetry]'` from the source checkout. This
+build option creates local install artifacts; it does not publish or commit either project.
+
 Past the install, every step is an ml-stack command rather than shell -- `ml-stack-setup`
 (what this machine can do), `ml-stack-serve build` (llama.cpp), `ml-stack-models fetch`
 (into the one cache, every download checked against its sha256), `ml-stack-fleet join

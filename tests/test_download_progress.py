@@ -25,22 +25,23 @@ def test_model_and_mtp_bytes_accumulate_and_each_phase_is_identified(tmp_path):
     phases = []
     head = tmp_path / 'draft.gguf'
     head.write_bytes(b'12345')
-    row = Getting('test', 'model.gguf', pending_draft=True)
+    row = Getting('test', 'model.gguf', pending_draft=True, components=[
+        {"name": head.name, "kind": "mtp", "packaging": "separate", "ref": "hf:fixture/draft", "size_bytes": 5}])
 
     class Store:
         def ensure(self, name, **options):
+            if name == head.name:
+                options['on_progress'](2, 5)
+                phases.append(row.public())
+                options['on_progress'](5, 5)
+                return Model(name, head, 5, 0)
             options['on_note']('Downloading model.gguf')
             options['on_progress'](100, 100)
             phases.append(row.public())
-            return Model(name, Path('model.gguf'), 100, 0)
+            return Model(name, tmp_path / 'model.gguf', 100, 0)
 
-        def ensure_draft(self, model, draft, **options):
-            options['on_progress'](2, 5)
-            phases.append(row.public())
-            options['on_progress'](5, 5)
-            return head
-
-    Downloads(Store())._run(row, None, True, 'hf:fixture/draft')
+    with patch('ml_stack.fleet.model_components.link'):
+        Downloads(Store())._run(row, None, True)
     assert phases[0]['phase'] == 'model'
     assert phases[0]['eta_s'] is None
     assert phases[1]['phase'] == 'mtp'

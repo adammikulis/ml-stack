@@ -1,4 +1,4 @@
-"""Who owns which branch, worktree, port, file or server."""
+"""Who owns which branch, worktree, port, file, area, install environment or server."""
 
 from __future__ import annotations
 
@@ -9,14 +9,15 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_stack import worktreerules
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import AGENT, Denied, Identity
+from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity
 
 __all__ = ["EXPIRING_SOON_S", "KINDS", "MAX_LIFETIME_S", "MAX_RENEW_S", "Claims", "Conflict", "alive", "normal"]
 
-KINDS = ("branch", "worktree", "port", "file", "server")
-PATH_KINDS = ("worktree", "file")
+KINDS = ("branch", "worktree", "port", "file", "server", "install", "area")
+PATH_KINDS = ("worktree", "file", "install")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,199}$")
 VERSION = 1
 EXPIRING_SOON_S = 300.0
@@ -51,6 +52,17 @@ def normal(kind: str, key: str) -> str:
         if not key.isdigit() or not 0 < int(key) < 65536:
             raise ValueError("a port is a number from 1 to 65535")
         return str(int(key))
+    if kind == 'area':
+        expanded = Path(key).expanduser()
+        if not expanded.is_absolute():
+            raise ValueError('an area claim needs an absolute project path')
+        target = expanded.resolve()
+        directory = next((parent for parent in (target, *target.parents) if parent.is_dir()), None)
+        checkout = worktreerules.checkouts(directory) if directory else None
+        if not checkout:
+            raise ValueError('an area claim needs a Git checkout')
+        top, common = checkout
+        return str(common / target.relative_to(top))
     if kind in PATH_KINDS:
         expanded = Path(key).expanduser()
         if not expanded.is_absolute():
@@ -66,6 +78,8 @@ def _nested(a: str, b: str) -> bool:
 
 
 def _covers(claim: dict[str, Any], kind: str, key: str) -> bool:
+    if kind == 'area':
+        return claim['kind'] == 'area' and _nested(claim['key'], key)
     if kind in PATH_KINDS:
         return claim["kind"] in PATH_KINDS and _nested(claim["key"], key)
     return claim["kind"] == kind and claim["key"] == key
@@ -132,6 +146,87 @@ class Claims:
                     if old["owner"] != who.id and _covers(old, kind, key):
                         self.on_stolen(old, made)
             return made, swept
+
+    def reserve(self, who: Identity, resources: list[tuple[str, str]],
+                fields: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Atomically reserve a mutation's resources or refuse its entire conflicting set."""
+        if len(resources) > 128:
+            raise ValueError('a mutation reserves at most 128 resources')
+        resources = list(dict.fromkeys((kind, normal(kind, key)) for kind, key in resources))
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            for kind, key in resources:
+                for other in claims.values():
+                    if _covers(other, kind, key) and other['owner'] != who.id:
+                        raise Conflict(f"{kind} {key} belongs to {other['owner']}", other)
+                    if _covers(other, kind, key) and other.get('assignment') \
+                            and other['assignment'] != (fields or {}).get('assignment'):
+                        raise Denied('the resource is reserved for a different task assignment')
+            now, made = self.clock(), []
+            for kind, key in resources:
+                old = claims.get(f'{kind}:{key}')
+                since = old['since'] if old else now
+                expiry = min(now + self.ttl_s, since + MAX_LIFETIME_S)
+                if expiry <= now:
+                    raise Denied('ownership lifetime exhausted; release the resource before continuing')
+                entry = {'kind': kind, 'key': key, 'owner': who.id, 'pid': 0, 'since': since,
+                         'expires': expiry, 'note': str((fields or {}).get('note', ''))[:200]}
+                entry.update({key: value for key, value in (fields or {}).items()
+                              if key in ('owner_pid', 'owner_started', 'interpreter', 'environment', 'commit')})
+                if kind in ('file', 'area', 'worktree'):
+                    entry.update({key: value for key, value in (fields or {}).items()
+                                  if key in ('assignment', 'task', 'project')})
+                if kind == 'worktree' and old and old.get('delegated_by'):
+                    entry['delegated_by'] = old['delegated_by']
+                claims[f'{kind}:{key}'] = entry
+                made.append(entry)
+            self._save(claims)
+            return made
+
+    def handoff(self, who: Identity, kind: str, key: str, owner: str, assignment: str) -> dict[str, Any]:
+        """Transfer one parent's exact claim under an already verified task assignment."""
+        key = normal(kind, key)
+        if kind != 'worktree' or who.parent != owner:
+            raise Denied('only an explicit parent worktree assignment can be handed off')
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            claim = claims.get(f'{kind}:{key}')
+            if claim is None or claim['owner'] not in (owner, who.id):
+                raise Denied('the assigned worktree has no matching parent ownership claim')
+            if claim['owner'] == owner:
+                claim.update(owner=who.id, delegated_by=owner, assignment=assignment)
+                self._save(claims)
+            return dict(claim)
+
+    def return_worktree(self, who: Identity, scope: dict[str, Any]) -> dict[str, Any]:
+        """Return one child's exact claim after its canonical acceptance was independently checked."""
+        key = normal('worktree', scope['project'])
+        if who.role != HUMAN and who.id != scope['owner']:
+            raise Denied('only the registered task parent or person may return its reviewed worktree')
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            claim = claims.get(f'worktree:{key}')
+            if not claim or claim['owner'] not in (scope['owner'], scope['worker']):
+                raise Denied('the reviewed worktree has a different ownership claim')
+            if claim['owner'] == scope['owner'] and claim.get('reviewed_assignment') != scope['id']:
+                raise Denied('the returned worktree does not match this exact task delegation')
+            if claim['owner'] == scope['worker']:
+                if claim.get('delegated_by') != scope['owner'] or claim.get('assignment') != scope['id']:
+                    raise Denied('the worktree claim does not match this exact task delegation')
+                claim.update(owner=scope['owner'], returned_by=who.id, reviewed_assignment=scope['id'])
+                claim.pop('delegated_by', None)
+                claim.pop('assignment', None)
+            released = [value for value in claims.values()
+                        if value['kind'] in ('file', 'area') and value['owner'] == scope['worker']
+                        and value.get('assignment') == scope['id'] and value.get('task') == scope['task']
+                        and value.get('project') == scope['project']]
+            for value in released:
+                claims.pop(f"{value['kind']}:{value['key']}")
+            self._save(claims)
+            return {**claim, 'released_claims': released}
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim. Its owner, a lead or a human may."""

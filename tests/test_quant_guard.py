@@ -284,7 +284,9 @@ def test_ml_stack_serve_up_takes_the_mode_and_exits_3_when_strict(
     from ml_stack.serve.cli import COMMANDS
 
     monkeypatch.setenv("ML_STACK_BROKER_LOCAL", "1")
-    manager = ServerManager(LlamaServerBackend(binary=fake_llama_binary(tmp_path)))
+    manager = ServerManager(LlamaServerBackend(binary=fake_llama_binary(tmp_path)),
+                            state_file=tmp_path / "servers.json")
+    manager._broker = Broker(manager, scan=lambda: [], room=lambda: None)
     monkeypatch.setattr(ops, "manager_for", lambda *_: manager)
     single = gguf(tmp_path / "one" / "Model-UD-IQ4_XS.gguf", "IQ4_XS",
                   (("blk.0.ffn.weight", 64, IQ4_XS),))

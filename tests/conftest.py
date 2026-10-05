@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import json
+import math
 import os
 import site
 import socket
@@ -19,11 +20,13 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import types
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
+import psutil
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
@@ -903,7 +906,115 @@ def _live(rel: str) -> bool:
     return rel.endswith(".key") is False and any(fnmatch.fnmatch(rel, g) for g in LIVE_PATHS)
 
 
-def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
+def _external_keystore_lock(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ("keystore/state.lock", "keystore/flight.lock"):
+        return False
+    try:
+        owner = int((root / rel).read_text(encoding="ascii")[:32].strip())
+    except (OSError, ValueError, UnicodeError):
+        return False
+    return owner > 0 and not ours({"owner_pid": owner})
+
+
+def _external_keystore_rate(root: Path, rel: Path) -> bool:
+    if rel.as_posix() != "keystore/rate.json":
+        return False
+    try:
+        record = json.loads((root / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict) or type(record.get("writer_pid")) is not int:
+        return False
+    return record["writer_pid"] > 0 and not ours({"owner_pid": record["writer_pid"]})
+
+
+def _external_harness_key(root: Path, rel: Path) -> bool:
+    import re
+
+    import psutil
+
+    match = re.fullmatch(r"workspace/local-agents/([a-z0-9][a-z0-9._-]{0,47})-chats/harness/"
+                         r"[0-9a-f]{12}/[0-9a-f]{24}/sessions/([1-9][0-9]{0,9})\.[0-9a-f]{64}\.key",
+                         rel.as_posix())
+    if match is None or ours({"owner_pid": int(match[2])}):
+        return False
+    try:
+        process = psutil.Process(int(match[2]))
+        saved = json.loads((root / 'workspace' / 'local-agents' / f'{match[1]}.json').read_text())
+        if not isinstance(saved, dict) or type(saved.get('pid')) is not int:
+            return False
+        parent = next((parent for parent in process.parents() if parent.pid == saved.get('pid')), None)
+        return parent is not None and parent.create_time() == saved.get('process_started')
+    except (OSError, ValueError, psutil.Error):
+        return False
+
+
+def _external_scanner_snapshot(root: Path, rel: Path) -> int:
+    try:
+        beat = json.loads((root / rel).read_text())['payload']
+        pid, started = beat['pid'], beat['started']
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}) or beat['running'] is not True:
+            return 0
+        process = psutil.Process(pid)
+        born = process.create_time()
+        values = (born, started, beat['beat'], beat['interval_s'])
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in values):
+            return 0
+        if beat['interval_s'] > 86400 or not process.is_running() or born > started or started > beat['beat']:
+            return 0
+        if beat.get('process_started', born) != born or not 0 <= time.time() - beat['beat'] <= 3 * beat['interval_s'] + 5:
+            return 0
+        return pid
+    except (OSError, ValueError, KeyError, TypeError, psutil.Error):
+        return 0
+
+
+def _external_scanner_write(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ('sentinel/scanner.json', 'sentinel/scanner.json.prev', 'sentinel/state.lock'):
+        return False
+    if rel.name != 'state.lock':
+        return bool(_external_scanner_snapshot(root, rel))
+    try:
+        words = (root / rel).read_text(encoding='ascii').split()
+        pid = int(words[1]) if len(words) >= 2 and words[0] == 'pid' else int(words[0])
+        return pid in {_external_scanner_snapshot(root, Path('sentinel/scanner.json')),
+                       _external_scanner_snapshot(root, Path('sentinel/scanner.json.prev'))} and pid > 0
+    except (OSError, ValueError, IndexError, UnicodeError):
+        return False
+
+
+
+def _external_activity_drop_write(root: Path, rel: Path) -> bool:
+    if len(rel.parts) != 3 or rel.parts[0] != 'activity' or rel.name != 'drops.json':
+        return False
+    user = rel.parts[1].removeprefix('u-')
+    if not rel.parts[1].startswith('u-') or not user.isascii() or not user.isdigit():
+        return False
+    try:
+        record = json.loads((root / rel).read_text())
+        pid, born, written = record['writer_pid'], record['writer_started'], record['writer_at']
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}):
+            return False
+        if type(born) not in (int, float) or type(written) not in (int, float):
+            return False
+        process = psutil.Process(pid)
+        return (process.is_running() and process.create_time() == born
+                and process.uids().real == int(user) and born <= written
+                and 0 <= time.time() - written <= 60)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, psutil.Error):
+        return False
+
+def _external_state_write(root: Path, rel: Path) -> bool:
+    return (_external_keystore_lock(root, rel) or _external_keystore_rate(root, rel)
+            or _external_harness_key(root, rel) or _external_scanner_write(root, rel)
+            or _external_activity_drop_write(root, rel))
+
+
+def real_state_changes(root: Path, before: dict[str, int], after: dict[str, int]) -> list[str]:
+    return [name for name in changed_files(before, after) if not _external_state_write(root, Path(name))]
+
+
+def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS, *, attribute_external: bool = True) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
     out: dict[str, int] = {}
@@ -914,6 +1025,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):
+                continue
+            if attribute_external and skip is LIVE_WRITERS and _external_state_write(root, rel / name):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
@@ -951,7 +1064,7 @@ def _real_home(tmp_path_factory):
     from ml_stack import home
 
     real = types.SimpleNamespace(state=home.home(), cache=home.cache())
-    before = file_mtimes(real.state)
+    before = file_mtimes(real.state, attribute_external=False)
     away = tmp_path_factory.mktemp("home")
     account = home.user_home()
     browsers = account / ("Library/Caches" if sys.platform == "darwin" else ".cache")
@@ -966,7 +1079,7 @@ def _real_home(tmp_path_factory):
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
         yield real
-    written = changed_files(before, file_mtimes(real.state))
+    written = real_state_changes(real.state, before, file_mtimes(real.state, attribute_external=False))
     if written:
         pytest.fail(f"the real state root {real.state} was written during the run: "
                     + ", ".join(written[:20]), pytrace=False)
@@ -1072,9 +1185,9 @@ def leased(backend, spec, **starting):
     return ServerManager(backend=backend, state_file=state).lease(spec, roam=False, **starting)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def playwright():
-    """The one Playwright this worker gets; a second in the same thread refuses."""
+    """The shared Playwright context for this test module."""
     pw = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
     with pw.sync_playwright() as play:
         yield play

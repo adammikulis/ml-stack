@@ -1,10 +1,4 @@
-"""A bounded tool-calling loop over any `ToolSource`, streamed as events.
-
-`Agent.run` asks the model, runs the tool calls it makes (in parallel), feeds the answers
-back, and repeats until the model answers in text or a budget runs out. Each piece of the
-turn arrives as an event from an async iterator: text deltas, tool calls, tool results,
-rejected calls, and a final `Done`.
-"""
+"""A bounded Agents SDK runner with local tools, interventions, and streamed events."""
 
 from __future__ import annotations
 
@@ -21,29 +15,22 @@ from ml_stack.agent.auto import AutoCompact
 from ml_stack.agent.compact import Compaction, CompactResult
 from ml_stack.agent.events import (
     ConfirmRequest,
-    Denied,
-    Done,
     Event,
-    Repair,
     Text,
     Thinking,
-    ToolCall,
-    ToolResult,
 )
-from ml_stack.agent.schema import from_mcp, index_by_name, parse_arguments, validate
+from ml_stack.agent.schema import from_mcp, parse_arguments, validate
 from ml_stack.agent.sources import ToolOutput, ToolSource
 from ml_stack.agent.watched import Watch, resolve
 from ml_stack.client import thinking
 from ml_stack.client.tokens import estimate_tokens
-from ml_stack.guard import Unguarded, default, native, start
+from ml_stack.guard import Unguarded, default, native
 from ml_stack.http import ServerError
 from ml_stack.interventions import (
     Asker,
     Call,
     Confirm,
-    Gate,
     Run,
-    Screened,
 )
 from ml_stack.taint import TaintRail
 
@@ -80,11 +67,6 @@ class Chats(Protocol):
 
 Summarise = Callable[[str, ToolOutput], str]
 """``summarise(tool name, output)`` -> the text the model is shown for that result."""
-
-
-@dataclass(slots=True)
-class _Refusal:
-    reason: str = ""
 
 
 @dataclass(slots=True)
@@ -168,75 +150,10 @@ class Agent:
                 self.watch.leave()
 
     async def _run(self, task: str | list[dict[str, Any]]) -> AsyncIterator[Event]:
-        messages = [{"role": "user", "content": task}] if isinstance(task, str) else task
-        schemas = from_mcp(listed := await self.tools.list_tools(), self.budget.profile)
-        index = index_by_name(schemas)
-        spent = calls = rejected_turns = 0
-        run = start(self._items(listed), offered=schemas, task=_task_of(messages),
-                    confirm=self.confirm, notify=self._notify)
-        run.context.messages = messages
-        refused = _Refusal()
-        async for event in self._decide(run, "before_invocation", refused):
-            yield event
-        for step in range(1, self.budget.max_steps + 1):
-            reply = None
-            run.context.step, run.context.tool_calls = step, calls
-            if not refused.reason:
-                async for event in self._decide(run, "before_model_call", refused):
-                    yield event
-            if refused.reason:
-                yield Done("denied", refused.reason, step - 1, calls, spent, messages)
-                return
-            _inject(run, messages)
-            if self.auto:
-                for event in await self.auto.before(messages, schemas):
-                    yield event
-            for attempt in (0, 1):
-                try:
-                    async for piece in self._ask(messages, schemas):
-                        if isinstance(piece, (Text, Thinking)):
-                            yield piece
-                        else:
-                            reply = piece
-                    break
-                except ServerError as exc:
-                    if attempt or not self.auto or not _overflowed(exc):
-                        raise
-                    for event in await self.auto.before(messages, schemas, force=True):
-                        yield event
-            spent += _completion_tokens(reply)
-            pending = self._pending(reply, index)
-            text = reply.content or ""
-            text = self.watch.said(text) if self.watch else text
-            if not pending:
-                messages.append({"role": "assistant", "content": text})
-                yield Done("answer", text, step, calls, spent, messages)
-                return
-            if calls + len(pending) > self.budget.max_tool_calls:
-                yield Done("max_tool_calls", text, step, calls, spent, messages)
-                return
-            calls += len(pending)
-            messages.append(_assistant(text, pending))
-            run.context.step, run.context.tool_calls = step, calls
-            async for event in self._vet(run, pending):
+        from ml_stack.agent.sdk_runtime import execute
+        async with contextlib.aclosing(execute(self, task)) as events:
+            async for event in events:
                 yield event
-            for one in pending:
-                yield (Repair(one.id, one.name, one.errors) if one.errors
-                       else Denied(one.id, one.name, one.denied) if one.denied
-                       else ToolCall(one.id, one.name, one.args or {}))
-            answers: list[ToolOutput] = []
-            async for event in self._dispatching(self._dispatch(pending), answers):
-                yield event
-            async for event in self._results(run, pending, answers, messages):
-                yield event
-            rejected_turns = rejected_turns + 1 if all(p.errors for p in pending) else 0
-            if rejected_turns > self.budget.max_repairs:
-                yield Done("repairs_exhausted", text, step, calls, spent, messages)
-                return
-            if self.budget.max_tokens is not None and spent >= self.budget.max_tokens:
-                yield Done("max_tokens", text, step, calls, spent, messages)
-                return
-        yield Done("max_steps", "", self.budget.max_steps, calls, spent, messages)
 
     async def _ask(self, messages: list[dict[str, Any]], schemas: list[dict[str, Any]]
                    ) -> AsyncIterator[Text | Thinking | Any]:
@@ -297,65 +214,6 @@ class Agent:
             yield task.result()
         finally:
             task.cancel()
-
-    async def _dispatching(self, work: Awaitable[list[ToolOutput]], out: list[ToolOutput]
-                           ) -> AsyncIterator[Event]:
-        """Run the calls, yielding the questions their servers ask meanwhile; the answers are
-        put in ``out``."""
-        async for item in self._watching(work):
-            if isinstance(item, list):
-                out.extend(item)
-            else:
-                yield item
-
-    async def _decide(self, run: Run, hook: str, out: _Refusal) -> AsyncIterator[Event]:
-        """Ask ``hook`` of the run's interventions, yielding the questions put to the person;
-        a refusal is left in ``out``."""
-        if self.watch:
-            self.watch.enter()
-        async for item in self._watching(run.decide(hook, run.context)):
-            if isinstance(item, Gate):
-                out.reason = "" if item.allowed else getattr(item.verdict, "reason", "")
-                if not out.reason and self.watch:
-                    out.reason = self.watch.frozen()
-            else:
-                yield item
-
-    async def _results(self, run: Run, pending: list[_Pending], answers: list[ToolOutput],
-                       messages: list[dict[str, Any]]) -> AsyncIterator[Event]:
-        """Pass each answer through the interventions, then add it to ``messages``."""
-        if self.watch:
-            self.watch.enter()
-        for one, answer in zip(pending, answers, strict=True):
-            text = answer.text
-            if not (one.errors or one.denied):
-                async for item in self._watching(
-                        run.after_tool(Call(one.name, one.args, one.id), text)):
-                    if isinstance(item, Screened):
-                        text = self.watch.shown(one.name, text, item) if self.watch else item.text
-                    else:
-                        yield item
-            messages.append({"role": "tool", "tool_call_id": one.id, "name": one.name,
-                             "content": text})
-            yield ToolResult(one.id, one.name, text, answer.is_error)
-
-    async def _vet(self, run: Run, pending: list[_Pending]) -> AsyncIterator[Event]:
-        if self.watch:
-            self.watch.enter()
-        for one in pending:
-            if one.errors:
-                continue
-            if self.watch and (why := self.watch.refuses(one.name, one.args)):
-                one.denied = f"Denied: {why}"
-                continue
-            async for item in self._watching(run.before_tool(Call(one.name, one.args, one.id))):
-                if isinstance(item, Gate):
-                    one.denied = "" if item.allowed else getattr(item.verdict, "reason", "")
-                    if one.denied and self.watch:
-                        self.watch.denied(one.name, one.args, getattr(item.verdict, "by", ""),
-                                          one.denied, logged=item.confirmed is None)
-                else:
-                    yield item
 
     def _pending(self, reply: Any, index: dict[str, dict[str, Any]]) -> list[_Pending]:
         out = []
@@ -424,14 +282,6 @@ def _overflowed(exc: ServerError) -> bool:
     said = f"{exc} {exc.body}".lower()
     return exc.status == 400 and ("exceed" in said or "context size" in said
                                   or "n_ctx" in said)
-
-
-def _assistant(text: str, pending: list[_Pending]) -> dict[str, Any]:
-    return {"role": "assistant", "content": text, "tool_calls": [
-        {"id": p.id, "type": "function", "function": {
-            "name": p.name,
-            "arguments": json.dumps(p.args if p.args is not None else {})}}
-        for p in pending]}
 
 
 def _completion_tokens(reply: Any) -> int:

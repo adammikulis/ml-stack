@@ -74,7 +74,7 @@
       if (!kept.downloadModel || kept.modelStarted) return;
       const m = models.find((x) => x.file === kept.modelFile);
       const r = await M.api("/ui/models", { method: "POST",
-        body: JSON.stringify({ name: m.file, source: m.ref, draft: m.draft_ref || "" }) });
+        body: JSON.stringify({ name: m.file, source: m.ref, mtp: !!(m.draft_ref || m.mtp_ref), vision: false }) });
       if (!r.ok || r.error) throw new Error(r.error || "Could not start the model download.");
       kept.modelStarted = true;
       if (r.id) {

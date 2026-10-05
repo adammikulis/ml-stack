@@ -186,3 +186,16 @@ multimodal projectors, and sharded models require live model validation.
 - Mutation check of the profile writer, validators, runner and bubblewrap argv: 45 hand-made
   mutations. The first pass left 7 alive (message-masked validation errors, signals, the
   operation parser); tests were tightened and all 45 are now killed.
+
+Native managed-build success tests first run a confined system `true` command. They skip at the
+test function when the backend is absent or the host denies namespace creation. Other probe
+failures and malformed policies fail the tests. The Linux container runner keeps Docker's
+default privileges; it does not enable privileged mode or relax seccomp to make a native
+sandbox run. Fail-closed policy and managed-build refusal tests still run when native success
+tests cannot.
+
+Bubblewrap availability uses a bounded native namespace probe, cached per executable identity,
+user and user namespace. An installed executable whose namespace probe is denied is reported
+unavailable. The probe keeps the policy's namespace and network restrictions, mounts no
+entire root directory, and runs the system `true` executable. Timeout cleanup terminates its
+process group. No agent command is executed by the availability check.

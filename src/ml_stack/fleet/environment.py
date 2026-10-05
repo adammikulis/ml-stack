@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import platform
-import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
+from importlib import metadata
 from pathlib import Path
 from typing import Any
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from ml_stack import net
 from ml_stack.files import promote
@@ -21,6 +26,9 @@ from ml_stack.http import ServerError
 from ml_stack.httpguard import Refused
 
 __all__ = ["CATALOG", "Environment", "Library", "catalog_for"]
+
+METADRIVE_SOURCE = ("metadrive-simulator @ git+https://github.com/metadriverse/"
+                    "metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db")
 
 PYTHON = "3.13"
 STANDALONE = ("https://api.github.com/repos/astral-sh/"
@@ -40,6 +48,8 @@ class Library:
     default: bool = False
     platforms: tuple[str, ...] = ()
     vendors: tuple[str, ...] = ()
+    python_version: str = ""
+    bootstrap_packages: tuple[str, ...] = ()
 
     def applies(self, vendor: str = "") -> bool:
         if self.platforms and sys.platform not in self.platforms:
@@ -77,6 +87,27 @@ CATALOG: tuple[Library, ...] = (
     Library("huggingface", "Hugging Face models",
             "Starting from a downloaded model rather than from scratch.",
             ("transformers>=4.40", "datasets>=2.19"), size_mb=300),
+    Library("decide-pointer", "Decision models",
+            "CPU pointer-head inference, trained checkpoints and the Strands 2B decision model. Download model weights in Tools.",
+            ("ml-stack[decide-pointer]",), size_mb=500),
+    Library("gym", "All live environments",
+            "MetaDrive, RWARE, SUMO-RL and Stable-Baselines3 including traffic-driving co-simulation.",
+            ("ml-stack[gym]", METADRIVE_SOURCE), size_mb=1400),
+    Library("gym-driving", "Smart car · MetaDrive",
+            "Native 3D driving, lidar, traffic and vehicle dynamics.",
+            ("ml-stack[gym-driving]", METADRIVE_SOURCE), size_mb=800),
+    Library("gym-warehouse", "Warehouse · RWARE",
+            "Cooperative warehouse robot environments.",
+            ("ml-stack[gym-warehouse]",), size_mb=30),
+    Library("gym-traffic", "Traffic · SUMO-RL",
+            "Traffic simulation and reinforcement-learning signal control.",
+            ("ml-stack[gym-traffic]",), size_mb=250),
+    Library("gym-drone", "Forest search drones · PyFlyt",
+            "Native quadrotor flight with RGB and thermal search cameras in isolated Python 3.12.",
+            ("PyFlyt==0.29.0", "ml-stack[gym-drone,gym-rl]"), size_mb=400, python_version="3.12", bootstrap_packages=("numpy<2", "wheel")),
+    Library("gym-rl", "Reinforcement learning · Stable-Baselines3",
+            "PPO training, checkpoints and policy evaluation.",
+            ("ml-stack[gym-rl]",), size_mb=300),
     Library("telemetry", "Temperature and clocks",
             "Reporting this machine's temperature and GPU clock.",
             ("metal-smi>=1.1.0",), size_mb=5, default=True,
@@ -95,6 +126,13 @@ class Environment:
 
     root: Path
     _cache: dict[str, Any] = field(default_factory=dict)
+    python_version: str = PYTHON
+
+    def for_library(self, library: Library) -> Environment:
+        """Keep incompatible simulator dependencies in an owned sibling environment."""
+        if library.python_version and library.python_version != self.python_version:
+            return Environment(Path(self.root) / "simulators" / library.name, python_version=library.python_version)
+        return self
 
     @property
     def path(self) -> Path:
@@ -112,11 +150,34 @@ class Environment:
 
     # -- finding an interpreter -----------------------------------------
     def host_python(self) -> Path | None:
-        """A Python on this machine to build the environment with."""
-        if not getattr(sys, "frozen", False):
+        """A verified installed Python to build the environment with."""
+        current = f"{sys.version_info.major}.{sys.version_info.minor}"
+        if not getattr(sys, "frozen", False) and self.python_version == current:
             return Path(sys.executable)
-        found = shutil.which(f"python{PYTHON}")
-        return Path(found) if found else None
+        name = f"python{self.python_version}"
+        candidates = [shutil.which(name)]
+        pyenv = shutil.which("pyenv")
+        if pyenv:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                installed = subprocess.run([pyenv, "whence", "--path", name],
+                                           capture_output=True, text=True, timeout=10)
+                if installed.returncode == 0:
+                    candidates.extend(installed.stdout.splitlines())
+        for found in candidates:
+            if not found:
+                continue
+            try:
+                checked = subprocess.run(
+                    [found, "-c", "import json,sys;print(json.dumps([sys.executable,sys.version_info[:2]]))"],
+                    capture_output=True, text=True, timeout=10)
+                if checked.returncode:
+                    continue
+                executable, version = json.loads(checked.stdout)
+                if ".".join(map(str, version)) == self.python_version:
+                    return Path(executable)
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+                continue
+        return None
 
     # -- fetching one --------------------------------------------------
     def standalone_python(self) -> Path | None:
@@ -147,10 +208,10 @@ class Environment:
         want = self._asset_name()
         assets = [a for a in release.get("assets", ())
                   if want in a["name"] and a["name"].endswith(".tar.gz")
-                  and f"cpython-{PYTHON}." in a["name"]]
+                  and f"cpython-{self.python_version}." in a["name"]]
         if not assets:
             raise OSError(
-                f"no Python {PYTHON} build for this machine ({want.strip('-')})")
+                f"no Python {self.python_version} build for this machine ({want.strip('-')})")
 
         base = Path(self.root).expanduser() / "python"
         base.parent.mkdir(parents=True, exist_ok=True)
@@ -222,41 +283,65 @@ class Environment:
         if found and args and args[0] == "install":
             args = [args[0], "--find-links", str(found), *args[1:]]
         return subprocess.run([str(self.python), "-m", "pip", *args],
-                              capture_output=True, text=True, timeout=timeout)
+                              capture_output=True, text=True, timeout=timeout,
+                              env=self.build_environment() if args and args[0] == "install" else dict(os.environ))
+
+    def build_environment(self):
+        """Use the installed macOS SDK when Bullet needs a native wheel build."""
+        environment = dict(os.environ)
+        if sys.platform != "darwin" or self.python_version != "3.12":
+            return environment
+        sdk = environment.get("SDKROOT")
+        if not sdk:
+            try:
+                found = subprocess.run(["xcrun", "--show-sdk-path"], capture_output=True, text=True, timeout=10)
+                sdk = found.stdout.strip() if found.returncode == 0 else ""
+            except (OSError, subprocess.SubprocessError):
+                sdk = ""
+            fallback = Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+            if not sdk or not (Path(sdk) / "usr/include/math.h").is_file():
+                sdk = str(fallback) if fallback.is_dir() else ""
+        if sdk:
+            environment["SDKROOT"] = sdk
+            for key in ["CFLAGS", "CXXFLAGS"]:
+                flags = f"{environment.get(key, '')} -isysroot {shlex.quote(sdk)}"
+                environment[key] = flags + (" -Dfdopen=fdopen" if key == "CFLAGS" else "")
+        return environment
 
     # -- what is in it --------------------------------------------------
     def daemon_installed(self) -> dict[str, str]:
         """Package name to version, for what the daemon's own interpreter can import."""
-        from importlib import metadata
         out: dict[str, str] = {}
         for dist in metadata.distributions():
             name = dist.metadata.get("Name") if dist.metadata else None
             if name:
-                out[name.lower()] = dist.version
+                out[canonicalize_name(name)] = dist.version
         return out
 
     def installed(self) -> dict[str, str]:
-        """Package name to version, for what a job run here can import.
-
-        A frozen app runs jobs in this environment alone; a checkout also runs them on its own
-        interpreter, whose distributions are merged in.
-        """
-        have = {} if getattr(sys, "frozen", False) else self.daemon_installed()
+        """Package versions available to the managed job interpreter."""
         if not self.exists:
-            return have
+            return {}
         try:
-            out = self.pip(["list", "--format=json"], timeout=60)
+            out = self.pip(["inspect", "--local"], timeout=60)
         except (OSError, subprocess.SubprocessError):
-            return have
+            return {}
         if out.returncode != 0:
-            return have
-        with contextlib.suppress(ValueError, KeyError, TypeError):
-            have.update({p["name"].lower(): p["version"] for p in json.loads(out.stdout)})
-        return have
+            return {}
+        try:
+            payload = json.loads(out.stdout)
+            rows = payload["installed"]
+            self._cache["marker_environment"] = payload.get("environment", {"python_version": self.python_version})
+            self._cache["metadata"] = {canonicalize_name(row["metadata"]["name"]): row["metadata"] for row in rows}
+            self._cache["direct_urls"] = {canonicalize_name(row["metadata"]["name"]): row.get("direct_url") for row in rows}
+            return {canonicalize_name(row["metadata"]["name"]): row["metadata"]["version"] for row in rows}
+        except (ValueError, KeyError, TypeError):
+            return {}
 
     def has(self, library: Library) -> bool:
-        have = self.installed()
-        return all(_base(spec) in have for spec in library.packages)
+        target = self.for_library(library)
+        have = target.installed()
+        return _library_installed(library, have, target._cache)
 
     def state(self, vendor: str = "") -> dict[str, Any]:
         have = self.installed()
@@ -266,18 +351,25 @@ class Environment:
             "host_python": str(self.host_python() or self.standalone_python() or ""),
             "can_build": True,
             "libraries": [
-                {"name": lib.name, "title": lib.title, "blurb": lib.blurb,
-                 "size_mb": lib.size_mb, "default": lib.default,
-                 "installed": all(_base(s) in have for s in lib.packages),
-                 "version": have.get(_base(lib.packages[0]), "")}
+                self.library_state(lib, have)
                 for lib in catalog_for(vendor)
             ],
         }
 
+    def library_state(self, lib, have):
+        target = self.for_library(lib)
+        if target is not self:
+            have = target.installed()
+        return {"name": lib.name, "title": lib.title, "blurb": lib.blurb,
+                "size_mb": lib.size_mb, "default": lib.default,
+                "installed": _library_installed(lib, have, target._cache),
+                "version": have.get(_base(lib.packages[0]), ""),
+                "python_version": target.python_version,
+                "python": str(target.python) if target.exists else ""}
+
     # -- changing it ----------------------------------------------------
     def install(self, names: list[str], *, on_progress: Any = None) -> dict[str, Any]:
         """Install the named libraries. Returns what happened, per library."""
-        self.create(on_progress=on_progress)
         wanted = {lib.name: lib for lib in CATALOG}
         done: dict[str, Any] = {}
         for name in names:
@@ -285,13 +377,24 @@ class Environment:
             if lib is None:
                 done[name] = {"ok": False, "error": "no such library"}
                 continue
+            target = self.for_library(lib)
+            try:
+                target.create(on_progress=on_progress)
+            except OSError as exc:
+                done[name] = {"ok": False, "error": str(exc)}
+                continue
             if on_progress:
                 on_progress(f"Installing {lib.title}")
             args = ["install", "--upgrade", *lib.packages]
             if lib.index:
                 args += ["--index-url", lib.index]
             try:
-                out = self.pip(args)
+                if lib.bootstrap_packages:
+                    prepared = target.pip(["install", *lib.bootstrap_packages])
+                    if prepared.returncode:
+                        done[name] = {"ok": False, "error": _last_error(prepared.stderr)}
+                        continue
+                out = target.pip(args)
             except subprocess.TimeoutExpired:
                 done[name] = {"ok": False, "error": "timed out"}
                 continue
@@ -304,20 +407,38 @@ class Environment:
         done: dict[str, Any] = {}
         for name in names:
             lib = wanted.get(name)
-            if lib is None or not self.exists:
+            if lib is None:
                 done[name] = {"ok": False, "error": "not installed"}
                 continue
-            out = self.pip(["uninstall", "-y", *(_base(s) for s in lib.packages)])
+            target = self.for_library(lib)
+            if not target.exists:
+                done[name] = {"ok": False, "error": "not installed"}
+                continue
+            have = target.installed()
+            protected = self.shared_packages(names, target, have)
+            requirements = [req for spec in lib.packages for req in (_requirements(spec, target._cache.get("metadata"), target._cache.get("marker_environment")) or [])]
+            packages = sorted({canonicalize_name(req.name) for req in requirements} - protected)
+            if not packages:
+                done[name] = {"ok": True, "kept_shared": True}
+                continue
+            out = target.pip(["uninstall", "-y", *packages])
             done[name] = ({"ok": True} if out.returncode == 0
                           else {"ok": False, "error": _last_error(out.stderr)})
         return done
+
+    def shared_packages(self, names, target, have):
+        return {canonicalize_name(req.name)
+                for lib in CATALOG if lib.name not in names and self.for_library(lib).path == target.path
+                and _library_installed(lib, have, target._cache)
+                for spec in lib.packages for req in
+                (_requirements(spec, target._cache.get("metadata"), target._cache.get("marker_environment")) or [])}
 
     def remove(self) -> None:
         shutil.rmtree(self.path, ignore_errors=True)
 
 
 def _base(spec: str) -> str:
-    return re.split(r"[<>=!~\[]", spec, maxsplit=1)[0].strip().lower()
+    return canonicalize_name(Requirement(spec).name)
 
 
 def _last_error(stderr: str) -> str:
@@ -326,3 +447,58 @@ def _last_error(stderr: str) -> str:
         if "error" in line.lower():
             return line.strip()[:200]
     return (lines[-1][:200] if lines else "failed")
+
+
+def _requirements(spec: str, installed_metadata=None, marker_environment=None) -> list[Requirement] | None:
+    requirement = Requirement(spec)
+    if requirement.marker and not requirement.marker.evaluate(marker_environment):
+        return []
+    if not requirement.extras:
+        return [requirement]
+    if installed_metadata is not None:
+        info = installed_metadata.get(canonicalize_name(requirement.name))
+        if info is None:
+            return None
+        provided = set(info.get("provides_extra", []))
+        requires = info.get("requires_dist", [])
+    else:
+        try:
+            distribution = metadata.distribution(requirement.name)
+        except metadata.PackageNotFoundError:
+            return None
+        provided = set(distribution.metadata.get_all("Provides-Extra", []))
+        requires = distribution.requires or []
+    if not requirement.extras <= provided:
+        return None
+    dependencies = [Requirement(text) for text in requires]
+    return [requirement, *(dependency for dependency in dependencies
+             if dependency.marker is None or any(dependency.marker.evaluate({**(marker_environment or {}), "extra": extra})
+                                                 for extra in requirement.extras))]
+
+
+def _library_installed(library: Library, have: dict[str, str], cache=None) -> bool:
+    cache = cache or {}
+    for spec in library.packages:
+        requirements = _requirements(spec, cache.get("metadata"), cache.get("marker_environment"))
+        if requirements is None:
+            return False
+        for requirement in requirements:
+            version = have.get(canonicalize_name(requirement.name))
+            if version is None or version not in requirement.specifier:
+                return False
+            if requirement.url and not _direct_matches(requirement, cache.get("direct_urls", {})):
+                return False
+    return True
+
+
+def _direct_matches(requirement: Requirement, urls) -> bool:
+    direct = urls.get(canonicalize_name(requirement.name)) or {}
+    expected = requirement.url or ""
+    if expected.startswith("git+"):
+        base, separator, revision = expected.removeprefix("git+").rpartition("@")
+        if not separator:
+            return False
+        vcs = direct.get("vcs_info", {})
+        return (direct.get("url") == base and vcs.get("vcs") == "git"
+                and revision == vcs.get("commit_id"))
+    return direct.get("url") == expected

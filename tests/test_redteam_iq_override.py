@@ -61,7 +61,8 @@ def test_the_mcp_serve_up_tool_reports_a_strict_refusal_and_starts_nothing(iq_mo
     assert got["started"] is False and "IQ4_XS" in got["blocked"]
 
 
-@pytest.mark.parametrize("flag", ["--iq", "--iq=off", "--iq-off"])
+@pytest.mark.parametrize("flag", ["--iq", "--iq=off", "--iq-off", "--iq-off=off",
+                                  "--iq-mode", "--iq_mode=off", "--iq-warn", "--iq-block"])
 def test_the_extra_argument_of_serve_up_cannot_carry_the_mode(iq_model, no_process, flag):
     plain = iq_model.with_name("Model-Q4_K_M.gguf")
     plain.write_bytes(iq_model.read_bytes().replace(struct.pack("<I", 30), struct.pack("<I", 15)))

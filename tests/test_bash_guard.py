@@ -23,7 +23,7 @@ BLOCKED, ALLOWED = 2, 0
 def guard(command: str, tool: str = "Bash", **env: str) -> int:
     done = subprocess.run(
         [str(GUARD)], text=True, capture_output=True, env={**os.environ, **env},
-        input=json.dumps({"tool_name": tool, "tool_input": {"command": command}}))
+        input=json.dumps({"tool_name": tool, "cwd": "/", "tool_input": {"command": command}}))
     assert done.returncode in (BLOCKED, ALLOWED), done.stderr
     if done.returncode == BLOCKED:
         assert "blocked:" in done.stderr, "a refusal has to say what to do instead"

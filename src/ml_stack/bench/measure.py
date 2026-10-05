@@ -55,27 +55,20 @@ def finding(store: str | Path | None, embed_url: str = "", embed_model: str = ""
     """Which look_up a run measures -- ``chars``, ``words`` or ``meaning`` -- see `found`."""
     return found(store, embed_url, embed_model)[0]
 
-def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, client: Any,
+def _question_row(one: Mapping[str, Any], label: str, conversation: int = 0, turn: int = 0) -> Row:
+    """A benchmark row with its expected answer and conversation position."""
+    return Row(label=label, question=str(one.get("q") or ""),
+               expected=[str(item) for item in (one.get("expect") or ())],
+               conversation=conversation, turn=turn)
+
+
+def _ask_once(ask: Callable[..., Any], row: Row, *, client: Any,
               graph: Mapping[str, Any] | None = None, turns: Sequence[Mapping[str, str]] = (),
-              conversation: int = 0, turn: int = 0,
               per_question: float = PER_QUESTION, trace: bool = False) -> tuple[Row, str]:
-    """One question through ``ask(question, client)``, and what it cost; with the answer's
-    text, which a conversation carries into its next turn.
-
-    ``per_question`` is the most it may take. Past that the row is kept as timed out: no
-    answer, the cap as its wall clock, scored wrong -- and the next question is asked. A
-    question that hangs is a result, not a reason for the run to.
-
-    ``trace`` keeps the transcript on the row as well as the totals -- see `Counting` and
-    `wants_trace`. A question that failed or timed out keeps the trace it got to: that is
-    the transcript worth having, since it says where it went wrong.
-    """
+    """Record a question's measured answer and carry its text into the next turn."""
     began = time.time()
     counting = Counting(client, deadline=began + per_question if per_question else None,
                         trace=trace)
-    row = Row(label=label, question=str(one.get("q") or ""),
-              expected=[str(i) for i in (one.get("expect") or ())],
-              conversation=conversation, turn=turn)
     said = ""
     try:
         out = ask(row.question, counting, **({"turns": list(turns)} if turns else {}))
@@ -151,7 +144,7 @@ def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]],
     at = str(getattr(client, "base_url", "") or "")
     with watching(at, baseline=baseline, client=client) if at else nullcontext():
         for one in questions:
-            row, _ = _ask_once(ask, one, label=label, client=client, graph=graph,
+            row, _ = _ask_once(ask, _question_row(one, label), client=client, graph=graph,
                                per_question=per_question, trace=traced)
             rows.append(row)
             if log:
@@ -197,8 +190,8 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
         prior: list[dict[str, str]] = []
         rows: list[Row] = []
         for t, question in enumerate(chains[c]):
-            row, said = _ask_once(ask, question, label=label, client=client, graph=graph,
-                                  turns=prior, conversation=c, turn=t,
+            row, said = _ask_once(ask, _question_row(question, label, c, t), client=client, graph=graph,
+                                  turns=prior,
                                   per_question=per_question, trace=traced)
             rows.append(row)
             prior += [{"role": "user", "content": row.question},

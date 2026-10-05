@@ -68,7 +68,14 @@ class TestTheProtocol:
         assert tools["serve_status"]["inputSchema"]["properties"]["port"] == {
             "type": "integer", "default": 8080}
         assert set(tools["serve_up"]["inputSchema"]["properties"]) == {
-            "model", "context", "parallel", "draft", "mmproj", "extra"}
+            "model", "context", "draft", "mmproj", "extra"}
+
+    def test_optional_array_options_keep_their_item_schema(self):
+        for fn, name in ((server.serve_up, "extra"), (server.doctor, "repos")):
+            schema = server.schema_of(fn)
+            assert schema["properties"][name] == {"type": "array", "items": {"type": "string"}}
+            assert name not in schema.get("required", [])
+        assert server.schema_of(server.decide)["required"] == ["question", "options"]
 
     def test_a_bad_line_and_an_unknown_method_are_answered_not_fatal(self):
         reader = io.StringIO('not json\n' + json.dumps(rpc(5, "resources/list")) + "\n")
@@ -93,6 +100,15 @@ class TestTheProtocol:
 
 
 class TestTheTools:
+    def test_serve_options_are_isolated_between_keyword_calls(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(server.quant_guard, "blocked_message", lambda _: "")
+        monkeypatch.setattr(server, "detached", lambda module, argv, **kw: captured.append(argv) or {})
+        server.serve_up("model.gguf", context=4096, extra=["--threads", "2"])
+        server.serve_up("model.gguf")
+        assert captured[0][-4:] == ["--context", "4096", "--threads", "2"]
+        assert "--threads" not in captured[1] and "--context" not in captured[1]
+
     def test_serve_status_calls_the_look_the_command_calls(self, monkeypatch):
         from ml_stack.serve import ops
 
@@ -304,3 +320,20 @@ class TestTheCommand:
         assert by_name["serve_down"].annotations.destructive_hint is True
         assert by_name["models_find"].annotations.open_world_hint is True
         assert by_name["serve_status"].output_schema["type"] == "object"
+
+
+def test_workspace_subset_rejects_server_admin_tools(monkeypatch):
+    names = {"workspace_inbox", "workspace_send", "workspace_thread", "workspace_claim",
+             "workspace_who_owns", "workspace_announce", "workspace_ack", "workspace_status",
+             "workspace_reputation"}
+    monkeypatch.setattr(server, "TOOLS", list(server.TOOLS))
+    monkeypatch.setattr(server, "_BY_NAME", dict(server._BY_NAME))
+    listing = rpc(1, "tools/list")
+    attack = rpc(2, "tools/call", name="serve_down", arguments={"port": 8080})
+    monkeypatch.setattr(server.sys, "stdin", io.StringIO(json.dumps(listing) + "\n" + json.dumps(attack) + "\n"))
+    output = io.StringIO()
+    monkeypatch.setattr(server.sys, "stdout", output)
+    assert server.main(["--builtin", "--workspace-only"]) == 0
+    replies = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert {t["name"] for t in replies[0]["result"]["tools"]} == names
+    assert replies[1]["result"]["isError"] is True

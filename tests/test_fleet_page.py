@@ -46,12 +46,12 @@ def no_release_lookup(monkeypatch):
     monkeypatch.setattr(updates, "check", offline)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser(playwright):
     try:
         # headless is the default, said out loud: a test must never take the screen
         b = playwright.chromium.launch(headless=True)
-    except Exception as exc:                           # noqa: BLE001
+    except pw.Error as exc:
         pytest.skip(f"chromium did not launch: {exc}")
     yield b
     b.close()
@@ -159,18 +159,19 @@ class TestFirstRun:
         page.fill("#n", "quillhaven")
         page.click("#first-run button:has-text('Continue')")
         page.wait_for_selector("#first-run h1:has-text('Clusters')")
-        assert page.locator("#p1").is_visible()
+        assert page.locator("#setup-cluster-passphrase").is_visible()
         assert not errors
 
     def test_a_short_passphrase_cannot_be_joined_with(self, daemon, open_page):
         page, errors = open_page(daemon)
         page.wait_for_selector("#first-run:not([hidden])")
         page.click("#first-run button:has-text('Continue')")
-        page.wait_for_selector("#p1")
-        page.fill("#p1", "abc")
-        assert page.locator("#first-run button:has-text('Join')").is_disabled()
-        page.fill("#p1", "correct horse battery")
-        assert page.locator("#first-run button:has-text('Join')").is_enabled()
+        page.wait_for_selector("#setup-cluster-passphrase")
+        page.fill("#setup-cluster-name", "default")
+        page.fill("#setup-cluster-passphrase", "abc")
+        assert page.locator("#first-run button:has-text('Join existing cluster')").is_disabled()
+        page.fill("#setup-cluster-passphrase", "correct horse battery")
+        assert page.locator("#first-run button:has-text('Join existing cluster')").is_enabled()
         assert not errors
 
     def test_the_reason_sits_beside_the_job_the_machine_was_given(self, daemon,
@@ -269,7 +270,7 @@ class TestTheChatView:
         page.wait_for_selector("#cluster:not([hidden])")
         page.click("nav.tabs a:has-text('Chat')")
         page.wait_for_selector("#chat-none:not([hidden])")
-        assert "No model is running yet" in page.locator("#chat-none").inner_text()
+        assert "No model is running" in page.locator("#chat-none").inner_text()
         assert page.locator("#chat-askrow").is_hidden()
         assert not errors
 
@@ -290,7 +291,9 @@ class TestTheChatView:
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Chat')")
         page.wait_for_selector("#chat-list .chatrow")
+        page.get_by_label("Options for about the roof").click()
         page.click("#chat-list .chatrow button:has-text('Delete')")
+        page.get_by_role("button", name="Delete conversation", exact=True).click()
         page.wait_for_selector("#chat-list .chatrow", state="detached")
         assert not errors
 
@@ -334,7 +337,7 @@ class TestTheSettingsView:
         page.check("#labels-train\\,prep")
         page.click("#settings-save")
         page.wait_for_selector("#settings-note .ok")
-        assert page.locator("#settings-note .ok").inner_text() == "Saved."
+        assert page.locator("#settings-note .ok").inner_text() == "Preferences saved."
         _, got, _ = joined.call("/ui/settings", cookie=joined.cookie)
         assert sorted(got["settings"]["labels"]) == ["prep", "train"]
         assert not errors
@@ -346,7 +349,7 @@ class TestTheSettingsView:
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
                            ("Models", "#browser-results"),
                            ("Settings", "#settings-removal label.opt"),
-                           ("Cluster", "#cluster-sweep .searchrow")):
+                           ("Fleet", "#cluster-sweep .searchrow")):
             page.click(f"nav.tabs a:has-text('{tab}')")
             page.wait_for_selector(ready)
             shown = page.locator("#root").inner_text()
@@ -356,6 +359,7 @@ class TestTheSettingsView:
     def test_the_remove_section_lists_what_would_go(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")
+        page.locator("#settings-advanced summary").click()
         page.wait_for_selector("#settings-removal label.opt")
         assert "cannot be undone" not in page.locator("#settings-removal").inner_text()
         page.click("#settings-removal button.danger")

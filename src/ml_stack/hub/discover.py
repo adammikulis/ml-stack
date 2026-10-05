@@ -52,6 +52,7 @@ class ModelInfo:
     shards: int = 1
     verified: bool = True
     copies: tuple[Path, ...] = ()
+    files: tuple[Path, ...] = ()
     """Paths of the other copies of this model, which were collapsed into this row."""
     kind: str = kinds.CHAT
     """One of `kinds.KINDS`: a label for listings, never a grant of trust."""
@@ -62,6 +63,7 @@ class ModelInfo:
         row["path"] = str(self.path)
         row["mmproj"] = str(self.mmproj) if self.mmproj else None
         row["copies"] = [str(c) for c in self.copies]
+        row["files"] = [str(p) for p in self.files]
         return row
 
     @property
@@ -170,18 +172,29 @@ def _info(one: Entry, parts: list[Entry], head: header.Header | None,
     if one.format != "gguf":
         shown = one.repo.split("/")[-1] if one.repo else one.name
     mmproj = _mmproj(one, side, alone) if one.format == "gguf" else None
+    config = files.read_json(one.path / "config.json", {}) if one.format != "gguf" else {}
+    architecture = config.get("model_type", "") if isinstance(config, dict) else ""
+    if not isinstance(architecture, str):
+        architecture = ""
     return ModelInfo(
         id=_identity(one, _stem(one.name) if total == 1 else one.name),
         name=shown, path=one.path, format=one.format, size_bytes=size, source=one.place,
         quantization=_quant(one.name, head) if one.format == "gguf" else "",
         parameters=head.parameters if head else 0,
-        architecture=head.architecture if head else "",
+        architecture=head.architecture if head else architecture,
         context_length=head.context_length if head else 0,
         mmproj=mmproj,
         repo=one.repo or "", mtime=max(p.mtime for p in parts),
-        is_complete=all(p.complete for p in parts) and len(parts) == total
+        is_complete=all(p.complete for p in parts) and _shards_complete(parts, total)
         and (head is not None or one.format != "gguf"),
-        shards=total, verified=one.verified)
+        shards=total, verified=one.verified, files=tuple(p.path for p in parts))
+
+
+def _shards_complete(parts: list[Entry], total: int) -> bool:
+    """Whether every expected shard number is present once."""
+    if not any(_OF.search(part.name) for part in parts):
+        return len(parts) == total
+    return sorted(int(_OF.search(part.name).group(1)) for part in parts) == list(range(1, total + 1))
 
 
 def _best(group: list[ModelInfo]) -> ModelInfo:

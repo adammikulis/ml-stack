@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, open_stream
@@ -27,13 +28,15 @@ class Target:
     url: str
     token: str = ""
     peer: str = ""
+    alias: str = ""
 
     @property
     def local(self) -> bool:
         return not self.peer
 
     def public(self) -> dict[str, Any]:
-        return {"model": self.model, "peer": self.peer, "local": self.local}
+        return {"model": self.model, "peer": self.peer, "local": self.local,
+                "path": self.alias if self.local and Path(self.alias).is_absolute() else ""}
 
 
 def targets(peers: list[dict[str, Any]], serving: Any = None,
@@ -43,7 +46,8 @@ def targets(peers: list[dict[str, Any]], serving: Any = None,
     for served in (serving.live() if serving is not None else []):
         for model in served.models:
             out.append(Target(model=model,
-                              url=f"http://127.0.0.1:{served.port}{CHAT_PATH}"))
+                              url=f"http://127.0.0.1:{served.port}{CHAT_PATH}",
+                              alias=next((name for name in served.aliases if Path(name).name == model), model)))
     here = {t.model for t in out}
     for beacon in peers:
         if beacon.get("is_self"):
@@ -68,7 +72,7 @@ def find(available: list[Target], model: str) -> Target | None:
     if not model:
         return available[0] if available else None
     for target in available:
-        if target.model == model:
+        if target.model == model or target.alias == model or target.model == Path(model).name:
             return target
     for target in available:
         if model.lower() in target.model.lower():

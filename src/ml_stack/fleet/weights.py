@@ -80,4 +80,6 @@ def is_a_piece(name: str) -> bool:
 def is_beside(name: str) -> bool:
     """Whether a file is an accessory rather than the model itself."""
     stem = name.rsplit("/", 1)[-1].lower()
+    if stem.endswith("-mtp.gguf") and not stem.startswith("mtp-"):
+        return any(word in stem for word in BESIDE if word != "mtp")
     return any(word in stem for word in BESIDE)

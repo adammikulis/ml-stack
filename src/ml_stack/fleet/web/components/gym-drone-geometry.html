@@ -1,0 +1,100 @@
+<script>
+(function () {
+  window.gymDroneGeometry = {
+    aircraft(scene, selected) {
+      const T = scene.T, group = new T.Group();
+      const shell = scene.box([.4,.16,.55],selected ? 0x16aaa5 : 0xe9eceb);
+      shell.material.roughness = .32; shell.material.metalness = .35;
+      group.add(shell);
+      const lens = new T.Mesh(new T.SphereGeometry(.08,12,8),
+        new T.MeshPhysicalMaterial({color:0x172c38,roughness:.12,metalness:.6}));
+      lens.position.set(0,-.12,.23); group.add(lens);
+      const rotors = [];
+      for (const x of [-.36,.36]) for (const z of [-.36,.36]) {
+        const arm = scene.box([.07,.065,.6],0x263a42);
+        arm.position.set(x/2,0,z/2); arm.rotation.y = x*z>0 ? Math.PI/4 : -Math.PI/4;
+        group.add(arm);
+        const motor = new T.Mesh(new T.CylinderGeometry(.06,.065,.13,12),
+          new T.MeshStandardMaterial({color:0x344953,metalness:.6,roughness:.4}));
+        motor.position.set(x,.045,z); group.add(motor);
+        const blades = new T.Group();
+        for (const angle of [0,Math.PI/2]) {
+          const blade = scene.box([.4,.015,.035],0x384c54);
+          blade.rotation.y = angle; blades.add(blade);
+        }
+        blades.position.set(x,.12,z); group.add(blades); rotors.push(blades);
+        const guard = new T.Mesh(new T.TorusGeometry(.23,.015,6,28),
+          new T.MeshStandardMaterial({color:0x73858c,roughness:.5}));
+        guard.rotation.x = Math.PI/2; guard.position.set(x,.09,z); group.add(guard);
+      }
+      group.userData.rotors = rotors;
+      return group;
+    },
+    landmark(scene, object) {
+      const T = scene.T, group = new T.Group(), tree = object.kind === 'trees';
+      const radius = Number(object.radius || .25), height = Number(object.height || 1.6);
+      const trunkHeight = tree ? height*.45 : height, trunkRadius = tree ? radius*.3 : radius;
+      const body = new T.Mesh(new T.CylinderGeometry(trunkRadius,trunkRadius,trunkHeight,tree ? 12 : 16),
+        new T.MeshStandardMaterial({color:tree ? 0x66513a : object.kind === 'fires' ? 0xbf5225 : 0xddaa43,
+          roughness:.9}));
+      body.position.y = trunkHeight/2; body.castShadow = body.receiveShadow = true; group.add(body);
+      if (tree) {
+        for (let i=0;i<3;i++) {
+          const crown = new T.Mesh(new T.ConeGeometry(radius*(3.2-i*.6),height*.48,9),
+            new T.MeshStandardMaterial({color:[0x244e3c,0x36664a,0x427754][i],roughness:1}));
+          crown.position.y = height*(.48+i*.17); crown.castShadow = true; group.add(crown);
+        }
+      } else if (object.kind === 'hikers') {
+        const head = new T.Mesh(new T.SphereGeometry(radius*.7,12,8),
+          new T.MeshStandardMaterial({color:0xd4ad84,roughness:1}));
+        head.position.y = height; group.add(head);
+        const pack = scene.box([radius*1.5,height*.4,radius],0x297a9a);
+        pack.position.set(0,height*.56,-radius); group.add(pack);
+      } else {
+        const flame = new T.Mesh(new T.ConeGeometry(radius*.8,height*3,9),
+          new T.MeshStandardMaterial({color:0xffae36,emissive:0xe7480f,emissiveIntensity:1.5,roughness:.8}));
+        flame.position.y = height*1.5; group.add(flame);
+      }
+      return group;
+    },
+    update(scene,state) {
+      for (const object of state.forest || []) scene.keep('forest-'+object.body_id,
+        () => this.landmark(scene,object),[object.x,object.y,0]);
+      for (const drone of state.drones || []) {
+        const rotation = drone.rotation || [0,0,0];
+        const mesh = scene.keep('drone-'+drone.id,() => this.aircraft(scene,drone.selected),
+          drone.position,Math.PI/2-rotation[2]);
+        mesh.rotation.x = rotation[1]; mesh.rotation.z = -rotation[0];
+      }
+      this.frustum(scene,state.camera);
+    },
+    frustum(scene,camera) {
+      if (!scene.debugRays || !camera?.pose?.position) return;
+      const T = scene.T, position = camera.pose.position;
+      const angles = camera.pose.rotation || [0,0,0], yaw = angles[2], pitch = -Math.PI/4;
+      const half = Math.tan((camera.intrinsics?.fov_degrees || 90)*Math.PI/360);
+      const forward = new T.Vector3(Math.cos(yaw)*Math.cos(pitch),Math.sin(pitch),Math.sin(yaw)*Math.cos(pitch));
+      const right = new T.Vector3(-Math.sin(yaw),0,Math.cos(yaw));
+      const up = new T.Vector3().crossVectors(right,forward).normalize();
+      const origin = new T.Vector3(position[0],position[2],position[1]), corners = [];
+      for (const [x,y] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+        const ray = forward.clone().addScaledVector(right,x*half).addScaledVector(up,y*half).normalize();
+        const distance = ray.y<-.001 ? Math.min(40,origin.y/-ray.y) : 40;
+        corners.push(origin.clone().addScaledVector(ray,distance));
+      }
+      const vertices = [];
+      corners.forEach((corner,i) => vertices.push(...origin.toArray(),...corner.toArray(),
+        ...corner.toArray(),...corners[(i+1)%4].toArray()));
+      const line = scene.keep('drone-camera-frustum',() => new T.LineSegments(new T.BufferGeometry(),
+        new T.LineBasicMaterial({color:0x75eee1,transparent:true,opacity:.6})),[0,0,0]);
+      line.geometry.dispose(); line.geometry = new T.BufferGeometry();
+      line.geometry.setAttribute('position',new T.Float32BufferAttribute(vertices,3));
+    },
+    animate(scene,dt) {
+      if (scene.reduced.matches) return;
+      for (const mesh of scene.meshes.values()) for (const rotor of mesh.userData.rotors || [])
+        rotor.rotation.y += dt*60;
+    },
+  };
+})();
+</script>

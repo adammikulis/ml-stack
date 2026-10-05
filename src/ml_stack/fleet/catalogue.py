@@ -53,6 +53,10 @@ class Suggestion:
     unfiltered: bool = False
     draft_ref: str = ""
     draft_gb: float = 0.0
+    mtp_ref: str = ""
+    mtp_gb: float = 0.0
+    vision_ref: str = ""
+    vision_gb: float = 0.0
 
     @property
     def file(self) -> str:
@@ -75,7 +79,10 @@ class Suggestion:
                 "takes": [MODALITY.get(m, m) for m in self.takes],
                 "gives": [MODALITY.get(m, m) for m in self.gives],
                 "unfiltered": self.unfiltered or is_unfiltered(self.name),
-                "draft_ref": self.draft_ref, "draft_gb": self.draft_gb}
+                "draft_ref": self.draft_ref, "draft_gb": self.draft_gb,
+                "mtp_ref": self.mtp_ref, "mtp_download_gb": round(self.mtp_gb * 2**30 / 1e9, 1),
+                "vision_ref": self.vision_ref, "vision_download_gb": round(self.vision_gb * 2**30 / 1e9, 1),
+                "mtp_recommended": bool(self.draft_ref or self.mtp_ref)}
 
 
 MODALITY = {"text": "💬", "image": "🖼", "audio": "🔊", "video": "🎬"}
@@ -105,6 +112,13 @@ SUGGESTED: tuple[Suggestion, ...] = (
     Suggestion("Gemma 4 12B",
                "hf:unsloth/gemma-4-12b-it-GGUF/gemma-4-12b-it-Q4_K_M.gguf", 6.7,
                "For a machine with room to spare."),
+    Suggestion("Qwen3.8 27B · GSQ IQ3_S",
+               "hf:ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf", 11.8e9 / 2**30,
+               "Smaller weights with optional integrated prediction and vision.", params_b=27,
+               mtp_ref="hf:ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
+               mtp_gb=12.1e9 / 2**30,
+               vision_ref="hf:ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF/mmproj-Qwen3.8-27B-BF16.gguf",
+               vision_gb=0.9e9 / 2**30),
     Suggestion("Qwen3.8 27B",
                "hf:unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf", 16.35,
                "For a GPU with 24 GB or more, with multi-token prediction.", params_b=27,
@@ -264,7 +278,7 @@ def _best_gguf(repo: str) -> tuple[str, int, bool] | None:
         size = int(row.get("size") or (row.get("lfs") or {}).get("size") or 0)
         if "mmproj" in stem:
             sees = True
-        if size and ("draft" in stem or "mtp" in stem):
+        if size and is_beside(path) and ("draft" in stem or "mtp" in stem):
             drafts.append((path, size))
         if is_a_piece(path) or is_beside(path):
             continue

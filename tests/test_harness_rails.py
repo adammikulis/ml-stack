@@ -10,10 +10,12 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from workspace_kit import clean_env
+from workspace_kit import Kit, clean_env
 
 from ml_stack import claude, codex, coding, harnesshook, harnessid, harnessing, requests
 from ml_stack.harnesspolicy import decide
+from ml_stack.workspace import tokens
+from ml_stack.workspace.project import describe
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 
@@ -81,10 +83,13 @@ class TestHook:
         assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
         assert inbox.list() == []
 
-    def test_a_call_that_asks_waits_for_the_person_and_runs_only_on_their_yes(self):
+    def test_a_call_that_asks_waits_for_the_person_and_runs_only_on_their_yes(self, tmp_path, monkeypatch):
+        kit = Kit(clean_env(monkeypatch, tmp_path))
+        tokens.store(kit.base, 'local-test', kit.agent('local-test'))
+        kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'local-test', describe(str(tmp_path)))
         for choice, want in (("allow-once", "allow"), ("deny", "deny")):
             inbox = requests.Inbox(memory=True)
-            payload = {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x"}, "cwd": "/w",
+            payload = {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {tmp_path}/x"}, "cwd": str(tmp_path),
                        "session_id": "s1"}
 
             def person(inbox=inbox, choice=choice):
@@ -98,7 +103,7 @@ class TestHook:
 
             thread = threading.Thread(target=person)
             thread.start()
-            out = harnesshook.pre(payload, self._rail(wait_s=10.0), inbox)
+            out = harnesshook.pre(payload, self._rail(wait_s=10.0, roots=(str(tmp_path),)), inbox)
             thread.join()
             assert out["hookSpecificOutput"]["permissionDecision"] == want
             raised = requests.list_requests(inbox=inbox)[0]
@@ -200,6 +205,7 @@ class TestCodex:
         assert got["model_context_window"] == 262144
         assert got["model_auto_compact_token_limit"] == int(262144 * 0.9)
         assert got["features"]["hooks"] is True
+        assert got["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__workspace"]
         assert got["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "PRE"
         assert got["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "POST"
         assert text == codex.config_toml("http://127.0.0.1:8080/", "qwen", 262144, ("PRE", "POST", 300.0))
@@ -233,7 +239,8 @@ def _fake_serving(seen):
 class TestLaunch:
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+        monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
@@ -274,6 +281,11 @@ class TestLaunch:
         assert codex.launch(["qwen", "--codex", str(binary), "--", "exec", "fix it"], say=lambda _: None,
                             run_codex=run) == 3
         assert seen["config"]["model_context_window"] == 262144
+        scope = seen["config"]["mcp_servers"]["workspace"]
+        assert scope["required"] is True
+        assert scope["command"] == sys.executable
+        assert scope["args"][-1] == "--workspace-only"
+        assert scope["env"]["ML_STACK_WORKSPACE_TOKEN"] == "assigned-test-seat"
         assert "--dangerously-bypass-hook-trust" in seen["command"] and seen["command"][-2:] == ["exec", "fix it"]
         assert tmp_path / "tree" not in seen["home"].parents and not seen["home"].exists()
 
@@ -392,12 +404,51 @@ class TestSeat:
         assert not (tokens.directory(Workspace().base) / "local-qwen-codex").exists()
         assert not seen["home"].exists()
 
-    def test_a_launcher_an_agent_started_is_not_minted_and_acts_as_its_parent(self, monkeypatch, tmp_path):
+    def test_an_agent_launcher_requires_an_authenticated_parent_instead_of_using_a_label(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDECODE", "1")
+        with pytest.raises(ValueError, match="workspace identity could not be created"):
+            harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
+
+    def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):
+        from ml_stack.testing import FakeLlamaServer, Served
+        from ml_stack.workspace import Workspace, tokens
+
+        ws = Workspace()
+        owner = ws.init("owner")
+        parent = ws.mint(owner, "codex", "agent")
+        tokens.store(ws.base, "codex", parent)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        seat = harnessid.invite("local-qwen", tmp_path, "codex", lambda _: None)
+        endpoint = FakeLlamaServer(Served(model="qwen-27b"))
+        try:
+            assert seat.record_model("qwen-27b", "codex", endpoint.base_url)
+            assert ws.whoami_model(seat.name)["model_state"] == "claimed"
+        finally:
+            endpoint.close()
+            seat.revoke()
+
+    def test_an_agent_launcher_delegates_a_distinct_private_child_without_changing_invite_policy(self, monkeypatch, tmp_path):
+        from ml_stack.workspace import Workspace, tokens
+
+        ws = Workspace()
+        owner = ws.init("owner")
+        parent = ws.mint(owner, "codex", "agent")
+        tokens.store(ws.base, "codex", parent)
         monkeypatch.setenv("CLAUDECODE", "1")
         said = []
-        seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", said.append)
-        assert not seat.minted and seat.flags() == ["--agent", "claude-code", "--label", "local-test-codex"]
-        assert seat.revoke() is False and "ml-stack-workspace setup" in said[0]
+        seat = harnessid.invite("local-qwen", tmp_path, "codex", said.append)
+        assert seat.name == "codex/local-qwen" and seat.flags() == ["--agent", "codex/local-qwen"]
+        secret = tokens.load(ws.base, seat.name)
+        child = ws.auth(secret)
+        assert child.parent == "codex" and child.role == "agent"
+        assert set(child.can) <= set(ws.auth(parent).can)
+        assert secret not in "".join(said)
+        assert ws.limits.agent_invite_ask == "approve-first" and ws.invites.made_by("codex") == []
+        assert seat.revoke() and ws.auth(parent).id == "codex"
+        from ml_stack.workspace import Denied
+
+        with pytest.raises(Denied, match="revoked"):
+            ws.delegate(secret, "nested")
 
     def test_the_brief_names_who_the_agent_obeys_and_that_everything_else_is_data(self):
         text = harnessid.brief("n", "alias", "codex", "claude-code", ["reviewer"])
@@ -407,11 +458,12 @@ class TestSeat:
 class TestCodingAgent:
     def test_launch_coding_agent_runs_codex_by_default_with_the_project_and_the_orders(self, monkeypatch, tmp_path):
         seen = {}
+        monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
         monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: seen.update(
-            name=name, project=project) or harnessid.Seat(name, parent))
+            name=name, project=project) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         binary = tmp_path / "codex"
         binary.write_text("#!/bin/sh\n")
         (tmp_path / "proj").mkdir()
@@ -431,3 +483,55 @@ class TestCodingAgent:
 
     def test_an_unknown_harness_is_refused(self):
         assert coding.launch_coding_agent("", "read-only", ".", "bash", say=lambda _: None) == 2
+
+
+def test_explicit_head_and_none_override_measured_profile(monkeypatch):
+    from types import SimpleNamespace
+
+    from ml_stack import hub
+    from ml_stack.serve.serving import Config, Serving
+
+    measured = Config(serving=Serving(model="qwen.gguf", draft="old-head.gguf", spec_type="draft-mtp"))
+    monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: SimpleNamespace(config=lambda **_: measured))
+    monkeypatch.setattr(harnessing.profile, "said", lambda _: "measured profile")
+    monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 262144)
+    monkeypatch.setattr(hub, "head_choice", lambda model, asked: None if asked == "none" else SimpleNamespace(
+        serving=lambda: "requested MTP head", over=lambda: {"draft": asked, "spec_type": "draft-mtp"}))
+    selected = harnessing.config_for("qwen.gguf", harnessing.Want(draft="matching-head.gguf"), lambda _: None)
+    assert selected.serving.draft == "matching-head.gguf"
+    assert selected.serving.slot_context == 262144
+    disabled = harnessing.config_for("qwen.gguf", harnessing.Want(draft="none"), lambda _: None)
+    assert disabled.serving.draft == "" and disabled.serving.mtp is False
+    automatic = harnessing.config_for("qwen.gguf", harnessing.Want(draft="auto"), lambda _: None)
+    assert automatic.serving.draft == "old-head.gguf"
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("ml-stack-workspace inbox --agent own", "allow"),
+    ("ml-stack-workspace send codex note 'sensor count 8' --agent own", "allow"),
+    ("ml-stack-workspace inbox --agent other", "deny"),
+    ("env ML_STACK_WORKSPACE_AGENT=other ml-stack-workspace inbox --agent other", "deny"),
+    ("command ml-stack-workspace inbox --agent other", "deny"),
+    ("ml-stack-workspace inbox --agent own --agent other", "deny"),
+    ("ml-stack-workspace inbox --agent own --token-file /tmp/other", "deny"),
+    ("ml-stack-workspace inbox", "deny"),
+    ("ml-stack-workspace setup --agents own --agent own", "deny"),
+    ("ml-stack-workspace inbox --agent own && rm README.md", "deny"),
+])
+def test_workspace_hook_binds_own_identity_and_keeps_human_commands_blocked(line, expected, tmp_path):
+    payload = {"tool_name": "Bash", "tool_input": {"command": line}, "cwd": str(tmp_path)}
+    rail = harnesshook.Rail("plan-and-go", "own", roots=(str(tmp_path),), wait_s=0)
+    answer = harnesshook.pre(payload, rail)
+    assert answer["hookSpecificOutput"]["permissionDecision"] == expected
+
+
+@pytest.mark.parametrize("name,role,action", [
+    ("mcp__workspace__workspace_inbox", "read-only", "allow"),
+    ("mcp__workspace__workspace_reputation", "read-only", "allow"),
+    ("mcp__workspace__workspace_send", "plan-and-go", "allow"),
+    ("mcp__workspace__workspace_send", "approve-first", "ask"),
+    ("mcp__workspace__workspace_send", "read-only", "deny"),
+    ("mcp__foreign__workspace_send", "plan-and-go", "ask"),
+])
+def test_bound_workspace_mcp_obeys_role(name, role, action):
+    assert decide(role, name, {"to": "codex", "kind": "status", "text": "ready"}).action == action

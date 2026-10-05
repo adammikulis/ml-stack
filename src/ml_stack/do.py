@@ -26,6 +26,7 @@ from typing import Any, TextIO
 
 from ml_stack import activity, hub, mcp, person, requests
 from ml_stack.client import ollama
+from ml_stack.command_capture import captured
 from ml_stack.interventions import Call, Confirm
 from ml_stack.log import say
 from ml_stack.rules import Rules, describe
@@ -227,7 +228,7 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
         return {"log": str(log), "pid": record.get("pid"), "argv": [sub, *args]}
     from ml_stack.bench.run import _main
 
-    return mcp._captured(lambda: _main([sub, *list(args)]))
+    return captured(lambda: _main([sub, *list(args)]))
 
 
 def _bench_tool(sub: str, detach: bool) -> mcp.Tool:

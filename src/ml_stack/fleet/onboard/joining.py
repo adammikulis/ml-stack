@@ -19,14 +19,14 @@ from typing import Any
 from ml_stack import keystore, macauth, sealing
 from ml_stack.log import warn
 
-from .. import discovery as disc
+from .. import discovery as disc, recovery
 from ..discovery import DiscoveryError, Membership
 from . import pake
 from .lan import require_local
 from .pairing import fingerprint_of, unverified_context
 
-__all__ = ["API", "Declined", "Joiner", "Joining", "cluster_action", "create_by_passphrase",
-           "find_joiners", "join_by_passphrase", "join_secret",
+__all__ = ["API", "Declined", "Joiner", "Joining", "Offer", "find_clusters", "cluster_action",
+           "create_by_passphrase", "find_joiners", "join_by_passphrase", "join_existing", "join_secret",
            "matches"]
 
 API = "/join/v1"
@@ -106,7 +106,10 @@ class Joining:
         self.log(f"join: {outcome} from {source} for cluster '{group}'")
 
     def _start(self, body: dict[str, Any], source: str) -> dict[str, Any]:
-        group = str(body.get("group") or "")
+        try:
+            group = disc.require_name(body.get("group"))
+        except DiscoveryError as exc:
+            raise Refusal(400, str(exc)) from None
         if self.lockout.locked(source) or self.everyone.locked("*"):
             self._note(source, group, "refused, too many attempts")
             raise Refusal(429, "too many attempts; try again later")
@@ -171,12 +174,12 @@ class Joiner:
     tls: bool
 
 
-def find_joiners(group: str, *, timeout_s: float = 1.5, port: int | None = None,
-                 most: int = 8) -> list[Joiner]:
-    """Daemons on this network in cluster ``group`` that offer to take a machine in."""
+def _ask_join(group: str, *, timeout_s: float, port: int | None, most: int
+              ) -> list[tuple[str, dict[str, Any]]]:
+    """``(address, answer)`` for each daemon that answers a ``join?`` for ``group`` (every cluster when empty)."""
     nonce = secrets.token_hex(16)
     ask = json.dumps({"v": disc.PROTOCOL, "kind": "join?", "group": group, "nonce": nonce}).encode()
-    found: dict[tuple[str, int], Joiner] = {}
+    found: dict[tuple[str, int, str], tuple[str, dict[str, Any]]] = {}
     where, port_ = disc.default_group(), port if port is not None else disc.default_port()
     with disc._socket(broadcast=True, bind=("", 0)) as sock:
         disc._say(sock, ask, where, port_)
@@ -189,16 +192,49 @@ def find_joiners(group: str, *, timeout_s: float = 1.5, port: int | None = None,
             sock.settimeout(max(0.01, min(deadline, resent) - time.time()))
             try:
                 raw, addr = sock.recvfrom(65535)
+                if len(raw) > 2048:
+                    continue
                 said = json.loads(raw)
-                theirs = int(said["port"])
-            except (TimeoutError, KeyError, TypeError, ValueError):
+                if not isinstance(said, dict) or said.get("v") != disc.PROTOCOL:
+                    continue
+                theirs = said["port"]
+                if type(theirs) is not int or not 1 <= theirs <= 65535:
+                    continue
+                disc.require_name(said.get("group"))
+            except (TimeoutError, KeyError, TypeError, ValueError, DiscoveryError):
                 continue
             except OSError:
                 break
-            if said.get("kind") == "join" and said.get("nonce") == nonce \
-                    and said.get("group") == group:
-                found.setdefault((addr[0], theirs), Joiner(addr[0], theirs, bool(said.get("tls"))))
+            if isinstance(said, dict) and said.get("kind") == "join" and said.get("nonce") == nonce \
+                    and (not group or said.get("group") == group):
+                found.setdefault((addr[0], theirs, str(said.get("group"))), (addr[0], said))
     return list(found.values())
+
+
+def find_joiners(group: str, *, timeout_s: float = 1.5, port: int | None = None,
+                 most: int = 8) -> list[Joiner]:
+    """Daemons on this network in cluster ``group`` that offer to take a machine in."""
+    return [Joiner(host, int(said["port"]), bool(said.get("tls")))
+            for host, said in _ask_join(group, timeout_s=timeout_s, port=port, most=most)]
+
+
+@dataclass(frozen=True, slots=True)
+class Offer:
+    """A daemon that says it takes machines into the cluster ``group``."""
+
+    group: str
+    machine: str
+    host: str
+    method: str = "passphrase"
+
+
+def find_clusters(*, timeout_s: float = 1.5, port: int | None = None, most: int = 64) -> list[Offer]:
+    """The clusters daemons on this network offer to take a machine into, one `Offer` per daemon and cluster."""
+    offers = (Offer(str(said.get("group") or ""), str(said.get("name") or host), host,
+                    "recovery" if said.get("method") == "recovery" else "passphrase")
+              for host, said in _ask_join("", timeout_s=timeout_s, port=port, most=most)
+              if said.get("group"))
+    return list({(o.group, o.machine): o for o in offers}.values())
 
 
 class _Call:
@@ -271,53 +307,65 @@ def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> bytes:
     if not session.check(str(done.get("confirmation"))):
         raise Declined(403, "the machine did not prove it knew the passphrase")
     try:
-        held = json.loads(sealing.open_(session.key("join"), bytes.fromhex(str(done.get("sealed"))), context))
-        key = str(held["key"]).encode()
-    except (sealing.SealError, ValueError, KeyError, TypeError):
+        held = recovery.parse_recovery(sealing.open_(
+            session.key("join"), bytes.fromhex(str(done.get("sealed"))), context).decode())
+        if held.group != group:
+            raise DiscoveryError("the machine answered for a different cluster")
+        key = held.key
+    except (sealing.SealError, ValueError, KeyError, TypeError, DiscoveryError):
         raise Declined(400, "the machine's answer did not authenticate") from None
     return key
 
 
-def _named(group: str) -> str:
-    group = group.strip()
-    if not group:
-        raise DiscoveryError("Enter a cluster name.")
-    return group
-
-
 def create_by_passphrase(passphrase: str, group: str,
-                         path: Path | str | None = None) -> Membership:
+                         path: Path | str | None = None, *, port: int | None = None) -> Membership:
     """Create a named cluster with a passphrase."""
-    group = _named(group)
+    group = disc.require_name(group)
     if any(member.group == group for member in disc.memberships(path)):
         raise DiscoveryError(f"This machine already belongs to '{group}'. Leave it before creating another.")
     words = disc.check_length(passphrase)
-    if find_joiners(group):
+    if find_joiners(group, port=port):
         raise DiscoveryError(f"A cluster named '{group}' is on this network. Join it instead.")
     return disc.mint_cluster(group, path, join=join_secret(words, group))
 
 
 def cluster_action(mode: str, passphrase: str, group: str,
-                   path: Path | str | None = None) -> Membership:
+                   path: Path | str | None = None, *, port: int | None = None) -> Membership:
     """Join an existing cluster or create a new one."""
     if mode == "join":
-        return join_by_passphrase(passphrase, group, path)
+        return join_existing(passphrase, group, path, port=port)
     if mode == "create":
-        return create_by_passphrase(passphrase, group, path)
+        return create_by_passphrase(passphrase, group, path, port=port)
     raise DiscoveryError("Choose Join existing cluster or Create new cluster.")
 
 
 def join_by_passphrase(passphrase: str, group: str,
                        path: Path | str | None = None, *, timeout_s: float = 1.5,
                        port: int | None = None) -> Membership:
-    """Join an existing named cluster through its authenticated passphrase exchange."""
-    group = _named(group)
+    """Join a named cluster or create it when no daemon answers."""
+    group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
     joiners = find_joiners(group, timeout_s=timeout_s, port=port)
     if not joiners:
-        raise DiscoveryError(f"No machine in '{group}' answered on this network. "
-                             "Check its connection and cluster name, then retry. "
-                             "Use Create new cluster to start a separate cluster.")
+        held = next((m for m in disc.memberships(path) if m.group == group), None)
+        return held or disc.mint_cluster(group, path, join=secret)
+    return _accept(joiners, group, secret, path)
+
+
+def join_existing(passphrase: str, group: str, path: Path | str | None = None, *,
+                  timeout_s: float = 1.5, port: int | None = None) -> Membership:
+    """Join a live cluster without creating a replacement when it disappears."""
+    group = disc.require_name(group)
+    secret = join_secret(disc.check_length(passphrase), group)
+    joiners = find_joiners(group, timeout_s=timeout_s, port=port)
+    if not joiners:
+        raise DiscoveryError(f"No machine in '{group}' answered on this network; "
+                             "cluster is no longer available; refresh nearby clusters.")
+    return _accept(joiners, group, secret, path)
+
+
+def _accept(joiners: list[Joiner], group: str, secret: str,
+            path: Path | str | None) -> Membership:
     refused: list[Declined] = []
     for one in joiners:
         try:

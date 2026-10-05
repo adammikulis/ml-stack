@@ -22,7 +22,7 @@ import pytest
 from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import in_cluster, primary_ip
+from ml_stack.fleet.discovery import cluster_group, in_cluster, primary_ip
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.onboard.pairing import unverified_context
@@ -75,7 +75,7 @@ def _free_port() -> int:
 
 
 class Serving:
-    """A real daemon with the UI mounted, bound on every interface."""
+    """A daemon with a loopback UI and an optional explicit LAN listener."""
 
     def __init__(self, tmp_path, name="studio", setup_token="", schedule=None, secure=True):
         self.schedule = schedule
@@ -101,6 +101,7 @@ class Serving:
                          schedule=schedule, tokens=self._cluster_tokens,
                          cluster_key_path=self.keyfile, ui_from_lan=True,
                          schedule_path=(root / "availability.json") if schedule else None)))
+        self.lan_httpd = None
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def _cluster_tokens(self):
@@ -109,8 +110,17 @@ class Serving:
 
         return {derive_token(m.key) for m in memberships(self.keyfile)}
 
-    def call(self, path, *, method="GET", body=None, host="127.0.0.1",
-             headers=None, ui_header=True, cookie=""):
+    def call(self, path, *, method="GET", body=None, **options):
+        host = options.pop("host", "127.0.0.1")
+        headers = options.pop("headers", None)
+        ui_header = options.pop("ui_header", True)
+        cookie = options.pop("cookie", "")
+        if options:
+            raise TypeError(f"Unknown request options: {', '.join(options)}")
+        if host != "127.0.0.1" and self.lan_httpd is None:
+            self.lan_httpd = LimitedServer((host, self.port), self.httpd.RequestHandlerClass,
+                                          tls=self.httpd.tls)
+            threading.Thread(target=self.lan_httpd.serve_forever, daemon=True).start()
         data = json.dumps(body).encode() if body is not None else None
         sent = {"Content-Type": "application/json"}
         if ui_header:
@@ -132,6 +142,9 @@ class Serving:
         self.runner.shutdown()
         self.httpd.shutdown()
         self.httpd.server_close()
+        if self.lan_httpd:
+            self.lan_httpd.shutdown()
+            self.lan_httpd.server_close()
 
 
 @pytest.fixture
@@ -152,10 +165,10 @@ class TestAssets:
         assert asset_bytes("style.css") is not None, "style.css is missing from web/"
 
     def test_every_component_the_page_lists_is_on_disk(self):
-        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES, components
 
-        assert COMPONENTS, "a page of no components would pass the loop below"
-        for name in COMPONENTS:
+        assert components(), "the page contains no components"
+        for name in (*COMPONENTS, *MODULES):
             assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
 
     def test_every_component_defines_the_element_the_shell_holds(self):
@@ -169,6 +182,20 @@ class TestAssets:
             assert f"customElements.define('{name}'" in text \
                 or f'customElements.define("{name}"' in text, \
                 f"{name}.html defines no <{name}>"
+
+    def test_shared_modules_load_before_consumers_without_custom_elements(self):
+        from ml_stack.fleet.page import COMPONENTS, FIT_ONLY, MODULES, components
+
+        parts = components()
+        names = [part.name for part in parts]
+        for name, consumers in MODULES.items():
+            assert name not in COMPONENTS
+            assert names.count(name) == 1
+            module = next(part for part in parts if part.name == name).read()
+            assert not module.templates
+            assert "customElements.define" not in module.script
+            assert all(names.index(name) < names.index(consumer) for consumer in consumers)
+        assert not set(MODULES) & {part.name for part in components(FIT_ONLY)}
 
     def test_every_asset_the_page_asks_for_exists(self):
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
@@ -207,6 +234,7 @@ class TestAssets:
 
 
 # -- the setup guard -----------------------------------------------------
+@pytest.mark.redteam
 class TestFirstRunIsNotUpForGrabs:
     def test_a_fresh_daemon_says_it_needs_setting_up(self, serving):
         status, body, _ = serving.call("/ui/setup")
@@ -397,24 +425,33 @@ class TestSignIn:
     def test_the_passphrase_signs_you_in(self, joined):
         """Typing the words you already know, rather than pasting 43 characters."""
         status, body, headers = joined.call("/ui/session", method="POST",
-                                            body={"passphrase": WORDS})
+                                            body={"passphrase": WORDS, "group": "home"})
         assert status == 200 and body["signed_in"]
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
 
+    @pytest.mark.redteam
     def test_the_wrong_passphrase_does_not(self, joined):
         status, _, _ = joined.call("/ui/session", method="POST",
                                    body={"passphrase": "not the words"})
         assert status == 401
+
+    @pytest.mark.redteam
+    def test_correct_passphrase_for_a_different_group_is_refused(self, joined):
+        status, body, headers = joined.call('/ui/session', method='POST',
+                                            body={'passphrase':WORDS,'group':'ml-stack'})
+        assert status == 401 and not body.get('signed_in')
+        assert 'Set-Cookie' not in headers
 
     def test_one_typo_does_not_lock_you_out(self, joined):
         """Someone who fumbles a passphrase once and is then told to wait has been
         punished for being the legitimate user."""
         joined.call("/ui/session", method="POST", body={"passphrase": "wrong words"})
         status, body, _ = joined.call("/ui/session", method="POST",
-                                      body={"passphrase": WORDS})
+                                      body={"passphrase": WORDS, "group": "home"})
         assert status == 200, body
 
+    @pytest.mark.redteam
     def test_persistent_guessing_is_slowed_down(self, joined):
         for _ in range(6):
             status, body, _ = joined.call("/ui/session", method="POST",
@@ -428,15 +465,50 @@ class TestSignIn:
 
     def test_a_session_opens_the_cluster_view(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, body, _ = joined.call("/ui/peers", cookie=cookie)
         assert status == 200
         assert body["group"] == "home"
 
+    @pytest.mark.redteam
+    def test_launch_ticket_requires_session_and_is_consumed_once(self, joined):
+        status, _, _ = joined.call('/ui/launch-ticket', method='POST')
+        assert status == 401
+        _, _, headers = joined.call('/ui/session', method='POST',
+                                    body={'passphrase': WORDS, 'group': 'home'})
+        cookie=headers['Set-Cookie'].split(';')[0]
+        status, body, headers=joined.call('/ui/launch-ticket', method='POST', cookie=cookie)
+        assert status == 200 and headers['Cache-Control'] == 'no-store'
+        assert joined.call('/ui/launch-ticket', method='POST', cookie=cookie, ui_header=False)[0] == 403
+        assert joined.call('/ui/launch-ticket', method='POST', cookie=cookie, headers={'Host':'foreign.example'})[0] == 403
+        ticket=body['ticket']
+        status, body, _=joined.call('/ui/session',method='POST',body={'ticket':ticket})
+        assert status == 200 and body['signed_in']
+        status, _, _=joined.call('/ui/session',method='POST',body={'ticket':ticket})
+        assert status == 401
+        assert joined.call('/ui/launch-ticket',cookie=cookie)[0] == 405
+
+    def test_browser_launch_exchanges_ticket_and_removes_address_credential(self, joined):
+        playwright=pytest.importorskip('playwright.sync_api')
+        _, _, headers=joined.call('/ui/session',method='POST',
+                                 body={'passphrase':WORDS,'group':'home'})
+        cookie=headers['Set-Cookie'].split(';')[0]
+        _, body, _=joined.call('/ui/launch-ticket',method='POST',cookie=cookie)
+        with playwright.sync_playwright() as driver:
+            browser=driver.chromium.launch(headless=True)
+            page=browser.new_page()
+            page.goto(f'http://127.0.0.1:{joined.port}/ui/?launch_ticket={body["ticket"]}#tasks')
+            page.wait_for_function("!location.search.includes('launch_ticket')")
+            page.wait_for_function("document.cookie !== undefined && window.fleetModel !== undefined")
+            status=page.evaluate("async () => (await fetch('/ui/session',{headers:{'X-ML-Stack-UI':'1'}})).json()")
+            assert status['signed_in']
+            assert page.url.endswith('#tasks')
+            browser.close()
+
     def test_signing_out_ends_the_session(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         joined.call("/ui/session", method="DELETE", cookie=cookie)
         status, _, _ = joined.call("/ui/peers", cookie=cookie)
@@ -446,7 +518,7 @@ class TestSignIn:
         """The cookie is scoped to /ui. A browser session must not become a bearer
         credential for the route that runs commands."""
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, _ = joined.call("/jobs", cookie=cookie)
         assert status == 401
@@ -960,13 +1032,13 @@ def test_every_components_script_parses(tmp_path):
     import shutil
     import subprocess
 
-    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR, MODULES
     from ml_stack.ui import load
 
     node = shutil.which("node")
     if node is None:
         pytest.skip("no node to parse with")
-    for name in COMPONENTS:
+    for name in (*COMPONENTS, *MODULES):
         script = load(COMPONENTS_DIR, [name])[0].read().script
         path = tmp_path / f"{name}.js"
         path.write_text(script, encoding="utf-8")

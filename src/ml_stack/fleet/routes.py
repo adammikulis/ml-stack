@@ -1,9 +1,4 @@
-"""The ``/ui/*`` route table: one mixin per screen, composed into `Router`.
-
-`Base` holds the request and how to answer it; each mixin answers the paths of one screen
-and hands anything else on. `Router.run` puts them in order: the page and its files, then
-setup and session, then everything a session is needed for.
-"""
+"""Authenticated UI routes composed from screen mixins."""
 
 from __future__ import annotations
 
@@ -17,7 +12,7 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import recovery
+from . import component_routes, lan_clusters, recovery
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -25,14 +20,22 @@ from .discovery import (
     in_cluster,
     load_cluster_key,
     memberships,
+    require_name,
 )
-from .onboard.joining import cluster_action
+from .onboard.joining import cluster_action, join_by_passphrase
+from .extension_routes import ExtensionRoutes
+from .gym_recording_routes import GymRecordingRoutes
+from .gym_routes import GymRoutes
+from .launch_routes import LaunchRoutes
+from .onboard.clusters import known_clusters
 from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .project_board_routes import ProjectBoardRoutes
 from .room_routes import RoomRoutes
 from .session import parse_cookie
 from .startup_models import choices
+from .setup_recovery_routes import SetupRecoveryRoutes
+from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"
 
@@ -187,6 +190,14 @@ class PageRoutes:
         return super().open_route()
 
 
+def found_clusters(routes: Any) -> bool:
+    """Answer with the clusters on this machine and those the network offers."""
+    ui = routes.ui
+    found = known_clusters(ui.cluster_key_path, port=ui.discovery_port, self_names=(ui.name,))
+    routes.send(200, {"found": [c.public() for c in found]})
+    return True
+
+
 class SetupRoutes:
     """First run: what this machine looks like, what to set it to, and who may say so."""
 
@@ -200,6 +211,21 @@ class SetupRoutes:
             return True
         if self.path == "/ui/setup/join" and self.method == "POST":
             return self._join()
+        if self.path == "/ui/setup/clusters" and self.method == "GET":
+            why = self._may_setup() if not in_cluster(self.ui.cluster_key_path) else ""
+            if why:
+                self.send(403, {"error": why})
+            elif in_cluster(self.ui.cluster_key_path) and not self.ui.authed(self.cookie):
+                self.send(401, {"error": "sign in to discover clusters"})
+            else:
+                try:
+                    self.send(200, {"clusters": lan_clusters.nearby(port=self.ui.discovery_port),
+                                    "found": [c.public() for c in known_clusters(
+                                        self.ui.cluster_key_path, port=self.ui.discovery_port,
+                                        self_names=(self.ui.name,))]})
+                except OSError:
+                    self.send(503, {"error": "LAN discovery is unavailable; enter the cluster name manually."})
+            return True
         if self.path == "/ui/setup/suggest" and self.method == "GET":
             return self._suggest()
         if self.path in ("/ui/setup/prefs", "/ui/setup/done") and self.method == "POST":
@@ -223,9 +249,11 @@ class SetupRoutes:
                 return True
         req = self.body()
         try:
+            if not isinstance(req.get("existing", False), bool):
+                raise DiscoveryError("existing cluster selection must be true or false")
             state, sid = ui.join(str(req.get("passphrase") or ""),
-                                 str(req.get("group") or ""), self.client_ip,
-                                 str(req.get("mode") or "join"))
+                                 require_name(req.get("group")), self.client_ip,
+                                 mode=req.get("mode"), existing=req.get("existing") is True)
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})
@@ -414,6 +442,8 @@ class ModelRoutes:
     """The models here and elsewhere, what may be downloaded, and what is being served."""
 
     def route(self) -> bool:
+        if component_routes.route(self):
+            return True
         if self.path == "/ui/models/startup" and self.method == "GET":
             ui = self.ui
             self.send(200, choices(disk_gb=ui.models.free_gb() if ui.models else 0,
@@ -495,6 +525,7 @@ class ModelRoutes:
                 elsewhere.setdefault(str(row.get("name")), []).append(str(beacon.get("name")))
         self.send(200, {
             "here": [m.public() for m in ui.models.all()],
+            "library": ui.models.library(),
             "elsewhere": [{"name": n, "peers": p}
                           for n, p in sorted(elsewhere.items()) if n not in here],
             "free_gb": free,
@@ -516,7 +547,15 @@ class ModelRoutes:
         if not name:
             self.send(400, {"error": "no model was named"})
             return True
+        try:
+            components = component_routes.selected(ui.models, req, key)
+        except (ModelError, ValueError) as exc:
+            self.send(400, {"error": str(exc)})
+            return True
         if ui.downloads is None:
+            if components:
+                self.send(501, {"error": "Background component downloads are unavailable"})
+                return True
             try:
                 got = ui.models.ensure(name, source=str(req.get("source") or ""), key=key,
                                        autodownload=auto_models)
@@ -526,12 +565,16 @@ class ModelRoutes:
             self.send(200, got.public())
             return True
         here = ui.models.find(name)
-        if here is not None:
+        if here is not None and not components:
             self.send(200, here.public())
             return True
-        started = ui.downloads.start(name, source=str(req.get("source") or ""),
+        source = str(req.get("source") or "")
+        integrated = next((row for row in components if row["packaging"] == "integrated"), None)
+        if integrated and here is None:
+            name, source = integrated["name"], integrated["ref"]
+        started = ui.downloads.start(name, source=source,
                                      key=key, autodownload=auto_models,
-                                     draft=str(req.get("draft") or ""))
+                                     components=components)
         self.send(202, started.public())
         return True
 
@@ -586,7 +629,11 @@ class ModelRoutes:
                                      "machine on your network can serve one instead"})
             return True
         req = self.body()
-        found = ui.models.find(str(req.get("name") or "")) if ui.models else None
+        path = req.get("path")
+        found = ui.models.library_model(path) if ui.models and isinstance(path, str) else None
+        if found is None and not path and ui.models:
+            legacy = ui.models.find(str(req.get("name") or ""))
+            found = ui.models.library_model(str(legacy.path)) if legacy else None
         if found is None:
             self.send(404, {"error": "no such model on this machine"})
             return True
@@ -639,6 +686,8 @@ class ClusterRoutes:
     def route(self) -> bool:
         if self.path == "/ui/clusters":
             return self._clusters()
+        if self.path == "/ui/clusters/found" and self.method == "GET":
+            return found_clusters(self)
         if self.path == "/ui/peers" and self.method == "GET":
             self.send(200, {"peers": self.ui.peers(), "self": self.ui.name,
                             "group": cluster_group(self.ui.cluster_key_path)})
@@ -674,9 +723,13 @@ class ClusterRoutes:
         if self.method == "POST":
             req = self.body()
             words = str(req.get("passphrase") or "")
-            group = str(req.get("group") or "").strip()
             try:
-                cluster_action(str(req.get("mode") or "join"), words, group, ui.cluster_key_path)
+                group = require_name(req.get("group"))
+                with ui.join_guard():
+                    if req.get("mode") is not None:
+                        cluster_action(str(req["mode"]), words, group, ui.cluster_key_path, port=ui.discovery_port)
+                    else:
+                        join_by_passphrase(words, group, ui.cluster_key_path, port=ui.discovery_port)
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True
@@ -704,7 +757,7 @@ class ClusterRoutes:
             return True
         try:
             self.send(200, self.ui.join_fleet(
-                passphrase=words, group=str(req.get("group") or ""),
+                passphrase=words, group=require_name(req.get("group")) if words else "",
                 persist=bool(req.get("persist")), name=str(req.get("name") or "")))
         except (JoinError, DiscoveryError) as exc:
             self.send(400, {"error": str(exc)})
@@ -770,8 +823,9 @@ class JobRoutes:
         return True
 
 
-class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
-             ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
+class Router(PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
+             ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
+             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:

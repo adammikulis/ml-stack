@@ -291,6 +291,7 @@ def serve_forever(root: Path | str | None = None,
 
         for group, member in joined.items():
             if group in advertisers:
+                advertisers[group].joinable = bool(member.join)
                 continue
             try:
                 offered = served_cert()
@@ -303,8 +304,9 @@ def serve_forever(root: Path | str | None = None,
             try:
                 # Not group=: that is the multicast address every cluster shares.
                 # Clusters are told apart by the key their beacons are signed with.
-                advertisers[group] = Advertiser(beacon, member.key, cluster=group,
-                                                refresh=refresh).start()
+                tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
+                tell.joinable = bool(member.join)
+                advertisers[group] = tell.start()
             except DiscoveryError as exc:
                 say(f"  discovery OFF for {group}: {exc}")
 
@@ -472,6 +474,8 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
     ap.add_argument("--root", default=str(default_root()))
+    ap.add_argument("--gym-python", default=None, metavar="PYTHON",
+                    help="reuse this existing simulator interpreter and remember it under --root")
     ap.add_argument("--bench-home", default=None, metavar="DIR",
                     help="where this machine's ml-stack-bench keeps its measuring lock "
                          "(default: the 'bench' beside --root). "
@@ -544,6 +548,14 @@ def main(argv: list[str] | None = None) -> int:
     if a.persist:
         return persist(slots=a.slots, labels=tuple(a.label), report=a.report[-1]
                        if a.report else "")
+    if a.gym_python:
+        python = Path(a.gym_python).expanduser().absolute()
+        if not python.is_file():
+            ap.error("--gym-python must name an existing Python executable")
+        path = Path(a.root).expanduser() / "settings.json"
+        selected = Settings.load(path)
+        selected.gym_python = str(python)
+        selected.save(path)
     probes = [resolve_report(spec) for spec in a.report]
 
     def report() -> dict[str, Any]:

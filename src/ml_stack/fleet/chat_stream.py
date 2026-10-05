@@ -40,8 +40,9 @@ def release(store: Any, cid: str) -> None:
 class Transfer:
     """One cancellable upstream chat request."""
 
-    def __init__(self, target: Any, payload: dict, cid: str) -> None:
+    def __init__(self, target: Any, payload: dict, cid: str, *, source: Any = None) -> None:
         self.target, self.payload, self.cid = target, payload, cid
+        self.source = source
         self.cancelled = threading.Event()
         self.events: queue.Queue = queue.Queue(maxsize=64)
         self.response = None
@@ -90,7 +91,7 @@ class Transfer:
                     return
                 self.state("rebuilding", "Rebuilding model context from the conversation transcript")
                 self.state("loading", "Waiting for the model to begin generating")
-                for block in stream(self.target, self.payload, control=self):
+                for block in (self.source or stream)(self.target, self.payload, control=self):
                     self.emit(block)
                     if self.cancelled.is_set():
                         break

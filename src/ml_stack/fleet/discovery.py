@@ -63,6 +63,13 @@ class DiscoveryError(RuntimeError):
 
 
 # -- the key -------------------------------------------------------------
+def require_name(value: object) -> str:
+    """A nonempty cluster name without control characters, at most 64 characters."""
+    if not isinstance(value, str) or not value.strip():
+        raise DiscoveryError("cluster name is required")
+    return check_name(value)
+
+
 def key_path(path: Path | str | None = None) -> Path:
     """Where the cluster key lives. ``$ML_STACK_CLUSTER_KEY`` wins if set."""
     if path is not None:
@@ -71,27 +78,26 @@ def key_path(path: Path | str | None = None) -> Path:
     return home.expand(env) if env else home.state("cluster.key")
 
 
-def mint_cluster(group: str = DEFAULT_CLUSTER, path: Path | str | None = None, *,
-                 join: str = "") -> Membership:
+def mint_cluster(group: str, path: Path | str | None = None, *, join: str = "") -> Membership:
     """Make a cluster of a fresh random 256-bit key, replacing one of the same name."""
+    group = require_name(group)
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=")
     return adopt(Membership(group=group, key=key, join=join), path)
 
 
 def create_cluster_key(path: Path | str | None = None, *,
-                       overwrite: bool = False) -> str:
+                       overwrite: bool = False, group: str = "") -> str:
     """Mint a cluster key that no passphrase protects, or return the one here."""
     joined = memberships(path)
     if joined and not overwrite:
         return joined[0].key.decode()
-    return mint_cluster(DEFAULT_CLUSTER, path).key.decode()
+    return mint_cluster(require_name(group), path).key.decode()
 
 
 def adopt(member: Membership, path: Path | str | None = None) -> Membership:
-    """Record ``member`` as a cluster this machine is in: in place of one of the same name, else last."""
-    rows = memberships(path)
-    kept = [member if m.group == member.group else m for m in rows]
-    _write_memberships(kept if any(m.group == member.group for m in rows) else [*rows, member], path)
+    """Record ``member`` as a cluster this machine is in, replacing one of the same name."""
+    require_name(member.group)
+    _write_memberships([member, *[m for m in memberships(path) if m.group != member.group]], path)
     return member
 
 
@@ -107,6 +113,26 @@ def check_length(passphrase: str) -> str:
     if len(passphrase) < MIN_PASSPHRASE:
         raise DiscoveryError(f"The passphrase needs at least {MIN_PASSPHRASE} characters.")
     return passphrase
+
+
+MOST_GROUP_NAME = 64
+REFUSED_IN_NAME = "/\\"
+
+
+def check_name(name: str) -> str:
+    """``name`` trimmed, or `DiscoveryError` saying which rule it breaks."""
+    name = name.strip()
+    if not name:
+        raise DiscoveryError("A cluster name cannot be empty.")
+    if len(name) > MOST_GROUP_NAME:
+        raise DiscoveryError(f"A cluster name is at most {MOST_GROUP_NAME} characters; this one is {len(name)}.")
+    bad = sorted({c for c in name if c in REFUSED_IN_NAME or not c.isprintable()})
+    if bad:
+        shown = ", ".join(repr(c) for c in bad)
+        raise DiscoveryError(f"A cluster name cannot contain {shown}: the join handshake uses "
+                                  "slashes as separators and the memberships file cannot carry "
+                                  "control characters.")
+    return name
 
 
 def group_path(path: Path | str | None = None) -> Path:
@@ -469,6 +495,7 @@ class Advertiser:
         self.last_error = ""
         self._said: set[str] = set()
         self.cluster = cluster
+        self.joinable = False
         """The cluster's name; a machine that asks to join it is told where to shake hands."""
 
     # -- lifecycle --
@@ -574,7 +601,8 @@ class Advertiser:
                    nonce: str, addr: tuple[str, int]) -> None:
         """Answer a machine asking to join this cluster: the port and scheme to shake hands on."""
         reply = _canonical({"v": PROTOCOL, "kind": "join", "group": self.cluster, "nonce": nonce,
-                            "port": self.beacon.port, "tls": bool(self.beacon.cert)})
+                            "name": self.beacon.name, "port": self.beacon.port, "tls": bool(self.beacon.cert),
+                            "method": "passphrase" if self.joinable else "recovery"})
         with contextlib.suppress(OSError):
             sock.sendto(reply, addr)
 
@@ -593,13 +621,16 @@ class Advertiser:
 
 def _join_nonce(raw: bytes, group: str) -> str | None:
     """The nonce of a plain datagram asking to join ``group``, or None for anything else."""
+    if len(raw) > 2048:
+        return None
     try:
         msg = json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         return None
     if isinstance(msg, dict) and msg.get("v") == PROTOCOL and msg.get("kind") == "join?" \
-            and msg.get("group") == group:
-        return str(msg.get("nonce", ""))[:64]
+            and msg.get("group") in (group, ""):
+        nonce = msg.get("nonce")
+        return nonce if isinstance(nonce, str) and 1 <= len(nonce) <= 64 else None
     return None
 
 

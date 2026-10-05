@@ -18,19 +18,19 @@ REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("core", ("activity", "asking", "backend", "checks", "command", "contracts", "credentials", "data",
+    ("core", ("activity", "asking", "backend", "checks", "command", "command_capture", "contracts", "credentials", "data",
               "entities", "extraction", "files", "gate", "geo",
               "home", "http", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "limits",
               "lock", "log", "macauth", "sealing",
               "markup", "sandbox",
               "deciders", "desktop", "media", "messages", "net", "paths", "platform", "safenames", "redact", "scrape", "sentinel",
               "records", "requests", "person", "safetext", "serverkeys",
-              "subscribers", "taint", "tar_libraries", "telemetry", "ui", "units")),
+              "subscribers", "taint", "tar_libraries", "telemetry", "tool_schema", "ui", "units", "worktreerules")),
     ("model", ("client", "decide", "gguf", "hub", "spec", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
-    ("machine", ("doctor", "fleet", "serve", "setup")),
+    ("machine", ("doctor", "fleet", "gym", "serve", "setup")),
     ("tools", ("agent", "bench", "chat", "chatpolicy", "claude", "cli", "codex", "coding", "datasheet", "decide_cli",
-               "do", "draft", "guard", "harness", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
+               "do", "draft", "guard", "harness", "harness_claims", "harnessid", "harnessing", "harnesshook", "harnesspolicy", "mcp", "memory", "reputation", "inbox", "roles", "rules",
                "surface", "testing", "train", "walk", "web", "workspace")),
     ("dev", ("redteam",)),
 )

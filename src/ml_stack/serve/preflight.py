@@ -13,6 +13,7 @@ raises before ``Popen`` when it fails.
 
 from __future__ import annotations
 
+import logging
 import re
 import struct
 from collections.abc import Callable, Mapping
@@ -257,8 +258,8 @@ def known_architectures(binary: str | Path) -> set[str]:
         from ml_stack.serve.build_platform import arches_from_source
 
         found |= arches_from_source(Path(source_dir()))
-    except Exception:  # noqa: BLE001 - no source checkout, or a table that moved
-        return _arches(binary)
+    except Exception as exc:  # noqa: BLE001 - no source checkout, or a table that moved
+        logging.getLogger(__name__).debug("Managed architecture table unavailable: %s", exc)
     found |= _arches(binary)
     return found
 

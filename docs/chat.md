@@ -143,3 +143,15 @@ I can't release a quarantine. Only you can, in your own terminal: ml-stack-secur
 - No file edits, shell or workspace access, and no way to cancel a call already confirmed.
 - The history is compacted by the same summariser as in `docs/compaction.md`; a summary is the model's
   own text, so very long chats lose detail.
+
+## Fleet plain chat
+
+The browser Chat view runs a plain turn through the OpenAI Agents Python SDK against
+an explicitly selected local or fleet model. Install `ml-stack[agents]`; the full app
+includes this extra. The SDK uses Chat Completions at the selected server, including
+its model alias. Fleet requests retain signed, sealed authentication and pinned TLS;
+no OpenAI cloud endpoint, environment API key or tracing exporter is selected.
+
+Answers stream into the existing chat composer. Disconnecting closes the model stream
+and cancels the SDK turn. Saved messages stay in ml-stack's encrypted conversation
+graph; no separate SDK session database is created.

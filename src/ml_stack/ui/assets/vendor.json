@@ -1,0 +1,44 @@
+{
+  "dependencies": {
+    "dompurify": "3.4.16",
+    "marked": "18.0.14",
+    "three": "0.186.1"
+  },
+  "files": [
+    [
+      "marked",
+      "lib/marked.umd.js",
+      "marked.umd.js"
+    ],
+    [
+      "dompurify",
+      "dist/purify.min.js",
+      "purify.min.js"
+    ],
+    [
+      "three",
+      "build/three.module.js",
+      "three.module.js"
+    ],
+    [
+      "three",
+      "build/three.core.js",
+      "three.core.js"
+    ],
+    [
+      "three",
+      "examples/jsm/controls/OrbitControls.js",
+      "OrbitControls.js"
+    ],
+    [
+      "three",
+      "examples/jsm/environments/RoomEnvironment.js",
+      "RoomEnvironment.js"
+    ],
+    [
+      "three",
+      "examples/jsm/geometries/RoundedBoxGeometry.js",
+      "RoundedBoxGeometry.js"
+    ]
+  ]
+}

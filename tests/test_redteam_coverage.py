@@ -23,6 +23,20 @@ def coverage():
     return module
 
 
+def test_class_method_references_match_the_exact_ast_class(tmp_path, monkeypatch):
+    cov = coverage()
+    monkeypatch.setattr(cov, 'ROOT', tmp_path)
+    (tmp_path / 'test_members.py').write_text(
+        'class TestFirst:\n    def test_acceptance(self): pass\n'
+        'class TestSecond:\n    def test_other(self): pass\n'
+        'async def test_async(): pass\n')
+    assert not cov.ref_problems('native', 'test_members.py::TestFirst::test_acceptance')
+    assert not cov.ref_problems('native', 'test_members.py::test_async')
+    assert cov.ref_problems('native', 'test_members.py::TestSecond::test_acceptance')
+    assert cov.ref_problems('native', 'test_members.py::TestFirst::test_missing')
+    assert cov.ref_problems('native', 'test_members.py::test_acceptance')
+
+
 @cache
 def state():
     cov = coverage()
@@ -41,6 +55,19 @@ def test_every_kind_of_surface_is_found():
     kinds = {row["kind"] for row in state()[3]}
     assert kinds >= {"route", "handler", "mcp-tool", "chat-tool", "slash-command", "cli", "spawn",
                      "listener", "egress", "human", "desktop", "keystore", "context", "parser"}
+
+
+def test_packaged_simulation_and_desktop_boundaries_are_inventoried():
+    found = state()[0]
+    assert {
+        "desktop:app/src-tauri/capabilities/main.json",
+        "spawn:scripts/test-on-linux",
+        "spawn:gym/transport.py:Process.start",
+        "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
+        "route:workspace/fleet_routes.py:/ui/board/*",
+        "route:fleet/routes.py:/ui/session",
+        "route:fleet/setup_recovery_routes.py:/ui/setup/recovery",
+    } <= found.keys()
 
 
 def test_a_new_surface_without_a_row_fails_and_the_message_says_what_to_add():

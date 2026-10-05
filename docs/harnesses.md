@@ -14,7 +14,7 @@ ml-stack-claude --on http://127.0.0.1:8080 --role read-only -- -p "explain this 
 
 A program starts the same thing with `ml_stack.coding.launch_coding_agent(model, role, project,
 harness="codex", **options)` (options: `name`, `orders_from`, `harness_args`, `say`,
-`run_codex` / `run_claude`); it returns the harness's exit code.
+`run_codex` / `run_claude`, `context`); it returns the harness's exit code.
 
 ## What a launch does
 
@@ -68,6 +68,14 @@ The hook's output is a fixed sentence per outcome, so it adds a few identical to
 conversation and nothing that changes the prompt prefix.
 
 ### The workspace
+
+Codex receives a workspace-only MCP server bound to its assigned agent token. Inbox, thread,
+status and ownership reads follow the read role; send, claim, announce and acknowledgement
+follow the acting role. The server exposes no model administration or identity minting tools.
+Workspace state stays outside the coding sandbox; use these MCP tools instead of shell CLI
+commands there. The token is kept in the private launcher settings and revoked with the seat.
+Shell workspace commands must explicitly name the launcher-assigned identity; other identity
+flags and token-file overrides are denied.
 
 A person-started launcher mints the session's identity the way `ml-stack-workspace setup` does: the
 standard agent role, a token file readable by this user only, nothing printed and no invite code. The

@@ -434,3 +434,139 @@ def test_a_claim_is_supervised_and_nothing_is_not(broker, holders):
     assert broker.supervising()
     broker.unclaim("gpu", holder.pid)
     assert not broker.supervising()
+
+
+@pytest.mark.redteam
+def test_gpu_claim_and_model_grants_exclude_each_other_concurrently(broker, models, holders):
+    model_owner, trainer, next_owner = holders(), holders(), holders()
+    first = broker.lease(ask(models[0], model_owner.pid), timeout=10)
+    claimed, granted = {}, {}
+    claim_thread = threading.Thread(target=lambda: claimed.update(
+        broker.claim('gpu-training', trainer.pid, {'purpose': 'native decision'}, timeout=10)))
+    claim_thread.start()
+    time.sleep(.15)
+    assert not claimed and 'gpu-training' not in broker.snapshot()['claims']
+    broker.release(first.lease)
+    claim_thread.join(timeout=10)
+    assert claimed['granted']
+    grant_thread = threading.Thread(target=lambda: granted.setdefault(
+        'grant', broker.lease(ask(models[1], next_owner.pid, purpose='vision'), timeout=10)))
+    grant_thread.start()
+    time.sleep(.15)
+    assert not granted
+    assert len(broker.snapshot()['servers']) == 1
+    assert 'GPU held' in broker.snapshot()['queue'][0]['blocked_by']
+    broker.unclaim('gpu-training', trainer.pid)
+    grant_thread.join(timeout=10)
+    assert granted['grant'].model == models[1]
+
+
+@pytest.mark.redteam
+def test_loading_model_placeholder_refuses_gpu_claim(broker, models, holders, monkeypatch):
+    entered, resume = threading.Event(), threading.Event()
+    native_start = broker._start
+    def delayed_start(waiting, placeholder):
+        entered.set()
+        assert resume.wait(10)
+        return native_start(waiting, placeholder)
+    monkeypatch.setattr(broker, '_start', delayed_start)
+    owner, trainer = holders(), holders()
+    granted = {}
+    thread = threading.Thread(target=lambda: granted.setdefault(
+        'grant', broker.lease(ask(models[0], owner.pid), timeout=10)))
+    thread.start()
+    try:
+        assert entered.wait(5)
+        claim = broker.claim('gpu-training', trainer.pid, {}, timeout=.1)
+        assert not claim['granted'] and 'gpu-training' not in broker.snapshot()['claims']
+    finally:
+        resume.set()
+        thread.join(timeout=10)
+    assert granted['grant'].model == models[0]
+
+
+@pytest.mark.redteam
+def test_direct_native_start_reserves_gpu_until_its_lease_is_recorded(broker, models, holders, monkeypatch):
+    from ml_stack.serve import ServerSpec
+    from ml_stack.serve.events import Caller
+    from ml_stack.serve.ports import free_port
+
+    entered, resume = threading.Event(), threading.Event()
+    native_start = broker.manager._start_server
+    def delayed_start(*args, **kwargs):
+        entered.set()
+        assert resume.wait(10)
+        return native_start(*args, **kwargs)
+    monkeypatch.setattr(broker.manager, '_start_server', delayed_start)
+    owner, trainer = holders(), holders()
+    got = {}
+    thread = threading.Thread(target=lambda: got.setdefault('server', broker.start(
+        ServerSpec(model=models[0], port=free_port(), context=512), Caller(pid=owner.pid), timeout=10)))
+    thread.start()
+    try:
+        assert entered.wait(5)
+        assert broker.snapshot()['exclusive_gpu_claims']
+        assert not broker.claim('gpu-training', trainer.pid, {}, timeout=.1)['granted']
+    finally:
+        resume.set()
+        thread.join(timeout=10)
+    assert got['server'].lease
+    broker.drop(got['server'])
+    assert broker.claim('gpu-training', trainer.pid, {}, timeout=.1)['granted']
+    with pytest.raises(BrokerError, match='GPU held'):
+        broker.start(ServerSpec(model=models[1], port=free_port(), context=512),
+                     Caller(pid=owner.pid), timeout=.1)
+    trainer.kill()
+    trainer.wait(timeout=10)
+    info = broker.start(ServerSpec(model=models[1], port=free_port(), context=512),
+                        Caller(pid=owner.pid), timeout=10)
+    assert info.lease
+
+
+@pytest.mark.redteam
+def test_paused_vision_child_releases_its_broker_model_lease(tmp_path, llama_binary, models, monkeypatch):
+    from types import SimpleNamespace
+
+    from ml_stack.gym import decision_process
+    from ml_stack.gym.simulation import Simulation
+    from ml_stack.gym.vision_process import VisionProcess
+    from ml_stack.platform import start_process
+    from ml_stack.serve import broker_wire
+
+    monkeypatch.setenv('LLAMA_CPP_SERVER', str(llama_binary))
+    script = ('import json,time\nfrom ml_stack.serve import broker_wire\n'
+              f'g=broker_wire.lease("vision", [{models[0]!r}], spec={{"context":512}}, timeout=20, reason="Paused vision child lease cleanup regression")\n'
+              'print(json.dumps({"status":"ready"}),flush=True)\ntime.sleep(120)\n')
+    monkeypatch.setattr(decision_process, 'start_process', lambda argv, **kwargs:
+                        start_process([sys.executable, '-u', '-c', script], **kwargs))
+    child = VisionProcess('camera-model')
+    live = Simulation.__new__(Simulation)
+    live.decider, live.control_revision = None, 0
+    live.state = {'status': 'running'}
+    live.perception = SimpleNamespace(close=child.close)
+    try:
+        deadline = time.monotonic() + 30
+        while child.status != 'ready' and time.monotonic() < deadline:
+            child.poll()
+            time.sleep(.02)
+        assert child.status == 'ready', child.error
+        before = broker_wire.status()
+        assert any(h['pid'] == child.handle.pid for s in before['servers'] for h in s['holders'])
+        live.pause()
+        assert live.state['status'] == 'paused' and live.perception is None
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            after = broker_wire.status()
+            if not any(h['pid'] == child.handle.pid for s in after['servers'] for h in s['holders']):
+                break
+            time.sleep(.05)
+        assert not any(h['pid'] == child.handle.pid for s in after['servers'] for h in s['holders'])
+    finally:
+        child.close()
+        path = broker_wire.record_path()
+        if path.exists():
+            record = json.loads(path.read_text())
+            for server in broker_wire.status()['servers']:
+                if server['pid']:
+                    kill_process_tree(server['pid'])
+            kill_process_tree(record['pid'])

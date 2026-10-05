@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from ml_stack.log import say, warn
@@ -104,7 +105,10 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
     """Run the Linux daemon with model confinement enabled."""
     executable = executable or prepare()
     arguments = list(argv)
-    environment = ["ML_STACK_SANDBOX_SERVE=1"]
+    host_python = _read("wslpath", "-a", "-u", sys.executable)
+    subprocess.run(command("systemctl", "--user", "disable", "ml-stack-traind.service"),
+                   capture_output=True, check=False)
+    environment = ["ML_STACK_SANDBOX_SERVE=1", "ML_STACK_WINDOWS_PYTHON=" + host_python]
     for name in ("ML_STACK_HOME", "ML_STACK_CACHE"):
         if value := os.environ.get(name):
             translated = _read("wslpath", "-a", "-u", str(Path(value).resolve()))

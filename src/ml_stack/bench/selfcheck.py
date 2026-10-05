@@ -370,12 +370,15 @@ def selfcheck(argv: Sequence[str]) -> str:
     the scoring and the saved run are real, and a run not asked as ``--smoke`` smokes
     first. Returns one line saying what got through, or raises `SelfCheckFailed` with the
     traceback and what the run printed. ``--detach``, ``--no-queue`` and
-    ``--no-selfcheck`` are ignored.
+    ``--no-selfcheck`` are ignored; ``--fleet`` and ``--peers`` are dropped, so a fleet sweep
+    checks the line each peer would run.
     """
     rest = [a for a in argv if a not in ("--detach", "--no-queue", "--no-selfcheck")]
     args = bench._parser().parse_args(rest)
     if args.cmd not in bench.MEASURING:
         raise ValueError(f"{args.cmd} measures nothing; there is nothing to check")
+    if getattr(args, "fleet", False):
+        args.fleet, args.peers = False, ""
     began = time.monotonic()
     built: list[Any] = []
     said = io.StringIO()

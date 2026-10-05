@@ -21,12 +21,11 @@ import re
 import shutil
 import subprocess
 import threading
-import urllib.error
-import urllib.request
 
 import pytest
 
 from ml_stack.fleet.ui import asset_bytes, serve_page
+from ml_stack.http import ServerError, open_stream
 from ml_stack.serve import charts, fit as fit_mod
 from ml_stack.serve.fit import Fit
 
@@ -67,14 +66,12 @@ class Page:
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
     def call(self, path: str, *, ui_header: bool = True) -> tuple[int, dict, str]:
-        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}")
-        if ui_header:
-            req.add_header("X-ML-Stack-UI", "1")
+        headers = {"X-ML-Stack-UI": "1"} if ui_header else {}
         try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                raw, status, kind = r.read(), r.status, r.headers.get("Content-Type", "")
-        except urllib.error.HTTPError as exc:
-            raw, status, kind = exc.read(), exc.code, exc.headers.get("Content-Type", "")
+            with open_stream(f"http://127.0.0.1:{self.port}{path}", headers=headers, timeout=10) as response:
+                raw, status, kind = response.read(), response.status, response.headers.get("Content-Type", "")
+        except ServerError as exc:
+            raw, status, kind = exc.body.encode(), exc.status, exc.headers.get("Content-Type", "")
         try:
             return status, json.loads(raw or b"{}"), kind
         except ValueError:
@@ -152,15 +149,7 @@ class TestThePage:
 
 
 class TestTheSplitBetweenTheFitComponents:
-    """The fit screen is five files: `fit-model` holds the formatting and the chart geometry,
-    `fit-view` the frame and the table, `fit-charts` the two panels the fit screen draws, and
-    `rates-view` and `telemetry-view` a screen each.
-
-    Nothing here drives a browser -- `TestTheFitView` in `test_fleet_page.py` already opens
-    all three screens and reads what they draw. This is the seam itself: the shared pieces
-    live once, in `fit-model`, and the rest read them off `window.fitModel` rather than each
-    carrying their own copy.
-    """
+    """Fit component composition and workspace navigation."""
 
     NAMES = ("fit-model", "fit-view", "fit-charts", "rates-view", "telemetry-view")
 
@@ -198,13 +187,27 @@ class TestTheSplitBetweenTheFitComponents:
         for anchor in ("id=\"fit-heading\"", "id=\"fit-views\"", "id=\"fit-body\""):
             assert anchor in html, f"the frame lost {anchor}"
 
-    def test_the_app_offers_it_beside_the_cluster_view(self):
-        from ml_stack.fleet.page import COMPONENTS_DIR
+    @pytest.mark.slow
+    def test_the_app_offers_it_beside_the_cluster_view(self, tmp_path, playwright):
+        from test_fleet_ui import Serving
 
-        nav = (COMPONENTS_DIR / "fleet-nav.html").read_text(encoding="utf-8")
-        tabs = re.search(r"const TABS = \[(.+?)\];", nav, re.S)
-        assert tabs, "the nav has no TABS"
-        assert '"Fit"' in tabs.group(1) and '"fit"' in tabs.group(1)
+        served = Serving(tmp_path)
+        served.ui.settings.setup_done = True
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.goto(f'http://127.0.0.1:{served.port}/ui/')
+            nav = page.locator('fleet-nav nav')
+            nav.locator('a[href="#fit"]').click()
+            assert page.locator('#nav-title').inner_text() == 'Capacity'
+            assert page.locator('#fit-heading').is_visible()
+            assert nav.locator('a[href="#cluster"]').is_visible()
+            nav.locator('a[href="#cluster"]').click()
+            assert page.locator('#cluster').is_visible()
+            assert not page.locator('#fit-heading').is_visible()
+        finally:
+            browser.close()
+            served.close()
 
 
 # -- the data ----------------------------------------------------------------------------
@@ -258,8 +261,8 @@ class TestTheSlotCountIsWorkedOutOnce:
     to keep equal.
     """
 
-    ROOMS = [6 * GIB, 24 * GIB, ROOM, 128 * GIB]
-    PEOPLE = [1, 2, 7, 64, 1000]
+    ROOMS = (6 * GIB, 24 * GIB, ROOM, 128 * GIB)
+    PEOPLE = (1, 2, 7, 64, 1000)
 
     def component(self) -> str:
         from ml_stack.fleet.page import COMPONENTS_DIR
@@ -336,13 +339,9 @@ class TestTheCliFlag:
             seen["url"] = str(where)
 
             def visit():
-                req = urllib.request.Request(str(where))
-                req.add_header("X-ML-Stack-UI", "1")
-                with urllib.request.urlopen(req, timeout=10) as r:
+                with open_stream(str(where), headers={"X-ML-Stack-UI": "1"}, timeout=10) as r:
                     seen["status"], seen["page"] = r.status, r.read().decode()
-                data = urllib.request.Request(str(where) + ".json")
-                data.add_header("X-ML-Stack-UI", "1")
-                with urllib.request.urlopen(data, timeout=10) as r:
+                with open_stream(str(where) + ".json", headers={"X-ML-Stack-UI": "1"}, timeout=10) as r:
                     seen["records"] = json.loads(r.read())["records"]
                 made["server"].shutdown()
 
@@ -398,7 +397,8 @@ class TestTheRatesRoute:
         where = home / "runs.ladybug"
 
         def run(label: str, *, seconds: float, tokens: int, right: bool,
-                model: str = "", questions: int = SHORT) -> None:
+                model: str = "") -> None:
+            questions = SHORT
             # a short run's worth: below `SHORT` a run is evidence that something ran, and
             # `composed` leaves it out, so a two-question fixture would compose nothing
             rows = [Row(label=label, question=f"who welds frame {n}?", seconds=seconds,
@@ -464,7 +464,7 @@ class TestTheRatesRoute:
         assert got["keys"]["kv_bytes"] == "kv_bytes"
         assert "per question" in got["axes"]["seconds"]
         for row in got["runs"]:
-            for cost, key in got["keys"].items():
+            for key in got["keys"].values():
                 assert row[key] > 0, f"{key} is missing, so the page cannot place the point"
 
     def test_a_model_composed_is_marked_as_one(self, page, store):

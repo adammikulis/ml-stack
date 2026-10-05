@@ -41,20 +41,29 @@ and the download is deleted. The verifier is Ed25519 in plain Python; nothing el
 
 `ml-stack-fleet join --track BRANCH` fetches the branch and runs `git verify-commit FETCH_HEAD` with `RELEASE_KEY` as
 the only allowed signer; the checkout then fast-forwards to exactly that commit. A tip commit that is unsigned or
-signed by another key is not pulled. Commits on the branch are signed with the same key:
+signed by another key is not pulled. Commits on the branch are signed with the same key, loaded into ssh-agent by `scripts/release-key agent`, which
+prints the git settings to use:
 
 ```
-git config gpg.format ssh && git config user.signingkey ~/.ssh/ml-stack-release && git config commit.gpgsign true
+git config gpg.format ssh
+git config user.signingkey 'key::ssh-ed25519 AAAA...'
+git config commit.gpgsign true
 ```
 
-Creating the key:
+The key is made and kept by `scripts/release-key`, run by a person at a terminal (it refuses an agent and a process
+with no terminal). It needs `ssh-keygen` and an authenticated `gh` in this repository.
 
-```
-ssh-keygen -t ed25519 -N '' -C ml-stack-release -f ml-stack-release
-```
+- `scripts/release-key create [--write]` generates an Ed25519 key, sets the repository secret `RELEASE_SIGNING_KEY`
+  from stdin, stores the private key in the OS keystore (credential `ML_STACK_RELEASE_SIGNING_KEY`) and prints the
+  public line. `--write` sets `RELEASE_KEY` in `src/ml_stack/fleet/signing.py`; commit that file. It refuses when a key
+  is already stored.
+- `scripts/release-key show-public` prints the stored key's public line.
+- `scripts/release-key rotate [--write]` replaces the stored key, the repository secret and `RELEASE_KEY`. Releases
+  signed before it verify only against the old public key.
+- `scripts/release-key agent` loads the stored key into ssh-agent.
 
-`ml-stack-release` is the private key, for the secret `RELEASE_SIGNING_KEY`; the contents of `ml-stack-release.pub` are
-`RELEASE_KEY`. Until `RELEASE_KEY` is set, no release asset and no tracked commit verifies.
+If `gh` fails, nothing is stored and `signing.py` is unchanged. Until `RELEASE_KEY` is set, no release asset and no
+tracked commit verifies.
 
 To check an asset by hand: `ssh-keygen -Y check-novalidate -n ml-stack-release -s <asset>.zip.sig < <asset>.zip`
 confirms the signature is well formed, and `ssh-keygen -Y verify -f allowed_signers -I ml-stack-release -n
@@ -76,3 +85,37 @@ Only the repository owner can change these.
   workflows from pull requests.
 - Tag ruleset for `v*`: restrict creation to the owner; block deletion and force updates.
 - The README one-line installers fetch `packaging/install.sh` from `main`. Pin a tag in the URL when you document one.
+
+## Standalone conversation smoke test
+
+The frozen daemon includes the Ladybug graph engine, native bindings and the package metadata
+that declares UI route extensions. Tensor, dataframe, world and benchmark dependencies remain
+outside this profile. Plain conversation history opens without installing search extensions.
+
+After building the standalone daemon, run its socket lifecycle check through the shared broker:
+
+```sh
+ML_STACK_FROZEN_BINARY=dist/bundle/ml-stack-headless python scripts/test slow -n 1 tests/test_packaging_conversations.py
+```
+
+Use the executable with the `.exe` suffix on Windows. The test uses isolated daemon and workspace
+roots, checks the maintained Board extension discovered from bundled metadata, imports an existing
+conversation and verifies edits and deletion across a restart. It starts no model server.
+
+The Coding worker additionally exercises frozen multiprocessing, native-session resume,
+cancellation, identity revocation and the frozen permission-hook dispatcher. Its test build
+replaces only the model-serving boundary with `tests/frozen_coding_broker.py`; the maintained
+harness launcher, role hooks and subprocess lifecycle still run. The test installs its own
+fixture Codex executable in an isolated PATH and starts no model server.
+
+Create a separate proof spec from `packaging/ml-stack.spec`, add
+`runtime_hooks=[str(repository / "tests/frozen_coding_broker.py")]` to `Analysis`, and use the
+absolute path of `packaging/launcher-headless.py` as its entry point. Build that spec with
+PyInstaller in the standalone build environment, then run:
+
+```sh
+ML_STACK_FROZEN_CODING_BINARY=/path/to/proof/ml-stack-headless python scripts/test slow -n 1 tests/test_packaging_coding.py
+```
+
+Keep that fixture hook out of production bundles. Actual local-model acceptance is a separate,
+exclusive brokered run with an installed harness and an isolated project.

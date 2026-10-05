@@ -42,8 +42,27 @@
         `${action === "create" ? "Created" : "Joined"} cluster '${group}'.`));
       await onComplete(got);
     };
+    const nearby = el("div", { role: "status", "aria-live": "polite" });
+    const recovered = el("div");
+    const refresh = el("button", { class: "ghost small", onclick: async () => {
+      refresh.disabled = true;
+      try {
+        const result = await M.api("/ui/clusters/found");
+        nearby.replaceChildren(...(result.found || []).filter(c => !c.mine).map(c =>
+          el("div", { class: "row" }, el("span", {}, c.name),
+            el("button", { class: "ghost small", onclick: () => {
+              named.value = c.name; mode.value = "join"; choose();
+              recovered.replaceChildren();
+              if (c.method === "recovery") recovered.append(window.setupRecovery(c.name, onComplete));
+              else words.focus();
+            } }, c.method === "recovery" ? "Join with recovery file" : "Join"))));
+        if (!nearby.childNodes.length) nearby.textContent = result.error || "No nearby clusters found.";
+      } catch { nearby.textContent = "Could not discover nearby clusters."; }
+      finally { refresh.disabled = false; }
+    } }, "Refresh nearby clusters");
     choose();
     this.replaceChildren(el("div", { class: "group", id: `${scope}-form` },
+      el("h3", {}, "Nearby clusters"), nearby, refresh, recovered,
       el("label", { for: `${scope}-action` }, "What would you like to do?"), mode, explain,
       el("label", { for: `${scope}-name` }, "Cluster name (required)"), named,
       el("label", { for: `${scope}-passphrase` }, "Cluster passphrase"), words,

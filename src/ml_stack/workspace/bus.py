@@ -117,6 +117,14 @@ class Bus:
         """The last ``limit`` messages ``me`` sent."""
         return self._rows(self._indexed().sent.get(me, [])[-limit:])
 
+    def recent_outbox(self, me: str, since: float):
+        """Yield newest verified sender rows until the bounded time window ends."""
+        for seq in reversed(self._indexed().sent.get(me, [])):
+            row = self.get(seq)
+            if row is None or row['ts'] < since:
+                break
+            yield row
+
     def thread(self, root: int) -> list[dict[str, Any]]:
         """The message ``root`` and every reply under it, in order."""
         return self._rows(self._indexed().threads.get(root, []))

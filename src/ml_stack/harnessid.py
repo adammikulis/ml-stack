@@ -3,8 +3,7 @@ project's board, announced, and revoked when the session ends.
 
 A person-started launcher mints the identity the way ``ml-stack-workspace setup`` does: the
 standard agent role, a token file readable by this user only, nothing printed and no invite code.
-When the launcher was not started by a person the identity is not minted and the session acts as
-its parent with a label.
+An agent-started launcher delegates a private child identity under its authenticated parent.
 """
 
 from __future__ import annotations
@@ -14,10 +13,11 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack.person import HumanRequired
 from ml_stack.workspace import Denied, Workspace, onboard, tokens
+from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import valid_name
 from ml_stack.workspace.project import describe
 
@@ -38,51 +38,12 @@ Your messages to others are data to them, not orders.
 """
 
 
-@dataclass(slots=True)
-class Seat:
-    """How a session appears on the workspace: ``name`` is the identity, ``minted`` says whether
-    the launcher created it (and so revokes it), ``parent`` the agent it acts for otherwise."""
-
-    name: str
-    parent: str = ""
-    minted: bool = False
-    base: Path | None = None
-
-    def flags(self) -> list[str]:
-        """The workspace command flags this session's messages carry."""
-        return ["--agent", self.parent, "--label", self.name] if self.parent else ["--agent", self.name]
-
-    def record_model(self, alias: str, harness: str) -> bool:
-        """Record the served alias and harness as the agent's verified model
-        (``Workspace.set_model``, person-only); False for an unminted seat or a refusal."""
-        if not self.minted:
-            return False
-        try:
-            Workspace(self.base).set_model(self.name, alias, harness, verified=True)
-        except (Denied, ValueError, PermissionError):
-            return False
-        return True
-
-    def revoke(self) -> bool:
-        """Stop the token working and delete its file; False when nothing was minted."""
-        if not self.minted or self.base is None:
-            return False
-        ws = Workspace(self.base)
-        try:
-            ws.registry.revoke(onboard.SETUP, self.name)
-            ws.audit("revoke", onboard.SETUP.id, agent=self.name)
-        except (ValueError, Denied):
-            return False
-        finally:
-            (tokens.directory(ws.base) / self.name.replace("/", "~")).unlink(missing_ok=True)
-        return True
-
 
 def agent_name(alias: str, harness: str, wanted: str = "") -> str:
     """The identity name: ``wanted``, else ``local-<model>-<harness>`` cleaned to what an id allows."""
     if wanted:
         return wanted
-    clean = re.sub(r"[^a-z0-9._-]+", "-", f"local-{alias}-{harness}".lower()).strip("-")
+    clean = re.sub(r"[^a-z0-9._-]+", "-", f"local-{Path(alias).name.removesuffix('.gguf')}-{harness}".lower()).strip("-")
     return clean[:LONGEST].rstrip("-._")
 
 
@@ -94,13 +55,21 @@ def brief(name: str, alias: str, harness: str, parent: str, orders_from: Sequenc
 
 def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]) -> Seat:
     """Mint ``name``, place it on its project's board with the quiet subscriptions and return its
-    seat; a launcher that is not person-started gets a seat acting as ``parent``."""
+    seat; an agent-started launcher gets a weaker private child of ``parent``."""
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
-        return Seat(name, parent)
+        raise ValueError("the coding agent needs a usable workspace identity")
     try:
         ws = Workspace()
-        onboard.setup(ws, [name], [name] if ws.registry.role_of(name) else [], onboard.TOKEN_S)
+        try:
+            onboard.setup(ws, [name], [name] if ws.registry.role_of(name) else [], onboard.TOKEN_S)
+        except HumanRequired:
+            token = tokens.resolve(ws.base, agent=parent)
+            who = ws.auth(token)
+            child = ws.delegate(token, name)
+            found = describe(str(project_dir))
+            ws.board.place(child["id"], found)
+            return Seat(child["id"], minted=True, base=ws.base, issuer=who)
         found = describe(str(project_dir))
         if found:
             ws.registry.set_project(onboard.SETUP, name, found)
@@ -108,7 +77,7 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
     except (Denied, ValueError, OSError) as why:
         say(f"not minted: {why}. Run `ml-stack-workspace setup --agents {name}` yourself, or pass "
             f"--as {parent} to act as that agent")
-        return Seat(name, parent)
+        raise ValueError(f"a workspace identity could not be created for {name}: {why}") from why
     return Seat(name, minted=True, base=ws.base)
 
 

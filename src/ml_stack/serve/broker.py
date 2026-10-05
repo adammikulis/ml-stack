@@ -33,7 +33,7 @@ from ml_stack.serve import canaries, grant, guarded, lease_history, provenance, 
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import recorded_servers
-from ml_stack.serve.manager import BESIDE_HEADROOM, Measuring, ServerManager, Starting
+from ml_stack.serve.manager import ASKING, BESIDE_HEADROOM, Measuring, ServerManager, Starting
 from ml_stack.serve.matching import model_matches
 from ml_stack.serve.ports import DEFAULT_HOST, free_port, port_is_free
 from ml_stack.serve.preflight import PreflightFailed
@@ -46,6 +46,7 @@ __all__ = ["Ask", "Broker", "BrokerError", "Grant", "Held", "Waiting"]
 IDLE_S = 600.0
 POLL_S = 0.5
 _SPEC_FIELDS = frozenset(f.name for f in dataclasses.fields(ServerSpec)) - {"model", "port"}
+_MODEL_START = "gpu-model-start:"
 
 
 _QUANT = re.compile(r"(?i)(?<![a-z0-9])((?:IQ|Q)\d(?:_[A-Z0-9]+)*|BF16|F16|F32)(?![a-z0-9])")
@@ -57,9 +58,11 @@ def _shape_of(settings: Mapping[str, Any]) -> dict[str, Any]:
     `ServerSpec` as a dict or a lease record."""
     out: dict[str, Any] = {}
     for key in ("context", "parallel", "cache_type_k", "cache_type_v", "spec_type", "mtp",
-                "embedding"):
+                "embedding", "draft", "chat_template_file", "spec_draft_max", "spec_p_min"):
         if key in settings and settings[key] is not None:
             out[key] = settings[key]
+        elif key in settings and key in ("draft", "chat_template_file"):
+            out[key] = ""
     return out
 
 
@@ -169,7 +172,10 @@ class Held:
             want, got = asked.get(key), have.get(key)
             if isinstance(want, int) and want > 0 and isinstance(got, int) and got < want:
                 return f"port {self.port} serves {got:,} {what}, {want:,} asked"
-        for key in ("cache_type_k", "cache_type_v", "spec_type"):
+        for key in ("draft", "chat_template_file"):
+            if key in asked and key in have and str(asked[key] or "") != str(have[key] or ""):
+                return f"port {self.port} serves {key} {have[key]!r}, {asked[key]!r} asked"
+        for key in ("cache_type_k", "cache_type_v", "spec_type", "spec_draft_max", "spec_p_min"):
             want, got = asked.get(key), have.get(key)
             if want and got is not None and want != got:
                 return f"port {self.port} serves {key} {got!r}, {want!r} asked"
@@ -282,12 +288,29 @@ class Broker:
         manager = self._manager_for(options)
         how = Starting(**{**{k: v for k, v in options.items() if k != "backend"},
                           "who": caller.label or who()})
-        with grant.broker_grant():
-            info = manager._start_server(spec, timeout=timeout, how=how,
-                                         on_event=caller.on_event, say=caller.say)
         pid = caller.pid or os.getpid()
-        return self._held_by(info, spec, pid, caller.label or who(),
-                             provenance.observe(pid, caller.claim))
+        reservation = self._reserve_model_start(pid, str(spec.model), timeout)
+        try:
+            with grant.broker_grant():
+                info = manager._start_server(spec, timeout=timeout, how=how, on_event=caller.on_event,
+                                             say=caller.say)
+            return self._held_by(info, spec, pid, caller.label or who(),
+                                 provenance.observe(pid, caller.claim))
+        finally:
+            self.unclaim(reservation, pid)
+
+    def _reserve_model_start(self, pid: int, model: str, timeout: float | None) -> str:
+        """Reserve a native model start until its server lease is recorded."""
+        deadline = time.monotonic() + (600 if timeout is None else timeout)
+        reservation = _MODEL_START + uuid.uuid4().hex
+        with self._cond:
+            while (held := self.claims.get("gpu-training")) and self.alive(held["pid"]):
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise BrokerError(f"GPU held by pid {held['pid']}: model start timed out")
+                self._cond.wait(min(left, POLL_S))
+            self.claims[reservation] = {"pid": pid, "info": {"purpose": model}, "since": time.time()}
+        return reservation
 
     def _held_by(self, info: ServerInfo, spec: ServerSpec, pid: int, label: str,
                  record: Mapping[str, Any]) -> ServerInfo:
@@ -481,8 +504,9 @@ class Broker:
 
     def _decide(self, ask: Ask) -> tuple[Held | None, list[Held], str]:
         """``(server to share, servers to stop first, why it must wait)``."""
-        # A shape asked for by `up` is shared only with a server held for that same shape:
-        # taking in one that happens to serve the model is how a caller got the wrong slots.
+        training = self.claims.get("gpu-training")
+        if training and self.alive(training["pid"]):
+            return None, [], f"GPU held by pid {training['pid']} ({training['info'].get('purpose', '')})"
         exact = ask.purpose.startswith("serve:")
         mine = [h for h in self.servers.values() if not h.unmanaged
                 and (h.purpose == ask.purpose
@@ -563,9 +587,13 @@ class Broker:
     def _start(self, waiting: Waiting, placeholder: Held) -> Grant:
         spec = waiting.ask.server_spec(placeholder.port)
         try:
-            with grant.broker_grant():
-                info = self._manager_for(waiting.ask.options)._start_server(
-                    spec, how=Starting(roam=False, who=waiting.ask.label))
+            token = ASKING.set(waiting.ask.pid)
+            try:
+                with grant.broker_grant():
+                    info = self._manager_for(waiting.ask.options)._start_server(
+                        spec, how=Starting(roam=False, who=waiting.ask.label))
+            finally:
+                ASKING.reset(token)
         except Measuring:
             with self._cond:
                 self.servers.pop(placeholder.port, None)
@@ -616,12 +644,23 @@ class Broker:
               timeout: float = 0.0) -> dict[str, Any]:
         """Hold ``name`` for ``pid``, or say who holds it. Waits up to ``timeout`` for it."""
         deadline = time.monotonic() + timeout
+        if name == "gpu-training":
+            self.adopt()
         with self._cond:
             while True:
                 held = self.claims.get(name)
-                if held is None or held["pid"] == pid or not self.alive(held["pid"]):
+                busy = next((server for server in self.servers.values()
+                             if server.loading or server.unmanaged or server.holders), None) if name == "gpu-training" else None
+                starting = next((value for key, value in self.claims.items()
+                                 if key.startswith(_MODEL_START) and self.alive(value["pid"])), None) if name == "gpu-training" else None
+                if busy is None and starting is None and (held is None or held["pid"] == pid or not self.alive(held["pid"])):
                     self.claims[name] = {"pid": pid, "info": dict(info), "since": time.time()}
                     return {"granted": True, **self.claims[name]}
+                if busy is not None:
+                    holder = next(iter(busy.holders.values()), (busy.pid or 0, "loading model"))
+                    held = {"pid": holder[0], "info": {"purpose": self._held_said(busy)}, "since": time.time()}
+                elif starting is not None:
+                    held = starting
                 left = deadline - time.monotonic()
                 if left <= 0:
                     return {"granted": False, **held}
@@ -790,6 +829,7 @@ class Broker:
         now = time.monotonic()
         with self._cond:
             return {
+                "exclusive_gpu_claims": True,
                 "servers": [h.said() for h in sorted(self.servers.values(), key=lambda h: h.port)],
                 "queue": [{"lease": w.lease, "purpose": w.ask.purpose, "model": w.ask.models[0],
                            "pid": w.ask.pid, "label": w.ask.label,

@@ -88,6 +88,12 @@ land the work, check for unique commits, uncommitted files and ignored state, re
 worktree and merged branch, prune, and verify the path is absent from `git worktree list`.
 The parent checks its subagents' cleanup. A retained worktree needs a handoff naming its path,
 branch, pending work and responsible agent; it is not a completed task.
+Exact clear agent `status`, `done`, `milestone` and `blocked` reports reuse their existing
+journal sequence for 60 seconds. Sender, helper label, destination, kind, subject, thread,
+body, lifetime and model provenance must all match. A reused report does not wake readers
+again or consume another send/announcement quota. Live authority, board membership, thread
+access and body checks still run first. Human messages, changed reports and quarantined
+content remain distinct; there is no separate deduplication index or hidden-body hash.
 
 The person never pastes anything for a subagent. A parent agent has two choices.
 
@@ -319,12 +325,27 @@ it. Results are deterministic and append-friendly (ordered by sequence number, n
 time in them), and tool names and descriptions are static, so a model's prompt cache survives.
 
 **Noticing without watching.** `ml-stack-workspace nudge --agent NAME` prints nothing when nothing
-waits for you and one byte-stable line when something does (`workspace: 2 waiting for you (1 DM, 1
-mention); run inbox`). It counts only: no message text, nothing marked read, no waiting. Run it from
-a hook after each tool call; `ml-stack-workspace hook-snippet claude-code|codex --agent NAME` prints
-the setting to paste and writes nothing (changing an agent's configuration is the person's
-decision). Its start-up costs about 90 ms here (Python and the package imports), more than the
-50 ms aimed for; trimming the imports is a follow-up.
+waits for you and one line when something does: counts per kind, the senders' ids and the age of the
+oldest (`workspace: 3 waiting for you (2 questions, 1 status; from codex, codex/local-qwen; oldest
+3h12m). A direct question is waiting on you: run ml-stack-workspace inbox now and answer it`). A
+direct `question`, `task`, `handoff` or `blocked` is named as waiting on you; routine kinds (status,
+note, milestone, done) end in `; run inbox`. It never carries message text, marks nothing read and
+waits for nothing.
+
+With `--hook post|stop|prompt` it prints the JSON a Claude Code hook expects:
+
+- `post` (PostToolUse): the line as `additionalContext`, checked at most once every 20 seconds.
+- `prompt` (UserPromptSubmit): the line as `additionalContext` whenever anything is unread.
+- `stop` (Stop): `{"decision": "block", "reason": LINE}` when a direct question, task, handoff or
+  blocked notice has been unread for two minutes, once per newest such message (kept in a file under
+  `$TMPDIR`); it always allows the stop when `stop_hook_active` is true.
+
+A hook prints nothing and exits 0 when nothing is unread or the workspace cannot be reached.
+`ml-stack-workspace install-hooks [--agent NAME] [--settings PATH]` (a person at a terminal) writes
+the three hooks into `~/.claude/settings.json`, replacing earlier nudge hooks and keeping every other
+hook; `hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. Start-up
+costs about 90 ms here (Python and the package imports), more than the 50 ms aimed for; trimming the
+imports is a follow-up.
 
 ## The Board
 
@@ -567,3 +588,99 @@ The adapters run against the real `sentinel` store and `guard` patterns in the s
 (`tests/test_workspace_surface.py`, no stand-ins). The MCP SDK transport was not exercised here.
 
 Left out: see "The agent workspace" in `HANDOFF.md`.
+
+### Mutation ownership
+
+Native coding harness hooks check the launcher's registered identity before permitted
+mutations. Known file tools, patches and inspectable shell targets reserve file or worktree
+claims atomically. Explicit serving ports and Python install environments are reserved as
+resources too. A conflicting owner is rejected before an approval request; a person approval
+does not override another agent's claim. Unknown acting shell programs reserve the approved
+project worktree rather than inferring individual files. Safe reads do not reserve resources.
+
+These reservations require the existing person-set project grant and launcher-approved
+roots. Tool arguments cannot change the owner or expand those permissions. Reservations
+record the hook parent's PID/start time, checked-out commit when available, and the hook's
+interpreter/environment. Claims expire and remain renewable within the existing lifetime
+cap; they serialize cooperating managed tools, not arbitrary external processes. The serving
+broker continues to enforce its own live model/GPU leases. Ownership does not award credits
+or change security reputation.
+
+`area` claims identify a source file or directory across linked Git worktrees. Supply an
+absolute path in your checkout; the store canonicalizes it to the repository's shared Git
+checkout and relative source path. Native file mutations reserve both the physical file and
+its repository-qualified source area. Editing the same source file in another worktree is
+refused, while disjoint files remain independently claimable. `install` claims identify an
+absolute environment or target directory. These claims do not grant access to either path.
+
+## Structured Tasks
+
+The main **Tasks** view organizes canonical claims, resource leases, checkpoints, submitted
+artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
+for the person workflow, service/API contract, recovery and supported limits. Task outcomes
+are verified separately from Board discussion and worker progress reports.
+
+A scheduler-prepared task worktree can be explicitly handed from its authenticated parent
+to the assigned child. Before a native mutation, the guard checks the graph assignment,
+actual parent relationship, active task lease and live broker allocation, including the
+exact worktree and baseline commit. Only that physical worktree claim transfers; another
+parent-owned file or source-area claim does not transfer with it. The guard rechecks the
+active assignment on later edits, so an expired task or released allocation cannot keep
+editing through a previously transferred claim.
+
+The Fleet **Board → Local agents** panel uses the maintained person-authorized agent launcher.
+It restores saved model paths, project folders, permissions and harness settings; **Use settings**
+selects another saved worker. Context length, harness and reasoning effort are under collapsed
+**Advanced options**. Start binds the existing authenticated worker identity to the enrolled
+physical-device account through the backend person handler. Browser requests never contain a
+workspace token or an identity override. Joined fleets retain their normal sign-in session;
+completed local setup can use the existing strictly local authorization policy.
+
+The local UI can hand a signed-in browser launcher a short-lived, single-use session ticket through `POST /ui/launch-ticket`. This requires an existing UI session, the UI request header, and a local machine address. Opening `/ui/?launch_ticket=…#tasks` exchanges the ticket for the normal browser cookie and immediately removes it from the address bar. Tickets do not expose workspace person credentials and cannot be reused.
+
+### Shared coordinator across devices
+
+The workspace defaults to device-local state. Joining a Fleet cluster alone does not share
+its Board, tasks or claims. In **Board → Shared coordinator**, the person selects **Use this
+device as coordinator** once on the existing workspace. This uses the Fleet daemon's
+normal authenticated peer server and TLS, with one stable workspace ID. Other devices
+must join the same Fleet cluster through the maintained pairing/setup flow.
+
+The person or an authorized parent creates a normal short-lived workspace invitation.
+Give its existing paste code directly to the agent being enrolled. On an enrolled remote
+device, run:
+
+```sh
+ml-stack-workspace join CODE --coordinator FLEET_NAME --name windows-codex --model EXACT_MODEL --harness codex
+ml-stack-workspace whoami --agent windows-codex
+ml-stack-workspace inbox --agent windows-codex
+```
+
+`--coordinator` discovers and pins that Fleet peer before redeeming the invitation there;
+an unavailable or ambiguous peer never causes local redemption. The invitation grants
+its existing bounded role/project permissions. Only the newly minted agent token is
+returned over encrypted remote transport and saved in that device's private token file.
+No person credential is sent or accepted by the agent RPC.
+
+`ml-stack-workspace coordinator list` shows offers; `coordinator status` shows the saved
+workspace ID and origin. Board shows hosted/remote/device-local mode, connection health,
+and a link to the coordinator's person UI. That UI requires its normal person session;
+a remote agent credential cannot enter it. Remote devices do not present a second local
+Board/task authority. A changed workspace ID, lost enrollment or unavailable endpoint
+fails explicitly without local fallback.
+
+Python services can use `coordinator_client.client(device_workspace_root).command(argv,
+agent_token, request_id=...)`. Remote commands are bounded coordination operations;
+local execution, processes, credentials, file paths, tests and publishing are excluded.
+Global branch/area claims remain shared. Device-local resource claims require a verified
+paired-device namespace and are refused by this initial transport instead of conflating
+two machines' ports or worktrees.
+
+For a lost mutation response, repeat the exact command with `--request-id ID`. One
+per-actor outcome is recorded in the coordinator graph, after fresh live authentication
+and applicable task/message checks. Reusing an ID for another payload is refused.
+Completed response caches expire after a day or bounded capacity; their audit nodes
+remain and expired IDs are refused. An interrupted request with an uncertain outcome
+is never silently executed again. Inspect shared state before issuing a new operation.
+This capability has local two-root/socket proof; a Windows machine is connected only
+when its actual authenticated handshake succeeds.

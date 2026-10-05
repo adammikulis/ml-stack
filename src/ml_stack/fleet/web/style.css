@@ -1,5 +1,3 @@
-/* One stylesheet, hand written, no build step. Custom properties carry the whole theme
-   so dark and light are one definition and a fork of both. */
 :root {
   --bg: var(--ml-bg);
   --bg-raised: var(--ml-surface);
@@ -35,39 +33,71 @@ body {
 a { color: var(--accent); }
 code, .mono, kbd { font-family: var(--mono); font-size: .9em; }
 
-/* ---- layout ---- */
-.app { display: flex; flex-direction: column; min-height: 100%; }
-header.top {
-  display: flex; align-items: center; gap: var(--gap);
-  padding: 14px 24px; border-bottom: 1px solid var(--line);
-  background: var(--bg-raised); position: sticky; top: 0; z-index: 10;
+.app { display: grid; grid-template-columns: 232px minmax(0, 1fr);
+       grid-template-rows: 76px minmax(0, 1fr); min-height: 100vh; }
+.sidebar { grid-column: 1; grid-row: 1 / 3; padding: 28px 16px 18px;
+            background: var(--bg-raised); border-right: 1px solid var(--line);
+            position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 750; font-size: 21px;
+         letter-spacing: -.04em; color: var(--text); text-decoration: none; padding: 0 10px; }
+.brand .dot { width: 12px; height: 12px; border-radius: 4px; background: var(--accent);
+              box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.sidebar-caption { color: var(--muted); font-size: 11px; margin: 6px 10px 26px; }
+nav.tabs { display: flex; flex-direction: column; gap: 24px; overflow-y: auto; }
+.nav-label, .eyebrow { text-transform: uppercase; font-size: 10px; font-weight: 650;
+                     letter-spacing: .12em; color: var(--muted); }
+.nav-label { display: block; margin: 0 12px 9px; }
+.nav-link { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+            border-radius: 10px; color: var(--muted); text-decoration: none; margin: 3px 0;
+            transition: background .15s, color .15s; }
+.nav-link strong { display: block; font-size: 13px; font-weight: 600; }
+.nav-link small { display: block; font-size: 10px; margin-top: 1px; color: var(--muted); }
+.nav-icon { display: grid; place-items: center; width: 25px; height: 25px; font-size: 11px;
+            border: 1px solid var(--line); border-radius: 7px; font-family: var(--mono); }
+.nav-link:hover { background: var(--bg-sunken); color: var(--text); }
+.nav-link.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.nav-link.on .nav-icon { border-color: var(--accent); }
+.sidebar-footer { margin-top: auto; padding: 20px 10px 0; font-size: 12px; }
+.workspace-label { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.sidebar-footer a { color: var(--muted); text-decoration: none; }
+.workspace-header { grid-column: 2; padding: 18px 32px; border-bottom: 1px solid var(--line);
+                    display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workspace-header .eyebrow, .workspace-header strong { display: block; }
+.app:not(:has(fleet-nav)) { display:flex; flex-direction:column; }
+.app:not(:has(fleet-nav)) .skip-link { display:none; }
+.workspace-header strong { font-size: 16px; margin-top: 2px; }
+.header-hint { color: var(--muted); font-size: 12px; }
+.workspace { grid-column: 2; min-width: 0; outline: none; }
+.skip-link { position: absolute; left: 248px; top: -60px; padding: 10px 16px;
+             background: var(--bg-raised); z-index: 30; border: 1px solid var(--accent); }
+.skip-link:focus { top: 10px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 180px minmax(0, 1fr); }
+  .sidebar { padding: 24px 10px 16px; }
+  .nav-link { padding: 9px; gap: 8px; }
+  .nav-link small, .header-hint { display: none; }
+  .workspace-header { padding: 16px 22px; }
 }
-.brand { display: flex; align-items: baseline; gap: 10px; font-weight: 650; letter-spacing: -.01em; }
-.brand .dot {
-  width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-  align-self: center;
+@media (max-width: 640px) {
+  .app { display: flex; flex-direction: column; }
+  .sidebar { position: static; height: auto; padding: 18px 16px 12px; border-right: 0;
+              border-bottom: 1px solid var(--line); }
+  .sidebar-caption, .sidebar-footer, .nav-label, .nav-icon { display: none; }
+  nav.tabs { flex-direction: row; gap: 4px; margin-top: 12px; }
+  .nav-section { display: contents; }
+  .nav-link { padding: 8px 10px; white-space: nowrap; }
+  .workspace-header { padding: 14px 20px; }
+  .skip-link { left: 16px; }
 }
-.brand .group { color: var(--muted); font-weight: 400; font-size: 13px; }
-nav.tabs { display: flex; gap: 4px; margin-left: auto; }
-nav.tabs a {
-  padding: 6px 13px; border-radius: 999px; color: var(--muted);
-  text-decoration: none; font-size: 14px; font-weight: 500;
-  transition: background .15s, color .15s;
-}
-nav.tabs a:hover { background: var(--bg-sunken); color: var(--text); }
-nav.tabs a.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 main { padding: 26px 24px 60px; max-width: 1240px; width: 100%; margin: 0 auto; flex: 1; }
 h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.02em; }
 h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
      text-transform: uppercase; letter-spacing: .06em; }
 .sub { color: var(--muted); margin: 0 0 24px; }
 
-/* ---- cluster grid ---- */
-/* align-items:start so a card is its own height. Stretching every card to the tallest
-   in its row leaves a machine with fewer meters sitting in a pool of empty space. */
 .grid { display: grid; gap: var(--gap); align-items: start;
-        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+        grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
 .peer {
   background: var(--bg-raised); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 16px 18px 18px;
@@ -107,7 +137,6 @@ h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
   font-family: var(--mono); letter-spacing: .02em;
 }
 
-/* ---- bars that fill and empty ---- */
 .meter { margin-top: 14px; }
 .meter .cap { display: flex; justify-content: space-between; font-size: 11.5px;
               color: var(--muted); margin-bottom: 5px; }
@@ -118,16 +147,13 @@ h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
 }
 .fill {
   height: 100%; border-radius: 999px; background: var(--accent);
-  /* Matched to the poll interval, so a value that steps every few seconds reads as
-     continuous motion rather than as a jump. Runs off the main thread. */
-  transition: width 1.2s cubic-bezier(.4, 0, .2, 1), background-color .3s;
+    transition: width 1.2s cubic-bezier(.4, 0, .2, 1), background-color .3s;
   width: 0;
 }
 .fill.busy { background: var(--busy); }
 .fill.full { background: var(--bad); }
 .fill.vram { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }
 
-/* slot pips: discrete capacity reads better than a continuous bar */
 .slots { display: flex; gap: 4px; margin-top: 6px; }
 .slot {
   flex: 1; height: 7px; border-radius: 3px; background: var(--bg-sunken);
@@ -144,7 +170,6 @@ h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
 @keyframes breathe { 0%,100% { opacity: 1; transform: scale(1); }
                      50% { opacity: .45; transform: scale(.82); } }
 
-/* ---- wizard / auth ---- */
 .centre { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
 .card {
   background: var(--bg-raised); border: 1px solid var(--line); border-radius: 14px;
@@ -154,7 +179,7 @@ h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
 .card .sub { margin-bottom: 22px; font-size: 14px; }
 label { display: block; font-size: 12.5px; color: var(--muted); margin: 16px 0 6px;
         font-weight: 550; }
-input[type=text], input[type=password], select {
+input[type=text], input[type=password], input[type=search], select, textarea {
   width: 100%; padding: 10px 12px; border-radius: 8px; font-size: 14px;
   background: var(--bg-sunken); border: 1px solid var(--line); color: var(--text);
   font-family: inherit; transition: border-color .15s, box-shadow .15s;
@@ -218,7 +243,6 @@ pre.cmd {
 .stat .n { font-size: 25px; font-weight: 680; font-family: var(--mono); letter-spacing: -.02em; }
 .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
 
-/* numbered how-to: what replaces "run this command" */
 ol.howto { list-style: none; margin: 18px 0 14px; padding: 0; display: grid; gap: 14px; }
 ol.howto li { display: flex; gap: 12px; align-items: flex-start; }
 ol.howto .num {
@@ -240,18 +264,14 @@ details.aside summary::before { content: "› "; }
 details.aside[open] summary::before { content: "⌄ "; }
 details.aside summary:hover { color: var(--muted); }
 
-/* live telemetry chips */
 .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 12px; }
 .label.temp { color: var(--muted); }
 .label.temp.warm { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
-/* Never colour alone: a red chip and an amber chip are the same chip to a good share
-   of readers, so the hot one also carries a mark. */
 .label.temp.hot { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .label.temp.hot::after { content: " ▲"; }
 .label.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .fill.util { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }
 
-/* preferences step */
 .card.wide { max-width: 560px; }
 .group { margin-top: 20px; }
 .group h2 { font-size: 11px; margin-bottom: 8px; }
@@ -271,12 +291,10 @@ label.opt b { font-weight: 600; font-size: 13.5px; display: block; }
 label.opt .why { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
 label.opt.inline { align-items: center; }
 
-/* settings: two columns on a wide window, one on a narrow one */
-.two { display: grid; gap: 26px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+.two { display: grid; gap: 26px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
        align-items: start; }
 main > button { max-width: 240px; }
 
-/* model list */
 .row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 12px; border-radius: 8px; margin-bottom: 6px;
@@ -286,10 +304,9 @@ main > button { max-width: 240px; }
 .row .why { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
 button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
 
-/* chat: a list of past chats beside the one open now */
 .chatmain {
   display: grid; grid-template-columns: 220px 1fr; gap: var(--gap);
-  align-items: start; height: calc(100vh - 120px);
+  align-items: stretch; height: calc(100vh - 76px); padding-bottom: 24px;
 }
 @media (max-width: 720px) { .chatmain { grid-template-columns: 1fr; height: auto; } }
 .chats { display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
@@ -302,13 +319,13 @@ button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
 .chatrow a { color: var(--text); text-decoration: none; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
 .chatrow button { opacity: 0; }
-.chatrow:hover button { opacity: 1; }
+.chatrow:hover button, .chatrow:focus-within button { opacity: 1; }
 
 .talk { display: flex; flex-direction: column; gap: 10px; height: 100%; min-width: 0; }
 .pickrow { display: flex; align-items: center; gap: 10px; }
 .pickrow select { width: auto; margin: 0; flex: 1; }
 .messages {
-  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
   padding: 12px; border-radius: var(--radius);
   background: var(--bg-sunken); border: 1px solid var(--line); min-height: 220px;
 }
@@ -321,92 +338,110 @@ button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
 .askrow textarea { flex: 1; margin: 0; resize: vertical; }
 .askrow button { width: auto; margin: 0; }
 
-/* a download in flight: the bar sits under the name, inside the row */
 .row .grow { flex: 1; min-width: 0; }
 .row .grow .track { margin-top: 6px; }
 
-/* removing it: the one button that destroys something */
 button.danger { background: var(--bad); border-color: var(--bad); color: var(--ml-on-accent); }
 button.danger:hover:not(:disabled) { filter: brightness(1.1); }
 
-/* paging through the model list */
 .pager { display: flex; align-items: center; justify-content: space-between;
          gap: 12px; margin-top: 12px; }
 .pager button { margin: 0; }
 
-/* searching the model list */
 .searchrow { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
 .searchrow input { flex: 1; margin: 0; }
 .searchrow button { margin: 0; }
 
-/* how much of a conversation a model reads */
 input[type="range"] {
   width: 100%; margin: 8px 0 4px; accent-color: var(--accent);
   background: transparent;
 }
 .card.wide { max-width: 560px; }
 
-/* App sections and persistent controls. */
-main { max-width: 1160px; padding-top: 32px; }
-h1 { font-size: 28px; font-weight: 650; }
-h2 { text-transform: none; letter-spacing: -.01em; font-size: 17px; color: var(--text); }
-.panel, .model-browser { border: 1px solid var(--line); border-radius: 14px;
-  background: var(--bg-raised); padding: 22px; margin: 20px 0; }
-.panel > summary { cursor: pointer; font-weight: 600; font-size: 17px; }
-.panel > summary .why { font-weight: 400; font-size: 13px; margin-top: 3px; }
-.panel[open] > summary { margin-bottom: 20px; }
-.browser-toolbar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 20px 0 10px; }
-.segmented { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--line);
-  background: var(--bg-sunken); border-radius: 10px; }
-.segmented button { background: transparent; color: var(--muted); border: 0; box-shadow: none;
-  font-size: 13px; padding: 8px 13px; border-radius: 7px; }
-.segmented button[aria-pressed=true] { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow); }
-.search-field { margin: 0; flex: 1; min-width: 240px; }
-.search-field input { width: 100%; margin: 0; }
-.model-row { display: flex; justify-content: space-between; gap: 18px; align-items: center;
-  padding: 16px 0; border-bottom: 1px solid var(--line); }
-.model-row:last-child { border-bottom: 0; }
-.model-info { min-width: 0; overflow-wrap: anywhere; }
-.model-info b { font-weight: 550; }
-.model-info .why { margin-top: 4px; }
-.model-row button { flex-shrink: 0; }
-.empty-state { padding: 26px 0; color: var(--muted); }
+.chat-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chat-heading h1 { font-size: 16px; }
+.chat-search { margin-bottom: 12px; }
+.chat-search input { font-size: 12px; }
+.chat-search label { margin-top: 0; }
+.chat-welcome { margin: auto; max-width: 420px; padding: 40px 20px; text-align: center; color: var(--muted); }
+.chat-welcome strong { color: var(--text); display: block; font-size: 23px; margin-bottom: 8px; }
+.chat-hint { font-size: 11px; color: var(--muted); }
+.msg .speaker { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: .06em; opacity: .7; margin-bottom: 6px; }
+.msg .message-body { white-space: pre-wrap; }
+.msg .message-body.markdown { white-space: normal; }
+.msg pre { max-width: 100%; overflow: auto; padding: 12px; border-radius: 8px; background: var(--bg-sunken); }
+.msg p { margin: 0 0 10px; }
+.msg p:last-child { margin-bottom: 0; }
+.msg .copy-message { display: block; width: auto; padding: 4px 8px; margin-top: 8px; font-size: 10px; }
+@media (max-width: 720px) {
+  .chatmain { height: auto; min-height: 70vh; }
+  .chats { max-height: 180px; }
+  .chatrow button { opacity: 1; }
+  .messages { min-height: 340px; }
+  main { padding: 22px 18px 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+.chat-toolbar { display:flex; align-items:center; gap:16px; min-height:38px; }
+.chat-toolbar h1 { margin:0; font-size:18px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-status { margin-left:auto; font-size:12px; color:var(--muted); }
+.chat-row-menu { flex:none; position:relative; }
+.chat-row-menu summary { cursor:pointer; list-style:none; padding:6px; color:var(--muted); }
+.chat-row-menu summary::-webkit-details-marker { display:none; }
+.chat-row-menu[open] { z-index:2; }
+.chat-row-menu > div { position:absolute; right:0; top:100%; padding:6px; border:1px solid var(--line); border-radius:10px; background:var(--bg-raised); box-shadow:0 8px 24px #0003; }
+.chatrow .chat-row-menu button { opacity:1; width:100%; text-align:left; }
+#chat-manage { color:var(--text); background:var(--bg-raised); border:1px solid var(--line); border-radius:16px; padding:24px; width:min(420px,calc(100vw - 40px)); }
+#chat-manage::backdrop { background:#0008; }
+#chat-manage h2 { margin-top:0; font-size:20px; }
+.chat-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+.chat-dialog-actions button { width:auto; margin:0; }
+.chatmain { grid-template-columns:240px minmax(0,1fr); gap:32px; }
+.chatmain .talk { width:100%; max-width:920px; margin:0 auto; }
+.chatmain .messages { background:transparent; border:0; padding:24px 4px; gap:24px; }
+.chatmain .msg { font-size:14px; line-height:1.65; }
+.chatmain .msg.assistant { border:0; background:transparent; max-width:100%; padding:8px 0; }
+.chatmain .msg.user { background:var(--bg-sunken); color:var(--text); padding:12px 18px; }
+.chatmain .askrow { border:1px solid var(--line); background:var(--bg-raised); border-radius:18px; padding:12px; }
+.chatmain .askrow:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+.chatmain .askrow textarea { background:transparent; border:0; box-shadow:none; padding:4px; outline:none; }
+.chatmain .chat-hint { text-align:center; }
+@media(max-width:720px) { .chatmain { grid-template-columns:1fr; gap:20px; } }
+
+.chat-coding-fields { margin:12px 0; }
+.chat-coding-pair { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+#chat-activity-output { max-height:300px; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:12px; }
+@media(max-width:600px) { .chat-coding-pair { grid-template-columns:1fr; gap:0; } }
+
+.chat-model-current { text-align:left; max-width:100%; overflow-wrap:anywhere; }
+#chat-model-dialog { width:min(560px,90vw); max-height:80vh; }
+#chat-model-list { overflow-y:auto; max-height:55vh; margin:16px 0; }
+.chat-model-family h3 { color:var(--muted); font-size:12px; margin:18px 0 8px; }
+.chat-model-choice { display:flex; justify-content:space-between; gap:12px; width:100%; text-align:left; margin:4px 0; }
+.chat-model-choice small { color:var(--muted); white-space:nowrap; }
+.chat-model-choice[aria-pressed="true"] { border-color:var(--accent); }
+
+.model-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.model-info { min-width: 0; flex: 1; }
+.model-info b, .model-info .why { display: block; overflow-wrap: anywhere; }
+.browser-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+.browser-empty { padding: 26px 0; color: var(--muted); }
 #browser-pages { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
 #browser-pages:empty { display: none; }
 #download-rows ml-progress { display: block; padding: 8px 0; }
-fieldset { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
-legend { padding: 0 6px; font-weight: 600; font-size: 14px; }
-.benchmark-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
-.benchmark-options input, .benchmark-options select { width: 100%; }
-.benchmark-options label { margin-top: 18px; }
-.benchmark-history { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; }
-.benchmark-history summary { cursor: pointer; color: var(--muted); }
 .capacity-panel fit-view .wrap { padding: 0 0 24px; }
 .capacity-panel fit-view header.fit-top { padding: 18px 0; flex-wrap: wrap; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-@media (max-width: 650px) {
-  header.top { padding: 12px 16px; flex-wrap: wrap; }
-  nav.tabs { width: 100%; margin-left: 0; justify-content: space-between; }
-  nav.tabs a { padding: 7px 10px; font-size: 13px; }
-  main { padding: 24px 16px 44px; }
-  .panel, .model-browser { padding: 16px; }
-  .model-row { gap: 10px; }
-  .model-info b { font-size: 13px; }
-  fit-view table.fit { display: block; overflow-x: auto; }
-}
-
 .variant-choice { display: flex; align-items: center; gap: 10px; margin: 9px 0; font-size: 12px; }
 .quant-select { max-width: 300px; padding: 6px 8px; min-width: 180px; font-size: 13px; }
 .model-actions { flex-shrink: 0; }
 .quant-filters { display: flex; gap: 16px; flex-wrap: wrap; }
 .quant-filters label { margin-top: 4px; font-size: 12px; }
 .quant-filters select { margin-left: 8px; padding: 5px 8px; font-size: 12px; }
-
 .model-reasoning { border-left: 2px solid var(--line); margin: 0 0 14px; padding-left: 12px; color: var(--muted); }
 .model-reasoning summary { cursor: pointer; font-size: 13px; }
 .reasoning-text { white-space: pre-wrap; font: 13px/1.6 var(--sans); margin-top: 10px; overflow-wrap: anywhere; }
 .reply-activity { display: block; color: var(--muted); font-size: 12px; margin-top: 10px; }
 .reply-activity:empty { display: none; }
-.answer-text { white-space: pre-wrap; }
-#chat-shortcut { margin-top: 8px; font-size: 12px; }

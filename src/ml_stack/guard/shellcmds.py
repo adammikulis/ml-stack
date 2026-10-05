@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.guard import codescan
+from ml_stack.guard import codescan, workspacecmds
 from ml_stack.guard.harm import Finding, outside, protected, resolve
 from ml_stack.guard.shellscan import Segment, has_expansion, has_glob, segments
 from ml_stack.guard.verbs import verb_finding, words_of
@@ -386,6 +386,23 @@ def _http(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
     return [Finding(S, f"{name} fetches a page")]
 
 
+def _queued_tests(args, ctx):
+    if not args or len(args) < 2 or args[1] not in ("fast", "quick", "all", "full"):
+        return False
+    if not ctx.roots:
+        return False
+    script = resolve(args[0], ctx.roots).resolve()
+    root = Path(ctx.roots[0]).resolve()
+    return (script == root / "scripts" / "test" and script.is_file()
+            and (root / ".git").is_file())
+
+
+def _pyenv(name, args, ctx):
+    if args in (["versions"], ["versions", "--bare"], ["version"], ["version-name"]):
+        return [Finding(S, "pyenv lists installed interpreters")]
+    return [Finding(U, "pyenv changes or executes an interpreter configuration")]
+
+
 def _interpreter(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
     _, words = split_args(args)
     code_flag = next((a for a in args if a in ("-c", "-e", "-r", "-E", "--eval", "-p", "--print", "-pe", "-ne", "-pi", "-lne")), "")
@@ -412,6 +429,8 @@ def _interpreter(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
             return _pkg("pip", args[2:], ctx)
         if mod in ("json.tool", "http.server", "this", "platform", "sysconfig", "site"):
             return [Finding(S, f"python -m {mod}")]
+    if name in ("python", "python3") and _queued_tests(args, ctx):
+        return [Finding(R, "runs the maintained test queue in the authorized isolated worktree")]
     if not args:
         return [Finding(U, f"{name} with no program reads commands from input")]
     return [Finding(U, f"{name} runs a program the classifier does not read ({words[0] if words else name})")]
@@ -512,6 +531,7 @@ def _sysctl(name: str, args: list[str], ctx: Ctx) -> list[Finding]:
 
 HANDLERS["sysctl"] = _sysctl
 HANDLERS["pytest"] = _pytest
+HANDLERS["pyenv"] = _pyenv
 for _n in DOWNLOADERS:
     HANDLERS[_n] = _http
 for _n in (*SHELLS, *INTERPRETERS):
@@ -556,6 +576,8 @@ def analyse(argv: list[str], ctx: Ctx) -> list[Finding]:
     fixed = _fixed(name, args, ctx)
     if fixed is not None:
         return fixed
+    if name == "ml-stack-workspace":
+        return workspacecmds.effect(args)
     if name in HANDLERS:
         return HANDLERS[name](name, args, ctx)
     if name in READ_ONLY:

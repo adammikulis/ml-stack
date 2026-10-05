@@ -1,13 +1,17 @@
-"""The Linux backend's bubblewrap command and GPU mounts."""
+"""Linux bubblewrap namespaces, native availability and policy arguments."""
 
 from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
+import threading
 from collections.abc import Sequence
+from functools import lru_cache
 from pathlib import Path
 
+from ml_stack.platform import start_process, terminate_process_group
 from ml_stack.sandbox.backend import Availability, Wrapped, program_of
 from ml_stack.sandbox.policy import NetMode, Policy, PolicyError, checked_path
 
@@ -48,6 +52,26 @@ def arguments(policy: Policy, program: str) -> list[str]:
     return out
 
 
+_PROBE_LOCK = threading.Lock()
+
+
+@lru_cache(maxsize=4)
+def _probe(binary: str, identity: tuple, program: str) -> Availability:
+    held = Policy("bubblewrap-probe", exec=(program,), env={}).validated()
+    process = start_process([binary, *arguments(held, program), "--", program],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, env={})
+    try:
+        _, error = process.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process, force=True)
+        process.communicate()
+        return Availability(False, "bubblewrap namespace probe timed out")
+    if process.returncode:
+        return Availability(False, "bubblewrap namespace probe failed: " + error.decode(errors="replace")[:300].strip())
+    return Availability(True)
+
+
 class Bubblewrap:
     """Runs a command inside bubblewrap namespaces."""
 
@@ -56,9 +80,21 @@ class Bubblewrap:
     def available(self) -> Availability:
         if not sys.platform.startswith("linux"):
             return Availability(False, "bubblewrap runs on Linux only")
-        if not shutil.which("bwrap"):
+        found = shutil.which("bwrap")
+        if not found:
             return Availability(False, "bwrap is not installed (apt install bubblewrap)")
-        return Availability(True)
+        try:
+            binary = checked_path(os.path.realpath(found), what="bubblewrap")
+            program = checked_path(os.path.realpath("/usr/bin/true"), what="probe")
+            stat = Path(binary).stat()
+            namespace = Path("/proc/self/ns/user")
+            identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
+                        stat.st_mode, os.geteuid(),
+                        namespace.stat().st_ino if namespace.exists() else 0)
+            with _PROBE_LOCK:
+                return _probe(binary, identity, program)
+        except (OSError, PolicyError) as exc:
+            return Availability(False, str(exc))
 
     def wrap(self, argv: Sequence[str], policy: Policy) -> Wrapped:
         found = shutil.which("bwrap")

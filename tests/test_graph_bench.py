@@ -3387,10 +3387,10 @@ def _asking_calls(n):
 
 
 def _cache_row(script, label="cached"):
-    from ml_stack.bench import _ask_once
+    from ml_stack.bench import Row, _ask_once
 
-    row, _ = _ask_once(_asking_calls(len(script)), {"q": "who?", "expect": ["topic:compiler"]},
-                       label=label, client=_Reporting(script))
+    row, _ = _ask_once(_asking_calls(len(script)), Row(label=label, question="who?", expected=["topic:compiler"]),
+                       client=_Reporting(script))
     return row
 
 

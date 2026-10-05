@@ -308,7 +308,12 @@ def test_a_person_lists_shows_exports_forgets_and_deletes_all(person, capsys):
     path = Ledger().path
     assert path.exists()
     assert cli.main(["forget", "--all", "--yes"]) == 0
-    assert not path.exists() and not (path.parent / "summary.json").exists()
+    cleared = Ledger()
+    try:
+        assert cleared.sources() == [] and not (path.parent / "summary.json").exists()
+        assert not cleared.sealed.prev.exists()
+    finally:
+        cleared.close()
 
 
 def test_a_terminal_is_needed(monkeypatch, capsys):

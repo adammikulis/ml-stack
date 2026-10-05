@@ -12,18 +12,22 @@ from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.serve import provenance
 from ml_stack.workspace import (
+    backlog,
+    issuepump,
     localagent as la,
     localeffort as le,
     localmodel,
     localprofile as lp,
     localstart as ls,
     plain,
+    task_scheduler,
+    tokens,
 )
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["ACTIONS", "OPTIONS", "run"]
 
-ACTIONS = ("start", "stop", "list")
+ACTIONS = ("start", "stop", "list", "backlog", "schedule", "supersede-issue", "resume-issue")
 READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
@@ -35,6 +39,9 @@ OPTIONS = [
     flag("--role", default=roles.DEFAULT, choices=list(roles.ROLES),
          help="what it may do (`/role` in ml-stack-chat describes them); default: %(default)s"),
     flag("--project", default="", metavar="PATH", help="the project folder it works for"),
+    flag("--repo", default="", metavar="OWNER/REPO", help="backlog: repository whose issues this coding worker may select"),
+    flag("--issue", type=int, default=0, help="supersede-issue: obsolete repository issue number"),
+    flag("--reason", default="", help="supersede-issue: current owner decision superseding the issue"),
     flag("--effort", default=le.DEFAULT, choices=[*le.LEVELS, le.AUTO],
          help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
@@ -43,6 +50,7 @@ OPTIONS = [
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--profile", default="chat", choices=["chat", "coding"],
          help="chat: 32K context and small per-task caps; coding: 256K context, Qwen3.8-27B and larger caps"),
+    flag("--harness", default="codex", choices=["codex", "claude"], help="native coding harness"),
     flag("--ctx", default="", metavar="TOKENS", help="context to serve, such as 32768, 32k or 256k (default: the profile's)"),
     flag("--for", dest="lease_for", default="", metavar="TEXT",
          help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`"),
@@ -74,6 +82,8 @@ def _wait(ws: Workspace, name: str, seconds: float) -> int:
 
 
 def _start(args: argparse.Namespace, ws: Workspace) -> int:
+    if not ws.registry.ids():
+        tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
     pick = localmodel.choose(args.model, coding=args.profile == "coding")
     if not pick.ok:
         warn(pick.problem)
@@ -83,7 +93,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(","))), pick=pick)
+                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
+                       person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
     except ls.Unavailable as err:
         warn(str(err))
         return 1
@@ -126,7 +137,31 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
     """Do the ``agent`` action; start and stop are for a person at a terminal."""
     if args.action == "list":
         return _list(ws)
+    if args.action == 'schedule':
+        if not args.target or not args.agent:
+            raise ValueError('agent schedule requires a worker name and --agent registered-parent')
+        return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target))
+    if args.action in ("supersede-issue", "resume-issue"):
+        if not args.target:
+            raise ValueError("supersede-issue needs the existing worker name")
+        if args.agent:
+            token = tokens.load(ws.base, args.agent)
+        else:
+            human.require_person("supersede a repository issue")
+            token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        decision = backlog.supersede if args.action == "supersede-issue" else backlog.resume
+        decision(ws, token, args.target, args.issue, args.reason)
+        say(f"issue {args.issue}: {args.action} decision recorded")
+        return 0
     human.require_person(f"{args.action} a local agent")
+    if args.action == "backlog":
+        if not args.target:
+            raise ValueError("agent backlog needs the existing worker's name")
+        token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        backlog.configure(ws, token, args.target, args.repo, args.project)
+        issuepump.start(ws, token, args.target)
+        say(f"{args.target} will work on open issues in {args.repo} when its inbox is empty")
+        return 0
     provenance.told(args.lease_for)
     handler: Any = _start if args.action == "start" else _stop
     return int(handler(args, ws))

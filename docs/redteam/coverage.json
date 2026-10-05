@@ -1,11 +1,11 @@
 {
- "surfaces": 616,
+ "surfaces": 722,
  "by_status": {
-  "covered": 303,
-  "partial": 201,
+  "covered": 395,
+  "partial": 207,
   "uncovered": 54,
-  "n/a": 58,
-  "unmapped": 0
+  "n/a": 65,
+  "unmapped": 1
  },
  "by_kind": {
   "chat-tool": {
@@ -19,26 +19,26 @@
    "covered": 7,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 25,
+   "n/a": 26,
    "unmapped": 0
   },
   "context": {
-   "covered": 7,
+   "covered": 8,
    "partial": 0,
    "uncovered": 4,
-   "n/a": 13,
+   "n/a": 16,
    "unmapped": 0
   },
   "desktop": {
-   "covered": 9,
+   "covered": 10,
    "partial": 0,
    "uncovered": 0,
    "n/a": 10,
    "unmapped": 0
   },
   "egress": {
-   "covered": 29,
-   "partial": 46,
+   "covered": 30,
+   "partial": 51,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 60,
+   "covered": 86,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -68,29 +68,29 @@
    "covered": 2,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 9,
+   "n/a": 11,
    "unmapped": 0
   },
   "mcp-tool": {
-   "covered": 24,
+   "covered": 34,
    "partial": 19,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
   },
   "parser": {
-   "covered": 49,
+   "covered": 67,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 47,
-   "partial": 61,
+   "covered": 69,
+   "partial": 58,
    "uncovered": 0,
    "n/a": 0,
-   "unmapped": 0
+   "unmapped": 1
   },
   "slash-command": {
    "covered": 9,
@@ -100,10 +100,10 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 23,
-   "partial": 63,
+   "covered": 36,
+   "partial": 67,
    "uncovered": 0,
-   "n/a": 1,
+   "n/a": 2,
    "unmapped": 0
   }
  },
@@ -645,6 +645,16 @@
    "note": ""
   },
   {
+   "id": "cli:ml-stack-gym",
+   "kind": "cli",
+   "source": "ml_stack.gym.cli:main",
+   "trust": "the person at a terminal; arguments may carry text from outside",
+   "attacker": "hostile argument text or path reaches the command",
+   "status": "n/a",
+   "tests": [],
+   "note": "run by the person with the person's own arguments; an agent reaches these commands only through an mcp-tool or chat-tool row, which carry the hostile-argument tests"
+  },
+  {
    "id": "cli:ml-stack-help",
    "kind": "cli",
    "source": "ml_stack.cli:help_main",
@@ -953,6 +963,16 @@
    "note": ""
   },
   {
+   "id": "context:agent/conversation.py",
+   "kind": "context",
+   "source": "agent/conversation.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+  },
+  {
    "id": "context:agent/loop.py",
    "kind": "context",
    "source": "agent/loop.py",
@@ -965,6 +985,16 @@
     "tests/test_taint_flows.py"
    ],
    "note": ""
+  },
+  {
+   "id": "context:agent/sdk_runtime.py",
+   "kind": "context",
+   "source": "agent/sdk_runtime.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
   },
   {
    "id": "context:agent/summarise.py",
@@ -1098,6 +1128,28 @@
    "note": "a note, page or document the graph or ingest reads is put in the model's prompt; no test plants an instruction in a source and checks what the model's reply can do"
   },
   {
+   "id": "context:gym/vision_process.py",
+   "kind": "context",
+   "source": "gym/vision_process.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "n/a",
+   "tests": [],
+   "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+  },
+  {
+   "id": "context:gym/vision_process.py:image_request",
+   "kind": "context",
+   "source": "src/ml_stack/gym/vision_process.py",
+   "trust": "tool results, pages, files, peers, stored facts",
+   "attacker": "text from outside is read by a model as an instruction",
+   "status": "covered",
+   "tests": [
+    "tests/test_gym_models.py"
+   ],
+   "note": "compatible HTTP server receives only captured RGB and explicitly synthetic thermal image pixels, not simulator detection labels or hidden actor coordinates; unregistered and unsupported model selections are refused; superseded actor results are rejected"
+  },
+  {
    "id": "context:ingest/extract.py",
    "kind": "context",
    "source": "ingest/extract.py",
@@ -1202,6 +1254,18 @@
    "status": "n/a",
    "tests": [],
    "note": "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
+  },
+  {
+   "id": "desktop:app/src-tauri/capabilities/main.json",
+   "kind": "desktop",
+   "source": "app/src-tauri/capabilities/main.json",
+   "trust": "names of peers, sessions, files",
+   "attacker": "attacker text reaches a dialog, notification or shell command",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_desktop_capabilities.py"
+   ],
+   "note": "compiled Tauri authority rejects foreign origins and windows, shell execution and filesystem reads"
   },
   {
    "id": "desktop:desktop.py:_mac",
@@ -1637,6 +1701,18 @@
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
+   "id": "egress:client/sdk.py:_open_response",
+   "kind": "egress",
+   "source": "client/sdk.py:_open_response",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
    "id": "egress:decide/logprob.py:LogprobDecider.probabilities",
    "kind": "egress",
    "source": "decide/logprob.py:LogprobDecider.probabilities",
@@ -1890,6 +1966,21 @@
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
   },
   {
+   "id": "egress:fleet/serving.py:_identity",
+   "kind": "egress",
+   "source": "fleet/serving.py:_identity",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_serving.py::TestRegistry::test_recycled_port_reports_its_actual_model_and_prunes_dead_rows",
+    "tests/test_fleet_serving.py::TestRegistry::test_invalid_persisted_ports_are_never_probed",
+    "tests/test_fleet_serving.py::TestRegistry::test_malformed_metadata_does_not_advertise_registration_claims",
+    "tests/test_fleet_serving.py::TestRegistry::test_metadata_redirect_cannot_borrow_another_endpoints_identity"
+   ],
+   "note": "Persisted registrations are claims: identity comes from the bounded local endpoint, invalid ports never probe, malformed bodies never advertise, and redirects cannot move metadata to another endpoint"
+  },
+  {
    "id": "egress:fleet/serving.py:answers",
    "kind": "egress",
    "source": "fleet/serving.py:answers",
@@ -1917,6 +2008,30 @@
    "id": "egress:fleet/ui.py:serve_page",
    "kind": "egress",
    "source": "fleet/ui.py:serve_page",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/wsl_network.py:DiscoverySocket.__init__",
+   "kind": "egress",
+   "source": "fleet/wsl_network.py:DiscoverySocket.__init__",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/wsl_network.py:_forward",
+   "kind": "egress",
+   "source": "fleet/wsl_network.py:_forward",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
    "status": "partial",
@@ -2394,6 +2509,30 @@
    "note": ""
   },
   {
+   "id": "egress:workspace/coordinator_client.py:client",
+   "kind": "egress",
+   "source": "workspace/coordinator_client.py:client",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:workspace/remote.py:RemoteWorkspace._request",
+   "kind": "egress",
+   "source": "workspace/remote.py:RemoteWorkspace._request",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "partial",
+   "tests": [
+    "tests/test_net_no_bypass.py"
+   ],
+   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
    "id": "handler:fleet/api.py:Handler",
    "kind": "handler",
    "source": "fleet/api.py:Handler",
@@ -2469,10 +2608,10 @@
    "attacker": "malformed, oversized or unauthenticated requests",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -2608,6 +2747,26 @@
    "id": "human:fleet/recovery.py:run",
    "kind": "human",
    "source": "fleet/recovery.py:run",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:gym/decision_process.py:DecisionProcess.__init__",
+   "kind": "human",
+   "source": "gym/decision_process.py:DecisionProcess.__init__",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -3225,6 +3384,54 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/backlog.py:configure",
+   "kind": "human",
+   "source": "workspace/backlog.py:configure",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/backlog.py:resume",
+   "kind": "human",
+   "source": "workspace/backlog.py:resume",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_attempt_and_consumes_one_retry",
+    "tests/test_workspace_backlog.py::test_issue_resume_refuses_unblocked_foreign_and_child_requests",
+    "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_canonical_task_retry_budget"
+   ],
+   "note": "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and canonical budget bypasses are refused"
+  },
+  {
+   "id": "human:workspace/backlog.py:supersede",
+   "kind": "human",
+   "source": "workspace/backlog.py:supersede",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_backlog.py::test_parent_superseded_issue_stays_excluded_after_revision_change",
+    "tests/test_workspace_backlog.py::test_child_and_foreign_parent_cannot_supersede_repository_tasks",
+    "tests/test_workspace_backlog.py::test_maintained_cli_records_parent_decision_without_person_impersonation"
+   ],
+   "note": "Only the person or actual registered worker parent records an obsolete-issue decision; child and foreign-parent tokens mutate no decision, and later issue revisions preserve the authenticated exclusion"
+  },
+  {
    "id": "human:workspace/boardapi.py:BoardApi.follow",
    "kind": "human",
    "source": "workspace/boardapi.py:BoardApi.follow",
@@ -3248,6 +3455,46 @@
    "id": "human:workspace/boardapi.py:BoardApi.join",
    "kind": "human",
    "source": "workspace/boardapi.py:BoardApi.join",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/boardroute.py:_ack",
+   "kind": "human",
+   "source": "workspace/boardroute.py:_ack",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/boardroute.py:_answer",
+   "kind": "human",
+   "source": "workspace/boardroute.py:_answer",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -3305,9 +3552,129 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/claims.py:Claims.return_worktree",
+   "kind": "human",
+   "source": "workspace/claims.py:Claims.return_worktree",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/cli.py:_chat",
    "kind": "human",
    "source": "workspace/cli.py:_chat",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/cli.py:_coordinator",
+   "kind": "human",
+   "source": "workspace/cli.py:_coordinator",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/coordinator_calls.py:prepare",
+   "kind": "human",
+   "source": "workspace/coordinator_calls.py:prepare",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/coordinator_routes.py:change",
+   "kind": "human",
+   "source": "workspace/coordinator_routes.py:change",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/device_agent.py:bind_worker",
+   "kind": "human",
+   "source": "workspace/device_agent.py:bind_worker",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/device_agent.py:enroll",
+   "kind": "human",
+   "source": "workspace/device_agent.py:enroll",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -3447,6 +3814,26 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/issuepump.py:run",
+   "kind": "human",
+   "source": "workspace/issuepump.py:run",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/localcli.py:run",
    "kind": "human",
    "source": "workspace/localcli.py:run",
@@ -3527,6 +3914,26 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/onboard.py:install_hooks",
+   "kind": "human",
+   "source": "workspace/onboard.py:install_hooks",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/onboard.py:setup",
    "kind": "human",
    "source": "workspace/onboard.py:setup",
@@ -3587,6 +3994,66 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/reports.py:eligible",
+   "kind": "human",
+   "source": "workspace/reports.py:eligible",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/reports.py:emit",
+   "kind": "human",
+   "source": "workspace/reports.py:emit",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/resource_allocations.py:assign",
+   "kind": "human",
+   "source": "workspace/resource_allocations.py:assign",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/service.py:Workspace.deliver",
    "kind": "human",
    "source": "workspace/service.py:Workspace.deliver",
@@ -3627,26 +4094,6 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
-   "id": "human:workspace/service.py:Workspace.post",
-   "kind": "human",
-   "source": "workspace/service.py:Workspace.post",
-   "trust": "an agent process or a peer",
-   "attacker": "an agent or a forged grant takes an action only a person may take",
-   "status": "covered",
-   "tests": [
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
-    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
-    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
-    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
-    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
-    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
-    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
-    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
-   ],
-   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
-  },
-  {
    "id": "human:workspace/service.py:Workspace.set_model",
    "kind": "human",
    "source": "workspace/service.py:Workspace.set_model",
@@ -3667,9 +4114,201 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/task_actions.py:block",
+   "kind": "human",
+   "source": "workspace/task_actions.py:block",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/task_integration.py:DevelopmentIntegration.prepare",
+   "kind": "human",
+   "source": "workspace/task_integration.py:DevelopmentIntegration.prepare",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/task_integration.py:reviewed",
+   "kind": "human",
+   "source": "workspace/task_integration.py:reviewed",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/task_routes.py:route",
+   "kind": "human",
+   "source": "workspace/task_routes.py:route",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/task_scope.py:eligible",
+   "kind": "human",
+   "source": "workspace/task_scope.py:eligible",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/task_worktrees.py:prepare",
+   "kind": "human",
+   "source": "workspace/task_worktrees.py:prepare",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/taskboard.py:TaskBoard._reviewer",
+   "kind": "human",
+   "source": "workspace/taskboard.py:TaskBoard._reviewer",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/taskboard.py:TaskBoard.create",
+   "kind": "human",
+   "source": "workspace/taskboard.py:TaskBoard.create",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
    "id": "human:workspace/tokens.py:directory",
    "kind": "human",
    "source": "workspace/tokens.py:directory",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/work_reputation.py:fleet_route",
+   "kind": "human",
+   "source": "workspace/work_reputation.py:fleet_route",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/work_reputation.py:standings",
+   "kind": "human",
+   "source": "workspace/work_reputation.py:standings",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -3739,6 +4378,16 @@
    "note": "refusal, rate ceiling, background process, other-purpose key, label collision, master in no file or log"
   },
   {
+   "id": "listener:fleet/chat.py:stream",
+   "kind": "listener",
+   "source": "fleet/chat.py:stream",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
    "id": "listener:fleet/daemon.py:main",
    "kind": "listener",
    "source": "fleet/daemon.py:main",
@@ -3765,9 +4414,9 @@
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
   },
   {
-   "id": "listener:fleet/discovery.py:_socket",
+   "id": "listener:fleet/discovery.py:_native_socket",
    "kind": "listener",
-   "source": "fleet/discovery.py:_socket",
+   "source": "fleet/discovery.py:_native_socket",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "partial",
@@ -3789,6 +4438,16 @@
     "tests/test_onboard_tailnet.py"
    ],
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
+  },
+  {
+   "id": "listener:fleet/wsl_network.py:NetworkBridge._listen",
+   "kind": "listener",
+   "source": "fleet/wsl_network.py:NetworkBridge._listen",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
   },
   {
    "id": "listener:graph/serve.py:main",
@@ -3927,6 +4586,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -3945,6 +4606,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -3963,6 +4626,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -3981,6 +4646,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -3999,6 +4666,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4017,6 +4686,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4035,6 +4706,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4053,6 +4726,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4071,6 +4746,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4089,6 +4766,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4107,6 +4786,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4125,6 +4806,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4143,6 +4826,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4161,6 +4846,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4194,6 +4881,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4212,6 +4901,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4243,6 +4934,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4510,6 +5203,19 @@
    "note": ""
   },
   {
+   "id": "mcp-tool:workspace_reputation",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_reputation",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_work_reputation.py::test_reputation_read_requires_valid_token_and_read_capability",
+    "tests/test_work_reputation.py::test_local_and_mcp_tools_read_reputation_and_task_frame_contains_team_awareness"
+   ],
+   "note": "Reputation reads use the authenticated caller token and delegated read capability; local and MCP tools expose evidence without any self-award operation"
+  },
+  {
    "id": "mcp-tool:workspace_scratch_ls",
    "kind": "mcp-tool",
    "source": "mcp.py:workspace_scratch_ls",
@@ -4606,6 +5312,150 @@
    "note": ""
   },
   {
+   "id": "mcp-tool:workspace_task",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_checkpoint",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_checkpoint",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_claim",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_claim",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_credit",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_credit",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_heartbeat",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_heartbeat",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_integrate",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_integrate",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_review",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_review",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_submit",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_submit",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_tasks",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_tasks",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
    "id": "mcp-tool:workspace_thread",
    "kind": "mcp-tool",
    "source": "mcp.py:workspace_thread",
@@ -4645,6 +5495,8 @@
    "attacker": "a prompt-injected model calls the tool with hostile arguments",
    "status": "partial",
    "tests": [
+    "tests/test_mcp.py::test_workspace_subset_rejects_server_admin_tools",
+    "tests/test_harness_rails.py::test_bound_workspace_mcp_obeys_role",
     "tests/test_redteam_mcp.py::test_hostile_json_rpc_gets_an_error_and_runs_nothing",
     "tests/test_redteam_mcp.py::test_a_tool_called_with_the_wrong_types_is_refused_before_it_runs",
     "tests/test_redteam_mcp.py::test_a_hostile_model_name_is_one_argument_never_a_shell_line",
@@ -4786,6 +5638,19 @@
    "note": "files the product wrote for itself (stores, caches, snapshots, case files) are read back; a hand-edited or planted file is not tried"
   },
   {
+   "id": "parser:fleet/gym_recording_routes.py",
+   "kind": "parser",
+   "source": "fleet/gym_recording_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
    "id": "parser:fleet/onboard/bootstrap.py",
    "kind": "parser",
    "source": "fleet/onboard/bootstrap.py",
@@ -4910,6 +5775,32 @@
     "tests/test_onboard_pairing.py"
    ],
    "note": ""
+  },
+  {
+   "id": "parser:fleet/request_fields.py",
+   "kind": "parser",
+   "source": "fleet/request_fields.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
+   "id": "parser:fleet/workspace_routes.py",
+   "kind": "parser",
+   "source": "fleet/workspace_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
   },
   {
    "id": "parser:graph/access.py",
@@ -5090,6 +5981,57 @@
     "tests/test_redteam_judge.py"
    ],
    "note": ""
+  },
+  {
+   "id": "parser:gym/car_definition.py",
+   "kind": "parser",
+   "source": "gym/car_definition.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
+   "id": "parser:gym/drone_definition.py",
+   "kind": "parser",
+   "source": "gym/drone_definition.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_gym_drone.py::test_manual_forest_rejects_invalid_shapes"
+   ],
+   "note": "manual forest JSON rejects unsupported versions, nonfinite dimensions, invalid shapes and excessive actor counts"
+  },
+  {
+   "id": "parser:gym/traffic_world.py",
+   "kind": "parser",
+   "source": "gym/traffic_world.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
+  },
+  {
+   "id": "parser:gym/world_files.py",
+   "kind": "parser",
+   "source": "gym/world_files.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py"
+   ],
+   "note": "planted files cannot escape the import root; invalid native JSON, XML entities and include paths are rejected; malformed browser JSON and review/frame symlinks are refused"
   },
   {
    "id": "parser:hub/cards.py",
@@ -5703,6 +6645,19 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/backlog.py",
+   "kind": "parser",
+   "source": "workspace/backlog.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/boardroute.py",
    "kind": "parser",
    "source": "workspace/boardroute.py",
@@ -5738,6 +6693,83 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/coding_routes.py",
+   "kind": "parser",
+   "source": "workspace/coding_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
+   "id": "parser:workspace/coding_turns.py",
+   "kind": "parser",
+   "source": "workspace/coding_turns.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
+   "id": "parser:workspace/coordinator.py",
+   "kind": "parser",
+   "source": "workspace/coordinator.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/coordinator_client.py",
+   "kind": "parser",
+   "source": "workspace/coordinator_client.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/coordinator_routes.py",
+   "kind": "parser",
+   "source": "workspace/coordinator_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/filestore.py",
    "kind": "parser",
    "source": "workspace/filestore.py",
@@ -5759,6 +6791,11 @@
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",
    "tests": [
+    "tests/test_task_coding.py::test_native_turn_and_output_limits_preserve_authority",
+    "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_preserves_its_private_identity",
+    "tests/test_workspace_local_agent.py::test_stop_never_releases_a_foreign_holder",
+    "tests/test_workspace_local_agent.py::test_start_and_stop_refuse_a_process_an_agent_started",
+    "tests/test_workspace_local_agent.py::test_paused_coding_worker_keeps_tasks_queued_until_resume",
     "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
     "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
     "tests/test_workspace_local_agent.py::test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused",
@@ -5783,9 +6820,48 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/nudge.py",
+   "kind": "parser",
+   "source": "workspace/nudge.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/onboard.py",
+   "kind": "parser",
+   "source": "workspace/onboard.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/rates.py",
    "kind": "parser",
    "source": "workspace/rates.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/remote.py",
+   "kind": "parser",
+   "source": "workspace/remote.py",
    "trust": "files, pages and archives from outside",
    "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
    "status": "covered",
@@ -5835,6 +6911,37 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/task_coding.py",
+   "kind": "parser",
+   "source": "workspace/task_coding.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/task_routes.py",
+   "kind": "parser",
+   "source": "workspace/task_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
    "id": "parser:workspace/tokens.py",
    "kind": "parser",
    "source": "workspace/tokens.py",
@@ -5859,6 +6966,18 @@
     "tests/test_workspace_rules.py"
    ],
    "note": ""
+  },
+  {
+   "id": "route:activity/fleet_routes.py:/ui/history/events",
+   "kind": "route",
+   "source": "activity/fleet_routes.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_activity_fleet_history.py::test_history_requires_ui_header_and_joined_session"
+   ],
+   "note": "The installed read-only History extension runs after Fleet UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
   },
   {
    "id": "route:fleet/api.py:/availability",
@@ -6140,27 +7259,35 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
   {
-   "id": "route:fleet/chat_routes.py:/ui/conversations*",
+   "id": "route:fleet/component_routes.py:/ui/models/addons",
    "kind": "route",
-   "source": "fleet/chat_routes.py:ChatRoutes.route",
+   "source": "fleet/component_routes.py:route",
    "trust": "network peer or local browser",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "unmapped",
+   "tests": [],
+   "note": ""
+  },
+  {
+   "id": "route:fleet/conversation_routes.py:/ui/conversations*",
+   "kind": "route",
+   "source": "fleet/conversation_routes.py:ConversationRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
+    "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"
    ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+   "note": "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
   },
   {
    "id": "route:fleet/framing.py:handle_error",
@@ -6185,6 +7312,74 @@
     "tests/test_fleet_framing.py"
    ],
    "note": ""
+  },
+  {
+   "id": "route:fleet/gym_recording_routes.py:/ui/gym/recordings*",
+   "kind": "route",
+   "source": "src/ml_stack/fleet/gym_recording_routes.py",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/gym_routes.py:/ui/gym*",
+   "kind": "route",
+   "source": "fleet/gym_routes.py:GymRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/gym_routes.py:/ui/gym/catalogue",
+   "kind": "route",
+   "source": "fleet/gym_routes.py:GymRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/gym_routes.py:/ui/gym/sessions",
+   "kind": "route",
+   "source": "fleet/gym_routes.py:GymRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/launch_routes.py:/ui/launch-ticket",
+   "kind": "route",
+   "source": "fleet/launch_routes.py:LaunchRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once"
+   ],
+   "note": "Actual Fleet socket checks require a signed-in session and UI header, reject foreign addressed hosts and unsupported methods, and reject replay after the one-use session handoff"
   },
   {
    "id": "route:fleet/onboard/bootstrap.py:manifest",
@@ -6401,10 +7596,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6416,10 +7611,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6431,10 +7626,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6446,10 +7641,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6461,10 +7656,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6476,10 +7671,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6491,10 +7686,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6506,12 +7701,25 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/clusters/found",
+   "kind": "route",
+   "source": "fleet/routes.py:ClusterRoutes.route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_found_route.py::test_first_run_refuses_the_list_from_another_machine",
+    "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in"
+   ],
+   "note": ""
   },
   {
    "id": "route:fleet/routes.py:/ui/fit",
@@ -6521,10 +7729,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6536,10 +7744,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6551,10 +7759,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6566,10 +7774,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6581,10 +7789,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6596,10 +7804,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6611,10 +7819,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6626,10 +7834,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6641,10 +7849,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6656,10 +7864,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6671,10 +7879,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6686,10 +7894,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6713,10 +7921,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6728,10 +7936,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6743,10 +7951,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6758,12 +7966,25 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/session",
+   "kind": "route",
+   "source": "fleet/routes.py:SessionRoutes.public_route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_ui.py::TestSignIn::test_the_wrong_passphrase_does_not",
+    "tests/test_fleet_ui.py::TestSignIn::test_persistent_guessing_is_slowed_down"
+   ],
+   "note": "Real sign-in requests reject hostile passphrases and rate-limit repeated guesses"
   },
   {
    "id": "route:fleet/routes.py:/ui/settings",
@@ -6773,10 +7994,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6786,14 +8007,31 @@
    "source": "fleet/routes.py:SetupRoutes.public_route",
    "trust": "browser session on this machine behind the UI header",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_rejoining_needs_a_session_once_the_box_is_in_a_cluster"
    ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+   "note": "Native Fleet sockets reject remote first-run ownership, DNS-rebinding Host values, missing UI headers and joined setup mutation without an authenticated session"
+  },
+  {
+   "id": "route:fleet/routes.py:/ui/setup/clusters",
+   "kind": "route",
+   "source": "fleet/routes.py:SetupRoutes.public_route",
+   "trust": "browser session on this machine behind the UI header",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_named_lan.py::test_prejoin_discovery_obeys_setup_boundary",
+    "tests/test_fleet_named_lan.py::test_malformed_stale_and_oversized_hints_are_ignored",
+    "tests/test_fleet_named_lan.py::test_random_key_hint_and_upload_authenticate_without_keystore",
+    "tests/test_fleet_named_lan.py::test_hostile_recovery_upload_never_writes_membership",
+    "tests/test_fleet_named_lan.py::test_wrong_name_wrong_key_and_cross_origin_cannot_import",
+    "tests/test_fleet_named_lan.py::test_authenticated_pake_answer_must_contain_selected_name_and_valid_key"
+   ],
+   "note": "LAN hints are bounded nonce-matching metadata; local setup or a signed-in person selects a named recovery file, validates its bounded shape, and authenticates a native encrypted protocol-3 beacon before any membership write; scans and recovery joins never access the keystore"
   },
   {
    "id": "route:fleet/routes.py:/ui/setup/done",
@@ -6803,10 +8041,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6816,14 +8054,14 @@
    "source": "fleet/routes.py:SetupRoutes.public_route",
    "trust": "browser session on this machine behind the UI header",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_rejoining_needs_a_session_once_the_box_is_in_a_cluster"
    ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+   "note": "Native Fleet sockets reject remote first-run ownership, DNS-rebinding Host values, missing UI headers and joined setup mutation without an authenticated session"
   },
   {
    "id": "route:fleet/routes.py:/ui/setup/peers",
@@ -6833,10 +8071,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6848,10 +8086,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6863,10 +8101,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6878,10 +8116,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6893,10 +8131,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6908,10 +8146,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6923,10 +8161,10 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
   },
@@ -6938,12 +8176,113 @@
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
    "status": "partial",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/setup_recovery_routes.py:/ui/setup/recovery",
+   "kind": "route",
+   "source": "fleet/setup_recovery_routes.py:SetupRecoveryRoutes.public_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_named_lan.py::test_prejoin_discovery_obeys_setup_boundary",
+    "tests/test_fleet_named_lan.py::test_malformed_stale_and_oversized_hints_are_ignored",
+    "tests/test_fleet_named_lan.py::test_random_key_hint_and_upload_authenticate_without_keystore",
+    "tests/test_fleet_named_lan.py::test_hostile_recovery_upload_never_writes_membership",
+    "tests/test_fleet_named_lan.py::test_wrong_name_wrong_key_and_cross_origin_cannot_import",
+    "tests/test_fleet_named_lan.py::test_authenticated_pake_answer_must_contain_selected_name_and_valid_key"
+   ],
+   "note": "LAN hints are bounded nonce-matching metadata; local setup or a signed-in person selects a named recovery file, validates its bounded shape, and authenticates a native encrypted protocol-3 beacon before any membership write; scans and recovery joins never access the keystore"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/*",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/commands",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/file",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/files",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/jobs",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/workspace_routes.py:/ui/workspace/recipes",
+   "kind": "route",
+   "source": "fleet/workspace_routes.py:WorkspaceRoutes._workspace",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_http.py",
+    "tests/test_fleet_gym_boundaries.py",
+    "tests/test_fleet_workspace_routes.py"
+   ],
+   "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
   },
   {
    "id": "route:graph/completions.py:handle_completion",
@@ -7486,6 +8825,55 @@
    "note": "the catch-all that holds a served request; its hold decision is tested, hostile framing is not"
   },
   {
+   "id": "route:workspace/coding_routes.py:/ui/coding/*",
+   "kind": "route",
+   "source": "workspace/coding_routes.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_coding_routes.py::test_client_cannot_supply_identity_or_unsupported_fields",
+    "tests/test_coding_routes.py::test_coding_start_requires_person_page_origin_and_ui_header",
+    "tests/test_coding_routes.py::test_joined_coding_session_is_required_before_starting_a_worker",
+    "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
+    "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
+    "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model"
+   ],
+   "note": "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
+  },
+  {
+   "id": "route:workspace/fleet_routes.py:/ui/board/*",
+   "kind": "route",
+   "source": "workspace/fleet_routes.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_board_routes.py::test_local_person_posts_dm_and_thread_without_exposing_credentials",
+    "tests/test_fleet_board_routes.py::test_joined_session_is_required_before_owner_identity_is_used",
+    "tests/test_fleet_board_routes.py::test_foreign_browser_cannot_send_as_person",
+    "tests/test_fleet_board_routes.py::test_malformed_or_impersonating_post_does_not_deliver",
+    "tests/test_fleet_board_routes.py::test_page_cannot_post_announcements_or_use_agent_owner_file",
+    "tests/test_fleet_board_routes.py::test_oversized_post_and_unsupported_methods_do_not_mutate",
+    "tests/test_fleet_board_routes.py::test_ack_marks_only_an_existing_visible_message_in_its_scope"
+   ],
+   "note": "Fleet delegates to maintained person-only Board routes after its existing UI authorization; foreign origins, missing UI header, malformed bodies, impersonation fields, oversized requests and agent owner credentials cannot send"
+  },
+  {
+   "id": "route:workspace/work_reputation.py:/ui/work-reputation/standings",
+   "kind": "route",
+   "source": "workspace/work_reputation.py:fleet_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_work_reputation.py::test_person_reputation_route_is_read_only_and_session_guarded"
+   ],
+   "note": "Verified-work standings are read-only and require the maintained Fleet UI header, session and server-side person owner identity; tokens are never returned"
+  },
+  {
    "id": "slash-command:chat.py:/exit",
    "kind": "slash-command",
    "source": "chat.py:/exit",
@@ -7726,12 +9114,12 @@
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
    "tests": [
-    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
-    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
-    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
-    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
-    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
-    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+    "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
    ],
    "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
@@ -7743,12 +9131,12 @@
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
    "tests": [
-    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
-    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
-    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
-    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
-    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
-    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+    "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
    ],
    "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
@@ -7897,6 +9285,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:fleet/autostart.py:_windows_owner",
+   "kind": "spawn",
+   "source": "fleet/autostart.py:_windows_owner",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:fleet/autostart.py:_windows_task_named",
    "kind": "spawn",
    "source": "fleet/autostart.py:_windows_task_named",
@@ -7933,6 +9333,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:fleet/environment.py:Environment.build_environment",
+   "kind": "spawn",
+   "source": "fleet/environment.py:Environment.build_environment",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_gym_managed_interpreters.py::test_macos_bullet_build_selects_sdk_without_shell"
+   ],
+   "note": "SDK discovery uses a fixed literal executable and argument without shell evaluation"
+  },
+  {
    "id": "spawn:fleet/environment.py:Environment.create",
    "kind": "spawn",
    "source": "fleet/environment.py:Environment.create",
@@ -7943,6 +9355,16 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:fleet/environment.py:Environment.host_python",
+   "kind": "spawn",
+   "source": "fleet/environment.py:Environment.host_python",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "n/a",
+   "tests": [],
+   "note": "The interpreter comes from the fixed library catalog or the running Python; the probe uses a fixed -c program and an argv list, without model, peer or browser text"
   },
   {
    "id": "spawn:fleet/environment.py:Environment.pip",
@@ -8154,6 +9576,30 @@
    "note": "shell metacharacters remain argv values; the WSL installer source path is one pip argument"
   },
   {
+   "id": "spawn:fleet/wsl.py:start",
+   "kind": "spawn",
+   "source": "fleet/wsl.py:start",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:fleet/wsl_startup.py:call",
+   "kind": "spawn",
+   "source": "fleet/wsl_startup.py:call",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:gguf/convert.py:_run",
    "kind": "spawn",
    "source": "gguf/convert.py:_run",
@@ -8166,6 +9612,56 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:gym/catalog.py:probe",
+   "kind": "spawn",
+   "source": "gym/catalog.py:probe",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+    "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"
+   ],
+   "note": "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+  },
+  {
+   "id": "spawn:gym/decision_process.py:DecisionProcess.__init__",
+   "kind": "spawn",
+   "source": "src/ml_stack/gym/decision_process.py",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_gym_decision_process.py"
+   ],
+   "note": "actual model child keeps hostile checkpoint and interpreter text literal; stalled inference admits one request and closes within a bounded grace period"
+  },
+  {
+   "id": "spawn:gym/traffic_world.py:generate",
+   "kind": "spawn",
+   "source": "gym/traffic_world.py:generate",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_worker.py::test_catalogue_probe_executes_hostile_interpreter_path_without_shell",
+    "tests/test_redteam_gym_worker.py::test_native_traffic_generator_keeps_hostile_home_path_in_argv"
+   ],
+   "note": "actual native generators and installed interpreter probes receive shell syntax as literal executable paths"
+  },
+  {
+   "id": "spawn:gym/transport.py:Process.start",
+   "kind": "spawn",
+   "source": "src/ml_stack/gym/transport.py",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_worker.py"
+   ],
+   "note": "actual subprocess receives hostile arguments only inside JSON and closes malformed native control streams"
+  },
+  {
    "id": "spawn:harnesshook.py:nudge",
    "kind": "spawn",
    "source": "harnesshook.py:nudge",
@@ -8173,12 +9669,12 @@
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
    "tests": [
-    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
-    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
-    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
-    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
-    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
-    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+    "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
    ],
    "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
@@ -8190,12 +9686,12 @@
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",
    "tests": [
-    "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
-    "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
-    "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
-    "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
-    "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
-    "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
+    "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+    "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+    "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+    "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
+    "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+    "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role"
    ],
    "note": "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
   },
@@ -8359,6 +9855,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:platform.py:start_process",
+   "kind": "spawn",
+   "source": "platform.py:start_process",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_gym_worker.py::test_worker_spawn_keeps_hostile_configuration_inside_json"
+   ],
+   "note": "actual worker launch through the process wrapper receives hostile configuration as one JSON argument without a shell"
+  },
+  {
    "id": "spawn:redact/hook.py:_git",
    "kind": "spawn",
    "source": "redact/hook.py:_git",
@@ -8369,6 +9877,18 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:sandbox/bubblewrap.py:_probe",
+   "kind": "spawn",
+   "source": "src/ml_stack/sandbox/bubblewrap.py",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_bubblewrap.py"
+   ],
+   "note": "actual executable paths containing shell syntax remain literal, control characters cannot execute, probes are single-flight and invalidate on binary changes, stalled probes are killed"
   },
   {
    "id": "spawn:sandbox/run.py:run",
@@ -8421,6 +9941,19 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:scripts/test-on-linux",
+   "kind": "spawn",
+   "source": "scripts/test-on-linux",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_linux_runner.py",
+    "tests/test_running_on_linux.py::test_the_runner_says_which_command_told_it_docker_is_missing"
+   ],
+   "note": "hostile pytest text remains literal argv; source mount is read-only, no privileged or host-network flags, temporary config and staging are removed"
   },
   {
    "id": "spawn:serve/backend.py:_binary_info",
@@ -8684,6 +10217,18 @@
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
   },
   {
+   "id": "spawn:workspace/backlog.py:fetch",
+   "kind": "spawn",
+   "source": "workspace/backlog.py:fetch",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "partial",
+   "tests": [
+    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+   ],
+   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
    "id": "spawn:workspace/guide.py:clipboard",
    "kind": "spawn",
    "source": "workspace/guide.py:clipboard",
@@ -8696,6 +10241,51 @@
    "note": "a constant argv per tool; the pasted text goes on stdin"
   },
   {
+   "id": "spawn:workspace/integration_git.py:ancestor",
+   "kind": "spawn",
+   "source": "workspace/integration_git.py:ancestor",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+    "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+    "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+    "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block"
+   ],
+   "note": "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+  },
+  {
+   "id": "spawn:workspace/integration_git.py:gates",
+   "kind": "spawn",
+   "source": "workspace/integration_git.py:gates",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+    "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+    "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+    "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block"
+   ],
+   "note": "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+  },
+  {
+   "id": "spawn:workspace/integration_git.py:git",
+   "kind": "spawn",
+   "source": "workspace/integration_git.py:git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+    "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+    "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+    "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block"
+   ],
+   "note": "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+  },
+  {
    "id": "spawn:workspace/notes.py:Notes.verify",
    "kind": "spawn",
    "source": "workspace/notes.py:Notes.verify",
@@ -8706,6 +10296,30 @@
     "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
    ],
    "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+  },
+  {
+   "id": "spawn:worktreerules.py:checkouts",
+   "kind": "spawn",
+   "source": "worktreerules.py:checkouts",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"
+   ],
+   "note": "git is run with argv only; the paths come from a tool call and are one argument each"
+  },
+  {
+   "id": "spawn:worktreerules.py:commit_refusal",
+   "kind": "spawn",
+   "source": "worktreerules.py:commit_refusal",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"
+   ],
+   "note": "git is run with argv only; the paths come from a tool call and are one argument each"
   }
  ]
 }

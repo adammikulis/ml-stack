@@ -16,7 +16,7 @@ from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.drafted_by()` --
 # so anything patchable is looked up there at call time, never bound here at import.
-from ml_stack import bench
+from ml_stack import bench, lock
 from ml_stack.bench.askings import sampling_from
 from ml_stack.bench.counting import PER_QUESTION
 from ml_stack.bench.keep import _commit
@@ -25,7 +25,7 @@ from ml_stack.bench.record import of
 from ml_stack.bench.score import derived
 from ml_stack.bench.show import NOT_ANSWERING
 from ml_stack.fleet import join, measuring, pausing, sweeps
-from ml_stack.log import say
+from ml_stack.log import say, warn
 from ml_stack.serve.serving import Config, Serving
 
 __all__ = ["Fleeted", "Kept", "Refused", "fleet_measure", "fleet_planned",
@@ -63,6 +63,7 @@ class Fleeted:
 
     jobs: dict[Any, Any] = field(default_factory=dict)
     lines: list[str] = field(default_factory=list)
+    unplaced: list[tuple[str, str]] = field(default_factory=list)
 
 
 def newest(kept: list[dict[str, Any]], *, last: int = 0, since: str = "") -> list[dict[str, Any]]:
@@ -342,12 +343,13 @@ def fleet_planned(argv: Sequence[str], models: Sequence[str], *,
     drafts = {model: heads[n] for n, model in enumerate(models) if n < len(heads)}
     base = measuring.Job(argv=tuple(rest), models=(), commit=mine, files=_shipped(argv))
     jobs = measuring.jobs_from(planned, base, drafts=drafts)
-    return Fleeted(jobs=jobs, lines=lines)
+    return Fleeted(jobs=jobs, lines=lines, unplaced=list(planned.unplaced))
 
 
 def fleet_measure(jobs: Mapping[Any, Any], *, into: str | Path) -> None:
     """Dispatch ``jobs`` (one per peer) over the fleet, wait for them, and gather their
-    runs into ``into``."""
+    runs into ``into`` under this machine's measuring lock."""
     handles = sweeps.dispatch(dict(jobs))
     sweeps.wait(handles)
-    gather(handles, into=into)
+    with lock.only_one(bench.home_dir() / "measuring.lock", announce=warn):
+        gather(handles, into=into)

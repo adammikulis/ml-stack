@@ -14,7 +14,7 @@ and a number without its regime cannot be read.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from time import monotonic
@@ -110,14 +110,15 @@ def _round(value: float | None, places: int) -> float | None:
     return None if value is None else round(value, places)
 
 
-def read_speculative(base_url: str, *, timeout: float = 5.0) -> Speculative | None:
+def read_speculative(base_url: str, *, timeout: float = 5.0,
+                     guard: Callable[[str], str] | None = None) -> Speculative | None:
     """The server's speculative counters, or None where it does not report them.
 
     None covers all three ways there is nothing to read: ``--metrics`` not passed, a build
     older than the counters, and a server with no draft head.
     """
     try:
-        reply = request_bytes(f"{base_url.rstrip('/')}{METRICS_PATH}", timeout=timeout)
+        reply = request_bytes(f"{base_url.rstrip('/')}{METRICS_PATH}", timeout=timeout, guard=guard)
     except (ServerError, OSError):
         return None
     return _parse(reply.body.decode("utf-8", "replace"))

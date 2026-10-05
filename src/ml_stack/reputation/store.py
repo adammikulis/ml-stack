@@ -259,12 +259,21 @@ class Ledger:
         return bool(self.sealed.edit(run))
 
     def forget_all(self) -> int:
-        """Delete the whole store and its summary; returns how many sources were held."""
-        held = len(self.sources())
+        """Delete source-risk records and their summary while retaining other graph domains."""
         self._pending = {}
-        self.sealed.delete()
+        if not self.sources():
+            if self.sealed.status in ('locked', 'tampered'):
+                raise RuntimeError('unlock or restore the shared graph before forgetting source records')
+            self.path.with_name("summary.json").unlink(missing_ok=True)
+            return 0
+        def run(graph):
+            rows = graph.nodes("source")
+            graph.drop([node["id"] for kind in ("source", "event") for node in graph.nodes(kind)],
+                       force=True)
+            return len(rows)
+        count = self.sealed.edit(run, keep_previous=False)
         self.path.with_name("summary.json").unlink(missing_ok=True)
-        return held
+        return count
 
     def export(self) -> dict[str, Any]:
         """Every source with its traits and recent events, as plain data."""

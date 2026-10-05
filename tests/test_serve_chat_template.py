@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from ml_stack.serve.chat_template import forgiving, needs_forgiving
@@ -51,3 +53,30 @@ def test_a_model_that_names_no_template_needs_none(tmp_path):
     empty.write_bytes(b"not a gguf")
     assert template_of(empty) == ""
     assert written_beside(empty) is None
+
+
+def test_shared_launchers_get_the_same_cached_template(monkeypatch, tmp_path):
+    from ml_stack.serve import chat_template
+
+    monkeypatch.setattr(chat_template, "template_of", lambda _: GUARD)
+    first = chat_template.written_beside(tmp_path / "qwen.gguf")
+    second = chat_template.written_beside(tmp_path / "qwen.gguf")
+    assert first == second and first is not None
+    assert first.read_text() == forgiving(GUARD)
+
+
+def test_resolved_launch_profile_uses_the_shared_template(monkeypatch, tmp_path):
+    from ml_stack.serve import chat_template, ops
+    from ml_stack.serve.backend import ServerSpec
+    from ml_stack.serve.manager import ServerManager
+
+    monkeypatch.setattr(chat_template, "template_of", lambda _: GUARD)
+    model = tmp_path / "qwen.gguf"
+    spec = ServerSpec(model=model, context=262144)
+    resolved = ops.resolve_spec(spec, manager=ServerManager())
+    assert resolved.spec.chat_template_file == chat_template.written_beside(model)
+    explicit = tmp_path / "manual.jinja"
+    explicit.write_text("{{ messages }}")
+    resolved = ops.resolve_spec(replace(spec, chat_template_file=explicit),
+                                manager=ServerManager())
+    assert resolved.spec.chat_template_file == explicit

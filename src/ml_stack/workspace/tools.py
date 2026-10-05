@@ -7,15 +7,34 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ml_stack.workspace import filecli, limits, tokens
+from ml_stack.workspace import (
+    filecli,
+    limits,
+    task_integration,
+    task_outcomes,
+    tokens,
+    work_reputation,
+)
 from ml_stack.workspace.files import Attachment, Where
 from ml_stack.workspace.identity import TOKEN_ENV, Denied
 from ml_stack.workspace.service import Workspace
+from ml_stack.workspace.taskboard import TaskBoard
 
 __all__ = ["HINTS", "NAMES"]
 
 HINTS = {
+    "workspace_tasks": (True, False, True),
+    "workspace_task": (True, False, True),
+    "workspace_task_claim": (False, False, False),
+    "workspace_task_heartbeat": (False, False, False),
+    "workspace_task_checkpoint": (False, False, False),
+    "workspace_task_submit": (False, False, False),
+    "workspace_task_review": (False, False, False),
+    "workspace_task_credit": (False, False, False),
+    "workspace_task_integrate": (False, False, False),
+
     "workspace_status": (True, False, True),
+    "workspace_reputation": (True, False, True),
     "workspace_inbox": (True, False, True),
     "workspace_thread": (True, False, True),
     "workspace_notes_search": (True, False, True),
@@ -54,6 +73,11 @@ def _token() -> str:
 def workspace_status() -> dict[str, Any]:
     """Counts, live claims and the test-slot queue. Read only."""
     return Workspace().status()
+
+
+def workspace_reputation(agent: str = "", offset: int = 0) -> dict[str, Any]:
+    """Your own and team independently verified completion scores and evidence. Read only."""
+    return work_reputation.standings(Workspace(), _token(), agent=agent, offset=offset)
 
 
 def _held(out: Any, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -95,7 +119,7 @@ def workspace_note_get(note_id: int) -> dict[str, Any]:
 
 
 def workspace_who_owns(kind: str, key: str) -> dict[str, Any]:
-    """Who owns a branch, worktree, port, file or server."""
+    """Who owns a branch, worktree, port, file, area, install environment or server."""
     return Workspace().who_owns(kind, key) or {"owner": None}
 
 
@@ -139,7 +163,7 @@ def workspace_note_add(kind: str, title: str, body: str, source: str = "") -> di
 
 def workspace_claim(kind: str, key: str, ttl_s: float = 0.0, pid: int = 0,
                     note: str = "") -> dict[str, Any]:
-    """Claim a branch, worktree, port, file or server; refused if another agent owns it."""
+    """Claim a branch, worktree, port, file, area, install environment or server; refused if another agent owns it."""
     return Workspace().claim(_token(), kind, key, ttl_s=ttl_s, pid=pid, note=note)
 
 
@@ -204,3 +228,48 @@ def workspace_file_save(handle: str, path: str) -> dict[str, Any]:
     """Write a file's bytes to a new path inside your worktree (never overwrites, never follows
     a link, mode 0600)."""
     return Workspace().files.save(_token(), handle.removeprefix("file:"), path, [Path.cwd()])
+
+
+def workspace_tasks() -> dict[str, Any]:
+    """List authorized canonical tasks and verified progress metrics."""
+    return TaskBoard(Workspace()).list(_token())
+
+
+def workspace_task(id: str) -> dict[str, Any]:
+    """Read an authorized task, its lease, checkpoints and review evidence."""
+    return TaskBoard(Workspace()).get(_token(), id)
+
+
+def workspace_task_claim(id: str, allocation_id: str) -> dict[str, Any]:
+    """Claim a queued task using its existing trusted resource allocation."""
+    return TaskBoard(Workspace()).claim(_token(), id, allocation_id)
+
+
+def workspace_task_heartbeat(id: str) -> dict[str, Any]:
+    """Renew your active task lease while its resource remains valid."""
+    return TaskBoard(Workspace()).heartbeat(_token(), id)
+
+
+def workspace_task_checkpoint(id: str, value: dict[str, Any]) -> dict[str, Any]:
+    """Save a bounded checkpoint for your active task."""
+    return TaskBoard(Workspace()).checkpoint(_token(), id, value)
+
+
+def workspace_task_submit(id: str, value: dict[str, Any]) -> dict[str, Any]:
+    """Submit immutable artifact hashes and claimed checks for independent review."""
+    return TaskBoard(Workspace()).submit(_token(), id, value)
+
+
+def workspace_task_review(id: str, decision: dict[str, Any]) -> dict[str, Any]:
+    """Record an authorized independent review and its outcome credit status."""
+    return task_outcomes.review(Workspace(), _token(), id, decision)
+
+
+def workspace_task_credit(id: str) -> dict[str, Any]:
+    """Retry authorized credit recording for an immutable reviewed outcome."""
+    return task_outcomes.credit(Workspace(), _token(), id)
+
+
+def workspace_task_integrate(id: str) -> dict[str, Any]:
+    """Gate and publish an exact independently accepted native task using existing authority."""
+    return task_integration.integrate(Workspace(), _token(), id)

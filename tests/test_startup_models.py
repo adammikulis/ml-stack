@@ -54,11 +54,12 @@ class StartupModelTests(unittest.TestCase):
 
     def test_failed_prediction_head_is_a_failed_download(self):
         models = Mock()
-        models.ensure.return_value = Mock(name="model", size=1024)
-        models.ensure_draft.side_effect = OSError("head download interrupted")
+        models.ensure.side_effect = [Mock(name="model", size=1024), OSError("head download interrupted")]
         downloads = Downloads(models)
-        row = Getting(id="test", name="model", source="hf:example/model/model.gguf")
-        downloads._run(row, None, True, "hf:example/model/MTP/mtp-head.gguf")
+        row = Getting(id="test", name="model", source="hf:example/model/model.gguf", components=[
+            {"kind": "mtp", "packaging": "separate", "name": "mtp-head.gguf",
+             "ref": "hf:example/model/MTP/mtp-head.gguf"}])
+        downloads._run(row, None, True)
         self.assertEqual(row.state, "failed")
         self.assertIn("head download interrupted", row.error)
 

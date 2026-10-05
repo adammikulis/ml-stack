@@ -24,4 +24,5 @@ tests/_generated_*/
 *.pem
 *.key
 .claude/settings.local.json
+.claude/worktrees/
 .full-tier-last.json

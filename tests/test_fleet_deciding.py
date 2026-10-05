@@ -122,11 +122,13 @@ def test_the_decider_for_a_server_is_built_once(api):
     assert len(decide._configs) == 1
 
 
-def test_the_mcp_tool_decides_with_descriptions_and_an_abstain_threshold(server):
+def test_the_mcp_tool_decides_with_descriptions_and_an_abstain_threshold(server, monkeypatch):
     from ml_stack import mcp
+    from ml_stack.decide import router
     chat = server(logprob_handler(lambda user: {"A": 0.3, "B": 0.7}))
-    got = mcp.decide("Which?", ["x=first option", "y"], "the state", "logprob", chat.base_url,
-                     0.9)
+    monkeypatch.setattr(router, "shared", lambda backend, url: router.Config(backend=backend, url=chat.base_url))
+    got = mcp.decide("Which?", ["x=first option", "y"], state_text="the state",
+                     backend="logprob", abstain_below=0.9)
     assert (got["choice"], got["abstained"]) == ("y", True)
     sent = json.loads(chat.requests[-1][2])["messages"][-1]["content"]
     assert "A. x - first option" in sent and "the state" in sent

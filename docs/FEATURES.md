@@ -11,17 +11,17 @@ python docs/verify_release.py
 
 ## Setting up
 
-Install it on each machine and type the same passphrase. The key is derived from those
-words, so two machines that heard the same phrase agree on it without exchanging
-anything — there is no key to copy and no address to write down.
+Create a named cluster on one machine, then select it on another and enter its passphrase.
+Cluster keys are random. The maintained authenticated password exchange gives an existing
+member's key to a machine with the correct passphrase; it does not derive the key from words.
+Clusters created without a passphrase are joined through an authenticated recovery file.
 
-- Machines that derived their key from different words are invisible to each other, so
-  several groups share a network without any of them being configured to.
-- The group name separates two clusters that happened to choose the same passphrase.
-- The passphrase is stretched with scrypt before it becomes a key. Everyone on the
-  network can hear the beacons, so a weak phrase would otherwise be worth grinding
-  guesses against offline.
-- At least eight characters.
+- Nearby cluster names are discovery hints, not membership or execution authority.
+- Authenticated cluster traffic is separated by each cluster's independent key.
+- The group name scopes passphrase authentication, even when two groups choose the same words.
+- Passphrases are stretched with scrypt before the PAKE exchange. Failed joining attempts
+  are rate limited; a discovery hint never grants access.
+- At least five characters are required; use a stronger phrase for an actual cluster.
 
 Beacons are signed. A peer's address is taken from the packet it arrived in, never from
 anything the packet claims about itself.

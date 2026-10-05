@@ -1,9 +1,8 @@
-"""Machine-wide, flock-backed CPU permits and subprocess admission for test runs."""
+"""Machine-wide, file-lock-backed CPU permits and subprocess test admission."""
 from __future__ import annotations
 
 import contextlib
 import contextvars
-import fcntl
 import json
 import os
 import secrets
@@ -13,6 +12,8 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from ml_stack.lock import release, take
 
 HEAVY_MODULES = frozenset({
     "test_serve_real_llama", "test_sentinel_real_model", "test_sentinel_wiring_serve",
@@ -75,25 +76,24 @@ class Slot:
 @contextlib.contextmanager
 def _mutex(d: Path) -> Iterator[None]:
     with (d / "mutex.lock").open("a+") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        while not take(fh):
+            time.sleep(0.01)
         try:
             yield
         finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            release(fh)
 
 
 def _alive(path: Path) -> bool:
-    """True while another process holds the slot's flock."""
+    """True while another process holds the slot's file lock."""
     try:
         fd = os.open(path, os.O_RDWR)
     except OSError:
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return True
-    else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        if not take(fd):
+            return True
+        release(fd)
         return False
     finally:
         os.close(fd)
@@ -119,11 +119,32 @@ def _valid_record(data: object) -> bool:
             and type(data.get("backfills", 0)) is int and 0 <= data.get("backfills", 0) <= 2)
 
 
+def _delete_shared_descriptor(path: Path) -> int:
+    """Open a Windows record handle allowing replacement while its lock is held."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    create = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    handle = create(str(path), 0xC0000000, 7, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return msvcrt.open_osfhandle(handle, os.O_RDWR)
+
+
 def _publish(path: Path, record: dict) -> int:
-    """Publish a complete record whose inode already holds its liveness flock."""
+    """Publish a complete record whose inode already holds its liveness lock."""
     fd, name = tempfile.mkstemp(dir=path.parent, suffix=".pending")
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        if sys.platform == "win32":
+            os.close(fd)
+            fd = _delete_shared_descriptor(Path(name))
+        if not take(fd):
+            raise RuntimeError("testslots: unpublished lease already locked")
+        os.lseek(fd, 0, os.SEEK_SET)
         with os.fdopen(fd, "w", closefd=False) as stream:
             json.dump(record, stream)
         Path(name).replace(path)
@@ -285,9 +306,12 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
             yield Lease(granted, time.monotonic() - t0)
     finally:
         with _mutex(d):
+            if sys.platform == "win32":
+                os.close(fd)
             with contextlib.suppress(OSError):
                 path.unlink()
-            os.close(fd)
+            if sys.platform != "win32":
+                os.close(fd)
 
 
 def _lane_count() -> int:
@@ -310,10 +334,12 @@ def heavy_lane(label: str = "heavy test", say=lambda m: print(m, file=sys.stderr
         for i in range(n):
             f = os.open(d / f"heavy-{i}.lane", os.O_RDWR | os.O_CREAT, 0o600)
             try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if not take(f):
+                    os.close(f)
+                    continue
             except OSError:
                 os.close(f)
-                continue
+                raise
             fd = f
             break
         if fd >= 0:
@@ -328,7 +354,7 @@ def heavy_lane(label: str = "heavy test", say=lambda m: print(m, file=sys.stderr
         yield
     finally:
         if fd >= 0:
-            os.close(fd)                                  # closing releases the flock
+            os.close(fd)                                  # closing releases the lock
 
 
 def _run_command(argv: list[str], elastic: bool = False) -> int:

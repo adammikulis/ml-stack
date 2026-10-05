@@ -23,8 +23,10 @@ from ml_stack.log import say
 from ml_stack.net import sniff
 from ml_stack.safenames import Unsafe, safe_filename
 
+from . import model_components
 from .download_progress import Transfer
-from .weights import ModelError, resolve
+from .model_library import library
+from .weights import ModelError, is_beside, resolve
 
 __all__ = ["CHUNK", "Downloads", "Getting", "Model", "Models", "caches",
            "draft_beside", "holding", "sized"]
@@ -155,7 +157,7 @@ class Models:
     def all(self) -> list[Model]:
         seen: dict[str, Model] = {}
         for path in hub.weight_paths(self.roots):
-            if hub.DRAFT_MARK in path.suffixes or path.name in seen:
+            if hub.DRAFT_MARK in path.suffixes or is_beside(path.name) or path.name in seen:
                 continue
             try:
                 stat = path.stat()
@@ -172,6 +174,15 @@ class Models:
             return None
         stat = found.stat()
         return Model(found.name, found, stat.st_size, stat.st_mtime)
+
+    def library(self) -> list[dict[str, Any]]:
+        """Grouped installed models for the person-facing library."""
+        return library(self.roots)
+
+    def library_model(self, path: str) -> Model | None:
+        """A complete supported primary model at its exact discovered path."""
+        row = next((row for row in self.library() if row['path'] == path and row['servable']), None)
+        return Model(Path(path).name, Path(path), row['size_bytes'], row['mtime']) if row else None
 
     def find_draft(self, name: str) -> Model | None:
         """A draft by its exact filename. Drafts are fetched, never listed."""
@@ -205,11 +216,16 @@ class Models:
         and a full path is needless disclosure."""
         return [m.public() for m in self.all()[:limit]]
 
+    def inventory(self) -> list[dict[str, Any]]:
+        """Complete model listings and installed component metadata."""
+        return [{**m.public(), **model_components.inventory(m.path)} for m in self.all()]
+
     def beacon(self, limit: int = 24) -> dict[str, Any]:
         """The models for the beacon, and how many this machine holds. A peer reads the
         ones past ``limit`` from ``/models``."""
         held = self.all()
         return {"models": [m.public() for m in held[:limit]],
+                "components": [c for model in held[:4] for c in model_components.inventory(model.path)["components"]],
                 "models_total": len(held)}
 
     # -- getting one ----------------------------------------------------
@@ -221,7 +237,7 @@ class Models:
         needle = name.strip().lower()
         out = []
         for beacon in discover(key, timeout_s=timeout_s):
-            for row in (beacon.device.get("models") or []):
+            for row in [*(beacon.device.get("models") or []), *(beacon.device.get("components") or [])]:
                 if needle in str(row.get("name", "")).lower():
                     out.append((beacon.name, beacon.base_url, int(row.get("size") or 0)))
                     break
@@ -267,6 +283,7 @@ class Models:
 
         peer = Peer(base_url, derive_token(key))
         holds = peer.models()
+        holds += [component for row in list(holds) for component in row.get("components", [])]
         wanted = name.strip().lower()
         match = next((m for m in holds
                       if str(m.get("name", "")).lower() == wanted), None)
@@ -317,7 +334,9 @@ class Models:
                 headers["If-Range"] = str(origin["validator"])
         try:
             with stream(url, headers=headers, limits=MODEL_LIMITS) as got:
-                return self._save(got, Resume(name, target, start, url), on_progress)
+                saved = self._save(got, Resume(name, target, start, url), on_progress)
+                model_components.remember(saved.path, source)
+                return saved
         except Refused as exc:
             raise ModelError(f"could not download {name}: {exc}") from None
 
@@ -460,6 +479,10 @@ class Models:
 def draft_beside(model: Path) -> Path | None:
     """The small model kept next to ``model`` to guess ahead with, if one was got."""
     beside = model.with_suffix(hub.DRAFT_MARK + model.suffix)
+    linked = model_components.linked(model, "mtp")
+    info = model_components.record(model).get("components", {}).get("mtp", {})
+    if linked and info.get("packaging") == "separate":
+        return linked
     return beside if beside.is_file() else None
 
 
@@ -482,6 +505,7 @@ class Getting:
     phase: str = "model"
     transfer: Transfer = field(default_factory=Transfer)
     pending_draft: bool = False
+    components: list[dict] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name, "source": self.source,
@@ -505,21 +529,20 @@ class Downloads:
         self._sem = threading.Semaphore(slots)
 
     def start(self, name: str, *, source: str = "", key: bytes | None = None,
-              autodownload: bool = True, draft: str = "") -> Getting:
+              autodownload: bool = True, components: list[dict] | None = None) -> Getting:
         with self._lock:
             for row in self.getting.values():
                 if row.state == "getting" and row.name == name:
                     return row
         row = Getting(id=f"{int(time.time())}-{secrets.token_hex(3)}",
-                      name=name, source=source, pending_draft=bool(draft))
+                      name=name, source=source, pending_draft=bool(components), components=components or [])
         with self._lock:
             self.getting[row.id] = row
-        threading.Thread(target=self._run, args=(row, key, autodownload, draft),
+        threading.Thread(target=self._run, args=(row, key, autodownload),
                          daemon=True, name=f"get-{row.id}").start()
         return row
 
-    def _run(self, row: Getting, key: bytes | None, autodownload: bool,
-             draft: str = "") -> None:
+    def _run(self, row: Getting, key: bytes | None, autodownload: bool) -> None:
         with self._sem:
             try:
                 offset = 0
@@ -542,19 +565,29 @@ class Downloads:
                 got = self.models.ensure(row.name, source=row.source, key=key,
                                          on_progress=progress, on_note=note,
                                          autodownload=autodownload)
-                if draft:
-                    offset = got.size
-                    row.phase = "mtp"
+                offset = got.size
+                for offer in row.components:
+                    if offer["name"] == got.name and offer["packaging"] == "integrated":
+                        model_components.link(got.path, got.path, offer)
+                        row.pending_draft = False
+                        continue
+                    kind = offer["kind"]
+                    row.phase = kind
                     row.pending_draft = False
                     row.transfer = Transfer()
-                    row.total = 0
-                    note(f"Downloading the MTP head for {got.name}")
-                    head = self.models.ensure_draft(got, draft, key=key, on_progress=progress)
-                    offset += head.stat().st_size
+                    row.total = offset + offer.get("size_bytes", 0)
+                    note(f"Downloading {kind} for {got.name}")
+                    companion = self.models.ensure(offer["name"], source=offer["ref"], key=key,
+                                                   on_progress=progress, on_note=note, autodownload=autodownload)
+                    model_components.link(got.path, companion.path, offer)
+                    offset += companion.size
+                    if offer["packaging"] == "integrated":
+                        got = companion
+                    row.pending_draft = False
                 row.state = "done"
                 row.name = got.name
                 row.done = row.total = offset or got.size
-                row.note = "Model and MTP head ready" if draft else "Model ready"
+                row.note = "Model and selected components ready" if row.components else "Model ready"
                 say(f"  {row.note}: {row.name}")
             except Exception as exc:                  # noqa: BLE001
                 row.state = "failed"
@@ -571,5 +604,4 @@ class Downloads:
                 del self.getting[key]
             rows = sorted(self.getting.values(), key=lambda r: r.started_at)
         return rows
-
 

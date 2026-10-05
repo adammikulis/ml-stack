@@ -1,0 +1,50 @@
+<script>
+(function(){const W=window.workspaceModel,E=window.fleetModel.el;
+class GymModelOptions extends HTMLElement{
+ connect(view,advanced){
+  this.view=view;this.models={decision:[],vision:[]};
+  this.decision=W.field(this,'Decision model','select');
+  this.decision.append(E('option',{value:'strands'},'Strands Decider 2B (default)'));
+  this.vision=W.field(this,'Vision model','select');
+  this.vision.append(E('option',{value:''},'Off'));
+  this.status=E('p',{class:'intro',role:'status'});this.append(this.status);
+  advanced.append(view.decisionCheckpoint.previousElementSibling,view.decisionCheckpoint);
+  this.age=W.field(advanced,'Maximum decision input age (seconds)','input',{type:'number',min:1,max:30,value:1});
+  this.device=W.field(advanced,'Decision device','select');this.device.append(E('option',{value:'auto'},'Auto · queued exclusive accelerator'),E('option',{value:'cpu'},'CPU'));
+  this.device.addEventListener('change',()=>{if(view.session)view.apply();});
+  this.decision.addEventListener('change',()=>{const row=this.models.decision.find(x=>x.id===this.decision.value);view.decisionCheckpoint.value=row?.checkpoint||'';if(view.session)view.apply();});
+  view.decisionCheckpoint.addEventListener('change',()=>{this.restore({...view.lastSnapshot?.config,decision_checkpoint:view.decisionCheckpoint.value});if(view.session)view.apply();});
+  this.vision.addEventListener('change',()=>{this.refresh();if(view.session)view.control('vision',{model:this.vision.value||null});});
+ }
+ choices(models){
+  this.models=models||{decision:[],vision:[]};const selected=this.decision.value;
+  this.decision.replaceChildren(...this.models.decision.map(row=>E('option',{value:row.id},row.label+(row.status==='missing'?' · missing files':''))));
+  this.decision.value=this.models.decision.some(x=>x.id===selected)?selected:'strands';
+  const vision=this.vision.value;
+  this.vision.replaceChildren(E('option',{value:''},'Off'),...this.models.vision.map(row=>E('option',{value:row.id,disabled:row.status==='unsupported'},row.label+(row.available?'':' · '+row.status))));
+  this.vision.value=vision||this.models.vision_default||'';
+  this.refresh();
+ }
+ environment(){
+  const view=this.view,environment=view.environment.value;
+  if(!view.session&&!view.controllerTouched&&this.environmentId!==environment){view.controller.value=environment==='car'?'decider':environment==='drone'?'native-patrol':'manual';this.environmentId=environment;}
+  this.refresh();view.controllerChanged();
+ }
+ refresh(){
+  const view=this.view;W.visible(this.decision,view.controller.value==='decider');W.visible(this.vision,view.environment.value==='drone');
+  const row=this.models.vision.find(x=>x.id===this.vision.value);
+  this.status.textContent=view.environment.value==='drone'?(row?.reason||'Vision runs asynchronously on real RGB and synthetic thermal camera pixels.'):'';
+ }
+ restore(config){
+  const checkpoint=config.decision_checkpoint||'',row=this.models.decision.find(x=>(x.checkpoint||'')===checkpoint);
+  if(row)this.decision.value=row.id;
+  this.vision.value=config.vision_model??this.models.vision_default??'';this.age.value=config.decision_max_age_s||1;this.device.value=config.decision_device||'auto';this.refresh();
+ }
+ value(){return {decision_device:this.device.value,decision_max_age_s:Number(this.age.value),...(this.view.environment.value==='drone'?{vision_model:this.vision.value||null}:{})};}
+ telemetry(snapshot){
+  const readiness=snapshot.decision_readiness,vision=snapshot.perception_readiness;
+  if(readiness&&snapshot.controller==='decider')this.status.textContent='Decision model: '+readiness.status+' · '+(snapshot.device||this.device.value)+(readiness.pending?' · inference pending':'')+(readiness.error?' · '+readiness.error:'')+(snapshot.decision?.fallback?' · '+snapshot.decision.reason+'; applying '+snapshot.decision.choice:'');
+  if(vision&&snapshot.environment==='drone')this.status.textContent+=(this.status.textContent?'\n':'')+'Vision: '+vision.status+(vision.pending?' · image pending':'')+(vision.error?' · '+vision.error:'');
+ }
+}customElements.define('gym-model-options',GymModelOptions);})();
+</script>

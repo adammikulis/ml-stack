@@ -1,0 +1,61 @@
+"""Dataset and specialist workflow controls driven against the daemon."""
+
+from __future__ import annotations
+
+import pytest
+from test_fleet_ui import Serving
+
+pytestmark = pytest.mark.slow
+
+
+def test_dataset_upload_preview_and_specialist_help(tmp_path, monkeypatch, playwright):
+    pw = pytest.importorskip('playwright.sync_api')
+    served = Serving(tmp_path)
+    served.ui.settings.setup_done = True
+    try:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page()
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(f'http://127.0.0.1:{served.port}/ui')
+        page.locator('fleet-nav a[href="#data"]').click()
+        page.get_by_label('Destination relative to files root').fill('datasets/demo.jsonl')
+        page.get_by_label('Or paste dataset content').fill('{"label":"stop"}\n')
+        page.get_by_role('button', name='Upload', exact=True).click()
+        page.get_by_role('button', name='demo.jsonl', exact=True).click()
+        pw.expect(page.locator('data-view #preview')).to_contain_text('"label":"stop"')
+        page.get_by_role('button', name='Use for training', exact=True).click()
+        assert page.get_by_label('Dataset path (relative to files root)').input_value() == 'datasets/demo.jsonl'
+        page.locator('fleet-nav a[href="#tools"]').click()
+        page.get_by_label('Installed command').select_option('ml-stack-doctor')
+        page.get_by_role('button', name='Review', exact=True).click()
+        pw.expect(page.locator('tools-view #runner pre')).to_contain_text('ml-stack-doctor --help')
+        args = page.evaluate("document.querySelector('training-view').spec()")
+        from ml_stack.train.run import _parser
+        parsed = _parser().parse_args(args['args'])
+        assert parsed.recipe == 'text-lm'
+        assert parsed.data == 'datasets/demo.jsonl'
+        page.locator('fleet-nav a[href="#gym"]').click()
+        page.get_by_label('Controller', exact=True).select_option('ppo')
+        page.get_by_label('PPO checkpoint path').fill('/tmp/policy.zip')
+        pw.expect(page.get_by_role('button', name='Apply controller', exact=True)).to_be_disabled()
+        applied = page.evaluate("""async () => {
+            const gym = document.querySelector('gym-view');
+            const calls = [];
+            gym.session = 'browser-controlled';
+            gym.applyController.disabled = false;
+            gym.control = async (command, payload) => calls.push({command, payload});
+            gym.decisionCheckpoint.value = '/tmp/trained-pointer';
+            gym.controller.value = 'decider';
+            gym.controller.dispatchEvent(new Event('change'));
+            const before = calls.length;
+            await gym.apply();
+            gym.session = null;
+            return {before, calls};
+        }""")
+        assert applied['before'] == 1
+        assert applied['calls'][0]['payload']['decision_checkpoint'] == '/tmp/trained-pointer'
+        assert not errors
+        browser.close()
+    finally:
+        served.close()

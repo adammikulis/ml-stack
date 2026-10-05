@@ -107,7 +107,7 @@ def _reach(port: int) -> dict[str, str]:
 
 @pytest.fixture
 def key(tmp_path) -> bytes:
-    create_cluster_key(tmp_path / "cluster.key")
+    create_cluster_key(tmp_path / "cluster.key", group="ml-stack")
     return load_cluster_key(tmp_path / "cluster.key")
 
 
@@ -119,16 +119,16 @@ def port() -> int:
 # -- the key -------------------------------------------------------------
 def test_key_is_created_once_and_not_silently_rotated(tmp_path):
     p = tmp_path / "cluster.key"
-    first = create_cluster_key(p)
-    assert create_cluster_key(p) == first, "re-running init must not evict the cluster"
-    assert create_cluster_key(p, overwrite=True) != first
+    first = create_cluster_key(p, group="ml-stack")
+    assert create_cluster_key(p, group="ml-stack") == first, "re-running init must not evict the cluster"
+    assert create_cluster_key(p, overwrite=True, group="ml-stack") != first
 
 
 def test_the_file_holding_the_keys_is_not_world_readable(tmp_path):
     from ml_stack.fleet.discovery import clusters_path
 
     p = tmp_path / "cluster.key"
-    create_cluster_key(p)
+    create_cluster_key(p, group="ml-stack")
     assert oct(clusters_path(p).stat().st_mode)[-3:] == "600"
 
 
@@ -137,8 +137,8 @@ def test_missing_key_reads_as_none(tmp_path):
 
 
 def test_token_is_a_pure_function_of_the_key(tmp_path):
-    a = create_cluster_key(tmp_path / "a.key").encode()
-    b = create_cluster_key(tmp_path / "b.key").encode()
+    a = create_cluster_key(tmp_path / "a.key", group="ml-stack").encode()
+    b = create_cluster_key(tmp_path / "b.key", group="ml-stack").encode()
     assert derive_token(a) == derive_token(a), "both ends must compute the same token"
     assert derive_token(a) != derive_token(b)
     assert a.decode() not in derive_token(a), "the token must not leak the key"
@@ -163,7 +163,7 @@ def test_nothing_is_found_when_nothing_is_advertising(key, port):
 
 
 def test_a_peer_with_a_different_key_is_invisible(key, port, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
     with Advertiser(Beacon(name="stranger", port=8770), other, port=port,
                     interval_s=0.2):
         assert discover(key, timeout_s=1.0, port=port) == [], \
@@ -279,7 +279,7 @@ def test_a_beacon_is_neither_readable_nor_guessable_from(key):
 
 
 def test_a_beacon_signed_with_another_key_is_refused(key, tmp_path):
-    other = create_cluster_key(tmp_path / "other.key").encode()
+    other = create_cluster_key(tmp_path / "other.key", group="ml-stack").encode()
     raw = _pack(other, {"v": PROTOCOL, "kind": "beacon", "t": time.time(), "nonce": "",
                         "beacon": {"name": "evil", "port": 8770}})
     assert _verify(key, raw, kind="beacon") is None
@@ -325,7 +325,7 @@ def _booted(tmp_path, *extra: str):
     """Boot the actual daemon the way a machine would, rooted in ``tmp_path/traind``
     with ``extra`` flags, and yield ``(keyfile, disco_port, http_port, log)``."""
     keyfile = tmp_path / "cluster.key"
-    create_cluster_key(keyfile)
+    create_cluster_key(keyfile, group="ml-stack")
     disco_port = _free_udp_port()
     http_port = _free_tcp_port()
     env = {**os.environ,
@@ -440,14 +440,14 @@ def test_a_daemon_in_its_own_root_runs_training_while_some_other_home_is_measuri
     from ml_stack.lock import only_one
 
     elsewhere = tmp_path / "somebody-elses-home" / "bench"
-    with only_one(elsewhere / "measuring.lock", announce=lambda *a, **k: None):
-        with _booted(tmp_path) as (keyfile, _disco, http_port, log):
-            rtx = _driver(keyfile, http_port)
-            assert rtx.health()["measuring"] is False, log.read_text(errors="replace")
-            job = _probe(rtx)
-            final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
-            assert final["state"] == "done", rtx.log(job["id"])
-            assert "score" in rtx.log(job["id"])
+    with (only_one(elsewhere / "measuring.lock", announce=lambda *a, **k: None),
+          _booted(tmp_path) as (keyfile, _disco, http_port, log)):
+        rtx = _driver(keyfile, http_port)
+        assert rtx.health()["measuring"] is False, log.read_text(errors="replace")
+        job = _probe(rtx)
+        final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
+        assert final["state"] == "done", rtx.log(job["id"])
+        assert "score" in rtx.log(job["id"])
     said = log.read_text(errors="replace")
     assert f"bench {tmp_path / 'bench'}" in said, said
     assert "holding" not in said
@@ -479,7 +479,7 @@ def test_a_daemon_pointed_at_a_held_bench_home_keeps_training_queued_and_says_so
 
 
 def test_find_one_says_why_when_no_peer_matches(traind):
-    keyfile, disco_port, _, log = traind
+    keyfile, disco_port, _, _log = traind
     with pytest.raises(DiscoveryError, match="no peer matches"):
         Peer.find_one(name="not-this-box", cluster_key_path=keyfile,
                                timeout_s=3.0, port=disco_port)
@@ -516,7 +516,7 @@ def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
 
 
 def test_peers_ls_reports_the_running_daemon(traind):
-    keyfile, disco_port, http_port, log = traind
+    keyfile, disco_port, http_port, _log = traind
     env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": str(REPO / "src")}
     r = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers",
