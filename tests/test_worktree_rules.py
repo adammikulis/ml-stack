@@ -274,3 +274,17 @@ def test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell(repo, tmp_pat
     assert worktreerules.bash_refusal(f"cd '{here / name}' && git add a.py", str(here)) == ""
     assert worktreerules.edit_refusal([str(primary / name / "f.py")], str(here))
     assert not (here / "pwned").exists() and not Path("pwned").exists()
+
+
+@pytest.mark.parametrize("variable", ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"])
+def test_hook_repository_environment_does_not_change_checkout_identity(repo, monkeypatch, variable):
+    primary, work, _ = repo
+    selected = subprocess.run(["git", "-C", str(work), "rev-parse", "--absolute-git-dir"],
+                              check=True, capture_output=True, text=True).stdout.strip()
+    value = {"GIT_DIR": selected, "GIT_WORK_TREE": str(work),
+             "GIT_COMMON_DIR": str(primary / ".git"), "GIT_INDEX_FILE": str(work / "other-index")}[variable]
+    monkeypatch.setenv(variable, value)
+    assert worktreerules.checkouts(primary) == (primary, primary)
+    assert worktreerules.checkouts(work) == (work, primary)
+    assert worktreerules.commit_refusal(work, {"ML_STACK_AGENT": "test"}) == ""
+    assert "primary checkout" in worktreerules.commit_refusal(primary, {"ML_STACK_AGENT": "test"})

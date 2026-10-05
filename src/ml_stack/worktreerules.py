@@ -33,6 +33,12 @@ def switched_off() -> bool:
     return os.environ.get("MLSTACK_GUARD") == "off"
 
 
+def _git_environment() -> dict[str, str]:
+    selectors = {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_NAMESPACE",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}
+    return {name: value for name, value in os.environ.items() if name not in selectors}
+
+
 def checkouts(directory: str | Path) -> tuple[Path, Path] | None:
     """(top of the checkout holding `directory`, the primary checkout), None outside a repository."""
     here = Path(directory)
@@ -40,7 +46,7 @@ def checkouts(directory: str | Path) -> tuple[Path, Path] | None:
         here = here.parent
     done = subprocess.run(
         ["git", "-C", str(here), "rev-parse", "--path-format=absolute", "--show-toplevel",
-         "--git-common-dir"], capture_output=True, text=True, timeout=5, check=False)
+         "--git-common-dir"], capture_output=True, text=True, timeout=5, check=False, env=_git_environment())
     lines = done.stdout.split("\n")
     if done.returncode != 0 or len(lines) < 2:
         return None
@@ -203,9 +209,9 @@ def commit_refusal(cwd: str, environ: dict[str, str] | None = None) -> str:
     if top == primary:
         return "a commit in the primary checkout. " + USE_A_WORKTREE.format(primary=primary)
     dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
-                         capture_output=True, text=True, check=False).stdout.strip()
+                         capture_output=True, text=True, check=False, env=_git_environment()).stdout.strip()
     here = subprocess.run(["git", "-C", str(top), "branch", "--show-current"],
-                          capture_output=True, text=True, check=False).stdout.strip()
+                          capture_output=True, text=True, check=False, env=_git_environment()).stdout.strip()
     if dev and here == dev:
         return (f"a commit on {dev}, the development branch. Commit on your own branch; it "
                 f"lands with `git merge --ff-only` from the primary checkout.")
@@ -219,7 +225,7 @@ def worktree_refusal(target: str | Path, source: str | Path, *, registered: bool
         return "The source must belong to a Git checkout"
     primary = found[1]
     listed = subprocess.run(["git", "-C", str(primary), "worktree", "list", "--porcelain"],
-                            capture_output=True, text=True, timeout=5, check=False)
+                            capture_output=True, text=True, timeout=5, check=False, env=_git_environment())
     if listed.returncode:
         return "Git could not verify existing checkout paths"
     path = Path(target).resolve()
