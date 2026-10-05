@@ -10,6 +10,7 @@ from ml_stack.files import read_json
 from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied
+from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
@@ -68,6 +69,10 @@ class WorkspaceHost:
         return {"project_id": project_id, "code": code, "ttl_s": 600,
                 "uses": min(max(int(uses), 1), 3)}
 
+    def adopt(self, project_id: str, history: dict) -> dict:
+        self.prepare(project_id)
+        return adopt(self.workspace(project_id).base, history)
+
     def answer(self, project_id: str, action: str, body: dict) -> tuple[int, dict]:
         try:
             if len(json.dumps(body).encode()) > 32 * 1024:
@@ -92,10 +97,12 @@ class WorkspaceHost:
             if (not isinstance(args, list) or len(args) > 12 or not isinstance(kwargs, dict)
                     or "token" in kwargs or len(kwargs) > 12):
                 raise ValueError("invalid operation arguments")
-            if operation in {"whoami", "agents", "claims", "who"} and "read" not in who.can:
+            if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
                 raise Denied("agent capability has no read permission")
             if operation == "whoami":
                 result = {"id": who.id, **ws.registry.info(who.id)}
+            elif operation == "history":
+                result = read_json(ws.base / "adopted-history.json", {}).get("messages", [])
             elif operation == "agents":
                 result = [row for row in ws.registered() if row["role"] == AGENT]
             elif operation == "claims":

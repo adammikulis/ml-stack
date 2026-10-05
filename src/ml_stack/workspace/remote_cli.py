@@ -6,7 +6,7 @@ from ml_stack.command import flag, option
 from ml_stack.workspace.remote import RemoteWorkspace
 
 OPTIONS = [option("json"), flag("action", choices=("join", "whoami", "agents", "boards",
-            "read", "post", "send", "inbox", "announce", "claims", "claim", "heartbeat")),
+            "read", "post", "send", "inbox", "announce", "claims", "claim", "heartbeat", "history")),
            flag("arguments", nargs="*"), flag("--host", required=True),
            flag("--project-id", required=True), flag("--cluster-key", default=""),
            flag("--cluster", default=""),
@@ -27,7 +27,7 @@ def run(args):
             raise ValueError("join needs the selected project's invitation code")
         return remote.join(values[0], args.name, model=args.model, harness=args.harness)
     token = remote.token(agent=args.agent, token_file=args.token_file)
-    if action in {"whoami", "agents", "claims", "heartbeat"}:
+    if action in {"whoami", "agents", "claims", "heartbeat", "history"}:
         return remote.call(action, token)
     if action == "boards":
         return remote.call("board.list", token)
