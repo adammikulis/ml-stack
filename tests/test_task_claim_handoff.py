@@ -17,7 +17,7 @@ pytestmark = pytest.mark.redteam
 
 @pytest.fixture
 def native_task(board, tmp_path, monkeypatch):
-    repository, source = tmp_path / 'repository', tmp_path / 'source'
+    repository, source = tmp_path / 'handoff-repository', tmp_path / 'handoff-source'
     repository.mkdir()
     git.run(['init', str(repository)])
     git.run(['remote', 'add', 'origin', 'https://example.invalid/fixture.git'], cwd=repository)
