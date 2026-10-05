@@ -47,6 +47,21 @@ def test_restarted_worker_waits_for_its_own_grant_and_keeps_old_allocation(board
     assert task_worker.assigned(board.ws, board.worker_id, board.board, 'native-grant') == board.allocation
 
 
+def test_scheduler_reallocates_queued_work_after_worker_restart(board, monkeypatch):
+    agent = task_worker.la.load(board.ws, 'native-worker')
+    task_worker.la.save(board.ws, replace(agent, pid=556, process_started=43))
+    board.status['servers'][0]['holders'] = [{'lease': 'replacement-grant', 'pid': 556, 'pid_started': 43}]
+    monkeypatch.setattr(task_scheduler.resource_allocations, 'started_at', lambda pid: 43 if pid == 556 else 42)
+    allocation = task_scheduler.assign_next(board.ws, board.parent, board.worker_id, 'replacement-grant')
+    assert allocation['allocation_id'] != board.allocation['allocation_id']
+    assert allocation['holder_pid'] == 556 and allocation['holder_started'] == 43
+    assert task_worker.assigned(board.ws, board.worker_id, board.board, 'replacement-grant') == allocation
+    board.board.claim(board.child, board.task['id'], allocation['allocation_id'])
+    assert board.board.get(board.parent, board.task['id'])['state'] == 'working'
+    with GraphStore(board.ws.base / 'coordination.db') as graph:
+        assert graph.has(board.allocation['allocation_id'])
+
+
 def test_person_task_scheduler_excludes_explicit_foreign_project(board):
     board.board.claim(board.child, board.task['id'], board.allocation['allocation_id'])
     board.board.block(board.child, board.task['id'], 'Prior task awaiting review')
