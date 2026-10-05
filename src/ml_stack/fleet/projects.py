@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
+import json
+import os
 import threading
 import urllib.parse
 from dataclasses import asdict, dataclass
@@ -12,7 +15,23 @@ from ml_stack.files import read_json, write_json, writing
 from ml_stack.home import DEFAULT_NAME
 from ml_stack.net import git
 
-from . import project_source as source
+from . import project_source as source, tls
+from .discovery import primary_ip
+from .wsl_network import ENV as BRIDGE_ENV
+
+
+def lan_host(port: int) -> str:
+    """Return the daemon address reachable through its Windows bridge or LAN interface."""
+    address = primary_ip()
+    if configured := os.environ.get(BRIDGE_ENV):
+        try:
+            address = json.loads(configured)["address"][0]
+            parsed = ipaddress.ip_address(address)
+            if not parsed.is_private or parsed.is_loopback or parsed.is_unspecified:
+                return ""
+        except (ValueError, KeyError, TypeError, IndexError):
+            return ""
+    return f"{'http' if tls.disabled() else 'https'}://{address}:{port}"
 
 
 def bootstrap() -> bytes:
@@ -53,7 +72,9 @@ class Project:
     id: str
     name: str
     root: str
-    authority_machine: str
+    source_machine: str
+    authority_machine: str = ""
+    board_host: str = ""
     shared: bool = False
     source_hash: str = ""
     archive_sha256: str = ""
@@ -70,8 +91,9 @@ class Project:
 class ProjectRegistry:
     """Registered local projects and immutable source bundles."""
 
-    def __init__(self, root: Path, machine: str, candidates: tuple[Path, ...] = ()):
+    def __init__(self, root: Path, machine: str, candidates: tuple[Path, ...] = (), host: str = ""):
         self.root, self.machine = root, machine
+        self.host = host
         self.path = root / "projects.json"
         self.lock = threading.RLock()
         self._candidates: dict[str, Path] = {}
@@ -103,7 +125,8 @@ class ProjectRegistry:
 
     def list(self) -> list[dict]:
         with self.lock:
-            return [project.public() for project in self._projects.values() if project.shared]
+            return [{**project.public(), "source_host": self.host} for project in self._projects.values()
+                    if project.shared]
 
     def _save(self) -> None:
         write_json(self.path, {"projects": [asdict(p) for p in self._projects.values()]})
@@ -114,15 +137,17 @@ class ProjectRegistry:
             if root is None:
                 raise source.ProjectError("Choose an available local project")
             attached = read_json(root / ".ml-stack-project.json", {})
-            authority = attached.get("authority", {}).get("machine", "")
-            if authority and authority != self.machine:
-                raise source.ProjectError("This checkout uses another device's project authority")
             identifier = identity(root)
             manifest, packed = source.build(root, identifier)
             source.verify(packed, identifier, manifest["source_hash"])
-            project = Project(identifier, name.strip() or root.name, str(root), self.machine,
-                              True, manifest["source_hash"], hashlib.sha256(packed).hexdigest(),
-                              manifest["size_bytes"], len(manifest["files"]), manifest["excluded_files"])
+            prior = self._projects.get(identifier)
+            authority = attached.get("authority", {})
+            project = Project(id=identifier, name=name.strip() or root.name, root=str(root),
+                              source_machine=self.machine, shared=True, source_hash=manifest["source_hash"],
+                              archive_sha256=hashlib.sha256(packed).hexdigest(), size_bytes=manifest["size_bytes"],
+                              files=len(manifest["files"]), excluded_files=manifest["excluded_files"],
+                              authority_machine=prior.authority_machine if prior else authority.get("machine", ""),
+                              board_host=prior.board_host if prior else authority.get("host", ""))
             target = self._bundle(project)
             with writing(target) as temporary:
                 temporary.write_bytes(packed)
@@ -154,10 +179,22 @@ class ProjectRegistry:
             raise source.ProjectError("Project workspace belongs to another device")
         return self.root / "shared-workspaces" / project.id
 
+    def claim_authority(self, identifier: str) -> Project:
+        """Select this device as workspace authority during an explicit human action."""
+        with self.lock:
+            project = self.get(identifier)
+            if project.authority_machine and project.authority_machine != self.machine:
+                raise source.ProjectError("Project already has another workspace authority")
+            if not self.host:
+                raise source.ProjectError("This device has no reachable workspace address")
+            project.authority_machine, project.board_host = self.machine, self.host
+            self._save()
+            return project
+
     def catalogue(self) -> dict:
         code = bootstrap()
         return {"projects": self.list(), "machine": self.machine,
-                "capabilities": ["project-source", "canonical-workspace"],
+                "capabilities": ["project-source"],
                 "bootstrap_sha256": hashlib.sha256(code).hexdigest()}
 
 

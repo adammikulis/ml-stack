@@ -200,8 +200,10 @@ def checkout(packed: bytes, identifier: str, source_hash: str, base: Path, *, au
         git.run(["-c", "user.name=ml-stack", "-c", "user.email=ml-stack@example.invalid",
                  "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m",
                  "chore: initialize shared project snapshot"], cwd=stage)
+        origin = authority or {}
         metadata = {"kind": "project-checkout", "project_id": identifier, "source_hash": source_hash,
-                    "authority": authority or {}}
+                    "authority": {"machine": origin.get("machine", ""), "host": origin.get("host", "")},
+                    "source": {"machine": origin.get("source_machine", ""), "host": origin.get("source_host", "")}}
         write_json(stage / ".ml-stack-project.json", metadata)
         promote(stage, target)
     return target
