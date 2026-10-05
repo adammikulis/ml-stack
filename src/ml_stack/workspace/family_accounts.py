@@ -14,7 +14,7 @@ def binding(workspace, resource):
             'workspace': workspace, 'source': 'verified-serving-resource'}
 
 
-def bind_submission(graph, task, worker, resource, at):
+def bind_resource(graph, task, worker, resource, at):
     account = binding(task['workspace'], resource)
     if account is None:
         return None

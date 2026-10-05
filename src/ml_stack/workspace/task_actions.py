@@ -8,7 +8,7 @@ from uuid import uuid4
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import task_worktrees
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.family_accounts import bind_submission
+from ml_stack.workspace.family_accounts import bind_resource
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.resource_allocations import verified_binding
 from ml_stack.workspace.task_graph import link, record, save
@@ -32,6 +32,7 @@ def claim(ws, graph, who, task, allocation):
     if allocation.get('profile') == 'coding':
         task_worktrees.activate(graph, who.id, task['id'])
     now = ws.clock()
+    task['family_account'] = bind_resource(graph, task, who.id, allocation, now)
     lease = {'id': f'task-lease:{uuid4().hex}', 'task': task['id'], 'worker': who.id,
              'allocation_id': allocation['allocation_id'], 'device_id': allocation['device_id'],
              'base_id': allocation['base_id'], 'at': now, 'heartbeat_at': now,
@@ -105,7 +106,7 @@ def submit(board, token, ident, value):
                                   'allocation_id': lease['allocation_id'],
                                   'device_id': lease['resource'].get('device_id'),
                                   'runtime': lease['resource'].get('harness') or lease['resource'].get('profile', '')}
-        proposal['family_account'] = bind_submission(graph, task, task['worker'], lease['resource'], proposal['at'])
+        proposal['family_account'] = bind_resource(graph, task, task['worker'], lease['resource'], proposal['at'])
         proposal['proposal_hash'] = fingerprint(proposal)
         save(graph, 'proposal', proposal)
         link(graph, ident, proposal['id'], 'proposed-outcome')
