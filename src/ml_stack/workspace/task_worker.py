@@ -50,7 +50,11 @@ def run(ws, name):
             status.update(state=outcome.get('state', 'review'), detail=outcome.get('blocked_reason', 'Awaiting independent review'),
                           task=allocation['task'])
     finally:
-        if held is not None:
-            held.release()
         status.update(state='stopped', detail='Canonical worker stopped')
-
+        try:
+            if held is not None:
+                held.release()
+        except (OSError, RuntimeError) as error:
+            status.update(detail=f'Canonical worker stopped; lease cleanup failed: {error}')
+            raise
+        status.update(lease={})
