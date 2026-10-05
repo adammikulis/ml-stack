@@ -52,6 +52,7 @@ class Plan:
     shared: bool = True
     project: dict[str, str] = field(default_factory=dict)
     code_only: bool = False
+    remote: bool = False
 
 
 def _step(n: int, total: int, title: str) -> None:
@@ -115,6 +116,10 @@ def _remember(ws: Workspace, plan: Plan, code: str) -> None:
 
 
 def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
+    config = coordinator_config.load(ws.base)
+    if plan.remote and config.get("mode") != "host":
+        raise ValueError("activate hosting first: run `ml-stack-workspace coordinator host` in your "
+                         "person terminal; then pair the receiving device into the same Fleet cluster")
     lim = ws.limits
     ttl, uses = (lim.shared_invite_ttl_s, lim.shared_invite_uses) if plan.shared else (
         lim.invite_ttl_s, 1)
@@ -123,14 +128,14 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
         _remember(ws, plan, code)
     block = onboard.snippet("", code, hint, plan.project.get("name", ""),
                           (uses, int(ttl // 60)))
-    config = coordinator_config.load(ws.base)
     if config.get("mode") == "host":
         offers = [(peer, info) for peer, info in coordinator_client.discover()
                   if info.get("workspace") == config["workspace"]]
         if len(offers) != 1:
             raise ValueError("the hosted workspace needs one advertised coordinator before sharing a code")
         block = block.replace(f"join {code} --name",
-                              f"join {code} --coordinator {shlex.quote(offers[0][0].name)} --name")
+                              f"join {code} --coordinator {shlex.quote(offers[0][0].name)} "
+                              f"--workspace {shlex.quote(config['workspace'])} --name")
         block = ("First enroll this device in the same Fleet cluster using person-approved pairing. "
                  "This agent code does not grant cluster membership.\n" + block)
     if plan.code_only or plan.wait_s <= 0:
