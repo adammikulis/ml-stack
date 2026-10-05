@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,10 +21,17 @@ Add this to ~/.claude/settings.json (or the project's .claude/settings.json), me
 {
   "hooks": {
     "PostToolUse": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "ml-stack-workspace nudge --agent NAME"}]}
+      {"matcher": "*", "hooks": [{"type": "command", "command": "ml-stack-workspace nudge --agent NAME --hook post"}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "ml-stack-workspace nudge --agent NAME --hook stop"}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "ml-stack-workspace nudge --agent NAME --hook prompt"}]}
     ]
   }
 }
+`ml-stack-workspace install-hooks --agent NAME` writes the same into ~/.claude/settings.json.
 """,
     "codex": """\
 Add this to ~/.codex/config.toml. Codex runs it when a turn ends, the closest hook it has; between
@@ -39,8 +47,35 @@ def hook_snippet(tool: str, name: str) -> str:
     return HOOKS[tool].replace("NAME", name)
 
 
-__all__ = ["DEFAULT_AGENTS", "Finding", "Outcome", "brief", "doctor", "hello", "hook_snippet", "join", "setup",
-           "snippet"]
+CLAUDE_HOOKS = (("PostToolUse", "post", "*"), ("Stop", "stop", ""), ("UserPromptSubmit", "prompt", ""))
+OWN_COMMANDS = ("ml-stack-workspace nudge", "claude-nudge.sh")
+
+
+def install_hooks(settings: Path, name: str) -> list[str]:
+    """Write the PostToolUse, Stop and UserPromptSubmit nudge hooks for ``name`` into the Claude
+    Code ``settings`` file, replacing earlier nudge hooks and keeping every other one. A person
+    at a terminal only. Returns the events written."""
+    human.require_person("workspace install-hooks")
+    check_names([name])
+    data = json.loads(settings.read_text()) if settings.exists() else {}
+    hooks = data.setdefault("hooks", {})
+    for event, hook, matcher in CLAUDE_HOOKS:
+        groups = []
+        for group in hooks.get(event, []):
+            kept = [h for h in group.get("hooks", []) if not any(c in h.get("command", "") for c in OWN_COMMANDS)]
+            if kept:
+                groups.append({**group, "hooks": kept})
+        command = f"ml-stack-workspace nudge --agent {name} --hook {hook}"
+        groups.append({**({"matcher": matcher} if matcher else {}),
+                       "hooks": [{"type": "command", "command": command}]})
+        hooks[event] = groups
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(data, indent=2) + "\n")
+    return [event for event, _, _ in CLAUDE_HOOKS]
+
+
+__all__ = ["DEFAULT_AGENTS", "Finding", "Outcome", "brief", "doctor", "hello", "hook_snippet", "install_hooks",
+           "join", "setup", "snippet"]
 
 DEFAULT_AGENTS = ("lead", "codex")
 SETUP = Identity("setup", HUMAN)

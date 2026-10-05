@@ -25,6 +25,7 @@ from ml_stack.workspace import (
     limits,
     localcli,
     localroute,
+    nudge,
     onboard,
     project,
     tokens,
@@ -371,9 +372,29 @@ def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _nudging(args: argparse.Namespace) -> int:
+    if args.hook:
+        return _hook(args)
     line = Workspace().nudge(_token(args))
     if line:
         say(line)
+    return 0
+
+
+def _hook(args: argparse.Namespace) -> int:
+    stdin = sys.stdin.read() if args.hook == "stop" and not sys.stdin.isatty() else ""
+    try:
+        out = nudge.output(args.hook, Workspace().waiting(_token(args)), stdin)
+    except tuple(kind for kind, _ in CODES):
+        return 0
+    if out:
+        say(out)
+    return 0
+
+
+def _install_hooks(args: argparse.Namespace, ws: Workspace) -> int:
+    path = Path(args.settings).expanduser()
+    events = onboard.install_hooks(path, args.agent or "claude-code")
+    say(f"wrote {', '.join(events)} to {path}")
     return 0
 
 
@@ -429,6 +450,9 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
      lambda a, w: say(onboard.snippet(a.name), end="") or 0),
     ("hook-snippet", "print the setting that makes a tool run `nudge` after each step; writes nothing",
      [flag("tool", choices=("claude-code", "codex"))], _hook_snippet),
+    ("install-hooks", "write the nudge hooks (PostToolUse, Stop, UserPromptSubmit) into Claude Code's "
+     "settings; at a terminal", [flag("--settings", default="~/.claude/settings.json",
+                                      help="the Claude Code settings file")], _install_hooks),
     ("brief", "print the short brief a parent pastes into a subagent's prompt", [flag("name")],
      _brief),
 )
@@ -606,8 +630,9 @@ for _name, _help, _options, _handler in BARE:
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
 COMMANDS.add("nudge", _guarded(_nudging),
-             help="print one line counting what waits for you (nothing when nothing does); for hooks",
-             options=COMMON)
+             help="print one line summarising what waits for you (nothing when nothing does); for hooks",
+             options=[*COMMON, flag("--hook", default="", choices=("", *nudge.EVENTS),
+                                    help="print the JSON a Claude Code hook of this kind expects")])
 COMMANDS.add("watch", _guarded(_watching),
              help="print messages as they arrive; --once exits after one",
              options=[*COMMON, *WIDEN, flag("--once", action="store_true"),

@@ -312,12 +312,27 @@ it. Results are deterministic and append-friendly (ordered by sequence number, n
 time in them), and tool names and descriptions are static, so a model's prompt cache survives.
 
 **Noticing without watching.** `ml-stack-workspace nudge --agent NAME` prints nothing when nothing
-waits for you and one byte-stable line when something does (`workspace: 2 waiting for you (1 DM, 1
-mention); run inbox`). It counts only: no message text, nothing marked read, no waiting. Run it from
-a hook after each tool call; `ml-stack-workspace hook-snippet claude-code|codex --agent NAME` prints
-the setting to paste and writes nothing (changing an agent's configuration is the person's
-decision). Its start-up costs about 90 ms here (Python and the package imports), more than the
-50 ms aimed for; trimming the imports is a follow-up.
+waits for you and one line when something does: counts per kind, the senders' ids and the age of the
+oldest (`workspace: 3 waiting for you (2 questions, 1 status; from codex, codex/local-qwen; oldest
+3h12m). A direct question is waiting on you: run ml-stack-workspace inbox now and answer it`). A
+direct `question`, `task`, `handoff` or `blocked` is named as waiting on you; routine kinds (status,
+note, milestone, done) end in `; run inbox`. It never carries message text, marks nothing read and
+waits for nothing.
+
+With `--hook post|stop|prompt` it prints the JSON a Claude Code hook expects:
+
+- `post` (PostToolUse): the line as `additionalContext`, checked at most once every 20 seconds.
+- `prompt` (UserPromptSubmit): the line as `additionalContext` whenever anything is unread.
+- `stop` (Stop): `{"decision": "block", "reason": LINE}` when a direct question, task, handoff or
+  blocked notice has been unread for two minutes, once per newest such message (kept in a file under
+  `$TMPDIR`); it always allows the stop when `stop_hook_active` is true.
+
+A hook prints nothing and exits 0 when nothing is unread or the workspace cannot be reached.
+`ml-stack-workspace install-hooks [--agent NAME] [--settings PATH]` (a person at a terminal) writes
+the three hooks into `~/.claude/settings.json`, replacing earlier nudge hooks and keeping every other
+hook; `hook-snippet claude-code|codex --agent NAME` prints the setting without writing it. Start-up
+costs about 90 ms here (Python and the package imports), more than the 50 ms aimed for; trimming the
+imports is a follow-up.
 
 ## The Board
 

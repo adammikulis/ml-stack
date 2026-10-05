@@ -20,6 +20,7 @@ from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity, Registry
 from ml_stack.workspace.invites import Invites
 from ml_stack.workspace.modelid import CLAIMED, VERIFIED, clean_harness, clean_model, describe
 from ml_stack.workspace.notes import KINDS, Notes
+from ml_stack.workspace.nudge import Waiting
 from ml_stack.workspace.quarantine import Quarantine
 from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.scratch import Scratch
@@ -441,19 +442,16 @@ class Workspace:
         posted = self.board.routed(who, self.bus.cursor(who.id), "inbox")
         return sorted([*direct, *posted], key=lambda r: r["seq"])[:limit]
 
-    def nudge(self, token: str) -> str:
-        """One short line counting what waits for the token's owner, or "" when nothing does.
-        Counts only: no text, nothing marked read, nothing waited for."""
+    def waiting(self, token: str) -> Waiting:
+        """What waits unread for the token's owner; nothing marked read, nothing waited for."""
         who = self.auth(token)
         self._may(who, "read")
-        found = self._unread(who, 1 << 30)
-        direct = sum(1 for r in found if r["to"] == who.id)
-        mentioned = sum(1 for r in found if r["to"] != who.id and who.id in r.get("mentions", []))
-        other = len(found) - direct - mentioned
-        parts = [f"{n} {word}{'s' if n > 1 and word != 'subscribed' else ''}"
-                 for n, word in ((direct, "DM"), (mentioned, "mention"), (other, "subscribed"))
-                 if n]
-        return f"workspace: {len(found)} waiting for you ({', '.join(parts)}); run inbox" if found else ""
+        return Waiting(who.id, self._unread(who, 1 << 30), self.clock())
+
+    def nudge(self, token: str) -> str:
+        """One line giving kinds, senders and age of what waits for the token's owner, never
+        text, or "" when nothing does."""
+        return self.waiting(token).line()
 
     def follow(self, token: str, spec: Follow, cancel: Callable[[], bool] | None = None) -> dict[str, Any]:
         """Messages of one board, thread or conversation after ``spec.after``, waiting up to
