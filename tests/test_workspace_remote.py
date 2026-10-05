@@ -70,6 +70,7 @@ def test_remote_human_and_lead_tokens_are_refused(host, role):
     ws = host.workspace(PROJECT)
     owner = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
     token = ws.mint(owner, "privileged", role)
+    ws.registry.set_project(ws.auth(owner), "privileged", {"key": PROJECT})
     code, _ = call(host, {"token": token}, "agents")
     assert code == 403
 
