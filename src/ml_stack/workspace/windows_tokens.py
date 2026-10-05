@@ -2,8 +2,9 @@
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-if sys.platform == "win32":
+if TYPE_CHECKING or sys.platform == "win32":
     import ntsecuritycon
     import pywintypes
     import win32api
