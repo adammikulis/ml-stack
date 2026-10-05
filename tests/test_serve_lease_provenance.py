@@ -6,6 +6,7 @@ pid, parents, working directory and secrets-in-its-command-line are read back fr
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -275,25 +276,36 @@ def test_the_workspace_label_names_the_requester(monkeypatch):
     assert provenance.asked("x")["requester"] == provenance.program()
 
 
-def test_every_lease_the_source_takes_gives_a_reason():
-    import ast
-    import re
-
-    root = Path(__file__).resolve().parents[1] / "src" / "ml_stack"
+def _unreasoned_lease_lines(text):
+    tree = ast.parse(text)
+    aliases = {alias.asname or alias.name for node in ast.walk(tree)
+               if isinstance(node, ast.ImportFrom) and node.module in ('ml_stack.serve', 'ml_stack.serve.manager')
+               for alias in node.names if alias.name == 'serve'}
     missing = []
-    for path in sorted(root.rglob("*.py")):
-        if path.name in ("manager.py", "broker.py", "broker_wire.py", "fakes.py"):
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
-        text = path.read_text()
-        imports_serve = re.search(r"from ml_stack\.serve(?:\.manager)? import [^\n]*\bserve\b", text)
-        for node in ast.walk(ast.parse(text, str(path))):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            leases = (isinstance(func, ast.Attribute) and func.attr == "lease"
-                      and isinstance(func.value, ast.Name) and func.value.id in ("broker_wire", "manager"))
-            serves = (bool(imports_serve) and isinstance(func, ast.Name) and func.id in ("serve", "serve_fn")
-                      ) or ast.unparse(func) == "ml_stack.serve.serve"
-            if (leases or serves) and "reason" not in {k.arg for k in node.keywords}:
-                missing.append(f"{path.relative_to(root)}:{node.lineno}")
-    assert not missing, "a lease with no reason= at " + ", ".join(missing)
+        func = node.func
+        leases = (isinstance(func, ast.Attribute) and func.attr == 'lease'
+                  and isinstance(func.value, ast.Name) and func.value.id in ('broker_wire', 'manager'))
+        serves = (isinstance(func, ast.Name) and func.id in aliases) or ast.unparse(func) == 'ml_stack.serve.serve'
+        if (leases or serves) and 'reason' not in {keyword.arg for keyword in node.keywords}:
+            missing.append(node.lineno)
+    return missing
+
+
+def test_reason_inventory_follows_imported_alias_not_local_serve_entrypoint():
+    good = "from ml_stack.serve import serve as camera_server\ndef serve():\n    camera_server('model', reason='camera perception')\nserve()\n"
+    assert _unreasoned_lease_lines(good) == []
+    assert _unreasoned_lease_lines(good.replace(", reason='camera perception'", '')) == [3]
+    assert _unreasoned_lease_lines("from ml_stack.serve import serve as another_alias\nanother_alias('model')") == [2]
+
+
+def test_every_lease_the_source_takes_gives_a_reason():
+    root = Path(__file__).resolve().parents[1] / 'src' / 'ml_stack'
+    missing = []
+    for path in sorted(root.rglob('*.py')):
+        if path.name in ('manager.py', 'broker.py', 'broker_wire.py', 'fakes.py'):
+            continue
+        missing.extend(f'{path.relative_to(root)}:{line}' for line in _unreasoned_lease_lines(path.read_text()))
+    assert not missing, 'a lease with no reason= at ' + ', '.join(missing)
