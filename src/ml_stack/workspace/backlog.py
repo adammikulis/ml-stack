@@ -43,6 +43,36 @@ def configure(ws, token, name, repo, project):
     return scope
 
 
+
+def supersede(ws, token, name, number, reason):
+    """Record an authorized repository decision that excludes an obsolete issue."""
+    who, agent = ws.auth(token), la.load(ws, name)
+    if agent is None:
+        raise ValueError('the coding worker does not exist')
+    child = ws.auth(tokens.load(ws.base, agent.identity or name))
+    if who.role != HUMAN and child.parent != who.id:
+        raise Denied('only the person or registered worker parent may supersede an issue')
+    scope = _scope(ws, agent)
+    if not scope.get('enabled'):
+        raise ValueError('configure the worker repository backlog first')
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError('issue number must be a positive integer')
+    reason = line(reason, 400).strip()
+    if not reason:
+        raise ValueError('an explicit superseding decision reason is required')
+    repo, key = scope['repo'], f"issue:{scope['repo']}:{number}"
+    with held(ws.base / 'issue-backlog.lock'), _store(ws) as graph:
+        record = {**_record(graph, key), 'state': 'superseded', 'decision_by': who.id,
+                  'decision_at': ws.clock(), 'summary': reason}
+        _save(graph, key, repo, record)
+        decision = f'issue-decision:{repo}:{number}'
+        graph.upsert_node({'id': decision, 'kind': 'issue-decision', 'label': key,
+                           'attrs': {'issue': key, 'actor': who.id, 'reason': reason, 'state': 'superseded'}})
+        graph.upsert_edge({'source': decision, 'target': key, 'rel': 'supersedes-issue'})
+    ws.audit('local-agent.issue-superseded', who.id, repo=repo, issue=number, reason=reason)
+    return record
+
+
 def fetch(repo):
     """Read at most one hundred open issues through the installed GitHub CLI."""
     binary = shutil.which("gh")

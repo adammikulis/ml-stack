@@ -53,3 +53,8 @@ the maintained development integration helper. A graph attempt binds the exact r
 hash before publication starts. Published, blocked and interrupted attempts are not
 repeated automatically; the owner inspects a blocked or interrupted candidate before
 requesting further integration. Proposal submission alone never starts publication.
+
+An obsolete repository issue can be excluded by the person or registered worker parent:
+`ml-stack-workspace agent supersede-issue WORKER --issue NUMBER --reason "Current owner decision" --agent PARENT`.
+The graph records the authenticated decision and its issue relationship. Subsequent
+issue edits do not remove that decision; nothing is posted to GitHub.

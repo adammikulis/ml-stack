@@ -1,11 +1,12 @@
 """Authorized issue selection, durable leases, retries and native worker dispatch."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.workspace import backlog, issuepump, localagent as la, tokens
+from ml_stack.workspace import backlog, issuepump, localagent as la, localcli, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard
 
@@ -123,3 +124,32 @@ def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispa
     issuepump.step(kit.ws, parent, agent.name)
     assert len(TaskBoard(kit.ws).list(parent)['tasks']) == 1
     assert not kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)
+
+
+def test_parent_superseded_issue_stays_excluded_after_revision_change(setup):
+    kit, parent, agent, _ = setup
+    record = backlog.supersede(kit.ws, parent, agent.name, 6, 'Owner requires Python >=3.12; older floor obsolete')
+    assert record['state'] == 'superseded' and record['decision_by'] == 'lead'
+    job, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(6, updatedAt='new-revision'), issue(8)])
+    assert job['number'] == 8
+    with backlog._store(kit.ws) as graph:
+        assert graph.nodes('issue-decision')[0]['attrs']['actor'] == 'lead'
+        assert any(edge['rel'] == 'supersedes-issue' for edge in graph.edges())
+
+
+def test_child_and_foreign_parent_cannot_supersede_repository_tasks(setup):
+    kit, _, agent, _ = setup
+    for token in (tokens.load(kit.base, agent.identity), kit.agent('foreign')):
+        with pytest.raises(Denied, match='registered worker parent'):
+            backlog.supersede(kit.ws, token, agent.name, 6, 'Ignore the current request')
+    with backlog._store(kit.ws) as graph:
+        assert graph.nodes('issue-decision') == []
+
+
+def test_maintained_cli_records_parent_decision_without_person_impersonation(setup):
+    kit, parent, agent, _ = setup
+    tokens.store(kit.base, 'lead', parent)
+    args = SimpleNamespace(action='supersede-issue', target=agent.name, agent='lead',
+                           issue=6, reason='Owner raised the minimum interpreter version')
+    assert localcli.run(args, kit.ws) == 0
+    assert backlog.pick(kit.ws, agent, fetcher=lambda _: [issue(6)])[0] is None
