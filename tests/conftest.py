@@ -970,6 +970,27 @@ def _external_scanner_write(root: Path, rel: Path) -> bool:
         return False
 
 
+
+def _external_activity_drop_write(root: Path, rel: Path) -> bool:
+    if len(rel.parts) != 3 or rel.parts[0] != 'activity' or rel.name != 'drops.json':
+        return False
+    user = rel.parts[1].removeprefix('u-')
+    if not rel.parts[1].startswith('u-') or not user.isascii() or not user.isdigit():
+        return False
+    try:
+        record = json.loads((root / rel).read_text())
+        pid, born, written = record['writer_pid'], record['writer_started'], record['writer_at']
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}):
+            return False
+        if type(born) not in (int, float) or type(written) not in (int, float):
+            return False
+        process = psutil.Process(pid)
+        return (process.is_running() and process.create_time() == born
+                and process.uids().real == int(user) and born <= written
+                and 0 <= time.time() - written <= 60)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, psutil.Error):
+        return False
+
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
@@ -985,7 +1006,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
             if skip is LIVE_WRITERS and (_external_keystore_lock(root, rel / name)
                                          or _external_keystore_rate(root, rel / name)
                                          or _external_harness_key(root, rel / name)
-                                         or _external_scanner_write(root, rel / name)):
+                                         or _external_scanner_write(root, rel / name)
+                                         or _external_activity_drop_write(root, rel / name)):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
