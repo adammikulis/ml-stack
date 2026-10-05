@@ -28,6 +28,7 @@ from ml_stack.workspace import (
     nudge,
     onboard,
     project,
+    task_outcomes,
     tokens,
 )
 from ml_stack.workspace.boardapi import Follow
@@ -41,6 +42,7 @@ from ml_stack.workspace.notes import KINDS as NOTE_KINDS
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused, fence
 from ml_stack.workspace.service import Workspace
+from ml_stack.workspace.taskboard import TaskBoard
 
 __all__ = ["COMMANDS", "main"]
 
@@ -481,6 +483,21 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
                         "done, blocked only)"), flag("type", choices=CALL_TYPES),
         flag("body"), flag("--subject", default=""), flag("--reply-to", type=int, default=0),
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
+    ("tasks", "authorized canonical tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
+    ("task", "task lease, checkpoints, proposal and independent review", [flag("id")],
+     lambda a, w, t: TaskBoard(w).get(t, a.id)),
+    ("task-claim", "claim a queued task with an existing trusted allocation", [flag("id"), flag("allocation_id")],
+     lambda a, w, t: TaskBoard(w).claim(t, a.id, a.allocation_id)),
+    ("task-heartbeat", "renew your active canonical task lease", [flag("id")],
+     lambda a, w, t: TaskBoard(w).heartbeat(t, a.id)),
+    ("task-checkpoint", "save your active task checkpoint (JSON or - for stdin)", [flag("id"), flag("payload")],
+     lambda a, w, t: TaskBoard(w).checkpoint(t, a.id, json.loads(_body(a.payload)))),
+    ("task-submit", "submit immutable artifact hashes for review (JSON or -)", [flag("id"), flag("payload")],
+     lambda a, w, t: TaskBoard(w).submit(t, a.id, json.loads(_body(a.payload)))),
+    ("task-review", "independently review an authorized task (JSON or -)", [flag("id"), flag("payload")],
+     lambda a, w, t: task_outcomes.review(w, t, a.id, json.loads(_body(a.payload)))),
+    ("task-credit", "retry recording an authorized immutable outcome", [flag("id")],
+     lambda a, w, t: task_outcomes.credit(w, t, a.id)),
     ("inbox", "unread messages, fenced as data", [
         *READ,
         flag("--children", action="store_true", help="only messages from your delegates")],

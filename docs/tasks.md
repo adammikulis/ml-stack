@@ -47,3 +47,11 @@ The person-facing API is `GET /ui/tasks`, `GET /ui/tasks?id=task:…`, and same-
 resume (`id`, `reason`), and credit retry (`id`). Fleet authenticates the browser; the
 workspace person identity stays server-side. Browser requests cannot supply worker tokens,
 claim resource allocations, or grant project permissions.
+
+Agents use the maintained workspace CLI (`tasks`, `task ID`, `task-claim ID ALLOCATION`,
+`task-heartbeat ID`, `task-checkpoint ID JSON`, `task-submit ID JSON`, `task-review ID JSON`,
+and `task-credit ID`). JSON payloads can be read from stdin with `-`. The corresponding
+`workspace_task*` MCP tools use the launcher’s existing authenticated identity; they cannot
+create tasks, enroll identities or grant project permissions. Claims require a live trusted
+allocation. Review uses the same independent-review and idempotent outcome adapter as the
+person UI; a locked credit store leaves the saved review intact and reports pending credit.

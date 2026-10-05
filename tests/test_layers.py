@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[1]
 ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("core", ("activity", "asking", "backend", "checks", "command", "contracts", "credentials", "data",
+    ("core", ("activity", "asking", "backend", "checks", "command", "command_capture", "contracts", "credentials", "data",
               "entities", "extraction", "files", "gate", "geo",
               "home", "http", "httpguard", "installed", "interventions", "jobs", "jsonl", "keystore", "limits",
               "lock", "log", "macauth", "sealing",

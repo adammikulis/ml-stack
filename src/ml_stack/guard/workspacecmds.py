@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from ml_stack.guard.harm import Finding
 
-READ = {"inbox": (0, 0), "thread": (1, 1), "who": (2, 2), "roster": (0, 0),
+READ = {"tasks": (0, 0), "task": (1, 1), "inbox": (0, 0), "thread": (1, 1), "who": (2, 2), "roster": (0, 0),
         "status": (0, 0), "nudge": (0, 0)}
-WRITE = {"send": (3, 3), "announce": (2, 2), "claim": (2, 2)}
+WRITE = {"task-claim": (2, 2), "task-heartbeat": (1, 1),
+         "task-checkpoint": (2, 2), "task-submit": (2, 2), "task-review": (2, 2), "task-credit": (1, 1), "send": (3, 3), "announce": (2, 2), "claim": (2, 2)}
 
 
 def effect(args: list[str]) -> list[Finding]:

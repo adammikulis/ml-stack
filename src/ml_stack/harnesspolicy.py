@@ -28,8 +28,12 @@ CATALOG: dict[str, str] = {
                      "ToolSearch", "BashOutput", "read_file", "list_dir", "grep_files", "update_plan"), "safe"),
     **dict.fromkeys(("mcp__workspace__workspace_inbox", "mcp__workspace__workspace_thread",
                      "mcp__workspace__workspace_who_owns", "mcp__workspace__workspace_status",
+                     "mcp__workspace__workspace_tasks", "mcp__workspace__workspace_task",
                      "mcp__workspace__workspace_reputation"), "safe"),
-    **dict.fromkeys(("mcp__workspace__workspace_send", "mcp__workspace__workspace_claim",
+    **dict.fromkeys(("mcp__workspace__workspace_task_claim", "mcp__workspace__workspace_task_heartbeat",
+                     "mcp__workspace__workspace_task_checkpoint", "mcp__workspace__workspace_task_submit",
+                     "mcp__workspace__workspace_task_review", "mcp__workspace__workspace_task_credit",
+                     "mcp__workspace__workspace_send", "mcp__workspace__workspace_claim",
                      "mcp__workspace__workspace_announce", "mcp__workspace__workspace_ack"), "reversible"),
     **dict.fromkeys(("Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch", "WebFetch", "WebSearch"), "reversible"),
 }

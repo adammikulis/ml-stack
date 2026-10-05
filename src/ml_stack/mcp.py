@@ -22,10 +22,8 @@ or in ``.mcp.json``: ``{"mcpServers": {"ml-stack": {"command": "ml-stack-mcp"}}}
 """
 
 import argparse
-import contextlib
 import dataclasses
 import inspect
-import io
 import json
 import re
 import secrets
@@ -115,16 +113,6 @@ def detached(module: str, argv: list[str], *, name: str,
     ran = jobs.detach(module, argv, log=log, lines=[f"command: {module} {' '.join(argv)}"])
     return {"log": str(ran.log), "pid": ran.pid, "command": " ".join(ran.command)}
 
-
-def _captured(fn: Callable[[], int]) -> dict[str, Any]:
-    """Run a command's ``main`` in-process and hand back what it printed and its exit."""
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        try:
-            code = int(fn() or 0)
-        except SystemExit as left:
-            code = int(left.code or 0) if isinstance(left.code, int) else 1
-    return {"exit": code, "output": out.getvalue(), "errors": err.getvalue()}
 
 
 def _plain(value: Any) -> Any:
