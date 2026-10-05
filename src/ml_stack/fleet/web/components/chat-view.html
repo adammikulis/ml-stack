@@ -16,6 +16,7 @@
       <div class="askrow" id="chat-askrow" hidden>
         <textarea id="ask" rows="3" placeholder="Ask it something" aria-label="Message" aria-describedby="chat-shortcut"></textarea>
         <button id="chat-send" title="Enter to send · Shift+Enter for a new line">Send</button>
+        <button id="chat-cancel" class="ghost" hidden>Stop generating</button>
       </div>
       <p class="hint" id="chat-shortcut">Enter to send · Shift+Enter for a new line</p>
     </div>
@@ -41,6 +42,9 @@
       this.askrow = this.querySelector("#chat-askrow");
       this.input = this.querySelector("#ask");
       this.send = this.querySelector("#chat-send");
+      this.cancelButton = this.querySelector("#chat-cancel");
+      this.cancelButton.onclick = () => this.controller?.abort();
+      this.requestSeq = 0;
       this.open = null;
       this.send.onclick = () => this.ask();
       this.input.onkeydown = (e) => {
@@ -56,8 +60,15 @@
     }
 
     /** One message in the transcript; returns the node the reply streams into. */
-    say(role, text) {
-      const node = el("div", { class: `msg ${role}` }, text);
+    say(role, text, reasoning = "") {
+      const node = el("div", { class: `msg ${role}` });
+      if (role === "assistant") {
+        const details = el("details", { class: "model-reasoning" }, el("summary", {}, "Model reasoning"),
+          el("pre", { class: "reasoning-text" }, reasoning));
+        details.hidden = !reasoning;
+        node.append(details, el("div", { class: "answer-text" }, text),
+          el("span", { class: "reply-activity", role: "status" }));
+      } else node.textContent = text;
       this.list.append(node);
       this.list.scrollTop = this.list.scrollHeight;
       return node;
@@ -81,7 +92,7 @@
       const rows = saved.conversations || [];
       this.sidebar.replaceChildren(
         el("button", { class: "ghost small",
-          onclick: () => { this.open = null; this.list.replaceChildren(); this.paintList(); } },
+          onclick: () => { this.cancelForSwitch(); this.open = null; this.list.replaceChildren(); this.paintList(); } },
           "New chat"),
         ...rows.map((c) =>
           el("div", { class: `chatrow${c.id === this.open ? " on" : ""}` },
@@ -97,11 +108,25 @@
     }
 
     async load(id) {
+      this.cancelForSwitch();
+      const sequence = this.loadSeq = (this.loadSeq || 0) + 1;
       this.open = id;
+      this.note.textContent = "Opening conversation…";
       const one = await api(`/ui/conversations/${id}`);
+      if (sequence !== this.loadSeq) return;
       this.list.replaceChildren();
-      for (const m of one.messages || []) this.say(m.role, m.content);
+      for (const m of one.messages || []) this.say(m.role, m.content, m.reasoning || "");
       if (one.model) this.picker.value = one.model;
+      this.note.textContent = one.error || "";
+    }
+
+    cancelForSwitch() {
+      this.controller?.abort();
+      this.controller = null;
+      this.requestSeq++;
+      this.send.disabled = false;
+      this.cancelButton.hidden = true;
+      this.list.removeAttribute("aria-busy");
     }
 
     async ask() {
@@ -111,17 +136,25 @@
       this.input.value = "";
       this.note.replaceChildren();
       this.send.disabled = true;
+      this.cancelButton.hidden = false;
+      this.controller = new AbortController();
+      const sequence = ++this.requestSeq;
+      this.say("user", text);
+      const reply = this.say("assistant", "");
+      const activity = reply.querySelector(".reply-activity");
+      activity.textContent = "Waiting for model…";
       try {
         if (!this.open) {
           const made = await api("/ui/conversations", { method: "POST",
             body: JSON.stringify({ model: this.picker.value }) });
+          if (sequence !== this.requestSeq) return;
+          if (made.error || !made.id) throw new Error(made.error || "Could not create the conversation.");
           this.open = made.id;
         }
-        this.say("user", text);
-        const reply = this.say("assistant", "");
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers,
+          signal: this.controller.signal,
           body: JSON.stringify({ conversation: this.open, model: this.picker.value,
-            messages: [{ role: "user", content: text }] }) });
+            stream: true, messages: [{ role: "user", content: text }] }) });
         if (!r.ok) {
           const why = await r.json().catch(() => ({}));
           reply.remove();
@@ -129,42 +162,35 @@
             why.error || "That did not go through."));
           return;
         }
-        await this.stream(r, reply);
+        const result = await M.readChatStream(r, (delta) => {
+          if (delta.activity) activity.textContent = delta.activity;
+          if (delta.reasoning) {
+            const details = reply.querySelector(".model-reasoning");
+            details.hidden = false;
+            details.querySelector(".reasoning-text").append(document.createTextNode(delta.reasoning));
+          }
+          if (delta.content) reply.querySelector(".answer-text").append(document.createTextNode(delta.content));
+          this.list.scrollTop = this.list.scrollHeight;
+        });
+        if (!result.content) throw new Error("The model returned no answer. Try again or choose another model.");
+      } catch (error) {
+        if (sequence === this.requestSeq) this.controller?.abort();
+        if (sequence === this.requestSeq) this.note.replaceChildren(el("div", {
+          class: error.name === "AbortError" ? "hint" : "err",
+        }, error.name === "AbortError" ? "Generation cancelled." : error.message));
       } finally {
-        this.list.removeAttribute("aria-busy");
-        this.send.disabled = false;
-        this.paintList();
-      }
-    }
-
-    /** Put each piece of the answer on the screen as it arrives. */
-    async stream(r, reply) {
-      const reader = r.body.getReader();
-      const decode = new TextDecoder();
-      let pending = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        pending += decode.decode(value, { stream: true });
-        const lines = pending.split("\n");
-        pending = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const frame = line.slice(5).trim();
-          if (!frame || frame === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(frame);
-            for (const c of parsed.choices || []) {
-              const piece = c.delta?.content || c.message?.content;
-              if (piece) {
-                reply.append(document.createTextNode(piece));
-                this.list.scrollTop = this.list.scrollHeight;
-              }
-            }
-          } catch { /* a half-arrived frame catches up next read */ }
+        if (reply) reply.querySelector(".reply-activity").textContent = "";
+        if (sequence === this.requestSeq) {
+          this.list.removeAttribute("aria-busy");
+          this.send.disabled = false;
+          this.cancelButton.hidden = true;
+          this.controller = null;
+          this.paintList();
         }
       }
     }
+
+
   }
   customElements.define("chat-view", ChatView);
 })();

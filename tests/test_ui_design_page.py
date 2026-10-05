@@ -233,3 +233,97 @@ def test_quant_choice_updates_size_and_download_payload_without_extra_search(app
     assert "3.5 bits per weight" in page.locator("#browser-results").inner_text()
     assert state["requests"].count("/ui/models/popular") == count
     assert not errors
+
+
+def streaming_chat(page, state):
+    state["chat_available"] = True
+    page.evaluate("""() => {
+      window.chatRequests = [];
+      const fetchOriginal = window.fetch;
+      window.fetch = (path, options = {}) => {
+        if (path !== '/ui/chat' || options.method !== 'POST') return fetchOriginal(path, options);
+        window.chatRequests.push(JSON.parse(options.body));
+        return Promise.resolve(new Response(new ReadableStream({start(controller) {
+          window.streamController = controller;
+          options.signal.addEventListener('abort', () => controller.error(new DOMException('Cancelled', 'AbortError')));
+        }}), {headers: {'Content-Type': 'text/event-stream'}}));
+      };
+    }""")
+    page.get_by_role("link", name="Chat", exact=True).click()
+    page.locator("#chat-askrow:not([hidden])").wait_for()
+
+
+def event(page, frame):
+    page.evaluate("frame => window.streamController.enqueue(new TextEncoder().encode('data: ' + JSON.stringify(frame) + '\\n\\n'))", frame)
+
+
+def test_chat_enter_shift_enter_ime_and_pending_prevent_duplicate_send(app):
+    page, state, errors = app
+    streaming_chat(page, state)
+    message = page.get_by_role("textbox", name="Message", exact=True)
+    message.press("Enter")
+    assert page.evaluate("window.chatRequests.length") == 0
+    message.fill("First")
+    message.press("Shift+Enter")
+    message.type("Second")
+    assert message.input_value() == "First\nSecond"
+    message.evaluate("e => e.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', isComposing:true, keyCode:229, bubbles:true}))")
+    assert page.evaluate("window.chatRequests.length") == 0
+    message.press("Enter")
+    page.locator(".reply-activity").get_by_text("Waiting for model…", exact=True).wait_for()
+    assert page.get_by_role("button", name="Send", exact=True).get_attribute("title") == "Enter to send · Shift+Enter for a new line"
+    message.fill("Another")
+    message.press("Enter")
+    assert page.evaluate("window.chatRequests.length") == 1
+    assert page.evaluate("window.chatRequests[0].stream") is True
+    event(page, {"choices": [{"delta": {"content": "Reply"}}]})
+    page.evaluate("window.streamController.close()")
+    page.wait_for_function("!document.getElementById('chat-send').disabled")
+    assert not errors
+
+
+def test_streamed_reasoning_is_collapsed_separate_and_keeps_user_expansion(app):
+    page, state, errors = app
+    streaming_chat(page, state)
+    page.get_by_role("textbox", name="Message", exact=True).fill("A question")
+    page.get_by_role("button", name="Send", exact=True).click()
+    page.wait_for_function("window.streamController !== undefined")
+    event(page, {"ml_stack": {"state": "rebuilding", "conversation": "chat-test"}})
+    page.locator(".reply-activity").get_by_text("Restoring conversation…", exact=True).wait_for()
+    event(page, {"choices": [{"delta": {"reasoning_content": "First thought."}}]})
+    details = page.locator(".model-reasoning")
+    details.wait_for()
+    assert not details.evaluate("e => e.open")
+    page.locator(".reply-activity").get_by_text("Thinking…", exact=True).wait_for()
+    details.locator("summary").click()
+    event(page, {"choices": [{"delta": {"reasoning_content": " More thought."}}]})
+    assert details.evaluate("e => e.open")
+    event(page, {"choices": [{"delta": {"content": "The answer."}}]})
+    page.locator(".answer-text").get_by_text("The answer.", exact=True).wait_for()
+    assert "thought" not in page.locator(".answer-text").inner_text()
+    page.evaluate("window.streamController.close()")
+    page.wait_for_function("!document.getElementById('chat-send').disabled")
+    assert details.evaluate("e => e.open")
+    assert not errors
+
+
+@pytest.mark.parametrize("end", ["cancel", "error", "empty"])
+def test_stream_cancel_error_and_empty_response_restore_send(app, end):
+    page, state, errors = app
+    streaming_chat(page, state)
+    page.get_by_role("textbox", name="Message", exact=True).fill("A question")
+    page.get_by_role("button", name="Send", exact=True).click()
+    page.wait_for_function("window.streamController !== undefined")
+    if end == "cancel":
+        page.get_by_role("button", name="Stop generating", exact=True).click()
+        text = "Generation cancelled."
+    elif end == "error":
+        event(page, {"error": {"message": "Model load failed"}})
+        text = "Model load failed"
+    else:
+        page.evaluate("window.streamController.close()")
+        text = "The model returned no answer. Try again or choose another model."
+    page.locator("#chat-note").get_by_text(text, exact=True).wait_for()
+    assert page.get_by_role("button", name="Send", exact=True).is_enabled()
+    assert page.get_by_role("button", name="Stop generating", exact=True).is_hidden()
+    assert not errors

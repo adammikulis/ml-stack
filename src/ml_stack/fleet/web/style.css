@@ -402,3 +402,11 @@ legend { padding: 0 6px; font-weight: 600; font-size: 14px; }
 .quant-filters { display: flex; gap: 16px; flex-wrap: wrap; }
 .quant-filters label { margin-top: 4px; font-size: 12px; }
 .quant-filters select { margin-left: 8px; padding: 5px 8px; font-size: 12px; }
+
+.model-reasoning { border-left: 2px solid var(--line); margin: 0 0 14px; padding-left: 12px; color: var(--muted); }
+.model-reasoning summary { cursor: pointer; font-size: 13px; }
+.reasoning-text { white-space: pre-wrap; font: 13px/1.6 var(--sans); margin-top: 10px; overflow-wrap: anywhere; }
+.reply-activity { display: block; color: var(--muted); font-size: 12px; margin-top: 10px; }
+.reply-activity:empty { display: none; }
+.answer-text { white-space: pre-wrap; }
+#chat-shortcut { margin-top: 8px; font-size: 12px; }
