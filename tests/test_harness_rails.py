@@ -10,10 +10,12 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from workspace_kit import clean_env
+from workspace_kit import Kit, clean_env
 
 from ml_stack import claude, codex, coding, harnesshook, harnessid, harnessing, requests
 from ml_stack.harnesspolicy import decide
+from ml_stack.workspace import tokens
+from ml_stack.workspace.project import describe
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 
@@ -81,10 +83,13 @@ class TestHook:
         assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
         assert inbox.list() == []
 
-    def test_a_call_that_asks_waits_for_the_person_and_runs_only_on_their_yes(self):
+    def test_a_call_that_asks_waits_for_the_person_and_runs_only_on_their_yes(self, tmp_path, monkeypatch):
+        kit = Kit(clean_env(monkeypatch, tmp_path))
+        tokens.store(kit.base, 'local-test', kit.agent('local-test'))
+        kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'local-test', describe(str(tmp_path)))
         for choice, want in (("allow-once", "allow"), ("deny", "deny")):
             inbox = requests.Inbox(memory=True)
-            payload = {"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x"}, "cwd": "/w",
+            payload = {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {tmp_path}/x"}, "cwd": str(tmp_path),
                        "session_id": "s1"}
 
             def person(inbox=inbox, choice=choice):
@@ -98,7 +103,7 @@ class TestHook:
 
             thread = threading.Thread(target=person)
             thread.start()
-            out = harnesshook.pre(payload, self._rail(wait_s=10.0), inbox)
+            out = harnesshook.pre(payload, self._rail(wait_s=10.0, roots=(str(tmp_path),)), inbox)
             thread.join()
             assert out["hookSpecificOutput"]["permissionDecision"] == want
             raised = requests.list_requests(inbox=inbox)[0]

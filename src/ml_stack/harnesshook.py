@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
-from ml_stack import requests
+from ml_stack import harness_claims, requests
 from ml_stack.harnesspolicy import (
     Decision,
     _shell_line,
@@ -80,19 +80,30 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     try:
         name = str(payload.get("tool_name", ""))
         inputs = args if isinstance(args, dict) else None
-        decision = (primary_decision(name, inputs, str(payload.get("cwd", "")))
+        ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), label)
+        decision = (Decision('deny', 'destructive', ownership) if ownership else None) or (primary_decision(name, inputs, str(payload.get("cwd", "")))
                     or workspace_authority(_shell_line(name, inputs), label)
                     or decide(role, name, inputs, roots=roots, protected=protected))
     except FAILURES:
         decision = Decision("ask", "unsure", "the call could not be classified", "tool_call_destructive")
     if decision.action == "allow":
-        return _answer(event, "allow", f"ml-stack: {decision.label}")
+        return _owned_answer(payload, rail, event, f"ml-stack: {decision.label}")
     if decision.action == "deny":
         return _answer(event, "deny", f"ml-stack: {decision.reason}")
     approved, state = _ask(payload, decision, label, wait_s, inbox)
     if approved:
-        return _answer(event, "allow", "ml-stack: the person allowed this call")
+        return _owned_answer(payload, rail, event, "ml-stack: the person allowed this call")
     return _answer(event, "deny", f"ml-stack: the person did not allow this call ({state})")
+
+
+def _owned_answer(payload, rail, event, reason):
+    try:
+        harness_claims.reserve(str(payload.get('tool_name', '')), payload.get('tool_input'),
+                               str(payload.get('cwd') or (rail.roots[0] if rail.roots else Path.cwd())),
+                               rail.label, rail.roots)
+    except FAILURES as error:
+        return _answer(event, 'deny', f'ml-stack: ownership refused: {error}')
+    return _answer(event, 'allow', reason)
 
 
 def nudge(label: str) -> str:
