@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from ml_stack import home, sentinel
 from ml_stack.sentinel import Mode, State
@@ -32,9 +33,17 @@ def test_baseline_pins_then_scan_finds_a_change(capsys):
     code, out, _ = run(capsys, "baseline", "--pin", str(model), "--json", "--honey")
     assert code == 0 and json.loads(out)[0]["path"] == str(model)
     assert run(capsys, "scan", "--deep")[0] == 0
+    original = model.stat()
     model.write_bytes(b"GGUF" * 999 + b"evil")
-    code, out, _ = run(capsys, "scan", "--deep", "--json")
-    assert code == 1 and json.loads(out)[0]["kind"] == "integrity.content_changed"
+    os.utime(model, ns=(original.st_atime_ns, original.st_mtime_ns))
+    assert model.stat().st_size == original.st_size
+    assert model.stat().st_mtime_ns == original.st_mtime_ns
+    node = sentinel.default()
+    assert str(model) in node.manifest.pins()
+    assert node.store.state_of("model", str(model)) == State.CLEAR
+    code, out, err = run(capsys, "scan", "--deep", "--json")
+    assert code == 1 and json.loads(out)[0]["kind"] == "integrity.content_changed", (
+        out, err, node.manifest.pins(), node.store.state_of("model", str(model)))
     code, out, _ = run(capsys, "quarantine", "list", "--json")
     rows = json.loads(out)
     assert rows[0]["state"] == "quarantined" and rows[0]["moved"] is True
