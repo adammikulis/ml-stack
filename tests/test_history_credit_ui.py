@@ -25,7 +25,9 @@ def standings():
     }, {"agent": "builder", "verified_tasks": 0, "score": 0,
         "economy": {"balance": 0, "earned": 0, "completion_credits": 0, "quality_credits": 0,
                     "usage": {"tasks": 0, "recorded": False}},
-        "work_reputation": {"state": "unrated", "quality": 50, "reliability": 50, "samples": 0},
+        "work_reputation": {"state": "reviewed", "quality": 50, "reliability": 67, "samples": 0,
+                            "quality_samples": 0, "reliability_samples": 1,
+                            "outcomes": {"accepted": 1, "rejected": 0, "blocked_infrastructure": 2}},
         "evidence": []}]}
 
 
@@ -65,7 +67,9 @@ def test_history_credits_without_recent_actions_and_review_evidence(tmp_path, pl
             expect(viewer.get_by_text("scout · 35 credits", exact=True)).to_have_count(1)
             viewer.locator("#history-agent").select_option("builder")
             viewer.get_by_text("builder · 0 credits", exact=True).click()
-            expect(viewer.get_by_text("Not yet rated", exact=False)).to_be_visible()
+            expect(viewer.get_by_text("Not yet rated", exact=True)).to_be_visible()
+            expect(viewer.get_by_text("1 accepted · 0 rejected · 2 infrastructure blockages", exact=True)).to_be_visible()
+            expect(viewer.get_by_text("67", exact=True)).to_be_visible()
             expect(viewer.get_by_text("Recorded compute usage", exact=False)).to_have_count(0)
             expect(viewer.get_by_text("scout · 35 credits", exact=True)).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
