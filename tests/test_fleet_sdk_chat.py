@@ -63,8 +63,17 @@ def test_sdk_stream_alias_and_consumer_cancellation_closes_response(monkeypatch)
         fake.close()
 
 
+@pytest.fixture
+def sdk_playwright():
+    # Close the browser event loop before this module's direct SDK tests.
+    browser_api = pytest.importorskip("playwright.sync_api", reason="ml-stack[scrape]")
+
+    with browser_api.sync_playwright() as playwright:
+        yield playwright
+
+
 @pytest.mark.slow
-def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, playwright):
+def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, sdk_playwright):
     from playwright.sync_api import expect
     from test_fleet_ui import Serving
 
@@ -77,7 +86,7 @@ def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, playwright):
     served.ui.serving = ModelsServing(tmp_path / "models.json")
     served.ui.serving.register(fake.port, ["qwen-sdk.gguf"])
     served.ui.conversations = Conversations(tmp_path / "chats")
-    browser = playwright.chromium.launch(headless=True)
+    browser = sdk_playwright.chromium.launch(headless=True)
     try:
         page = browser.new_page()
         page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
