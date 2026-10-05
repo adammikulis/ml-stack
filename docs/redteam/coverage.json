@@ -1,8 +1,8 @@
 {
- "surfaces": 675,
+ "surfaces": 680,
  "by_status": {
-  "covered": 356,
-  "partial": 202,
+  "covered": 363,
+  "partial": 200,
   "uncovered": 54,
   "n/a": 63,
   "unmapped": 0
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 73,
+   "covered": 77,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -79,15 +79,15 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 61,
+   "covered": 62,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 65,
-   "partial": 60,
+   "covered": 67,
+   "partial": 58,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -3958,6 +3958,96 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/task_actions.py:block",
+   "kind": "human",
+   "source": "workspace/task_actions.py:block",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/task_routes.py:route",
+   "kind": "human",
+   "source": "workspace/task_routes.py:route",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/taskboard.py:TaskBoard._reviewer",
+   "kind": "human",
+   "source": "workspace/taskboard.py:TaskBoard._reviewer",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/taskboard.py:TaskBoard._scope",
+   "kind": "human",
+   "source": "workspace/taskboard.py:TaskBoard._scope",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/taskboard.py:TaskBoard.create",
+   "kind": "human",
+   "source": "workspace/taskboard.py:TaskBoard.create",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
    "id": "human:workspace/tokens.py:directory",
    "kind": "human",
    "source": "workspace/tokens.py:directory",
@@ -4001,26 +4091,6 @@
    "id": "human:workspace/work_reputation.py:standings",
    "kind": "human",
    "source": "workspace/work_reputation.py:standings",
-   "trust": "an agent process or a peer",
-   "attacker": "an agent or a forged grant takes an action only a person may take",
-   "status": "covered",
-   "tests": [
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
-    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
-    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
-    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
-    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
-    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
-    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
-    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
-   ],
-   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
-  },
-  {
-   "id": "human:workspace/work_reputation.py:verify",
-   "kind": "human",
-   "source": "workspace/work_reputation.py:verify",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -6392,6 +6462,24 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/task_routes.py",
+   "kind": "parser",
+   "source": "workspace/task_routes.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+    "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+    "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+    "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+    "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+    "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+    "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
+   ],
+   "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
    "id": "parser:workspace/tokens.py",
    "kind": "parser",
    "source": "workspace/tokens.py",
@@ -7423,14 +7511,14 @@
    "source": "fleet/routes.py:SetupRoutes.public_route",
    "trust": "browser session on this machine behind the UI header",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_rejoining_needs_a_session_once_the_box_is_in_a_cluster"
    ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+   "note": "Native Fleet sockets reject remote first-run ownership, DNS-rebinding Host values, missing UI headers and joined setup mutation without an authenticated session"
   },
   {
    "id": "route:fleet/routes.py:/ui/setup/clusters",
@@ -7470,14 +7558,14 @@
    "source": "fleet/routes.py:SetupRoutes.public_route",
    "trust": "browser session on this machine behind the UI header",
    "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-    "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-    "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-    "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in"
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+    "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_rejoining_needs_a_session_once_the_box_is_in_a_cluster"
    ],
-   "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+   "note": "Native Fleet sockets reject remote first-run ownership, DNS-rebinding Host values, missing UI headers and joined setup mutation without an authenticated session"
   },
   {
    "id": "route:fleet/routes.py:/ui/setup/peers",

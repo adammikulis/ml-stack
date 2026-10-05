@@ -118,7 +118,8 @@ class Serving:
         if options:
             raise TypeError(f"Unknown request options: {', '.join(options)}")
         if host != "127.0.0.1" and self.lan_httpd is None:
-            self.lan_httpd = Server((host, self.port), self.httpd.RequestHandlerClass)
+            self.lan_httpd = LimitedServer((host, self.port), self.httpd.RequestHandlerClass,
+                                          tls=self.httpd.tls)
             threading.Thread(target=self.lan_httpd.serve_forever, daemon=True).start()
         data = json.dumps(body).encode() if body is not None else None
         sent = {"Content-Type": "application/json"}
@@ -230,6 +231,7 @@ class TestAssets:
 
 
 # -- the setup guard -----------------------------------------------------
+@pytest.mark.redteam
 class TestFirstRunIsNotUpForGrabs:
     def test_a_fresh_daemon_says_it_needs_setting_up(self, serving):
         status, body, _ = serving.call("/ui/setup")

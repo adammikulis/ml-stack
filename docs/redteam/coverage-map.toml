@@ -15,6 +15,27 @@ uncovered = 54
 partial = 200
 
 [[group]]
+match = ["route:fleet/routes.py:/ui/setup", "route:fleet/routes.py:/ui/setup/join"]
+status = "covered"
+tests = ["tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+         "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+         "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+         "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_rejoining_needs_a_session_once_the_box_is_in_a_cluster"]
+note = "Native Fleet sockets reject remote first-run ownership, DNS-rebinding Host values, missing UI headers and joined setup mutation without an authenticated session"
+
+[[group]]
+match = ["human:workspace/taskboard.py:TaskBoard._reviewer", "human:workspace/taskboard.py:TaskBoard._scope", "human:workspace/taskboard.py:TaskBoard.create", "human:workspace/task_actions.py:block", "human:workspace/task_routes.py:route", "parser:workspace/task_routes.py"]
+status = "covered"
+tests = ["tests/test_fleet_task_routes.py::test_foreign_page_cannot_create_tasks",
+         "tests/test_fleet_task_routes.py::test_joined_unsigned_and_browser_claims_are_refused",
+         "tests/test_fleet_task_routes.py::test_malformed_requests_and_identity_overrides_do_not_mutate",
+         "tests/test_taskboard.py::test_designated_reviewer_without_read_capability_cannot_grade_task",
+         "tests/test_taskboard.py::test_changed_task_specification_cannot_be_claimed",
+         "tests/test_task_credit.py::test_same_device_parent_cannot_review_through_another_worker_seat",
+         "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"]
+note = "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+
+[[group]]
 match = ["mcp-tool:workspace_reputation"]
 status = "covered"
 tests = ["tests/test_work_reputation.py::test_reputation_read_requires_valid_token_and_read_capability",
