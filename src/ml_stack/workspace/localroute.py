@@ -14,13 +14,14 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
-from ml_stack import roles
+from ml_stack import coding, roles
 from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
 from ml_stack.graph.guard import host_ok, refusal
 from ml_stack.workspace import (
     boardroute,
     localagent as la,
     localeffort as le,
+    localharness,
     localmodel,
     localprofile as lp,
     localstart as ls,
@@ -73,7 +74,9 @@ def _read(ws: Workspace, route: str) -> Any:
     if route == "list":
         return {"agents": ls.listing(ws), "roles": la.role_choices(), "default_role": roles.DEFAULT, "efforts": [*le.LEVELS, le.AUTO],
                 "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX,
-                "orders_from": list(la.DEFAULT_ORDERS_FROM)}
+                "orders_from": list(la.DEFAULT_ORDERS_FROM), "harnesses": [localharness.OWN, *coding.HARNESSES],
+                "saved": [{key: getattr(agent, key) for key in START_KEYS}
+                          for name in la.names(ws) if (agent := la.load(ws, name)) is not None]}
     if route == "model":
         return _model_view()
     raise ValueError("no such route")
