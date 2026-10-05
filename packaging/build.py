@@ -17,7 +17,7 @@ from packaging.version import InvalidVersion, Version
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 APP = ROOT / "app"
-EXTERNAL = ("pyinstaller", "packaging", "psutil", "ladybug>=0.20.4,<0.21")
+EXTERNAL = ("pyinstaller", "packaging", "psutil", "ladybug>=0.20.4,<0.21", "py-machineid")
 SIDECAR = "ml-stack-headless"
 
 

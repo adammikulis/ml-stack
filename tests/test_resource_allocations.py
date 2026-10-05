@@ -9,7 +9,8 @@ from ml_stack.workspace.identity import Denied
 
 def test_shared_managed_holder_allowed_but_changed_grant_denied(tmp_path, monkeypatch):
     kit = Kit(tmp_path / "ws")
-    monkeypatch.setattr(device_agent.home, "machine_id", lambda: "1234567890abcdef")
+    monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
+    monkeypatch.setattr(resources, "device_id", lambda: "1234567890abcdef")
     parent = kit.agent("parent")
     child = kit.ws.delegate(parent, "worker")
     worker = child["id"]

@@ -11,7 +11,7 @@ from ml_stack.workspace.identity import Denied
 
 def test_owner_enrollment_survives_worker_revocation_and_model_change(tmp_path, monkeypatch):
     kit = Kit(tmp_path / "ws")
-    monkeypatch.setattr(device_agent.home, "machine_id", lambda: "1234567890abcdef")
+    monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
     first = device_agent.enroll(kit.ws, kit.owner)
     assert device_agent.enroll(kit.ws, kit.owner) == first
     token = kit.agent("worker")
@@ -28,7 +28,7 @@ def test_owner_enrollment_survives_worker_revocation_and_model_change(tmp_path, 
 
 def test_agent_cannot_enroll_or_self_assign_device_credit(tmp_path, monkeypatch):
     kit = Kit(tmp_path / "ws")
-    monkeypatch.setattr(device_agent.home, "machine_id", lambda: "1234567890abcdef")
+    monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
     agent = kit.agent("external")
     with pytest.raises(Denied, match="only the person"):
         device_agent.enroll(kit.ws, agent)
@@ -42,7 +42,7 @@ def test_person_start_binds_model_independent_default(tmp_path, monkeypatch):
 
     from ml_stack.workspace import localstart
     kit = Kit(tmp_path / "ws")
-    monkeypatch.setattr(device_agent.home, "machine_id", lambda: "1234567890abcdef")
+    monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
     got = localstart.start(kit.ws, localstart.Ask(), pick=PICK, spawn=sleeper, person_token=kit.owner)
     try:
         assert got.name == "local-agent"
@@ -66,7 +66,7 @@ def test_saved_delegated_coding_seat_survives_model_restart(tmp_path, monkeypatc
     localagent.save(kit.ws, localagent.Agent("named-worker", "old-model", identity=identity, profile="coding"))
     monkeypatch.setattr(localprofile, "admit", lambda *args: ("", ""))
     monkeypatch.setattr(localstart.jobs, "detach", sleeper)
-    monkeypatch.setattr(device_agent.home, "machine_id", lambda: "1234567890abcdef")
+    monkeypatch.setattr(device_agent, "device_id", lambda: "1234567890abcdef")
     got = localstart.start(kit.ws, localstart.Ask(name="named-worker", profile="coding"),
                            pick=PICK, person_token=kit.owner)
     try:

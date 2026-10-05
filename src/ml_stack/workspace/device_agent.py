@@ -1,6 +1,6 @@
 """Person-enrolled device accounts bind local worker identities independently of models."""
-from ml_stack import home
 from ml_stack.graph.store import GraphStore
+from ml_stack.home import device_id
 from ml_stack.workspace import localagent, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.device_accounts import account_for, account_in
@@ -19,12 +19,12 @@ def enroll(ws, token):
     owner = ws.auth(token)
     if owner.role != HUMAN:
         raise Denied("only the person may enroll a device account")
-    device = home.machine_id()
+    device = device_id()
     with held(ws.base / "device-accounts.lock"), _graph(ws) as graph:
         key = f"device:{device}"
         node = next((node for node in graph.nodes("device-account") if node["id"] == key), None)
         account = node["attrs"] if node else {}
-        base = account.get("base_id", f"local-device-{device}")
+        base = account.get("base_id", f"local-device-{device[:32]}")
         if not account and ws.registry.role_of(base):
             raise Denied("the device account identity is already owned by another enrollment")
         if not ws.registry.role_of(base):
