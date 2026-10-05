@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 from conftest import changed_files, file_mtimes, truncated_logs
@@ -51,3 +52,28 @@ def test_keystore_records_keys_and_unknown_locks_remain_guarded(tmp_path):
         (root / name).write_text('12345')
     assert set(file_mtimes(tmp_path)) == {f'keystore/{name}' for name in
         ('state.json', 'master.key', 'credentials.json', 'other.lock')}
+
+
+def test_keystore_rate_metadata_distinguishes_test_and_external_writes(tmp_path, monkeypatch):
+    import conftest
+
+    root = tmp_path / 'keystore'
+    root.mkdir()
+    path = root / 'rate.json'
+    monkeypatch.setattr(conftest, 'ours', lambda entry: entry['owner_pid'] == os.getpid())
+    path.write_text(json.dumps({'writer_pid': 12345, 'reads': [], 'writes': []}))
+    assert file_mtimes(tmp_path) == {}
+    path.write_text(json.dumps({'writer_pid': os.getpid(), 'reads': [], 'writes': []}))
+    assert changed_files({}, file_mtimes(tmp_path)) == ['keystore/rate.json']
+    path.write_text(json.dumps({'reads': [], 'writes': []}))
+    assert 'keystore/rate.json' in file_mtimes(tmp_path)
+
+
+def test_keystore_spending_records_actual_pid_without_calling_backend(tmp_path):
+    from ml_stack.keystore import Keystore
+
+    held = Keystore(directory=tmp_path / 'ks')
+    held._spend('read', 'process provenance')
+    record = json.loads((tmp_path / 'ks' / 'rate.json').read_text())
+    assert record['writer_pid'] == os.getpid()
+    assert record['writer_at'] == record['reads'][-1]

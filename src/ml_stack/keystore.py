@@ -315,8 +315,7 @@ class Keystore:
                              f"runs `{UNLOCK_COMMAND}` once in a terminal to create it.")
 
     def _spend(self, kind: str, purpose: str) -> None:
-        """Count one backend call against its class; a read after an earlier refusal is a retry
-        and counts with the writes."""
+        """Count one backend call and record its process ownership."""
         write = kind != "read" or self._path("denied.json").exists()
         with self._held("state.lock", STATE_WAIT_S):
             now = self._clock()
@@ -328,7 +327,8 @@ class Keystore:
                 raise KeystoreBusy(f"ml-stack has already {what} the keystore {ceiling} times in "
                                    "the last hour and will not ask again until that passes")
             used.append(now)
-            self._put_doc("rate.json", {"reads": reads, "writes": writes})
+            self._put_doc("rate.json", {"reads": reads, "writes": writes,
+                                        "writer_pid": os.getpid(), "writer_at": now})
             near = len(used) / ceiling >= NEAR_CEILING and not write
         if near:
             self._sleep(_JITTER.uniform(0.05, 0.25))
