@@ -154,4 +154,5 @@ def main(argv: list[str] | None = None) -> int:
         say(listing(table))
         return 0
     from ml_stack.fleet.launch import main as app
-    return app(rest)
+    from .daemon import main as daemon_main
+    return app(rest, daemon_main=daemon_main)

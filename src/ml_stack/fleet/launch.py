@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Callable
 from typing import Any
 
 from ml_stack.http import ServerError, request_json
@@ -93,7 +94,8 @@ def _open_when_ready(port: int, browser: bool, stopped: threading.Event) -> None
         stopped.wait(0.15)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *,
+         daemon_main: Callable[[list[str]], int] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack",
         description="Start ml-stack on this machine and open it in your browser.")
@@ -132,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         finally:
             stopped.set()
-    from .daemon import main as daemon_main
+    if daemon_main is None:
+        from .daemon import main as daemon_main
 
     try:
         return daemon_main(arguments)

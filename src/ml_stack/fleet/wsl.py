@@ -128,7 +128,7 @@ def start(argv: list[str], *, executable: str | None = None) -> int:
         environment.append(wsl_network.ENV + "=" + bridge.config)
     try:
         process = launch(command("env", *environment, executable,
-                                 "-m", "ml_stack.fleet.wsl_daemon", *arguments), stdin=subprocess.PIPE)
+                                 "-m", "ml_stack.cli.wsl_daemon", *arguments), stdin=subprocess.PIPE)
         try:
             return process.wait()
         except KeyboardInterrupt:

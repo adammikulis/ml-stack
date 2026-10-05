@@ -8,6 +8,7 @@ from typing import Any
 
 from ml_stack.files import read_json
 from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_history import adopt
@@ -16,11 +17,11 @@ from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
 MAX_REPLY = 512 * 1024
-METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model",
-                     "claim", "release", "heartbeat", "board.list", "board.read",
+METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model", "nudge", "wait",
+                     "claim", "release", "heartbeat", "renew", "board.list", "board.read",
                      "board.threads", "board.join", "board.leave", "board.dm",
                      "board.subscribe", "board.unsubscribe", "board.subs", "board.digest",
-                     "board.rollup", "board.summary"})
+                     "board.rollup", "board.summary", "board.mentions"})
 
 
 class WorkspaceHost:
@@ -57,9 +58,10 @@ class WorkspaceHost:
                 if row.get("event") == "remote.seen"}
         for agent in agents:
             agent["last_seen"] = seen.get(agent["id"], 0)
-            agent["online"] = bool(agent["last_seen"] and ws.clock() - agent["last_seen"] < 90)
+            agent["online"] = bool(agent["last_seen"] and ws.clock() - agent["last_seen"] < 90
+                                   and ws.registry.role_of(agent["id"]))
         boards = ws.board.store.state()[0]
-        chosen = {name for name, info in boards.items() if info.get("project") == project_id}
+        chosen = {name for name, info in boards.items() if info.get("project") == project_id or name == ANNOUNCE}
         messages = [ws.deliver(row) for row in ws.board._rows()
                     if row.get("to") in chosen][-20:]
         return {"project_id": project_id, "name": project.name,
@@ -131,6 +133,8 @@ class WorkspaceHost:
                     bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
                 if "widen" in bound.arguments:
                     bound.arguments["widen"] = False
+                if "timeout_s" in bound.arguments:
+                    bound.arguments["timeout_s"] = min(max(float(bound.arguments["timeout_s"]), 0), 20)
                 result = method(*bound.args, **bound.kwargs)
             else:
                 raise Denied("this operation is unavailable to remote agents")
