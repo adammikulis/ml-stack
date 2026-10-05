@@ -1,7 +1,7 @@
 {
- "surfaces": 698,
+ "surfaces": 699,
  "by_status": {
-  "covered": 381,
+  "covered": 382,
   "partial": 200,
   "uncovered": 54,
   "n/a": 63,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 67,
+   "covered": 68,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -7145,6 +7145,18 @@
     "tests/test_fleet_workspace_routes.py"
    ],
    "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/launch_routes.py:/ui/launch-ticket",
+   "kind": "route",
+   "source": "fleet/launch_routes.py:LaunchRoutes.route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once"
+   ],
+   "note": "Actual Fleet socket checks require a signed-in session and UI header, reject foreign addressed hosts and unsupported methods, and reject replay after the one-use session handoff"
   },
   {
    "id": "route:fleet/onboard/bootstrap.py:manifest",

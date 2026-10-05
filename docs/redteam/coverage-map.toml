@@ -16,6 +16,13 @@ partial = 200
 
 
 [[group]]
+match = ["route:fleet/launch_routes.py:/ui/launch-ticket"]
+status = "covered"
+tests = ["tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once"]
+count = 1
+note = "Actual Fleet socket checks require a signed-in session and UI header, reject foreign addressed hosts and unsupported methods, and reject replay after the one-use session handoff"
+
+[[group]]
 match = ["human:workspace/backlog.py:resume"]
 status = "covered"
 tests = ["tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_attempt_and_consumes_one_retry",
