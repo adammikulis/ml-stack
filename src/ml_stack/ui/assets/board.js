@@ -281,7 +281,7 @@ class MlBoard extends MlElement {
         this.view.kind === "dm" && this.view.a === c.a && this.view.b === c.b,
         () => this.open({ kind: "dm", a: c.a, b: c.b }))),
       ...(this.agents.length ? [h("h3", {}, "Agents"), ...this.agents.map(agent =>
-        item(agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
+        item(agent.device?.label ? `${agent.id} · ${agent.device.label} (${agent.device.verification})` : agent.id, 0, this.view.kind === "dm" && [this.view.a, this.view.b].includes(agent.id),
           () => this.open({kind:"dm", a:this.me, b:agent.id})))] : []));
     this.feed.replaceChildren(...this.pane());
     const key = JSON.stringify([this.target(), this.readonly, this.draft.error, Boolean(this.error), this.loading]);

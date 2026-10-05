@@ -313,6 +313,8 @@ def _join(args: argparse.Namespace, ws: Workspace) -> int:
                      "enroll in its Fleet cluster and use the complete invitation command")
     name = remote.join(limits.root(), args.code, args.name, args.model, args.harness) if remote else onboard.join(
         ws, args.code, args.name, claim=(args.model, args.harness))
+    if not remote:
+        ws.registry._record_device(name, onboard.device_metadata.current())
     say(f"joined as {name}")
     return 0
 
@@ -672,6 +674,8 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
                                     _token(args), request_id=args.request_id)
         else:
             ws, token = _context(args)
+            if isinstance(ws, Workspace):
+                ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
             result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)

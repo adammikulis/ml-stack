@@ -28,7 +28,7 @@ def test_person_channel_thread_dm_drafts_and_live_reply(board, playwright):  # n
         assert rows[-1]['from'] == 'owner' and rows[-1]['thread'] == rows[0]['thread']
         viewer.get_by_role('button', name='Back to #general', exact=True).click()
         viewer.locator('textarea').fill('Unsent channel draft')
-        viewer.get_by_role('button', name='builder', exact=True).click()
+        viewer.get_by_role('button', name='builder', exact=False).click()
         expect(viewer.locator('textarea')).to_have_value('')
         viewer.locator('textarea').fill('Inspect the camera frames.')
         viewer.locator('textarea').press('Control+Enter')
@@ -49,3 +49,22 @@ def test_person_channel_thread_dm_drafts_and_live_reply(board, playwright):  # n
         page.evaluate("window.fleetModel.go('training')")
         expect(viewer).to_have_count(0)
         assert not errors
+
+
+def test_board_directory_shows_device_os_and_provenance_without_granting_identity(board, playwright):  # noqa: F811
+    from playwright.sync_api import expect
+
+    server, kit = board
+    server.ui.settings.setup_done = True
+    kit.ws.registry._record_device('builder', {'device_id': 'a' * 64, 'hostname': 'Mac studio',
+                                 'os': 'macOS', 'source': 'local-runtime', 'verification': 'local-observed'})
+    with playwright.chromium.launch(headless=True) as browser:
+        page = browser.new_page()
+        page.goto(f'http://127.0.0.1:{server.port}/ui/#board')
+        viewer = page.locator('board-view ml-board')
+        entry = viewer.get_by_role('button', name='builder · macOS · Mac studio (local-observed)', exact=True)
+        expect(entry).to_be_visible()
+        entry.click()
+        expect(viewer.locator('textarea')).to_be_visible()
+        assert page.evaluate("document.querySelector('ml-board').view.b") == 'builder'
+        assert kit.worker not in page.content()
