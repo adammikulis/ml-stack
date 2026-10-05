@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 import time
@@ -12,7 +13,7 @@ from pathlib import Path
 from ml_stack.files import read_json, write_json
 from ml_stack.log import say
 from ml_stack.sentinel import human
-from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace import coordinator_client, coordinator_config, onboard, tokens
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["Plan", "Talk", "clipboard", "connect", "walk"]
@@ -50,6 +51,7 @@ class Plan:
     yes: bool = False
     shared: bool = True
     project: dict[str, str] = field(default_factory=dict)
+    code_only: bool = False
 
 
 def _step(n: int, total: int, title: str) -> None:
@@ -121,6 +123,18 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
         _remember(ws, plan, code)
     block = onboard.snippet("", code, hint, plan.project.get("name", ""),
                           (uses, int(ttl // 60)))
+    config = coordinator_config.load(ws.base)
+    if config.get("mode") == "host":
+        offers = [(peer, info) for peer, info in coordinator_client.discover()
+                  if info.get("workspace") == config["workspace"]]
+        if len(offers) != 1:
+            raise ValueError("the hosted workspace needs one advertised coordinator before sharing a code")
+        block = block.replace(f"join {code} --name",
+                              f"join {code} --coordinator {shlex.quote(offers[0][0].name)} --name")
+        block = ("First enroll this device in the same Fleet cluster using person-approved pairing. "
+                 "This agent code does not grant cluster membership.\n" + block)
+    if plan.code_only or plan.wait_s <= 0:
+        say(block)
     if talk.copy(block):
         say("Copied. Paste it into the agent's chat now."
             + (f" The same paste works for up to {uses} agents in the next {ttl / 60:.0f} minutes."
@@ -135,6 +149,9 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
 def _connect_one(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
     """The name of the agent that joined and answered, or an empty string."""
     code = _offer(ws, hint, plan, talk)
+    if plan.code_only or plan.wait_s <= 0:
+        say("Invite ready. No join or live check was requested.")
+        return ""
     before = len(ws.invites.joined(code))
     joined = _wait(plan, talk, "Waiting for the agent to join", plan.wait_s,
                    lambda: len(ws.invites.joined(code)) > before)
