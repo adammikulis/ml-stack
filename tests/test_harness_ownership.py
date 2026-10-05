@@ -88,3 +88,29 @@ def test_explicit_port_worktree_and_install_mutations_reserve_native_resources(k
                                harnesshook.Rail('plan-and-go', 'beta', roots=[str(kit.project)], wait_s=0))
     assert decision['hookSpecificOutput']['permissionDecision'] == 'deny'
     assert kit.ws.claims.who('install', str(python.parent.parent))['owner'] == 'alpha'
+
+
+def test_separate_worktrees_share_source_area_but_allow_independent_files(kit, tmp_path):
+    git = harness_claims.shutil.which('git')
+    def run(*args):
+        return subprocess.run([git, '-C', str(kit.project), *args], capture_output=True,
+                              text=True, check=True, timeout=10)
+    run('init')
+    (kit.project / 'shared.py').write_text('original\n')
+    run('add', 'shared.py')
+    run('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'fixture')
+    other = tmp_path / 'other-worktree'
+    run('worktree', 'add', '-b', 'independent', str(other))
+    kit.ws.registry.set_project(kit.ws.auth(kit.owner), 'beta', describe(str(other)))
+    harness_claims.reserve('Write', {'file_path': str(kit.project / 'shared.py')},
+                           str(kit.project), 'alpha', [str(kit.project)])
+    with pytest.raises(Conflict):
+        harness_claims.reserve('Write', {'file_path': str(other / 'shared.py')},
+                               str(other), 'beta', [str(other)])
+    harness_claims.reserve('Write', {'file_path': str(other / 'independent.py')},
+                           str(other), 'beta', [str(other)])
+    owner = kit.ws.claims.who('area', str(other / 'shared.py'))
+    assert owner['owner'] == 'alpha'
+    assert owner['commit'] == run('rev-parse', 'HEAD').stdout.strip()
+    assert owner['owner_pid'] > 0 and owner['owner_started'] > 0
+    assert owner['environment'] and owner['interpreter']

@@ -14,6 +14,7 @@ from ml_stack.interventions import Call
 from ml_stack.net import git
 from ml_stack.serve.process import started_at
 from ml_stack.workspace import tokens
+from ml_stack.workspace.claims import normal
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project import describe
 from ml_stack.workspace.service import Workspace
@@ -74,6 +75,10 @@ def resources(name, args, cwd):
                         found.append(('port', words[at + 1]))
                     elif word.startswith('--port='):
                         found.append(('port', word.partition('=')[2]))
+    physical = list(found)
+    for kind, key in physical:
+        if kind == 'file' and any((parent / '.git').exists() for parent in Path(key).parents):
+            found.append(('area', normal('area', key)))
     return found
 
 
