@@ -79,6 +79,8 @@ def _wait(ws: Workspace, name: str, seconds: float) -> int:
 
 
 def _start(args: argparse.Namespace, ws: Workspace) -> int:
+    if not ws.registry.ids():
+        tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
     pick = localmodel.choose(args.model, coding=args.profile == "coding")
     if not pick.ok:
         warn(pick.problem)
@@ -88,7 +90,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick)
+                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
+                       person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
     except ls.Unavailable as err:
         warn(str(err))
         return 1
