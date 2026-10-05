@@ -5,13 +5,14 @@ from dataclasses import replace
 import pytest
 from taskboard_kit import board
 
+from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import task_runtime, task_scheduler, task_worker
 
 __all__ = ['board']
 
 
 def test_actual_graph_assignment_proposal_and_no_repeat(board):
-    allocation = task_worker.assigned(board.ws, board.worker_id, board.board)
+    allocation = task_worker.assigned(board.ws, board.worker_id, board.board, 'native-grant')
     assert allocation['allocation_id'] == board.allocation['allocation_id']
     def run(task, project, stopped, checkpoint):
         assert str(project) == allocation['project']
@@ -24,7 +25,7 @@ def test_actual_graph_assignment_proposal_and_no_repeat(board):
     assert task['state'] == 'review'
     assert task['proposal']['id'] == proposal['id']
     assert task['checkpoints'][0]['summary'] == 'Native tool completed'
-    assert task_worker.assigned(board.ws, board.worker_id, board.board) is None
+    assert task_worker.assigned(board.ws, board.worker_id, board.board, 'native-grant') is None
 
 
 def test_actual_graph_block_does_not_reenter_worker(board):
@@ -34,7 +35,16 @@ def test_actual_graph_block_does_not_reenter_worker(board):
     task = board.board.get(board.parent, board.task['id'])
     assert task['state'] == 'blocked'
     assert task['blocked_reason'] == 'Approval expired'
-    assert task_worker.assigned(board.ws, board.worker_id, board.board) is None
+    assert task_worker.assigned(board.ws, board.worker_id, board.board, 'native-grant') is None
+
+
+def test_restarted_worker_waits_for_its_own_grant_and_keeps_old_allocation(board):
+    assert task_worker.assigned(board.ws, board.worker_id, board.board, 'replacement-grant') is None
+    fresh = {**board.allocation, 'allocation_id': 'allocation:replacement', 'lease_id': 'replacement-grant'}
+    with GraphStore(board.ws.base / 'coordination.db') as graph:
+        graph.upsert_node({'id': fresh['allocation_id'], 'kind': 'allocation', 'attrs': fresh})
+    assert task_worker.assigned(board.ws, board.worker_id, board.board, 'replacement-grant') == fresh
+    assert task_worker.assigned(board.ws, board.worker_id, board.board, 'native-grant') == board.allocation
 
 
 def test_person_task_scheduler_excludes_explicit_foreign_project(board):

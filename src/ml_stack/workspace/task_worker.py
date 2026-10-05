@@ -8,13 +8,14 @@ from ml_stack.workspace.chain import held
 from ml_stack.workspace.taskboard import TaskBoard
 
 
-def assigned(ws, identity, board):
+def assigned(ws, identity, board, broker_lease):
     """Return the oldest queued task with an authenticated scheduler allocation."""
     tasks = {row['id']: row for row in board.list(tokens.load(ws.base, identity))['tasks']
              if row['state'] == 'queued'}
     with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
         allocations = [row['attrs'] for row in graph.nodes('allocation')
-                       if row['attrs']['worker'] == identity and row['attrs']['task'] in tasks]
+                       if row['attrs']['worker'] == identity and row['attrs']['task'] in tasks
+                       and row['attrs']['lease_id'] == broker_lease]
     return min(allocations, key=lambda row: tasks[row['task']]['created_at'], default=None)
 
 
@@ -37,7 +38,7 @@ def run(ws, name):
             if held is None:
                 held = localloop.lease_model(agent)
                 status.update(lease=held.lease)
-            allocation = assigned(ws, identity, board)
+            allocation = assigned(ws, identity, board, held.lease['id'])
             if not allocation:
                 status.update(state='idle', detail='Waiting for a canonical task allocation')
                 time.sleep(1)
