@@ -460,7 +460,7 @@ class TestStatus:
                                                          root=Path(kw["root"]),
                                                          group="g"))[1])
         main(["--cluster-key", str(key), "--root", str(tmp_path), "join",
-              "--passphrase", WORDS, "--name", "larchmere"])
+              "--passphrase", WORDS, "--name", "larchmere", "--group", "home"])
 
         assert asked["passphrase"] == WORDS and asked["name"] == "larchmere"
 
