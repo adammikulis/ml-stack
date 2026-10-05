@@ -36,7 +36,7 @@ hidden = [
     "ml_stack.contracts", "ml_stack.client", "ml_stack.media",
     # Reached only through a lazy import, so nothing static points at it.
     "ml_stack.serve", "psutil", "ladybug._lbug", "ladybug._lbug_capi",
-    "ml_stack.graph.store", "ml_stack.graph.cypher",
+    "ml_stack.graph.store", "ml_stack.graph.cypher", "machineid",
     "ml_stack.workspace.fleet_routes", "ml_stack.workspace.coding_routes", "ml_stack.mcp",
     "ml_stack.activity.fleet_routes",
 ]

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ml_stack.files import promote
 
-__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "machine_id",
+__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "device_id", "expand", "home", "machine_id",
            "moved", "state", "user_home"]
 
 ROOT_ENV = "ML_STACK_HOME"
@@ -105,3 +105,15 @@ def machine_id() -> str:
     finally:
         draft.unlink()
     return path.read_text(encoding="utf-8").strip()
+
+
+def device_id():
+    """Fail explicitly when the host provider cannot identify this device."""
+    try:
+        import machineid
+        identity = machineid.hashed_id("ml-stack")
+    except (ImportError, OSError, RuntimeError) as exc:
+        raise RuntimeError("physical device identity unavailable; install ml-stack[coordinator]") from exc
+    if not isinstance(identity, str) or len(identity) != 64 or any(c not in "0123456789abcdef" for c in identity):
+        raise RuntimeError("physical device identity provider returned an invalid app-scoped hash")
+    return identity

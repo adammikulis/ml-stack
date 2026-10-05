@@ -3,8 +3,8 @@ import os
 import sys
 import uuid
 
-from ml_stack import home
 from ml_stack.graph.store import GraphStore
+from ml_stack.home import device_id
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import tokens
@@ -43,7 +43,7 @@ def assign(ws, token, worker, task, lease_id):
     if caller.role != HUMAN and child.parent != caller.id:
         raise Denied("only the person or the worker's registered parent assigns resources")
     account = account_for(ws, worker)
-    if account is None or account["device_id"] != home.machine_id():
+    if account is None or account["device_id"] != device_id():
         raise Denied("the worker has no person-enrolled account on this device")
     grant = _grant(lease_id, broker_wire.status(start=False))
     runner = _worker(ws, worker)
