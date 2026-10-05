@@ -5,6 +5,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from test_project_source import repository  # noqa: F401
 
 from ml_stack import http
 from ml_stack.fleet import tls
@@ -13,6 +14,7 @@ from ml_stack.fleet.daemon import ALL_INTERFACES
 from ml_stack.fleet.discovery import Advertiser, Beacon, derive_token
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.projects import ProjectRegistry
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError, request_json
 from ml_stack.workspace import tokens
@@ -232,3 +234,28 @@ def test_history_from_other_boards_and_conflicting_imports_are_refused(host):
     assert host.adopt(PROJECT, history) == host.adopt(PROJECT, history)
     with pytest.raises(ValueError, match="different adopted history"):
         host.adopt(PROJECT, {"board": "#ml-stack", "messages": [{"text": "different"}]})
+
+
+def test_source_publication_does_not_initialize_board_and_explicit_invite_selects_authority(repository, tmp_path):  # noqa: F811
+    registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), host="https://192.168.2.59:8770")
+    project = registry.share(registry.candidates()[0]["id"], "ml-stack")
+    host = WorkspaceHost(registry)
+    status = host.status(project.id)
+    assert status["state"] == "unconfigured"
+    assert not (registry.root / "shared-workspaces").exists()
+    assert not project.authority_machine
+    host.invite(project.id)
+    assert project.authority_machine == "pc"
+    assert project.board_host == "https://192.168.2.59:8770"
+    assert host.status(project.id)["state"] == "awaiting_agents"
+
+
+def test_foreign_canonical_authority_cannot_be_replaced_by_local_invite(repository, tmp_path):  # noqa: F811
+    registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), host="https://192.168.2.59:8770")
+    project = registry.share(registry.candidates()[0]["id"], "ml-stack")
+    project.authority_machine, project.board_host = "mac", "https://192.168.2.27:8770"
+    host = WorkspaceHost(registry)
+    assert host.status(project.id)["state"] == "connection_required"
+    with pytest.raises(ValueError, match="another workspace authority"):
+        host.invite(project.id)
+    assert project.authority_machine == "mac"
