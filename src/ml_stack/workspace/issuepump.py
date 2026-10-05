@@ -124,7 +124,7 @@ def start(ws, token, name):
     return job.pid
 
 
-def main(argv=None):
+def run(argv=None):
     name, actor = list(sys.argv[1:] if argv is None else argv)
     ws = Workspace()
     bound = os.environ.get(tokens.AGENT_ENV)
@@ -153,4 +153,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
