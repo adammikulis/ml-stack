@@ -1004,7 +1004,17 @@ def _external_activity_drop_write(root: Path, rel: Path) -> bool:
     except (OSError, ValueError, KeyError, TypeError, AttributeError, psutil.Error):
         return False
 
-def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
+def _external_state_write(root: Path, rel: Path) -> bool:
+    return (_external_keystore_lock(root, rel) or _external_keystore_rate(root, rel)
+            or _external_harness_key(root, rel) or _external_scanner_write(root, rel)
+            or _external_activity_drop_write(root, rel))
+
+
+def real_state_changes(root: Path, before: dict[str, int], after: dict[str, int]) -> list[str]:
+    return [name for name in changed_files(before, after) if not _external_state_write(root, Path(name))]
+
+
+def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS, *, attribute_external: bool = True) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
     out: dict[str, int] = {}
@@ -1016,11 +1026,7 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
         for name in filenames:
             if name.endswith(".tmp"):
                 continue
-            if skip is LIVE_WRITERS and (_external_keystore_lock(root, rel / name)
-                                         or _external_keystore_rate(root, rel / name)
-                                         or _external_harness_key(root, rel / name)
-                                         or _external_scanner_write(root, rel / name)
-                                         or _external_activity_drop_write(root, rel / name)):
+            if attribute_external and skip is LIVE_WRITERS and _external_state_write(root, rel / name):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
@@ -1058,7 +1064,7 @@ def _real_home(tmp_path_factory):
     from ml_stack import home
 
     real = types.SimpleNamespace(state=home.home(), cache=home.cache())
-    before = file_mtimes(real.state)
+    before = file_mtimes(real.state, attribute_external=False)
     away = tmp_path_factory.mktemp("home")
     account = home.user_home()
     browsers = account / ("Library/Caches" if sys.platform == "darwin" else ".cache")
@@ -1073,7 +1079,7 @@ def _real_home(tmp_path_factory):
         mp.setenv("ML_STACK_HOME", str(away / ".ml-stack"))
         mp.setenv("ML_STACK_CACHE", str(away / ".cache" / "ml_stack"))
         yield real
-    written = changed_files(before, file_mtimes(real.state))
+    written = real_state_changes(real.state, before, file_mtimes(real.state, attribute_external=False))
     if written:
         pytest.fail(f"the real state root {real.state} was written during the run: "
                     + ", ".join(written[:20]), pytrace=False)

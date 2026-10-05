@@ -70,3 +70,37 @@ def test_unavailable_process_provenance_does_not_raise_into_activity_caller(tmp_
     monkeypatch.setattr(writer.psutil, 'Process', unavailable)
     writer._dropped('isolated unavailable introspection', time.time())
     assert not (tmp_path / 'drops.json').exists()
+
+
+@pytest.mark.parametrize('expiry', ['dead', 'aged'])
+def test_external_writer_expiry_does_not_fabricate_a_state_write(tmp_path, monkeypatch, expiry):
+    path = tmp_path / 'activity/u-501/drops.json'
+    path.parent.mkdir(parents=True)
+    now = time.time()
+    live = [True]
+    clock = [now]
+    record = {'writer_pid':12345,'writer_started':now-20,'writer_at':now}
+    monkeypatch.setattr(conftest,'ours',lambda entry:False)
+    monkeypatch.setattr(conftest.time,'time',lambda:clock[0])
+    monkeypatch.setattr(conftest.psutil,'Process',lambda pid:SimpleNamespace(
+        is_running=lambda:live[0],create_time=lambda:now-20,uids=lambda:SimpleNamespace(real=501)))
+    path.write_text(json.dumps(record))
+    before=conftest.file_mtimes(tmp_path,attribute_external=False)
+    assert conftest._external_activity_drop_write(tmp_path,path.relative_to(tmp_path))
+    if expiry == 'dead':
+        live[0]=False
+    else:
+        clock[0]+=61
+    after=conftest.file_mtimes(tmp_path,attribute_external=False)
+    assert conftest.real_state_changes(tmp_path,before,after) == []
+    record['dropped']=2
+    path.write_text(json.dumps(record))
+    assert conftest.real_state_changes(tmp_path,before,conftest.file_mtimes(tmp_path,attribute_external=False)) == ['activity/u-501/drops.json']
+
+
+def test_actual_test_writer_mutation_is_not_attributed_to_external_process(tmp_path, monkeypatch):
+    path=tmp_path/'activity'/f'u-{os.getuid()}'/'drops.json'
+    path.parent.mkdir(parents=True)
+    before=conftest.file_mtimes(tmp_path,attribute_external=False)
+    path.write_text(json.dumps({'writer_pid':os.getpid(),'writer_started':psutil.Process().create_time(),'writer_at':time.time()}))
+    assert conftest.real_state_changes(tmp_path,before,conftest.file_mtimes(tmp_path,attribute_external=False)) == [path.relative_to(tmp_path).as_posix()]
