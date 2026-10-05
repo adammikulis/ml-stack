@@ -22,7 +22,7 @@ import pytest
 from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import in_cluster, primary_ip
+from ml_stack.fleet.discovery import cluster_group, in_cluster, primary_ip
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.onboard.pairing import unverified_context
@@ -408,14 +408,16 @@ class TestOnItsOwn:
 class TestSignIn:
     @pytest.fixture
     def joined(self, serving):
-        serving.call("/ui/setup/join", method="POST",
-                     body={"passphrase": WORDS, "group": "home"})
+        status, body, _ = serving.call("/ui/setup/join", method="POST",
+                                      body={"passphrase": WORDS, "group": "home"})
+        assert status == 200, body
+        assert cluster_group(serving.keyfile) == "home"
         return serving
 
     def test_the_passphrase_signs_you_in(self, joined):
         """Typing the words you already know, rather than pasting 43 characters."""
         status, body, headers = joined.call("/ui/session", method="POST",
-                                            body={"passphrase": WORDS, "group": "ml-stack"})
+                                            body={"passphrase": WORDS, "group": "home"})
         assert status == 200 and body["signed_in"]
         assert "HttpOnly" in headers["Set-Cookie"]
         assert "SameSite=Strict" in headers["Set-Cookie"]
@@ -426,12 +428,19 @@ class TestSignIn:
                                    body={"passphrase": "not the words"})
         assert status == 401
 
+    @pytest.mark.redteam
+    def test_correct_passphrase_for_a_different_group_is_refused(self, joined):
+        status, body, headers = joined.call('/ui/session', method='POST',
+                                            body={'passphrase':WORDS,'group':'ml-stack'})
+        assert status == 401 and not body.get('signed_in')
+        assert 'Set-Cookie' not in headers
+
     def test_one_typo_does_not_lock_you_out(self, joined):
         """Someone who fumbles a passphrase once and is then told to wait has been
         punished for being the legitimate user."""
         joined.call("/ui/session", method="POST", body={"passphrase": "wrong words"})
         status, body, _ = joined.call("/ui/session", method="POST",
-                                      body={"passphrase": WORDS, "group": "ml-stack"})
+                                      body={"passphrase": WORDS, "group": "home"})
         assert status == 200, body
 
     @pytest.mark.redteam
@@ -448,7 +457,7 @@ class TestSignIn:
 
     def test_a_session_opens_the_cluster_view(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS, "group": "ml-stack"})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, body, _ = joined.call("/ui/peers", cookie=cookie)
         assert status == 200
@@ -491,7 +500,7 @@ class TestSignIn:
 
     def test_signing_out_ends_the_session(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS, "group": "ml-stack"})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         joined.call("/ui/session", method="DELETE", cookie=cookie)
         status, _, _ = joined.call("/ui/peers", cookie=cookie)
@@ -501,7 +510,7 @@ class TestSignIn:
         """The cookie is scoped to /ui. A browser session must not become a bearer
         credential for the route that runs commands."""
         _, _, headers = joined.call("/ui/session", method="POST",
-                                    body={"passphrase": WORDS, "group": "ml-stack"})
+                                    body={"passphrase": WORDS, "group": "home"})
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, _ = joined.call("/jobs", cookie=cookie)
         assert status == 401
