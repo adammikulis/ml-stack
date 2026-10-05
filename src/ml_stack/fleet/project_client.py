@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 
 from ml_stack import sealing
+from ml_stack.files import read_json
 from ml_stack.http import Sealed, ServerError, open_stream
 
+from .discovery import memberships
 from .project_source import MAX_ARCHIVE, ProjectError, checkout, project_id
 from .remote import Peer
 
@@ -34,9 +36,18 @@ def catalogue(peer: Peer) -> dict:
         raise ProjectError("Peer returned an invalid project catalogue")
     for project in result["projects"]:
         project_id(project["id"])
-        if project.get("authority_machine") != result.get("machine"):
-            raise ProjectError("Peer advertised another device's project authority")
+        if project.get("source_machine") != result.get("machine"):
+            raise ProjectError("Peer advertised another device's project source")
     return result
+
+
+def peers(ui) -> list[Peer]:
+    found = {}
+    for member in memberships(ui.cluster_key_path):
+        for peer in Peer.discover(cluster_key_path=ui.cluster_key_path, key=member.key,
+                                  group=member.group, timeout_s=1, port=ui.discovery_port):
+            found.setdefault(peer.base_url, peer)
+    return list(found.values())
 
 
 def available(ui) -> dict:
@@ -44,7 +55,7 @@ def available(ui) -> dict:
     if ui.projects:
         projects = [{**p, "is_self": True, "peer": "", "state": "available"}
                     for p in ui.projects.list()]
-    for peer in Peer.discover(cluster_key_path=ui.cluster_key_path, timeout_s=1, port=ui.discovery_port):
+    for peer in peers(ui):
         if peer.beacon and ui.projects and peer.beacon.machine == ui.projects.machine:
             continue
         try:
@@ -57,7 +68,7 @@ def available(ui) -> dict:
                             "state": "upgrade_required" if getattr(exc, "status", 0) in {404, 501} else "offline",
                             "error": str(exc)})
     for project in projects:
-        authorities = {p["authority_machine"] for p in projects if p["id"] == project["id"]}
+        authorities = {p["authority_machine"] for p in projects if p["id"] == project["id"] and p["authority_machine"]}
         if len(authorities) > 1:
             project["state"] = "conflict"
     return {"projects": projects, "devices": devices,
@@ -74,7 +85,8 @@ def receive(peer: Peer, identifier: str, base: Path) -> Path:
     if hashlib.sha256(data).hexdigest() != project["archive_sha256"]:
         raise ProjectError("Project archive digest mismatch")
     return checkout(data, identifier, project["source_hash"], base,
-                    authority={"machine": project["authority_machine"], "host": peer.base_url})
+                    authority={"machine": project["authority_machine"], "host": project.get("board_host", ""),
+                               "source_machine": project["source_machine"], "source_host": peer.base_url})
 
 
 def route(request) -> bool:
@@ -97,16 +109,16 @@ def route(request) -> bool:
             request.send(200, {"ok": True})
         elif len(suffix) == 2 and suffix[1] == "checkout" and method == "POST":
             selected = request.body().get("peer")
-            peers = [p for p in Peer.discover(cluster_key_path=ui.cluster_key_path, timeout_s=1,
-                                             port=ui.discovery_port) if p.base_url == selected]
-            if len(peers) != 1:
+            selected_peers = [p for p in peers(ui) if p.base_url == selected]
+            if len(selected_peers) != 1:
                 raise ProjectError("Choose a currently authenticated cluster device")
             found = available(ui)
             if any(p["id"] == suffix[0] and p["state"] == "conflict" for p in found["projects"]):
                 raise ProjectError("Project has conflicting workspace authorities")
-            result = receive(peers[0], suffix[0], ui.root / "project-checkouts")
+            result = receive(selected_peers[0], suffix[0], ui.root / "project-checkouts")
             request.send(200, {"project_id": suffix[0], "checkout": str(result),
-                               "board_host": selected, "attached": False})
+                               "board_host": read_json(result / ".ml-stack-project.json", {}).get("authority", {}).get("host", ""),
+                               "attached": False})
         else:
             return False
     except (ProjectError, ServerError, ValueError, OSError) as exc:

@@ -53,7 +53,7 @@ from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
-from .projects import ProjectRegistry
+from .projects import ProjectRegistry, lan_host
 from .serving import Hosting, Serving
 from .settings import Settings
 from .ui import UI
@@ -209,7 +209,7 @@ def serve_forever(root: Path | str | None = None,
         return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
 
     projects = ProjectRegistry(root, bench_host[0].machine,
-                               (Path(__file__).resolve().parents[3], Path.cwd()))
+                               (Path(__file__).resolve().parents[3], Path.cwd()), lan_host(port))
     handler = make_handler(Daemon(
         runner, files_root, lambda: live_token[0],
         name=lambda: live_name[0], report=report, fetcher=fetcher,

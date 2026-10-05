@@ -16,7 +16,7 @@ from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.discovery import derive_token
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.project_client import catalogue, receive
-from ml_stack.fleet.projects import ProjectRegistry, bootstrap
+from ml_stack.fleet.projects import ProjectRegistry, bootstrap, lan_host
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError
 from ml_stack.net import git
@@ -89,10 +89,14 @@ def test_checkout_uses_verified_blobs_without_filters(repository, tmp_path):
 
 
 def test_registry_requires_explicit_selection_and_unshare_closes_source(repository, tmp_path):
-    registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,))
+    registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,), "https://pc:8770")
     with pytest.raises(source.ProjectError):
         registry.share(str(repository))
     project = registry.share(registry.candidates()[0]["id"])
+    assert project.authority_machine == ""
+    with pytest.raises(source.ProjectError):
+        registry.workspace_base(project.id)
+    registry.claim_authority(project.id)
     assert registry.workspace_base(project.id).name == project.id
     assert registry.snapshot(project.id, project.source_hash)
     registry.unshare(project.id)
@@ -104,8 +108,9 @@ def test_remote_checkout_cannot_create_another_authority(repository, tmp_path):
     write_json(repository / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": IDENTIFIER,
                                                         "authority": {"machine": "other"}})
     registry = ProjectRegistry(tmp_path / "daemon", "pc", (repository,))
+    project = registry.share(registry.candidates()[0]["id"])
     with pytest.raises(source.ProjectError, match="authority"):
-        registry.share(registry.candidates()[0]["id"])
+        registry.claim_authority(project.id)
 
 
 def test_http_source_requires_auth_and_transfers_verified_checkout(repository, tmp_path):
@@ -158,3 +163,11 @@ def test_standalone_bootstrap_contains_verified_checkout_helpers(repository, tmp
     namespace = runpy.run_path(str(script))
     target = namespace["checkout"](packed, IDENTIFIER, manifest["source_hash"], tmp_path / "bootstrapped")
     assert (target / "run.sh").read_bytes() == b"#!/bin/sh\necho hello\n"
+
+
+def test_wsl_board_host_uses_authenticated_bridge_lan_address(monkeypatch):
+    monkeypatch.setenv("ML_STACK_WSL_NETWORK", json.dumps({"address": ["192.168.2.59", 4321]}))
+    monkeypatch.delenv("ML_STACK_FLEET_TLS", raising=False)
+    assert lan_host(8770) == "https://192.168.2.59:8770"
+    monkeypatch.setenv("ML_STACK_WSL_NETWORK", json.dumps({"address": ["127.0.0.1", 4321]}))
+    assert lan_host(8770) == ""
