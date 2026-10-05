@@ -1,13 +1,16 @@
 """Native Windows ownership and access checks for workspace token files."""
 
+import sys
 from pathlib import Path
 
-
-def _user():
+if sys.platform == "win32":
+    import ntsecuritycon
+    import pywintypes
     import win32api
     import win32con
     import win32security
 
+def _user():
     token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
     try:
         return win32security.GetTokenInformation(token, win32security.TokenUser)[0]
@@ -17,9 +20,6 @@ def _user():
 
 def restrict(path: Path) -> None:
     """Grant this process's account exclusive access to a token file or directory."""
-    import ntsecuritycon
-    import win32security
-
     user = _user()
     acl = win32security.ACL()
     flags = (win32security.OBJECT_INHERIT_ACE | win32security.CONTAINER_INHERIT_ACE
@@ -34,9 +34,6 @@ def restrict(path: Path) -> None:
 
 def problem(path: Path) -> str:
     """Describe token ownership or access grants that permit another account."""
-    import pywintypes
-    import win32security
-
     try:
         descriptor = win32security.GetNamedSecurityInfo(
             str(path), win32security.SE_FILE_OBJECT,

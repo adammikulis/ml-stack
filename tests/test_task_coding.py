@@ -102,6 +102,7 @@ def test_proposal_binds_committed_files_and_deletions(tmp_path):
     git.run(['init', str(tmp_path)])
     git.run(['config', 'user.name', 'Test'], cwd=tmp_path)
     git.run(['config', 'user.email', 'test@example.invalid'], cwd=tmp_path)
+    git.run(['config', 'core.autocrlf', 'true'], cwd=tmp_path)
     (tmp_path / 'deleted.py').write_text('OLD = True\n')
     git.run(['add', 'deleted.py'], cwd=tmp_path)
     git.run(['commit', '-m', 'baseline'], cwd=tmp_path)
@@ -116,6 +117,7 @@ def test_proposal_binds_committed_files_and_deletions(tmp_path):
     assert set(proposal['artifacts']) == {'.task.patch', '.task-report.md', 'new.py'}
     assert 'deleted file mode' in (tmp_path / '.task.patch').read_text()
     assert proposal['provenance']['commit'] == git.head(tmp_path)
+    task_coding.repo.reviewed_files(tmp_path, git.head(tmp_path), proposal['artifacts'])
     assert not git.run(['status', '--porcelain'], cwd=tmp_path).stdout.strip()
     (tmp_path / 'new.py').write_text('DIRTY = True\n')
     with pytest.raises(RuntimeError, match='uncommitted changes'):

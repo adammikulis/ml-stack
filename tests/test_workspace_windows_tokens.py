@@ -44,6 +44,7 @@ def test_another_account_grant_refuses_token_reads(tmp_path):
 @pytest.mark.skipif(os.name != "nt", reason="native Windows junctions")
 def test_junction_token_directory_is_refused_without_changing_target_acl(tmp_path):
     import subprocess
+
     import win32security
 
     target = tmp_path / "other-private-directory"

@@ -22,9 +22,9 @@ __all__ = [
     "private_file",
     "process_group_kwargs",
     "quit_signals",
+    "start_process",
     "stop_gently",
     "stop_pid",
-    "start_process",
     "terminate_process_group",
 ]
 

@@ -4,6 +4,16 @@
 # person's shell does not. The development branch is the one the primary checkout is on, and
 # `main` is never it. ML_STACK_PUSH_MAIN=yes on the command lets `main` through, for the
 # push the owner has asked for.
+if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+    echo "pre-push: refused: working tree has uncommitted changes" >&2
+    exit 1
+fi
+for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply sequencer; do
+    if [ -e "$(git rev-parse --git-path "$state")" ]; then
+        echo "pre-push: refused: unresolved git operation: $state" >&2
+        exit 1
+    fi
+done
 [ -z "$CLAUDECODE" ] && exit 0
 
 self=$0
@@ -36,7 +46,7 @@ $input
 EOF
 
 if [ -z "$refused" ]; then
-    printf '%s\n' "$input" | python3 "$here/pushed" "$dev"
+    printf '%s\n' "$input" | "${PYTHON:-python3}" "$here/pushed" "$dev"
     exit $?
 fi
 cat >&2 <<WHY

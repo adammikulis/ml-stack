@@ -1,7 +1,9 @@
 """The git hook that lets an agent push the development branch and nothing else."""
 
 import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,9 +40,17 @@ def push(where: Path, *refs: str, sha: str = "", base: str = ZERO,
          **env: str) -> subprocess.CompletedProcess:
     sha = sha or git(where, "rev-parse", "HEAD")
     lines = "".join(f"refs/heads/{r} {sha} refs/heads/{r} {base}\n" for r in refs)
+    hook = where / ".git" / "hooks" / "pre-push"
+    hook.write_text("#!/bin/sh\nexec sh " + shlex.quote(HOOK.as_posix()) + " \"$@\"\n",
+                    encoding="utf-8", newline="\n")
+    hook.chmod(hook.stat().st_mode | 0o111)
+    source = where / ".git" / "push-input"
+    source.write_text(lines, encoding="utf-8")
     return subprocess.run(
-        [str(HOOK), "origin", "https://example.invalid/x.git"], cwd=where,
-        text=True, capture_output=True, input=lines, env={**os.environ, **env})
+        ["git", "hook", "run", "--to-stdin=" + str(source), "pre-push", "--",
+         "origin", "https://example.invalid/x.git"], cwd=where,
+        text=True, capture_output=True,
+        env={**os.environ, "PYTHON": Path(sys.executable).as_posix(), **env})
 
 
 def test_an_agent_pushes_the_development_branch(checkout):
@@ -131,7 +141,7 @@ def test_a_merged_worktree_blocks_the_development_branch_until_removed_or_locked
     git(checkout, "merge", "-q", "--ff-only", "done-work")
     done = push(checkout, "0.9dev", CLAUDECODE="1")
     assert done.returncode != 0
-    assert f"git worktree remove {tree}" in done.stderr
+    assert shlex.join(["git", "worktree", "remove", tree.as_posix()]) in done.stderr
     git(checkout, "worktree", "lock", str(tree))
     assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
 
@@ -146,3 +156,18 @@ def test_a_worktree_with_its_own_commits_does_not_block(checkout):
 def test_a_fresh_worktree_with_no_commits_yet_does_not_block(checkout):
     git(checkout, "worktree", "add", "-q", "-b", "just-started", str(checkout.parent / "fresh"))
     assert push(checkout, "0.9dev", CLAUDECODE="1").returncode == 0
+
+
+@pytest.mark.parametrize("agent", ["", "1"])
+def test_dirty_checkout_refuses_publication(checkout, agent):
+    (checkout / "pending.txt").write_text("pending")
+    done = push(checkout, "0.9dev", CLAUDECODE=agent)
+    assert done.returncode != 0
+    assert "uncommitted changes" in done.stderr
+
+
+def test_clean_checkout_with_pending_operation_refuses_publication(checkout):
+    (checkout / ".git" / "CHERRY_PICK_HEAD").write_text(git(checkout, "rev-parse", "HEAD"))
+    done = push(checkout, "main", CLAUDECODE="")
+    assert done.returncode != 0
+    assert "unresolved git operation" in done.stderr

@@ -4,7 +4,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -581,6 +580,7 @@ def _concurrent_lease(module, index):
 
 def test_rpc_admission_survives_a_live_incomplete_record(tmp_path, monkeypatch):
     import concurrent.futures
+
     from ml_stack.lock import take
 
     rpc = _rpc_module()

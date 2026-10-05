@@ -10,6 +10,7 @@ from pathlib import Path
 from ml_stack.files import writing
 from ml_stack.sentinel import human
 from ml_stack.workspace.identity import PREFIX, TOKEN_ENV, Denied, valid_id
+from ml_stack.workspace.windows_tokens import problem as windows_problem, restrict
 
 __all__ = ["AGENT_ENV", "OWNER_FILE", "directory", "inside_repo", "load", "prepare", "problem",
            "read_file", "resolve", "store"]
@@ -48,8 +49,6 @@ def prepare(base: Path) -> Path:
                          f"move ML_STACK_HOME out of it")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "nt":
-        from ml_stack.workspace.windows_tokens import restrict
-
         restrict(path)
     else:
         path.chmod(0o700)
@@ -72,8 +71,6 @@ def problem(path: Path) -> str:
     if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
         return "is not a plain file"
     if os.name == "nt":
-        from ml_stack.workspace.windows_tokens import problem as windows_problem
-
         return windows_problem(path)
     if info.st_uid != os.getuid():
         return "belongs to another user"
@@ -89,8 +86,6 @@ def store(base: Path, name: str, token: str) -> Path:
     target = prepare(base) / name.replace("/", "~")
     with writing(target) as tmp:
         if os.name == "nt":
-            from ml_stack.workspace.windows_tokens import restrict
-
             restrict(tmp)
         else:
             tmp.chmod(0o600)

@@ -111,9 +111,9 @@ class TestTheLockOnWindows:
     def test_a_second_holder_is_refused_rather_than_allowed_to_overlap(
             self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock
-        with only_one(tmp_path / "l", wait=False), pytest.raises(Busy) as why:
-            with only_one(tmp_path / "l", wait=False):
-                raise AssertionError("two runs held the same lock at once")
+        with (only_one(tmp_path / "l", wait=False), pytest.raises(Busy) as why,
+              only_one(tmp_path / "l", wait=False)):
+            raise AssertionError("two runs held the same lock at once")
         assert str(os.getpid()) in str(why.value), "says who has it, for a stalled machine"
 
     def test_the_lock_is_released_when_the_block_ends(self, win_lock, tmp_path):
@@ -156,9 +156,9 @@ class TestTheLockOnWindows:
 
     def test_a_bounded_wait_gives_up_and_says_so(self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock
-        with only_one(tmp_path / "l"), pytest.raises(Busy, match="still held"):
-            with only_one(tmp_path / "l", timeout=0.2, announce=lambda _: None):
-                pass
+        with (only_one(tmp_path / "l"), pytest.raises(Busy, match="still held"),
+              only_one(tmp_path / "l", timeout=0.2, announce=lambda _: None)):
+            pass
 
     def test_the_pid_is_written_at_the_front_where_a_person_can_read_it(
             self, win_lock, tmp_path):
@@ -463,7 +463,7 @@ class TestAutostartOnWindows:
 
     def test_when_schtasks_refuses_the_startup_folder_is_the_fallback(
             self, win_autostart, tmp_path):
-        auto, ran, refuse = win_autostart
+        auto, _ran, refuse = win_autostart
         refuse["/Create"] = 1
 
         done = auto.install("login", log_dir=tmp_path)

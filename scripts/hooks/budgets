@@ -21,7 +21,7 @@ sys.path.insert(0, str(HERE.parent))
 
 import gates  # noqa: E402
 
-ROOT = HERE.parent.parent
+ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 BUDGETS = ROOT / "budgets.json"
 
 

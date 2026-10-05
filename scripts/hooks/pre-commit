@@ -13,8 +13,8 @@ while [ -L "$self" ]; do
 done
 here=$(cd "$(dirname "$self")" && pwd)
 
-"$here/primary-only"
-"$here/no-data-files"
+"${PYTHON:-python3}" "$here/primary-only"
+"${PYTHON:-python3}" "$here/no-data-files"
 "$here/no-real-names" "$@"
-"$here/budgets" "$@"
-"$here/budgets-only-fall" "$@"
+"${PYTHON:-python3}" "$here/budgets" "$@"
+"${PYTHON:-python3}" "$here/budgets-only-fall" "$@"

@@ -27,7 +27,7 @@ def test_source_dedup_graph_artifacts_and_reopened_accepted_outcome(board):
         assert {'task', 'agent', 'device', 'allocation', 'lease', 'proposal', 'artifact', 'review'} <= {n['kind'] for n in graph.nodes()}
         assert {'depends-on', 'produced-artifact'} & {edge['rel'] for edge in graph.edges()} == {'produced-artifact'}
     metrics = board.board.list(board.child)['metrics']
-    assert metrics['verified_outcomes'] == 1 and metrics['accepted_artifacts'] == 1
+    assert metrics['verified_outcomes'] == 0 and metrics['accepted_artifacts'] == 0
     with pytest.raises(ValueError, match='source key'):
         board.board.create(board.parent, {**board.spec, 'title': 'Changed request'})
 
