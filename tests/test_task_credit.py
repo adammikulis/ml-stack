@@ -145,7 +145,8 @@ def test_concurrent_canonical_award_and_outcome_record_once(board, ledger):
     assert row['economy']['balance'] == 10 and row['work_reputation']['outcomes']['accepted'] == 1
 
 
-def test_canonical_tasks_from_different_workers_and_models_share_device_balance(board, ledger):
+@pytest.mark.parametrize('model, balance, members', [('Qwen3.8-27B', 20, 2), ('gemma', 10, 1)])
+def test_canonical_awards_follow_verified_model_family_not_device_or_worker_label(board, ledger, model, balance, members):
     from pathlib import Path
 
     from ml_stack.workspace import (
@@ -159,10 +160,10 @@ def test_canonical_tasks_from_different_workers_and_models_share_device_balance(
     task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
     delegated = board.ws.delegate(board.parent, 'second-model')
     second, token = delegated['id'], tokens.read_file(Path(delegated['token_file']))
-    localagent.save(board.ws, localagent.Agent('second-model', 'gemma', identity=second,
+    localagent.save(board.ws, localagent.Agent('second-model', model, identity=second,
                                               profile='coding', project=str(board.source), pid=555, process_started=42))
     device_agent.bind_worker(board.ws, board.owner, 'second-model')
-    board.status['servers'][0]['model'] = 'gemma'
+    board.status['servers'][0]['model'] = model
     board.status['servers'][0]['pid'] = 1001
     task = board.board.create(board.parent, {**board.spec, 'source_key': 'repo:demo/sim:issue:43'})
     board.prepare(task['id'], second)
@@ -170,14 +171,19 @@ def test_canonical_tasks_from_different_workers_and_models_share_device_balance(
     board.board.claim(token, task['id'], allocation['allocation_id'])
     board.board.submit(token, task['id'], {'artifacts': {'next.json': 'b' * 64},
                         'checks': [{'name': 'Worker claims tests', 'passed': True}],
-                        'provenance': {'model': 'gemma', 'runtime': 'Codex'}})
+                        'provenance': {'model': 'forged-qwen-label', 'runtime': 'Codex'}})
     board.board.review(board.parent, task['id'], accepted())
     task_credit.verify_task(board.ws, board.parent, task['id'], ledger=ledger)
     row = work_reputation.standings(board.ws, token, ledger=ledger)['own']
-    assert row['economy']['balance'] == 20 and row['verified_tasks'] == 2
-    assert {board.worker_id, second} <= set(row['members'])
-    assert {item['provenance']['model'] for item in row['evidence']} == {'qwen', 'gemma'}
-    assert row['work_reputation']['reliability_samples'] == 2
+    assert row['economy']['balance'] == balance and row['verified_tasks'] == members
+    assert len(row['members']) == members and second in row['members']
+    assert model in {item['provenance']['model'] for item in row['evidence']}
+    assert row['account_type'] == 'model_family'
+    team = work_reputation.standings(board.ws, board.parent, ledger=ledger)['team']
+    qwen = next(item for item in team if item['family_id'] == 'qwen')
+    assert qwen['economy']['balance'] == (20 if members == 2 else 10)
+    assert sum(item['economy']['balance'] for item in team) == 20
+    assert len(ledger.sealed.graph().nodes('work_award')) == 2
 
 
 @pytest.mark.redteam

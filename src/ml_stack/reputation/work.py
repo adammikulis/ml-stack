@@ -131,6 +131,11 @@ def _details(graph, ident, agent_id, evidence):
                        'attrs': {key: award[key] for key in ('policy', 'currency', 'base', 'quality_bonus', 'total')}})
     graph.upsert_edge({'source': agent_id, 'target': node, 'rel': 'earned'})
     graph.upsert_edge({'source': node, 'target': ident, 'rel': 'justified_by'})
+    if account := evidence.get('family_account'):
+        graph.upsert_node({'id': account['id'], 'kind': 'model-family-account',
+                           'label': account['label'], 'attrs': account})
+        graph.upsert_edge({'source': account['id'], 'target': node, 'rel': 'earned'})
+        graph.upsert_edge({'source': ident, 'target': account['id'], 'rel': 'credited-to-family'})
     decision = ident + ':verification'
     graph.upsert_node({'id': decision, 'kind': 'work_verification', 'label': evidence['verifier'],
                        'attrs': {'reviewer': evidence['verifier'], 'at': evidence['verified_at'],

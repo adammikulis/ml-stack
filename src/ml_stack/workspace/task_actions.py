@@ -8,6 +8,7 @@ from uuid import uuid4
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import task_worktrees
 from ml_stack.workspace.chain import held
+from ml_stack.workspace.family_accounts import bind_submission
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.resource_allocations import verified_binding
 from ml_stack.workspace.task_graph import link, record, save
@@ -102,7 +103,9 @@ def submit(board, token, ident, value):
         proposal['claimed_provenance'] = proposal['provenance']
         proposal['provenance'] = {**proposal['provenance'], 'model': lease['resource']['model'],
                                   'allocation_id': lease['allocation_id'],
+                                  'device_id': lease['resource'].get('device_id'),
                                   'runtime': lease['resource'].get('harness') or lease['resource'].get('profile', '')}
+        proposal['family_account'] = bind_submission(graph, task, task['worker'], lease['resource'], proposal['at'])
         proposal['proposal_hash'] = fingerprint(proposal)
         save(graph, 'proposal', proposal)
         link(graph, ident, proposal['id'], 'proposed-outcome')
