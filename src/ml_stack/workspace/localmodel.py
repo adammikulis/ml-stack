@@ -92,7 +92,7 @@ def _ranked(installed: Sequence[object], machine: object | None) -> list[object]
 
 def _line(row: object) -> Pick:
     one = row.candidate  # type: ignore[attr-defined]
-    return Pick(ref=one.ref or str(one.path or one.name), name=one.name, size_bytes=one.size_bytes,
+    return Pick(ref=str(one.path or one.ref or one.name), name=one.name, size_bytes=one.size_bytes,
                 verdict=row.verdict, note=row.reason)  # type: ignore[attr-defined]
 
 
