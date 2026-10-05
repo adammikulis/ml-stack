@@ -150,7 +150,9 @@
       if (result?.ok && this.selected === project) {
         this.querySelector('#project-access').hidden = false;
         this.querySelector('#project-access-hint').textContent = result.command
-          ? 'Run this on the agent\'s device. The code expires after ten minutes.'
+          ? /\b(NAME|MODEL|HARNESS|HOST_URL)\b/.test(result.command)
+            ? 'Replace NAME, MODEL and HARNESS with the agent details, and HOST_URL with the board authority\'s reachable address. Run it on the agent\'s device within ten minutes.'
+            : 'Run this on the agent\'s device. The code expires after ten minutes.'
           : 'Project-scoped access code. Use it with workspace remote join on the agent\'s device. It expires after ten minutes.';
         this.querySelector('#project-command').textContent = result.command || result.code || '';
         this.querySelector('#project-board-state').textContent = 'Access code ready. Waiting for the agent to connect.';
