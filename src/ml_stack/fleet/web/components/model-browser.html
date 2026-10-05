@@ -132,7 +132,7 @@
         || group.rows.find((x) => x.recommended) || group.rows[0];
       const quant = (x) => (x.file || x.name).match(/-((?:IQ|Q)\d(?:_[A-Z0-9]+)+)(?:-mtp)?(?=\.gguf$)/i)?.[1] || "Original";
       const size = (x) => x.size ? M.fileSize(x.size)
-        : x.download_gb !== undefined ? `${x.download_gb} GB` : x.gb !== undefined ? `${x.gb} GB` : "size unknown";
+        : x.download_gb !== undefined ? `${x.download_gb} GB` : x.gb !== undefined ? `${x.gb} GiB` : "size unknown";
       const title = group.rows.some((x) => quant(x) !== "Original") || chosen.name.endsWith(".gguf")
         ? group.key.replace(/-/g, " ") : chosen.name;
       const card = el("div", { class: "model-row", "data-group": group.key });
@@ -151,12 +151,14 @@
         card.dataset.model = name;
         const loading = this.pending.has(name);
         const active = running.has(name);
-        const total = (chosen.download_gb ?? chosen.gb) + (chosen.draft_download_gb ?? chosen.draft_gb ?? 0);
+        const weightsGB = chosen.download_gb ?? (chosen.gb === undefined ? NaN : chosen.gb * 2**30 / 1e9);
+        const draftGB = chosen.draft_download_gb ?? (chosen.draft_gb === undefined ? NaN : chosen.draft_gb * 2**30 / 1e9);
+        const total = weightsGB + (chosen.draft_ref ? draftGB : 0);
         detail.replaceChildren(el("span", {}, name), el("span", { class: "why" },
           this.source === "network" ? (chosen.local
             ? `This machine · ${size(chosen)}${loading ? " · loading model" : active ? " · running" : ""}`
             : `On ${(chosen.peers || []).join(", ")} · ${size(chosen)}`)
-          : `${size(chosen)} weights${chosen.draft_ref ? ` + ${chosen.draft_download_gb ?? chosen.draft_gb ?? "unknown"} GB MTP head · ${Number.isFinite(total) ? `${total.toFixed(1)} GB total download` : "total size unknown"}` : ""}`),
+          : `${size(chosen)} weights${chosen.draft_ref ? ` + ${Number.isFinite(draftGB) ? `${draftGB.toFixed(1)} GB` : 'size unknown'} MTP head · ${Number.isFinite(total) ? `${total.toFixed(1)} GB total download` : "total size unknown"}` : ""}`),
           ...M.kids(chosen.estimated_context ? el("span", { class: "why" },
             `Estimated up to ${M.ctxWords(chosen.estimated_context)} at Q8 KV; other apps reduce available memory.`) : null,
             chosen.bits_per_weight ? el("span", { class: "why" }, `${chosen.bits_per_weight} bits per weight`) : null));

@@ -101,13 +101,15 @@
       this.querySelector('#project-checkout').disabled = this.busy || ['conflict', 'upgrade_required'].includes(result.state || project.state);
       this.querySelector('#project-board-state').textContent = !available
         ? result.error || (project.state === 'conflict' ? 'Project authority conflict. Resolve it before connecting agents.' : 'Shared board unavailable. Update or reconnect the authority device.')
-        : result.state === 'connected' ? 'Agents connected to the shared board' : 'Waiting for agents to connect';
+        : {connected: 'Agents connected to the shared board', offline: 'Registered agents are offline',
+          unconfigured: 'Board not connected/configured', awaiting_agents: 'Waiting for agents to connect'}[result.state]
+          || 'Board not connected/configured';
       const signature = JSON.stringify([result.agents, result.messages, result.history]);
       if (signature === this.boardSignature) return;
       this.boardSignature = signature;
       const agents = this.querySelector('#project-agents');
       agents.replaceChildren(...(result.agents || []).map(a => el('p', {},
-        el('b', {}, a.label || a.name || a.id), ` · ${a.role || 'agent'}${a.model ? ` · ${a.model}` : ''}${a.model_state ? ` · ${a.model_state}` : ''}`)));
+        el('b', {}, a.label || a.name || a.id), ` · ${a.role || 'agent'} · ${a.online ? 'online' : 'offline'}${a.model ? ` · ${a.model}` : ''}${a.model_state ? ` · ${a.model_state}` : ''}`)));
       if (!result.agents?.length) agents.append(el('p', {class: 'hint'}, 'No agents connected yet.'));
       const messages = this.querySelector('#project-messages');
       messages.replaceChildren(...(result.messages || result.history || []).map(m => el('div', {class: 'project-message'},

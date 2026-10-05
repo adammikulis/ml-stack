@@ -132,6 +132,12 @@ def test_projects_keep_source_checkout_separate_from_explicit_agent_access(app):
     page.get_by_text("Review ready", exact=True).wait_for()
     assert page.get_by_label("Agent label (optional)").input_value() == "Mac reviewer"
     assert page.get_by_text("Agents connected to the shared board", exact=True).is_visible()
+    state["project_board"] = {"state": "offline", "agents": [{"id": "agent-a", "online": False}]}
+    page.evaluate("document.querySelector('projects-view').draw()")
+    page.get_by_text("Registered agents are offline", exact=True).wait_for()
+    state["project_board"] = {"state": "unconfigured", "agents": []}
+    page.evaluate("document.querySelector('projects-view').draw()")
+    page.get_by_text("Board not connected/configured", exact=True).wait_for()
     assert not errors
 
 

@@ -39,7 +39,7 @@
       try {
         const [m, run] = await Promise.all([api("/ui/models"), api("/ui/serving")]);
         if (M.refused(m) || M.refused(run) || this.box.hidden) return;
-        this.querySelector("#models-free").textContent = `${m.free_gb || 0} GB free storage on this machine.`;
+        this.querySelector("#models-free").textContent = `${m.free_gb || 0} GiB free storage on this machine.`;
         this.browser.setInventory(m, run);
         this.paintDownloads(m.getting || []);
         const section = this.querySelector("#models-unfinished");
