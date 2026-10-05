@@ -645,53 +645,29 @@ def test_start_records_the_started_model_as_verified(kit, monkeypatch):
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
 
 
-def test_coding_tasks_reuse_the_registered_seat_and_reply_on_each_thread(kit, monkeypatch, tmp_path):
+def test_coding_entrypoint_uses_canonical_worker(kit, monkeypatch):
     from ml_stack.workspace import localcoding
 
-    authority = kit.agent("a")
-    issued = kit.ws.delegate(authority, "qwen")
-    identity = issued["id"]
-    agent = la.Agent("local-qwen", "model.gguf", identity=identity, profile="coding",
-                     harness="codex", role=roles.PLAN_AND_GO, project=str(tmp_path), orders_from=("a",))
-    la.save(kit.ws, agent)
     seen = []
-
-    def native(manager, turn, conversation, prompt):
-        seat = manager._seat("ignored", tmp_path, "ignored", lambda _: None)
-        assert seat.name == identity and not seat.minted
-        assert conversation.settings["context"] == agent.ctx
-        assert conversation.settings["role"] == roles.PLAN_AND_GO
-        assert kit.ws.auth(tokens.load(kit.base, identity)).id == identity
-        seen.append(prompt)
-        turn.text = "Completed coding task"
-
-    monkeypatch.setattr(localcoding.BoundManager, "_run", native)
-    settings = localloop.Settings(execute=lambda a, row, why, stop: localcoding.perform(kit.ws, a, row, why, stop))
-    loop = localloop.Loop(kit.ws, agent, localloop.Held(None, {}), settings,
-                         (lambda: False, la.Status(kit.ws, agent.name)))
-    for text in ("implement first task", "implement second task"):
-        sent = kit.ws.send(authority, identity, "task", text)
-        row = next(r for r in kit.ws.inbox(tokens.load(kit.base, identity), raw=True) if r["seq"] == sent["seq"])
-        loop.handle(row)
-        reply = kit.ws.thread(authority, sent["seq"])[-1]
-        assert reply["from"] == identity and "Completed coding task" in reply["text"]
-    assert len(seen) == 2 and kit.ws.registry.role_of(identity) == "agent"
-    assert all("Verified-work reputation" in prompt and identity in prompt for prompt in seen)
-    assert "Verified-work reputation" in la.status_of(kit.ws, agent.name)["reputation"]
+    monkeypatch.setenv('ML_STACK_AGENT', '1')
+    monkeypatch.setenv('ML_STACK_NONINTERACTIVE', '1')
+    monkeypatch.setattr(localcoding, 'Workspace', lambda: kit.ws)
+    monkeypatch.setattr(localcoding.task_worker, 'run', lambda ws, name: seen.append((ws, name)))
+    assert localcoding.run_detached(['local-qwen']) == 0
+    assert seen == [(kit.ws, 'local-qwen')]
 
 
-def test_empty_native_result_is_an_error_without_completed_activity(kit, monkeypatch, tmp_path):
-    from ml_stack.workspace import localcoding
+def test_empty_native_result_cannot_submit_artifacts(kit, monkeypatch, tmp_path):
+    from ml_stack.workspace import task_coding
 
-    events = []
-    monkeypatch.setattr(localcoding.BoundManager, "_run", lambda *args: None)
-    monkeypatch.setattr(localcoding.activity, "record", lambda kind, **fields: events.append(fields))
+    monkeypatch.setattr(task_coding.TaskManager, "_run", lambda *args: None)
+    monkeypatch.setattr(task_coding.git, 'head', lambda *_: 'a' * 40)
     tokens.store(kit.base, "local-qwen", kit.agent("local-qwen"))
     agent = la.Agent("local-qwen", "model.gguf", profile="coding", project=str(tmp_path))
-    row = {"seq": 1, "from": "lead", "text": "work"}
-    kind, text, steps = localcoding.perform(kit.ws, agent, row, "authorized", lambda: False)
-    assert kind == "status" and "without an answer" in text and steps == 1
-    assert [event["outcome"] for event in events] == ["started", "error"]
+    task = {'id': 'task:' + 'a' * 32, 'title': 'Task', 'description': 'Work', 'acceptance': ['Checks pass']}
+    with pytest.raises(RuntimeError, match='without an answer'):
+        task_coding.perform(kit.ws, agent, task, tmp_path, (lambda: False, lambda _: None))
+    assert not (tmp_path / '.task-report.md').exists()
 
 
 def test_stopping_a_delegated_worker_revokes_only_its_private_identity(kit):

@@ -20,13 +20,14 @@ from ml_stack.workspace import (
     localprofile as lp,
     localstart as ls,
     plain,
+    task_scheduler,
     tokens,
 )
 from ml_stack.workspace.service import Workspace
 
 __all__ = ["ACTIONS", "OPTIONS", "run"]
 
-ACTIONS = ("start", "stop", "list", "backlog")
+ACTIONS = ("start", "stop", "list", "backlog", "schedule")
 READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
@@ -134,6 +135,10 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
     """Do the ``agent`` action; start and stop are for a person at a terminal."""
     if args.action == "list":
         return _list(ws)
+    if args.action == 'schedule':
+        if not args.target or not args.agent:
+            raise ValueError('agent schedule requires a worker name and --agent registered-parent')
+        return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target))
     human.require_person(f"{args.action} a local agent")
     if args.action == "backlog":
         if not args.target:

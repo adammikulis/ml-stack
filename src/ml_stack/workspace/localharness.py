@@ -7,4 +7,4 @@ __all__ = ["CODEX", "OWN", "RUNNER"]
 
 OWN = "ml-stack-agent"
 CODEX = "codex"
-RUNNER = "ml_stack.workspace.task_worker"
+RUNNER = "ml_stack.workspace.localcoding"

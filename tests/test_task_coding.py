@@ -15,7 +15,7 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
     def process(self, turn, command, environment, context):
         seen.update(command=command, environment=environment)
         return 0
-    monkeypatch.setattr(task_coding.BoundManager, '_process', process)
+    monkeypatch.setattr(task_coding.Manager, '_process', process)
     manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
     context = (None, 'claude', 'prompt', None)
     manager._process(None, ['claude', '--print'], {'AUTHORITY': 'unchanged'}, context)
@@ -34,6 +34,8 @@ def test_canonical_stop_cancels_native_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(task_coding, 'Conversations', lambda *_: SimpleNamespace(start=lambda **_: conversation))
     monkeypatch.setattr(task_coding.git, 'head', lambda _: 'a' * 40)
     monkeypatch.setattr(task_coding.la, 'folder', lambda _: tmp_path)
+    monkeypatch.setattr(task_coding.tokens, 'load', lambda *_: 'token')
+    monkeypatch.setattr(task_coding.work_reputation, 'brief', lambda *_: 'Recorded reputation data')
     monkeypatch.setattr(task_coding.Turn, 'cancel', lambda self: (cancelled.append(True), self.cancelled.set()))
     def run(self, turn, conversation, prompt):
         assert 'calling done' not in prompt

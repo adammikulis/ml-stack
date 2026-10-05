@@ -2,7 +2,7 @@
 
 from taskboard_kit import board
 
-from ml_stack.workspace import task_runtime, task_worker
+from ml_stack.workspace import task_runtime, task_scheduler, task_worker
 
 __all__ = ['board']
 
@@ -32,3 +32,19 @@ def test_actual_graph_block_does_not_reenter_worker(board):
     assert task['state'] == 'blocked'
     assert task['blocked_reason'] == 'Approval expired'
     assert task_worker.assigned(board.ws, board.worker_id, board.board) is None
+
+
+def test_person_task_scheduler_excludes_explicit_foreign_project(board):
+    board.board.claim(board.child, board.task['id'], board.allocation['allocation_id'])
+    board.board.block(board.child, board.task['id'], 'Prior task awaiting review')
+    wrong = board.board.create(board.owner, {**board.spec, 'source_key': 'wrong-project',
+                                            'project': {'root': '/another/repository'}})
+    assert task_scheduler.assign_next(board.ws, board.parent, board.worker_id, 'native-grant') is None
+    assert board.board.get(board.parent, wrong['id'])['state'] == 'queued'
+    task = board.board.create(board.owner, {**board.spec, 'source_key': 'person-current-project'})
+    allocation = task_scheduler.assign_next(board.ws, board.parent, board.worker_id, 'native-grant')
+    assert allocation['task'] == task['id']
+    assert allocation['source_project'] == str(board.source)
+    assert allocation['project'] != str(board.source)
+    board.board.claim(board.child, task['id'], allocation['allocation_id'])
+    assert board.board.get(board.parent, task['id'])['worker'] == board.worker_id

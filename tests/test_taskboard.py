@@ -151,6 +151,7 @@ def test_designated_peer_requires_existing_project_grant_and_cannot_self_review(
     peer = board.agent('independent-reviewer')
     owner = board.ws.auth(board.owner)
     project = {'root': '/approved/project'}
+    board.ws.registry.set_project(owner, board.worker_id, project)
     spec = {**board.spec, 'source_key': 'peer-review', 'project': project,
             'reviewers': ['independent-reviewer']}
     with pytest.raises(Denied, match='project grants'):
@@ -197,9 +198,11 @@ def test_designated_reviewer_without_read_capability_cannot_grade_task(board):
     reviewer = board.ws.delegate(board.parent, 'no-read-reviewer', can=('send',))
     token = tokens.read_file(Path(reviewer['token_file']))
     project = {'root': '/approved/project'}
+    board.ws.registry.set_project(board.ws.auth(board.owner), board.worker_id, project)
     board.ws.registry.set_project(board.ws.auth(board.owner), reviewer['id'], project)
     board.task = board.board.create(board.owner, {**board.spec, 'source_key': 'read-grant-check',
                                     'project': project, 'reviewers': [reviewer['id']]})
+    board.prepare(board.task['id'])
     board.allocation = resource_allocations.assign(board.ws, board.parent, board.worker_id,
                                                    board.task['id'], 'native-grant')
     proposed(board)
