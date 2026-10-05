@@ -18,7 +18,6 @@ from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.plain import line
 
 POLL_S = 60
-MAX_FAILURES = 3
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -117,10 +116,12 @@ def pick(ws, agent, *, fetcher=fetch, clock=time.time):
                 continue
             key = f"issue:{repo}:{issue['number']}"
             old = _record(graph, key)
+            if old.get('state') in ('blocked', 'superseded'):
+                continue
             if old.get("state") == "working" and pid_exists(old.get("pid", 0)):
                 continue
             if old.get("revision") == issue.get("updatedAt") and (
-                    old.get("state") == "proposed" or old.get("failures", 0) >= MAX_FAILURES
+                    old.get("state") == "proposed"
                     or old.get("next_try", 0) > now):
                 continue
             record = {**old, "revision": issue.get("updatedAt"), "state": "working",
@@ -133,7 +134,7 @@ def pick(ws, agent, *, fetcher=fetch, clock=time.time):
 
 
 def finish(ws, issue, agent, result, *, clock=time.time):
-    """Record a proposed result or bounded retry without awarding completion credit."""
+    """Project a proposed or blocked canonical outcome without completion credit."""
     kind, text = result
     with held(ws.base / "issue-backlog.lock"), _store(ws) as graph:
         record = _record(graph, issue["key"])
@@ -141,7 +142,5 @@ def finish(ws, issue, agent, result, *, clock=time.time):
             raise Denied("this issue lease belongs to another worker")
         failed = kind != "answer"
         failures = record.get("failures", 0) + int(failed)
-        _save(graph, issue["key"], issue["repo"], {**record, "state": "blocked" if failures >= MAX_FAILURES
-            else "retry" if failed else "proposed", "failures": failures, "finished": clock(),
-            "next_try": clock() + min(900, 30 * 2 ** failures), "summary": line(text, 400)})
-
+        _save(graph, issue["key"], issue["repo"], {**record, "state": "blocked" if failed else "proposed",
+            "failures": failures, "finished": clock(), "summary": line(text, 400)})

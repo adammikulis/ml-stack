@@ -19,7 +19,9 @@ def assign_next(ws, parent_token: str, worker: str, broker_lease: str):
     parent, child = ws.auth(parent_token), ws.auth(tokens.load(ws.base, worker))
     if child.parent != parent.id:
         raise Denied('the scheduler must be the worker registered parent')
-    child_renewal.renew(ws, parent_token, worker)
+    expiry = ws.registry.info(worker).get('expires', 0)
+    if expiry and expiry - ws.registry.clock() < ws.limits.child_ttl_s / 4:
+        child_renewal.renew(ws, parent_token, worker)
     board = TaskBoard(ws)
     runner = resource_allocations._worker(ws, worker)
     grant = resource_allocations._grant(broker_lease, resource_allocations.broker_wire.status(start=False))
@@ -46,4 +48,3 @@ def watch(ws, parent_token, name):
             assign_next(ws, parent_token, agent.identity or agent.name, status['lease']['id'])
         time.sleep(1)
     return 0
-
