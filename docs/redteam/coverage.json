@@ -1,7 +1,7 @@
 {
- "surfaces": 697,
+ "surfaces": 698,
  "by_status": {
-  "covered": 380,
+  "covered": 381,
   "partial": 200,
   "uncovered": 54,
   "n/a": 63,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 81,
+   "covered": 82,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -3354,6 +3354,20 @@
     "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
    ],
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/backlog.py:resume",
+   "kind": "human",
+   "source": "workspace/backlog.py:resume",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_attempt_and_consumes_one_retry",
+    "tests/test_workspace_backlog.py::test_issue_resume_refuses_unblocked_foreign_and_child_requests",
+    "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_canonical_task_retry_budget"
+   ],
+   "note": "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and canonical budget bypasses are refused"
   },
   {
    "id": "human:workspace/backlog.py:supersede",
