@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.machinery
 import importlib.util
 import os
 import re
@@ -42,9 +43,16 @@ def guards(root: Path) -> list[str]:
 
 
 def installed(name: str) -> bool:
-    """Whether this module can be imported here."""
+    """Whether this module is discoverable, without executing native package parents."""
     try:
-        return importlib.util.find_spec(name) is not None
+        parts = name.split('.')
+        spec = importlib.util.find_spec(parts[0])
+        for index in range(1, len(parts)):
+            if spec is None or spec.submodule_search_locations is None:
+                return False
+            spec = importlib.machinery.PathFinder.find_spec(
+                '.'.join(parts[:index + 1]), spec.submodule_search_locations)
+        return spec is not None
     except (ImportError, ValueError):
         return False
 
