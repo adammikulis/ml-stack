@@ -76,8 +76,8 @@ def test_a_joined_child_is_listed_with_its_parent_and_its_sends_count_against_th
     child = tokens.load(kit.base, name)
     sent = 0
     with pytest.raises(Exception, match=r"rate|limit|window"):
-        for _ in range(10):
-            kit.ws.send(child, "lead-a", "status", "hi")
+        for step in range(10):
+            kit.ws.send(child, "lead-a", "status", f"progress {step}")
             sent += 1
     assert sent <= 2
 
