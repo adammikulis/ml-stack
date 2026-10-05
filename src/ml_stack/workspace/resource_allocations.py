@@ -50,10 +50,13 @@ def assign(ws, token, worker, task, lease_id):
     if caller.role != HUMAN and (runner.pid != grant["holder_pid"]
                                  or runner.process_started != grant["holder_started"]):
         raise Denied("the worker does not own this broker holder")
+    if runner.profile not in ("chat", "coding"):
+        raise Denied("the configured worker profile has no coordinator capability")
     allocation = {"allocation_id": f"allocation:{uuid.uuid4().hex}", "worker": worker, "task": task,
                   "device_id": account["device_id"], "base_id": account["base_id"], **grant,
                   "owner": caller.id, "person_assigned": caller.role == HUMAN, "requester": worker, "reason": f"Task {task}",
-                  "interpreter": sys.executable, "python": sys.version.split()[0], "scheduler_pid": os.getpid()}
+                  "profile": runner.profile, "capabilities": [runner.profile], "harness": runner.harness,
+                  "project": runner.project, "interpreter": sys.executable, "python": sys.version.split()[0], "scheduler_pid": os.getpid()}
     with held(ws.base / "coordination.lock"), GraphStore(ws.base / "coordination.db") as graph:
         if not graph.has(task):
             raise ValueError("the canonical task does not exist")
@@ -83,6 +86,8 @@ def verified_binding(ws, worker, task, allocation_id, *, status=None):
     if any(allocation[k] != value for k, value in grant.items()):
         raise Denied("the broker grant changed after resource assignment")
     runner = _worker(ws, worker)
+    if runner.profile != allocation["profile"] or runner.project != allocation["project"]:
+        raise Denied("the worker configuration changed after allocation")
     if not allocation["person_assigned"] and (runner.pid != grant["holder_pid"]
                                               or runner.process_started != grant["holder_started"]):
         raise Denied("the worker no longer owns this broker holder")
