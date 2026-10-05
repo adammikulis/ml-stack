@@ -23,6 +23,9 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
     context = (None, 'claude', 'prompt', None)
     manager._process(None, ['claude', '--print'], {'AUTHORITY': 'unchanged'}, context)
     assert seen['command'][-2:] == ['--max-turns', '60']
+    assert seen['command'][seen['command'].index('--system-prompt') + 1] == task_coding.BOOTSTRAP
+    assert seen['command'][seen['command'].index('--tools') + 1] == 'Read,Edit,Write,Bash,Glob,Grep'
+    assert '--dangerously-skip-permissions' not in seen['command']
     assert 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen['environment']
     assert seen['environment']['CLAUDE_CODE_EFFORT_LEVEL'] == 'low'
     assert seen['environment']['AUTHORITY'] == 'unchanged'
@@ -87,6 +90,7 @@ def test_canonical_stop_cancels_native_turn(tmp_path, monkeypatch):
     def run(self, turn, conversation, prompt):
         assert 'calling done' not in prompt
         assert 'Linux testing is on hold' in prompt
+        assert 'Recorded reputation data' not in prompt
         stop.set()
         assert turn.cancelled.wait(1)
     monkeypatch.setattr(task_coding.TaskManager, '_run', run)
