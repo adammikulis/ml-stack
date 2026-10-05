@@ -164,6 +164,13 @@ class TestChattingThroughTheInterface:
         text = raw["raw"] if "raw" in raw else json.dumps(raw)
         assert "Hel" in text and "there" in text
 
+    @pytest.mark.parametrize('limit',[0,-1,True,1.5,'2048'])
+    def test_invalid_output_budget_is_refused_before_generation(self, bare, limit):
+        ui,cookie=bare
+        status,body,_=ui.call('/ui/chat',method='POST',cookie=cookie,
+            body={'model':'qwen3-4b.gguf','messages':[{'role':'user','content':'hi'}],'max_output_tokens':limit})
+        assert status == 400 and 'positive integer' in body['error']
+
     def test_the_reply_arrives_as_it_is_generated(self, bare):
         """read(n) waits for n bytes and delivers the whole reply at once."""
         import urllib.request

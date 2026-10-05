@@ -28,7 +28,8 @@ def _disconnected(connection: Any) -> bool:
 async def _events(target: Any, payload: dict[str, Any], connection: Any):
     client = local_client(target, payload["model"])
     agent = Agent(name="Chat", model=OpenAIChatCompletionsModel(payload["model"], client),
-                  model_settings=ModelSettings(temperature=payload.get("temperature")))
+                  model_settings=ModelSettings(temperature=payload.get("temperature"),
+                                               max_tokens=payload.get("max_output_tokens")))
     result = Runner.run_streamed(agent, input=payload["messages"],
                                  run_config=RunConfig(tracing_disabled=True,
                                                       trace_include_sensitive_data=False))

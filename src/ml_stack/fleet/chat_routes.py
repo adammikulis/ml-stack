@@ -48,6 +48,12 @@ class ChatRoutes(ConversationRoutes):
             self.send(400, {"error": "nothing to send"})
             return True
         payload = {"model": target.alias or target.model, "messages": messages, "stream": True}
+        if req.get("max_output_tokens") is not None:
+            output_tokens = req["max_output_tokens"]
+            if type(output_tokens) is not int or output_tokens < 1:
+                self.send(400, {"error": "Maximum output tokens must be a positive integer"})
+                return True
+            payload["max_output_tokens"] = output_tokens
         if req.get("temperature") is not None:
             payload["temperature"] = float(req["temperature"])
         try:

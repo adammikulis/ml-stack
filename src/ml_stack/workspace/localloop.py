@@ -80,7 +80,7 @@ class _Wake(BaseException):
 def client_on(base_url: str) -> Any:
     """A client on slot 0 of the server at ``base_url``: the same slot every task, so the
     server's prompt cache keeps the prefix the system message and tool list make."""
-    return Client(base_url, request=Request(n_predict=4096, slot=0), transport=Transport(timeout=600.0))
+    return Client(base_url, request=Request(slot=0), transport=Transport(timeout=600.0))
 
 
 def check_context(want: int, base_url: str, read: Callable[..., Any] | None = None) -> str:
