@@ -96,7 +96,7 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
 
     got = ls.start(kit.ws, ls.Ask(), pick=PICK, spawn=spawn)
     try:
-        assert got.name == "local-qwen3.6-35b-a3b" and not got.already
+        assert got.name == "local-agent" and not got.already
         tok = tokens.directory(kit.base) / got.name
         assert stat.S_IMODE(tok.stat().st_mode) == 0o600
         assert kit.ws.auth(tok.read_text().strip()).role == "agent"
@@ -617,7 +617,7 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
     got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
     try:
         row = ls.listing(kit.ws)[0]
-        assert got.name == "local-qwen3.6-35b-a3b-codex" and row["harness"] == "codex" and row["ctx"] == 262144
+        assert got.name == "local-coding" and row["harness"] == "codex" and row["ctx"] == 262144
         assert sorted(kit.ws.registry.ids()) == sorted(["owner", got.name])
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
