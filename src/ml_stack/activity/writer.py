@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Unpack
 
+import psutil
+
 from ml_stack import home, keystore
 from ml_stack.activity.log import ActivityLog, Limits
 from ml_stack.activity.schema import Said, build
@@ -102,8 +104,10 @@ def _dropped(cause: str, now: float) -> None:
     try:
         held = drops()
         write_json(directory() / "drops.json", {
-            "dropped": int(held.get("dropped", 0)) + 1, "last": round(now, 3), "cause": cause})
-    except FAILURES:
+            "dropped": int(held.get("dropped", 0)) + 1, "last": round(now, 3), "cause": cause,
+            "writer_pid": os.getpid(), "writer_started": psutil.Process(os.getpid()).create_time(),
+            "writer_at": time.time()})
+    except (*FAILURES, psutil.Error):
         return
 
 
