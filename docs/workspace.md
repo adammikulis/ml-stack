@@ -592,3 +592,10 @@ interpreter/environment. Claims expire and remain renewable within the existing 
 cap; they serialize cooperating managed tools, not arbitrary external processes. The serving
 broker continues to enforce its own live model/GPU leases. Ownership does not award credits
 or change security reputation.
+
+`area` claims identify a source file or directory across linked Git worktrees. Supply an
+absolute path in your checkout; the store canonicalizes it to the repository's shared Git
+checkout and relative source path. Native file mutations reserve both the physical file and
+its repository-qualified source area. Editing the same source file in another worktree is
+refused, while disjoint files remain independently claimable. `install` claims identify an
+absolute environment or target directory. These claims do not grant access to either path.

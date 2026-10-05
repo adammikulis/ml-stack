@@ -554,7 +554,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: {"path": w.scratch_path(t, a.name, a.relative, a.owner)}),
     ("scratch-rm", "delete a scratch folder", [flag("name"), OWNER],
      lambda a, w, t: {"removed": w.scratch_rm(t, a.name, a.owner)}),
-    ("claim", "own a branch, worktree, port, file or server", [
+    ("claim", "own a branch, worktree, port, file, area, install environment or server", [
         *CLAIM, flag("--ttl", type=float, default=0.0, help="seconds; renew with heartbeat"),
         flag("--pid", type=int, default=0, help="release when this process is gone"),
         flag("--note", default="")], _claim),

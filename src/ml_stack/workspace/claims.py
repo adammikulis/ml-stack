@@ -1,4 +1,4 @@
-"""Who owns which branch, worktree, port, file or server."""
+"""Who owns which branch, worktree, port, file, area, install environment or server."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_stack import worktreerules
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, Denied, Identity
 
 __all__ = ["EXPIRING_SOON_S", "KINDS", "MAX_LIFETIME_S", "MAX_RENEW_S", "Claims", "Conflict", "alive", "normal"]
 
-KINDS = ("branch", "worktree", "port", "file", "server", "install")
+KINDS = ("branch", "worktree", "port", "file", "server", "install", "area")
 PATH_KINDS = ("worktree", "file", "install")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,199}$")
 VERSION = 1
@@ -51,6 +52,17 @@ def normal(kind: str, key: str) -> str:
         if not key.isdigit() or not 0 < int(key) < 65536:
             raise ValueError("a port is a number from 1 to 65535")
         return str(int(key))
+    if kind == 'area':
+        expanded = Path(key).expanduser()
+        if not expanded.is_absolute():
+            raise ValueError('an area claim needs an absolute project path')
+        target = expanded.resolve()
+        directory = next((parent for parent in (target, *target.parents) if parent.is_dir()), None)
+        checkout = worktreerules.checkouts(directory) if directory else None
+        if not checkout:
+            raise ValueError('an area claim needs a Git checkout')
+        top, common = checkout
+        return str(common / target.relative_to(top))
     if kind in PATH_KINDS:
         expanded = Path(key).expanduser()
         if not expanded.is_absolute():
@@ -66,6 +78,8 @@ def _nested(a: str, b: str) -> bool:
 
 
 def _covers(claim: dict[str, Any], kind: str, key: str) -> bool:
+    if kind == 'area':
+        return claim['kind'] == 'area' and _nested(claim['key'], key)
     if kind in PATH_KINDS:
         return claim["kind"] in PATH_KINDS and _nested(claim["key"], key)
     return claim["kind"] == kind and claim["key"] == key

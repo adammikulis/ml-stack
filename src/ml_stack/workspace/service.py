@@ -654,7 +654,7 @@ class Workspace:
 
     def claim(self, token: str, kind: str, key: str,
               **opts: Unpack[ClaimOptions]) -> dict[str, Any]:
-        """Take ownership of a branch, worktree, port, file or server."""
+        """Take ownership of a branch, worktree, port, file, area, install environment or server."""
         given = _only(dict(opts), ClaimOptions)
         who = self.auth(token)
         self._may(who, "claim")

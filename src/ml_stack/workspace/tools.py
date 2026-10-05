@@ -101,7 +101,7 @@ def workspace_note_get(note_id: int) -> dict[str, Any]:
 
 
 def workspace_who_owns(kind: str, key: str) -> dict[str, Any]:
-    """Who owns a branch, worktree, port, file or server."""
+    """Who owns a branch, worktree, port, file, area, install environment or server."""
     return Workspace().who_owns(kind, key) or {"owner": None}
 
 
@@ -145,7 +145,7 @@ def workspace_note_add(kind: str, title: str, body: str, source: str = "") -> di
 
 def workspace_claim(kind: str, key: str, ttl_s: float = 0.0, pid: int = 0,
                     note: str = "") -> dict[str, Any]:
-    """Claim a branch, worktree, port, file or server; refused if another agent owns it."""
+    """Claim a branch, worktree, port, file, area, install environment or server; refused if another agent owns it."""
     return Workspace().claim(_token(), kind, key, ttl_s=ttl_s, pid=pid, note=note)
 
 
