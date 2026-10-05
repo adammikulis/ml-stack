@@ -215,7 +215,7 @@ def serve_up(model: str, *, context: int = 0, draft: str = "",
         return {"started": False, "blocked": why}
     for one in extra or []:
         flag = str(one).split("=", 1)[0]
-        if flag in _NOT_A_TOOL_ARGUMENT:
+        if flag in _NOT_A_TOOL_ARGUMENT or flag.startswith(("--iq-", "--iq_")):
             raise ValueError(f"{flag} is a person's to set, not a tool argument")
     argv = ["up", _not_an_option(model, "model"), "--no-wait", "--parallel", "1"]
     if context:
