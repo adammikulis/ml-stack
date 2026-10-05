@@ -197,7 +197,7 @@ def _drop(path: Path, name: str, fd: int) -> None:
 
 
 @contextmanager
-def turn(url: str, *, wait_s: float | None = None) -> Iterator[None]:
+def turn(url: str, *, wait_s: float | None = None, cancelled=None) -> Iterator[None]:
     """Hold the front of the line for the pool ``url`` is in while the block runs.
 
     A URL that is not queued, a thread that already holds the pool, and a caller inside
@@ -228,6 +228,8 @@ def turn(url: str, *, wait_s: float | None = None) -> Iterator[None]:
     step = 0
     try:
         while True:
+            if cancelled is not None and cancelled():
+                raise QueueTimeout("request cancelled while waiting for its turn")
             with _directory_lock(path):
                 ahead = _ahead(path, name)
             if not ahead:

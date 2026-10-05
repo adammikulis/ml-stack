@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from .discovery import derive_token, load_cluster_key
 
 __all__ = ["ChatRoutes"]
@@ -72,7 +70,8 @@ class ChatRoutes:
         return super().route()
 
     def _say(self, available: list) -> bool:
-        from .chat import ChatError, find, reply_text, stream
+        from .chat import find, reply_parts
+        from .chat_stream import Transfer, frame, release, reserve
         req = self.body()
         target = find(available, str(req.get("model") or ""))
         if target is None:
@@ -80,46 +79,50 @@ class ChatRoutes:
             return True
         messages = [m for m in (req.get("messages") or [])
                     if isinstance(m, dict) and m.get("content")]
-        if not messages:
-            self.send(400, {"error": "nothing to send"})
-            return True
-        payload = {"model": target.model, "messages": messages, "stream": True}
-        if req.get("temperature") is not None:
-            payload["temperature"] = float(req["temperature"])
-        try:
-            pieces = stream(target, payload)
-            first = next(pieces, b"")
-        except ChatError as exc:
-            self.send(502, {"error": str(exc)})
+        if not messages or messages[-1].get("role") != "user":
+            self.send(400, {"error": "send a user message"})
             return True
         cid = str(req.get("conversation") or "")
-        if self.ui.conversations is not None and cid:
-            self.ui.conversations.append(cid, "user", str(messages[-1]["content"]))
-        said = self._relay(target, first, pieces)
-        if self.ui.conversations is not None and cid:
-            spoken = reply_text(said)
-            if spoken:
-                self.ui.conversations.append(cid, "assistant", spoken)
-        return True
-
-    def _relay(self, target: Any, first: bytes, pieces: Any) -> bytes:
-        """Stream the answer to the caller as it arrives, and return all of it."""
-        handler = self.handler
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Cache-Control", "no-store")
-        handler.send_header("X-ML-Stack-Peer", target.peer or "")
-        handler.send_header("X-ML-Stack-Model", target.model)
-        handler.send_header("Connection", "close")
-        handler.end_headers()
-        said = bytearray(first)
+        store = self.ui.conversations
+        found = store.get(cid) if store is not None and cid else None
+        if cid and found is None:
+            self.send(404, {"error": "no such chat"})
+            return True
+        if cid and not reserve(store, cid):
+            self.send(409, {"error": "this conversation already has a pending response"})
+            return True
         try:
-            handler.wfile.write(first)
-            handler.wfile.flush()
-            for block in pieces:
-                said += block
-                handler.wfile.write(block)
+            if found is not None:
+                messages = [{"role": m.role, "content": m.content}
+                            for m in found.messages if m.content] + [messages[-1]]
+            payload = {"model": target.model, "messages": messages, "stream": True}
+            if req.get("temperature") is not None:
+                try:
+                    payload["temperature"] = float(req["temperature"])
+                except (TypeError, ValueError):
+                    self.send(400, {"error": "invalid temperature"})
+                    return True
+            if found is not None:
+                store.append(cid, "user", str(messages[-1]["content"]))
+            handler = self.handler
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("X-ML-Stack-Peer", target.peer or "")
+            handler.send_header("X-ML-Stack-Model", target.model)
+            handler.send_header("Connection", "close")
+            handler.end_headers()
+            try:
+                handler.wfile.write(frame({"ml_stack": {"state": "queued", "conversation": cid,
+                                                       "message": "Waiting for the model slot"}}))
                 handler.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        return bytes(said)
+            except OSError:
+                return True
+            said, status = Transfer(target, payload, cid).relay(handler)
+            spoken, reasoning = reply_parts(said)
+            if found is not None and (spoken or reasoning):
+                store.append(cid, "assistant", spoken, reasoning=reasoning, status=status)
+        finally:
+            if cid:
+                release(store, cid)
+        return True

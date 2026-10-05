@@ -77,7 +77,7 @@ def find(available: list[Target], model: str) -> Target | None:
 
 
 def stream(target: Target, payload: dict[str, Any], *,
-           timeout: float = 600.0) -> Iterator[bytes]:
+           timeout: float = 600.0, control: Any = None) -> Iterator[bytes]:
     """The model server's reply, in the pieces it arrives in."""
     data = json.dumps(payload).encode()
     try:
@@ -93,7 +93,11 @@ def stream(target: Target, payload: dict[str, Any], *,
             f"{target.peer or 'this machine'} answered {exc.status}: "
             f"{exc.body[:400]}", status=exc.status, body=exc.body) from None
     with response:
+        if control is not None:
+            control.bind(response)
         while True:
+            if control is not None and control.cancelled.is_set():
+                break
             # read1, not read: read(n) waits for n bytes and delivers a whole
             # completion at once.
             block = response.read1(CHUNK)
@@ -104,7 +108,13 @@ def stream(target: Target, payload: dict[str, Any], *,
 
 def reply_text(raw: bytes) -> str:
     """The assistant's words out of a stream of server-sent events."""
+    return reply_parts(raw)[0]
+
+
+def reply_parts(raw: bytes) -> tuple[str, str]:
+    """Return content and reasoning from streamed deltas."""
     out = []
+    reasoning = []
     for line in raw.decode(errors="replace").splitlines():
         if not line.startswith("data:"):
             continue
@@ -116,8 +126,12 @@ def reply_text(raw: bytes) -> str:
         except ValueError:
             continue
         for choice in parsed.get("choices") or []:
+            thought = ((choice.get("delta") or {}).get("reasoning_content")
+                       or (choice.get("message") or {}).get("reasoning_content"))
+            if thought:
+                reasoning.append(str(thought))
             piece = ((choice.get("delta") or {}).get("content")
                      or (choice.get("message") or {}).get("content"))
             if piece:
                 out.append(str(piece))
-    return "".join(out)
+    return "".join(out), "".join(reasoning)
