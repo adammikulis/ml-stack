@@ -131,7 +131,7 @@ Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
 # `ml-stack <command>` runs any `ml-stack-<command>` below; bare, it starts the daemon and
 # opens the browser on it (`ml_stack.fleet.launch`).
 ml-stack = "ml_stack.cli:main"
-ml-stack-traind = "ml_stack.fleet.daemon:main"
+ml-stack-traind = "ml_stack.cli.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 # one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce
 ml-stack-fleet = "ml_stack.fleet.join:main"

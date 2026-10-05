@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 
-from ml_stack.fleet.daemon import main
+from .daemon import main
 
 
 def _watch() -> None:

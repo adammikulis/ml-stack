@@ -210,7 +210,7 @@ def start_daemon(port: int, root: Path | str, name: str = "") -> int:
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     argv = ["--port", str(port), "--root", str(root)] + (["--name", name] if name else [])
-    ran = detach("ml_stack.fleet.daemon", argv, log=root / "traind.log")
+    ran = detach("ml_stack.cli.daemon", argv, log=root / "traind.log")
     write_json(started_file(root), versioned(
         {"pid": ran.pid, "argv": list(ran.command), "log": str(ran.log),
          "started": ran.started}, STARTED_VERSION), indent=1)

@@ -140,6 +140,7 @@ def test_signed_sealed_fleet_and_agent_capabilities_both_required(host, tmp_path
     runner = JobRunner(tmp_path / "jobs", files)
     daemon = Daemon(runner, files, fleet_token)
     daemon.projects = host.projects
+    daemon.workspaces = host
     server = Server(("127.0.0.1", 0), make_handler(daemon))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
@@ -207,6 +208,7 @@ def test_https_client_discovers_pins_and_authenticates_self_signed_host(host, tm
     runner = JobRunner(tmp_path / "tls-jobs", files)
     daemon = Daemon(runner, files, derive_token(key))
     daemon.projects = host.projects
+    daemon.workspaces = host
     server = LimitedServer((ALL_INTERFACES, 0), make_handler(daemon), tls=tls.server_context(ident))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:

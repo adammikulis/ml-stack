@@ -29,7 +29,6 @@ from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
-from ml_stack.workspace.remote_host import WorkspaceHost
 
 from . import commands, projects as project_routes
 from .availability import Availability, parse_window
@@ -88,6 +87,7 @@ class Daemon:
     fetcher: Fetcher | None = None
     ui: Any | None = None
     projects: project_routes.ProjectRegistry | None = None
+    workspaces: Any | None = None
     schedule: Availability | None = None
     on_paused: str = "stop"
     schedule_path: Path | None = None
@@ -576,14 +576,14 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                                  urllib.parse.urlparse(self.path).path)
             if not match:
                 return False
-            projects = getattr(daemon, "projects", None)
+            host = daemon.workspaces
             opening = self._sealing()
-            if projects is None:
+            if host is None:
                 self._send(501, {"error": "project workspace hosting is unavailable"})
             elif opening is None or not opening[2]:
                 self._send(403, {"error": "project agent capabilities require sealed fleet requests"})
             else:
-                code, reply = WorkspaceHost(projects).answer(match[1], match[2], self._object(body))
+                code, reply = host.answer(match[1], match[2], self._object(body))
                 self._send(code, reply)
             return True
 

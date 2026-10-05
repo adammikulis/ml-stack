@@ -3,9 +3,6 @@
 import re
 import shlex
 
-from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.remote_host import WorkspaceHost
-
 from .discovery import memberships
 
 
@@ -15,14 +12,14 @@ class ProjectBoardRoutes:
         if match is None:
             return super().route()
         projects = getattr(self.ui, "projects", None)
-        if projects is None:
+        host = getattr(self.ui, "workspaces", None)
+        if projects is None or host is None:
             self.send(501, {"error": "project registry unavailable"})
             return True
         if (self.client_ip not in {"127.0.0.1", "::1"} or not self.ui.authed(self.cookie)
                 or not self.ui.host_ok(self.host_header)):
             self.send(403, {"error": "project board controls require a signed-in local person"})
             return True
-        host = WorkspaceHost(projects)
         try:
             if self.method == "POST" and (
                     self.header("Origin") not in {f"http://{self.host_header}", f"https://{self.host_header}"}
@@ -45,6 +42,6 @@ class ProjectBoardRoutes:
                 self.send(200, host.adopt(match[1], self.body()))
             else:
                 self.send(405, {"error": "read board status or create an agent invitation"})
-        except (Denied, ValueError, TypeError, KeyError) as exc:
+        except (PermissionError, ValueError, TypeError, KeyError) as exc:
             self.send(409, {"error": str(exc)})
         return True
