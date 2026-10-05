@@ -8,6 +8,7 @@ terminal does the work, so a refusal is never just a command that fails.
 
 from __future__ import annotations
 
+import importlib
 import os
 import select
 import subprocess
@@ -20,8 +21,7 @@ import pytest
 from ml_stack.net.scan import CATEGORIES
 from ml_stack.sentinel import Sentinel, State
 
-if sys.platform != "win32":
-    import pty
+pty = importlib.import_module("pty") if sys.platform != "win32" else None
 
 POSIX_TERMINAL = pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 
