@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ml_stack.graph.store import GraphStore
 from ml_stack.net import git
-from ml_stack.workspace import localagent, tokens
+from ml_stack.workspace import localagent, task_scope, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.task_schema import TASK_ID
@@ -29,8 +29,8 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
     key = f'task-worktree:{suffix}'
     with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
         spec = next((row['attrs'] for row in graph.nodes('task') if row['id'] == task), None)
-        if not spec or spec['state'] != 'queued' or (caller.role != HUMAN and spec['created_by'] != caller.id):
-            raise Denied('the parent must own a queued canonical task')
+        if not spec or spec['state'] != 'queued' or not task_scope.eligible(ws, child, spec):
+            raise Denied('the worker must be eligible for the queued canonical task')
         old = next((row['attrs'] for row in graph.nodes('task-worktree') if row['id'] == key), None)
         if old:
             if old['worker'] != worker or old['source_project'] != str(source):

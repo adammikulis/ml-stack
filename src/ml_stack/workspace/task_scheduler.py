@@ -7,6 +7,7 @@ from ml_stack.workspace import (
     child_renewal,
     localagent as la,
     resource_allocations,
+    task_scope,
     task_worktrees,
     tokens,
 )
@@ -25,7 +26,7 @@ def assign_next(ws, parent_token: str, worker: str, broker_lease: str):
     runner = resource_allocations._worker(ws, worker)
     grant = resource_allocations._grant(broker_lease, resource_allocations.broker_wire.status(start=False))
     tasks = board.list(parent_token)['tasks']
-    ready = [task for task in tasks if task['state'] == 'queued' and task['created_by'] == parent.id
+    ready = [task for task in tasks if task['state'] == 'queued' and task_scope.eligible(ws, child, task)
              and all(dep['state'] == 'completed' for dep in task['dependencies'])
              and set(task['capabilities']) <= {runner.profile}
              and task['limits'].get('model', grant['model']) == grant['model']]

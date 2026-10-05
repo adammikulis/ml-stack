@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_actions
+from ml_stack.workspace import task_actions, task_scope
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.device_accounts import account_for
@@ -52,10 +52,7 @@ class TaskBoard:
                     and info.get('project') == task['project'])
 
     def _scope(self, who, task: dict[str, Any]) -> None:
-        creator = self.ws.registry.info(task['created_by'])
-        delegated = who.id in task['assignees'] and self._project_grant(who.id, task)
-        if who.role == HUMAN or not (delegated or who.parent == task['created_by']
-                                    or (creator['role'] == HUMAN and not task['assignees'])):
+        if not task_scope.eligible(self.ws, who, task):
             raise Denied('the task requires an authorized registered worker')
 
     def _reviewer(self, who, task: dict[str, Any], *, economic: bool = True) -> None:
