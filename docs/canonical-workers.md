@@ -19,8 +19,11 @@ receive the trusted allocation's execution path; task descriptions cannot select
 The worker reloads its private token before each task transition, heartbeats its task lease,
 and cancels its owned native process when stopped, its wall limit expires or heartbeat fails.
 Checkpoints record successful native tool returns, the repository commit and runtime/interpreter
-provenance. A final answer produces hashed file artifacts and a proposal awaiting independent
-review. A final answer alone does not award reputation or accept a task.
+provenance. The native worker commits its changes before answering. Uncommitted changes block
+submission and remain available for review. The runner commits a report and binary patch covering
+the task baseline through the native commit, including deleted files. Its proposal records the
+final clean commit and hashed artifacts for independent review. A final answer alone does not
+award reputation or accept a task.
 
 Canonical coding currently uses the Claude harness. Its maintained coding profile caps native
 turns with `--max-turns`; output tokens per response use `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, and

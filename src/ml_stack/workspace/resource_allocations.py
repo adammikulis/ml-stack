@@ -35,6 +35,11 @@ def _worker(ws, identity):
     return found[0]
 
 
+def _execution_config(runner):
+    return {key: getattr(runner, key) for key in
+            ('model', 'harness', 'ctx', 'effort', 'max_effort', 'role', 'profile', 'project')}
+
+
 def assign(ws, token, worker, task, lease_id):
     """The actual person or registered parent assigns a live grant to an enrolled worker."""
     caller = ws.auth(token)
@@ -55,6 +60,7 @@ def assign(ws, token, worker, task, lease_id):
                   "device_id": account["device_id"], "base_id": account["base_id"], **grant,
                   "owner": caller.id, "person_assigned": caller.role == HUMAN, "requester": worker, "reason": f"Task {task}",
                   "profile": runner.profile, "capabilities": [runner.profile], "harness": runner.harness,
+                  "execution_config": _execution_config(runner),
                   "project": runner.project, "interpreter": sys.executable, "python": sys.version.split()[0], "scheduler_pid": os.getpid()}
     with held(ws.base / "coordination.lock"), GraphStore(ws.base / "coordination.db") as graph:
         if not graph.has(task):
@@ -66,7 +72,7 @@ def assign(ws, token, worker, task, lease_id):
                          if row['attrs']['task'] == task and row['attrs']['worker'] == worker
                          and row['attrs']['lease_id'] == lease_id), None)
         if existing and all(existing.get(key) == allocation.get(key) for key in
-                            ('owner', 'holder_pid', 'holder_started', 'server_pid', 'server_started', 'project')):
+                            ('owner', 'holder_pid', 'holder_started', 'server_pid', 'server_started', 'project', 'execution_config')):
             return existing
         key = allocation["allocation_id"]
         graph.upsert_node({"id": key, "kind": "allocation", "label": task, "attrs": allocation})
@@ -94,6 +100,8 @@ def verified_binding(ws, worker, task, allocation_id, *, status=None):
     if any(allocation[k] != value for k, value in grant.items()):
         raise Denied("the broker grant changed after resource assignment")
     runner = _worker(ws, worker)
+    if allocation.get('execution_config') != _execution_config(runner):
+        raise Denied('the worker execution configuration changed after allocation')
     if runner.profile != allocation["profile"] or runner.project != allocation.get("source_project", allocation["project"]):
         raise Denied("the worker configuration changed after allocation")
     if not allocation["person_assigned"] and (runner.pid != grant["holder_pid"]

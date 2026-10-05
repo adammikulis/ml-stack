@@ -46,3 +46,28 @@ def test_canonical_stop_cancels_native_turn(tmp_path, monkeypatch):
         task_coding.perform(SimpleNamespace(base=tmp_path), localagent.Agent('worker', 'qwen'),
                             task, tmp_path, (stop.is_set, lambda _: None))
     assert cancelled == [True]
+
+
+def test_proposal_binds_committed_files_and_deletions(tmp_path):
+    git = task_coding.git
+    git.run(['init', str(tmp_path)])
+    git.run(['config', 'user.name', 'Test'], cwd=tmp_path)
+    git.run(['config', 'user.email', 'test@example.invalid'], cwd=tmp_path)
+    (tmp_path / 'deleted.py').write_text('OLD = True\n')
+    git.run(['add', 'deleted.py'], cwd=tmp_path)
+    git.run(['commit', '-m', 'baseline'], cwd=tmp_path)
+    baseline = git.head(tmp_path)
+    (tmp_path / 'deleted.py').unlink()
+    (tmp_path / 'new.py').write_text('NEW = True\n')
+    git.run(['add', '--', 'deleted.py', 'new.py'], cwd=tmp_path)
+    git.run(['commit', '-m', 'task changes'], cwd=tmp_path)
+    task = {'lease': {'resource': {'baseline_commit': baseline}}}
+    turn = SimpleNamespace(text='Changed code and verified checks.', session='session')
+    proposal = task_coding._proposal(localagent.Agent('worker', 'qwen'), task, tmp_path, turn, 'python')
+    assert set(proposal['artifacts']) == {'.task.patch', '.task-report.md', 'new.py'}
+    assert 'deleted file mode' in (tmp_path / '.task.patch').read_text()
+    assert proposal['provenance']['commit'] == git.head(tmp_path)
+    assert not git.run(['status', '--porcelain'], cwd=tmp_path).stdout.strip()
+    (tmp_path / 'new.py').write_text('DIRTY = True\n')
+    with pytest.raises(RuntimeError, match='uncommitted changes'):
+        task_coding._proposal(localagent.Agent('worker', 'qwen'), task, tmp_path, turn, 'python')

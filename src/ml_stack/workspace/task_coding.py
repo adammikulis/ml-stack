@@ -77,11 +77,21 @@ def perform(ws, agent, task, project, control):
         watcher.join(timeout=3)
     if turn.error or turn.cancelled.is_set() or not turn.text.strip():
         raise RuntimeError(turn.error or 'Native coding turn cancelled or ended without an answer')
+    return _proposal(agent, task, project, turn, environment)
+
+
+def _proposal(agent, task, project, turn, environment):
+    if git.run(['status', '--porcelain', '--untracked-files=normal'], cwd=project).stdout.strip():
+        raise RuntimeError('Native coding left uncommitted changes; preserve the worktree for review')
+    baseline = task['lease']['resource']['baseline_commit']
+    patch = project / '.task.patch'
+    patch.write_text(git.run(['diff', '--binary', '--full-index', baseline, 'HEAD'], cwd=project).stdout,
+                     encoding='utf-8')
     report = project / '.task-report.md'
     report.write_text(turn.text, encoding='utf-8')
-    baseline = task['lease']['resource']['baseline_commit']
-    paths = {'.task-report.md', *git.run(['diff', '--name-only', baseline], cwd=project).stdout.splitlines(),
-             *git.run(['ls-files', '--others', '--exclude-standard'], cwd=project).stdout.splitlines()}
+    git.run(['add', '--', '.task.patch', '.task-report.md'], cwd=project)
+    git.run(['commit', '-m', 'chore: record canonical task artifacts'], cwd=project)
+    paths = git.run(['diff', '--name-only', baseline, 'HEAD'], cwd=project).stdout.splitlines()
     artifacts = {}
     for name in sorted(paths):
         path = (project / name).resolve()

@@ -1,4 +1,6 @@
 """Task grants are assigned by genuine parents and revalidated against the live broker."""
+from dataclasses import replace
+
 import pytest
 from workspace_kit import Kit
 
@@ -30,6 +32,13 @@ def test_shared_managed_holder_allowed_but_changed_grant_denied(tmp_path, monkey
     allocation = resources.assign(kit.ws, parent, worker, "task:1234", "lease")
     assert allocation["holder_pid"] == 555
     assert resources.verified_binding(kit.ws, worker, "task:1234", allocation["allocation_id"]) == allocation
+    original = localagent.load(kit.ws, 'local-worker')
+    for fields in ({'model': 'other'}, {'harness': 'claude'}, {'ctx': 65536}, {'effort': 'high'},
+                   {'max_effort': 'high'}, {'role': 'manual'}):
+        localagent.save(kit.ws, replace(original, **fields))
+        with pytest.raises(Denied, match='execution configuration changed'):
+            resources.verified_binding(kit.ws, worker, "task:1234", allocation["allocation_id"])
+    localagent.save(kit.ws, original)
     with pytest.raises(Denied, match="another worker"):
         resources.verified_binding(kit.ws, "foreign", "task:1234", allocation["allocation_id"])
     with pytest.raises(Denied, match="registered parent"):
