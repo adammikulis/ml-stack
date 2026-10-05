@@ -18,6 +18,7 @@ from ml_stack.serve.estimate import DEFAULT_KV, Setup, estimate, verdict
 from ml_stack.serve.preflight import read_gguf_header
 from ml_stack.units import human_bytes
 
+from . import model_components
 from .models import draft_beside
 
 __all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
@@ -134,6 +135,9 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
     if port is None:
         port = free_port()
     parallel = max(1, int(parallel))
+    original_path = Path(model_path)
+    model_path = str(model_components.effective(original_path))
+    projector = model_components.linked(original_path, "vision")
     draft = draft_beside(Path(model_path))
     kind = ""
     if draft is not None:
@@ -141,12 +145,13 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
         arch = found.get("general.architecture")
         if found.get(f"{arch}.nextn_predict_layers"):
             kind = "draft-mtp"
-    sizing = estimate(model_path, Setup(context=int(context), parallel=parallel, draft=draft,
+    sizing = estimate(model_path, Setup(context=int(context), parallel=parallel, draft=draft, mmproj=projector,
                                        draft_cache_type=DEFAULT_KV))
     if verdict(sizing, machine_memory()) == "red":
         raise NoRoom(f"{Path(model_path).name}: not enough free memory for the model, head and context")
     lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
                                      parallel=parallel, draft=str(draft) if draft else None,
+                                     mmproj=str(projector) if projector else None,
                                      cache_type_k=DEFAULT_KV, cache_type_v=DEFAULT_KV,
                                      spec_draft_type_k=DEFAULT_KV if draft else "",
                                      spec_draft_type_v=DEFAULT_KV if draft else "",

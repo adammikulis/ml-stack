@@ -17,7 +17,7 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import project_client, recovery
+from . import component_routes, project_client, recovery
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -414,6 +414,8 @@ class ModelRoutes:
     """The models here and elsewhere, what may be downloaded, and what is being served."""
 
     def route(self) -> bool:
+        if component_routes.route(self):
+            return True
         if self.path == "/ui/models/startup" and self.method == "GET":
             ui = self.ui
             self.send(200, choices(disk_gb=ui.models.free_gb() if ui.models else 0,
@@ -516,7 +518,15 @@ class ModelRoutes:
         if not name:
             self.send(400, {"error": "no model was named"})
             return True
+        try:
+            components = component_routes.selected(ui.models, req, key)
+        except (ModelError, ValueError) as exc:
+            self.send(400, {"error": str(exc)})
+            return True
         if ui.downloads is None:
+            if components:
+                self.send(501, {"error": "Background component downloads are unavailable"})
+                return True
             try:
                 got = ui.models.ensure(name, source=str(req.get("source") or ""), key=key,
                                        autodownload=auto_models)
@@ -526,12 +536,16 @@ class ModelRoutes:
             self.send(200, got.public())
             return True
         here = ui.models.find(name)
-        if here is not None:
+        if here is not None and not components:
             self.send(200, here.public())
             return True
-        started = ui.downloads.start(name, source=str(req.get("source") or ""),
+        source = str(req.get("source") or "")
+        integrated = next((row for row in components if row["packaging"] == "integrated"), None)
+        if integrated and here is None:
+            name, source = integrated["name"], integrated["ref"]
+        started = ui.downloads.start(name, source=source,
                                      key=key, autodownload=auto_models,
-                                     draft=str(req.get("draft") or ""))
+                                     components=components)
         self.send(202, started.public())
         return True
 

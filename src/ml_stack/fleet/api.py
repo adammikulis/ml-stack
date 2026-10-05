@@ -408,7 +408,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 if models is None:
                     self._send(501, {"error": "no model store on this daemon"})
                     return
-                self._send(200, {"models": [m.public() for m in models.all()],
+                self._send(200, {"models": models.public(),
                                  "free_gb": models.free_gb(),
                                  "store": str(models.store)})
                 return
