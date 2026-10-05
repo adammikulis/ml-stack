@@ -575,3 +575,10 @@ The adapters run against the real `sentinel` store and `guard` patterns in the s
 (`tests/test_workspace_surface.py`, no stand-ins). The MCP SDK transport was not exercised here.
 
 Left out: see "The agent workspace" in `HANDOFF.md`.
+
+## Structured Tasks
+
+The main **Tasks** view organizes canonical claims, resource leases, checkpoints, submitted
+artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
+for the person workflow, service/API contract, recovery and supported limits. Task outcomes
+are verified separately from Board discussion and worker progress reports.

@@ -3,7 +3,8 @@
 import json
 
 from ml_stack.fleet.request_fields import object_body
-from ml_stack.workspace import localroute, tokens
+from ml_stack.memory import vault
+from ml_stack.workspace import localroute, task_credit, tokens
 from ml_stack.workspace.boardroute import Request
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
@@ -40,6 +41,9 @@ def route(request) -> bool:
                 result = board.create(token, body.get('spec'))
             elif action == 'review' and set(body) == {'action', 'id', 'decision'}:
                 result = board.review(token, body['id'], body['decision'])
+                result = {**result, 'credit': _credit(ws, token, body['id'])}
+            elif action == 'credit' and set(body) == {'action', 'id'}:
+                result = {'credit': _credit(ws, token, body['id'])}
             elif action in ('resume', 'recover') and set(body) == {'action', 'id', 'reason'}:
                 result = getattr(board, action)(token, body['id'], body['reason'])
             else:
@@ -52,3 +56,15 @@ def route(request) -> bool:
     except (OSError, RuntimeError):
         request.send(503, {'error': 'task coordination is unavailable or locked'})
     return True
+
+
+def _credit(ws, token, ident):
+    try:
+        result = task_credit.verify_task(ws, token, ident)
+        total = result.get('award', {}).get('total', 0) if result.get('outcome') == 'accepted' else 0
+        return {'state': 'recorded', 'credited': result['credited'], 'total': total,
+                'evidence_id': result['id']}
+    except Denied:
+        return {'state': 'blocked', 'reason': 'This reviewer cannot record credit for this outcome.'}
+    except (vault.KeyUnavailable, OSError, RuntimeError):
+        return {'state': 'pending', 'reason': 'Credit recording is unavailable. The independent review remains saved.'}
