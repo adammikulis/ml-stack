@@ -14,6 +14,16 @@
 uncovered = 54
 partial = 200
 
+
+[[group]]
+match = ["human:workspace/backlog.py:supersede"]
+status = "covered"
+tests = ["tests/test_workspace_backlog.py::test_parent_superseded_issue_stays_excluded_after_revision_change",
+         "tests/test_workspace_backlog.py::test_child_and_foreign_parent_cannot_supersede_repository_tasks",
+         "tests/test_workspace_backlog.py::test_maintained_cli_records_parent_decision_without_person_impersonation"]
+count = 1
+note = "Only the person or actual registered worker parent records an obsolete-issue decision; child and foreign-parent tokens mutate no decision, and later issue revisions preserve the authenticated exclusion"
+
 [[group]]
 match = ["route:fleet/routes.py:/ui/setup", "route:fleet/routes.py:/ui/setup/join"]
 status = "covered"
