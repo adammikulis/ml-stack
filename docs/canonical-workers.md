@@ -37,3 +37,7 @@ server context remain the existing managed broker's responsibility. Linux tests 
 
 The native controls use the maintained [Claude CLI reference](https://code.claude.com/docs/en/cli-reference)
 and [environment-variable reference](https://code.claude.com/docs/en/env-vars).
+
+Stop ends only the saved worker process and its verified broker holder. It retains the
+private identity, token, preferences and device account. Start reuses that identity
+when changing models; identity revocation is a separate operation.

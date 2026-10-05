@@ -152,7 +152,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
-                         project=folder_, orders_from=orders, started=time.time())
+                         project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {})
         la.save(ws, agent)
         job = (spawn or jobs.detach)(LOOP, [name], log=la.log_file(ws, name), kind=name,
                                      home=la.folder(ws) / "jobs")
@@ -178,7 +178,8 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
-                         ctx=ctx, project=project, orders_from=la.check_orders(list(ask.orders_from)),
+                         ctx=ctx, project=project, effort=ask.effort, max_effort=ask.max_effort,
+                         extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
         identity = _worker_identity(ws, have, name, project)
         agent = replace(agent, identity=identity)
@@ -203,12 +204,13 @@ def _ended(pid: int, seconds: float) -> bool:
 
 def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = None,
          wait_s: float = STOP_WAIT_S) -> Stopped:
-    """End ``name``: the stop file first, then SIGTERM (SIGKILL after ``wait_s``), then the model
-    lease, its token and its files. ValueError when there is no such local agent."""
+    """Stop the owned process and holder while preserving its identity and saved preferences."""
     agent = la.load(ws, la.check_name(name))
     if agent is None:
         raise ValueError(f"no local agent called {name}; `agent list` shows them")
     la.stop_file(ws, name).write_text("stop\n", encoding="utf-8")
+    lease = str((la.status_of(ws, name).get("lease") or {}).get("id") or "")
+    owned = bool(release) or _owns_lease(agent, lease)
     running, forced, notes = la.alive(agent), False, []
     if running:
         with contextlib.suppress(ProcessLookupError):
@@ -218,20 +220,15 @@ def stop(ws: Workspace, name: str, *, release: Callable[[str], Any] | None = Non
             with contextlib.suppress(ProcessLookupError):
                 os.kill(agent.pid, signal.SIGKILL)
             _ended(agent.pid, 5.0)
-    lease = str((la.status_of(ws, name).get("lease") or {}).get("id") or "")
     freed = False
-    if lease:
+    if lease and owned:
         try:
             freed = bool((release or _release)(lease))
         except (OSError, RuntimeError) as err:
             notes.append(f"the lease was not released now ({err}); it ends with the process")
-    identity = agent.identity or name
-    if ws.registry.role_of(identity):
-        ws.registry.revoke(onboard.SETUP, identity)
-    tokens_file = tokens.directory(ws.base) / identity.replace("/", "~")
-    tokens_file.unlink(missing_ok=True)
-    for path in (la.stop_file(ws, name), la.pause_file(ws, name), la.folder(ws) / f"{name}.json",
-                 la.folder(ws) / f"{name}.status.json", la.folder(ws) / "jobs" / f"{name}.json"):
+    la.save(ws, replace(agent, pid=0, process_started=0.0))
+    la.Status(ws, name).update(state='stopped', detail='Identity and preferences retained', lease={})
+    for path in (la.stop_file(ws, name), la.pause_file(ws, name), la.folder(ws) / "jobs" / f"{name}.json"):
         path.unlink(missing_ok=True)
     ws.audit("local-agent.stop", onboard.SETUP.id, agent=name, forced=forced, lease=freed)
     return Stopped(name, running, forced, freed, notes)
@@ -244,6 +241,15 @@ def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick) -> None:
     except ValueError:
         ws.set_model(name, localmodel.short_name(chosen.name), lh.OWN, verified=True,
                      terminal=(True, True), env={})
+
+
+def _owns_lease(agent: la.Agent, lease: str) -> bool:
+    if not lease or not agent.pid:
+        return False
+    status = broker_wire.status(start=False)
+    return any(holder.get("lease") == lease and holder.get("pid") == agent.pid
+               and holder.get("pid_started") == agent.process_started
+               for server in status.get("servers", []) for holder in server.get("holders", []))
 
 
 def _release(lease: str) -> bool:
