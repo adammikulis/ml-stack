@@ -154,6 +154,16 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
 
   /** What to show when the page opens: setup, sign in, or a screen. */
   M.boot = async function () {
+    const launchURL = new URL(location.href);
+    const ticket = launchURL.searchParams.get("launch_ticket");
+    if (ticket !== null) {
+      launchURL.searchParams.delete("launch_ticket");
+      history.replaceState(null, "", launchURL.pathname + launchURL.search + launchURL.hash);
+      if (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "[::1]") {
+        try { await M.api("/ui/session", {method:"POST", body:JSON.stringify({ticket})}); }
+        catch (_) { /* The ordinary sign-in view handles expired tickets. */ }
+      }
+    }
     const hash = location.hash.slice(1);
     const asked = available(hash) ? hash
       : (location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster");

@@ -24,6 +24,7 @@ from .discovery import (
 from .extension_routes import ExtensionRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
+from .launch_routes import LaunchRoutes
 from .onboard.clusters import known_clusters
 from .onboard.joining import join_by_passphrase
 from .page import COMPONENTS, render
@@ -777,7 +778,7 @@ class JobRoutes:
 
 class Router(PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
              RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes,
-             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, ExtensionRoutes, Base):
+             WorkspaceRoutes, GymRecordingRoutes, GymRoutes, LaunchRoutes, ExtensionRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:

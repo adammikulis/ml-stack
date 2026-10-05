@@ -454,6 +454,41 @@ class TestSignIn:
         assert status == 200
         assert body["group"] == "home"
 
+    @pytest.mark.redteam
+    def test_launch_ticket_requires_session_and_is_consumed_once(self, joined):
+        status, _, _ = joined.call('/ui/launch-ticket', method='POST')
+        assert status == 401
+        _, _, headers = joined.call('/ui/session', method='POST',
+                                    body={'passphrase': WORDS, 'group': 'home'})
+        cookie=headers['Set-Cookie'].split(';')[0]
+        status, body, headers=joined.call('/ui/launch-ticket', method='POST', cookie=cookie)
+        assert status == 200 and headers['Cache-Control'] == 'no-store'
+        assert joined.call('/ui/launch-ticket', method='POST', cookie=cookie, ui_header=False)[0] == 403
+        assert joined.call('/ui/launch-ticket', method='POST', cookie=cookie, headers={'Host':'foreign.example'})[0] == 403
+        ticket=body['ticket']
+        status, body, _=joined.call('/ui/session',method='POST',body={'ticket':ticket})
+        assert status == 200 and body['signed_in']
+        status, _, _=joined.call('/ui/session',method='POST',body={'ticket':ticket})
+        assert status == 401
+        assert joined.call('/ui/launch-ticket',cookie=cookie)[0] == 405
+
+    def test_browser_launch_exchanges_ticket_and_removes_address_credential(self, joined):
+        playwright=pytest.importorskip('playwright.sync_api')
+        _, _, headers=joined.call('/ui/session',method='POST',
+                                 body={'passphrase':WORDS,'group':'home'})
+        cookie=headers['Set-Cookie'].split(';')[0]
+        _, body, _=joined.call('/ui/launch-ticket',method='POST',cookie=cookie)
+        with playwright.sync_playwright() as driver:
+            browser=driver.chromium.launch(headless=True)
+            page=browser.new_page()
+            page.goto(f'http://127.0.0.1:{joined.port}/ui/?launch_ticket={body["ticket"]}#tasks')
+            page.wait_for_function("!location.search.includes('launch_ticket')")
+            page.wait_for_function("document.cookie !== undefined && window.fleetModel !== undefined")
+            status=page.evaluate("async () => (await fetch('/ui/session',{headers:{'X-ML-Stack-UI':'1'}})).json()")
+            assert status['signed_in']
+            assert page.url.endswith('#tasks')
+            browser.close()
+
     def test_signing_out_ends_the_session(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
                                     body={"passphrase": WORDS, "group": "ml-stack"})
