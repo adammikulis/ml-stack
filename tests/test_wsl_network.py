@@ -171,6 +171,8 @@ def test_wsl_launcher_cleans_bridge_when_process_creation_fails(monkeypatch):
     bridge.config = "authenticated socket configuration"
     monkeypatch.setattr(wsl, "_bridge", lambda *_args: bridge)
     monkeypatch.setattr(wsl, "command", lambda *args: list(args))
+    monkeypatch.setattr(wsl, "_read", lambda *_args: "/linux/python")
+    monkeypatch.setattr(wsl.subprocess, "run", MagicMock(return_value=SimpleNamespace(returncode=0)))
     monkeypatch.delenv("ML_STACK_HOME", raising=False)
     monkeypatch.delenv("ML_STACK_CACHE", raising=False)
 
@@ -204,3 +206,20 @@ def test_windows_bridge_factory_uses_native_socket_with_inherited_proxy(monkeypa
     monkeypatch.setattr(wsl_network, "NetworkBridge", factory)
     wsl._bridge("linux-python", [])
     assert captured == [discovery._native_socket]
+
+
+def test_discovery_bridge_refuses_public_control_address(monkeypatch):
+    monkeypatch.setenv(wsl_network.ENV, json.dumps({"address": ["8.8.8.8", 80], "token": "test"}))
+    connect = MagicMock()
+    monkeypatch.setattr(socket, "create_connection", connect)
+    with pytest.raises(OSError, match="public internet"):
+        wsl_network.DiscoverySocket({})
+    connect.assert_not_called()
+
+
+def test_lan_forward_refuses_public_target(monkeypatch):
+    connect = MagicMock()
+    monkeypatch.setattr(socket, "create_connection", connect)
+    client = MagicMock()
+    wsl_network._forward(client, ("8.8.8.8", 80), threading.Event())
+    connect.assert_not_called()

@@ -16,6 +16,8 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from .onboard.lan import require_local
+
 ENV = "ML_STACK_WSL_NETWORK"
 LIMIT = 100_000
 
@@ -51,7 +53,9 @@ class DiscoverySocket:
 
     def __init__(self, options: dict) -> None:
         config = json.loads(os.environ[ENV])
-        self.connection = socket.create_connection(tuple(config["address"]), timeout=5)
+        address = tuple(config["address"])
+        require_local(*address)
+        self.connection = socket.create_connection(address, timeout=5)
         self.stream = self.connection.makefile("rwb")
         self.lock = threading.Lock()
         self.timeout = 2.0
@@ -104,6 +108,7 @@ class DiscoverySocket:
 def _forward(client: socket.socket, target: tuple[str, int], stop: threading.Event) -> None:
     with client:
         try:
+            require_local(*target)
             with socket.create_connection(target, timeout=3) as upstream:
                 sockets = [client, upstream]
                 while sockets and not stop.is_set():

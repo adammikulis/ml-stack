@@ -35,6 +35,9 @@ ALLOWED: dict[str, str] = {
     "http.py": "the client for model servers on this machine and network; urllib lives here",
     "httpguard.py": "the guarded connection the pipeline is built on",
     "fleet/serving.py": "a port check on loopback",
+    "fleet/project_client.py": "sealed project source from a LAN peer; exact redirects and require_local_url at every request",
+    "workspace/remote.py": "sealed project board on the LAN; exact redirects and require_local_url at every request",
+    "fleet/wsl_network.py": "WSL LAN bridge; require_local before each TCP connection and restricted discovery destinations",
     "fleet/api.py": "proxies an inference call to a fleet peer",
     "fleet/remote.py": "calls a fleet peer",
     "fleet/join.py": "joins a fleet peer",
@@ -98,6 +101,8 @@ def findings(path: Path) -> list[str]:
             module = node.module
             if node.level and module != "http":
                 continue  # a sibling module that shares a library's name
+            if module == "http.client" and all(a.name == "HTTPException" for a in node.names):
+                continue
             if module in LIBRARIES or any(module.startswith(lib + ".") for lib in LIBRARIES):
                 found.append(f"from {module} import ...")
             elif module in ("urllib", "http"):
@@ -160,6 +165,8 @@ def test_every_allowed_module_exists_and_still_needs_its_place():
 
 @pytest.mark.parametrize("source", [
     "import urllib.request\n",
+    "from http.client import HTTPConnection\n",
+    "from http.client import HTTPException, HTTPConnection\n",
     "from urllib.request import urlopen\n",
     "import requests\n",
     "import socket\nsocket.create_connection(('x', 1))\n",
@@ -212,3 +219,9 @@ def test_every_module_that_may_open_a_peer_connection_checks_the_address_first()
         assert "require_local" in source, rel
         assert "create_default_context" not in source, rel
         assert "HTTPSConnection(" not in source or "context=" in source, rel
+
+
+def test_http_exception_import_does_not_open_a_connection(tmp_path):
+    path = tmp_path / "m.py"
+    path.write_text("from http.client import HTTPException\n")
+    assert findings(path) == []

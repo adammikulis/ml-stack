@@ -39,7 +39,7 @@ PRIVATE = ("_start_server", "_escalate", "_detach", "_stop_server")
 
 
 def parsed() -> dict[str, ast.Module]:
-    return {str(path.relative_to(SRC)): ast.parse(path.read_text(encoding="utf-8"))
+    return {path.relative_to(SRC).as_posix(): ast.parse(path.read_text(encoding="utf-8"))
             for path in sorted(SRC.rglob("*.py"))}
 
 
