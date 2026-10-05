@@ -6,6 +6,9 @@ names and layout. `CLAUDE.md` holds the working rules in full; the short version
 - Python 3.13. `python -m pip install -e ".[test]"` then `python -m pytest` (`--slow` adds the slow tests).
 - Commit subjects start with `feat:`, `fix:` or `chore:`; release-please builds the changelog from them.
 - Comments say what the code does, not why it was written that way.
+- Work in a separate branch and worktree beside the primary checkout. Completion includes
+  landing the work, checking for anything unique, removing the worktree and merged branch,
+  and verifying cleanup before the final report (see `CLAUDE.md`, "Worktrees").
 - The gates in `scripts/gates/` refuse a new violation; run `scripts/budgets` before you push. A number in
   `budgets.json` may fall, never rise.
 - Tests build their own fixtures with invented names and never read `~/.ml-stack`. No real names, emails, hostnames

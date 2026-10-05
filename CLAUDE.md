@@ -276,26 +276,39 @@ git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch -
 
 `main` is the release branch: a commit that arrives there is a commit queued to publish. Work
 lands on the development branch, and promoting that to `main` is the owner's. Whoever made a
-branch finishes it. Fetch, merge into the development branch, push it, then take the worktree
-and the branch away:
+branch finishes it. Fetch, merge into the development branch, then take the worktree and the
+branch away. Run removal from outside the worktree being removed:
 
 ```
 git fetch origin
 git merge --ff-only <branch>
-git push origin "$(git branch --show-current)"
 git worktree remove ../ml-stack-<branch>
 git branch -d <branch>
 git worktree prune
 ```
 
-The development branch is pushed after every merge that lands on it, so the remote is never
-behind what has landed; a work branch is not pushed. Whoever merges, prunes: a subagent that
+Push, tag and release are the owner's actions unless explicitly requested. Whoever merges, prunes: a subagent that
 lands its own branch removes its own worktree and branch, and when the main session merges it
 does so in the same step. A merge is not finished until `git worktree list` shows only trees
 with live work in them. Before removing a tree, check that it holds nothing unique -- unmerged
 commits (`git cherry <dev-branch> <branch>`), uncommitted changes, or ignored state that is not
 a rebuildable cache -- and never remove one while an agent is still working in it; if one is,
 leave it and say so.
+
+**Cleanup is part of completion, before the final report or `announce done`.** Check
+`git status --short --untracked-files=all`, `git status --short --ignored`, and
+`git cherry <dev-branch> <branch>` in the worktree. Remove it only when its work is landed,
+there are no uncommitted or unique files to preserve, and no agent is using it. Never use
+`--force` to bypass those checks. Delete the merged branch with `git branch -d`, prune the
+registrations, and confirm with `git worktree list` that the path is gone. Report the landed
+commit and cleanup result. A passing test, commit, or handoff alone does not finish the task.
+
+This applies to documentation, investigations that created a worktree, cancelled tasks and
+subagents too. If work must remain, name the path, branch, pending work and responsible agent
+in the handoff; do not report it as complete. The lead checks cleanup for every branch it
+requested. Create worktrees beside the primary checkout, never inside it (including
+`.worktrees/`), so each checkout has its own file tree. Existing nested worktrees get the same
+preservation checks before removal; an unregistered directory is not proof that it is disposable.
 
 - The primary checkout is what *runs* — the editable install, a detached ingest, the page. It
   changes only by landing a branch: tests green on the branch, a fast-forward or rebase merge

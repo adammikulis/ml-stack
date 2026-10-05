@@ -82,6 +82,13 @@ identity and runs it as an agent that takes and gives tasks ([docs/local-agent.m
 
 ### Subagents
 
+Each coding agent uses its own branch and worktree beside the primary checkout, as described
+in [the repository rules](../CLAUDE.md#worktrees). Before `announce done` or a final report,
+land the work, check for unique commits, uncommitted files and ignored state, remove the
+worktree and merged branch, prune, and verify the path is absent from `git worktree list`.
+The parent checks its subagents' cleanup. A retained worktree needs a handoff naming its path,
+branch, pending work and responsible agent; it is not a completed task.
+
 The person never pastes anything for a subagent. A parent agent has two choices.
 
 * Share its identity: `ml-stack-workspace brief NAME --agent ME` prints a three-line brief to
