@@ -684,3 +684,20 @@ remain and expired IDs are refused. An interrupted request with an uncertain out
 is never silently executed again. Inspect shared state before issuing a new operation.
 This capability has local two-root/socket proof; a Windows machine is connected only
 when its actual authenticated handshake succeeds.
+
+For a generic invitation from your own terminal, run `ml-stack-workspace connect --code-only --no-project`.
+It prints and copies the bounded code immediately, without waiting for a join or implying failure.
+A hosted workspace includes its authenticated advertised coordinator in the paste; the receiving
+computer must first enroll in the same Fleet cluster through person-approved pairing. Agent-issued
+invites still follow the person's policy: the CLI prints the approval request ID and timeout before
+waiting, so the person can approve or deny it in the app's requests view.
+
+A cross-device code belongs to a coordinator, not to whichever local workspace receives it.
+On the coordinator, the person first runs `ml-stack-workspace coordinator host` (or selects
+Host in the UI). Open person-approved network enrollment with `ml-stack-fleet listen --for 10m`;
+on the receiving computer run `ml-stack-fleet pair --host MAC_LAN_ADDRESS --port 8772`, then
+approve the actual device and compare the pairing code. Existing enrolled devices skip pairing.
+Now run `ml-stack-workspace connect --remote --code-only --no-project` on the coordinator.
+The complete paste binds the advertised Fleet coordinator and its workspace ID. Paste the whole
+join command: its code alone cannot identify the correct authority. `--remote` refuses to create
+an invitation before hosting is active, and a workspace-bound join never falls back to a local registry.
