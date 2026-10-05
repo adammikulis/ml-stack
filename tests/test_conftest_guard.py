@@ -77,3 +77,30 @@ def test_keystore_spending_records_actual_pid_without_calling_backend(tmp_path):
     record = json.loads((tmp_path / 'ks' / 'rate.json').read_text())
     assert record['writer_pid'] == os.getpid()
     assert record['writer_at'] == record['reads'][-1]
+
+
+def test_only_live_harness_keys_linked_to_external_worker_are_excluded(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import conftest
+    import psutil
+
+    worker = tmp_path / 'workspace' / 'local-agents'
+    worker.mkdir(parents=True)
+    (worker / 'scout.json').write_text(json.dumps({'pid': 12345, 'process_started': 10.0}))
+    key = worker / 'scout-chats' / 'harness' / ('a' * 12) / ('b' * 24) / 'sessions' / ('23456.' + 'c' * 64 + '.key')
+    key.parent.mkdir(parents=True)
+    key.write_bytes(b'private test session key')
+    parent = SimpleNamespace(pid=12345, create_time=lambda: 10.0)
+    monkeypatch.setattr(conftest, 'ours', lambda entry: entry['owner_pid'] == os.getpid())
+    monkeypatch.setattr(psutil, 'Process', lambda pid: SimpleNamespace(parents=lambda: [parent]))
+    assert key.relative_to(tmp_path).as_posix() not in file_mtimes(tmp_path)
+    (worker / 'scout.json').write_text(json.dumps({'pid': 12345, 'process_started': 9.0}))
+    assert key.relative_to(tmp_path).as_posix() in file_mtimes(tmp_path)
+    malformed = key.with_name('23456.bad.key')
+    malformed.write_bytes(b'private test session key')
+    assert malformed.relative_to(tmp_path).as_posix() in file_mtimes(tmp_path)
+    (worker / 'scout.json').write_text(json.dumps({'pid': 12345, 'process_started': 10.0}))
+    ours_key = key.with_name(str(os.getpid()) + '.' + 'c' * 64 + '.key')
+    ours_key.write_bytes(b'private test session key')
+    assert ours_key.relative_to(tmp_path).as_posix() in file_mtimes(tmp_path)

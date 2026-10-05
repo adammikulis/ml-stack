@@ -925,6 +925,26 @@ def _external_keystore_rate(root: Path, rel: Path) -> bool:
     return record["writer_pid"] > 0 and not ours({"owner_pid": record["writer_pid"]})
 
 
+def _external_harness_key(root: Path, rel: Path) -> bool:
+    import re
+    import psutil
+
+    match = re.fullmatch(r"workspace/local-agents/([a-z0-9][a-z0-9._-]{0,47})-chats/harness/"
+                         r"[0-9a-f]{12}/[0-9a-f]{24}/sessions/([1-9][0-9]{0,9})\.[0-9a-f]{64}\.key",
+                         rel.as_posix())
+    if match is None or ours({"owner_pid": int(match[2])}):
+        return False
+    try:
+        process = psutil.Process(int(match[2]))
+        saved = json.loads((root / 'workspace' / 'local-agents' / f'{match[1]}.json').read_text())
+        if not isinstance(saved, dict) or type(saved.get('pid')) is not int:
+            return False
+        parent = next((parent for parent in process.parents() if parent.pid == saved.get('pid')), None)
+        return parent is not None and parent.create_time() == saved.get('process_started')
+    except (OSError, ValueError, psutil.Error):
+        return False
+
+
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
@@ -938,7 +958,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
             if name.endswith(".tmp"):
                 continue
             if skip is LIVE_WRITERS and (_external_keystore_lock(root, rel / name)
-                                         or _external_keystore_rate(root, rel / name)):
+                                         or _external_keystore_rate(root, rel / name)
+                                         or _external_harness_key(root, rel / name)):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
