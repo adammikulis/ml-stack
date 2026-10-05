@@ -1,8 +1,8 @@
 {
- "surfaces": 729,
+ "surfaces": 730,
  "by_status": {
-  "covered": 406,
-  "partial": 204,
+  "covered": 411,
+  "partial": 200,
   "uncovered": 54,
   "n/a": 65,
   "unmapped": 0
@@ -100,8 +100,8 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 38,
-   "partial": 67,
+   "covered": 43,
+   "partial": 63,
    "uncovered": 0,
    "n/a": 2,
    "unmapped": 0
@@ -7604,7 +7604,7 @@
    "note": "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
   },
   {
-   "id": "route:fleet/project_client.py:/ui/projects*",
+   "id": "route:fleet/project_client.py:/ui/projects/*",
    "kind": "route",
    "source": "fleet/project_client.py:route",
    "trust": "network peer or local browser",
@@ -9367,11 +9367,13 @@
    "source": "fleet/autostart.py:_windows_owner",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_wsl_autostart.py::test_hostile_request_refused",
+    "tests/test_wsl_autostart.py::test_invalid_wire_never_mutates_tasks",
+    "tests/test_wsl_autostart.py::test_windows_owner_preserves_running_launcher"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "hostile startup fields refuse before task mutation; validated requests use fixed task commands and preserve the running launcher"
   },
   {
    "id": "spawn:fleet/autostart.py:_windows_task_named",
@@ -9658,11 +9660,11 @@
    "source": "fleet/wsl.py:start",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_redteam_startup_arguments.py"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "hostile executable and label text stays in literal argv or JSON fields; service commands and information flags remain fixed without a shell"
   },
   {
    "id": "spawn:fleet/wsl_startup.py:call",
@@ -9670,11 +9672,11 @@
    "source": "fleet/wsl_startup.py:call",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_redteam_startup_arguments.py"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "hostile executable and label text stays in literal argv or JSON fields; service commands and information flags remain fixed without a shell"
   },
   {
    "id": "spawn:gguf/convert.py:_run",
@@ -10062,11 +10064,11 @@
    "source": "serve/backend.py:_binary_info",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"
+    "tests/test_redteam_startup_arguments.py"
    ],
-   "note": "the AST gate shows no spawn goes through a shell; what each argv carries (peer names in fleet/jobs.py, repo paths in doctor.py and updates.py, file names in speech/) is not attacked individually"
+   "note": "hostile executable and label text stays in literal argv or JSON fields; service commands and information flags remain fixed without a shell"
   },
   {
    "id": "spawn:serve/backend.py:launch",
@@ -10414,6 +10416,18 @@
    "id": "spawn:worktreerules.py:commit_refusal",
    "kind": "spawn",
    "source": "worktreerules.py:commit_refusal",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_worktree_rules.py::test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell"
+   ],
+   "note": "git is run with argv only; the paths come from a tool call and are one argument each"
+  },
+  {
+   "id": "spawn:worktreerules.py:worktree_refusal",
+   "kind": "spawn",
+   "source": "worktreerules.py:worktree_refusal",
    "trust": "arguments built from model output, peer messages or file names",
    "attacker": "attacker text becomes a command line, environment or working directory",
    "status": "covered",

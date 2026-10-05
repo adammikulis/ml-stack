@@ -645,3 +645,23 @@ def test_wait_notices_are_delayed_and_time_gated(tmp_path, monkeypatch):
         pass
     assert [stamp for stamp, _ in notices] == [1, 21]
     assert not list((tmp_path / 'slots').glob('*.slot'))
+
+
+def test_record_removed_after_identity_check_is_republished_locked(tmp_path, monkeypatch):
+    module = _load()
+    monkeypatch.setenv("DEV_TEST_SLOTS_DIR", str(tmp_path / "slots"))
+    monkeypatch.setenv("DEV_TEST_BUDGET", "1")
+    original = module._own_records
+    removed = []
+
+    def remove_once(directory, path, record):
+        if not removed:
+            path.unlink()
+            removed.append(path)
+        return original(directory, path, record)
+
+    monkeypatch.setattr(module, "_own_records", remove_once)
+    with module.lease(1, say=lambda message: None):
+        assert module._alive(removed[0])
+        assert module.status()["in_use"] == 1
+    assert not list((tmp_path / "slots").glob("*.slot"))

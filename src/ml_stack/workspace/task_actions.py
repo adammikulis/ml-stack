@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
+from ml_stack.workspace import task_worktrees
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.resource_allocations import verified_binding
@@ -27,6 +28,8 @@ def claim(ws, graph, who, task, allocation):
         raise Denied('the worker allocation lacks a required capability')
     if task['limits'].get('model') and task['limits']['model'] != allocation['model']:
         raise Denied('the allocated model does not match the task requirement')
+    if allocation.get('profile') == 'coding':
+        task_worktrees.activate(graph, who.id, task['id'])
     now = ws.clock()
     lease = {'id': f'task-lease:{uuid4().hex}', 'task': task['id'], 'worker': who.id,
              'allocation_id': allocation['allocation_id'], 'device_id': allocation['device_id'],
@@ -136,7 +139,9 @@ def review(board, token, ident, decision):
         link(graph, outcome['id'], proposal['id'], 'reviews-proposal')
         graph.upsert_node({'id': f'agent:{who.id}', 'kind': 'agent', 'label': who.id})
         link(graph, outcome['id'], f'agent:{who.id}', 'reviewed-by')
-        task.update(state='completed' if decision['accepted'] else
+        scope = next((node['attrs'] for node in graph.nodes('task-worktree')
+                      if node['attrs']['task'] == ident), None)
+        task.update(state=('accepted' if scope else 'completed') if decision['accepted'] else
                     'blocked' if decision['outcome'] == 'blocked_infrastructure' else 'rejected',
                     review_id=outcome['id'])
         if decision['outcome'] == 'rejected':

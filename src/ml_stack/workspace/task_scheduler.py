@@ -51,7 +51,7 @@ def integrate_completed(ws, parent_token, worker):
     board = TaskBoard(ws)
     results = []
     for summary in board.list(parent_token)['tasks']:
-        if summary['state'] != 'completed' or summary.get('worker') != worker:
+        if summary['state'] != 'accepted' or summary.get('worker') != worker:
             continue
         task = board.get(parent_token, summary['id'])
         review = task.get('review') or {}

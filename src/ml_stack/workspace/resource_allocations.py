@@ -62,6 +62,8 @@ def assign(ws, token, worker, task, lease_id):
                   "profile": runner.profile, "capabilities": [runner.profile], "harness": runner.harness,
                   "execution_config": _execution_config(runner),
                   "project": runner.project, "interpreter": sys.executable, "python": sys.version.split()[0], "scheduler_pid": os.getpid()}
+    if runner.profile == 'coding':
+        task_worktrees.prepare(ws, token, worker, task)
     with held(ws.base / "coordination.lock"), GraphStore(ws.base / "coordination.db") as graph:
         if not graph.has(task):
             raise ValueError("the canonical task does not exist")
@@ -72,7 +74,7 @@ def assign(ws, token, worker, task, lease_id):
                          if row['attrs']['task'] == task and row['attrs']['worker'] == worker
                          and row['attrs']['lease_id'] == lease_id), None)
         if existing and all(existing.get(key) == allocation.get(key) for key in
-                            ('owner', 'holder_pid', 'holder_started', 'server_pid', 'server_started', 'project', 'execution_config')):
+                            ('owner', 'holder_pid', 'holder_started', 'server_pid', 'server_started', 'project', 'baseline_commit', 'execution_config')):
             return existing
         key = allocation["allocation_id"]
         graph.upsert_node({"id": key, "kind": "allocation", "label": task, "attrs": allocation})

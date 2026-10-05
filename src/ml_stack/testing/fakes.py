@@ -516,7 +516,7 @@ class Served:
     @property
     def name(self) -> str:
         """The id ``/v1/models`` lists: the weights file's own name."""
-        return PurePosixPath(self.model).name or self.model
+        return PurePosixPath(self.model.replace("\\", "/")).name or self.model
 
     def props(self) -> dict[str, Any]:
         """``/props``, with the fields `serving_params` and `drafting_of` read."""

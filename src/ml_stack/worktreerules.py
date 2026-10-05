@@ -59,7 +59,7 @@ def _enforced(primary: Path) -> bool:
 
 
 def _unquote(word: str) -> str:
-    return re.sub(r"^~(?=/|$)", os.environ.get("HOME", "~"), word.strip("'\""))
+    return re.sub(r"^~(?=/|$)", lambda _: os.environ.get("HOME", "~"), word.strip("'\""))
 
 
 def edit_refusal(paths: Iterable[str], cwd: str) -> str:
@@ -124,6 +124,30 @@ def _installs(segment: str, here: Path) -> list[Path]:
     return found
 
 
+
+def _worktree_target(segment: str) -> str | None:
+    try:
+        words = [_unquote(word) for word in shlex.split(segment, posix=os.name != "nt")]
+    except ValueError:
+        return None
+    if "worktree" not in words:
+        return None
+    index = words.index("worktree") + 1
+    if words[index:index + 1] != ["add"]:
+        return None
+    index += 1
+    while index < len(words):
+        word = words[index]
+        if word in {"-b", "-B", "--reason"}:
+            index += 2
+        elif word == "--":
+            return words[index + 1] if index + 1 < len(words) else None
+        elif word.startswith("-"):
+            index += 1
+        else:
+            return word
+    return None
+
 def bash_refusal(command: str, cwd: str) -> str:
     """Why `command` may not run from `cwd`, empty when it may."""
     if switched_off():
@@ -135,6 +159,13 @@ def bash_refusal(command: str, cwd: str) -> str:
             here = moved
             continue
         git = re.match(GIT, segment)
+        if git and git["verb"] == "worktree" and (target := _worktree_target(segment)):
+            given = re.search(r"\s-C\s+(\S+)", segment)
+            where = here / _unquote(given.group(1)) if given else here
+            found = checkouts(where)
+            if found and _enforced(found[1]):
+                if why := worktree_refusal(where / target, where):
+                    return why
         if git and git["verb"] in CHANGES_THE_TREE:
             given = re.search(r"\s-C\s+(\S+)", segment)
             where = here / _unquote(given.group(1)) if given else here
@@ -179,4 +210,23 @@ def commit_refusal(cwd: str, environ: dict[str, str] | None = None) -> str:
     if dev and here == dev:
         return (f"a commit on {dev}, the development branch. Commit on your own branch; it "
                 f"lands with `git merge --ff-only` from the primary checkout.")
+    return ""
+
+
+def worktree_refusal(target: str | Path, source: str | Path, *, registered: bool = False) -> str:
+    """Why a worktree path is nested inside an existing repository checkout."""
+    found = checkouts(source)
+    if not found:
+        return "The source must belong to a Git checkout"
+    primary = found[1]
+    listed = subprocess.run(["git", "-C", str(primary), "worktree", "list", "--porcelain"],
+                            capture_output=True, text=True, timeout=5, check=False)
+    if listed.returncode:
+        return "Git could not verify existing checkout paths"
+    path = Path(target).resolve()
+    for line in listed.stdout.splitlines():
+        if line.startswith("worktree "):
+            checkout = Path(line.removeprefix("worktree ")).resolve()
+            if (path == checkout and not registered) or checkout in path.parents:
+                return f"{path} is inside checkout {checkout}; create the task worktree beside the checkout"
     return ""

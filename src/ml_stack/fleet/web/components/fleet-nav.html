@@ -17,7 +17,7 @@ fleet-nav { display: contents; }
     <a class="brand" href="#chat"><span class="dot"></span>ml-stack</a>
     <div class="sidebar-caption">Local intelligence studio</div>
     <input class="nav-search" id="nav-search" type="search" aria-label="Find a page"
-      placeholder="Find a pageâ€¦" aria-keyshortcuts="Control+k Meta+k">
+      placeholder="Find a page…" aria-keyshortcuts="Control+k Meta+k">
     <nav class="tabs" id="nav-tabs" aria-label="Main navigation"></nav>
     <p class="nav-empty" id="nav-empty" role="status" hidden>No pages match. Press Escape to clear.</p>
     <footer class="sidebar-footer">
@@ -91,7 +91,7 @@ fleet-nav { display: contents; }
         const jobs = result.jobs || [];
         const running = jobs.filter((job) => job.state === "running").length;
         const queued = jobs.filter((job) => job.state === "queued").length;
-        this.jobs.textContent = `${running} running Â· ${queued} queued`;
+        this.jobs.textContent = `${running} running · ${queued} queued`;
         this.jobs.hidden = false;
       } catch { this.jobs.hidden = true; }
       finally { this.refreshing = false; }

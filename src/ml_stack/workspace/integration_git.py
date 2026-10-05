@@ -31,6 +31,10 @@ def git(root: Path, *arguments: str, binary: bool = False):
 
 
 def clean(root: Path) -> None:
+    for marker in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply'):
+        path = root / git(root, 'rev-parse', '--git-path', marker)
+        if path.exists():
+            raise Denied(f'{root} has an unfinished {marker} operation')
     if git(root, 'status', '--porcelain'):
         raise Denied(f'{root} has uncommitted changes; commit or preserve them before integration')
 
@@ -101,3 +105,47 @@ def gates(candidate: Path, baseline: str) -> list[dict]:
     if git(candidate, 'rev-parse', 'HEAD') != before:
         raise Denied('the candidate commit changed during its gates')
     return outcomes
+
+
+def remote_baseline(root: Path, branch: str, baseline: str) -> None:
+    """Refuse a baseline behind or diverged from freshly fetched development."""
+    if 'origin' not in git(root, 'remote').splitlines():
+        return
+    git(root, 'fetch', 'origin', branch)
+    remote = git(root, 'rev-parse', 'FETCH_HEAD')
+    if not ancestor(root, remote, baseline):
+        raise Denied('development moved remotely; reconcile the latest remote before integration')
+
+
+def remove_merged(primary: Path, path: Path, branch: str, landed: str) -> None:
+    """Remove a clean merged checkout and branch, preserving unique files and commits."""
+    entries = git(primary, 'worktree', 'list', '--porcelain').splitlines()
+    listed = any(line.startswith('worktree ') and Path(line[9:]).resolve() == path.resolve()
+                 for line in entries)
+    if listed:
+        clean(path)
+        head = git(path, 'rev-parse', 'HEAD')
+        if not ancestor(primary, head, landed):
+            raise Denied(f'{path} still has commits outside the landed development tree')
+        ignored = git(path, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z').split('\0')
+        unknown = [name for name in ignored if name and not any(
+            part in {'__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache'}
+            for part in Path(name).parts) and not Path(name).name.startswith(('.testmondata', '.coverage'))]
+        if unknown:
+            raise Denied(f'{path} contains ignored files requiring preservation: {unknown[:5]}')
+        locked = path / git(path, 'rev-parse', '--git-path', 'locked')
+        if locked.exists():
+            git(primary, 'worktree', 'unlock', str(path))
+        git(primary, 'worktree', 'remove', str(path))
+    elif path.exists():
+        raise Denied(f'{path} exists without its registered task worktree; preserve it before completion')
+    refs = git(primary, 'for-each-ref', '--format=%(refname)', f'refs/heads/{branch}').splitlines()
+    if f'refs/heads/{branch}' in refs:
+        tip = git(primary, 'rev-parse', f'refs/heads/{branch}')
+        if not ancestor(primary, tip, landed):
+            raise Denied(f'{branch} still has unique commits')
+        git(primary, 'branch', '-d', branch)
+    git(primary, 'worktree', 'prune')
+    if path.exists() or any(line.startswith('worktree ') and Path(line[9:]).resolve() == path.resolve()
+                           for line in git(primary, 'worktree', 'list', '--porcelain').splitlines()):
+        raise Denied(f'{path} remains after task cleanup')

@@ -17,7 +17,7 @@ const M=window.fleetModel,W=window.workspaceModel,E=M.el;
 class TasksView extends HTMLElement{
  connectedCallback(){if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.note=this.querySelector('.status');this.rows=[];this.selected='';
  this.search=this.querySelector('input[aria-label="Search tasks"]');this.filter=this.querySelector('select');
- for(const state of ['queued','working','review','completed','blocked','rejected'])this.filter.append(E('option',{value:state},state));
+ for(const state of ['queued','working','review','accepted','completed','blocked','rejected'])this.filter.append(E('option',{value:state},state));
  this.search.oninput=this.filter.onchange=()=>this.paint();this.querySelector('.task-refresh').onclick=()=>this.load();
  this.querySelector('form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget;try{const row=await W.post('/ui/tasks',{spec:{title:form.elements.namedItem('title').value,description:form.elements.namedItem('description').value,acceptance:form.elements.namedItem('acceptance').value.split('\n').map(x=>x.trim()).filter(Boolean)}});this.selected=row.id;form.reset();await this.load();}catch(error){W.status(this.note,error);}};
  W.route(this.host,'tasks',()=>this.load());this.timer=setInterval(()=>{if(!this.host.hidden)this.load();},5000);}

@@ -17,7 +17,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
     if (g.eta_s !== null && g.eta_s !== undefined) {
       parts.push(`about ${Math.max(1, Math.ceil(g.eta_s / 60))} min left`);
     }
-    return parts.join(" Ã‚Â· ");
+    return parts.join(" · ");
   };
 
   /** One call to the daemon: `{ok, status, ...body}`. */
@@ -73,9 +73,9 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
   // The badge has to be right: torch's ROCm build answers True to every CUDA question,
   // so the daemon reports vendor separately and this only renders what it is told.
   M.vendorOf = function (d = {}) {
-    if (d.rocm || d.vendor === "amd") return { key: "amd", text: "AMD Ã‚Â· ROCm" };
-    if (d.cuda || d.vendor === "nvidia") return { key: "nvidia", text: "NVIDIA Ã‚Â· CUDA" };
-    if (d.vendor === "apple") return { key: "apple", text: "Apple Ã‚Â· Metal" };
+    if (d.rocm || d.vendor === "amd") return { key: "amd", text: "AMD · ROCm" };
+    if (d.cuda || d.vendor === "nvidia") return { key: "nvidia", text: "NVIDIA · CUDA" };
+    if (d.vendor === "apple") return { key: "apple", text: "Apple · Metal" };
     return { key: "cpu", text: `${d.cpus || "?"} CPU` };
   };
 
@@ -92,7 +92,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view, data-view, traini
       slider.valueText = `${new Intl.NumberFormat().format(n)} tokens`;
       slider.hint = n > 262144
         ? "Extended context: Qwen uses YaRN above its native 256K window. Larger contexts require more memory."
-        : "Maximum tokens in the modelÃ¢â‚¬â„¢s context. Larger contexts require more memory.";
+        : "Maximum tokens in the model’s context. Larger contexts require more memory.";
       onPick(n);
     };
     slider.addEventListener("input", (e) => {

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -82,14 +83,18 @@ def project(board, tmp_path, monkeypatch, request):
     (source / '.task-report.md').write_text('Independent replay ready.\n')
     repo.git(source, 'add', '--', '.task.patch', '.task-report.md')
     repo.git(source, 'commit', '-m', 'chore: record canonical task artifacts')
-    artifacts = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
+    artifacts = {name: hashlib.sha256(repo.git(source, 'show', f'HEAD:{name}', binary=True)).hexdigest()
                  for name in ('sim.py', '.task.patch', '.task-report.md')}
     proposal = board.board.submit(board.child, board.task['id'],
                                  {'summary': 'Native source is committed.', 'artifacts': artifacts,
                                   'checks': [{'name': 'Worker claim', 'passed': True}],
                                   'provenance': {'commit': repo.git(source, 'rev-parse', 'HEAD')}})
     hook = Path(__file__).resolve().parents[1] / 'scripts' / 'hooks' / 'pre-push'
-    (primary / '.git' / 'hooks' / 'pre-push').symlink_to(hook)
+    interpreter = Path(sys.executable).as_posix()
+    checker = (hook.parent / 'pushed').as_posix()
+    installed = primary / '.git' / 'hooks' / 'pre-push'
+    installed.write_text(hook.read_text().replace('python3 \"$here/pushed\"', f'\"{interpreter}\" \"{checker}\"'))
+    installed.chmod(0o755)
     log = tmp_path / 'gate-commands.jsonl'
     monkeypatch.setenv('INTEGRATION_GATE_LOG', str(log))
     return {'primary': primary, 'source': source, 'origin': origin, 'log': log,
@@ -98,7 +103,7 @@ def project(board, tmp_path, monkeypatch, request):
 
 def test_reviewed_native_patch_runs_maintained_gates_then_fast_forwards_development(board, project):
     review = board.board.review(board.parent, board.task['id'], accepted())
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'published' and result['review_hash'] == review['review_hash']
     commands = [json.loads(line) for line in project['log'].read_text().splitlines()]
     assert commands == [['quick', '--base', project['baseline']], ['gate'],
@@ -108,13 +113,15 @@ def test_reviewed_native_patch_runs_maintained_gates_then_fast_forwards_developm
     assert repo.git(project['origin'], 'rev-parse', 'refs/heads/0.2dev') == result['commit']
     assert repo.ancestor(project['primary'], project['baseline'], result['commit'])
     assert repo.git(project['origin'], 'for-each-ref', '--format=%(refname)', 'refs/heads') == 'refs/heads/0.2dev'
-    assert task_integration.integrate(board.ws, board.parent, board.task['id']) == result
+    assert task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True) == result
     with GraphStore(board.base / 'coordination.db') as graph:
         assert len(graph.nodes('integration')) == 1
-        assert {node['attrs']['state'] for node in graph.nodes('integration-event')} == {'scope_returned', 'candidate', 'integrated', 'published'}
+        assert {node['attrs']['state'] for node in graph.nodes('integration-event')} == {'scope_returned', 'candidate', 'integrated', 'publication_confirmed', 'cleanup_required', 'published'}
         assert len(graph.nodes('integration-gate')) == 3
         assert graph.nodes('git-commit')[0]['attrs']['sha'] == result['commit']
-    assert board.ws.who_owns('worktree', str(project['source']))['owner'] == 'lead'
+    assert not project['source'].exists()
+    assert board.ws.who_owns('worktree', str(project['source'])) is None
+    assert board.board.get(board.parent, board.task['id'])['state'] == 'completed'
 
 
 @pytest.mark.redteam
@@ -143,7 +150,7 @@ def test_stale_sources_and_release_target_are_refused_before_gates(board, projec
             proposal = graph.nodes('proposal')[0]
             graph.upsert_node({**proposal, 'attrs': {**proposal['attrs'], 'artifacts': {'sim.py': 'b' * 64}}})
     with pytest.raises((Denied, ValueError)):
-        task_integration.integrate(board.ws, board.parent, board.task['id'])
+        task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert not project['log'].exists()
 
 
@@ -153,11 +160,11 @@ def test_parallel_reviewed_branch_merges_in_owned_candidate_without_rebasing(boa
     repo.git(project['primary'], 'add', '--', 'parallel.py')
     repo.git(project['primary'], 'commit', '-m', 'feat: independent parallel development')
     before = repo.git(project['primary'], 'rev-parse', 'HEAD')
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'published'
     assert repo.ancestor(project['primary'], before, result['commit'])
     assert repo.ancestor(project['primary'], project['proposal']['provenance']['commit'], result['commit'])
-    assert repo.git(project['source'], 'rev-parse', 'HEAD') == project['proposal']['provenance']['commit']
+    assert not project['source'].exists()
     assert (project['primary'] / 'parallel.py').exists()
 
 
@@ -172,7 +179,7 @@ def test_failed_merge_or_gate_preserves_candidate_and_never_publishes(board, pro
     else:
         monkeypatch.setenv('FAIL_INTEGRATION_GATE', 'gate')
     before = repo.git(project['primary'], 'rev-parse', 'HEAD')
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'blocked'
     assert repo.git(project['primary'], 'rev-parse', 'HEAD') == before
     assert repo.git(project['origin'], 'rev-parse', 'refs/heads/0.2dev') == project['baseline']
@@ -190,7 +197,7 @@ def test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the
     repo.git(project['primary'], 'merge', '--ff-only', 'other-agent/active')
     other = board.agent('other-agent')
     board.ws.claim(other, 'worktree', str(foreign))
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'blocked' and 'other-agent/active' in result['reason']
     assert 'commit' in result and result['checks']
     assert foreign.exists() and not Path(repo.git(foreign, 'rev-parse', '--git-path', 'locked')).exists()
@@ -203,7 +210,7 @@ def test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the
 def test_accepted_artifact_hashes_cannot_substitute_an_unrelated_native_patch(board, project):
     board.board.review(board.parent, board.task['id'], accepted())
     with pytest.raises(Denied, match='exact reviewed source changes'):
-        task_integration.integrate(board.ws, board.parent, board.task['id'])
+        task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert not project['log'].exists()
 
 
@@ -252,7 +259,7 @@ def test_foreign_development_branch_owner_blocks_integration_before_gates(board,
     board.board.review(board.parent, board.task['id'], accepted())
     other = board.agent('development-owner')
     claim = board.ws.claim(other, 'branch', '0.2dev')
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'blocked' and result['blocking_owner'] == 'development-owner'
     assert result['blocking_claim'] == claim
     current = board.ws.who_owns('branch', '0.2dev')
@@ -282,7 +289,7 @@ def test_task_integrate_interfaces_use_native_token_and_exact_task_id(board, pro
     monkeypatch.setattr(tools, 'Workspace', lambda: board.ws)
     monkeypatch.setattr(tools, '_token', lambda: board.parent)
     result = tools.workspace_task_integrate(board.task['id'])
-    assert result['state'] == 'published'
+    assert result['state'] == 'completed'
     command = next(item for item in cli.TABLE if item[0] == 'task-integrate')
     assert command[3](SimpleNamespace(id=board.task['id']), board.ws, board.parent) == result
 
@@ -293,7 +300,7 @@ def test_registered_parent_integrates_human_created_independently_reviewed_task(
     assert task['created_by'] != board.ws.auth(board.parent).id
     review = board.board.review(board.owner, board.task['id'], accepted())
     assert review['verifier'] != board.ws.auth(board.parent).id
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'published'
     assert repo.git(project['origin'], 'rev-parse', 'refs/heads/0.2dev') == result['commit']
 
@@ -319,7 +326,7 @@ def test_native_reservations_release_only_the_exact_accepted_task_assignment(boa
     board.ws.claims.reserve(board.ws.auth(board.child), [('file', wrong)],
                             {'assignment': 'task-worktree:other', 'task': 'task:other', 'project': str(source)})
     board.board.review(board.parent, board.task['id'], accepted())
-    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'published'
     assert board.ws.claims.who('area', target) is None
     assert board.ws.claims.who('file', unrelated)['owner'] == board.worker_id
@@ -337,7 +344,7 @@ def test_native_reservations_release_only_the_exact_accepted_task_assignment(boa
 def test_authenticated_task_inspection_exposes_exact_published_review_and_once_only_attempt(board, project):
     review = board.board.review(board.parent, board.task['id'], accepted())
     outcome = task_scheduler.integrate_completed(board.ws, board.parent, board.worker_id)[0]
-    assert outcome['state'] == 'published'
+    assert outcome['state'] == 'completed'
     assert task_scheduler.integrate_completed(board.ws, board.parent, board.worker_id) == []
     detail = board.board.get(board.owner, board.task['id'])
     integration = detail['integration']
@@ -353,7 +360,7 @@ def test_authenticated_task_inspection_exposes_exact_published_review_and_once_o
     listed = next(task for task in board.board.list(board.owner)['tasks'] if task['id'] == board.task['id'])
     assert listed['integration'] == integration and listed['integration_attempts'] == detail['integration_attempts']
     assert {event['state'] for event in detail['integration_events']} == {
-        'scope_returned', 'candidate', 'integrated', 'published'}
+        'scope_returned', 'candidate', 'integrated', 'cleanup_required', 'completed'}
     assert 'candidate' not in integration and 'released_claims' not in detail['integration_events'][0]
 
 
@@ -381,3 +388,31 @@ def test_blocked_integration_inspection_redacts_secrets_and_retains_authenticati
         board.board.get(board.parent, board.task['id'])
     with pytest.raises(Denied):
         board.board.list(board.parent)
+
+
+def test_accepted_task_is_not_done_until_local_landing_and_cleanup(board, project):
+    board.board.review(board.parent, board.task['id'], accepted())
+    assert board.board.get(board.parent, board.task['id'])['state'] == 'accepted'
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'completed' and result['cleanup_verified']
+    assert not project['source'].exists()
+    assert not Path(result['candidate']).exists()
+    assert repo.git(project['origin'], 'rev-parse', 'refs/heads/0.2dev') == project['baseline']
+    assert task_integration.integrate(board.ws, board.parent, board.task['id']) == result
+
+
+def test_unique_ignored_files_keep_task_pending_until_preserved(board, project, tmp_path):
+    board.board.review(board.parent, board.task['id'], accepted())
+    excluded = Path(repo.git(project['source'], 'rev-parse', '--git-path', 'info/exclude'))
+    excluded.write_text('notes.private\n')
+    notes = project['source'] / 'notes.private'
+    notes.write_text('unique work')
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'blocked' and 'requiring preservation' in result['reason']
+    assert notes.read_text() == 'unique work'
+    assert board.board.get(board.parent, board.task['id'])['state'] == 'accepted'
+    notes.rename(tmp_path / 'preserved.private')
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'completed'
+    assert not project['source'].exists()
+    assert (tmp_path / 'preserved.private').read_text() == 'unique work'

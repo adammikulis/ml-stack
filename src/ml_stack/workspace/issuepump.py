@@ -46,7 +46,7 @@ def _reconcile(ws, token, agent, board):
                 if row['attrs']['worker'] == (agent.identity or agent.name)]
     for row in rows:
         task = board.get(token, row['task'])
-        if task['state'] in ('queued', 'working'):
+        if task['state'] in ('queued', 'working', 'accepted'):
             return task
         if row.get('reported_state') == task['state']:
             continue

@@ -1,6 +1,7 @@
 """Bounded native coding turns execute canonical task worktrees."""
 
 import hashlib
+
 import json
 import sys
 import threading
@@ -10,6 +11,7 @@ from pathlib import Path
 from ml_stack.client import families
 from ml_stack.fleet.conversations import Conversations
 from ml_stack.net import git
+from ml_stack.workspace import integration_git as repo
 from ml_stack.workspace import localagent as la, localeffort, localloop, tokens, work_reputation
 from ml_stack.workspace.coding_turns import Manager, Turn
 from ml_stack.workspace.harness_seat import Seat
@@ -101,8 +103,7 @@ def _proposal(agent, task, project, turn, environment):
         raise RuntimeError('Native coding left uncommitted changes; preserve the worktree for review')
     baseline = task['lease']['resource']['baseline_commit']
     patch = project / '.task.patch'
-    patch.write_text(git.run(['diff', '--binary', '--full-index', baseline, 'HEAD'], cwd=project).stdout,
-                     encoding='utf-8')
+    patch.write_bytes(repo.git(project, 'diff', '--binary', '--full-index', baseline, 'HEAD', binary=True))
     report = project / '.task-report.md'
     report.write_text(turn.text, encoding='utf-8')
     git.run(['add', '--', '.task.patch', '.task-report.md'], cwd=project)

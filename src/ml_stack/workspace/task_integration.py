@@ -21,7 +21,7 @@ def reviewed(ws, token: str, task_id: str) -> tuple[dict, dict]:
     board = TaskBoard(ws)
     task = board.get(token, task_id)
     proposal, review = task.get('proposal'), task.get('review')
-    if task['workspace'] != board.workspace_id or task['state'] != 'completed' \
+    if task['workspace'] != board.workspace_id or task['state'] not in ('accepted', 'completed') \
             or not proposal or not review or not review['accepted'] or review['outcome'] != 'accepted':
         raise Denied('integration requires an independently accepted canonical proposal')
     parent = ws.registry.info(task['worker'])['parent']
@@ -104,8 +104,8 @@ def _proof(graph, integration_id: str, details: dict) -> None:
 class DevelopmentIntegration:
     """Own a candidate checkout, gate its combined tree and publish only development."""
 
-    def __init__(self, ws, token: str, task_id: str):
-        self.ws, self.token = ws, token
+    def __init__(self, ws, token: str, task_id: str, *, publish: bool = False):
+        self.ws, self.token, self.publish_requested = ws, token, publish
         self.task, self.worktree = reviewed(ws, token, task_id)
         self.source, self.commit = _source(self.task, self.worktree)
         self.primary, self.development, self.before = repo.repository(self.source)
@@ -119,9 +119,15 @@ class DevelopmentIntegration:
                        'proposal_hash': self.task['proposal']['proposal_hash'],
                        'development': self.development, 'before': self.before,
                        'candidate': str(self.candidate), 'branch': self.branch,
+                       'primary': str(self.primary), 'source': str(self.source),
+                       'source_branch': self.worktree['branch'], 'publish_requested': publish,
                        'policy': 'development-integration-v1'}
 
     def prepare(self) -> None:
+        repo.clean(self.primary)
+        if repo.git(self.primary, 'rev-parse', 'HEAD') != self.before:
+            raise Denied('development changed before integration acquired its lock')
+        repo.remote_baseline(self.primary, self.development, self.before)
         self.ws.claim(self.token, 'branch', self.development)
         self.ws.claim(self.token, 'area', str(self.primary / '.ml-stack-integration'))
         self.ws.claim(self.token, 'branch', self.branch)
@@ -145,10 +151,6 @@ class DevelopmentIntegration:
             raise Denied('the owned candidate already exists; inspect its recorded outcome before retrying')
         repo.git(self.primary, 'worktree', 'add', '-b', self.branch, str(self.candidate), self.before)
         repo.git(self.primary, 'worktree', 'lock', '--reason', 'active reviewed task integration', str(self.candidate))
-        repo.git(self.candidate, 'fetch', 'origin', self.development)
-        remote = repo.git(self.candidate, 'rev-parse', 'FETCH_HEAD')
-        if not repo.ancestor(self.candidate, remote, self.before):
-            raise Denied('development moved remotely; update the integration baseline before retrying')
         repo.git(self.candidate, 'merge', '--no-edit', self.commit)
         tip = repo.git(self.candidate, 'rev-parse', 'HEAD')
         repo.reviewed_files(self.candidate, tip, self.task['proposal']['artifacts'])
@@ -164,17 +166,45 @@ class DevelopmentIntegration:
                 or worktree != self.worktree:
             raise Denied('the review or prepared task binding changed during gating')
         _source(self.task, self.worktree)
+        repo.clean(self.candidate)
+        repo.remote_baseline(self.primary, self.development, self.before)
         tip = repo.git(self.candidate, 'rev-parse', 'HEAD')
         repo.git(self.primary, 'merge', '--ff-only', tip)
         _event(self.ws, self.record, 'integrated', commit=tip, checks=checks)
         if repo.git(self.primary, 'rev-parse', 'HEAD') != tip:
             raise Denied('development moved after its fast-forward; publication must be rechecked')
-        self.ws.claim(self.token, 'branch', self.development)
-        repo.git(self.primary, 'push', 'origin', f'{tip}:refs/heads/{self.development}')
-        remote = repo.git(self.primary, 'ls-remote', 'origin', f'refs/heads/{self.development}').split()[0]
-        if remote != tip:
-            raise Denied('remote development did not confirm the exact gated commit')
-        return _event(self.ws, self.record, 'published', commit=tip, checks=checks)
+        return self.finish(tip, checks)
+
+    def finish(self, tip: str, checks: list[dict]) -> dict:
+        repo.clean(self.primary)
+        if repo.git(self.primary, 'branch', '--show-current') != self.development \
+                or not repo.ancestor(self.primary, tip, repo.git(self.primary, 'rev-parse', 'HEAD')):
+            raise Denied('the task commit is not landed on the current development branch')
+        if self.publish_requested and not self.record.get('publication_verified'):
+            repo.remote_baseline(self.primary, self.development, tip)
+            repo.git(self.primary, 'push', 'origin', f'{tip}:refs/heads/{self.development}')
+            remote = repo.git(self.primary, 'ls-remote', 'origin', f'refs/heads/{self.development}').split()[0]
+            if remote != tip:
+                raise Denied('remote development did not confirm the exact gated commit')
+            self.record = _event(self.ws, self.record, 'publication_confirmed', commit=tip,
+                                 checks=checks, publication_verified=True)
+        _event(self.ws, self.record, 'cleanup_required', commit=tip, checks=checks)
+        repo.remove_merged(self.primary, self.source, self.worktree['branch'], tip)
+        repo.remove_merged(self.primary, self.candidate, self.branch, tip)
+        with held(self.ws.base / 'coordination.lock'), GraphStore(self.ws.base / 'coordination.db') as graph, graph.transaction():
+            scope = {**self.worktree, 'state': 'cleaned', 'landed_commit': tip}
+            save(graph, 'task-worktree', scope)
+            task = record(graph, self.task['id'], 'task')
+            task.update(state='completed', landed_commit=tip, cleanup_verified_at=self.ws.clock())
+            save(graph, 'task', task)
+        for kind, key in (('worktree', str(self.source)), ('branch', self.worktree['branch']),
+                          ('worktree', str(self.candidate)), ('branch', self.branch),
+                          ('branch', self.development)):
+            claim = self.ws.who_owns(kind, key)
+            if claim and claim['owner'] == self.record['owner']:
+                self.ws.release(self.token, kind, key)
+        return _event(self.ws, self.record, 'published' if self.publish_requested else 'completed',
+                      commit=tip, checks=checks, cleanup_verified=True)
 
     def run(self) -> dict:
         with held(self.primary / '.git' / 'ml-stack-integration.lock'):
@@ -198,11 +228,25 @@ class DevelopmentIntegration:
                     self.ws.release(self.token, 'area', area)
 
 
-def integrate(ws, token: str, task_id: str) -> dict:
-    """Integrate a committed independently reviewed task without granting new authority."""
-    operation = DevelopmentIntegration(ws, token, task_id)
+def integrate(ws, token: str, task_id: str, *, publish: bool = False) -> dict:
+    """Land and clean a reviewed task; publication requires explicit authorization."""
+    task, worktree = reviewed(ws, token, task_id)
     with GraphStore(ws.base / 'coordination.db') as graph:
-        previous = next((row['attrs'] for row in graph.nodes('integration') if row['id'] == operation.ident), None)
-    if previous and previous['state'] == 'published':
+        previous = next((row['attrs'] for row in graph.nodes('integration')
+                         if row['attrs']['task'] == task_id
+                         and row['attrs']['review_id'] == task['review']['id']), None)
+    if previous and previous.get('cleanup_verified'):
+        if Path(previous['source']).exists() or Path(previous['candidate']).exists():
+            raise Denied('a completed task checkout reappeared; inspect it before reporting completion')
         return previous
-    return operation.run()
+    if previous and previous['state'] in ('integrated', 'publication_confirmed', 'cleanup_required', 'blocked') \
+            and previous.get('commit'):
+        operation = DevelopmentIntegration.__new__(DevelopmentIntegration)
+        operation.ws, operation.token, operation.task, operation.worktree = ws, token, task, worktree
+        operation.record = previous
+        operation.source, operation.primary = Path(previous['source']), Path(previous['primary'])
+        operation.candidate, operation.branch = Path(previous['candidate']), previous['branch']
+        operation.development, operation.publish_requested = previous['development'], publish
+        with held(operation.primary / '.git' / 'ml-stack-integration.lock'):
+            return operation.finish(previous['commit'], previous['checks'])
+    return DevelopmentIntegration(ws, token, task_id, publish=publish).run()

@@ -21,7 +21,9 @@ authenticated physical-device base account.
 A heartbeat renews the task lease. Worker checkpoints, proposed checks and claimed usage
 remain claims. Submission records artifact hashes and the actual allocated model/runtime;
 it does not complete the task. An independent person or authorized reviewer records passed
-checks covering every acceptance criterion before an outcome becomes completed. Reviewers
+checks covering every acceptance criterion before an outcome is accepted. Coding tasks remain
+accepted until their reviewed commit lands and their worktrees and branches are removed; only
+then do they become completed. Reviewers
 need existing project permissions, cannot review their own work, and nonhuman reviewers
 cannot grade another worker from their own physical-device account. Rejected work and
 infrastructure blockage are separate outcomes.
@@ -64,7 +66,13 @@ blocks integration before any candidate or source-claim changes.
 The helper requires the exact committed task branch, tracked artifact hashes and committed
 full patch that the independent review accepted. It merges unchanged source into its own
 candidate worktree, runs the maintained quick, structural and serving-security gates,
-then fast-forwards the checked-out development branch and pushes that exact commit.
+then fast-forwards the checked-out development branch. Local integration is the default;
+publication requires an explicitly authorized `publish=True` request.
+Before preparing a candidate and before landing, it fetches and refuses a stale or divergent
+remote baseline. A repository lock serializes integration. Clean-tree checks reject unfinished
+merges and uncommitted changes. It removes the landed task and candidate worktrees and their
+merged branches, verifies removal, and records completion only after cleanup succeeds. Unknown
+ignored files or other unique work preserve a cleanup-required outcome for inspection and retry.
 It records integration, gate, commit and outcome nodes in the coordinator graph. Publishing
 does not award credits or grant permissions.
 
@@ -72,14 +80,20 @@ Conflicting changes, changed review evidence, failed gates and push-hook ownersh
 preserve the candidate for inspection. Only the authenticated parent or person can return
 the exact completed child's delegated worktree claim. The helper never removes or locks
 another agent's worktree to clear a publication block; the recorded reason identifies the
-condition that its owner must resolve. A published integration is idempotent.
+condition that its owner must resolve. Completed and published integrations are idempotent.
+
+The parent resource assignment reserves the task branch, path and committed development
+baseline. Claiming the task creates that checkout; nested worktrees inside the primary
+checkout are refused. Worker loss or cancellation preserves its task scope for recovery,
+rather than deleting unfinished files or reporting completion.
 Independent reviewers can open **Review quality — advanced** to link a validated result,
 prevented regression or demonstrated impact to specific independently passed checks and
 submitted artifact hashes. The server applies fixed, bounded bonus tiers; the interface has
 no arbitrary credit amount. Optional quality and reliability assessments require a separate
 reason. Task reliability still derives from actual accepted/rejected outcomes, with
 infrastructure blockage excluded. Leaving advanced controls untouched keeps a plain accepted
-review at completion credit and leaves quality unrated.
+review at the standard credit assessment and leaves quality unrated. Coding completion credit
+waits for landed work and verified cleanup.
 Native file and logical source-area reservations carry the authenticated task-worktree
 assignment. After exact accepted review and release of its execution lease, returning the
 worktree also atomically releases only that task's matching file and area reservations.

@@ -38,7 +38,7 @@ def _maybe_json(raw: bytes) -> dict:
     try:
         return json.loads(raw or b"{}")
     except ValueError:
-        return {"raw": raw[:400].decode(errors="replace")}
+        return {"raw": raw.decode(errors="replace")}
 
 
 
@@ -844,7 +844,8 @@ class TestTheInterfaceAndTheDaemonAgree:
             if not pp.startswith("/ui"):
                 continue
             path = pp.split("?", 1)[0]
-            cleaned.add(re.sub(r"\$\{[^}]*\}", "x", path))
+            placeholder = "a" * 32 if path.startswith("/ui/projects/") else "x"
+            cleaned.add(re.sub(r"\$\{[^}]*\}", placeholder, path))
         return sorted(cleaned)
 
     @pytest.mark.slow

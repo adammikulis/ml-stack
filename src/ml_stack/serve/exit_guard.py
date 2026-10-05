@@ -83,7 +83,8 @@ def _hook_exit() -> None:
     global _exit_hooked
     if not _exit_hooked:
         atexit.register(stop_guarded)
-        os.register_at_fork(after_in_child=_forget_all)
+        if hasattr(os, "register_at_fork"):
+            os.register_at_fork(after_in_child=_forget_all)
         _exit_hooked = True
 
 

@@ -88,6 +88,7 @@ def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, playwright):
         expect(page.locator("chat-view #chat-messages")).to_contain_text("A live ")
         assert "SDK answer" not in page.locator("chat-view #chat-messages").inner_text()
         expect(page.locator("chat-view #chat-messages")).to_contain_text("A live SDK answer")
+        expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
         page.reload()
         expect(page.locator("chat-view #chat-messages")).to_contain_text("A live SDK answer")
         request = fake.sent_to("/v1/chat/completions")[0]

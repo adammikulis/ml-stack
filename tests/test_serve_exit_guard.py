@@ -18,8 +18,9 @@ import os, signal, subprocess, sys, time
 sys.path.insert(0, {src!r})
 {before}
 from ml_stack.serve import exit_guard
+from ml_stack.platform import process_group_kwargs
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
-                         start_new_session=True)
+                         **process_group_kwargs())
 exit_guard.protect(child.pid)
 {after}
 print(child.pid, flush=True)
@@ -65,7 +66,6 @@ def hosts():
         host.wait(timeout=10)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="signals are POSIX")
 def test_a_server_stops_when_the_host_exits(tmp_path, hosts):
     host, child = _host(tmp_path, before=NO_WATCHDOG, finish="pass")
     hosts.append((host, child))

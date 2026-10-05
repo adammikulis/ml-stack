@@ -35,15 +35,30 @@ def prepare(base: Path) -> Path:
     """The token directory, made owner-only; ValueError when it is a symlink or sits inside a
     git work tree."""
     path = directory(base)
-    if path.is_symlink():
-        raise ValueError(f"{path} is a symlink; token files are not kept behind one")
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if _redirected(info):
+            raise ValueError(f"{path} is a symlink or Windows reparse point")
     repo = inside_repo(path)
     if repo is not None:
         raise ValueError(f"{path} resolves into the git work tree {repo}; "
                          f"move ML_STACK_HOME out of it")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.chmod(0o700)
+    if os.name == "nt":
+        from ml_stack.workspace.windows_tokens import restrict
+
+        restrict(path)
+    else:
+        path.chmod(0o700)
     return path
+
+
+def _redirected(info) -> bool:
+    return (stat.S_ISLNK(info.st_mode) or (os.name == "nt"
+            and bool(info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)))
 
 
 def problem(path: Path) -> str:
@@ -52,10 +67,14 @@ def problem(path: Path) -> str:
         info = path.lstat()
     except FileNotFoundError:
         return "missing"
-    if stat.S_ISLNK(info.st_mode):
-        return "is a symlink"
+    if _redirected(info):
+        return "is a symlink or Windows reparse point"
     if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
         return "is not a plain file"
+    if os.name == "nt":
+        from ml_stack.workspace.windows_tokens import problem as windows_problem
+
+        return windows_problem(path)
     if info.st_uid != os.getuid():
         return "belongs to another user"
     if info.st_mode & 0o077:
@@ -69,7 +88,12 @@ def store(base: Path, name: str, token: str) -> Path:
         raise ValueError(f"{name!r} is not a usable agent id")
     target = prepare(base) / name.replace("/", "~")
     with writing(target) as tmp:
-        tmp.chmod(0o600)
+        if os.name == "nt":
+            from ml_stack.workspace.windows_tokens import restrict
+
+            restrict(tmp)
+        else:
+            tmp.chmod(0o600)
         tmp.write_text(token + "\n", encoding="utf-8")
     return target
 

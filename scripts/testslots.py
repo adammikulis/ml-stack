@@ -246,12 +246,11 @@ def _restore_inode(path: Path, record: dict, fd: int) -> int:
     return replacement
 
 
-def _own_records(directory: Path, path: Path, record: dict) -> list[Slot]:
+def _own_records(directory: Path, path: Path, record: dict) -> list[Slot] | None:
     slots = _read(directory, mine=path)
     owned = next((slot for slot in slots if slot.path == path), None)
     if owned is None:
-        path.write_text(json.dumps(record))
-        return _read(directory, mine=path)
+        return None
     if owned.data["token"] != record["token"] or owned.granted != record["granted"]:
         raise RuntimeError("testslots: lease record ownership changed")
     return slots
@@ -284,6 +283,11 @@ def lease(want: int, minimum: int | None = None, label: str = "tests", say=lambd
             with _mutex(d):
                 fd = _restore_inode(path, me, fd)
                 slots = _own_records(d, path, me)
+                if slots is None:
+                    replacement = _publish(path, me)
+                    os.close(fd)
+                    fd = replacement
+                    continue
                 waiting = [s for s in slots if s.granted == 0]
                 used = sum(s.granted for s in slots)
                 granted = _grant(Slot(path, me), waiting, (cap, used, sum(slot.granted > 0 for slot in slots)))

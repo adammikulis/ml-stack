@@ -143,6 +143,7 @@ def open_page(browser):
 def open_capacity(page):
     page.click("nav.tabs a:has-text('Models')")
     page.locator("#model-capacity > summary").click()
+    page.locator("#fit").scroll_into_view_if_needed()
 
 
 # -- first run ---------------------------------------------------------------------------
@@ -306,8 +307,8 @@ class TestTheModelsView:
         page.click("nav.tabs a:has-text('Models')")
         page.wait_for_selector("#browser-results")
         here = page.locator("#browser-results")
-        assert "thornfield-8B-Q4_K_M.gguf" in here.inner_text()
-        assert "GB free storage on this machine" in page.locator("#models-free").inner_text()
+        pw.expect(here).to_contain_text("thornfield-8B-Q4_K_M.gguf")
+        assert "GiB free storage on this machine" in page.locator("#models-free").inner_text()
         assert not errors
 
     def test_with_no_hub_the_search_box_still_takes_a_query(self, joined, open_page):
@@ -334,7 +335,8 @@ class TestTheSettingsView:
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")
         page.wait_for_selector("#settings-left .group")
-        page.check("#labels-train\\,prep")
+        page.locator("#settings-left").get_by_label("Both", exact=True).check()
+        page.check("#download_sources-both")
         page.click("#settings-save")
         page.wait_for_selector("#settings-note .ok")
         assert page.locator("#settings-note .ok").inner_text() == "Preferences saved."
@@ -348,8 +350,8 @@ class TestTheSettingsView:
         page.wait_for_selector("#cluster-joined .row")
         for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
                            ("Models", "#browser-results"),
-                           ("Settings", "#settings-removal label.opt"),
-                           ("Fleet", "#cluster-sweep .searchrow")):
+                           ("Settings", "#settings-save"),
+                           ("Fleet", "#cluster-joined .row")):
             page.click(f"nav.tabs a:has-text('{tab}')")
             page.wait_for_selector(ready)
             shown = page.locator("#root").inner_text()
@@ -428,6 +430,7 @@ class TestTheFitView:
         open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1)
+        cost.scroll_into_view_if_needed()
         line = cost.locator("svg path.ln").first.bounding_box()
         page.mouse.move(line["x"] + line["width"] / 2, line["y"] + line["height"] / 2)
 
@@ -448,6 +451,7 @@ class TestTheFitView:
         open_capacity(page)
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1).locator("svg")
+        cost.scroll_into_view_if_needed()
 
         def ticks():
             return cost.locator("text").all_text_contents()
@@ -477,10 +481,10 @@ class TestTheFitView:
         page, errors = open_page(joined, cookie=joined.cookie)
         open_capacity(page)
         page.wait_for_selector("#fit-views button")
-        page.click("#fit-views button:has-text('What it cost to be right')")
-        page.wait_for_selector("#fit-heading:has-text('What it cost to be right')")
-        page.click("#fit-views button:has-text('What it has spent')")
-        page.wait_for_selector("#fit-heading:has-text('What it has spent')")
+        page.click("#fit-views button:has-text('Quality & speed')")
+        page.wait_for_selector("#fit-heading:has-text('Quality & speed')")
+        page.click("#fit-views button:has-text('Usage history')")
+        page.wait_for_selector("#fit-heading:has-text('Usage history')")
         assert "answers no questions" in page.locator("#fit-body").inner_text()
         assert not errors
 

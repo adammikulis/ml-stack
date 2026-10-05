@@ -33,6 +33,8 @@ class _Body(httpx.AsyncByteStream):
         if sock is not None:
             with suppress(OSError):
                 sock.shutdown(socket.SHUT_RDWR)
+                with socket.socket(fileno=sock.detach()):
+                    pass
         self.response.close()
 
 

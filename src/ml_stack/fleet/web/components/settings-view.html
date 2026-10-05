@@ -87,7 +87,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
 
     async draw() {
       this.save.disabled = true;
-      this.note.textContent = "Loading preferencesâ€¦";
+      this.note.textContent = "Loading preferences…";
       const s = await api("/ui/settings");
       if (M.refused(s)) return;
       if (!s.ok) throw Error(s.error || "Could not load preferences.");
@@ -104,7 +104,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
         context: cur.context || 8192,
       };
       this.querySelector("#settings-sub").textContent =
-        `${s.name}${s.machine?.gpu ? " â€” " + s.machine.gpu : ""}`;
+        `${s.name}${s.machine?.gpu ? " — " + s.machine.gpu : ""}`;
       const nav = document.querySelector("fleet-nav");
       if (nav && nav.paint) nav.paint("settings");
 
@@ -130,7 +130,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
         M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }));
 
       const status = el("div", { class: "hint", style: "margin-top:10px" },
-        el("span", { class: "spin" }), " Checking for updatesâ€¦");
+        el("span", { class: "spin" }), " Checking for updates…");
       this.querySelector("#settings-updates").replaceChildren(
         el("h2", {}, "Updates"),
         el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
@@ -179,7 +179,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
 
     async apply() {
       this.save.disabled = true;
-      this.save.textContent = "Savingâ€¦";
+      this.save.textContent = "Saving…";
       this.box.setAttribute("aria-busy", "true");
       try {
         const result = await api("/ui/settings", {method:"POST", body:JSON.stringify({
@@ -208,7 +208,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
       libs.hidden = false;
       libs.replaceChildren(
         el("h2", {}, "Libraries & simulators"),
-        el("div", { class: "hint" }, el("span", { class: "spin" }), " Lookingâ€¦"));
+        el("div", { class: "hint" }, el("span", { class: "spin" }), " Looking…"));
       const L = await api("/ui/libraries");
       if (!L.ok) {
         libs.replaceChildren(el("h2", {}, "Libraries & simulators"),
@@ -228,10 +228,10 @@ settings-view [aria-busy="true"] { opacity:.8; }
             el("b", {}, lib.title),
             el("span", {class:"library-kind"}, lib.installed ? "Installed" : "Available to install"),
             el("span", { class: "why" },
-              `${lib.blurb} Â· ${lib.size_mb >= 1000
+              `${lib.blurb} · ${lib.size_mb >= 1000
                 ? (lib.size_mb / 1000).toFixed(1) + " GB" : lib.size_mb + " MB"}`
-              + (lib.version ? ` Â· version ${lib.version}` : "")
-              + (lib.python_version ? ` Â· Python ${lib.python_version}` : ""))));
+              + (lib.version ? ` · version ${lib.version}` : "")
+              + (lib.python_version ? ` · Python ${lib.python_version}` : ""))));
       });
 
       const apply = el("button", { class: "ghost" }, "Apply library changes");
@@ -245,7 +245,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
           return;
         }
         apply.disabled = true;
-        apply.textContent = "Installing librariesâ€¦";
+        apply.textContent = "Installing libraries…";
         for (const box of libs.querySelectorAll("input")) box.disabled = true;
         try {
           const result = await api("/ui/libraries", {method:"POST", body:JSON.stringify({install, remove})});
@@ -291,12 +291,12 @@ settings-view [aria-busy="true"] { opacity:.8; }
       const go = el("button", {}, `Update to ${u.latest}`);
       go.onclick = async () => {
         go.disabled = true;
-        go.innerHTML = '<span class="spin"></span> Downloadingâ€¦';
+        go.innerHTML = '<span class="spin"></span> Downloading…';
         const r = await api("/ui/updates/install", { method: "POST" });
         status.replaceChildren(r.ok
           ? el("div", { class: "ok" },
               !r.installed ? "Already up to date."
-                : r.restarting ? `Updated to ${r.version}. Starting it nowâ€¦`
+                : r.restarting ? `Updated to ${r.version}. Starting it now…`
                 : `Updated to ${r.version}. Open it again to use it.`)
           : el("div", { class: "err" }, r.error || "Could not install the update."));
       };
@@ -310,7 +310,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
       const removal = this.querySelector("#settings-removal");
       removal.replaceChildren(
         el("h2", {}, "Remove ml-stack"),
-        el("div", { class: "hint" }, "Loading what is on this machineâ€¦"));
+        el("div", { class: "hint" }, "Loading what is on this machine…"));
       const u = await api("/ui/uninstall");
       if (u.error) {
         removal.replaceChildren(el("h2", {}, "Remove ml-stack"),
@@ -324,7 +324,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
                                   ...(it.default ? { checked: "1" } : {}) });
         box.onchange = () => { want[it.key] = box.checked; };
         return el("label", { class: "opt", for: `rm_${it.key}` }, box,
-          M.row(`${it.name} â€” ${fileSize(it.bytes)}`, it.why));
+          M.row(`${it.name} — ${fileSize(it.bytes)}`, it.why));
       });
       const out = el("div");
       const go = el("button", { class: "danger" }, "Remove");
@@ -333,7 +333,7 @@ settings-view [aria-busy="true"] { opacity:.8; }
         const chosen = Object.keys(want).filter((k) => want[k]);
         if (!armed) {
           armed = true;
-          go.textContent = `Remove ${chosen.length} of these â€” click again`;
+          go.textContent = `Remove ${chosen.length} of these — click again`;
           out.replaceChildren(el("div", { class: "hint" }, "This cannot be undone."));
           return;
         }

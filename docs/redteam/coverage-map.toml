@@ -653,6 +653,20 @@ tests = [
 note = "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
 
 [[group]]
+match = ["spawn:fleet/autostart.py:_windows_owner"]
+status = "covered"
+tests = ["tests/test_wsl_autostart.py::test_hostile_request_refused",
+         "tests/test_wsl_autostart.py::test_invalid_wire_never_mutates_tasks",
+         "tests/test_wsl_autostart.py::test_windows_owner_preserves_running_launcher"]
+note = "hostile startup fields refuse before task mutation; validated requests use fixed task commands and preserve the running launcher"
+
+[[group]]
+match = ["spawn:fleet/wsl.py:start", "spawn:fleet/wsl_startup.py:call", "spawn:serve/backend.py:_binary_info"]
+status = "covered"
+tests = ["tests/test_redteam_startup_arguments.py"]
+note = "hostile executable and label text stays in literal argv or JSON fields; service commands and information flags remain fixed without a shell"
+
+[[group]]
 match = ["spawn:*"]
 status = "partial"
 tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]

@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
+from ml_stack import worktreerules
 from ml_stack.graph.store import GraphStore
 from ml_stack.serve.process import pid_exists
 from ml_stack.workspace import localagent as la, tokens
@@ -35,9 +36,9 @@ def configure(ws, token, name, repo, project):
         raise ValueError("repository must be owner/name")
     folder = la.check_project(project, ws.base)
     if not folder:
-        raise ValueError("repository backlog requires an isolated project folder")
-    if not (Path(folder) / ".git").is_file():
-        raise ValueError("repository backlog requires an isolated git worktree")
+        raise ValueError("repository backlog requires a source repository")
+    if not worktreerules.checkouts(folder):
+        raise ValueError("repository backlog requires a registered git checkout")
     scope = {"repo": repo, "project": folder, "authority": parent.id, "enabled": True}
     la.save(ws, replace(agent, extra={**agent.extra, "backlog": scope}))
     ws.audit("local-agent.backlog", parent.id, agent=name, repo=repo, project=folder)

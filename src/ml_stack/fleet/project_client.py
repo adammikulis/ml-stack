@@ -131,8 +131,11 @@ def receive(peer: Peer, identifier: str, base: Path) -> Path:
 
 def route(request) -> bool:
     ui, path, method = request.ui, request.path, request.method
-    if not path.startswith("/ui/projects") or not ui.projects:
+    if path != "/ui/projects" and not path.startswith("/ui/projects/"):
         return False
+    if not ui.projects:
+        request.send(501, {"error": "project registry unavailable"})
+        return True
     suffix = path.removeprefix("/ui/projects").strip("/").split("/")
     try:
         if path == "/ui/projects" and method == "GET":

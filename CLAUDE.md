@@ -338,6 +338,11 @@ commits (`git cherry <dev-branch> <branch>`), uncommitted changes, or ignored st
 a rebuildable cache -- and never remove one while an agent is still working in it; if one is,
 leave it and say so.
 
+Canonical coding tasks own their worktree lifecycle: assignment reserves the path and branch,
+claiming creates the checkout, independent review accepts the proposal, and gated integration
+lands the work and verifies cleanup before completion. Use the maintained task lifecycle
+([docs/tasks.md](docs/tasks.md)); a worker report cannot bypass its completion gate.
+
 **Cleanup is part of completion, before the final report or `announce done`.** Check
 `git status --short --untracked-files=all`, `git status --short --ignored`, and
 `git cherry <dev-branch> <branch>` in the worktree. Remove it only when its work is landed,

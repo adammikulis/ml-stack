@@ -81,6 +81,7 @@ def win_lock(monkeypatch):
     # every later test on this worker would inherit it (ssl went looking for the Windows
     # certificate store the first time this was got wrong).
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "msvcrt", sys.modules.get("msvcrt"))
     scope: dict = {}
     exec(FAKE_MSVCRT, scope)            # noqa: S102 - our own source, above
     fake = scope["_m"]
@@ -139,18 +140,19 @@ class TestTheLockOnWindows:
                 import time
                 from ml_stack.lock import only_one
                 with only_one({str(tmp_path / 'l')!r}):
-                    print("held", flush=True)
+                    print("held", os.getpid(), flush=True)
                     time.sleep(1.5)
             """)], stdout=subprocess.PIPE, text=True,
             env={**os.environ, "PYTHONPATH": str(SRC)})
         try:
-            assert other.stdout.readline().strip() == "held"
+            marker, holder_pid = other.stdout.readline().split()
+            assert marker == "held"
             with only_one(tmp_path / "l", timeout=10, announce=said.append):
                 pass
         finally:
             other.wait(timeout=10)
         assert said and "waiting for" in said[0]
-        assert str(other.pid) in said[0], "the holder's pid was read back across processes"
+        assert holder_pid in said[0], "the holder's pid was read back across processes"
 
     def test_a_bounded_wait_gives_up_and_says_so(self, win_lock, tmp_path):
         only_one, Busy, _ = win_lock

@@ -169,7 +169,8 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
     parallel = max(1, int(parallel))
     original_path = Path(model_path)
     model_path = str(model_components.effective(original_path))
-    projector = model_components.linked(original_path, "vision")
+    projector = (model_components.linked(original_path, "vision")
+                 or model_components.linked(Path(model_path), "vision"))
     draft = draft_beside(Path(model_path))
     kind = ""
     if draft is not None:
