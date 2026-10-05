@@ -73,7 +73,7 @@ def _imports() -> dict[tuple[str, str], set[str]]:
             continue
         source = _package_of_file(path)
         where = str(path.relative_to(REPO))
-        for node in ast.walk(ast.parse(path.read_text(), str(path))):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), str(path))):
             named: list[str] = []
             if isinstance(node, ast.Import):
                 named = [alias.name for alias in node.names]

@@ -129,3 +129,43 @@ def test_vision_is_linked_and_not_listed_as_a_base_model(tmp_path, monkeypatch):
     models = Models([tmp_path], tmp_path)
     assert [row.name for row in models.all()] == [model.name]
     assert models.inventory()[0]["components"][0]["name"] == vision.name
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_addon_route_refuses_untrusted_requests_before_component_lookup(method):
+    from unittest.mock import patch
+    from ml_stack.fleet import routes
+
+    handler = Mock(path="/ui/models/addons?name=../../outside&source=file:///outside",
+                   command=method, client_address=("192.0.2.1", 1000))
+    handler.headers = {}
+    ui = Mock()
+    ui.authed.return_value = False
+    ui.may_setup.return_value = "remote setup refused"
+    with patch.object(components, "catalogue") as catalogue, patch.object(
+            routes, "in_cluster", return_value=False), patch.object(routes.Router, "send") as send:
+        routes.Router(ui, handler).run()
+        assert send.call_args.args[0] == 403
+        catalogue.assert_not_called()
+        handler.headers = {routes.UI_HEADER: "1"}
+        routes.Router(ui, handler).run()
+        assert send.call_args.args[0] == 403
+        catalogue.assert_not_called()
+
+
+@pytest.mark.parametrize("choice", ["../../outside", "true", 1, {}, []])
+def test_component_flags_refuse_untyped_selection_before_source_lookup(choice):
+    models = Mock()
+    with pytest.raises(ModelError):
+        component_routes.selected(models, {"name": "model.gguf", "mtp": choice})
+    models.sources.assert_not_called()
+
+
+def test_component_graph_retains_source_and_relationship_after_reopen(tmp_path):
+    model = gguf(tmp_path / "model.gguf")
+    head = gguf(tmp_path / "mtp-head.gguf", head=True)
+    components.remember(model, SOURCE)
+    components.link(model, head, offer(packaging="separate"))
+    assert components.record(model)["source"] == SOURCE
+    assert components.linked(model, "mtp") == head
+    assert not list(tmp_path.glob("*.json"))

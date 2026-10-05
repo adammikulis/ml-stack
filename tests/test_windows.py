@@ -1,14 +1,4 @@
-"""What Windows gets instead, proved against a faked platform on whatever runs the tests.
-
-Nothing here runs a real Windows call: this machine is a Mac, and ``msvcrt``, ``schtasks``,
-``netsh``, ``icacls`` and ``CTRL_BREAK_EVENT`` exist only there. What each test proves is
-that the *branch* is taken -- the right module asked, the right argv built, the right
-Popen keyword chosen -- against a fake that stands in for the Windows side. The one place a
-fake is more than a recorder is the lock: the stand-in ``msvcrt.locking`` is built on
-``flock``, so the Windows code path is exercised with real cross-process exclusion, and
-a second process really is refused. Whether ``LockFile`` itself behaves the way the fake
-does is the first thing a Windows machine will tell Adam (README, "On Windows").
-"""
+"""Platform process controls, file locking, autostart, and firewall behavior."""
 
 from __future__ import annotations
 
@@ -32,6 +22,12 @@ SRC = REPO / "src"
 
 
 @pytest.fixture
+def posix(monkeypatch):
+    """Simulate the POSIX platform branch."""
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+
+
+@pytest.fixture
 def windows(monkeypatch):
     """``platform.system()`` says Windows; everything that reads it at call time follows."""
     monkeypatch.setattr(platform, "system", lambda: "Windows")
@@ -46,7 +42,11 @@ def _ok(returncode: int = 0, stdout: str = "", stderr: str = "") -> types.Simple
 # refuses with EACCES the way LockFile does; LK_UNLCK releases. Installed in this process
 # by the fixture and in a child by the same source, so both sides run the Windows branch.
 FAKE_MSVCRT = textwrap.dedent("""
-    import errno, fcntl, sys, types
+    import errno, os, sys, types
+    if os.name == "nt":
+        import msvcrt as _native
+    else:
+        import fcntl
     _m = types.ModuleType("msvcrt")
     _m.LK_UNLCK, _m.LK_LOCK, _m.LK_NBLCK = 0, 1, 2
     _m.calls = []
@@ -54,11 +54,17 @@ FAKE_MSVCRT = textwrap.dedent("""
         _m.calls.append((mode, nbytes))
         if mode == _m.LK_NBLCK:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if os.name == "nt":
+                    _native.locking(fd, _native.LK_NBLCK, nbytes)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 raise OSError(errno.EACCES, "Permission denied") from None
         elif mode == _m.LK_UNLCK:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if os.name == "nt":
+                _native.locking(fd, _native.LK_UNLCK, nbytes)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
         else:
             raise AssertionError(f"blocking mode {mode} must never be used")
     _m.locking = _locking
@@ -75,7 +81,6 @@ def win_lock(monkeypatch):
     # every later test on this worker would inherit it (ssl went looking for the Windows
     # certificate store the first time this was got wrong).
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setitem(sys.modules, "msvcrt", None)
     scope: dict = {}
     exec(FAKE_MSVCRT, scope)            # noqa: S102 - our own source, above
     fake = scope["_m"]
@@ -175,7 +180,7 @@ class TestProcessGroups:
         assert kwargs == {"creationflags": CREATE_NEW_PROCESS_GROUP}
         assert CREATE_NEW_PROCESS_GROUP == 0x200, "Win32's own value, the same everywhere"
 
-    def test_posix_keeps_its_session(self):
+    def test_posix_keeps_its_session(self, posix):
         from ml_stack.platform import process_group_kwargs
 
         assert process_group_kwargs() == {"start_new_session": True}
@@ -187,7 +192,7 @@ class TestProcessGroups:
             "creationflags": CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}
         assert DETACHED_PROCESS == 0x8, "Win32's own value, the same everywhere"
 
-    def test_a_detached_job_on_posix_is_a_session_of_its_own(self):
+    def test_a_detached_job_on_posix_is_a_session_of_its_own(self, posix):
         from ml_stack.platform import detached_kwargs
 
         assert detached_kwargs() == {"start_new_session": True}
@@ -217,7 +222,7 @@ class TestProcessGroups:
         assert stop_gently(proc) == "TerminateProcess"
         assert terminated == [True]
 
-    def test_posix_still_sends_sigterm(self):
+    def test_posix_still_sends_sigterm(self, posix):
         from ml_stack.platform import stop_gently
 
         sent: list[int] = []
@@ -255,7 +260,7 @@ class TestStopByPid:
         assert stop_pid(4242) == "TerminateProcess"
         assert sent == [(4242, signal.SIGTERM)]
 
-    def test_posix_sends_sigterm_by_pid(self, monkeypatch):
+    def test_posix_sends_sigterm_by_pid(self, posix, monkeypatch):
         from ml_stack.platform import stop_pid
 
         sent: list[tuple[int, int]] = []
@@ -348,12 +353,12 @@ class TestQuitSignals:
         monkeypatch.setattr(signal, "SIGBREAK", 21, raising=False)
         assert quit_signals() == [signal.SIGTERM, 21]
 
-    def test_posix_hooks_only_sigterm(self):
+    def test_posix_hooks_only_sigterm(self, posix):
         from ml_stack.platform import quit_signals
 
         assert quit_signals() == [signal.SIGTERM]
 
-    def test_the_handler_is_installed_from_the_main_thread_and_not_from_a_worker(self):
+    def test_the_handler_is_installed_from_the_main_thread_and_not_from_a_worker(self, posix):
         from ml_stack.platform import on_quit
 
         before = signal.getsignal(signal.SIGTERM)
@@ -386,13 +391,15 @@ class TestPrivateFile:
         assert ran == [["icacls", str(target), "/inheritance:r", "/grant:r",
                         "fixture-user:F"]]
 
-    def test_posix_is_chmod_600(self, tmp_path):
+    def test_posix_is_chmod_600(self, posix, monkeypatch, tmp_path):
         from ml_stack.platform import private_file
 
         target = tmp_path / "cluster.json"
         target.write_text("[]")
+        modes = []
+        monkeypatch.setattr(Path, "chmod", lambda path, mode: modes.append((path, mode)))
         private_file(target)
-        assert oct(target.stat().st_mode)[-3:] == "600"
+        assert modes == [(target, 0o600)]
 
     def test_the_cluster_key_goes_through_it(self, windows, monkeypatch, tmp_path):
         """`discovery` used to chmod directly, which on Windows protects nothing."""
@@ -597,7 +604,7 @@ class TestDiscoveryAndTheFirewall:
         finding = next(f for f in setup.look() if f.name == "firewall")
         assert finding.good and not finding.fix
 
-    def test_no_firewall_finding_anywhere_else(self, monkeypatch):
+    def test_no_firewall_finding_anywhere_else(self, posix, monkeypatch):
         from ml_stack import setup
 
         monkeypatch.setattr(setup, "_arches", lambda binary, known=None: set())
