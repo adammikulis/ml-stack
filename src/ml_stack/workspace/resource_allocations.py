@@ -27,6 +27,15 @@ def _grant(lease_id, status):
     raise Denied("the resource lease is not an active managed broker grant")
 
 
+def _worker(ws, identity):
+    from ml_stack.workspace import localagent
+    workers = [localagent.load(ws, name) for name in localagent.names(ws)]
+    found = [worker for worker in workers if worker and (worker.identity or worker.name) == identity]
+    if len(found) != 1:
+        raise Denied("the allocation requires one registered local worker")
+    return found[0]
+
+
 def assign(ws, token, worker, task, lease_id):
     """The actual person or registered parent assigns a live grant to an enrolled worker."""
     caller = ws.auth(token)
@@ -37,9 +46,13 @@ def assign(ws, token, worker, task, lease_id):
     if account is None or account["device_id"] != home.machine_id():
         raise Denied("the worker has no person-enrolled account on this device")
     grant = _grant(lease_id, broker_wire.status(start=False))
+    runner = _worker(ws, worker)
+    if caller.role != HUMAN and (runner.pid != grant["holder_pid"]
+                                 or runner.process_started != grant["holder_started"]):
+        raise Denied("the worker does not own this broker holder")
     allocation = {"allocation_id": f"allocation:{uuid.uuid4().hex}", "worker": worker, "task": task,
                   "device_id": account["device_id"], "base_id": account["base_id"], **grant,
-                  "owner": caller.id, "requester": worker, "reason": f"Task {task}",
+                  "owner": caller.id, "person_assigned": caller.role == HUMAN, "requester": worker, "reason": f"Task {task}",
                   "interpreter": sys.executable, "python": sys.version.split()[0], "scheduler_pid": os.getpid()}
     with held(ws.base / "coordination.lock"), GraphStore(ws.base / "coordination.db") as graph:
         if not graph.has(task):
@@ -69,4 +82,8 @@ def verified_binding(ws, worker, task, allocation_id, *, status=None):
     grant = _grant(allocation["lease_id"], (status or broker_wire.status)(start=False))
     if any(allocation[k] != value for k, value in grant.items()):
         raise Denied("the broker grant changed after resource assignment")
+    runner = _worker(ws, worker)
+    if not allocation["person_assigned"] and (runner.pid != grant["holder_pid"]
+                                              or runner.process_started != grant["holder_started"]):
+        raise Denied("the worker no longer owns this broker holder")
     return allocation
