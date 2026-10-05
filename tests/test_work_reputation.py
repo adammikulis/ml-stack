@@ -218,3 +218,72 @@ def test_evidence_pages_keep_total_score_and_expose_earlier_records(work):
     assert len(first_page['evidence']) == 20 and first_page['evidence_held'] == 2
     assert len(next_page['evidence']) == 2 and next_page['evidence_held'] == 0
     assert not {item['id'] for item in first_page['evidence']} & {item['id'] for item in next_page['evidence']}
+
+
+def test_free_economy_separates_credits_ratings_and_unknown_usage(work):
+    first = verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    row = standings(work.ws, work.child, ledger=work.ledger)['own']
+    assert row['verified_tasks'] == 1 and row['economy']['balance'] == 10
+    assert row['economy']['spent'] == 0 and row['economy']['mode'] == 'free'
+    assert row['economy']['usage']['recorded'] is False
+    assert row['economy']['usage']['tokens_in'] is None
+    assert row['work_reputation']['state'] == 'unrated'
+    assert row['pricing']['price'] == 0 and not row['pricing']['active_charging']
+    assert first['award'] == {'base': 10, 'quality_bonus': 0, 'total': 10, 'quality': []}
+
+
+def reviewed_evidence(work):
+    return {**work.evidence,
+            'quality': [{'kind': 'regression', 'reason': 'Reviewer reproduced the fixed failure.',
+                         'checks': ['native regression suite'], 'artifacts': ['result.json']}],
+            'review': {'quality': 90, 'reliability': 80, 'reason': 'Independent review passed.'},
+            'usage': {'source': 'native harness measurement', 'tokens_in': None,
+                      'tokens_out': 42, 'wall_seconds': 2.5},
+            'provenance': {'model': 'first.gguf', 'harness': 'codex'}}
+
+
+def test_quality_bonus_requires_reviewed_evidence_and_does_not_multiply_by_test_count(work):
+    evidence = reviewed_evidence(work)
+    first = verify(work.ws, work.parent, work.agent_id, evidence, ledger=work.ledger)
+    repeated = verify(work.ws, work.parent, work.agent_id,
+                      {**evidence, 'quality': []}, ledger=work.ledger)
+    assert first['credited'] and not repeated['credited']
+    row = standings(work.ws, work.child, ledger=work.ledger)['own']
+    assert row['economy']['balance'] == 15 and row['economy']['quality_credits'] == 5
+    assert row['work_reputation']['quality'] == 63.33
+    assert row['work_reputation']['reliability'] == 60
+    assert row['work_reputation']['samples'] == 1
+    assert row['economy']['usage']['tokens_in'] is None
+    assert row['economy']['usage']['tokens_out'] == 42
+    assert row['economy']['usage']['wall_seconds'] == 2.5
+    assert row['pricing']['baseline_guaranteed'] and row['pricing']['price'] == 0
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('change', [
+    {'quality': [{'kind': 'regression', 'reason': 'Claimed', 'checks': ['invented'], 'artifacts': ['result.json']}]},
+    {'quality': [{'kind': 'impact', 'reason': 'Claimed', 'checks': ['native regression suite'], 'artifacts': ['missing']}]},
+    {'review': {'quality': True, 'reliability': 80, 'reason': 'Claimed'}},
+    {'review': {'quality': 101, 'reliability': 80, 'reason': 'Claimed'}},
+    {'usage': {'source': 'native', 'tokens_in': -1, 'tokens_out': 1, 'wall_seconds': 1}},
+    {'usage': {'source': 'native', 'tokens_in': 1, 'tokens_out': 1, 'wall_seconds': float('nan')}},
+])
+def test_unverified_or_invalid_quality_and_resource_claims_never_credit(work, change):
+    with pytest.raises(ValueError):
+        verify(work.ws, work.parent, work.agent_id, {**work.evidence, **change}, ledger=work.ledger)
+    assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['balance'] == 0
+
+
+def test_model_switches_keep_one_authenticated_agent_account(work):
+    verify(work.ws, work.parent, work.agent_id, reviewed_evidence(work), ledger=work.ledger)
+    task = work.ws.send(work.parent, work.agent_id, 'task', 'Task with another model.')
+    done = work.ws.send(work.child, 'lead', 'answer', 'Completed.', reply_to=task['seq'])
+    evidence = {**reviewed_evidence(work), 'task': task['seq'], 'completion': done['seq'],
+                'provenance': {'model': 'second.gguf', 'harness': 'claude'}}
+    verify(work.ws, work.parent, work.agent_id, evidence, ledger=work.ledger)
+    result = standings(work.ws, work.child, ledger=work.ledger)
+    row = result['own']
+    assert row['agent'] == work.agent_id and row['economy']['balance'] == 30
+    assert row['verified_tasks'] == 2 and row['work_reputation']['samples'] == 2
+    assert {item['provenance']['model'] for item in row['evidence']} == {'first.gguf', 'second.gguf'}
+    assert len([item for item in result['team'] if item['agent'] == work.agent_id]) == 1

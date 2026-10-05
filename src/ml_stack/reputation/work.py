@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from ml_stack.reputation import economy
 from ml_stack.reputation.sealed import SealedGraph
 
 MAX_EVIDENCE = 5000
@@ -49,5 +50,6 @@ class WorkLedger:
             if evidence.get('workspace') == workspace:
                 agents.setdefault(evidence['agent'], []).append({'id': node['id'], **evidence})
         return [{'agent': agent, 'score': len(evidence), 'verified_tasks': len(evidence),
-                 'evidence': sorted(evidence, key=lambda item: -item['verified_at'])}
+                 'evidence': sorted(evidence, key=lambda item: -item['verified_at']),
+                 **economy.summary(evidence)}
                 for agent, evidence in sorted(agents.items())]
