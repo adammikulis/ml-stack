@@ -138,6 +138,18 @@ note = "the loopback route (reads, and one person-only post), live follow and ch
 
 # -- HTTP routes and handlers --------------------------------------------------------------
 [[group]]
+match = ["route:fleet/project_client.py:*"]
+status = "covered"
+tests = ["tests/test_project_ui_access.py", "tests/test_project_source.py", "tests/test_remote_transport_attacks.py"]
+note = "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
+
+[[group]]
+match = ["spawn:net/git.py:blobs", "spawn:net/git.py:source_index"]
+status = "covered"
+tests = ["tests/test_project_source.py"]
+note = "snapshot paths use verified Git object IDs and bounded index/blob output; options, oversized objects and checkout filters are refused"
+
+[[group]]
 match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
 status = "partial"
 tests = [
@@ -390,6 +402,14 @@ note = "the AST gate shows no spawn goes through a shell; what each argv carries
 
 # -- listeners -----------------------------------------------------------------------------
 [[group]]
+match = ["listener:fleet/wsl_network.py:NetworkBridge._listen"]
+status = "covered"
+tests = ["tests/test_wsl_network.py::test_bridge_refuses_authentication_and_socket_scope",
+         "tests/test_wsl_network.py::test_bridge_caps_messages_and_datagrams",
+         "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"]
+note = "the discovery control listener rejects bad capabilities, destinations and oversized frames; the TCP listener relays opaque bytes to the fixed daemon target"
+
+[[group]]
 match = ["listener:fleet/daemon.py:*", "listener:fleet/discovery.py:*",
          "listener:fleet/onboard/nearby.py:*"]
 status = "partial"
@@ -424,6 +444,27 @@ status = "n/a"
 note = "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
 
 # -- network egress ------------------------------------------------------------------------
+[[group]]
+match = ["egress:fleet/project_client.py:read"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_project_source.py"]
+note = "signed source replies stay on the exact LAN authority endpoint; wire and plaintext bounds include authenticated sealing overhead"
+
+[[group]]
+match = ["egress:fleet/wsl_network.py:DiscoverySocket.__init__", "egress:fleet/wsl_network.py:_forward"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
+         "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
+         "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+         "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"]
+note = "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
+
+[[group]]
+match = ["egress:workspace/remote.py:RemoteWorkspace._request"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_workspace_remote.py"]
+note = "project credentials stay on the exact LAN authority endpoint; redirects, oversized or malformed replies, and slow responses are refused"
+
 [[group]]
 match = ["egress:net/*", "egress:httpguard.py:*", "egress:http.py:*", "egress:web.py:*",
          "egress:fleet/models.py:*", "egress:ingest/run.py:*"]
@@ -499,6 +540,18 @@ status = "n/a"
 note = "prompts built from the person's own benchmark questions, canaries and fixed smoke checks"
 
 # -- parsers and readers of files, pages and messages --------------------------------------
+[[group]]
+match = ["parser:workspace/project_connection.py"]
+status = "covered"
+tests = ["tests/test_project_connection.py"]
+note = "corrupt connection records and conflicting checkout authorities refuse device-local fallback and privileged operations"
+
+[[group]]
+match = ["parser:workspace/remote.py"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_workspace_remote.py"]
+note = "sealed replies must be bounded JSON objects and project capabilities cannot cross authorities or projects"
+
 [[group]]
 match = ["parser:net/*", "parser:web.py", "parser:sources/html.py", "parser:taint/*",
          "parser:guard/*", "parser:hub/modelfile.py"]

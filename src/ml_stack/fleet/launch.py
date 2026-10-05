@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None, *,
         finally:
             stopped.set()
     if daemon_main is None:
-        from .daemon import main as daemon_main
+        from .daemon import run as daemon_main
 
     try:
         return daemon_main(arguments)

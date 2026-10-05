@@ -1,10 +1,10 @@
 {
- "surfaces": 616,
+ "surfaces": 629,
  "by_status": {
-  "covered": 303,
+  "covered": 314,
   "partial": 201,
   "uncovered": 54,
-  "n/a": 58,
+  "n/a": 60,
   "unmapped": 0
  },
  "by_kind": {
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 29,
+   "covered": 33,
    "partial": 46,
    "uncovered": 0,
    "n/a": 0,
@@ -65,10 +65,10 @@
    "unmapped": 0
   },
   "listener": {
-   "covered": 2,
+   "covered": 3,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 9,
+   "n/a": 11,
    "unmapped": 0
   },
   "mcp-tool": {
@@ -79,14 +79,14 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 49,
+   "covered": 51,
    "partial": 0,
    "uncovered": 50,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 47,
+   "covered": 49,
    "partial": 61,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 23,
+   "covered": 25,
    "partial": 63,
    "uncovered": 0,
    "n/a": 1,
@@ -884,7 +884,7 @@
   {
    "id": "cli:ml-stack-traind",
    "kind": "cli",
-   "source": "ml_stack.fleet.daemon:main",
+   "source": "ml_stack.cli.daemon:main",
    "trust": "the person at a terminal; arguments may carry text from outside",
    "attacker": "hostile argument text or path reaches the command",
    "status": "partial",
@@ -1854,6 +1854,19 @@
    "note": ""
   },
   {
+   "id": "egress:fleet/project_client.py:read",
+   "kind": "egress",
+   "source": "fleet/project_client.py:read",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_remote_transport_attacks.py",
+    "tests/test_project_source.py"
+   ],
+   "note": "signed source replies stay on the exact LAN authority endpoint; wire and plaintext bounds include authenticated sealing overhead"
+  },
+  {
    "id": "egress:fleet/remote.py:<module>",
    "kind": "egress",
    "source": "fleet/remote.py:<module>",
@@ -1924,6 +1937,36 @@
     "tests/test_net_no_bypass.py"
    ],
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/wsl_network.py:DiscoverySocket.__init__",
+   "kind": "egress",
+   "source": "fleet/wsl_network.py:DiscoverySocket.__init__",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
+    "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
+    "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+    "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
+   ],
+   "note": "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
+  },
+  {
+   "id": "egress:fleet/wsl_network.py:_forward",
+   "kind": "egress",
+   "source": "fleet/wsl_network.py:_forward",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
+    "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
+    "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+    "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
+   ],
+   "note": "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
   },
   {
    "id": "egress:graph/serve.py:bind",
@@ -2392,6 +2435,19 @@
     "tests/test_net_untrusted.py"
    ],
    "note": ""
+  },
+  {
+   "id": "egress:workspace/remote.py:RemoteWorkspace._request",
+   "kind": "egress",
+   "source": "workspace/remote.py:RemoteWorkspace._request",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_remote_transport_attacks.py",
+    "tests/test_workspace_remote.py"
+   ],
+   "note": "project credentials stay on the exact LAN authority endpoint; redirects, oversized or malformed replies, and slow responses are refused"
   },
   {
    "id": "handler:fleet/api.py:Handler",
@@ -3739,9 +3795,19 @@
    "note": "refusal, rate ceiling, background process, other-purpose key, label collision, master in no file or log"
   },
   {
-   "id": "listener:fleet/daemon.py:main",
+   "id": "listener:fleet/chat.py:stream",
    "kind": "listener",
-   "source": "fleet/daemon.py:main",
+   "source": "fleet/chat.py:stream",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
+   "id": "listener:fleet/daemon.py:run",
+   "kind": "listener",
+   "source": "fleet/daemon.py:run",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "partial",
@@ -3765,9 +3831,9 @@
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
   },
   {
-   "id": "listener:fleet/discovery.py:_socket",
+   "id": "listener:fleet/discovery.py:_native_socket",
    "kind": "listener",
-   "source": "fleet/discovery.py:_socket",
+   "source": "fleet/discovery.py:_native_socket",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "partial",
@@ -3789,6 +3855,20 @@
     "tests/test_onboard_tailnet.py"
    ],
    "note": "the daemon handler is attacked; forged UDP beacons are attacked in tests/test_fleet_discovery.py only for the signature"
+  },
+  {
+   "id": "listener:fleet/wsl_network.py:NetworkBridge._listen",
+   "kind": "listener",
+   "source": "fleet/wsl_network.py:NetworkBridge._listen",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "covered",
+   "tests": [
+    "tests/test_wsl_network.py::test_bridge_refuses_authentication_and_socket_scope",
+    "tests/test_wsl_network.py::test_bridge_caps_messages_and_datagrams",
+    "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"
+   ],
+   "note": "the discovery control listener rejects bad capabilities, destinations and oversized frames; the TCP listener relays opaque bytes to the fixed daemon target"
   },
   {
    "id": "listener:graph/serve.py:main",
@@ -3913,6 +3993,16 @@
    "id": "listener:setup.py:_port_free",
    "kind": "listener",
    "source": "setup.py:_port_free",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
+   "id": "listener:workspace/remote_cli.py:run",
+   "kind": "listener",
+   "source": "workspace/remote_cli.py:run",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "n/a",
@@ -5783,6 +5873,18 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/project_connection.py",
+   "kind": "parser",
+   "source": "workspace/project_connection.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_connection.py"
+   ],
+   "note": "corrupt connection records and conflicting checkout authorities refuse device-local fallback and privileged operations"
+  },
+  {
    "id": "parser:workspace/rates.py",
    "kind": "parser",
    "source": "workspace/rates.py",
@@ -5794,6 +5896,19 @@
     "tests/test_workspace_rules.py"
    ],
    "note": ""
+  },
+  {
+   "id": "parser:workspace/remote.py",
+   "kind": "parser",
+   "source": "workspace/remote.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_remote_transport_attacks.py",
+    "tests/test_workspace_remote.py"
+   ],
+   "note": "sealed replies must be bounded JSON objects and project capabilities cannot cross authorities or projects"
   },
   {
    "id": "parser:workspace/screen.py",
@@ -6344,6 +6459,34 @@
     "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent"
    ],
    "note": ""
+  },
+  {
+   "id": "route:fleet/project_client.py:/ui/projects",
+   "kind": "route",
+   "source": "fleet/project_client.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_ui_access.py",
+    "tests/test_project_source.py",
+    "tests/test_remote_transport_attacks.py"
+   ],
+   "note": "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
+  },
+  {
+   "id": "route:fleet/project_client.py:/ui/projects*",
+   "kind": "route",
+   "source": "fleet/project_client.py:route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_ui_access.py",
+    "tests/test_project_source.py",
+    "tests/test_remote_transport_attacks.py"
+   ],
+   "note": "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
   },
   {
    "id": "route:fleet/room_routes.py:/ui/room",
@@ -8251,6 +8394,18 @@
    "note": ""
   },
   {
+   "id": "spawn:net/git.py:blobs",
+   "kind": "spawn",
+   "source": "net/git.py:blobs",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_source.py"
+   ],
+   "note": "snapshot paths use verified Git object IDs and bounded index/blob output; options, oversized objects and checkout filters are refused"
+  },
+  {
    "id": "spawn:net/git.py:run",
    "kind": "spawn",
    "source": "net/git.py:run",
@@ -8263,6 +8418,18 @@
     "tests/test_net_scan.py"
    ],
    "note": ""
+  },
+  {
+   "id": "spawn:net/git.py:source_index",
+   "kind": "spawn",
+   "source": "net/git.py:source_index",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_project_source.py"
+   ],
+   "note": "snapshot paths use verified Git object IDs and bounded index/blob output; options, oversized objects and checkout filters are refused"
   },
   {
    "id": "spawn:net/pdfread.py:run_child",

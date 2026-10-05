@@ -12,7 +12,7 @@ def test_daemon_entrypoint_injects_project_host(monkeypatch):
         received.append((argv, workspace_factory))
         return 7
 
-    monkeypatch.setattr(composition.daemon, "main", start)
+    monkeypatch.setattr(composition.daemon, "run", start)
     assert composition.main(["--no-web"]) == 7
     assert received == [(["--no-web"], WorkspaceHost)]
 

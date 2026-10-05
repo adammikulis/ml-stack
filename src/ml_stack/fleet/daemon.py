@@ -475,7 +475,7 @@ def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -
     return 2
 
 
-def main(argv: list[str] | None = None, *,
+def run(argv: list[str] | None = None, *,
          workspace_factory: Callable[[ProjectRegistry], Any] | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
@@ -573,4 +573,4 @@ def main(argv: list[str] | None = None, *,
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())
