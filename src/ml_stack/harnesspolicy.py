@@ -67,12 +67,12 @@ def decide(role: str, name: str, args: dict[str, Any] | None, *, roots: Sequence
     """The decision for one tool call. ``protected`` are path strings no call may name."""
     if hit := _mentions(args, protected):
         return _denied("destructive", f"the call names {hit}, which belongs to the launcher")
-    if refusal := refusal_for(_shell_line(name, args)):
-        return _denied("destructive", f"{refusal[0]} is for a person; run `{refusal[1]}` yourself")
     verdict = classify(Call(name, args), roots=roots, catalog=CATALOG)
     why = reason_text(verdict)
     if verdict.label == "safe":
         return Decision("allow", "safe", why)
+    if refusal := refusal_for(_shell_line(name, args)):
+        return _denied("destructive", f"{refusal[0]} is for a person; run `{refusal[1]}` yourself")
     if role == READ_ONLY or role not in (APPROVE_FIRST, PLAN_AND_GO):
         return _denied(verdict.label, f"the read-only role runs no acting call: {why}")
     if verdict.label in ("destructive", "unsure"):
