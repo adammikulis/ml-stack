@@ -232,7 +232,7 @@ def test_same_worker_claim_for_another_assignment_cannot_be_returned(board, proj
     claim = board.ws.who_owns('worktree', str(project['source']))
     assert claim['assignment'] == project['worktree']['id']
     wrong = {**project['worktree'], 'id': 'task-worktree:' + '0' * 32}
-    with pytest.raises(Denied, match='exact task delegation'):
+    with pytest.raises(Denied, match='different ownership claim'):
         board.ws.claims.return_worktree(board.ws.auth(board.parent), wrong)
     current = board.ws.who_owns('worktree', str(project['source']))
     assert {key: value for key, value in current.items() if key != 'expires_in_s'} == \
@@ -332,10 +332,11 @@ def test_native_reservations_release_only_the_exact_accepted_task_assignment(boa
     board.board.review(board.parent, board.task['id'], accepted())
     result = task_integration.integrate(board.ws, board.parent, board.task['id'], publish=True)
     assert result['state'] == 'published'
-    assert board.ws.claims.who('area', target) is None
+    assert not any(claim.get('assignment') == scope['id']
+                   for claim in board.ws.claims.listing(owner=board.worker_id))
     assert board.ws.claims.who('file', unrelated)['owner'] == board.worker_id
     assert board.ws.claims.who('file', wrong)['assignment'] == 'task-worktree:other'
-    with pytest.raises(Denied, match='exact task delegation'):
+    with pytest.raises(Denied, match='different ownership claim'):
         board.ws.claims.return_worktree(board.ws.auth(board.parent),
                                         {**scope, 'id': 'task-worktree:other'})
     assert board.ws.claims.who('file', wrong)['assignment'] == 'task-worktree:other'

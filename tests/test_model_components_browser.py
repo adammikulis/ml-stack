@@ -19,7 +19,7 @@ def test_download_component_choices_and_installed_component_action(joined, open_
     from ml_stack.fleet.models import Getting
 
     pick = catalogue.Suggestion("Qwen Example 2B", "hf:publisher/example/Example-Q4_K_M.gguf", 1,
-                               "Fixture model", draft_ref="hf:publisher/example/mtp-Example.gguf")
+                               "Fixture model", family="Qwen", draft_ref="hf:publisher/example/mtp-Example.gguf")
     monkeypatch.setattr(catalogue, "popular", lambda *args, **kwargs: [pick])
     monkeypatch.setattr(catalogue, "families", lambda *args, **kwargs: [pick.family])
     monkeypatch.setattr(catalogue, "how_many", lambda *args, **kwargs: 1)
@@ -38,7 +38,7 @@ def test_download_component_choices_and_installed_component_action(joined, open_
     page.get_by_role("button", name="Hugging Face", exact=True).click()
     page.get_by_role("button", name="Download", exact=True).click()
     mtp = page.get_by_label("Multi-token prediction", exact=False)
-    vision = page.get_by_label("Vision", exact=False)
+    vision = page.get_by_role("checkbox", name="Vision", exact=False)
     expect(mtp).to_be_checked()
     mtp.uncheck()
     vision.check()
