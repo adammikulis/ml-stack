@@ -23,8 +23,6 @@ from ml_stack.sentinel import Sentinel, State
 
 pty = importlib.import_module("pty") if sys.platform != "win32" else None
 
-POSIX_TERMINAL = pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
-
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 HOST = "evil.example"
 CLEAN = {"CLAUDECODE": "", "ML_STACK_AGENT": "", "ML_STACK_NONINTERACTIVE": "",
@@ -110,7 +108,7 @@ def run_command(tmp_path: Path, target: tuple[str, str, list[str]], *,
 
 
 @pytest.mark.parametrize("index", range(17))
-@POSIX_TERMINAL
+@pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_every_human_only_command_refuses_a_process_started_by_an_agent(tmp_path, index):
     label, module, function, argv, typed = commands(tmp_path)[index]
     before = snapshot(tmp_path / "home")
@@ -128,7 +126,7 @@ def test_every_human_only_command_refuses_a_process_with_no_terminal(tmp_path, i
     assert snapshot(tmp_path / "home") == before, f"{label} changed state with no terminal"
 
 
-@POSIX_TERMINAL
+@pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_the_same_commands_do_their_work_for_a_person_at_a_terminal(tmp_path):
     held = seed_quarantine(tmp_path)
     approved = run_command(tmp_path, ("ml_stack.net.cli", "command", ["approve-host", HOST]),
@@ -244,7 +242,7 @@ def test_building_the_signing_keys_never_asks_the_keystore(tmp_path):
         os.environ.pop("ML_STACK_TEST_KEYRING", None)
 
 
-@POSIX_TERMINAL
+@pytest.mark.skipif(sys.platform == "win32", reason="requires a POSIX pseudoterminal")
 def test_workspace_init_registers_the_first_identity_for_a_person_at_a_terminal(tmp_path):
     done = run_command(tmp_path, ("ml_stack.workspace.cli", "main", ["init"]), agent=False,
                        terminal=True)
