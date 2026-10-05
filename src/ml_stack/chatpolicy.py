@@ -10,7 +10,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home, mcp
+from ml_stack import home
+from ml_stack.command_capture import captured
 from ml_stack.guard.untrusted import EXTERNAL
 from ml_stack.interventions import Base, Call, Context, Deny, Proceed, Verdict
 from ml_stack.net.cli import command as security_command
@@ -183,4 +184,4 @@ def review_view(what: str = "status", limit: int = 20) -> dict[str, Any]:
              "scanners": ["scanners", "--json"]}
     if what not in views:
         return {"error": f"what is one of {', '.join(views)}"}
-    return mcp._captured(lambda: security_command(views[what]))
+    return captured(lambda: security_command(views[what]))

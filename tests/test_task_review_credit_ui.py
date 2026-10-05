@@ -28,7 +28,7 @@ def test_person_review_records_credit_after_locked_store_retry_without_losing_re
         if not available[0]:
             raise vault.KeyUnavailable('fake locked store')
         return original(ws, token, ident, ledger=ledger)
-    monkeypatch.setattr(task_routes.task_credit, 'verify_task', verify)
+    monkeypatch.setattr(task_routes.task_outcomes.task_credit, 'verify_task', verify)
     server = Serving(tmp_path)
     def post(body):
         return server.call('/ui/tasks', method='POST', body=body,
