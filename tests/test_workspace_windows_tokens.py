@@ -51,7 +51,8 @@ def test_junction_token_directory_is_refused_without_changing_target_acl(tmp_pat
     marker = target / "kept.txt"
     marker.write_text("preserved", encoding="utf-8")
     security = win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION
-    before = win32security.GetFileSecurity(str(target), security).GetSecurityDescriptorBinaryForm()
+    before = win32security.ConvertSecurityDescriptorToStringSecurityDescriptor(
+        win32security.GetFileSecurity(str(target), security), win32security.SDDL_REVISION_1, security)
     base = tmp_path / "workspace"
     base.mkdir()
     junction = base / "tokens"
@@ -62,7 +63,8 @@ def test_junction_token_directory_is_refused_without_changing_target_acl(tmp_pat
         assert "reparse point" in tokens.problem(junction)
         with pytest.raises(ValueError, match="reparse point"):
             tokens.prepare(base)
-        after = win32security.GetFileSecurity(str(target), security).GetSecurityDescriptorBinaryForm()
+        after = win32security.ConvertSecurityDescriptorToStringSecurityDescriptor(
+            win32security.GetFileSecurity(str(target), security), win32security.SDDL_REVISION_1, security)
         assert after == before and marker.read_text(encoding="utf-8") == "preserved"
     finally:
         junction.rmdir()

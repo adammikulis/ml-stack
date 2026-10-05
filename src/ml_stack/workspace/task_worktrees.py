@@ -28,6 +28,7 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
     if not checkout or checkout[0] != source:
         raise Denied('the configured source must be a Git checkout')
     primary = checkout[1]
+    repo.clean(primary)
     baseline = repo.git(primary, 'rev-parse', 'HEAD')
     development = repo.git(primary, 'branch', '--show-current')
     repo.remote_baseline(primary, development, baseline)
