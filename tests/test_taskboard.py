@@ -1,12 +1,13 @@
 """Canonical graph tasks enforce native allocations, ownership and independent review."""
 
 import concurrent.futures
+from pathlib import Path
 
 import pytest
 from taskboard_kit import accepted, board, proposed
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import resource_allocations
+from ml_stack.workspace import resource_allocations, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard, record, save
 
@@ -186,3 +187,18 @@ def test_expired_claim_requires_bounded_independent_recovery_and_blocked_explici
     detail = board.board.get(board.owner, ident)
     assert [row['transition'] for row in detail['checkpoints']] == ['recover', 'resume']
     assert detail['failures'] == 1
+
+
+@pytest.mark.redteam
+def test_designated_reviewer_without_read_capability_cannot_grade_task(board):
+    reviewer = board.ws.delegate(board.parent, 'no-read-reviewer', can=('send',))
+    token = tokens.read_file(Path(reviewer['token_file']))
+    project = {'root': '/approved/project'}
+    board.ws.registry.set_project(board.ws.auth(board.owner), reviewer['id'], project)
+    board.task = board.board.create(board.owner, {**board.spec, 'source_key': 'read-grant-check',
+                                    'project': project, 'reviewers': [reviewer['id']]})
+    board.allocation = resource_allocations.assign(board.ws, board.parent, board.worker_id,
+                                                   board.task['id'], 'native-grant')
+    proposed(board)
+    with pytest.raises(Denied, match='right to read'):
+        board.board.review(token, board.task['id'], accepted())
