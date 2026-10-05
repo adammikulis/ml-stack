@@ -47,10 +47,9 @@ class TaskManager(Manager):
             raise ValueError('chat_template_kwargs must be a JSON object')
         family = families.for_model_id(self.agent.model)
         if family is not families.GENERIC:
-            extra['chat_template_kwargs'] = {**kwargs, **family.think_kwargs(localeffort.thinks(level))}
+            thinking = localeffort.thinks(level) and environment.get('MAX_THINKING_TOKENS', '').strip() != '0'
+            extra['chat_template_kwargs'] = {**kwargs, **family.think_kwargs(thinking)}
         environment['CLAUDE_CODE_EXTRA_BODY'] = json.dumps(extra)
-        if level == 'off':
-            environment['MAX_THINKING_TOKENS'] = '0'
         return super()._process(turn, command, environment, context)
 
 
