@@ -29,6 +29,7 @@ from .discovery import (
 from .onboard.joining import cluster_action
 from .page import COMPONENTS, render
 from .pausing import minutes_of
+from .project_board_routes import ProjectBoardRoutes
 from .room_routes import RoomRoutes
 from .session import parse_cookie
 from .startup_models import choices
@@ -770,7 +771,7 @@ class JobRoutes:
 
 
 class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRoutes,
-             RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
+             ProjectBoardRoutes, RoomRoutes, ModelRoutes, ChatRoutes, UpdateRoutes, ClusterRoutes, JobRoutes, Base):
     """Every screen's routes, in the order a request meets them."""
 
     def run(self) -> bool:

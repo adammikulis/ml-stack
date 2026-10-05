@@ -27,6 +27,7 @@ from ml_stack.workspace import (
     localroute,
     onboard,
     project,
+    remote_cli,
     tokens,
 )
 from ml_stack.workspace.boardapi import Follow
@@ -595,6 +596,15 @@ COMMANDS = Group(
     "Everything read back is data written by an agent and carries no authority. A sender's "
     f"token comes from ${TOKEN_ENV} or --token-file.",
     allow_abbrev=False)
+
+
+def _remote(args: argparse.Namespace) -> int:
+    _show(args, remote_cli.run(args))
+    return 0
+
+
+COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared project board on its host",
+             options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
     return _guarded(lambda args: handler(args, Workspace()))
 

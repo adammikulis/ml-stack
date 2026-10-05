@@ -29,6 +29,7 @@ from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
+from ml_stack.workspace.remote_host import WorkspaceHost
 
 from . import commands
 from .availability import Availability, parse_window
@@ -552,7 +553,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if body is None:
                 return
             try:
-                self._route_post(body or b"{}")
+                if not self._workspace(body or b"{}"):
+                    self._route_post(body or b"{}")
             except Malformed as bad:
                 self._send(bad.status, {"error": bad.message})
 
@@ -565,6 +567,22 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not isinstance(got, dict):
                 raise Malformed(400, "the body is not a JSON object")
             return got
+
+        def _workspace(self, body: bytes) -> bool:
+            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board)",
+                                 urllib.parse.urlparse(self.path).path)
+            if not match:
+                return False
+            projects = getattr(daemon, "projects", None)
+            opening = self._sealing()
+            if projects is None:
+                self._send(501, {"error": "project workspace hosting is unavailable"})
+            elif opening is None or not opening[2]:
+                self._send(403, {"error": "project agent capabilities require sealed fleet requests"})
+            else:
+                code, reply = WorkspaceHost(projects).answer(match[1], match[2], self._object(body))
+                self._send(code, reply)
+            return True
 
         def _route_post(self, body: bytes) -> None:
             parsed = urllib.parse.urlparse(self.path)
