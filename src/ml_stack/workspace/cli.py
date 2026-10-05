@@ -27,6 +27,7 @@ from ml_stack.workspace import (
     localroute,
     onboard,
     project,
+    project_connection,
     remote_cli,
     tokens,
 )
@@ -72,6 +73,19 @@ def _label(args: argparse.Namespace) -> str:
 
 def _token(args: argparse.Namespace) -> str:
     return tokens.resolve(limits.root(), token_file=args.token_file, agent=args.agent)
+
+
+def _context(args: argparse.Namespace):
+    connection = project_connection.selected()
+    if connection is None:
+        return Workspace(), _token(args)
+    remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
+                                                cluster=connection.get("cluster", ""),
+                                                cluster_key=Path(connection["cluster_key"])
+                                                if connection.get("cluster_key") else None)
+    token = remote.token(agent=args.agent or connection.get("agent", ""),
+                         token_file=getattr(args, "token_file", ""))
+    return project_connection.CanonicalWorkspace(remote, token), token
 
 
 def _block(lines: list[str], what: str) -> str:
@@ -372,7 +386,8 @@ def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _nudging(args: argparse.Namespace) -> int:
-    line = Workspace().nudge(_token(args))
+    ws, token = _context(args)
+    line = ws.nudge(token)
     if line:
         say(line)
     return 0
@@ -574,7 +589,8 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        result = handler(args, Workspace(), _token(args))
+        ws, token = _context(args)
+        result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)
         return 0
@@ -587,7 +603,8 @@ def _watching(args: argparse.Namespace) -> int:
             signal.signal(sig, lambda *_: CANCELLED.set())
         except ValueError:
             break
-    return _watch(args, Workspace(), _token(args))
+    ws, token = _context(args)
+    return _watch(args, ws, token)
 
 
 COMMANDS = Group(
@@ -606,7 +623,13 @@ def _remote(args: argparse.Namespace) -> int:
 COMMANDS.add("remote", _guarded(_remote), help="attach and use one shared project board on its host",
              options=remote_cli.OPTIONS)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
-    return _guarded(lambda args: handler(args, Workspace()))
+    def run(args):
+        if project_connection.selected() is not None:
+            if handler in {_brief, _hook_snippet}:
+                return handler(args, None)
+            raise Denied("this command is unavailable in a canonical project; use its shared board")
+        return handler(args, Workspace())
+    return _guarded(run)
 
 
 for _name, _help, _options, _handler in BARE:

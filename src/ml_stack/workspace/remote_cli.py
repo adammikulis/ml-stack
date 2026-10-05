@@ -3,16 +3,18 @@
 from pathlib import Path
 
 from ml_stack.command import flag, option
+from ml_stack.workspace.project_connection import bind
 from ml_stack.workspace.remote import RemoteWorkspace
 
 OPTIONS = [option("json"), flag("action", choices=("join", "whoami", "agents", "boards",
-            "read", "post", "send", "inbox", "announce", "claims", "claim", "heartbeat", "history")),
+            "read", "post", "send", "inbox", "announce", "claims", "claim", "heartbeat", "history", "use")),
            flag("arguments", nargs="*"), flag("--host", required=True),
            flag("--project-id", required=True), flag("--cluster-key", default=""),
            flag("--cluster", default=""),
            flag("--name", default=""), flag("--agent", default=""),
            flag("--token-file", default=""), flag("--model", default=""),
            flag("--harness", default=""), flag("--label", default=""),
+           flag("--project-root", default="."),
            flag("--limit", type=int, default=20), flag("--ack", action="store_true")]
 
 
@@ -27,6 +29,8 @@ def run(args):
             raise ValueError("join needs the selected project's invitation code")
         return remote.join(values[0], args.name, model=args.model, harness=args.harness)
     token = remote.token(agent=args.agent, token_file=args.token_file)
+    if action == "use":
+        return bind(remote, Path(args.project_root), args.agent, args.cluster)
     if action in {"whoami", "agents", "claims", "heartbeat", "history"}:
         return remote.call(action, token)
     if action == "boards":

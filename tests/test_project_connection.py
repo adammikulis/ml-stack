@@ -1,0 +1,94 @@
+"""Canonical project CLI dispatch without device-local fallback."""
+
+from types import SimpleNamespace
+
+import pytest
+
+from ml_stack import home
+from ml_stack.files import write_json
+from ml_stack.workspace import cli, project_connection as connection
+from ml_stack.workspace.identity import Denied
+
+PROJECT = "a" * 32
+
+
+class Remote:
+    host = "http://127.0.0.1:8770"
+    project_id = PROJECT
+    cluster_key = ""
+
+    def __init__(self, *args, **kwargs):
+        self.calls = []
+
+    def token(self, **kwargs):
+        return "project-agent-capability"
+
+    def call(self, operation, token, *args, **kwargs):
+        self.calls.append((operation, token, args, kwargs))
+        if operation == "whoami":
+            return {"id": "mac", "role": "agent", "can": ["send", "read", "claim"],
+                    "project": {"key": PROJECT}}
+        return {"seq": 1}
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    root.mkdir()
+    return root
+
+
+def test_normal_cli_sends_to_saved_canonical_board(project, monkeypatch):
+    remote = Remote()
+    connection.bind(remote, project, "mac", "default")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(connection, "RemoteWorkspace", lambda *a, **k: remote)
+    monkeypatch.setattr(cli, "Workspace", lambda: pytest.fail("created a split local board"))
+    args = SimpleNamespace(agent="", token_file="", label="helper", to="pc", type="status",
+                           body="connected", subject="", reply_to=0, ttl=0, json=True)
+    assert cli._runner(cli._send)(args) == 0
+    operation, token, values, kwargs = remote.calls[-1]
+    assert operation == "send" and token == "project-agent-capability"
+    assert values == ("pc", "status", "connected") and kwargs["label"] == "helper"
+
+
+def test_connected_project_uses_nearest_root_and_refuses_other_authority(project):
+    connection.bind(Remote(), project, "mac")
+    nested = project / "subdir"
+    nested.mkdir()
+    assert connection.selected(nested)["agent"] == "mac"
+    other = Remote()
+    other.host = "http://127.0.0.1:8771"
+    with pytest.raises(Denied, match="another canonical board"):
+        connection.bind(other, project, "mac")
+
+
+def test_unconfigured_shared_checkout_never_uses_local_workspace(project):
+    write_json(project / ".ml-stack-project.json", {"kind": "project-checkout", "project_id": PROJECT,
+                                                   "authority": {}})
+    with pytest.raises(Denied, match="no canonical board"):
+        connection.selected(project)
+
+
+def test_offline_canonical_connection_does_not_fall_back(project, monkeypatch):
+    connection.bind(Remote(), project, "mac")
+    monkeypatch.chdir(project)
+    def offline(*args, **kwargs):
+        raise Denied("canonical host offline")
+    monkeypatch.setattr(connection, "RemoteWorkspace", offline)
+    monkeypatch.setattr(cli, "Workspace", lambda: pytest.fail("created a split local board"))
+    assert cli._runner(cli._agents)(SimpleNamespace(agent="", token_file="", json=True)) == 3
+
+
+def test_corrupt_connection_record_disables_local_fallback(project):
+    connection.bind(Remote(), project, "mac")
+    home.state("workspace-connections.json").write_text("not json")
+    with pytest.raises(Denied, match="local fallback is disabled"):
+        connection.selected(project)
+
+
+def test_unsupported_privileged_operation_is_explicitly_refused():
+    ws = connection.CanonicalWorkspace(Remote(), "project-agent-capability")
+    with pytest.raises(Denied, match="local fallback is disabled"):
+        ws.mint("project-agent-capability", "lead", "lead")
