@@ -202,3 +202,27 @@ def test_remote_watchers_refuse_before_opening_a_local_board(tmp_path, monkeypat
     with pytest.raises(Denied, match='local-only'):
         getattr(cli, handler)(None)
     assert not (base / 'registry.json').exists()
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('endpoint', [
+    'http://192.0.2.10:8786', 'file:///etc/passwd', 'https://user:secret@example.org',
+    'https://example.org/callback', 'https://example.org?token=secret',
+    'https://example.org#authority', '//example.org', 'ftp://example.org'])
+def test_hostile_saved_coordinator_origin_is_refused_before_transport(tmp_path, monkeypatch, endpoint):
+    from ml_stack.workspace import coordinator_client
+
+    (tmp_path / 'coordinator.json').write_text(json.dumps({
+        'version': 1, 'mode': 'remote', 'workspace': 'workspace:' + 'a' * 32, 'endpoint': endpoint}))
+    monkeypatch.setattr(coordinator_client, 'load_cluster_key',
+                        lambda: pytest.fail('hostile configuration reached credential/transport setup'))
+    with pytest.raises(Denied):
+        coordinator_client.client(tmp_path)
+
+
+def test_origin_attack_regression_detects_removed_validation_guard(tmp_path, monkeypatch):
+    with monkeypatch.context() as changed:
+        changed.setattr(coordinator_config, 'validate_endpoint', lambda _: None)
+        with pytest.raises(pytest.fail.Exception, match='reached credential/transport setup'):
+            test_hostile_saved_coordinator_origin_is_refused_before_transport(
+                tmp_path, changed, 'http://192.0.2.10:8786')

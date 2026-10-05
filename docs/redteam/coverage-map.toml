@@ -16,6 +16,14 @@ partial = 200
 
 
 [[group]]
+match = ["egress:workspace/coordinator_client.py:client"]
+status = "covered"
+count = 1
+tests = ["tests/test_workspace_coordinator.py::test_hostile_saved_coordinator_origin_is_refused_before_transport",
+         "tests/test_workspace_coordinator.py::test_remote_mcp_never_falls_back_to_local_workspace"]
+note = "Saved origins reject plaintext remote, credentials, foreign schemes, paths, queries and fragments before credential or transport setup; remote clients refuse local workspace fallback"
+
+[[group]]
 match = ["route:fleet/launch_routes.py:/ui/launch-ticket"]
 status = "covered"
 tests = ["tests/test_fleet_ui.py::TestSignIn::test_launch_ticket_requires_session_and_is_consumed_once"]
