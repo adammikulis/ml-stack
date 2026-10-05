@@ -121,6 +121,7 @@ class DevelopmentIntegration:
                        'policy': 'development-integration-v1'}
 
     def prepare(self) -> None:
+        self.ws.claim(self.token, 'branch', self.development)
         self.ws.claim(self.token, 'area', str(self.primary / '.ml-stack-integration'))
         self.ws.claim(self.token, 'branch', self.branch)
         self.ws.claim(self.token, 'worktree', str(self.candidate))
@@ -151,6 +152,7 @@ class DevelopmentIntegration:
         repo.reviewed_files(self.candidate, tip, self.task['proposal']['artifacts'])
 
     def publish(self, checks: list[dict]) -> dict:
+        self.ws.claim(self.token, 'branch', self.development)
         primary, branch, before = repo.repository(self.source)
         if (primary, branch, before) != (self.primary, self.development, self.before):
             raise Denied('development changed during gating; preserve candidate and recheck the new baseline')
@@ -165,6 +167,7 @@ class DevelopmentIntegration:
         _event(self.ws, self.record, 'integrated', commit=tip, checks=checks)
         if repo.git(self.primary, 'rev-parse', 'HEAD') != tip:
             raise Denied('development moved after its fast-forward; publication must be rechecked')
+        self.ws.claim(self.token, 'branch', self.development)
         repo.git(self.primary, 'push', 'origin', f'{tip}:refs/heads/{self.development}')
         remote = repo.git(self.primary, 'ls-remote', 'origin', f'refs/heads/{self.development}').split()[0]
         if remote != tip:

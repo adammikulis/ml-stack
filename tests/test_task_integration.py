@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from taskboard_kit import accepted, board as _board_fixture
@@ -40,8 +41,9 @@ def project(board, tmp_path, monkeypatch, request):
     repo.git(primary, 'config', 'user.email', 'reviewer@example.test')
     (primary / 'scripts').mkdir()
     (primary / 'scripts' / 'test').write_text(GATES)
+    (primary / '.gitignore').write_text('.claude/worktrees/\n')
     (primary / 'sim.py').write_text('speed = 1\n')
-    repo.git(primary, 'add', '--', 'scripts/test', 'sim.py')
+    repo.git(primary, 'add', '--', '.gitignore', 'scripts/test', 'sim.py')
     repo.git(primary, 'commit', '-m', 'chore: isolated baseline')
     repo.git(tmp_path, 'init', '--bare', str(origin))
     repo.git(primary, 'remote', 'add', 'origin', str(origin))
@@ -229,3 +231,41 @@ def test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape(tm
         with pytest.raises(Denied, match='relative repository paths'):
             repo.reviewed_files(tmp_path, commit, {unsafe: digest})
     assert not (tmp_path / 'ESCAPED').exists()
+
+
+@pytest.mark.redteam
+def test_foreign_development_branch_owner_blocks_integration_before_gates(board, project):
+    board.board.review(board.parent, board.task['id'], accepted())
+    other = board.agent('development-owner')
+    claim = board.ws.claim(other, 'branch', '0.2dev')
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'blocked' and result['blocking_owner'] == 'development-owner'
+    assert board.ws.who_owns('branch', '0.2dev') == claim
+    assert not project['log'].exists()
+    assert repo.git(project['primary'], 'rev-parse', 'HEAD') == project['baseline']
+
+
+def test_standard_nested_harness_worktrees_do_not_dirty_or_delete_primary(board, project):
+    foreign = project['primary'] / '.claude' / 'worktrees' / 'foreign-agent'
+    foreign.mkdir(parents=True)
+    marker = foreign / 'work.txt'
+    marker.write_text('active foreign work\n')
+    repo.clean(project['primary'])
+    assert marker.read_text() == 'active foreign work\n'
+    unrelated = project['primary'] / '.claude' / 'unreviewed.py'
+    unrelated.write_text('unreviewed = True\n')
+    with pytest.raises(Denied, match='uncommitted changes'):
+        repo.clean(project['primary'])
+    assert marker.exists() and unrelated.exists()
+
+
+def test_task_integrate_interfaces_use_native_token_and_exact_task_id(board, project, monkeypatch):
+    from ml_stack.workspace import cli, tools
+
+    board.board.review(board.parent, board.task['id'], accepted())
+    monkeypatch.setattr(tools, 'Workspace', lambda: board.ws)
+    monkeypatch.setattr(tools, '_token', lambda: board.parent)
+    result = tools.workspace_task_integrate(board.task['id'])
+    assert result['state'] == 'published'
+    command = next(item for item in cli.TABLE if item[0] == 'task-integrate')
+    assert command[3](SimpleNamespace(id=board.task['id']), board.ws, board.parent) == result

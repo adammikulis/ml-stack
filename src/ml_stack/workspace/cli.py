@@ -28,6 +28,7 @@ from ml_stack.workspace import (
     nudge,
     onboard,
     project,
+    task_integration,
     task_outcomes,
     tokens,
 )
@@ -498,6 +499,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
      lambda a, w, t: task_outcomes.review(w, t, a.id, json.loads(_body(a.payload)))),
     ("task-credit", "retry recording an authorized immutable outcome", [flag("id")],
      lambda a, w, t: task_outcomes.credit(w, t, a.id)),
+    ("task-integrate", "gate and publish an independently accepted committed native task", [flag("id")],
+     lambda a, w, t: task_integration.integrate(w, t, a.id)),
     ("inbox", "unread messages, fenced as data", [
         *READ,
         flag("--children", action="store_true", help="only messages from your delegates")],

@@ -57,6 +57,10 @@ allocation. Review uses the same independent-review and idempotent outcome adapt
 person UI; a locked credit store leaves the saved review intact and reports pending credit.
 
 Reviewed native work can land through `task_integration.integrate(workspace, token, task_id)`.
+The same authenticated operation is available as `ml-stack-workspace task-integrate ID`
+and the `workspace_task_integrate` tool. It needs existing development-branch claim authority;
+an accepted review does not grant publication rights. A foreign live development claim
+blocks integration before any candidate or source-claim changes.
 The helper requires the exact committed task branch, tracked artifact hashes and committed
 full patch that the independent review accepted. It merges unchanged source into its own
 candidate worktree, runs the maintained quick, structural and serving-security gates,

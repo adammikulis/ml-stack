@@ -7,7 +7,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ml_stack.workspace import filecli, limits, task_outcomes, tokens, work_reputation
+from ml_stack.workspace import (
+    filecli,
+    limits,
+    task_integration,
+    task_outcomes,
+    tokens,
+    work_reputation,
+)
 from ml_stack.workspace.files import Attachment, Where
 from ml_stack.workspace.identity import TOKEN_ENV, Denied
 from ml_stack.workspace.service import Workspace
@@ -24,6 +31,7 @@ HINTS = {
     "workspace_task_submit": (False, False, False),
     "workspace_task_review": (False, False, False),
     "workspace_task_credit": (False, False, False),
+    "workspace_task_integrate": (False, False, False),
 
     "workspace_status": (True, False, True),
     "workspace_reputation": (True, False, True),
@@ -260,3 +268,8 @@ def workspace_task_review(id: str, decision: dict[str, Any]) -> dict[str, Any]:
 def workspace_task_credit(id: str) -> dict[str, Any]:
     """Retry authorized credit recording for an immutable reviewed outcome."""
     return task_outcomes.credit(Workspace(), _token(), id)
+
+
+def workspace_task_integrate(id: str) -> dict[str, Any]:
+    """Gate and publish an exact independently accepted native task using existing authority."""
+    return task_integration.integrate(Workspace(), _token(), id)
