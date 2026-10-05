@@ -49,6 +49,9 @@ def prepare(base: Path) -> Path:
                          f"move ML_STACK_HOME out of it")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "nt":
+        if _redirected(base.lstat()):
+            raise ValueError(f"{base} is a symlink or Windows reparse point")
+        restrict(base)
         restrict(path)
     else:
         path.chmod(0o700)
