@@ -114,3 +114,51 @@ def test_separate_worktrees_share_source_area_but_allow_independent_files(kit, t
     assert owner['commit'] == run('rev-parse', 'HEAD').stdout.strip()
     assert owner['owner_pid'] > 0 and owner['owner_started'] > 0
     assert owner['environment'] and owner['interpreter']
+
+
+@pytest.mark.parametrize('command', [
+    "ls src/ml_stack/models* 2>/dev/null; find src -name '*model*' -maxdepth 3 | head",
+    "cat HANDOFF.md 2>/dev/null | head",
+    "ls 1>/dev/null 2>>/dev/null",
+    "ls &>/dev/null",
+])
+def test_native_read_inventory_null_sink_needs_no_mutation_claim(kit, command):
+    assert harness_claims.resources('Bash', {'command': command}, str(kit.project)) == []
+    decision = harnesshook.pre({'tool_name': 'Bash', 'tool_input': {'command': command},
+                               'cwd': str(kit.project)},
+                              harnesshook.Rail('plan-and-go', 'alpha', roots=[str(kit.project)], wait_s=0))
+    assert decision['hookSpecificOutput']['permissionDecision'] == 'allow'
+    assert kit.ws.claims.listing(owner='alpha') == []
+
+
+@pytest.mark.parametrize('target', ['/tmp/outside-report', '/dev/zero', '/dev/tty',
+                                   '/dev/stdout', '/dev/fd/1', '/proc/self/fd/1'])
+def test_other_outside_redirect_targets_remain_denied(kit, target):
+    command = f'ls 2>{target}'
+    with pytest.raises(Denied, match='outside the launcher-approved'):
+        harness_claims.reserve('Bash', {'command': command}, str(kit.project),
+                               'alpha', [str(kit.project)])
+
+
+def test_aliases_and_replaced_null_sink_are_not_exempt(kit, monkeypatch):
+    alias = kit.project / 'null-alias'
+    alias.symlink_to(os.devnull)
+    assert not harness_claims._null_sink(str(alias))
+    replacement = kit.project / 'null-file'
+    replacement.write_text('preserve')
+    with monkeypatch.context() as patch:
+        patch.setattr(os, 'devnull', str(replacement))
+        assert not harness_claims._null_sink(str(replacement))
+        patch.setattr(os, 'devnull', str(alias))
+        assert not harness_claims._null_sink(str(alias))
+    assert replacement.read_text() == 'preserve'
+
+
+def test_windows_null_sink_is_the_exact_reserved_os_device(monkeypatch):
+    with monkeypatch.context() as patch:
+        patch.setattr(os, 'name', 'nt')
+        patch.setattr(os, 'devnull', 'nul')
+        assert harness_claims._null_sink('nul')
+        assert not harness_claims._null_sink('NUL.txt')
+        assert not harness_claims._null_sink('C:/nul')
+        assert not harness_claims._null_sink('/dev/null')
