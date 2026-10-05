@@ -1,5 +1,8 @@
 """Canonical workers select queued allocations and persist proposals in the graph."""
 
+from dataclasses import replace
+
+import pytest
 from taskboard_kit import board
 
 from ml_stack.workspace import task_runtime, task_scheduler, task_worker
@@ -48,3 +51,21 @@ def test_person_task_scheduler_excludes_explicit_foreign_project(board):
     assert allocation['project'] != str(board.source)
     board.board.claim(board.child, task['id'], allocation['allocation_id'])
     assert board.board.get(board.parent, task['id'])['worker'] == board.worker_id
+
+
+def test_failed_lease_cleanup_publishes_stopped_status_and_preserves_grant(board, monkeypatch):
+    agent = task_worker.la.load(board.ws, 'native-worker')
+    agent = replace(agent, harness='claude')
+    task_worker.la.save(board.ws, agent)
+    def release():
+        raise RuntimeError('Access to registered broker denied')
+    held = task_worker.localloop.Held(None, {'id': 'native-grant'}, release)
+    monkeypatch.setattr(task_worker.localloop, 'lease_model', lambda *_: held)
+    with pytest.raises(RuntimeError, match='Access to registered broker denied') as raised:
+        task_worker.run(board.ws, agent.name)
+    status = task_worker.la.status_of(board.ws, agent.name)
+    assert status['state'] == 'stopped'
+    assert status['lease']['id'] == 'native-grant'
+    assert 'lease cleanup failed' in status['detail']
+    assert 'execution configuration changed' in str(raised.value.__context__)
+    assert board.board.get(board.parent, board.task['id'])['state'] == 'queued'
