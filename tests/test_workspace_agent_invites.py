@@ -268,7 +268,7 @@ def test_an_unknown_policy_value_is_the_strictest_asking_one(kit):
     assert asked
 
 
-def test_approve_first_raises_a_request_the_person_answers(kit, person_home):  # noqa: F811
+def test_approve_first_raises_a_request_the_person_answers(kit, person_home, capsys):  # noqa: F811
     kit.limits(agent_invite_ask="approve-first", agent_invite_wait_s=20.0)
     seen = {}
 
@@ -294,6 +294,10 @@ def test_approve_first_raises_a_request_the_person_answers(kit, person_home):  #
         thread.join()
         assert "invite a new agent as a child of lead-a" in seen["request"].subject
         assert seen["request"].raised_by.agent == "lead-a"
+        notice = capsys.readouterr().err
+        assert seen["request"].id in notice
+        assert "Waiting for person approval" in notice and "approvals/requests" in notice
+        assert "timeout 20 seconds" in notice
     assert len(audit(kit, "agent_invite.refused")) == 1 and len(audit(kit, "agent_invite.create")) == 1
 
 
