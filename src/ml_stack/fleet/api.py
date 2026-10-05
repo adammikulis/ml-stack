@@ -19,6 +19,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
@@ -371,6 +372,12 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             self._send(status, answer)
             return True
 
+        def _extension(self, body=None) -> bool:
+            for entry in entry_points(group='ml_stack.peer_routes'):
+                if self.path.split('?')[0].startswith('/' + entry.name + '/'):
+                    return bool(entry.load()(self, body))
+            return False
+
         def do_GET(self) -> None:
             if self.path == "/favicon.ico":
                 self.send_response(204)
@@ -389,6 +396,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             if not (path == "/health" and here and "Authorization" not in self.headers) \
                     and not self._guard():
+                return
+            if self._extension():
                 return
             if path == "/health":
                 status = runner.status()
@@ -550,6 +559,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             body = self._unsealed(body)
             if body is None:
+                return
+            if self._extension(body):
                 return
             try:
                 self._route_post(body or b"{}")

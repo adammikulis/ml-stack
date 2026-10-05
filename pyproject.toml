@@ -305,7 +305,11 @@ reportUnsupportedDunderAll = "error"
 reportUnusedCoroutine = "error"
 reportUnusedExcept = "error"
 
+[project.entry-points."ml_stack.peer_routes"]
+workspace = "ml_stack.workspace.coordinator:route"
+
 [project.entry-points."ml_stack.ui_routes"]
+coordination = "ml_stack.workspace.coordinator_routes:route"
 agents = "ml_stack.workspace.agent_routes:route"
 tasks = "ml_stack.workspace.task_routes:route"
 board = "ml_stack.workspace.fleet_routes:route"

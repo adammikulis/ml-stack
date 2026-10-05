@@ -1,0 +1,58 @@
+<style>coordinator-control { display:block; min-width:0; } coordinator-control p, coordinator-control small { overflow-wrap:anywhere; }</style>
+<script>
+(function () {
+  const M = window.fleetModel;
+  class CoordinatorControl extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.note = M.el('p', {role:'status', 'aria-live':'polite'}, 'Checking coordination…');
+      this.controls = M.el('div', {class:'row'});
+      this.details = M.el('details', {}, M.el('summary', {}, 'Shared coordinator'), this.controls);
+      this.append(this.note, this.details);
+      this.load();
+    }
+    async load() {
+      const result = await M.api('/ui/coordination');
+      if (!result.ok) { this.note.textContent = result.error || 'Coordination is unavailable.'; return; }
+      this.connection = result;
+      this.note.replaceChildren(M.el('strong', {}, result.mode === 'host' ? 'Coordinator on this device' :
+        result.mode === 'remote' ? `Shared coordinator: ${result.name || result.endpoint}` : 'Device-local coordination'));
+      if (result.workspace) this.note.append(M.el('small', {}, ` · ${result.workspace}`));
+      if (result.mode === 'remote') {
+        this.note.append(document.createTextNode(result.connected ? ' · Connected' : ' · Unavailable; local fallback is disabled'));
+        this.note.append(M.el('a', {href:`${result.endpoint}/ui/#board`, target:'_blank', rel:'noopener noreferrer'}, ' Open coordinator Board'));
+      } else if (result.mode === 'local') this.note.append(document.createTextNode(' · Not shared with other devices'));
+      this.controls.replaceChildren();
+      const refresh = M.el('button', {type:'button'}, 'Find coordinators');
+      refresh.onclick = () => this.discover();
+      this.controls.append(refresh);
+      if (result.mode === 'local') {
+        const host = M.el('button', {type:'button'}, 'Use this device as coordinator');
+        host.onclick = () => this.change({action:'host'});
+        this.controls.append(host);
+      }
+      this.dispatchEvent(new CustomEvent('coordination', {detail:result, bubbles:true}));
+    }
+    async discover() {
+      const result = await M.api('/ui/coordination?discover=1');
+      const choices = M.el('div', {});
+      if (!result.ok) choices.textContent = result.error || 'Discovery unavailable.';
+      else if (!result.coordinators?.length) choices.textContent = 'No shared coordinator found. Pair both devices with the same Fleet cluster, then select a coordinator.';
+      for (const row of result.coordinators || []) {
+        const join = M.el('button', {type:'button'}, `Connect to ${row.name}`);
+        join.onclick = () => this.change({action:'connect', name:row.name});
+        choices.append(M.el('p', {}, join, ` ${row.endpoint} · ${row.workspace}`));
+      }
+      this.controls.querySelector('[data-choices]')?.remove();
+      choices.dataset.choices = '1'; this.controls.append(choices);
+    }
+    async change(document) {
+      const result = await M.api('/ui/coordination', {method:'POST', body:JSON.stringify(document)});
+      if (!result.ok) { this.note.textContent = result.error || 'Selection failed.'; return; }
+      await this.load();
+    }
+  }
+  customElements.define('coordinator-control', CoordinatorControl);
+})();
+</script>
