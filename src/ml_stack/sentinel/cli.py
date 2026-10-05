@@ -136,17 +136,17 @@ def _show(args: argparse.Namespace) -> int:
 
 
 def _release(args: argparse.Namespace) -> int:
-    grant = human.mint("release", args.subject)
+    human.require_person("release")
     record = _find(args.subject)
-    done = sentinel.default().store.release(record.id, grant)
+    done = sentinel.default().store.release(record.id, human.mint("release", record.id))
     say(f"{done.id} released ({done.kind}:{done.key})")
     return 0
 
 
 def _purge(args: argparse.Namespace) -> int:
-    grant = human.mint("purge", args.subject)
+    human.require_person("purge")
     record = _find(args.subject)
-    done = sentinel.default().store.purge(record.id, grant)
+    done = sentinel.default().store.purge(record.id, human.mint("purge", record.id))
     say(f"{done.id} purged: what was held is deleted, the record stays")
     return 0
 
