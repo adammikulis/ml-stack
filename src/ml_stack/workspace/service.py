@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.sentinel import human
-from ml_stack.workspace import agent_invites, limits as limits_mod, tokens, wake
+from ml_stack.workspace import agent_invites, limits as limits_mod, reports, tokens, wake
 from ml_stack.workspace.boardapi import BoardApi, Follow, Held
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
@@ -196,7 +196,7 @@ class Workspace:
                                    how.get("env"), how.get("ask"))
 
     # -- the write checks ----------------------------------------------------------------
-    def _check(self, who: Identity, what: str, size_cap: int, *texts: str) -> None:
+    def _screen(self, who: Identity, what: str, size_cap: int, *texts: str) -> None:
         joined = "\n".join(texts)
         if len(joined.encode()) > size_cap:
             self.audit("write.refused", who.id, what=what, why="size", chars=len(joined))
@@ -209,6 +209,11 @@ class Workspace:
         if why:
             self.audit("write.refused", who.id, what=what, why="screen", chars=len(joined))
             raise Refused(f"{what} was not written: {'; '.join(why)}. Remove it and send again.")
+    def _check(self, who: Identity, what: str, size_cap: int, *texts: str) -> None:
+        self._screen(who, what, size_cap, *texts)
+        self._rate(who, what)
+
+    def _rate(self, who: Identity, what: str) -> None:
         try:
             self.rates.admit(who.id, self.limits.child_sends_per_window if who.parent else 0)
             if who.parent:
@@ -301,13 +306,16 @@ class Workspace:
             raise Refused(f"an announcement is one line of at most {lim.announce_chars} "
                           f"characters ({len(text)} given); put the detail in a note or a thread "
                           f"and link it by sequence number, such as 'done: see note 12'")
+        return self.post(who, ANNOUNCE, kind, text, subject=kind, label=label, announce=True)
+
+    def _announcement_quota(self, who: Identity) -> None:
+        lim = self.limits
         horizon = self.clock() - lim.announce_window_s
         recent = [r for r in self.bus.outbox(who.id, 50) if r["to"] == ANNOUNCE and r["ts"] > horizon]
         if len(recent) >= lim.announce_per_window:
             self.audit("write.refused", who.id, what="announcement", why="rate")
             raise RateLimited(f"{who.id} made {len(recent)} announcements in "
                               f"{lim.announce_window_s:.0f}s; the limit is {lim.announce_per_window}")
-        return self.post(who, ANNOUNCE, kind, text, subject=kind, label=label, announce=True)
 
     def post(self, who: Identity, to: str, kind: str, body: str, *, announce: bool = False,
              **opts: Unpack[SendOptions]) -> dict[str, Any]:
@@ -329,42 +337,60 @@ class Workspace:
             raise Refused("a file message is made by `attach`")
         if kind not in TYPES and not announce:
             raise ValueError(f"type must be one of {', '.join(TYPES)}")
-        mentions: list[str] = []
-        if to.startswith("#"):
+        row = {'type': kind, 'from': who.id, 'role': who.role, 'to': to, 'reply_to': reply_to,
+               'thread': 0, 'subject': subject, 'body': body, 'label': label,
+               'mentions': [], **({'file': file} if file else {})}
+        return reports.emit(self, who, row, announce=announce, ttl_s=ttl_s)
+
+    def _message_sender(self, who: Identity) -> bool:
+        if who is GREETER or who is agent_invites.GREETER:
+            return False  # Maintained internal notices are not authenticated reports.
+        info = self.registry.info(who.id)
+        if not self.registry.role_of(who.id) or info['role'] != who.role or info['parent'] != who.parent:
+            raise Denied('the sender identity expired or was revoked')
+        self._may(Identity(who.id, info['role'], info['parent'], tuple(info['can'])), 'send')
+        return True
+
+    def _message_rights(self, who: Identity, row: dict, announce: bool) -> None:
+        to, subject, body, reply_to = row['to'], row['subject'], row['body'], row['reply_to']
+        if to.startswith('#'):
             if not announce:
-                mentions = self.board.prepare(who, to, body, reply_to)
+                row['mentions'] = self.board.prepare(who, to, body, reply_to)
         elif not self._known(to):
             raise ValueError(f"no agent called {to!r}; use * for everyone")
         if len(subject) > self.limits.subject_chars:
             raise Refused(f"the subject is over {self.limits.subject_chars} characters")
-        self._check(who, "the message", self.limits.body_bytes, subject, body)
-        if to != BROADCAST and not to.startswith("#") and self.bus.pending(to) >= self.limits.inbox_pending:
-            self.audit("write.refused", who.id, what="message", why="inbox-full", to=to)
-            raise Refused(f"{to} has {self.limits.inbox_pending} unread messages; wait for it to read")
-        if to != BROADCAST and not to.startswith("#") and sum(
-                1 for r in self.bus.inbox(to, limit=1 << 30) if r["from"] == who.id
-        ) >= self.limits.unread_per_sender:
-            self.audit("write.refused", who.id, what="message", why="sender-share", to=to)
-            raise Refused(f"{who.id} already has {self.limits.unread_per_sender} unread messages "
-                          f"waiting for {to}")
-        thread = 0
+        self._screen(who, 'the message', self.limits.body_bytes, subject, body)
         if reply_to:
             parent = self.bus.get(reply_to)
             if parent is None:
                 raise ValueError(f"no message {reply_to} to reply to")
-            thread = int(parent.get("thread") or parent["seq"])
-        qid, flags = self._hold(who, "message", f"{who.id}->{to}", subject, body)
-        model, model_state = ("", "") if who.role == HUMAN else self.registry.model_of(who.id, label)
-        row = self.bus.append({"model": model, "model_state": model_state,
-            "type": kind, "from": who.id, "role": who.role, "to": to, "thread": thread,
-            "reply_to": reply_to, "subject": "" if qid else subject,
-            "body": PLACEHOLDER.format(qid=qid, why=", ".join(flags)) if qid else body,
-            "held": qid, "flags": flags, "label": label, "mentions": mentions,
-            **({"file": file} if file else {}), "expires": self.clock() + ttl_s if ttl_s else 0.0})
-        wake.signal(self.base / "wake", self.board.wake_names(row))
-        self.audit("message", who.id, msg=row["seq"], to=to, type=kind, held=qid, label=label,
-                   model=model, verified=model_state == VERIFIED)
-        return self.deliver(row, raw=True)
+            if parent['to'].startswith('#'):
+                self.board.require_read(who, parent['to'])
+            elif who.role == AGENT and who.id not in (parent['from'], parent['to']):
+                raise Denied('the sender is not a participant in the referenced thread')
+            row['thread'] = int(parent.get('thread') or parent['seq'])
+
+    def _post_new(self, who: Identity, row: dict, ttl_s: float) -> dict:
+        to = row['to']
+        self._rate(who, 'the message')
+        if not to.startswith('#') and self.bus.pending(to) >= self.limits.inbox_pending:
+            self.audit('write.refused', who.id, what='message', why='inbox-full', to=to)
+            raise Refused(f"{to} has {self.limits.inbox_pending} unread messages; wait for it to read")
+        if not to.startswith('#') and sum(1 for r in self.bus.inbox(to, limit=1 << 30)
+                                         if r['from'] == who.id) >= self.limits.unread_per_sender:
+            self.audit('write.refused', who.id, what='message', why='sender-share', to=to)
+            raise Refused(f"{who.id} already has {self.limits.unread_per_sender} unread messages "
+                          f"waiting for {to}")
+        qid, flags = self._hold(who, 'message', f"{who.id}->{to}", row['subject'], row['body'])
+        row.update(subject='' if qid else row['subject'],
+                   body=PLACEHOLDER.format(qid=qid, why=', '.join(flags)) if qid else row['body'],
+                   held=qid, flags=flags, expires=self.clock() + ttl_s if ttl_s else 0.0)
+        made = self.bus.append(row)
+        wake.signal(self.base / 'wake', self.board.wake_names(made))
+        self.audit('message', who.id, msg=made['seq'], to=to, type=row['type'], held=qid,
+                   label=row['label'], model=row['model'], verified=row['model_state'] == VERIFIED)
+        return self.deliver(made, raw=True)
 
     def deliver(self, row: dict[str, Any], raw: bool = False, cap: int = 0,
                 reader: Identity | None = None) -> dict[str, Any]:
