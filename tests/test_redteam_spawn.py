@@ -100,7 +100,7 @@ def test_a_hostile_argument_is_one_argv_item_and_never_reaches_a_shell(tmp_path,
         assert not kwargs.get("shell")
 
 
-@pytest.mark.parametrize("text", ["x" * 100_000, "a\x00b"])
+@pytest.mark.parametrize("text", ["x" * 100_000, "a\x00b"], ids=["oversized-name", "nul-name"])
 def test_a_name_no_file_system_can_hold_is_an_error_and_starts_nothing(recorded, text):
     for tool, arguments in (("models_fetch", {"reference": text}), ("serve_up", {"model": text})):
         assert mcp.call(tool, arguments)["isError"], (tool, text[:10])
