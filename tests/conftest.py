@@ -948,25 +948,34 @@ def _external_harness_key(root: Path, rel: Path) -> bool:
         return False
 
 
-def _external_scanner_write(root: Path, rel: Path) -> bool:
-    if rel.as_posix() not in ('sentinel/scanner.json', 'sentinel/scanner.json.prev', 'sentinel/state.lock'):
-        return False
+def _external_scanner_snapshot(root: Path, rel: Path) -> int:
     try:
-        beat = json.loads((root / 'sentinel/scanner.json').read_text())['payload']
+        beat = json.loads((root / rel).read_text())['payload']
         pid, started = beat['pid'], beat['started']
         if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}) or not beat['running']:
-            return False
+            return 0
         process = psutil.Process(pid)
         born = process.create_time()
         if not process.is_running() or born > started or started > beat['beat']:
-            return False
+            return 0
         if beat.get('process_started', born) != born or time.time() - beat['beat'] > 3 * beat['interval_s'] + 5:
-            return False
-        if rel.name == 'state.lock':
-            return int((root / rel).read_text(encoding='ascii').strip()) == pid
-        written = json.loads((root / rel).read_text())['payload']
-        return written['pid'] == pid and written['started'] == started and written.get('process_started', born) == born
+            return 0
+        return pid
     except (OSError, ValueError, KeyError, TypeError, psutil.Error):
+        return 0
+
+
+def _external_scanner_write(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ('sentinel/scanner.json', 'sentinel/scanner.json.prev', 'sentinel/state.lock'):
+        return False
+    if rel.name != 'state.lock':
+        return bool(_external_scanner_snapshot(root, rel))
+    try:
+        words = (root / rel).read_text(encoding='ascii').split()
+        pid = int(words[1]) if len(words) >= 2 and words[0] == 'pid' else int(words[0])
+        return pid in {_external_scanner_snapshot(root, Path('sentinel/scanner.json')),
+                       _external_scanner_snapshot(root, Path('sentinel/scanner.json.prev'))} and pid > 0
+    except (OSError, ValueError, IndexError, UnicodeError):
         return False
 
 
