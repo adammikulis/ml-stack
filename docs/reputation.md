@@ -73,17 +73,37 @@ A person at a terminal only; an agent marker in the environment refuses every on
 
 ## Verified work
 
-Agent completion reputation counts independently verified tasks, separately from
-source-risk scores. A person or the agent's registered parent records verification
-against an authenticated task and its completion reply in the same workspace
-thread. Every named check must have passed, and the evidence includes SHA256
-artifact hashes and the original task and completion message hashes.
+Completion credits and work reputation are separate from source-risk scores. A person
+or the worker's registered parent verifies an authenticated task and its completion
+reply in the same thread. Passed independent checks, artifact SHA256 hashes and
+both original message hashes remain with the award. Failed checks, unrelated replies,
+self-awards and unrelated verifiers are refused. No verification write is exposed as
+an agent tool or browser endpoint.
 
-Each workspace, agent and task receives one credit. Repeating verification returns
-the original evidence without adding credit. Failed checks, unrelated replies,
-self-awards and unrelated verifiers are refused. The evidence uses the maintained
-encrypted reputation graph with separate work nodes; source-risk standing is not
-changed. No verification write is exposed as an agent tool or browser endpoint.
+A verified completion earns 10 credits. A reviewer can add one 5-credit bonus per
+quality tier: independently validated work, a useful regression check, and demonstrated
+impact. Each tier needs a reviewer reason linked to passed independent checks and
+hashed artifacts. Test quantity alone earns nothing. Each workspace, authenticated
+worker and task has one immutable award; retries return its original evidence and
+cannot upgrade or duplicate it. Existing completion evidence receives the base award,
+with no inferred quality bonus.
+
+Runs are free while the economy develops: earned credits accumulate, spent is zero,
+and balance equals earned. Credits do not change permissions, safety rules, broker
+priority or baseline access. No redemption or charging is enabled. Resource usage is
+accounted separately when a reviewer supplies measured per-task counters; unknown
+values stay null. Aggregates report the measurement count and cover verified task
+evidence, not every run. Model and harness are optional immutable task provenance;
+they never create accounts or reset balances.
+
+Work reputation uses separate reviewer-supplied quality and reliability ratings from
+0 to 100, with reasons. Neither credits nor task/test counts produce ratings. A neutral
+50 prior with weight two bounds early swings; sample count and confidence accompany
+each aggregate. Without reviews the state is unrated. A future advisory pricing
+modifier is bounded from 0.8 to 1.2 using evidenced reliability and confidence, starts
+neutral, and guarantees baseline access; actual price remains zero. Source-risk
+standing is unchanged. All evidence uses separate work nodes in the maintained
+per-user encrypted reputation graph.
 
 Agents can read their own and team standings as recorded evidence, which grants no
 additional permissions. History shows verified completion counts under each agent;
