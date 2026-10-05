@@ -1,8 +1,8 @@
 {
  "surfaces": 730,
  "by_status": {
-  "covered": 411,
-  "partial": 200,
+  "covered": 412,
+  "partial": 199,
   "uncovered": 54,
   "n/a": 65,
   "unmapped": 0
@@ -37,8 +37,8 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 34,
-   "partial": 48,
+   "covered": 35,
+   "partial": 47,
    "uncovered": 0,
    "n/a": 0,
    "unmapped": 0
@@ -2533,11 +2533,12 @@
    "source": "workspace/coordinator_client.py:client",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
-   "status": "partial",
+   "status": "covered",
    "tests": [
-    "tests/test_net_no_bypass.py"
+    "tests/test_workspace_coordinator.py::test_hostile_saved_coordinator_origin_is_refused_before_transport",
+    "tests/test_workspace_coordinator.py::test_remote_mcp_never_falls_back_to_local_workspace"
    ],
-   "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+   "note": "Saved origins reject plaintext remote, credentials, foreign schemes, paths, queries and fragments before credential or transport setup; remote clients refuse local workspace fallback"
   },
   {
    "id": "egress:workspace/remote.py:RemoteWorkspace._request",
