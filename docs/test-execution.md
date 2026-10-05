@@ -1,6 +1,9 @@
 # Shared test execution
 
 Run tests with `python scripts/test fast`, `full`, `slow`, `all`, or `quick`.
+Explicit test paths are checked before broker admission using pytest’s argument parser.
+A missing file or directory, or a node selector that collects no tests, returns
+exit status 4, including in `quick`; an empty affected-test selection remains valid.
 `-n N` limits the worker pool; its default, `0`, creates a pool up to the
 machine's CPU capacity. Every checkout shares the same admission broker.
 

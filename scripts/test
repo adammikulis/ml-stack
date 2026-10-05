@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import affected
+import testselectors
 import testslots_runner
 import testtime
 
@@ -73,6 +74,9 @@ def run(command: list[str], env: dict[str, str] | None = None, tier: str = "") -
     began = time.monotonic()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0
     status = testslots_runner.run_pytest(shown, want, env=environment)
+    if status == 5 and any("::" in value for value in command):
+        print("test: the explicit node selector matched no tests", file=sys.stderr)
+        status = 4
     wall = time.monotonic() - began
     if junit is not None and tier in ("full", "all") and not [a for a in command if a.startswith("tests/") or a == "-k"]:
         measured(command, junit, wall, load)
@@ -288,6 +292,12 @@ def main() -> int:
         return testtime.check(ROOT, args.update, args.allow_increase)
     if args.tier == "record":
         return record(args)          # takes its own lease: a nested one would wait on itself
+    if args.tier != "gate":
+        try:
+            testselectors.validate(rest, ROOT)
+        except (ValueError, OSError) as error:
+            print(f"test: {error}", file=sys.stderr)
+            return 4
     tiers = {"fast": FAST, "full": FULL, "slow": ["--slow", "-m", "slow"], "all": ["--slow"]}
     if args.tier == "quick":
         return quick(args, rest)
