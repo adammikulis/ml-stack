@@ -1,4 +1,4 @@
-"""Read-only device standings from authenticated canonical reviews and historical evidence."""
+"""Read-only model-family standings from authenticated canonical reviews and historical evidence."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 from ml_stack.files import read_json
 from ml_stack.reputation import economy
 from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import coordination, device_accounts, tokens
+from ml_stack.workspace import coordination, device_accounts, family_accounts, tokens
 from ml_stack.workspace.identity import HUMAN, Denied, valid_id, valid_name
 from ml_stack.workspace.service import Workspace
 
@@ -57,8 +57,8 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
             team.append({'agent': name, 'verified_tasks': 0, 'evidence': [],
                          'aliases': aliases.get(name, []), **economy.summary([])})
     team = _accounts(ws, team)
-    account = device_accounts.account_for(ws, who.id)
-    own_id = account['base_id'] if account else who.id
+    accounts = family_accounts.current_accounts(ws, who.id)
+    own_id = accounts[0]['account'] if accounts else who.id
     own = next((item for item in team if item['agent'] == own_id),
                {'agent': own_id, 'verified_tasks': 0, 'evidence': [], **economy.summary([])})
     for item in team:
@@ -70,24 +70,38 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
             'metric': 'Completion credits and reviewed quality bonuses; runs are free.'}
 
 
+def _account_group(groups, identity, account):
+    key = account['account'] if account else identity
+    return groups.setdefault(key, {'agent': key, 'label': account['label'] if account else identity,
+        'family_id': account['family_id'] if account else None,
+        'account_type': 'model_family' if account else 'unassigned', 'members': set(),
+        'devices': set(), 'aliases': set(), 'evidence': [], 'contributions': [], 'enrolled': bool(account)})
+
+
 def _accounts(ws, team):
     groups = {}
     for row in team:
-        account = device_accounts.account_for(ws, row['agent'])
-        base = account['base_id'] if account else row['agent']
-        group = groups.setdefault(base, {'agent': base, 'members': set(), 'aliases': set(),
-                                        'evidence': [], 'contributions': [], 'enrolled': bool(account)})
-        group['members'].update(account['members'] if account else [row['agent']])
-        group['aliases'].update(row.get('aliases', []))
-        group['evidence'].extend(row['evidence'])
-        group['contributions'].extend(row.get('contributions', []))
-        if account:
-            group['device_id'] = account['device_id']
+        items = [('evidence', item) for item in row['evidence']] + [('contributions', item) for item in row.get('contributions', [])]
+        accounts = family_accounts.current_accounts(ws, row['agent'])
+        device = device_accounts.account_for(ws, row['agent'])
+        if not items and not accounts and device and row['agent'] == device['base_id']:
+            continue
+        for account in accounts or ([None] if not items else []):
+            group = _account_group(groups, row['agent'], account)
+            group['members'].add(row['agent'])
+            group['aliases'].update(row.get('aliases', []))
+        for kind, item in items:
+            group = _account_group(groups, row['agent'], item.get('family_account'))
+            group['members'].add(row['agent'])
+            group['aliases'].update(row.get('aliases', []))
+            group[kind].append(item)
+            if device := item.get('provenance', {}).get('device_id'):
+                group['devices'].add(device)
     result = []
     for group in groups.values():
         evidence = sorted(group['evidence'], key=lambda item: -item['verified_at'])
-        result.append({**group, 'members': sorted(group['members']), 'aliases': sorted(group['aliases']),
-                       'evidence': evidence, 'verified_tasks': len(evidence),
+        result.append({**group, 'devices': sorted(group['devices']), 'members': sorted(group['members']),
+                       'aliases': sorted(group['aliases']), 'evidence': evidence, 'verified_tasks': len(evidence),
                        **economy.summary(evidence, group['contributions'])})
     return sorted(result, key=lambda item: item['agent'])
 
