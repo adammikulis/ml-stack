@@ -3618,9 +3618,9 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
-   "id": "human:workspace/issuepump.py:main",
+   "id": "human:workspace/issuepump.py:run",
    "kind": "human",
-   "source": "workspace/issuepump.py:main",
+   "source": "workspace/issuepump.py:run",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
