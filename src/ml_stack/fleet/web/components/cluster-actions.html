@@ -3,7 +3,7 @@
   const M = window.fleetModel;
   const el = M.el;
   class ClusterActions extends HTMLElement {
-    setup({ endpoint, onComplete, group = "default" }) {
+    setup({ endpoint, onComplete, group = "default", groups = [] }) {
     const scope = endpoint.includes("/setup/") ? "setup-cluster" : "fleet-cluster";
     const mode = el("select", { id: `${scope}-action` },
       el("option", { value: "join" }, "Join existing cluster"),
@@ -61,7 +61,8 @@
       finally { refresh.disabled = false; }
     } }, "Refresh nearby clusters");
     choose();
-    this.replaceChildren(el("div", { class: "group", id: `${scope}-form` },
+    this.replaceChildren(M.inviteForm({ groups, onComplete, scope }),
+      el("div", { class: "group", id: `${scope}-form` },
       el("h3", {}, "Nearby clusters"), nearby, refresh, recovered,
       el("label", { for: `${scope}-action` }, "What would you like to do?"), mode, explain,
       el("label", { for: `${scope}-name` }, "Cluster name (required)"), named,
@@ -69,6 +70,115 @@
       submit, note));
     }
   }
+  class FleetInvites extends HTMLElement {
+    setup({ groups, onComplete, scope }) {
+      this.generation = 0;
+      const note = el("div", { role: "status", "aria-live": "polite" });
+      const invite = el("textarea", { id: `${scope}-invite`, rows: "3", autocomplete: "off",
+        autocapitalize: "off", spellcheck: "false" });
+      const join = el("button", { class: "small" }, "Join with invite");
+      const check = () => { join.disabled = !invite.value.trim(); };
+      invite.oninput = check;
+      join.onclick = async () => {
+        const generation = this.generation;
+        join.disabled = true;
+        note.textContent = "Joining the invited cluster...";
+        try {
+          const got = await M.api("/ui/fleet/join-invite", { method: "POST",
+            body: JSON.stringify({ invite: invite.value.trim() }) });
+          if (generation !== this.generation || M.refused(got)) return;
+          if (got.error || got.ok === false) throw new Error(got.error || "Could not join this invite.");
+          invite.value = "";
+          note.textContent = `Joined cluster '${got.group || ""}'.`;
+          await onComplete(got);
+        } catch (error) { note.textContent = error.message; }
+        finally { check(); }
+      };
+      check();
+      this.replaceChildren(el("div", { class: "group", "aria-label": "Fleet invitations" },
+        el("h3", {}, "Connect another machine"),
+        el("p", { class: "hint" }, "Create an invite on a machine in your cluster, then paste it here on the machine joining. Both machines must be reachable on your network."),
+        el("label", { for: `${scope}-invite` }, "Invitation"), invite, join, note));
+      if (!groups.length) return;
+      const named = el("select", { id: `${scope}-invite-group` },
+        ...groups.map(group => el("option", { value: group }, group)));
+      const issued = el("div");
+      const create = el("button", { class: "ghost small" }, "Create invite");
+      const creation = el("div", { role: "status", "aria-live": "polite" });
+      create.onclick = async () => {
+        const generation = this.generation;
+        create.disabled = true;
+        creation.textContent = "Creating an invite...";
+        try {
+          const got = await M.api("/ui/fleet/invites", { method: "POST",
+            body: JSON.stringify({ group: named.value, kind: "computer" }) });
+          if (generation !== this.generation || M.refused(got)) return;
+          if (got.error || got.ok === false) throw new Error(got.error || "Could not create an invite.");
+          if (!got.invite || !got.id || !Number.isFinite(got.expires)) throw new Error("The invite response is incomplete.");
+          creation.textContent = "Invite created. Share it with the machine you want to add.";
+          if (this.isConnected) this.showInvite(got, issued, creation, create);
+        } catch (error) { creation.textContent = error.message; create.disabled = false; }
+      };
+      this.create = create; this.issued = issued;
+      this.firstChild.append(el("label", { for: `${scope}-invite-group` }, "Cluster to invite into"),
+        named,
+        el("p", { class: "hint" }, "Only add computers you own. This invite grants full cluster access, including permission to run commands."),
+        create, creation, issued);
+    }
+    showInvite(got, issued, note, create) {
+      const text = el("textarea", { rows: "4", readonly: "1", "aria-label": "Created invitation",
+        spellcheck: "false" });
+      text.value = got.invite;
+      const expiry = el("div", { class: "hint" });
+      const copy = el("button", { class: "small" }, "Copy invite");
+      copy.onclick = async () => {
+        try {
+          if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text.value);
+          else {
+            text.focus(); text.select();
+            if (!document.execCommand("copy")) throw new Error("Select the invitation and copy it.");
+          }
+          note.textContent = "Invite copied. On the other machine, open Fleet and choose Join with invite.";
+        } catch { text.focus(); text.select(); note.textContent = "Select the invitation and copy it."; }
+      };
+      const revoke = el("button", { class: "ghost small" }, "Revoke invite");
+      const tick = () => {
+        const seconds = Math.max(0, Math.ceil(got.expires - Date.now() / 1000));
+        expiry.textContent = seconds ? `Single use; expires in ${Math.ceil(seconds / 60)} minute(s).` : "This invite has expired.";
+        if (!seconds) { text.value = ""; issued.querySelector("img")?.remove(); copy.disabled = true; create.disabled = false; clearInterval(this.timer); }
+      };
+      revoke.onclick = async () => {
+        revoke.disabled = true;
+        try {
+          const result = await M.api("/ui/fleet/invites", { method: "DELETE", body: JSON.stringify({ id: got.id }) });
+          if (result.error || result.ok === false) throw new Error(result.error || "Could not revoke this invite.");
+          clearInterval(this.timer); text.value = ""; issued.replaceChildren(); create.disabled = false;
+          note.textContent = "Invite revoked.";
+        } catch (error) { note.textContent = error.message; revoke.disabled = false; }
+      };
+      const qr = typeof got.qr === "string" && got.qr.startsWith("data:image/svg+xml;")
+        ? el("img", { src: got.qr, alt: "Invitation QR code", width: "240", height: "240" }) : null;
+      issued.replaceChildren(...M.kids(qr), text, expiry, el("div", { class: "row" }, copy, revoke));
+      clearInterval(this.timer); tick(); if (got.expires > Date.now() / 1000) this.timer = setInterval(tick, 1000);
+    }
+    clear() {
+      this.generation++; clearInterval(this.timer);
+      this.querySelectorAll("textarea").forEach(field => { field.value = ""; });
+      this.querySelectorAll('[role="status"]').forEach(note => { note.textContent = ""; });
+      this.querySelector("button").disabled = true;
+      this.issued?.replaceChildren();
+      if (this.create) this.create.disabled = false;
+    }
+    disconnectedCallback() { clearInterval(this.timer); }
+  }
+  customElements.define("fleet-invites", FleetInvites);
+  M.onRoute(route => document.querySelectorAll("fleet-invites").forEach(form => {
+    if ((form.closest("#cluster") && route !== "cluster")
+        || (form.closest("#first-run") && route !== "first-run")) form.clear();
+  }));
+  M.inviteForm = (options) => {
+    const form = el("fleet-invites"); form.setup(options); return form;
+  };
   customElements.define("cluster-actions", ClusterActions);
   M.clusterForm = (options) => {
     const form = el("cluster-actions");

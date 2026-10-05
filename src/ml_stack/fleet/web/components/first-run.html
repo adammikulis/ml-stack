@@ -99,8 +99,8 @@
         this.steps(1, () => this.go(0)),
         el("h1", {}, "Clusters"),
         el("p", { class: "sub" },
-          "Join your existing cluster to share work with its machines, or create a new one. "
-          + "Everyone with its passphrase can run commands on every machine in it."),
+          "On your other machine, open Fleet and choose Create invite. Paste that invite below to join. "
+          + "Only invite computers you own: a computer invite grants permission to run cluster commands."),
         rows,
         M.clusterForm({ endpoint: "/ui/setup/join", group: current[0]?.group || "default", onComplete: async () =>
           draw((await api("/ui/clusters")).clusters || []) }),
