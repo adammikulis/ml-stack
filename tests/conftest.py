@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import json
+import math
 import os
 import site
 import socket
@@ -952,13 +953,16 @@ def _external_scanner_snapshot(root: Path, rel: Path) -> int:
     try:
         beat = json.loads((root / rel).read_text())['payload']
         pid, started = beat['pid'], beat['started']
-        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}) or not beat['running']:
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}) or beat['running'] is not True:
             return 0
         process = psutil.Process(pid)
         born = process.create_time()
-        if not process.is_running() or born > started or started > beat['beat']:
+        values = (born, started, beat['beat'], beat['interval_s'])
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in values):
             return 0
-        if beat.get('process_started', born) != born or time.time() - beat['beat'] > 3 * beat['interval_s'] + 5:
+        if beat['interval_s'] > 86400 or not process.is_running() or born > started or started > beat['beat']:
+            return 0
+        if beat.get('process_started', born) != born or not 0 <= time.time() - beat['beat'] <= 3 * beat['interval_s'] + 5:
             return 0
         return pid
     except (OSError, ValueError, KeyError, TypeError, psutil.Error):

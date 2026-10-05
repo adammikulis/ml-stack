@@ -29,3 +29,19 @@ def test_multiple_external_snapshots_do_not_exempt_unattributed_lock(tmp_path, m
     value['payload']['process_started'] -= 1
     (sentinel/'scanner.json.prev').write_text(json.dumps(value))
     assert conftest.file_mtimes(tmp_path).keys() == {'sentinel/scanner.json.prev','sentinel/state.lock'}
+
+
+@pytest.mark.parametrize('field,value', [('beat',float('nan')),('beat',float('inf')),
+    ('beat',time.time()+10000),('started',float('nan')),('interval_s',0),
+    ('interval_s',float('inf')),('interval_s',86401)],ids=['nan-beat','infinite-beat','future-beat','nan-start','zero-interval','infinite-interval','huge-interval'])
+def test_invalid_scanner_clock_never_attributes_external_write(tmp_path, monkeypatch, field, value):
+    now=time.time()
+    monkeypatch.setattr(conftest,'ours',lambda record:False)
+    monkeypatch.setattr(conftest.psutil,'Process',lambda pid:SimpleNamespace(
+        create_time=lambda:now-100,is_running=lambda:True))
+    root=tmp_path/'sentinel'
+    root.mkdir()
+    payload={'pid':12345,'started':now-10,'beat':now,'interval_s':300,'running':True}
+    payload[field]=value
+    (root/'scanner.json').write_text(json.dumps({'payload':payload}))
+    assert not conftest._external_scanner_write(tmp_path,conftest.Path('sentinel/scanner.json'))
