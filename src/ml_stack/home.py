@@ -19,6 +19,7 @@ __all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "mac
 
 ROOT_ENV = "ML_STACK_HOME"
 """Moves the state root."""
+DEFAULT_NAME = ".ml-stack"
 
 CACHE_ENV = "ML_STACK_CACHE"
 """Moves the cache root."""
@@ -50,7 +51,7 @@ def expand(path: str | Path) -> Path:
 def home() -> Path:
     """The directory this machine keeps ml-stack's state in."""
     named = os.environ.get(ROOT_ENV)
-    return expand(named) if named else user_home() / ".ml-stack"
+    return expand(named) if named else user_home() / DEFAULT_NAME
 
 
 def state(*parts: str) -> Path:

@@ -17,7 +17,7 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import recovery
+from . import project_client, recovery
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -785,6 +785,8 @@ class Router(PageRoutes, SetupRoutes, SessionRoutes, MeasureRoutes, SettingsRout
         if self.public_route():
             return True
         if not self.signed_in():
+            return True
+        if project_client.route(self):
             return True
         if self.route():
             return True

@@ -53,6 +53,7 @@ from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
+from .projects import ProjectRegistry
 from .serving import Hosting, Serving
 from .settings import Settings
 from .ui import UI
@@ -207,10 +208,12 @@ def serve_forever(root: Path | str | None = None,
         offered = served_cert()
         return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
 
+    projects = ProjectRegistry(root, bench_host[0].machine,
+                               (Path(__file__).resolve().parents[3], Path.cwd()))
     handler = make_handler(Daemon(
         runner, files_root, lambda: live_token[0],
         name=lambda: live_name[0], report=report, fetcher=fetcher,
-        ui=interface, schedule=schedule, on_paused=on_paused,
+        ui=interface, projects=projects, schedule=schedule, on_paused=on_paused,
         schedule_path=schedule_path, serving=serving, models=models,
         cluster_key_path=cluster_key_path, tokens=every_token,
         bench=bench_host[0], hosting=hosting,
@@ -353,6 +356,7 @@ def serve_forever(root: Path | str | None = None,
         interface.conversations = conversations
         interface.downloads = downloads
         interface.root = root
+        interface.projects = projects
 
     if announce:
         start_announcing()

@@ -87,6 +87,7 @@ class UI:
         self.conversations: Any = None
         self.downloads: Any = None
         self.root: Any = None
+        self.projects: Any = None
         self.hosting: Any = None
         self.detach: Any = None
         """How a sweep is started: the bench's own `detach` unless a test hands in a fake."""

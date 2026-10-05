@@ -31,7 +31,7 @@ from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 from ml_stack.workspace.remote_host import WorkspaceHost
 
-from . import commands
+from . import commands, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
@@ -87,6 +87,7 @@ class Daemon:
     report: Callable[[], dict[str, Any]] = device_report
     fetcher: Fetcher | None = None
     ui: Any | None = None
+    projects: project_routes.ProjectRegistry | None = None
     schedule: Availability | None = None
     on_paused: str = "stop"
     schedule_path: Path | None = None
@@ -390,6 +391,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return
             if not (path == "/health" and here and "Authorization" not in self.headers) \
                     and not self._guard():
+                return
+            if project_routes.answer(self, daemon.projects, parsed):
                 return
             if path == "/health":
                 status = runner.status()
