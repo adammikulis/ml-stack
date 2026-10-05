@@ -122,7 +122,6 @@ class Guarded:
         seconds, steps = limits
         self.ctx = ctx
         self.client, self.think, self.steps, self.stop = client, le.thinks(effort), steps, stop
-        self.tokens = le.TOKENS[effort]
         self.deadline, self.used, self.seconds = time.monotonic() + seconds, 0, seconds
 
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
@@ -135,7 +134,7 @@ class Guarded:
         self.used += 1
         if self.ctx:
             lp.trim(messages, self.ctx)
-        return self.client.chat(messages, **{**kwargs, "think": self.think, "n_predict": self.tokens})
+        return self.client.chat(messages, **{**kwargs, "think": self.think})
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.client, name)

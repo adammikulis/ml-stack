@@ -777,3 +777,13 @@ def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fa
     assert not localmodel.choose(str(missing),installed=[candidate],machine=BIG).ok
     model.unlink()
     assert not localmodel.choose(str(model),installed=[candidate],machine=BIG).ok
+
+
+@pytest.mark.parametrize('effort',['off','low','medium','high'])
+def test_reasoning_effort_never_overrides_explicit_response_budget(effort):
+    model=Script([done('answer')])
+    guarded=localtools.Guarded(model,effort=effort,limits=(60,5),stop=lambda:False)
+    guarded.chat([{'role':'user','content':'answer'}],n_predict=32000)
+    assert model.kw[-1]['n_predict'] == 32000
+    guarded.chat([{'role':'user','content':'answer'}])
+    assert 'n_predict' not in model.kw[-1]

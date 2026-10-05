@@ -26,6 +26,9 @@
       <details class="aside" id="chat-options" hidden>
         <summary>Advanced options</summary>
         <div data-chat>
+        <label for="chat-output-tokens">Maximum output tokens</label>
+        <input id="chat-output-tokens" type="number" min="1" step="1" placeholder="Model server default">
+        <p class="hint">Independent of reasoning effort. Leave blank to use the model server's output limit.</p>
         <label for="chat-temperature">Temperature</label>
         <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
         <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
@@ -353,6 +356,7 @@
         const messages = [...this.messages, { role: "user", content: text }];
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
           body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages,
+            ...(this.querySelector('#chat-output-tokens').value !== "" ? {max_output_tokens:Number(this.querySelector('#chat-output-tokens').value)} : {}),
             ...(this.temperature.value !== "" ? { temperature: Number(this.temperature.value) } : {}) }) });
         if (!r.ok) {
           const why = await r.json().catch(() => ({}));

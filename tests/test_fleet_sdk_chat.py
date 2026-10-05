@@ -50,12 +50,15 @@ def test_sdk_stream_alias_and_consumer_cancellation_closes_response(monkeypatch)
     try:
         target = Target("display", f"http://127.0.0.1:{fake.port}/v1/chat/completions",
                         alias="server-alias")
-        pieces = stream(target, {"model": target.alias, "messages": [{"role": "user", "content": "hi"}]})
+        pieces = stream(target, {"model": target.alias, "max_output_tokens":32000, "messages": [{"role": "user", "content": "hi"}]})
         first = next(pieces)
         assert reply_text(first) == "first"
         pieces.close()
         assert opened and opened[0].closed
-        assert json.loads(fake.requests[-1][2])["model"] == "server-alias"
+        request = json.loads(fake.requests[-1][2])
+        assert request["model"] == "server-alias"
+        assert request["max_tokens"] == 32000
+        assert request["stream"] is True
     finally:
         fake.close()
 
@@ -68,7 +71,7 @@ def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, playwright):
     from ml_stack.fleet.conversations import Conversations
     from ml_stack.fleet.serving import Serving as ModelsServing
 
-    fake = FakeLlamaServer(Served(model="qwen-sdk.gguf", pieces=("A live ", "SDK answer"), gap=0.1))
+    fake = FakeLlamaServer(Served(model="qwen-sdk.gguf", pieces=("A live ", "SDK answer"), gap=2.0))
     served = Serving(tmp_path)
     served.ui.settings.setup_done = True
     served.ui.serving = ModelsServing(tmp_path / "models.json")
@@ -78,12 +81,18 @@ def test_browser_sends_sdk_chat_and_reloads_saved_answer(tmp_path, playwright):
     try:
         page = browser.new_page()
         page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
+        page.locator('#chat-options > summary').click()
+        page.locator('#chat-output-tokens').fill('32000')
         page.get_by_role("textbox", name="Message", exact=True).fill("Say hello")
         page.get_by_role("textbox", name="Message", exact=True).press("Enter")
+        expect(page.locator("chat-view #chat-messages")).to_contain_text("A live ")
+        assert "SDK answer" not in page.locator("chat-view #chat-messages").inner_text()
         expect(page.locator("chat-view #chat-messages")).to_contain_text("A live SDK answer")
         page.reload()
         expect(page.locator("chat-view #chat-messages")).to_contain_text("A live SDK answer")
-        assert fake.sent_to("/v1/chat/completions")[0]["model"] == "qwen-sdk.gguf"
+        request = fake.sent_to("/v1/chat/completions")[0]
+        assert request["model"] == "qwen-sdk.gguf"
+        assert request["max_tokens"] == 32000 and request["stream"] is True
     finally:
         browser.close()
         served.close()
