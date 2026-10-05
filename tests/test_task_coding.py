@@ -8,6 +8,7 @@ import pytest
 from ml_stack.workspace import localagent, task_coding
 
 
+@pytest.mark.redteam
 def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
     agent = localagent.Agent('worker', 'qwen', profile='coding', harness='claude',
                              effort='high', max_effort='low')

@@ -23,6 +23,20 @@ def coverage():
     return module
 
 
+def test_class_method_references_match_the_exact_ast_class(tmp_path, monkeypatch):
+    cov = coverage()
+    monkeypatch.setattr(cov, 'ROOT', tmp_path)
+    (tmp_path / 'test_members.py').write_text(
+        'class TestFirst:\n    def test_acceptance(self): pass\n'
+        'class TestSecond:\n    def test_other(self): pass\n'
+        'async def test_async(): pass\n')
+    assert not cov.ref_problems('native', 'test_members.py::TestFirst::test_acceptance')
+    assert not cov.ref_problems('native', 'test_members.py::test_async')
+    assert cov.ref_problems('native', 'test_members.py::TestSecond::test_acceptance')
+    assert cov.ref_problems('native', 'test_members.py::TestFirst::test_missing')
+    assert cov.ref_problems('native', 'test_members.py::test_acceptance')
+
+
 @cache
 def state():
     cov = coverage()

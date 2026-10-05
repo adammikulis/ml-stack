@@ -388,8 +388,13 @@ def ref_problems(label: str, ref: str) -> list[str]:
     file = ROOT / path
     if not file.is_file():
         return [f"{label}: test file {path} does not exist"]
-    if name and not re.search(rf"def {re.escape(name)}\b", file.read_text(encoding="utf-8")):
-        return [f"{label}: {path} has no test named {name}"]
+    if name:
+        try:
+            qualified = {symbol for _start, _end, symbol in spans(ast.parse(file.read_text(encoding="utf-8")))}
+        except SyntaxError:
+            return [f"{label}: test file {path} does not parse"]
+        if name.replace('::', '.') not in qualified:
+            return [f"{label}: {path} has no test named {name}"]
     return []
 
 

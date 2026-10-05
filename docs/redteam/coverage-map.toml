@@ -107,7 +107,7 @@ tests = [
   "tests/test_coding_routes.py::test_native_turns_resume_and_revoke_only_their_agent",
   "tests/test_coding_routes.py::test_cancel_stops_native_process_and_the_next_turn_can_start",
   "tests/test_coding_routes.py::test_launcher_refusal_is_failed_instead_of_a_completed_empty_turn",
-  "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
+  "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
   "tests/test_harness_rails.py::TestSeat::test_a_fake_endpoint_cannot_verify_a_delegated_agents_model",
 ]
 note = "Coding is a declared authenticated Fleet extension; only same-origin person UI can start turns, browser bodies cannot set identity or policy, native argv/session resume retains maintained role hooks, cancellation revokes the temporary agent"
@@ -118,12 +118,12 @@ match = ["spawn:claude.py:launch", "spawn:codex.py:launch", "spawn:harnesshook.p
          "spawn:harnessid.py:announce"]
 status = "covered"
 tests = [
-  "tests/test_harness_rails.py::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
-  "tests/test_harness_rails.py::test_no_environment_variable_or_argument_lifts_the_policy",
-  "tests/test_harness_rails.py::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
-  "tests/test_harness_rails.py::test_a_hook_that_fails_blocks_the_call",
-  "tests/test_harness_rails.py::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
-  "tests/test_harness_rails.py::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role",
+  "tests/test_harness_rails.py::TestWorkspaceCommands::test_a_hostile_label_is_one_argument_and_never_a_shell_line",
+  "tests/test_harness_rails.py::TestHook::test_no_environment_variable_or_argument_lifts_the_policy",
+  "tests/test_harness_rails.py::TestHook::test_a_call_that_asks_with_no_keystore_is_denied_at_once",
+  "tests/test_harness_rails.py::TestHook::test_a_hook_that_fails_blocks_the_call",
+  "tests/test_harness_rails.py::TestSessionFiles::test_the_settings_are_outside_the_tree_read_only_and_hold_no_secret",
+  "tests/test_harness_rails.py::TestPolicy::test_text_naming_the_launchers_files_or_a_person_only_action_is_denied_in_every_role",
 ]
 note = "the harness is spawned with argv only; its hook sits in a settings file the model cannot write, decides from the classifier and a role fixed on the command line, denies when the request store or the hook fails, and a hostile label is one argument"
 
@@ -173,7 +173,7 @@ note = "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
 match = ["parser:workspace/localroute.py"]
 status = "covered"
 tests = [
-  "tests/test_workspace_local_agent.py::test_coding_tasks_reuse_the_registered_seat_and_reply_on_each_thread",
+  "tests/test_task_coding.py::test_native_turn_and_output_limits_preserve_authority",
   "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_revokes_only_its_private_identity",
   "tests/test_workspace_local_agent.py::test_paused_coding_worker_keeps_tasks_queued_until_resume",
   "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
@@ -368,10 +368,10 @@ tests = [
 match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]
 status = "partial"
 tests = [
-  "tests/test_fleet_ui.py::test_the_api_is_unreachable_without_the_ui_header",
-  "tests/test_fleet_ui.py::test_a_request_addressed_to_a_hostname_is_refused",
-  "tests/test_fleet_ui.py::test_setup_is_refused_from_another_machine",
-  "tests/test_fleet_ui.py::test_the_cluster_cannot_be_browsed_without_signing_in",
+  "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_the_api_is_unreachable_without_the_ui_header",
+  "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_a_request_addressed_to_a_hostname_is_refused",
+  "tests/test_fleet_ui.py::TestFirstRunIsNotUpForGrabs::test_setup_is_refused_from_another_machine",
+  "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in",
 ]
 note = "session, header and host checks are attacked; the query and body of each /ui screen route are not"
 
