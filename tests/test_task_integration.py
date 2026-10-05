@@ -210,3 +210,22 @@ def test_same_worker_claim_for_another_assignment_cannot_be_returned(board, proj
     with pytest.raises(Denied, match='exact task delegation'):
         board.ws.claims.return_worktree(board.ws.auth(board.parent), wrong)
     assert board.ws.who_owns('worktree', str(project['source'])) == claim
+
+
+@pytest.mark.redteam
+def test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape(tmp_path):
+    repo.git(tmp_path, 'init', '--initial-branch=0.2dev')
+    repo.git(tmp_path, 'config', 'user.name', 'Isolated reviewer')
+    repo.git(tmp_path, 'config', 'user.email', 'reviewer@example.test')
+    name = '$(touch ESCAPED);--upload-pack.py'
+    content = b'authoritative tracked content\n'
+    (tmp_path / name).write_bytes(content)
+    repo.git(tmp_path, 'add', '--', name)
+    repo.git(tmp_path, 'commit', '-m', 'test: literal hostile artifact path')
+    commit = repo.git(tmp_path, 'rev-parse', 'HEAD')
+    digest = hashlib.sha256(content).hexdigest()
+    repo.reviewed_files(tmp_path, commit, {name: digest})
+    for unsafe in ('../outside.py', '/outside.py', 'nested\\outside.py'):
+        with pytest.raises(Denied, match='relative repository paths'):
+            repo.reviewed_files(tmp_path, commit, {unsafe: digest})
+    assert not (tmp_path / 'ESCAPED').exists()

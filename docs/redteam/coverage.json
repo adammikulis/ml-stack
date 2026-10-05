@@ -1,7 +1,7 @@
 {
- "surfaces": 682,
+ "surfaces": 688,
  "by_status": {
-  "covered": 365,
+  "covered": 371,
   "partial": 200,
   "uncovered": 54,
   "n/a": 63,
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 78,
+   "covered": 81,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 30,
+   "covered": 33,
    "partial": 64,
    "uncovered": 0,
    "n/a": 2,
@@ -3476,6 +3476,26 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/claims.py:Claims.return_worktree",
+   "kind": "human",
+   "source": "workspace/claims.py:Claims.return_worktree",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/cli.py:_chat",
    "kind": "human",
    "source": "workspace/cli.py:_chat",
@@ -3974,6 +3994,46 @@
     "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
    ],
    "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/task_integration.py:DevelopmentIntegration.prepare",
+   "kind": "human",
+   "source": "workspace/task_integration.py:DevelopmentIntegration.prepare",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/task_integration.py:reviewed",
+   "kind": "human",
+   "source": "workspace/task_integration.py:reviewed",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
    "id": "human:workspace/task_routes.py:route",
@@ -9700,6 +9760,51 @@
     "tests/test_workspace_quickstart.py::test_the_clipboard_gets_the_text_on_stdin_and_never_through_a_shell"
    ],
    "note": "a constant argv per tool; the pasted text goes on stdin"
+  },
+  {
+   "id": "spawn:workspace/integration_git.py:ancestor",
+   "kind": "spawn",
+   "source": "workspace/integration_git.py:ancestor",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+    "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+    "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+    "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block"
+   ],
+   "note": "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+  },
+  {
+   "id": "spawn:workspace/integration_git.py:gates",
+   "kind": "spawn",
+   "source": "workspace/integration_git.py:gates",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+    "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+    "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+    "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block"
+   ],
+   "note": "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+  },
+  {
+   "id": "spawn:workspace/integration_git.py:git",
+   "kind": "spawn",
+   "source": "workspace/integration_git.py:git",
+   "trust": "arguments built from model output, peer messages or file names",
+   "attacker": "attacker text becomes a command line, environment or working directory",
+   "status": "covered",
+   "tests": [
+    "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+    "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+    "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+    "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block"
+   ],
+   "note": "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
   },
   {
    "id": "spawn:workspace/notes.py:Notes.verify",

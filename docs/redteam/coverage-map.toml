@@ -586,6 +586,18 @@ status = "n/a"
 note = "fixed git argv over the checkout scripts/test is run in, in a throwaway index; no model, peer or file name reaches it"
 
 [[group]]
+match = ["spawn:workspace/integration_git.py:git", "spawn:workspace/integration_git.py:ancestor",
+         "spawn:workspace/integration_git.py:gates"]
+status = "covered"
+tests = [
+  "tests/test_task_integration.py::test_reviewed_artifact_names_stay_literal_git_arguments_and_cannot_escape",
+  "tests/test_task_integration.py::test_stale_sources_and_release_target_are_refused_before_gates",
+  "tests/test_task_integration.py::test_failed_merge_or_gate_preserves_candidate_and_never_publishes",
+  "tests/test_task_integration.py::test_maintained_push_hook_preserves_foreign_merged_worktrees_and_reports_the_block",
+]
+note = "real isolated repositories exercise literal hostile paths, exact reviewed ancestry, gate failure and the maintained publication hook; only fixed gate command forms run"
+
+[[group]]
 match = ["spawn:*"]
 status = "partial"
 tests = ["tests/test_redteam_spawn.py::test_no_process_is_started_through_a_shell_except_the_confirmed_fix_line"]
