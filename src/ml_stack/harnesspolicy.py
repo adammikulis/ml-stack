@@ -9,6 +9,7 @@ state root or an action only a person can take is denied in every role.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,11 +86,32 @@ def primary_decision(name: str, args: dict[str, Any] | None, cwd: str) -> Decisi
     return _denied("destructive", why) if why else None
 
 
+def _unbrokered_tests(line):
+    commands, _ = segments(line)
+    for command in commands:
+        words = command.argv
+        if not words:
+            continue
+        names = [Path(word).name for word in words]
+        if names[0] in ("pytest", "py.test", "tox", "nox"):
+            return True
+        if re.fullmatch(r"python(?:[0-9.]+)?", names[0]) and "-m" in words:
+            at = words.index("-m")
+            if at + 1 < len(words) and words[at + 1] in ("pytest", "unittest", "tox", "nox"):
+                return True
+        if (names[0] in ("uv", "pipenv", "poetry") and "run" in words
+                and any(name in ("pytest", "py.test", "tox", "nox") for name in names[words.index("run") + 1:])):
+            return True
+    return False
+
+
 def decide(role: str, name: str, args: dict[str, Any] | None, *, roots: Sequence[str] = (),
            protected: Sequence[str] = ()) -> Decision:
     """The decision for one tool call. ``protected`` are path strings no call may name."""
     if hit := _mentions(args, protected):
         return _denied("destructive", f"the call names {hit}, which belongs to the launcher")
+    if _unbrokered_tests(_shell_line(name, args)):
+        return _denied("reversible", "tests must use the maintained scripts/test broker queue")
     verdict = classify(Call(name, args), roots=roots, catalog=CATALOG)
     why = reason_text(verdict)
     if verdict.label == "safe":

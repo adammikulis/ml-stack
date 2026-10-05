@@ -23,3 +23,12 @@ def test_inventory_and_policy_source_reads_do_not_request_mutation_authority():
     assert decide(roles.PLAN_AND_GO, "Bash", {"command": "pyenv exec arbitrary-program"}).action == "ask"
     assert decide(roles.READ_ONLY, "Bash", {"command": "git log -- src/ml_stack/sentinel/policy.py"}).action == "allow"
     assert decide(roles.PLAN_AND_GO, "Bash", {"command": "ml-stack-security mode off"}).action != "allow"
+
+
+def test_native_testing_cannot_bypass_queue_in_reversible_role():
+    for command in ("pytest tests/test_one.py", "python -m pytest tests/test_one.py",
+                    "python3.13 -m pytest", "uv run pytest", "uv run --project . pytest",
+                    "poetry run pytest", "python -m unittest", "pytest --collect-only"):
+        decision = decide(roles.PLAN_AND_GO, "Bash", {"command": command})
+        assert decision.action == "deny", command
+        assert "scripts/test" in decision.reason
