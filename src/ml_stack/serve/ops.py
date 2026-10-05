@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import platform
+import struct
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -45,7 +46,7 @@ from ml_stack.serve.manager import ServerManager
 from ml_stack.serve.mlx_tree import is_mlx, report_for
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import every_server, machine_memory, pid_exists
-from ml_stack.units import human_bytes
+from ml_stack.units import human_bytes, parse_duration
 
 __all__ = ["FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Limits",
            "Machine",
@@ -523,8 +524,6 @@ def servings(model: str = "", *, workload: str = "") -> list[Any]:
 
 def tensors(models: Iterable[str]) -> list[str]:
     """What each model file is made of, from its GGUF header alone."""
-    import struct
-
     out = []
     for one in models:
         try:
@@ -668,7 +667,6 @@ def limits(*, memory_size: str = "", servers: int | None = None, slots: int | No
     time that cannot be read.
     """
     from ml_stack.hub import machine_room
-    from ml_stack.units import parse_duration
 
     if clear:
         return Limits((), limits_mod.clear(), 0, 0)
@@ -701,7 +699,6 @@ def reclaim(*, idle: str = "") -> tuple[float, Any]:
 
     Raises `Refused` when no idle time is given and none is set.
     """
-    from ml_stack.units import parse_duration
 
     older = parse_duration(idle) if idle else limits_mod.read().idle_s
     if not older:
