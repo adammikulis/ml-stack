@@ -132,3 +132,17 @@ sample count and confidence; an account without an independent review is not yet
 rated. Compute usage appears only when recorded, with available token counts and
 elapsed time. **Runs are free**; credits are not spent and ratings do not restrict
 access. Model names in actions describe the work performed, not separate balances.
+
+Structured tasks use the workspace coordination graph. The authenticated Tasks API at
+`/ui/tasks` lists tasks and accepted-outcome metrics; `?id=task:…` returns the task's
+resource lease, checkpoints, proposal artifacts and independent reviews. Person requests
+can create a specification or review a submitted proposal. Browser requests cannot claim
+worker resources or supply a worker identity. Worker claims require a live scheduler
+allocation and expire without renewed heartbeats. Checkpoints and submitted checks remain
+worker claims; completion requires independent passed checks covering the acceptance
+criteria. Infrastructure blockage is distinct from rejection and earns no completion credit.
+
+Designated peer assignees and reviewers need an existing person-set project grant matching
+the task's permission metadata. Listing an identity in a task creates no new authority.
+An actual worker cannot review its own proposal. Execution paths come from the verified
+scheduler allocation, never from task descriptions or browser-supplied permission metadata.
