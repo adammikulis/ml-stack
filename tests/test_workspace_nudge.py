@@ -35,8 +35,8 @@ def test_the_line_counts_kinds_names_senders_and_gives_the_age_without_a_body(ki
     ws.send(t["alice"], "bob", "question", "SECRET-BODY which port?", label="local-qwen")
     ws.send(t["alice"], "bob", "question", "SECRET-BODY and the lease?")
     ws.send(t["carol"], "bob", "task", "SECRET-BODY build it")
-    for _ in range(3):
-        ws.send(t["carol"], "bob", "status", "SECRET-BODY progress")
+    for step in range(3):
+        ws.send(t["carol"], "bob", "status", f"SECRET-BODY progress {step}")
     out = cli(kit.base, t["bob"], "nudge").stdout
     assert out.startswith("workspace: 6 waiting for you (2 questions, 1 task, 3 status; "
                           "from alice/local-qwen, alice, carol; oldest 3h12m). A direct question or "
