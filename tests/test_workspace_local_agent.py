@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -759,3 +760,20 @@ def test_stop_retains_worker_when_broker_is_unavailable(kit, monkeypatch):
     monkeypatch.setattr(ls.broker_wire, 'status', unavailable)
     assert not ls.stop(kit.ws, agent.name).lease_released
     assert la.load(kit.ws, agent.name).pid == 0
+
+
+def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fallback(tmp_path):
+    blob=tmp_path/'blob'
+    blob.write_bytes(b'GGUF installed fixture')
+    snapshot=tmp_path/'snapshot'
+    snapshot.mkdir()
+    model=snapshot/'Qwen3.8-27B-Q4_K_M.gguf'
+    model.symlink_to(blob)
+    candidate=replace(info(model.name,18),path=model)
+    for asked in (str(model),str(blob)):
+        pick=localmodel.choose(asked,installed=[candidate],machine=BIG)
+        assert pick.ok and pick.ref==candidate.id
+    missing=tmp_path/'elsewhere'/model.name
+    assert not localmodel.choose(str(missing),installed=[candidate],machine=BIG).ok
+    model.unlink()
+    assert not localmodel.choose(str(model),installed=[candidate],machine=BIG).ok
