@@ -41,3 +41,9 @@ and [environment-variable reference](https://code.claude.com/docs/en/env-vars).
 Stop ends only the saved worker process and its verified broker holder. It retains the
 private identity, token, preferences and device account. Start reuses that identity
 when changing models; identity revocation is a separate operation.
+
+Repository issue intake creates canonical TaskBoard tasks with source-revision keys,
+acceptance criteria and coding limits. Board chat replies cannot complete those tasks.
+Blocked intake stays blocked until an authorized review changes its condition; issue
+edits and elapsed time do not retry a blocked task. The scheduler selects eligible
+queued tasks and assigns an isolated worktree before native execution.

@@ -7,6 +7,7 @@ from workspace_kit import Kit, clean_env
 
 from ml_stack.workspace import backlog, issuepump, localagent as la, tokens
 from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.taskboard import TaskBoard
 
 
 @pytest.fixture
@@ -58,22 +59,19 @@ def test_two_workers_cannot_claim_the_same_issue_and_reopen_preserves_result(set
     assert backlog.pick(kit.reopen(), agent, fetcher=lambda _: [issue()])[0] is None
 
 
-def test_failure_backoff_is_bounded_and_an_updated_issue_reopens_work(setup):
+def test_blocked_issue_does_not_retry_after_time_or_issue_updates(setup):
     kit, _, agent, _ = setup
     now = [1000.0]
     source = [issue()]
     def select():
         return backlog.pick(kit.ws, agent, fetcher=lambda _: source, clock=lambda: now[0])
-    for _ in range(3):
-        job, _ = select()
-        assert job
-        backlog.finish(kit.ws, job, agent, ("status", "A bounded failure"), clock=lambda: now[0])
-        assert select()[0] is None
-        now[0] += 1000
+    job, _ = select()
+    backlog.finish(kit.ws, job, agent, ("status", "Approval expired"), clock=lambda: now[0])
+    now[0] += 1000
     assert select()[0] is None
     source[0] = issue(updatedAt="revision2")
     now[0] += backlog.POLL_S
-    assert select()[0]
+    assert select()[0] is None
 
 
 def test_assigned_and_blocked_issues_are_skipped_and_fetch_failures_are_visible(setup):
@@ -87,7 +85,7 @@ def test_assigned_and_blocked_issues_are_skipped_and_fetch_failures_are_visible(
     assert "blocked" in detail and "GitHub unavailable" in detail
 
 
-def test_idle_dispatch_posts_one_authenticated_job_and_reconciles_its_native_reply(setup, monkeypatch):
+def test_idle_dispatch_creates_one_canonical_task_and_chat_cannot_complete_it(setup, monkeypatch):
     kit, parent, agent, project = setup
     monkeypatch.setattr(backlog, "fetch", lambda _: [issue()])
     monkeypatch.setattr(la, "alive", lambda _: True)
@@ -96,24 +94,32 @@ def test_idle_dispatch_posts_one_authenticated_job_and_reconciles_its_native_rep
     monkeypatch.setattr(backlog, "pick", lambda ws, a: original(ws, a, fetcher=backlog.fetch))
     issuepump.step(kit.ws, parent, agent.name)
     child = tokens.load(kit.base, agent.identity)
-    tasks = kit.ws.inbox(child, raw=True, limit=1)
-    assert len(tasks) == 1 and tasks[0]["from"] == "lead"
-    assert str(project) in tasks[0]["text"] and "bare pytest" in tasks[0]["text"]
+    tasks = TaskBoard(kit.ws).list(parent)['tasks']
+    assert len(tasks) == 1 and tasks[0]['created_by'] == 'lead'
+    assert str(project) not in tasks[0]['description'] and 'bare pytest' in tasks[0]['description']
+    assert tasks[0]['source_key'] == 'github:sample/project:1:revision1'
+    assert tasks[0]['capabilities'] == ['coding'] and tasks[0]['limits']['max_retries'] == 0
+    assert not kit.ws.inbox(child, raw=True)
     issuepump.step(kit.ws, parent, agent.name)
-    assert len(kit.ws.inbox(child, raw=True)) == 1
-    kit.ws.send(child, "lead", "answer", "Patch ready for parent review", reply_to=tasks[0]["seq"])
+    assert len(TaskBoard(kit.ws).list(parent)['tasks']) == 1
+    kit.ws.send(child, 'lead', 'answer', 'Discussion claiming the patch is done')
     issuepump.step(kit.ws, parent, agent.name)
-    assert original(kit.ws, agent, fetcher=backlog.fetch)[0] is None
+    assert TaskBoard(kit.ws).get(parent, tasks[0]['id'])['state'] == 'queued'
 
 
-def test_interrupted_dispatch_recovers_outbox_receipt_without_duplicate_task(setup, monkeypatch):
+def test_interrupted_projection_preserves_canonical_task_without_duplicate_dispatch(setup, monkeypatch):
     kit, parent, agent, _ = setup
     monkeypatch.setattr(la, "alive", lambda _: True)
     la.Status(kit.ws, agent.name).update(state="idle")
-    job, _ = backlog.pick(kit.ws, agent, fetcher=lambda _: [issue()])
-    key = f"dispatch:{agent.identity}"
-    with backlog._store(kit.ws) as graph:
-        graph.put_doc(key, {"issue": job, "seq": 0, "subject": "Unique dispatch"})
-    kit.ws.send(parent, agent.identity, "task", "existing job", subject="Unique dispatch")
+    original = backlog.pick
+    monkeypatch.setattr(backlog, 'pick', lambda ws, a: original(ws, a, fetcher=lambda _: [issue()]))
+    previous = issuepump._status
+    def interrupted(*args, **kwargs):
+        raise RuntimeError('Projection interrupted after canonical commit')
+    monkeypatch.setattr(issuepump, '_status', interrupted)
+    with pytest.raises(RuntimeError, match='Projection interrupted'):
+        issuepump.step(kit.ws, parent, agent.name)
+    monkeypatch.setattr(issuepump, '_status', previous)
     issuepump.step(kit.ws, parent, agent.name)
-    assert len(kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)) == 1
+    assert len(TaskBoard(kit.ws).list(parent)['tasks']) == 1
+    assert not kit.ws.inbox(tokens.load(kit.base, agent.identity), raw=True)
