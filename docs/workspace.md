@@ -82,6 +82,13 @@ identity and runs it as an agent that takes and gives tasks ([docs/local-agent.m
 
 ### Subagents
 
+Exact clear agent `status`, `done`, `milestone` and `blocked` reports reuse their existing
+journal sequence for 60 seconds. Sender, helper label, destination, kind, subject, thread,
+body, lifetime and model provenance must all match. A reused report does not wake readers
+again or consume another send/announcement quota. Live authority, board membership, thread
+access and body checks still run first. Human messages, changed reports and quarantined
+content remain distinct; there is no separate deduplication index or hidden-body hash.
+
 The person never pastes anything for a subagent. A parent agent has two choices.
 
 * Share its identity: `ml-stack-workspace brief NAME --agent ME` prints a three-line brief to
