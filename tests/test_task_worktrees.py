@@ -3,10 +3,10 @@
 import pytest
 from workspace_kit import Kit
 
-from ml_stack.graph.store import GraphStore
 from ml_stack.net import git
 from ml_stack.workspace import localagent, task_worktrees
 from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.taskboard import TaskBoard
 
 
 def test_clean_task_baseline_claims_and_parent_authority(tmp_path):
@@ -24,14 +24,12 @@ def test_clean_task_baseline_claims_and_parent_authority(tmp_path):
     worker = kit.ws.delegate(parent, 'worker')['id']
     localagent.save(kit.ws, localagent.Agent('local-worker', 'qwen', identity=worker,
                                            profile='coding', project=str(source)))
-    task = 'task:' + 'a' * 32
-    with GraphStore(kit.base / 'coordination.db') as graph:
-        graph.upsert_node({'id': task, 'kind': 'task', 'label': 'task',
-                           'attrs': {'state': 'queued', 'created_by': 'parent'}})
+    task = TaskBoard(kit.ws).create(kit.owner, {'title': 'Person task', 'description': 'Fix current code',
+                                             'acceptance': ['Checks pass']})['id']
     with pytest.raises(Denied, match='registered worker parent'):
         task_worktrees.prepare(kit.ws, kit.agent('foreign'), worker, task)
     prepared = task_worktrees.prepare(kit.ws, parent, worker, task)
-    target = tmp_path / ('task-' + 'a' * 32)
+    target = tmp_path / ('task-' + task.split(':')[1])
     assert prepared['project'] == str(target)
     assert (target / 'code.py').read_text() == 'ORIGINAL = True\n'
     assert (source / 'code.py').read_text() == 'CONTAMINATED = True\n'
