@@ -116,8 +116,11 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
   }
   reputationDetails(reputation){
    const section=E('section',{'aria-label':'Work reputation'},E('h3',{},'Work reputation'));
-   if(reputation.state!=='reviewed')section.append(E('p',{class:'intro'},'Not yet rated · no independent quality or reliability assessment recorded.'));
-   else section.append(E('div',{class:'history-economy'},this.metric('Quality · out of 100',reputation.quality),this.metric('Reliability · out of 100',reputation.reliability)),E('p',{class:'intro'},`${reputation.samples} independent reviews · ${Math.round(reputation.confidence*100)}% confidence. Ratings use a neutral starting prior; they are separate from credits and task counts.`));
+   const qualitySamples=reputation.quality_samples??reputation.samples??0,reliabilitySamples=reputation.reliability_samples??reputation.samples??0;
+   const metrics=E('div',{class:'history-economy'});
+   metrics.append(this.metric('Quality · out of 100',qualitySamples?reputation.quality:'Not yet rated'),this.metric('Reliability · out of 100',reliabilitySamples?reputation.reliability:'Not yet rated'));
+   section.append(metrics,E('p',{class:'intro'},`${qualitySamples} independent reviews · ${reliabilitySamples} accepted or rejected outcomes · ${Math.round((reputation.confidence||0)*100)}% confidence. Quality requires independent review; reliability uses actual task outcomes. Infrastructure blockage does not lower reliability.`));
+   if(reputation.outcomes)section.append(E('p',{class:'intro'},`${reputation.outcomes.accepted||0} accepted · ${reputation.outcomes.rejected||0} rejected · ${reputation.outcomes.blocked_infrastructure||0} infrastructure blockages`));
    return section;
   }
   evidence(evidence){
