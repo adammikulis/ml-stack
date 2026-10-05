@@ -7,7 +7,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.home import device_id
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import tokens
+from ml_stack.workspace import localagent, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.device_accounts import account_for
 from ml_stack.workspace.identity import HUMAN, Denied
@@ -28,7 +28,6 @@ def _grant(lease_id, status):
 
 
 def _worker(ws, identity):
-    from ml_stack.workspace import localagent
     workers = [localagent.load(ws, name) for name in localagent.names(ws)]
     found = [worker for worker in workers if worker and (worker.identity or worker.name) == identity]
     if len(found) != 1:
