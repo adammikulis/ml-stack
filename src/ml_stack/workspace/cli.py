@@ -385,6 +385,8 @@ def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _nudging(args: argparse.Namespace) -> int:
+    if coordinator_config.load(limits.root()).get("mode") == "remote":
+        raise Denied("this watcher is local-only; use coordinator inbox polling")
     if args.hook:
         return _hook(args)
     line = Workspace().nudge(_token(args))
@@ -394,6 +396,8 @@ def _nudging(args: argparse.Namespace) -> int:
 
 
 def _hook(args: argparse.Namespace) -> int:
+    if coordinator_config.load(limits.root()).get("mode") == "remote":
+        raise Denied("this watcher is local-only; use coordinator inbox polling")
     stdin = sys.stdin.read() if args.hook == "stop" and not sys.stdin.isatty() else ""
     try:
         out = nudge.output(args.hook, Workspace().waiting(_token(args)), stdin)
@@ -647,6 +651,8 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
 
 
 def _watching(args: argparse.Namespace) -> int:
+    if coordinator_config.load(limits.root()).get("mode") == "remote":
+        raise Denied("this watcher is local-only; use coordinator inbox polling")
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             signal.signal(sig, lambda *_: CANCELLED.set())
