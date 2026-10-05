@@ -1,0 +1,38 @@
+<script>
+(function(){
+ const E=window.fleetModel.el;
+ window.taskReviewQuality=function(row,checks){
+  const node=E('details',{},E('summary',{},'Review quality — advanced'));
+  node.append(E('p',{},'Optional independent evidence can earn fixed quality bonuses. Plain acceptance earns completion credit without a quality rating. Runs remain free.'));
+  const tiers=[['validated','Validated result'],['regression','Regression prevented'],['impact','Impact demonstrated']].map(([kind,label])=>{
+   const enabled=E('input',{type:'checkbox','aria-label':label});
+   const reason=E('input',{type:'text',maxlength:500,disabled:true,'aria-label':label+' reason'});
+   const refs=E('select',{multiple:true,disabled:true,'aria-label':label+' checks'},...checks.map(check=>E('option',{value:check.name},check.name)));
+   const artifacts=E('select',{multiple:true,disabled:true,'aria-label':label+' artifacts'},...Object.keys(row.proposal?.artifacts||{}).map(name=>E('option',{value:name},name)));
+   const fields=E('div',{hidden:true},E('label',{},'Independent evidence reason',reason),E('label',{},'Verified checks',refs),E('label',{},'Hashed artifacts',artifacts));
+   enabled.onchange=()=>{fields.hidden=!enabled.checked;for(const control of [reason,refs,artifacts]){control.disabled=!enabled.checked;control.required=enabled.checked;}};
+   node.append(E('fieldset',{},E('legend',{},E('label',{},enabled,' '+label)),fields));
+   return {kind,enabled,reason,refs,artifacts};
+  });
+  const rated=E('input',{type:'checkbox','aria-label':'Add independent ratings'});
+  const quality=E('input',{type:'number',min:0,max:100,step:1,value:50,disabled:true,'aria-label':'Quality rating'});
+  const reliability=E('input',{type:'number',min:0,max:100,step:1,value:50,disabled:true,'aria-label':'Reliability assessment'});
+  const reason=E('input',{type:'text',maxlength:500,disabled:true,'aria-label':'Rating reason'});
+  const ratings=E('div',{hidden:true},E('label',{},'Quality rating (0–100)',quality),E('label',{},'Reliability assessment (0–100)',reliability),E('label',{},'Rating reason',reason),E('p',{},'Task reliability is calculated from accepted and rejected outcomes. Infrastructure blockage is excluded. Reviewer ratings are stored separately.'));
+  rated.onchange=()=>{ratings.hidden=!rated.checked;for(const control of [quality,reliability,reason]){control.disabled=!rated.checked;control.required=rated.checked;}};
+  node.append(E('fieldset',{},E('legend',{},E('label',{},rated,' Add independent ratings')),ratings));
+  return {node,value(outcome){
+   const value={},selected=select=>Array.from(select.selectedOptions,option=>option.value);
+   const bonuses=tiers.filter(tier=>tier.enabled.checked).map(tier=>({kind:tier.kind,reason:tier.reason.value,checks:selected(tier.refs),artifacts:selected(tier.artifacts)}));
+   if(bonuses.length){
+    if(outcome!=='accepted')throw new Error('Quality bonuses require an accepted outcome.');
+    const passed=new Set(checks.filter(check=>check.input.checked).map(check=>check.name));
+    if(bonuses.some(tier=>tier.checks.some(name=>!passed.has(name))))throw new Error('Quality bonuses must reference checks you independently verified.');
+    value.quality=bonuses;
+   }
+   if(rated.checked)value.review={quality:Number(quality.value),reliability:Number(reliability.value),reason:reason.value};
+   return value;
+  }};
+ };
+})();
+</script>

@@ -55,3 +55,11 @@ and `task-credit ID`). JSON payloads can be read from stdin with `-`. The corres
 create tasks, enroll identities or grant project permissions. Claims require a live trusted
 allocation. Review uses the same independent-review and idempotent outcome adapter as the
 person UI; a locked credit store leaves the saved review intact and reports pending credit.
+
+Independent reviewers can open **Review quality — advanced** to link a validated result,
+prevented regression or demonstrated impact to specific independently passed checks and
+submitted artifact hashes. The server applies fixed, bounded bonus tiers; the interface has
+no arbitrary credit amount. Optional quality and reliability assessments require a separate
+reason. Task reliability still derives from actual accepted/rejected outcomes, with
+infrastructure blockage excluded. Leaving advanced controls untouched keeps a plain accepted
+review at completion credit and leaves quality unrated.
