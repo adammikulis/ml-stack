@@ -138,6 +138,13 @@ def test_projects_keep_source_checkout_separate_from_explicit_agent_access(app):
     state["project_board"] = {"state": "unconfigured", "agents": []}
     page.evaluate("document.querySelector('projects-view').draw()")
     page.get_by_text("Board not connected/configured", exact=True).wait_for()
+    assert page.get_by_role("button", name="Create agent access code", exact=True).is_disabled()
+    page.get_by_label("Host this project's board on this device").check()
+    page.wait_for_function("!document.querySelector('#project-invite').disabled")
+    state["project_board"] = {"state": "connection_required", "board_host": "https://mac.test:8770", "agents": []}
+    page.evaluate("document.querySelector('projects-view').draw()")
+    page.get_by_text("Connect to the existing board on https://mac.test:8770. Create agent access on the authority device.").wait_for()
+    assert page.get_by_role("button", name="Create agent access code", exact=True).is_disabled()
     assert not errors
 
 

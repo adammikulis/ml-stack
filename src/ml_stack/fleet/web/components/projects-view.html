@@ -10,10 +10,12 @@
     <section class="panel"><h2>Cluster projects</h2><div id="project-list"></div></section>
     <section class="panel" id="project-board" hidden>
       <h2 id="project-title"></h2><p id="project-authority"></p><p id="project-board-state" role="status"></p>
+      <p id="project-source"></p>
       <button id="project-checkout">Get source on this device</button>
       <p id="project-checkout-state" role="status"></p>
       <h3>Connect an agent</h3><label for="project-agent-label">Agent label (optional)</label>
       <input id="project-agent-label" placeholder="For example, Mac reviewer">
+      <label id="project-host-choice" hidden><input type="checkbox" id="project-host-board"> Host this project's board on this device</label>
       <button id="project-invite">Create agent access code</button>
       <div id="project-access" hidden><p id="project-access-hint"></p>
         <pre id="project-command"></pre><button id="project-copy">Copy access details</button>
@@ -42,6 +44,7 @@
       };
       this.querySelector('#project-checkout').onclick = () => this.checkout();
       this.querySelector('#project-invite').onclick = () => this.invite();
+      this.querySelector('#project-host-board').onchange = () => this.loadBoard();
       this.querySelector('#project-copy').onclick = async () => {
         try { await navigator.clipboard.writeText(this.querySelector('#project-command').textContent); this.note.textContent = 'Command copied'; }
         catch { this.note.textContent = 'Select and copy the command above.'; }
@@ -84,10 +87,13 @@
       this.selected = project;
       this.board.hidden = false;
       this.querySelector('#project-title').textContent = project.name;
-      this.querySelector('#project-authority').textContent = `Board authority: ${project.authority_machine || project.host || 'Unavailable'}`;
+      this.querySelector('#project-authority').textContent = `Board authority: ${project.authority_machine || 'unconfigured'}`;
+      this.querySelector('#project-source').textContent = `Source available on ${project.is_self ? 'this device' : project.source_host || project.host || project.peer || 'a cluster device'}`;
+      this.querySelector('#project-host-board').checked = false;
       this.querySelector('#project-access').hidden = true;
       this.querySelector('#project-command').textContent = '';
-      this.querySelector('#project-checkout-state').textContent = '';
+      this.querySelector('#project-checkout').hidden = !!project.is_self;
+      this.querySelector('#project-checkout-state').textContent = project.is_self ? 'Source is already available on this device.' : '';
       this.boardSignature = null;
       this.loadBoard();
     }
@@ -96,11 +102,15 @@
       const project = this.selected;
       const result = await M.api(`/ui/projects/${encodeURIComponent(project.id)}/board`);
       if (this.selected !== project) return;
-      const available = result.ok && !['conflict', 'upgrade_required'].includes(result.state || project.state);
-      this.querySelector('#project-invite').disabled = !available || this.busy;
+      const available = result.ok && !['conflict', 'upgrade_required', 'connection_required'].includes(result.state || project.state);
+      this.querySelector('#project-host-choice').hidden = result.state !== 'unconfigured';
+      this.querySelector('#project-invite').disabled = !available || this.busy
+        || (result.state === 'unconfigured' && !this.querySelector('#project-host-board').checked);
       this.querySelector('#project-checkout').disabled = this.busy || ['conflict', 'upgrade_required'].includes(result.state || project.state);
       this.querySelector('#project-board-state').textContent = !available
-        ? result.error || (project.state === 'conflict' ? 'Project authority conflict. Resolve it before connecting agents.' : 'Shared board unavailable. Update or reconnect the authority device.')
+        ? result.state === 'connection_required'
+          ? `Connect to the existing board on ${result.board_host || project.board_host || project.authority_machine}. Create agent access on the authority device.`
+          : result.error || (project.state === 'conflict' ? 'Project authority conflict. Resolve it before connecting agents.' : 'Shared board unavailable. Update or reconnect the authority device.')
         : {connected: 'Agents connected to the shared board', offline: 'Registered agents are offline',
           unconfigured: 'Board not connected/configured', awaiting_agents: 'Waiting for agents to connect'}[result.state]
           || 'Board not connected/configured';
@@ -150,8 +160,8 @@
       if (result?.ok && this.selected === project) {
         this.querySelector('#project-access').hidden = false;
         this.querySelector('#project-access-hint').textContent = result.command
-          ? /\b(NAME|MODEL|HARNESS|HOST_URL)\b/.test(result.command)
-            ? 'Replace NAME, MODEL and HARNESS with the agent details, and HOST_URL with the board authority\'s reachable address. Run it on the agent\'s device within ten minutes.'
+          ? /\b(NAME|MODEL|HARNESS|HOST_URL|CLUSTER)\b/.test(result.command)
+            ? 'Replace the uppercase placeholders with the agent name, model, harness and cluster, and the authority address if needed. Run it on the agent\'s device within ten minutes.'
             : 'Run this on the agent\'s device. The code expires after ten minutes.'
           : 'Project-scoped access code. Use it with workspace remote join on the agent\'s device. It expires after ten minutes.';
         this.querySelector('#project-command').textContent = result.command || result.code || '';
