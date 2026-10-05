@@ -16,6 +16,15 @@ partial = 200
 
 
 [[group]]
+match = ["human:workspace/backlog.py:resume"]
+status = "covered"
+tests = ["tests/test_workspace_backlog.py::test_parent_resume_preserves_failed_attempt_and_consumes_one_retry",
+         "tests/test_workspace_backlog.py::test_issue_resume_refuses_unblocked_foreign_and_child_requests",
+         "tests/test_workspace_backlog.py::test_issue_resume_cannot_bypass_canonical_task_retry_budget"]
+count = 1
+note = "Authenticated person or actual parent recovery preserves the failed projection and grants one intake attempt; child, foreign parent, unblocked projections and canonical budget bypasses are refused"
+
+[[group]]
 match = ["human:workspace/backlog.py:supersede"]
 status = "covered"
 tests = ["tests/test_workspace_backlog.py::test_parent_superseded_issue_stays_excluded_after_revision_change",

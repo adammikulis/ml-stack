@@ -125,6 +125,7 @@ def start(ws, token, name):
         status = node['attrs'] if node else {}
         if pid_exists(status.get("producer_pid", 0)) and started_at(status["producer_pid"]) == status.get("producer_started"):
             return status["producer_pid"]
+        (la.folder(ws) / f"{name}.backlog-stop").unlink(missing_ok=True)
         job = jobs.detach("ml_stack.workspace.issuepump", [name, who.id],
             log=la.folder(ws) / f"{name}.backlog.log", kind=f"{name}-backlog", home=la.folder(ws) / "jobs")
         record = {"producer_pid": job.pid, "producer_started": started_at(job.pid), "authority": who.id}
