@@ -202,6 +202,8 @@ class Manager:
 
     def _event(self, turn, row, harness) -> None:
         payload = coding_events.event(row, harness)
+        if payload.get("blocked"):
+            raise RuntimeError("Coding task blocked by approval policy: " + payload["blocked"])
         if payload.get("session"):
             turn.session = str(uuid.UUID(payload["session"]))
         if payload.get("error"):

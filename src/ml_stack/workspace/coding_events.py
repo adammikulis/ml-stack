@@ -29,6 +29,13 @@ def event(row: dict, harness: str) -> dict:
             if text:
                 result["text"] = text
             result["activity"] = {"type": "assistant", "content": blocks}
+        elif kind == "user":
+            blocks = row.get("message", {}).get("content", [])
+            for block in blocks if isinstance(blocks, list) else []:
+                content = block.get("content", "")
+                if (block.get("type") == "tool_result" and block.get("is_error") and isinstance(content, str)
+                        and "PreToolUse:" in content and "the person did not allow this call" in content):
+                    result["blocked"] = content[:1000]
         elif kind == "result":
             if row.get("is_error"):
                 result["error"] = row.get("result") or "The coding turn failed"
