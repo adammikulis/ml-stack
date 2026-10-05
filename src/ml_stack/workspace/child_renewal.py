@@ -17,7 +17,7 @@ def renew(ws, token: str, child: str) -> dict:
             raise Denied('the delegated seat is not a live child of this parent')
         if not set(entry.get('can', ())) <= set(parent.can) & set(CAPS):
             raise Denied('the child capabilities exceed current parent authority')
-        expires = ws.clock() + ws.limits.child_ttl_s
+        expires = registry.clock() + ws.limits.child_ttl_s
         if stop := rows[parent.id].get('expires'):
             expires = min(expires, stop)
         entry['expires'] = expires

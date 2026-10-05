@@ -5,8 +5,14 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import device_agent, localagent, resource_allocations as resources, tokens
+from ml_stack.net import git
+from ml_stack.workspace import (
+    device_agent,
+    localagent,
+    resource_allocations as resources,
+    task_worktrees,
+    tokens,
+)
 from ml_stack.workspace.taskboard import TaskBoard
 
 
@@ -21,8 +27,17 @@ def board(tmp_path, monkeypatch):
     kit.child = tokens.read_file(Path(delegated['token_file']))
     monkeypatch.setattr(device_agent, 'device_id', lambda: '1234567890abcdef')
     monkeypatch.setattr(resources, 'device_id', lambda: '1234567890abcdef')
+    repository, source = tmp_path / 'repository', tmp_path / 'source'
+    repository.mkdir()
+    git.run(['init', str(repository)])
+    (repository / 'code.py').write_text('BASELINE = True\n')
+    git.run(['add', 'code.py'], cwd=repository)
+    git.run(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+             'commit', '-m', 'baseline'], cwd=repository)
+    git.run(['worktree', 'add', '-b', 'source', str(source)], cwd=repository)
+    kit.source = source
     localagent.save(kit.ws, localagent.Agent('native-worker', 'qwen', identity=kit.worker_id,
-                                           profile='coding', pid=555, process_started=42))
+                                           profile='coding', project=str(source), pid=555, process_started=42))
     device_agent.bind_worker(kit.ws, kit.owner, 'native-worker')
     kit.status = {'servers': [{'ours': True, 'pid': 999, 'model': 'qwen', 'port': 51548,
                   'holders': [{'lease': 'native-grant', 'pid': 555, 'pid_started': 42}]}]}
@@ -33,14 +48,8 @@ def board(tmp_path, monkeypatch):
     kit.spec = {'title': 'Inspect native simulation', 'description': 'Collect a reproducible replay.',
                 'acceptance': ['Replay passes'], 'source_key': 'repo:demo/sim:issue:42'}
     kit.task = kit.board.create(kit.parent, kit.spec)
-    project = tmp_path / 'task-worktree'
-    project.mkdir()
-    (project / '.git').write_text('gitdir: isolated-fixture\n')
-    def prepare(ident):
-        with GraphStore(kit.base / 'coordination.db') as graph:
-            graph.upsert_node({'id': 'task-worktree:' + ident, 'kind': 'task-worktree', 'label': ident,
-                              'attrs': {'task': ident, 'worker': kit.worker_id,
-                                        'project': str(project), 'source_project': '', 'baseline_commit': 'a' * 40}})
+    def prepare(ident, worker=None):
+        return task_worktrees.prepare(kit.ws, kit.parent, worker or kit.worker_id, ident)
     kit.prepare = prepare
     prepare(kit.task['id'])
     kit.allocation = resources.assign(kit.ws, kit.parent, kit.worker_id, kit.task['id'], 'native-grant')

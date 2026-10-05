@@ -160,11 +160,12 @@ def test_canonical_tasks_from_different_workers_and_models_share_device_balance(
     delegated = board.ws.delegate(board.parent, 'second-model')
     second, token = delegated['id'], tokens.read_file(Path(delegated['token_file']))
     localagent.save(board.ws, localagent.Agent('second-model', 'gemma', identity=second,
-                                              profile='coding', pid=555, process_started=42))
+                                              profile='coding', project=str(board.source), pid=555, process_started=42))
     device_agent.bind_worker(board.ws, board.owner, 'second-model')
     board.status['servers'][0]['model'] = 'gemma'
     board.status['servers'][0]['pid'] = 1001
     task = board.board.create(board.parent, {**board.spec, 'source_key': 'repo:demo/sim:issue:43'})
+    board.prepare(task['id'], second)
     allocation = resources.assign(board.ws, board.parent, second, task['id'], 'native-grant')
     board.board.claim(token, task['id'], allocation['allocation_id'])
     board.board.submit(token, task['id'], {'artifacts': {'next.json': 'b' * 64},
@@ -185,9 +186,11 @@ def test_designated_peer_review_awards_with_live_person_grant_and_revocation_is_
 
     peer = board.agent('review-peer')
     project = {'root': '/approved/project'}
+    board.ws.registry.set_project(board.ws.auth(board.owner), board.worker_id, project)
     board.ws.registry.set_project(board.ws.auth(board.owner), 'review-peer', project)
     task = board.board.create(board.owner, {**board.spec, 'project': project,
                               'reviewers': ['review-peer'], 'source_key': 'independent-peer'})
+    board.prepare(task['id'])
     allocation = resources.assign(board.ws, board.parent, board.worker_id, task['id'], 'native-grant')
     board.board.claim(board.child, task['id'], allocation['allocation_id'])
     board.board.submit(board.child, task['id'], {'artifacts': {'reviewed.json': 'd' * 64},

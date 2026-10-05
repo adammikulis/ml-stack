@@ -2,13 +2,16 @@
 
 Coding workers consume structured TaskBoard assignments. Board chat messages discuss work;
 they do not start jobs. An authenticated registered parent runs
-`python -m ml_stack.workspace.task_scheduler PARENT WORKER_NAME`, and the maintained coding
-launcher runs `ml_stack.workspace.task_worker` for the saved worker identity.
+`ml-stack-workspace agent schedule WORKER_NAME --agent PARENT`, and the maintained coding
+launcher runs `ml_stack.workspace.localcoding` for the saved worker identity.
 
 The scheduler renews the existing delegated seat within the parent's authority and configured
 TTL. It selects queued tasks whose dependencies are independently accepted and whose model
 and capability requirements match the actual broker grant and configured worker. Blocked tasks
 require authorized resumption; the scheduler does not retry them automatically.
+Person-created tasks use the same worker eligibility rules as TaskBoard claims. An explicit
+project must match a current person-set worker or inherited parent grant. Empty project metadata
+uses the trusted configured worker source; it does not grant access to a path in task text.
 
 Each task gets a claimed branch and sibling git worktree beneath the saved source worktree's
 parent directory. Its immutable baseline is the source HEAD. Uncommitted changes in other task

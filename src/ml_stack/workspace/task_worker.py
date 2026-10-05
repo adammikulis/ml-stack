@@ -1,13 +1,10 @@
 """Local coding workers consume graph task assignments and preserve blocked outcomes."""
 
-import os
-import sys
 import time
 
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import localagent as la, localloop, task_coding, task_runtime, tokens
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.taskboard import TaskBoard
 
 
@@ -57,15 +54,3 @@ def run(ws, name):
             held.release()
         status.update(state='stopped', detail='Canonical worker stopped')
 
-
-def main():
-    """Start one registered canonical coding worker."""
-    if len(sys.argv) != 2:
-        return 2
-    os.environ['ML_STACK_AGENT'] = '1'
-    os.environ['ML_STACK_NONINTERACTIVE'] = '1'
-    return run(Workspace(), la.check_name(sys.argv[1])) or 0
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

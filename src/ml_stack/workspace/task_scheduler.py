@@ -1,6 +1,5 @@
 """Registered parents allocate ready tasks to their enrolled local workers."""
 
-import sys
 import time
 
 from ml_stack.workspace import (
@@ -12,7 +11,6 @@ from ml_stack.workspace import (
     tokens,
 )
 from ml_stack.workspace.identity import Denied
-from ml_stack.workspace.service import Workspace
 from ml_stack.workspace.taskboard import TaskBoard
 
 
@@ -37,21 +35,15 @@ def assign_next(ws, parent_token: str, worker: str, broker_lease: str):
     return resource_allocations.assign(ws, parent_token, worker, task['id'], broker_lease)
 
 
-def main():
+def watch(ws, parent_token, name):
     """Continuously assign ready tasks using the registered parent's private token."""
-    if len(sys.argv) != 3:
-        return 2
-    ws, parent, name = Workspace(), sys.argv[1], la.check_name(sys.argv[2])
     while not la.stop_file(ws, name).exists():
         agent = la.load(ws, name)
         if agent is None:
             raise ValueError('the local worker is missing')
         status = la.status_of(ws, name)
         if status.get('state') == 'idle' and status.get('lease', {}).get('id'):
-            assign_next(ws, tokens.load(ws.base, parent), agent.identity or agent.name, status['lease']['id'])
+            assign_next(ws, parent_token, agent.identity or agent.name, status['lease']['id'])
         time.sleep(1)
     return 0
 
-
-if __name__ == '__main__':
-    raise SystemExit(main())
