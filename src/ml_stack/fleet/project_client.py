@@ -4,25 +4,37 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ml_stack import sealing
 from ml_stack.files import read_json
 from ml_stack.http import Sealed, ServerError, open_stream
 
 from .discovery import memberships
-from .project_source import MAX_ARCHIVE, ProjectError, checkout, project_id
+from .onboard.lan import require_local_url
+from .project_source import MAX_ARCHIVE, MAX_FILES, MAX_SOURCE, ProjectError, checkout, project_id
 from .remote import Peer
 
 
 def read(peer: Peer, path: str, limit: int) -> bytes:
     """Read one bounded signed and sealed project response."""
-    with open_stream(peer.base_url + path, token=peer.token,
+    endpoint = peer.base_url + path
+
+    def guard(url: str) -> str:
+        if url != endpoint:
+            raise ProjectError("Project source cannot redirect away from its authority endpoint")
+        require_local_url(url)
+        return url
+
+    wire_limit = limit + sealing.NONCE_BYTES + 16
+    with open_stream(guard(endpoint), token=peer.token, guard=guard,
                      headers={sealing.HEADER: "2"}, timeout=30) as response:
         if not response.headers.get(sealing.HEADER):
             raise ProjectError("Project response was not authenticated and sealed")
-        data = response.read(limit + 1024)
-        if len(data) >= limit + 1024:
+        data = response.read(wire_limit + 1)
+        if len(data) > wire_limit:
             raise ProjectError("Project response exceeds its size limit")
         opened = getattr(response, "sealed", Sealed()).open(response.status, response.headers, data)
         if len(opened) > limit:
@@ -32,13 +44,41 @@ def read(peer: Peer, path: str, limit: int) -> bytes:
 
 def catalogue(peer: Peer) -> dict:
     result = json.loads(read(peer, "/workspace/v1/projects", 1 << 20))
-    if not isinstance(result, dict) or not isinstance(result.get("projects"), list):
+    if (not isinstance(result, dict) or not isinstance(result.get("projects"), list)
+            or not isinstance(result.get("machine"), str) or not 0 < len(result["machine"]) <= 256
+            or len(result["projects"]) > 1000):
         raise ProjectError("Peer returned an invalid project catalogue")
     for project in result["projects"]:
-        project_id(project["id"])
+        validate_project(project)
         if project.get("source_machine") != result.get("machine"):
             raise ProjectError("Peer advertised another device's project source")
     return result
+
+
+def validate_project(project: dict) -> None:
+    """Refuse malformed project metadata before selecting a source URL."""
+    if not isinstance(project, dict):
+        raise ProjectError("Peer returned an invalid project entry")
+    for field, length in (("id", 32), ("name", 256), ("source_machine", 256),
+                          ("authority_machine", 256), ("board_host", 2048)):
+        value = project.get(field)
+        if not isinstance(value, str) or len(value) > length:
+            raise ProjectError(f"Invalid project {field}")
+    project_id(project["id"])
+    for field in ("source_hash", "archive_sha256"):
+        value = project.get(field)
+        if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+            raise ProjectError(f"Invalid project {field}")
+    for field, maximum in (("size_bytes", MAX_SOURCE), ("files", MAX_FILES)):
+        value = project.get(field)
+        if type(value) is not int or not 0 <= value <= maximum:
+            raise ProjectError(f"Invalid project {field}")
+    if project.get("board_host"):
+        parts = urlsplit(project["board_host"])
+        if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username
+                or parts.password or parts.query or parts.fragment or parts.path not in {"", "/"}):
+            raise ProjectError("Invalid project board_host")
+        require_local_url(project["board_host"])
 
 
 def peers(ui) -> list[Peer]:

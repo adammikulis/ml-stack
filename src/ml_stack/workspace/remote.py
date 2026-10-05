@@ -62,10 +62,14 @@ class RemoteWorkspace:
                              headers={"Content-Type": "application/json", sealing.HEADER: "2"}) as response:
                 if not response.headers.get(sealing.HEADER):
                     raise Denied("project board response was not authenticated and sealed")
-                raw = response.read(512 * 1024 + 1)
-                if len(raw) > 512 * 1024:
+                limit = 512 * 1024
+                wire_limit = limit + sealing.NONCE_BYTES + 16
+                raw = response.read(wire_limit + 1)
+                if len(raw) > wire_limit:
                     raise ValueError("project board response exceeds the size limit")
                 opened = response.sealed.open(response.status, response.headers, raw)
+                if len(opened) > limit:
+                    raise ValueError("project board response exceeds the size limit")
                 result = json.loads(opened)
                 if not isinstance(result, dict):
                     raise ValueError("project board returned no object")
