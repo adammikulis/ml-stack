@@ -108,8 +108,9 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
     finally:
         done = ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
         spawned[0].child.wait(timeout=10)
-    assert done.was_running and not kit.ws.registry.role_of(got.name)
-    assert not (tokens.directory(kit.base) / got.name).exists() and ls.listing(kit.ws) == []
+    assert done.was_running and kit.ws.registry.role_of(got.name) == "agent"
+    assert (tokens.directory(kit.base) / got.name).exists()
+    assert ls.listing(kit.ws)[0]["state"] == "stopped"
 
 
 def test_stop_releases_the_lease_the_loop_recorded(kit):
@@ -414,7 +415,7 @@ def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(serv
                 {"effort": "extreme"}, {"max_effort": "auto"}, {"effort": 3}, {"name": 5}):
         assert post(served, "start", bad)[0] == 400, bad
     assert post(served, "stop", {"name": "local-r"})[0] == 200
-    assert json.loads(request(served.port, "GET", "/agents/list")[1])["agents"] == []
+    assert json.loads(request(served.port, "GET", "/agents/list")[1])["agents"][0]["state"] == "stopped"
     status, page = request(served.port, "GET", f"/agents?session={served.session}")
     assert status == 200 and b"<ml-agents" in page
 
@@ -670,14 +671,15 @@ def test_empty_native_result_cannot_submit_artifacts(kit, monkeypatch, tmp_path)
     assert not (tmp_path / '.task-report.md').exists()
 
 
-def test_stopping_a_delegated_worker_revokes_only_its_private_identity(kit):
+def test_stopping_a_delegated_worker_preserves_its_private_identity(kit):
     parent = kit.agent("parent")
     child = kit.ws.delegate(parent, "local-qwen")
     la.save(kit.ws, la.Agent("local-qwen", "model", identity=child["id"]))
     ls.stop(kit.ws, "local-qwen", release=lambda _: True)
     assert kit.ws.auth(parent).id == "parent"
-    assert not kit.ws.registry.role_of(child["id"])
-    assert not Path(child["token_file"]).exists()
+    assert kit.ws.registry.role_of(child["id"]) == "agent"
+    assert Path(child["token_file"]).exists()
+    assert la.load(kit.ws, "local-qwen").identity == child["id"]
 
 
 def test_paused_coding_worker_keeps_tasks_queued_until_resume(kit, monkeypatch):
@@ -712,3 +714,34 @@ def test_paused_coding_worker_keeps_tasks_queued_until_resume(kit, monkeypatch):
         thread.join(timeout=6)
     assert not thread.is_alive() and seen == [sent["seq"]]
     assert kit.ws.thread(authority, sent["seq"])[-1]["from"] == child["id"]
+
+
+def test_stop_restart_retains_identity_and_preferences_across_models(kit):
+    parent = kit.agent('parent')
+    child = kit.ws.delegate(parent, 'qwen')
+    la.save(kit.ws, la.Agent('local-qwen', 'old-model', identity=child['id'], extra={'preference': 'saved'}))
+    secret = Path(child['token_file']).read_text()
+    ls.stop(kit.ws, 'local-qwen', release=lambda _: True)
+    spawned = []
+    got = ls.start(kit.ws, ls.Ask(name='local-qwen'), pick=PICK,
+                   spawn=lambda *a, **k: spawned.append(sleeper(*a, **k)) or spawned[-1])
+    try:
+        restored = la.load(kit.ws, got.name)
+        assert restored.identity == child['id']
+        assert restored.extra == {'preference': 'saved'}
+        assert restored.model == PICK.ref
+        assert Path(child['token_file']).read_text() == secret
+    finally:
+        ls.stop(kit.ws, got.name, release=lambda _: True, wait_s=5)
+        spawned[0].child.wait(timeout=10)
+
+
+def test_stop_never_releases_a_foreign_holder(kit, monkeypatch):
+    agent = la.Agent('local-qwen', 'model', pid=42, process_started=12.0)
+    la.save(kit.ws, agent)
+    la.Status(kit.ws, agent.name).update(lease={'id': 'foreign'})
+    monkeypatch.setattr(la, 'alive', lambda _: False)
+    monkeypatch.setattr(ls.broker_wire, 'status', lambda **_: {'servers': [
+        {'holders': [{'lease': 'foreign', 'pid': 99, 'pid_started': 12.0}]}]})
+    monkeypatch.setattr(ls.broker_wire, 'release', lambda _: pytest.fail('foreign release'))
+    assert not ls.stop(kit.ws, agent.name).lease_released
