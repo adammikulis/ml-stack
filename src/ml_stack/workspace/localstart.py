@@ -280,6 +280,8 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         if agent is None:
             continue
         status, live = la.status_of(ws, name), la.alive(agent)
+        if live and float(status.get("beat") or 0) < agent.started:
+            status = {}
         state = str(status.get("state") or "starting") if live else (
             "failed" if status.get("state") == "failed" else "stopped")
         out.append({
