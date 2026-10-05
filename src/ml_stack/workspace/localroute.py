@@ -64,8 +64,8 @@ def _post_refusal(req: Request) -> Reply | None:
     return None
 
 
-def _model_view() -> dict[str, Any]:
-    pick = localmodel.choose(localmodel.AUTO, search=False)
+def _model_view(*, coding: bool = False) -> dict[str, Any]:
+    pick = localmodel.choose(localmodel.AUTO, search=False, coding=coding)
     return {"name": plain.line(pick.name, 80), "size_bytes": pick.size_bytes, "verdict": pick.verdict,
             "ok": pick.ok, "problem": plain.line(pick.problem, 300), "hint": plain.line(pick.hint, 200)}
 
@@ -78,7 +78,7 @@ def _read(ws: Workspace, route: str) -> Any:
                 "saved": [{key: getattr(agent, key) for key in START_KEYS}
                           for name in la.names(ws) if (agent := la.load(ws, name)) is not None]}
     if route == "model":
-        return _model_view()
+        return {**_model_view(), "profiles": {"chat": _model_view(), "coding": _model_view(coding=True)}}
     raise ValueError("no such route")
 
 

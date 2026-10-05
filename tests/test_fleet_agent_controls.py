@@ -1,5 +1,7 @@
 """Fleet mounts the maintained person agent-start flow and native saved settings."""
 
+import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -63,12 +65,20 @@ def test_actual_fleet_controls_require_auth_origin_header_and_typed_person_paylo
     assert server.call('/ui/agents/start', method='PUT', body=body, headers=origin)[0] == 405
     assert server.call('/ui/agents/start', method='POST', body={**body,'identity':worker}, headers=origin)[0] == 400
     assert not children
+    status_path=localagent.folder(kit.ws)/"local-worker.status.json"
+    status_path.write_text(json.dumps({"state":"stopped","beat":1,"tasks":99,"lease":{"id":"old"}}))
     code, result, _ = server.call('/ui/agents/start', method='POST', body=body, headers=origin)
     assert code == 200, result
     assert len(children) == 1
     assert localagent.load(kit.ws,'local-worker').identity == worker
     assert account_for(kit.ws,worker)['enrolled_by'] == kit.ws.auth(kit.owner).id
     listed = server.call('/ui/agents/list')[1]
+    assert listed['agents'][0]['state'] == 'starting'
+    assert listed['agents'][0]['tasks'] == 0
+    assert listed['agents'][0]['lease'] is False
+    agent=localagent.load(kit.ws,'local-worker')
+    status_path.write_text(json.dumps({'state':'idle','beat':agent.started+1}))
+    assert server.call('/ui/agents/list')[1]['agents'][0]['state'] == 'idle'
     assert listed['saved'][0]['model'] == PICK.ref
     assert listed['saved'][0]['project'] == str(server.ui.settings_path.parent)
     assert 'token' not in listed['saved'][0]
@@ -86,6 +96,8 @@ def test_person_board_controls_reuse_saved_settings_and_enroll_through_maintaine
         page.wait_for_function("document.querySelector('ml-agents')?.shadowRoot?.querySelector('#name')?.value === 'local-worker'")
         assert controls.locator('input#model').input_value() == PICK.ref
         assert controls.locator('input#project').input_value() == str(server.ui.settings_path.parent)
+        assert controls.get_by_text('Selected model:',exact=False).count() == 1
+        assert controls.get_by_text('auto uses',exact=False).count() == 0
         assert not controls.locator('details').get_attribute('open')
         assert controls.locator('input#context').input_value() == '262144'
         controls.get_by_role('button',name='Start a local agent',exact=True).click()
@@ -95,3 +107,13 @@ def test_person_board_controls_reuse_saved_settings_and_enroll_through_maintaine
         assert account_for(kit.ws,worker) is not None
     finally:
         page.close()
+
+
+def test_auto_model_hints_are_resolved_for_each_work_profile(served, monkeypatch):
+    server, _, _, _=served
+    monkeypatch.setattr(localmodel,'choose',lambda *args,**kw:replace(PICK,
+        name='Qwen3.8-27B' if kw.get('coding') else 'Qwen3.6-35B-A3B'))
+    code,result,_=server.call('/ui/agents/model')
+    assert code == 200
+    assert result['profiles']['coding']['name'] == 'Qwen3.8-27B'
+    assert result['profiles']['chat']['name'] == 'Qwen3.6-35B-A3B'

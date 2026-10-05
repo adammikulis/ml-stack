@@ -66,6 +66,7 @@ class MlAgents extends MlElement {
       placeholder: "local-" });
     this.modelField = h("input", { type: "text", id: "model", spellcheck: "false", autocomplete: "off",
       value: "auto" });
+    this.modelField.addEventListener("input", () => this.update());
     this.projectField = h("input", { type: "text", id: "project", spellcheck: "false", autocomplete: "off",
       placeholder: "optional" });
     this.roleControl = h("ml-select", { label: "What it may do", value: "" });
@@ -75,7 +76,7 @@ class MlAgents extends MlElement {
     this.profile.options = [{value:"chat",label:"Chat"},{value:"coding",label:"Coding"}];
     this.contextField = h("input", { type:"text", id:"context", value:"32K" });
     this.harness = h("ml-select", { label:"Harness", value:"ml-stack-agent" });
-    this.profile.addEventListener("change", event => { if (event.detail?.value) this.contextField.value = event.detail.value === "coding" ? "256K" : "32K"; });
+    this.profile.addEventListener("change", event => { if (event.detail?.value) { this.contextField.value = event.detail.value === "coding" ? "256K" : "32K"; this.update(); } });
     this.ceiling = h("ml-select", { label: "Maximum reasoning effort", hint: "It can raise its own effort up to this",
       value: "medium" });
     this.go = h("button", { class: "go", type: "button", onclick: () => this.start() }, "Start a local agent");
@@ -87,12 +88,11 @@ class MlAgents extends MlElement {
       h("section", {},
         h("h2", {}, "Start a local agent"),
         h("div", { class: "grid" },
-          h("div", {}, h("label", { for: "model" }, "Model"), this.modelField),
           h("div", {}, h("label", { for: "name" }, "Name"), this.nameField),
           h("div", {}, h("label", { for: "project" }, "Project folder"), this.projectField),
           this.roleControl, this.profile),
         h("details", {}, h("summary", {}, "Advanced options"),
-          h("div", {class:"grid"}, this.effort, this.ceiling, this.harness,
+          h("div", {class:"grid"}, h("div", {}, h("label", {for:"model"}, "Exact model path or reference (auto selects for the kind of work)"), this.modelField), this.effort, this.ceiling, this.harness,
             h("div", {}, h("label", {for:"context"}, "Context length"), this.contextField))),
         this.rolesEl, this.preview,
         h("div", { class: "row" }, this.go, this.note)),
@@ -185,6 +185,7 @@ class MlAgents extends MlElement {
     this.profile.value = saved.profile; this.effort.value = saved.effort;
     this.ceiling.value = saved.max_effort; this.harness.value = saved.harness;
     this.contextField.value = String(saved.ctx);
+    this.update();
   }
 
   async stop(name) {
@@ -209,10 +210,14 @@ class MlAgents extends MlElement {
     this.go.toggleAttribute("disabled", this.busy);
     this.rolesEl.replaceChildren(...this.roleList.map((r) =>
       h("li", {}, h("b", {}, line(r.name, 40)), ` ${line(r.summary, 200)}`)));
-    const m = this.model;
-    this.preview.textContent = !m ? "" : m.ok
-      ? `auto uses ${line(m.name, 80)}${m.size_bytes ? ` (${fmt(m.size_bytes, "bytes-iec")})` : ""}.`
-      : `${line(m.problem, 300)}${m.hint ? ` Run: ${line(m.hint, 200)}` : ""}`;
+    const selected = this.modelField.value.trim() || "auto";
+    const m = this.model?.profiles?.[this.profile.value || "chat"] || this.model;
+    this.preview.textContent = selected !== "auto"
+      ? `Selected model: ${line(selected.split(/[\\/]/).pop(), 120)}`
+      : !m ? "Checking the automatic model choice…" : m.ok
+        ? `Auto for ${this.profile.value || "chat"}: ${line(m.name, 80)}${m.size_bytes ? ` (${fmt(m.size_bytes, "bytes-iec")})` : ""}.`
+        : `${line(m.problem, 300)}${m.hint ? ` Run: ${line(m.hint, 200)}` : ""}`;
+    this.preview.title = selected === "auto" ? "" : selected;
     this.list.replaceChildren(...(this.failed
       ? [h("p", { class: "note error", role: "alert" }, "The workspace did not answer.")]
       : this.agents.length ? this.agents.map((a) => this.card(a))
