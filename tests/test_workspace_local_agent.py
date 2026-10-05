@@ -747,3 +747,15 @@ def test_stop_never_releases_a_foreign_holder(kit, monkeypatch):
         {'holders': [{'lease': 'foreign', 'pid': 99, 'pid_started': 12.0}]}]})
     monkeypatch.setattr(ls.broker_wire, 'release', lambda _: pytest.fail('foreign release'))
     assert not ls.stop(kit.ws, agent.name).lease_released
+
+
+def test_stop_retains_worker_when_broker_is_unavailable(kit, monkeypatch):
+    agent = la.Agent('local-qwen', 'model', pid=42, process_started=12.0)
+    la.save(kit.ws, agent)
+    la.Status(kit.ws, agent.name).update(lease={'id': 'owned'})
+    monkeypatch.setattr(la, 'alive', lambda _: False)
+    def unavailable(**kwargs):
+        raise OSError('broker unavailable')
+    monkeypatch.setattr(ls.broker_wire, 'status', unavailable)
+    assert not ls.stop(kit.ws, agent.name).lease_released
+    assert la.load(kit.ws, agent.name).pid == 0

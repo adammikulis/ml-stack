@@ -178,7 +178,7 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
-                         ctx=ctx, project=project, effort=ask.effort, max_effort=ask.max_effort,
+                         ctx=ctx, project=project, effort=le.clamp(le.valid(ask.effort), le.valid(ask.max_effort)), max_effort=ask.max_effort,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
         identity = _worker_identity(ws, have, name, project)
@@ -246,7 +246,10 @@ def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick) -> None:
 def _owns_lease(agent: la.Agent, lease: str) -> bool:
     if not lease or not agent.pid:
         return False
-    status = broker_wire.status(start=False)
+    try:
+        status = broker_wire.status(start=False)
+    except (OSError, RuntimeError):
+        return False
     return any(holder.get("lease") == lease and holder.get("pid") == agent.pid
                and holder.get("pid_started") == agent.process_started
                for server in status.get("servers", []) for holder in server.get("holders", []))
