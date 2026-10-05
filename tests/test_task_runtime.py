@@ -81,3 +81,21 @@ def test_missing_allocated_project_blocks_after_claim(tmp_path, monkeypatch):
     monkeypatch.setattr(task_runtime.tokens, 'load', lambda *_: 'token')
     result = task_runtime.execute(board, 'worker', 'task', 'allocation', lambda *_: pytest.fail('run'))
     assert result['state'] == 'blocked'
+
+
+@pytest.mark.parametrize('cause', ['Task wall time limit reached', 'Task lease heartbeat failed: socket denied'])
+def test_native_cancellation_preserves_the_supervisor_cause(tmp_path, monkeypatch, cause):
+    board = Board(tmp_path)
+    monkeypatch.setattr(task_runtime.tokens, 'load', lambda *_: 'token')
+    if 'heartbeat' in cause:
+        def heartbeat(*_):
+            raise RuntimeError('socket denied')
+        board.heartbeat = heartbeat
+    else:
+        board.task['limits']['max_wall_s'] = 0
+    def run(task, project, stopped, checkpoint):
+        while not stopped():
+            threading.Event().wait(0.01)
+        raise RuntimeError('Native coding turn cancelled or ended without an answer')
+    result = task_runtime.execute(board, 'worker', 'task', 'allocation', run)
+    assert result['blocked_reason'] == cause

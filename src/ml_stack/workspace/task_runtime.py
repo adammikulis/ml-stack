@@ -64,7 +64,8 @@ def execute(board, identity: str, task_id: str, allocation_id: str, run: Callabl
             raise RuntimeError(failure[0])
         return board.submit(token(), task_id, proposal)
     except (Denied, OSError, RuntimeError, ValueError) as error:
-        return board.block(token(), task_id, str(error)[:2000] or type(error).__name__)
+        reason = failure[0] if failure else str(error) or type(error).__name__
+        return board.block(token(), task_id, reason[:2000])
     finally:
         done.set()
         watcher.join(timeout=1)

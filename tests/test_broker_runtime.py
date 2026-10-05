@@ -1,5 +1,6 @@
 """Broker handshakes report observed runtime identity without guessing older processes."""
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -96,3 +97,16 @@ def test_known_incompatible_broker_refuses_mutation_but_allows_status(monkeypatc
     assert calls == []
     assert broker_wire.status()['runtime']['state'] == 'unknown'
     assert calls == ['status']
+
+
+@pytest.mark.parametrize('code', [errno.EACCES, errno.EPERM])
+def test_denied_broker_socket_does_not_start_a_replacement(monkeypatch, code):
+    monkeypatch.setattr(broker_wire, '_record', lambda: {'pid': 123, 'port': 1})
+    monkeypatch.setattr(broker_wire, 'pid_exists', lambda _: True)
+    def denied(*args, **kwargs):
+        raise PermissionError(code, os.strerror(code))
+    monkeypatch.setattr(broker_wire, '_send', denied)
+    monkeypatch.setattr(broker_wire.jobs, 'detach', lambda *args, **kwargs: pytest.fail('replacement launched'))
+    monkeypatch.setattr(broker_wire, 'write_json', lambda *args, **kwargs: pytest.fail('registry overwritten'))
+    with pytest.raises(broker_wire.BrokerError, match='authorized local socket access'):
+        broker_wire.call('status', start=True)

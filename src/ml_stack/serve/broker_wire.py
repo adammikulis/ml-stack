@@ -305,6 +305,12 @@ def _answering() -> dict[str, Any] | None:
         if not reply.get("ok") or reply.get("pid") != record["pid"]:
             return None
         return {**record, "runtime": broker_runtime.reported(reply.get("runtime"))}
+    except PermissionError as exc:
+        raise BrokerError(
+            f"Access to the registered broker (pid {record['pid']}) was denied; "
+            "launch this client with authorized local socket access. "
+            "The broker may still be running; do not start or stop a replacement."
+        ) from exc
     except (OSError, ValueError, BrokerError):
         return None
 
