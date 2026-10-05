@@ -11,7 +11,7 @@ from ml_stack import activity
 from ml_stack.files import read_json
 from ml_stack.reputation import economy
 from ml_stack.reputation.work import WorkLedger
-from ml_stack.workspace import tokens
+from ml_stack.workspace import device_accounts, tokens
 from ml_stack.workspace.identity import HUMAN, Denied, valid_id, valid_name
 from ml_stack.workspace.service import Workspace
 
@@ -100,9 +100,6 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
         raise ValueError('evidence offset must be between zero and 5000')
     with _store(ledger) as held:
         team = held.standings(scope(ws))
-    for item in team:
-        item['evidence_held'] = max(0, len(item['evidence']) - offset - 20)
-        item['evidence'] = item['evidence'][offset:offset + 20]
     aliases: dict[str, list[str]] = {}
     for path in (ws.base / 'local-agents').glob('*.json'):
         name = path.stem
@@ -120,12 +117,39 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
         if name not in known and ws.registry.info(name)['role'] != HUMAN:
             team.append({'agent': name, 'score': 0, 'verified_tasks': 0, 'evidence': [],
                          'aliases': aliases.get(name, []), **economy.summary([])})
-    own = next((item for item in team if item['agent'] == who.id),
-               {'agent': who.id, 'score': 0, 'verified_tasks': 0, 'evidence': [], **economy.summary([])})
-    return {'own': own, 'team': [item for item in team if not agent or item['agent'] == agent],
+    team = _accounts(ws, team)
+    account = device_accounts.account_for(ws, who.id)
+    own_id = account['base_id'] if account else who.id
+    own = next((item for item in team if item['agent'] == own_id),
+               {'agent': own_id, 'score': 0, 'verified_tasks': 0, 'evidence': [], **economy.summary([])})
+    for item in team:
+        item['evidence_held'] = max(0, len(item['evidence']) - offset - 20)
+        item['evidence'] = item['evidence'][offset:offset + 20]
+    return {'own': own, 'team': [item for item in team if not agent or item['agent'] == agent or agent in item['members']],
             'offset': offset, 'authority': 'none',
             'economy_mode': 'free',
             'metric': 'Completion credits and reviewed quality bonuses; runs are free.'}
+
+
+def _accounts(ws, team):
+    groups = {}
+    for row in team:
+        account = device_accounts.account_for(ws, row['agent'])
+        base = account['base_id'] if account else row['agent']
+        group = groups.setdefault(base, {'agent': base, 'members': set(), 'aliases': set(),
+                                        'evidence': [], 'enrolled': bool(account)})
+        group['members'].update(account['members'] if account else [row['agent']])
+        group['aliases'].update(row.get('aliases', []))
+        group['evidence'].extend(row['evidence'])
+        if account:
+            group['device_id'] = account['device_id']
+    result = []
+    for group in groups.values():
+        evidence = sorted(group['evidence'], key=lambda item: -item['verified_at'])
+        result.append({**group, 'members': sorted(group['members']), 'aliases': sorted(group['aliases']),
+                       'evidence': evidence, 'score': len(evidence), 'verified_tasks': len(evidence),
+                       **economy.summary(evidence)})
+    return sorted(result, key=lambda item: item['agent'])
 
 
 def brief(ws, token: str) -> str:

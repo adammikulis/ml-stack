@@ -47,7 +47,7 @@ def test_verified_task_credits_once_and_reopens_with_evidence(work):
     reopened = WorkLedger(SealedGraph(sealed.path, keys=sealed.keys))
     try:
         result = standings(work.ws, work.child, ledger=reopened)
-        assert result['own']['score'] == 1 and result['team'][0]['evidence'][0]['artifacts'] == {'result.json': 'a' * 64}
+        assert result['own']['score'] == 1 and result['own']['evidence'][0]['artifacts'] == {'result.json': 'a' * 64}
     finally:
         reopened.sealed.close()
 
@@ -131,7 +131,8 @@ def test_person_reputation_route_is_read_only_and_session_guarded(work, tmp_path
         assert server.call('/ui/work-reputation/standings?agent=../../owner', cookie=cookie)[0] == 400
         verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
         code, result, _ = server.call('/ui/work-reputation/standings', cookie=cookie)
-        assert code == 200 and result['team'][0]['score'] == 1
+        assert code == 200
+        assert next(item for item in result['team'] if item['agent'] == work.agent_id)['score'] == 1
         assert work.child not in str(result) and work.owner not in str(result)
     finally:
         server.close()
@@ -162,11 +163,11 @@ def test_history_shows_verified_score_and_expandable_parent_evidence(work, tmp_p
             page = browser.new_page(viewport={'width': 390, 'height': 844})
             page.goto(f'http://127.0.0.1:{server.port}/ui/#history')
             viewer = page.locator('history-view')
-            viewer.get_by_text('1 verified completion credits', exact=True).click()
+            viewer.locator('#history-credits > details > summary').filter(has_text=work.agent_id).click()
             viewer.get_by_text(f"Task {work.task['seq']} · verified by lead", exact=True).click()
             expect(viewer.get_by_text('native regression suite', exact=False)).to_be_visible()
             expect(viewer.get_by_text('result.json', exact=False)).to_be_visible()
-            expect(viewer.get_by_text(f'Registered identity: {work.agent_id}', exact=True)).to_be_visible()
+            expect(viewer.get_by_text(f'Account identity: {work.agent_id}', exact=True)).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path='/private/tmp/ml-stack-work-reputation-history.png', full_page=True)
     finally:
@@ -229,7 +230,8 @@ def test_free_economy_separates_credits_ratings_and_unknown_usage(work):
     assert row['economy']['usage']['tokens_in'] is None
     assert row['work_reputation']['state'] == 'unrated'
     assert row['pricing']['price'] == 0 and not row['pricing']['active_charging']
-    assert first['award'] == {'base': 10, 'quality_bonus': 0, 'total': 10, 'quality': []}
+    assert first['award'] == {'policy': 'completion-quality-v1', 'currency': 'work-credit',
+                              'base': 10, 'quality_bonus': 0, 'total': 10, 'quality': []}
 
 
 def reviewed_evidence(work):
@@ -287,3 +289,73 @@ def test_model_switches_keep_one_authenticated_agent_account(work):
     assert row['verified_tasks'] == 2 and row['work_reputation']['samples'] == 2
     assert {item['provenance']['model'] for item in row['evidence']} == {'first.gguf', 'second.gguf'}
     assert len([item for item in result['team'] if item['agent'] == work.agent_id]) == 1
+
+
+def test_two_workers_roll_up_to_one_owner_enrolled_device_across_models(work, monkeypatch):
+    from ml_stack import home
+    from ml_stack.workspace import device_agent, localagent
+
+    monkeypatch.setattr(home, 'machine_id', lambda: 'physical-one')
+    localagent.save(work.ws, localagent.Agent('worker-one', 'first.gguf', identity=work.agent_id))
+    account = device_agent.bind_worker(work.ws, work.owner, 'worker-one')
+    verify(work.ws, work.parent, work.agent_id, reviewed_evidence(work), ledger=work.ledger)
+    another = work.ws.delegate(work.parent, 'second')
+    second = another['id']
+    second_token = tokens.read_file(Path(another['token_file']))
+    localagent.save(work.ws, localagent.Agent('worker-two', 'second.gguf', identity=second))
+    device_agent.bind_worker(work.ws, work.owner, 'worker-two')
+    task = work.ws.send(work.parent, second, 'task', 'Other model task')
+    done = work.ws.send(second_token, 'lead', 'answer', 'Completed', reply_to=task['seq'])
+    verify(work.ws, work.parent, second, {**reviewed_evidence(work), 'task': task['seq'],
+                                        'completion': done['seq'],
+                                        'provenance': {'model': 'second.gguf', 'harness': 'claude'}},
+           ledger=work.ledger)
+    row = standings(work.ws, second_token, ledger=work.ledger)['own']
+    assert row['agent'] == account['base_id'] and row['device_id'] == 'physical-one'
+    assert row['economy']['balance'] == 30 and row['verified_tasks'] == 2
+    assert {work.agent_id, second} <= set(row['members'])
+    assert {item['agent'] for item in row['evidence']} == {work.agent_id, second}
+    assert {'worker-one', 'worker-two'} <= set(row['aliases'])
+    assert standings(work.ws, work.child, ledger=work.ledger)['own']['agent'] == row['agent']
+
+
+@pytest.mark.redteam
+def test_foreign_device_rebinding_and_agent_enrollment_cannot_steal_credits(work, monkeypatch):
+    from ml_stack import home
+    from ml_stack.workspace import device_agent, localagent
+
+    localagent.save(work.ws, localagent.Agent('worker', 'model.gguf', identity=work.agent_id))
+    monkeypatch.setattr(home, 'machine_id', lambda: 'first-device')
+    first = device_agent.bind_worker(work.ws, work.owner, 'worker')
+    verify(work.ws, work.parent, work.agent_id, work.evidence, ledger=work.ledger)
+    with pytest.raises(Denied):
+        device_agent.bind_worker(work.ws, work.child, 'worker')
+    monkeypatch.setattr(home, 'machine_id', lambda: 'second-device')
+    with pytest.raises(Denied):
+        device_agent.bind_worker(work.ws, work.owner, 'worker')
+    second = device_agent.enroll(work.ws, work.owner)
+    rows = standings(work.ws, work.owner, ledger=work.ledger)['team']
+    assert next(row for row in rows if row['agent'] == first['base_id'])['economy']['balance'] == 10
+    assert next(row for row in rows if row['agent'] == second['base_id'])['economy']['balance'] == 0
+
+
+def test_awards_ratings_and_usage_are_linked_graph_evidence_and_migration_is_once(work, monkeypatch):
+    verify(work.ws, work.parent, work.agent_id, reviewed_evidence(work), ledger=work.ledger)
+    graph = work.ledger.sealed.graph()
+    assert len(graph.nodes('work_award')) == 1
+    assert len(graph.nodes('work_quality_review')) == 1
+    assert len(graph.nodes('work_rating')) == 1 and len(graph.nodes('work_usage')) == 1
+    assert any(edge['rel'] == 'earned' for edge in graph.edges())
+    assert any(edge['rel'] == 'supported_by' for edge in graph.edges())
+    assert work.ledger.migrate_credit_awards() == 0
+    node = graph.nodes('work_evidence')[0]
+    historical = {**node['attrs']}
+    historical.pop('award')
+    def remove_award(current):
+        current.upsert_node({**node, 'attrs': historical})
+    work.ledger.sealed.edit(remove_award)
+    assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['pending_awards'] == 1
+    assert work.ledger.migrate_credit_awards() == 1
+    assert work.ledger.migrate_credit_awards() == 0
+    monkeypatch.setattr('ml_stack.reputation.economy.BASE_CREDITS', 1000)
+    assert standings(work.ws, work.child, ledger=work.ledger)['own']['economy']['balance'] == 10

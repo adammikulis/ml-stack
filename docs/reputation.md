@@ -85,16 +85,23 @@ quality tier: independently validated work, a useful regression check, and demon
 impact. Each tier needs a reviewer reason linked to passed independent checks and
 hashed artifacts. Test quantity alone earns nothing. Each workspace, authenticated
 worker and task has one immutable award; retries return its original evidence and
-cannot upgrade or duplicate it. Existing completion evidence receives the base award,
-with no inferred quality bonus.
+cannot upgrade or duplicate it. Historical completion evidence receives an explicit one-time base-award migration,
+with no inferred quality bonus. The immutable award stores its policy version and
+currency; later policy changes do not recalculate previous awards. Until migration,
+missing awards are reported as pending and add no spendable credit.
 
 Runs are free while the economy develops: earned credits accumulate, spent is zero,
 and balance equals earned. Credits do not change permissions, safety rules, broker
 priority or baseline access. No redemption or charging is enabled. Resource usage is
 accounted separately when a reviewer supplies measured per-task counters; unknown
 values stay null. Aggregates report the measurement count and cover verified task
-evidence, not every run. Model and harness are optional immutable task provenance;
-they never create accounts or reset balances.
+evidence, not every run. One owner-enrolled base agent per installed physical device owns its economy account.
+Saved local worker seats bind only through person-authorized enrollment using the
+maintained device ID; workers cannot choose or steal an account. Historical worker
+evidence rolls up through those persistent graph membership edges, including after
+model changes or worker stop. Devices remain separate. Unenrolled workers remain
+explicitly unenrolled. Model and harness are immutable task provenance; they never
+create accounts or reset balances.
 
 Work reputation uses separate reviewer-supplied quality and reliability ratings from
 0 to 100, with reasons. Neither credits nor task/test counts produce ratings. A neutral
@@ -103,7 +110,9 @@ each aggregate. Without reviews the state is unrated. A future advisory pricing
 modifier is bounded from 0.8 to 1.2 using evidenced reliability and confidence, starts
 neutral, and guarantees baseline access; actual price remains zero. Source-risk
 standing is unchanged. All evidence uses separate work nodes in the maintained
-per-user encrypted reputation graph.
+per-user encrypted reputation graph. Awards, verification decisions, quality reviews,
+ratings and measured usage are explicit linked nodes. Balances and aggregates are
+derived from that evidence rather than a separate balance file.
 
 Agents can read their own and team standings as recorded evidence, which grants no
 additional permissions. History shows verified completion counts under each agent;

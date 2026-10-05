@@ -57,7 +57,8 @@ def assessment(raw: dict[str, Any]) -> dict[str, Any]:
             raise ValueError('task provenance needs model and harness')
         for value in provenance.values():
             _reason(value)
-    return {'base': BASE_CREDITS, 'quality_bonus': 5 * len(quality),
+    return {'policy': 'completion-quality-v1', 'currency': 'work-credit',
+            'base': BASE_CREDITS, 'quality_bonus': 5 * len(quality),
             'total': BASE_CREDITS + 5 * len(quality), 'quality': quality}
 
 
@@ -68,8 +69,7 @@ def _reason(value: Any) -> None:
 
 def summary(evidence: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate credits and explicitly reviewed ratings, with unmeasured usage left unknown."""
-    awards = [item.get('award') or {'base': BASE_CREDITS, 'quality_bonus': 0,
-                                  'total': BASE_CREDITS, 'quality': []} for item in evidence]
+    awards = [item.get('award') or {'base': 0, 'quality_bonus': 0, 'total': 0, 'quality': []} for item in evidence]
     reviews = [item['review'] for item in evidence if item.get('review') is not None]
     usage = [item['usage'] for item in evidence if item.get('usage') is not None]
     earned = sum(item['total'] for item in awards)
@@ -79,6 +79,7 @@ def summary(evidence: list[dict[str, Any]]) -> dict[str, Any]:
     modifier = round(1 + (50 - ratings['reliability']) / 250 * confidence, 3)
     return {'economy': {'mode': 'free', 'earned': earned, 'spent': 0, 'balance': earned,
                         'completion_credits': sum(item['base'] for item in awards),
+                        'pending_awards': sum(not item.get('award') for item in evidence),
                         'quality_credits': sum(item['quality_bonus'] for item in awards),
                         'usage': {'recorded': bool(usage), 'tasks': len(usage),
                                   'scope': 'verified_task_evidence',
