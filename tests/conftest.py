@@ -903,6 +903,16 @@ def _live(rel: str) -> bool:
     return rel.endswith(".key") is False and any(fnmatch.fnmatch(rel, g) for g in LIVE_PATHS)
 
 
+def _external_keystore_lock(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ("keystore/state.lock", "keystore/flight.lock"):
+        return False
+    try:
+        owner = int((root / rel).read_text(encoding="ascii")[:32].strip())
+    except (OSError, ValueError, UnicodeError):
+        return False
+    return owner > 0 and not ours({"owner_pid": owner})
+
+
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
@@ -914,6 +924,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
             filenames = [f for f in filenames if f not in skip]
         for name in filenames:
             if name.endswith(".tmp"):
+                continue
+            if skip is LIVE_WRITERS and _external_keystore_lock(root, rel / name):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
