@@ -28,13 +28,14 @@ class TasksView extends HTMLElement{
  this.querySelector('.task-list').replaceChildren(...rows.map(row=>E('button',{class:'task-row',type:'button','aria-pressed':String(row.id===this.selected),onclick:()=>{this.selected=row.id;this.paint();}},row.title,E('small',{},`${row.state} · ${row.base_id||'Unassigned account'}`))));
  if(!rows.length)this.querySelector('.task-list').append(E('p',{},'No matching tasks.'));
  const row=this.rows.find(row=>row.id===this.selected);if(row)this.details(row);}
- field(list,label,value){if(value!==undefined&&value!==null&&value!=='')list.append(E('dt',{},label),E('dd',{},String(value)));}
+ field(list,label,value){if(value!==undefined&&value!==null&&value!=='')list.append(E('dt',{},label),E('dd',{},value instanceof Node?value:String(value)));}
  evidence(title,value){return E('details',{},E('summary',{},title),E('pre',{},W.json(value)));}
- details(row){const host=this.querySelector('.task-detail'),list=E('dl',{});host.replaceChildren(E('h2',{},row.title),E('span',{class:'badge'},row.state),E('p',{},row.description),list);
- for(const [label,value] of [['Account',row.base_id],['Device',row.device_id],['Worker',row.worker],['Task ID',row.id],['Blocked reason',row.blocked_reason],['Resource model',row.lease?.resource?.model],['Authorized project',row.lease?.resource?.project],['Lease expires',row.lease?.deadline?new Date(row.lease.deadline*1000).toLocaleString():null]])this.field(list,label,value);
+ details(row){const host=this.querySelector('.task-detail'),list=E('dl',{}),opened=new Set([...host.querySelectorAll('[data-publishing-key][open]')].map(node=>node.dataset.publishingKey));host.replaceChildren(E('h2',{},row.title),E('span',{class:'badge'},row.state),E('p',{},row.description),list);
+ for(const [label,value] of [['Account',row.base_id],['Device',row.device_id],['Worker',row.worker],['Task ID',row.id],['Blocked reason',row.blocked_reason],['Resource model',row.lease?.resource?.model],['Authorized project',window.taskPublishingProject(row.lease?.resource?.project,row.id)],['Lease expires',row.lease?.deadline?new Date(row.lease.deadline*1000).toLocaleString():null]])this.field(list,label,value);
  host.append(E('h3',{},'Acceptance criteria'),E('ul',{},...row.acceptance.map(item=>E('li',{},item))));
  if(row.dependencies?.length)host.append(this.evidence('Dependencies',row.dependencies));
  for(const [label,value] of [['Resource lease',row.lease],['Worker checkpoints',row.checkpoints],['Submitted proposal and artifact hashes',row.proposal],['Independent reviews',row.reviews]])if(value&&(Array.isArray(value)?value.length:true))host.append(this.evidence(label,value));
+ host.append(window.taskPublishing(row));for(const node of host.querySelectorAll('[data-publishing-key]'))node.open=opened.has(node.dataset.publishingKey);
  if(row.state==='review')this.reviewForm(host,row);
  if(row.review)this.creditControl(host,row);
  if(row.state==='blocked'||row.state==='working'&&row.lease?.deadline*1000<Date.now())this.resumeForm(host,row);}

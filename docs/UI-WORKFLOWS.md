@@ -142,6 +142,12 @@ allocation and expire without renewed heartbeats. Checkpoints and submitted chec
 worker claims; completion requires independent passed checks covering the acceptance
 criteria. Infrastructure blockage is distinct from rejection and earns no completion credit.
 
+Expand **Publishing** to inspect the independently reviewed source and proposal, gated
+development commit, gate exit codes and output hashes, once-only attempt timestamps,
+and any blocking owner or reason. Publishing is inspection-only: it offers no retry or
+permission controls. Open sections stay open while task data refreshes. The authorized
+project shows its folder name; expand it to inspect the full path.
+
 Designated peer assignees and reviewers need an existing person-set project grant matching
 the task's permission metadata. Listing an identity in a task creates no new authority.
 An actual worker cannot review its own proposal. Execution paths come from the verified

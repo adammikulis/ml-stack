@@ -17,7 +17,8 @@ COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view"
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",
               "gym-drone-camera", "gym-scene", "gym-recordings",
               "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
-MODULES = {"task-review-quality": frozenset({"tasks-view"}),
+MODULES = {"task-publishing": frozenset({"tasks-view"}),
+           "task-review-quality": frozenset({"tasks-view"}),
            "gym-drone-geometry": frozenset({"gym-scene"}),
            "setup-recovery": frozenset({"first-run"}),
            "chat-model-picker": frozenset({"chat-view"}),
