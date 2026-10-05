@@ -40,8 +40,10 @@ def route(request) -> bool:
                 result = board.create(token, body.get('spec'))
             elif action == 'review' and set(body) == {'action', 'id', 'decision'}:
                 result = board.review(token, body['id'], body['decision'])
+            elif action in ('resume', 'recover') and set(body) == {'action', 'id', 'reason'}:
+                result = getattr(board, action)(token, body['id'], body['reason'])
             else:
-                raise ValueError('tasks accept only create or independent review requests')
+                raise ValueError('tasks accept create, independent review, resume or recovery requests')
         request.send(200, result)
     except Denied:
         request.send(403, {'error': 'task authority is unavailable'})

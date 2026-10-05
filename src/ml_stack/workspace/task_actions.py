@@ -16,7 +16,7 @@ HEARTBEAT_S = 120
 
 
 def claim(ws, graph, who, task, allocation):
-    if task['state'] not in ('queued', 'blocked'):
+    if task['state'] != 'queued':
         raise Denied('the task is already claimed or has an outcome')
     if task['failures'] > task['limits'].get('max_retries', 3):
         raise Denied('task retry budget exhausted')
@@ -98,7 +98,8 @@ def submit(board, token, ident, value):
                     'at': board.ws.clock(), 'lease_id': lease['id'], **value}
         proposal['claimed_provenance'] = proposal['provenance']
         proposal['provenance'] = {**proposal['provenance'], 'model': lease['resource']['model'],
-                                  'allocation_id': lease['allocation_id']}
+                                  'allocation_id': lease['allocation_id'],
+                                  'runtime': lease['resource'].get('harness') or lease['resource'].get('profile', '')}
         proposal['proposal_hash'] = fingerprint(proposal)
         save(graph, 'proposal', proposal)
         link(graph, ident, proposal['id'], 'proposed-outcome')
@@ -164,5 +165,40 @@ def block(board, token, ident, reason, kind):
         lease = record(graph, task['lease_id'], 'lease')
         lease['active'] = False
         save(graph, 'lease', lease)
+        save(graph, 'task', task)
+        return task
+
+
+def ready(board, token, ident, reason, *, expired):
+    who = board._auth(token, 'send')
+    reason = text(reason, 'resume reason', 2000)
+    with board._store() as graph:
+        task = board._task(graph, ident)
+        board._reviewer(who, task)
+        if expired:
+            if task['state'] != 'working':
+                raise ValueError('only a working task can recover an expired lease')
+            lease = record(graph, task['lease_id'], 'lease')
+            if lease['deadline'] > board.ws.clock():
+                raise Denied('a live task lease cannot be recovered')
+            task['failures'] += 1
+        elif task['state'] != 'blocked':
+            raise ValueError('only an explicitly blocked task can resume')
+        else:
+            lease = record(graph, task['lease_id'], 'lease')
+        if task['failures'] > task['limits'].get('max_retries', 3):
+            raise Denied('task retry budget exhausted')
+        lease['active'] = False
+        save(graph, 'lease', lease)
+        if task.get('blocked_at') is not None:
+            task['blocked_seconds'] += max(0, board.ws.clock() - task.pop('blocked_at'))
+        entry = {'id': f'checkpoint:{uuid4().hex}', 'task': ident, 'worker': task['worker'],
+                 'at': board.ws.clock(), 'summary': reason, 'transition': 'recover' if expired else 'resume',
+                 'authorized_by': who.id, 'lease_id': lease['id']}
+        save(graph, 'checkpoint', entry)
+        link(graph, ident, entry['id'], 'checkpoint')
+        task.update(state='queued', resumed_by=who.id, resume_reason=reason)
+        task.pop('blocked_reason', None)
+        task.pop('blocked_kind', None)
         save(graph, 'task', task)
         return task

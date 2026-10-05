@@ -162,3 +162,27 @@ def test_designated_peer_requires_existing_project_grant_and_cannot_self_review(
     board.ws.registry.set_project(owner, 'independent-reviewer', {'root': '/elsewhere'})
     with pytest.raises(Denied):
         board.board.assert_reviewer(peer, board.task['id'])
+
+
+@pytest.mark.redteam
+def test_expired_claim_requires_bounded_independent_recovery_and_blocked_explicit_resume(board):
+    ident = board.task['id']
+    board.board.claim(board.child, ident, board.allocation['allocation_id'])
+    with pytest.raises(Denied, match='live task lease'):
+        board.board.recover(board.owner, ident, 'Attempt premature takeover')
+    board.now[0] += 121
+    with pytest.raises(Denied):
+        board.board.claim(board.child, ident, board.allocation['allocation_id'])
+    board.board.recover(board.owner, ident, 'Previous worker heartbeat expired')
+    board.board.claim(board.child, ident, board.allocation['allocation_id'])
+    board.board.block(board.child, ident, 'Approval pending')
+    with pytest.raises(Denied):
+        board.board.claim(board.child, ident, board.allocation['allocation_id'])
+    with pytest.raises(Denied):
+        board.board.resume(board.child, ident, 'Self approved')
+    board.now[0] += 1
+    board.board.resume(board.owner, ident, 'Person approved continuation')
+    board.board.claim(board.child, ident, board.allocation['allocation_id'])
+    detail = board.board.get(board.owner, ident)
+    assert [row['transition'] for row in detail['checkpoints']] == ['recover', 'resume']
+    assert detail['failures'] == 1

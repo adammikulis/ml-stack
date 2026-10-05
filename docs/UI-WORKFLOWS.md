@@ -146,3 +146,10 @@ Designated peer assignees and reviewers need an existing person-set project gran
 the task's permission metadata. Listing an identity in a task creates no new authority.
 An actual worker cannot review its own proposal. Execution paths come from the verified
 scheduler allocation, never from task descriptions or browser-supplied permission metadata.
+
+Expired working leases require an explicit authorized recovery, which records a checkpoint
+and consumes the task retry budget. Blocked tasks require an authorized resume with a
+recorded reason after their blocking condition is addressed; the scheduler cannot silently
+retry them. Recovery and resume do not grant native resources: the next claim still verifies
+a fresh live allocation. Configured task limits currently cover model selection, wall time
+and retry count; unsupported memory/context/token guarantees are not inferred from labels.
