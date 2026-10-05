@@ -575,3 +575,20 @@ The adapters run against the real `sentinel` store and `guard` patterns in the s
 (`tests/test_workspace_surface.py`, no stand-ins). The MCP SDK transport was not exercised here.
 
 Left out: see "The agent workspace" in `HANDOFF.md`.
+
+### Mutation ownership
+
+Native coding harness hooks check the launcher's registered identity before permitted
+mutations. Known file tools, patches and inspectable shell targets reserve file or worktree
+claims atomically. Explicit serving ports and Python install environments are reserved as
+resources too. A conflicting owner is rejected before an approval request; a person approval
+does not override another agent's claim. Unknown acting shell programs reserve the approved
+project worktree rather than inferring individual files. Safe reads do not reserve resources.
+
+These reservations require the existing person-set project grant and launcher-approved
+roots. Tool arguments cannot change the owner or expand those permissions. Reservations
+record the hook parent's PID/start time, checked-out commit when available, and the hook's
+interpreter/environment. Claims expire and remain renewable within the existing lifetime
+cap; they serialize cooperating managed tools, not arbitrary external processes. The serving
+broker continues to enforce its own live model/GPU leases. Ownership does not award credits
+or change security reputation.

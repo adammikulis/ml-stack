@@ -15,8 +15,8 @@ from ml_stack.workspace.identity import AGENT, Denied, Identity
 
 __all__ = ["EXPIRING_SOON_S", "KINDS", "MAX_LIFETIME_S", "MAX_RENEW_S", "Claims", "Conflict", "alive", "normal"]
 
-KINDS = ("branch", "worktree", "port", "file", "server")
-PATH_KINDS = ("worktree", "file")
+KINDS = ("branch", "worktree", "port", "file", "server", "install")
+PATH_KINDS = ("worktree", "file", "install")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,199}$")
 VERSION = 1
 EXPIRING_SOON_S = 300.0
@@ -132,6 +132,35 @@ class Claims:
                     if old["owner"] != who.id and _covers(old, kind, key):
                         self.on_stolen(old, made)
             return made, swept
+
+    def reserve(self, who: Identity, resources: list[tuple[str, str]],
+                fields: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Atomically reserve a mutation's resources or refuse its entire conflicting set."""
+        if len(resources) > 128:
+            raise ValueError('a mutation reserves at most 128 resources')
+        resources = list(dict.fromkeys((kind, normal(kind, key)) for kind, key in resources))
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            for kind, key in resources:
+                for other in claims.values():
+                    if _covers(other, kind, key) and other['owner'] != who.id:
+                        raise Conflict(f"{kind} {key} belongs to {other['owner']}", other)
+            now, made = self.clock(), []
+            for kind, key in resources:
+                old = claims.get(f'{kind}:{key}')
+                since = old['since'] if old else now
+                expiry = min(now + self.ttl_s, since + MAX_LIFETIME_S)
+                if expiry <= now:
+                    raise Denied('ownership lifetime exhausted; release the resource before continuing')
+                entry = {'kind': kind, 'key': key, 'owner': who.id, 'pid': 0, 'since': since,
+                         'expires': expiry, 'note': str((fields or {}).get('note', ''))[:200]}
+                entry.update({key: value for key, value in (fields or {}).items()
+                              if key in ('owner_pid', 'owner_started', 'interpreter', 'environment', 'commit')})
+                claims[f'{kind}:{key}'] = entry
+                made.append(entry)
+            self._save(claims)
+            return made
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim. Its owner, a lead or a human may."""
