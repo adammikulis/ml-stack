@@ -1,5 +1,6 @@
 """Canonical native coding uses bounded turns and cancels its owned process."""
 
+import json
 import threading
 from types import SimpleNamespace
 
@@ -21,11 +22,38 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch):
     context = (None, 'claude', 'prompt', None)
     manager._process(None, ['claude', '--print'], {'AUTHORITY': 'unchanged'}, context)
     assert seen['command'][-2:] == ['--max-turns', '60']
-    assert seen['environment']['CLAUDE_CODE_MAX_OUTPUT_TOKENS'] == '4096'
+    assert 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen['environment']
     assert seen['environment']['CLAUDE_CODE_EFFORT_LEVEL'] == 'low'
     assert seen['environment']['AUTHORITY'] == 'unchanged'
     with pytest.raises(ValueError, match='bounded Claude'):
         manager._process(None, ['codex'], {}, (None, 'codex', 'prompt', None))
+
+
+@pytest.mark.parametrize('effort, thinking', [('off', False), ('medium', True)])
+def test_native_template_thinking_is_separate_from_output_and_stream(monkeypatch, effort, thinking):
+    agent = localagent.Agent('worker', 'Qwen3.8-27B.gguf', harness='claude', effort=effort)
+    seen = {}
+    monkeypatch.setattr(task_coding.Manager, '_process',
+                        lambda self, turn, command, environment, context: seen.update(environment) or 0)
+    manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
+    manager._process(None, ['claude'], {'CLAUDE_CODE_MAX_OUTPUT_TOKENS': '12000',
+        'CLAUDE_CODE_EXTRA_BODY': json.dumps({'stream': True, 'max_tokens': 12000,
+            'chat_template_kwargs': {'custom': 'kept', 'enable_thinking': not thinking}})},
+        (None, 'claude', 'prompt', None))
+    body = json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])
+    assert body == {'stream': True, 'max_tokens': 12000,
+                    'chat_template_kwargs': {'custom': 'kept', 'enable_thinking': thinking}}
+    assert seen['CLAUDE_CODE_MAX_OUTPUT_TOKENS'] == '12000'
+    if not thinking:
+        assert seen['MAX_THINKING_TOKENS'] == '0'
+
+
+@pytest.mark.parametrize('body', ['broken', '[]', '{"chat_template_kwargs":[]}'])
+def test_invalid_native_extra_body_does_not_launch(monkeypatch, body):
+    monkeypatch.setattr(task_coding.Manager, '_process', lambda *_: pytest.fail('native launched'))
+    manager = task_coding.TaskManager(None, SimpleNamespace(base=None), localagent.Agent('worker', 'qwen'))
+    with pytest.raises(ValueError):
+        manager._process(None, ['claude'], {'CLAUDE_CODE_EXTRA_BODY': body}, (None, 'claude', '', None))
 
 
 def test_canonical_stop_cancels_native_turn(tmp_path, monkeypatch):

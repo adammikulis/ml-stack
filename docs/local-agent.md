@@ -58,7 +58,10 @@ Caps per task: 12 tool-calling rounds, 30 tool calls, 24 model calls, 600 s, and
 
 ## Effort and the prompt cache
 
-Effort is compute only: `off` (no thinking, 2048 tokens a reply), `low`, `medium`, `high` (16384).
+Effort selects reasoning: `off`, `low`, `medium`, or `high`. Native coding sends the
+selected model family's thinking flag in `CLAUDE_CODE_EXTRA_BODY`; `off` explicitly disables
+Qwen template thinking. It does not impose an output limit from the effort level. Explicit
+caller output budgets are retained; otherwise the native harness uses its own output default.
 The default is `off`. The model may raise or lower its own effort with `set_effort(level, reason)` up
 to `--max-effort` (default `medium`); above the ceiling is refused with the ceiling in the message.
 The change applies from the next task, so a task's prompt is never rewritten; it is recorded in the
