@@ -133,6 +133,8 @@ def test_the_hook_counts_what_a_commit_deletes(tmp_path):
     (src / "leaving.py").write_text('def a():\n    print("one")\n    print("two")\n')
     (src / "staying.py").write_text("def b():\n    return 1\n")
     (tmp_path / "budgets.json").write_text('{"print-calls": 2}\n')
+    (tmp_path / "pyproject.toml").write_text(
+        (REPO / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8")
     run("add", "-A")
     run("commit", "-qm", "before")
 
