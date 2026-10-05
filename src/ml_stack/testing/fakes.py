@@ -724,9 +724,36 @@ def fake_llama_server(served: Served | None = None, *, port: int = 0
 
 # ---------------------------------------------------------------- as a binary
 
+def _windows_fake(where: Path, name: str) -> Path:
+    """Build a Windows executable launcher for the fake program."""
+    from distlib.scripts import ScriptMaker
+
+    maker = ScriptMaker(None, str(where))
+    maker.variants = {""}
+    maker.executable = sys.executable
+    maker.script_template = maker.script_template.replace(
+        "import sys\n", f"import sys\nsys.path.insert(0, {str(_import_root())!r})\n")
+    created = maker.make(f"{name} = ml_stack.testing.fakes:_fake_entry")
+    return Path(created[0])
+
+
+def _fake_entry() -> int:
+    """Run the Windows fake executable's help stub or socket server."""
+    path = Path(sys.argv[0])
+    stub = path.with_suffix(".stub")
+    if stub.is_file():
+        if "--help" in sys.argv[1:]:
+            sys.stdout.write(stub.read_text(encoding="utf-8"))
+        return 0
+    return serve_from_argv(sys.argv[1:], where=path.parent)
+
+
 def fake_binary(where: Path, *, help_text: str = "-m, --model FNAME  model path\n",
                 name: str = "llama-server") -> Path:
     """An executable in ``where`` answering ``--help`` with ``help_text``, exit 0 otherwise."""
+    if os.name == "nt":
+        (where / f"{name}.stub").write_text(help_text, encoding="utf-8")
+        return _windows_fake(where, name)
     path = where / name
     path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
                     + help_text + "HELP\nexit 0\nfi\nexit 0\n")
@@ -811,6 +838,10 @@ def fake_llama_binary(where: Path, *, name: str = "llama-server",
     process scan as ``llama-server``, and answers everything `FakeLlamaServer` answers
     for the model, context, slots and draft head its command line named.
     """
+    if os.name == "nt":
+        if help_text is not None:
+            (where / "help.txt").write_text(help_text, encoding="utf-8")
+        return _windows_fake(where, name)
     path = where / name
     if help_text is not None:
         (where / "help.txt").write_text(help_text)

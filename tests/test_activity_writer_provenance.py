@@ -10,6 +10,7 @@ import psutil
 import pytest
 
 from ml_stack.activity import writer
+from ml_stack.keystore import os_user
 
 
 def test_activity_drop_records_actual_process_identity_and_write_time(tmp_path, monkeypatch):
@@ -99,8 +100,21 @@ def test_external_writer_expiry_does_not_fabricate_a_state_write(tmp_path, monke
 
 
 def test_actual_test_writer_mutation_is_not_attributed_to_external_process(tmp_path, monkeypatch):
-    path=tmp_path/'activity'/f'u-{os.getuid()}'/'drops.json'
+    path=tmp_path/'activity'/('u-' + os_user().partition(':')[0])/'drops.json'
     path.parent.mkdir(parents=True)
     before=conftest.file_mtimes(tmp_path,attribute_external=False)
     path.write_text(json.dumps({'writer_pid':os.getpid(),'writer_started':psutil.Process().create_time(),'writer_at':time.time()}))
     assert conftest.real_state_changes(tmp_path,before,conftest.file_mtimes(tmp_path,attribute_external=False)) == [path.relative_to(tmp_path).as_posix()]
+
+
+@pytest.mark.parametrize("account, user, expected", [
+    ("fixture-domain\\fixture-user", 0, True),
+    ("fixture-domain\\other-user", 0, False),
+    ("fixture-domain\\fixture-user", 501, False),
+])
+def test_windows_activity_writer_matches_actual_account(monkeypatch, account, user, expected):
+    monkeypatch.setattr(conftest.sys, "platform", "win32")
+    monkeypatch.setattr(conftest.psutil, "Process", lambda: SimpleNamespace(
+        username=lambda: "fixture-domain\\fixture-user"))
+    process = SimpleNamespace(username=lambda: account)
+    assert conftest._activity_writer_user(process, user) is expected

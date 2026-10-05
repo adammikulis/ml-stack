@@ -103,7 +103,13 @@ def test_help_lists_the_subcommands(fake, capsys):
 
 def test_bare_and_its_flags_reach_the_app(fake, monkeypatch):
     seen: list = []
-    monkeypatch.setattr("ml_stack.fleet.launch.main", lambda argv: seen.append(argv) or 0)
+    from ml_stack.cli.daemon import main as daemon_main
+
+    def app(argv, **services):
+        assert services["daemon_main"] is daemon_main
+        return seen.append(argv) or 0
+
+    monkeypatch.setattr("ml_stack.fleet.launch.main", app)
     assert cli.main([]) == 0
     assert cli.main(["--port", "8771", "--no-browser"]) == 0
     assert seen == [[], ["--port", "8771", "--no-browser"]]

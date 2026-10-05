@@ -40,6 +40,8 @@ async def _events(target: Any, payload: dict[str, Any], connection: Any, control
             while not pending.done():
                 await asyncio.wait([pending], timeout=0.1)
                 if _disconnected(connection) or (control is not None and control.cancelled.is_set()):
+                    await client.close()
+                    result.cancel()
                     pending.cancel()
                     await asyncio.gather(pending, return_exceptions=True)
                     return

@@ -53,6 +53,7 @@ from .measuring import BenchHost, bench_home as bench_home_beside
 from .models import Downloads, Models
 from .onboard.joining import PLAIN, Joining
 from .pausing import ADOPT_S, adopt_pause, peer_pause
+from .projects import ProjectRegistry, lan_host
 from .serving import Hosting, Serving
 from .settings import Settings
 from .ui import UI
@@ -99,7 +100,8 @@ def serve_forever(root: Path | str | None = None,
                   busy_hours: Iterable[str] = (), free_hours: Iterable[str] = (),
                   on_paused: str = "stop",
                   bench_home: Path | str | None = None,
-                  track: str | None = None) -> None:
+                  track: str | None = None,
+                  workspace_factory: Callable[[ProjectRegistry], Any] | None = None) -> None:
     """Serve until stopped. ``host``, ``lan`` and ``setup_from_lan`` say where to listen
     (`bind_address`); ``ui_from_lan`` lets other machines open the web interface.
 
@@ -207,10 +209,13 @@ def serve_forever(root: Path | str | None = None,
         offered = served_cert()
         return hashlib.sha256(base64.b64decode(offered)).hexdigest() if offered else PLAIN
 
+    projects = ProjectRegistry(root, bench_host[0].machine,
+                               (Path(__file__).resolve().parents[3], Path.cwd()), lan_host(port))
+    workspaces = workspace_factory(projects) if workspace_factory else None
     handler = make_handler(Daemon(
         runner, files_root, lambda: live_token[0],
         name=lambda: live_name[0], report=report, fetcher=fetcher,
-        ui=interface, schedule=schedule, on_paused=on_paused,
+        ui=interface, projects=projects, workspaces=workspaces, schedule=schedule, on_paused=on_paused,
         schedule_path=schedule_path, serving=serving, models=models,
         cluster_key_path=cluster_key_path, tokens=every_token,
         bench=bench_host[0], hosting=hosting,
@@ -355,6 +360,8 @@ def serve_forever(root: Path | str | None = None,
         interface.conversations = conversations
         interface.downloads = downloads
         interface.root = root
+        interface.projects = projects
+        interface.workspaces = workspaces
 
     if announce:
         start_announcing()
@@ -470,7 +477,8 @@ def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -
     return 2
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None, *,
+         workspace_factory: Callable[[ProjectRegistry], Any] | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
     ap.add_argument("--root", default=str(default_root()))
@@ -572,9 +580,9 @@ def main(argv: list[str] | None = None) -> int:
                   fetch_slots=a.fetch_slots, web=not a.no_web,
                   setup_from_lan=a.setup_from_lan,
                   busy_hours=a.busy, free_hours=a.free, on_paused=a.on_paused,
-                  bench_home=a.bench_home, track=a.track)
+                  bench_home=a.bench_home, track=a.track, workspace_factory=workspace_factory)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run())

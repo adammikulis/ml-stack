@@ -172,6 +172,7 @@ class TestWhatRunsAsRoot:
         asked = []
         evil = tmp_path / "it's \"here\"; rm -rf ~"
         monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(autostart, "_runs", lambda argv: True)
         monkeypatch.setattr(autostart, "_ask_and_run",
                             lambda command, prompt: asked.append(command) or (True, ""))
         monkeypatch.setattr(autostart, "_mac_path", lambda mode: evil / "boot.plist")

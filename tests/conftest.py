@@ -984,6 +984,14 @@ def _external_scanner_write(root: Path, rel: Path) -> bool:
 
 
 
+def _activity_writer_user(process, user: int) -> bool:
+    """Match an activity writer to the directory's operating-system account."""
+    if hasattr(process, "uids"):
+        return process.uids().real == user
+    return (sys.platform == "win32" and user == 0
+            and process.username() == psutil.Process().username())
+
+
 def _external_activity_drop_write(root: Path, rel: Path) -> bool:
     if len(rel.parts) != 3 or rel.parts[0] != 'activity' or rel.name != 'drops.json':
         return False
@@ -999,7 +1007,7 @@ def _external_activity_drop_write(root: Path, rel: Path) -> bool:
             return False
         process = psutil.Process(pid)
         return (process.is_running() and process.create_time() == born
-                and process.uids().real == int(user) and born <= written
+                and _activity_writer_user(process, int(user)) and born <= written
                 and 0 <= time.time() - written <= 60)
     except (OSError, ValueError, KeyError, TypeError, AttributeError, psutil.Error):
         return False

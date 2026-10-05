@@ -93,6 +93,70 @@ def run(args: Sequence[str], *, cwd: Path | None = None, url: str = "",
     return done
 
 
+def blobs(digests: list[str], *, cwd: Path, limit: int, total: int) -> dict[str, bytes]:
+    """Read bounded Git blobs in two batches without checkout filters."""
+    if len(digests) > 10_000 or any(not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", d) for d in digests):
+        raise GitFailed("Invalid Git blob identifiers")
+    identifiers = list(dict.fromkeys(digests))
+    if not identifiers:
+        return {}
+    query = ("\n".join(identifiers) + "\n").encode()
+    hooks = staging_dir() / "no-hooks"
+    env = environment("", hooks)
+    checked = subprocess.run([_git(), "cat-file", "--batch-check"], cwd=cwd, input=query,
+                             capture_output=True, timeout=30, env=env, check=False)
+    rows = checked.stdout.splitlines()
+    if checked.returncode or len(rows) != len(identifiers):
+        raise GitFailed("Git source objects could not be sized")
+    sizes = []
+    for digest, row in zip(identifiers, rows, strict=True):
+        parts = row.decode().split()
+        if len(parts) != 3 or parts[:2] != [digest, "blob"] or not parts[2].isdigit():
+            raise GitFailed("Git source object is not a blob")
+        sizes.append(int(parts[2]))
+    if any(size > limit for size in sizes) or sum(sizes) > total:
+        raise GitFailed("Git source blobs exceed source size limits")
+    done = subprocess.run([_git(), "cat-file", "--batch"], cwd=cwd, input=query,
+                          capture_output=True, timeout=30, env=env, check=False)
+    if done.returncode or len(done.stdout) > total + len(identifiers) * 100:
+        raise GitFailed("Git source blobs could not be read")
+    offset, result = 0, {}
+    for digest, size in zip(identifiers, sizes, strict=True):
+        newline = done.stdout.find(b"\n", offset)
+        expected = f"{digest} blob {size}".encode()
+        if newline < offset or done.stdout[offset:newline] != expected:
+            raise GitFailed("Git source blob changed while reading")
+        offset = newline + 1
+        result[digest] = done.stdout[offset:offset + size]
+        offset += size
+        if done.stdout[offset:offset + 1] != b"\n":
+            raise GitFailed("Truncated Git source blob")
+        offset += 1
+    if offset != len(done.stdout):
+        raise GitFailed("Unexpected Git source blob bytes")
+    return result
+
+
+def source_index(entries: list[dict], *, cwd: Path) -> None:
+    """Add verified source files to a fresh index without filters."""
+    if not entries:
+        return
+    hooks = staging_dir() / "no-hooks"
+    env = environment("", hooks)
+    paths = ("\n".join(entry["path"] for entry in entries) + "\n").encode()
+    hashed = subprocess.run([_git(), "hash-object", "-w", "--no-filters", "--stdin-paths"],
+                            cwd=cwd, input=paths, capture_output=True, timeout=30, env=env, check=False)
+    digests = hashed.stdout.decode().splitlines()
+    if hashed.returncode or len(digests) != len(entries) or any(not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", d) for d in digests):
+        raise GitFailed("Verified source could not be indexed")
+    rows = [f"{'100755' if entry['executable'] else '100644'} {digest}\t{entry['path']}\n"
+            for entry, digest in zip(entries, digests, strict=True)]
+    indexed = subprocess.run([_git(), "update-index", "--index-info"], cwd=cwd,
+                             input="".join(rows).encode(), capture_output=True, timeout=30, env=env, check=False)
+    if indexed.returncode:
+        raise GitFailed("Verified source index could not be written")
+
+
 def _origin(cwd: Path | None) -> str:
     if cwd is None:
         raise Refused("a git network command needs the address it talks to")

@@ -8,18 +8,20 @@ from typing import Any
 
 from ml_stack.files import read_json
 from ml_stack.workspace import onboard, tokens
+from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import AGENT, Denied
+from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
 MAX_REPLY = 512 * 1024
-METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model",
-                     "claim", "release", "heartbeat", "board.list", "board.read",
+METHODS = frozenset({"send", "inbox", "outbox", "ack", "thread", "announce", "claim_model", "nudge", "wait",
+                     "claim", "release", "heartbeat", "renew", "board.list", "board.read",
                      "board.threads", "board.join", "board.leave", "board.dm",
                      "board.subscribe", "board.unsubscribe", "board.subs", "board.digest",
-                     "board.rollup", "board.summary"})
+                     "board.rollup", "board.summary", "board.mentions"})
 
 
 class WorkspaceHost:
@@ -32,26 +34,39 @@ class WorkspaceHost:
         return Workspace(self.projects.workspace_base(project_id))
 
     def prepare(self, project_id: str) -> dict:
+        if hasattr(self.projects, "claim_authority"):
+            self.projects.claim_authority(project_id)
         ws = self.workspace(project_id)
         if not ws.registry.ids():
             tokens.store(ws.base, tokens.OWNER_FILE, ws.init())
         return self.status(project_id)
 
     def status(self, project_id: str) -> dict:
-        ws = self.workspace(project_id)
         project = self.projects.get(project_id)
+        authority = getattr(project, "authority_machine", None)
+        if authority == "":
+            return {"project_id": project_id, "name": project.name, "state": "unconfigured",
+                    "authority_machine": "", "board_host": "", "agents": [], "boards": [],
+                    "messages": [], "history": []}
+        if authority and authority != getattr(self.projects, "machine", authority):
+            return {"project_id": project_id, "name": project.name, "state": "connection_required",
+                    "authority_machine": authority, "board_host": project.board_host,
+                    "agents": [], "boards": [], "messages": [], "history": []}
+        ws = self.workspace(project_id)
         agents = [row for row in ws.registered() if row["role"] == AGENT]
         seen = {row["who"]: row["ts"] for row in ws.audit_log.rows()
                 if row.get("event") == "remote.seen"}
         for agent in agents:
             agent["last_seen"] = seen.get(agent["id"], 0)
-            agent["online"] = bool(agent["last_seen"] and ws.clock() - agent["last_seen"] < 90)
+            agent["online"] = bool(agent["last_seen"] and ws.clock() - agent["last_seen"] < 90
+                                   and ws.registry.role_of(agent["id"]))
         boards = ws.board.store.state()[0]
-        chosen = {name for name, info in boards.items() if info.get("project") == project_id}
+        chosen = {name for name, info in boards.items() if info.get("project") == project_id or name == ANNOUNCE}
         messages = [ws.deliver(row) for row in ws.board._rows()
                     if row.get("to") in chosen][-20:]
         return {"project_id": project_id, "name": project.name,
                 "authority_machine": getattr(project, "authority_machine", ""),
+                "board_host": getattr(project, "board_host", ""),
                 "agents": agents,
                 "boards": sorted(chosen), "messages": messages,
                 "history": read_json(ws.base / "adopted-history.json", {}).get("messages", []),
@@ -67,6 +82,10 @@ class WorkspaceHost:
                                  uses=min(max(int(uses), 1), 3))
         return {"project_id": project_id, "code": code, "ttl_s": 600,
                 "uses": min(max(int(uses), 1), 3)}
+
+    def adopt(self, project_id: str, history: dict) -> dict:
+        self.prepare(project_id)
+        return adopt(self.workspace(project_id).base, history)
 
     def answer(self, project_id: str, action: str, body: dict) -> tuple[int, dict]:
         try:
@@ -92,10 +111,12 @@ class WorkspaceHost:
             if (not isinstance(args, list) or len(args) > 12 or not isinstance(kwargs, dict)
                     or "token" in kwargs or len(kwargs) > 12):
                 raise ValueError("invalid operation arguments")
-            if operation in {"whoami", "agents", "claims", "who"} and "read" not in who.can:
+            if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
                 raise Denied("agent capability has no read permission")
             if operation == "whoami":
                 result = {"id": who.id, **ws.registry.info(who.id)}
+            elif operation == "history":
+                result = read_json(ws.base / "adopted-history.json", {}).get("messages", [])
             elif operation == "agents":
                 result = [row for row in ws.registered() if row["role"] == AGENT]
             elif operation == "claims":
@@ -112,6 +133,8 @@ class WorkspaceHost:
                     bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
                 if "widen" in bound.arguments:
                     bound.arguments["widen"] = False
+                if "timeout_s" in bound.arguments:
+                    bound.arguments["timeout_s"] = min(max(float(bound.arguments["timeout_s"]), 0), 20)
                 result = method(*bound.args, **bound.kwargs)
             else:
                 raise Denied("this operation is unavailable to remote agents")

@@ -368,6 +368,18 @@ tests = ["tests/test_redteam_gym_http.py", "tests/test_fleet_gym_boundaries.py",
 note = "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
 
 [[group]]
+match = ["route:fleet/project_client.py:*"]
+status = "covered"
+tests = ["tests/test_project_ui_access.py", "tests/test_project_source.py", "tests/test_remote_transport_attacks.py"]
+note = "source publication and checkout require a browser session; hostile candidate paths, peer schema, redirects and source archives are rejected before checkout"
+
+[[group]]
+match = ["spawn:net/git.py:blobs", "spawn:net/git.py:source_index"]
+status = "covered"
+tests = ["tests/test_project_source.py"]
+note = "snapshot paths use verified Git object IDs and bounded index/blob output; options, oversized objects and checkout filters are refused"
+
+[[group]]
 match = ["route:fleet/api.py:*", "handler:fleet/api.py:*"]
 status = "partial"
 tests = [
@@ -387,7 +399,7 @@ tests = ["tests/test_fleet_framing.py"]
 [[group]]
 match = ["route:fleet/routes.py:/ui/models/startup"]
 status = "covered"
-tests = ["tests/test_startup_models.py::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"]
+tests = ["tests/test_startup_models.py::StartupModelTests::test_startup_route_refuses_untrusted_requests_and_ignores_query_paths"]
 
 [[group]]
 match = ["route:fleet/routes.py:/ui/setup/clusters", "route:fleet/routes.py:/ui/clusters/found"]
@@ -648,6 +660,14 @@ note = "the AST gate shows no spawn goes through a shell; what each argv carries
 
 # -- listeners -----------------------------------------------------------------------------
 [[group]]
+match = ["listener:fleet/wsl_network.py:NetworkBridge._listen"]
+status = "covered"
+tests = ["tests/test_wsl_network.py::test_bridge_refuses_authentication_and_socket_scope",
+         "tests/test_wsl_network.py::test_bridge_caps_messages_and_datagrams",
+         "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"]
+note = "the discovery control listener rejects bad capabilities, destinations and oversized frames; the TCP listener relays opaque bytes to the fixed daemon target"
+
+[[group]]
 match = ["listener:fleet/daemon.py:*", "listener:fleet/discovery.py:*",
          "listener:fleet/onboard/nearby.py:*"]
 status = "partial"
@@ -682,6 +702,27 @@ status = "n/a"
 note = "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
 
 # -- network egress ------------------------------------------------------------------------
+[[group]]
+match = ["egress:fleet/project_client.py:read"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_project_source.py"]
+note = "signed source replies stay on the exact LAN authority endpoint; wire and plaintext bounds include authenticated sealing overhead"
+
+[[group]]
+match = ["egress:fleet/wsl_network.py:DiscoverySocket.__init__", "egress:fleet/wsl_network.py:_forward"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py::test_wsl_control_replies_reject_oversized_and_malformed_frames",
+         "tests/test_wsl_network.py::test_udp_bridge_refuses_non_discovery_destinations",
+         "tests/test_wsl_network.py::test_udp_bridge_preserves_timeout",
+         "tests/test_wsl_network.py::test_lan_relay_preserves_stream_half_close_and_releases_ports"]
+note = "launcher-selected control and fixed daemon destinations cannot be redirected by relay bytes; control frames and discovery datagrams have bounded reads and deadlines"
+
+[[group]]
+match = ["egress:workspace/remote.py:RemoteWorkspace._request"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_workspace_remote.py"]
+note = "project credentials stay on the exact LAN authority endpoint; redirects, oversized or malformed replies, and slow responses are refused"
+
 [[group]]
 match = ["egress:net/*", "egress:httpguard.py:*", "egress:http.py:*", "egress:web.py:*",
          "egress:fleet/models.py:*", "egress:ingest/run.py:*"]
@@ -766,6 +807,18 @@ note = "planted files cannot escape the import root; invalid native JSON, XML en
 
 # -- parsers and readers of files, pages and messages --------------------------------------
 [[group]]
+match = ["parser:workspace/project_connection.py"]
+status = "covered"
+tests = ["tests/test_project_connection.py"]
+note = "corrupt connection records and conflicting checkout authorities refuse device-local fallback and privileged operations"
+
+[[group]]
+match = ["parser:workspace/remote.py"]
+status = "covered"
+tests = ["tests/test_remote_transport_attacks.py", "tests/test_workspace_remote.py"]
+note = "sealed replies must be bounded JSON objects and project capabilities cannot cross authorities or projects"
+
+[[group]]
 match = ["parser:net/*", "parser:web.py", "parser:sources/html.py", "parser:taint/*",
          "parser:guard/*", "parser:hub/modelfile.py"]
 status = "covered"
@@ -799,3 +852,10 @@ note = "a crafted model-repository listing, card, document, mailbox, WAV or arch
 match = ["parser:*"]
 status = "uncovered"
 note = "files the product wrote for itself (stores, caches, snapshots, case files) are read back; a hand-edited or planted file is not tried"
+
+[[group]]
+match = ["route:fleet/component_routes.py:/ui/models/addons"]
+status = "covered"
+tests = ["tests/test_model_components.py::test_addon_route_refuses_untrusted_requests_before_component_lookup",
+         "tests/test_model_components.py::test_component_flags_refuse_untyped_selection_before_source_lookup"]
+note = "unauthenticated and forged UI requests refuse before lookup; malformed component flags refuse before source lookup"

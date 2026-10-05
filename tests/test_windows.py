@@ -510,7 +510,7 @@ class TestTraindPersist:
         monkeypatch.setattr(daemon_module, "serve_forever",
                             lambda *a, **k: pytest.fail("--persist must not serve"))
 
-        code = daemon_module.main(["--persist", "--slots", "2", "--label", "prep",
+        code = daemon_module.run(["--persist", "--slots", "2", "--label", "prep",
                                    "--report", "ml_stack.fleet.device:stdlib_device_report"])
 
         assert code == 0
@@ -524,7 +524,7 @@ class TestTraindPersist:
 
         monkeypatch.setattr(autostart, "install", lambda mode, **k: autostart.Autostart(
             mode, installed=False, command="schtasks /Create ...", note="no permission"))
-        assert daemon_module.main(["--persist"]) == 2
+        assert daemon_module.run(["--persist"]) == 2
         err = capsys.readouterr().err
         assert "schtasks /Create" in err and "no permission" in err
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -30,6 +31,7 @@ class RemoteWorkspace:
             raise ValueError("invalid shared project ID")
         require_local_url(host)
         self.host, self.project_id = host.rstrip("/"), project_id
+        self.cluster_key = str(cluster_key) if cluster_key else ""
         self.endpoint = f"{self.host}/workspace/v1/projects/{project_id}"
         rows = memberships(cluster_key)
         if cluster:
@@ -62,10 +64,14 @@ class RemoteWorkspace:
                              headers={"Content-Type": "application/json", sealing.HEADER: "2"}) as response:
                 if not response.headers.get(sealing.HEADER):
                     raise Denied("project board response was not authenticated and sealed")
-                raw = response.read(512 * 1024 + 1)
-                if len(raw) > 512 * 1024:
+                limit = 512 * 1024
+                wire_limit = limit + sealing.NONCE_BYTES + 16
+                raw = response.read(wire_limit + 1)
+                if len(raw) > wire_limit:
                     raise ValueError("project board response exceeds the size limit")
                 opened = response.sealed.open(response.status, response.headers, raw)
+                if len(opened) > limit:
+                    raise ValueError("project board response exceeds the size limit")
                 result = json.loads(opened)
                 if not isinstance(result, dict):
                     raise ValueError("project board returned no object")
@@ -88,4 +94,12 @@ class RemoteWorkspace:
                                        "args": list(args), "kwargs": kwargs})["result"]
 
     def token(self, *, agent: str = "", token_file: str = "") -> str:
-        return tokens.resolve(self.base, agent=agent, token_file=token_file)
+        if token_file:
+            path = Path(token_file).expanduser().resolve()
+            if not path.is_relative_to(tokens.directory(self.base).resolve()) or path.name == tokens.OWNER_FILE:
+                raise Denied("remote operations use only private project agent capability files")
+            return tokens.read_file(path)
+        name = agent or os.environ.get(tokens.AGENT_ENV, "")
+        if not name:
+            raise Denied("attach a project agent and select it with --agent NAME")
+        return tokens.load(self.base, name)

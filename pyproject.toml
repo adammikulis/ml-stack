@@ -38,7 +38,7 @@ gym = ["ml-stack[gym-driving,gym-warehouse,gym-traffic,gym-rl]"]
 privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
 # presidio over a transformers NER model rather than spaCy's own
 privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
-test = ["ml-stack[agents]", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7"]
+test = ["ml-stack[agents]", "distlib", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7"]
 
 claude = ["claude-agent-sdk>=0.1"]
 arrays = ["numpy>=1.24"]
@@ -103,7 +103,7 @@ viz = ["manim>=0.19"]
 # `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
 # own --plot writes hand-built SVG with no library, so it opens on a machine with no packages
 plot = ["matplotlib>=3.11.2"]
-testing = ["numpy>=1.24", "pytest>=9.1.1"]
+testing = ["distlib", "numpy>=1.24", "pytest>=9.1.1"]
 telemetry = ["metal-smi>=1.1.0; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that.
 # `ml_stack.agent.McpTools` is an MCP client on the same SDK (2026-07-28 revision).
@@ -140,7 +140,7 @@ ml-stack-gym = "ml_stack.gym.cli:main"
 # `ml-stack <command>` runs any `ml-stack-<command>` below; bare, it starts the daemon and
 # opens the browser on it (`ml_stack.fleet.launch`).
 ml-stack = "ml_stack.cli:main"
-ml-stack-traind = "ml_stack.fleet.daemon:main"
+ml-stack-traind = "ml_stack.cli.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 # one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce
 ml-stack-fleet = "ml_stack.fleet.join:main"

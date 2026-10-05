@@ -11,13 +11,13 @@ WEB = Path(__file__).parent / "web"
 COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
 COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "startup-models", "cluster-actions", "first-run", "fleet-benchmark", "cluster-view",
-              "chat-stream", "chat-view", "board-view", "projects-view", "wired-memory", "models-library", "model-browser", "models-view", "settings-view", "fit-model", "fit-view",
+              "chat-stream", "chat-view", "coordinator-control", "board-view", "projects-view", "wired-memory", "models-library", "model-browser", "models-view", "settings-view", "fit-model", "fit-view",
               "fit-charts", "rates-view", "telemetry-view",
               "workspace-jobs", "history-view", "tasks-view", "data-view",
               "training-view", "tools-view", "benchmarks-view", "gym-scene-controls",
               "gym-drone-camera", "gym-scene", "gym-recordings",
               "gym-world-options", "gym-model-options", "gym-view", "close-sheet")
-MODULES = {"coordinator-control": frozenset({"board-view"}), "task-publishing": frozenset({"tasks-view"}),
+MODULES = {"task-publishing": frozenset({"tasks-view"}),
            "task-review-quality": frozenset({"tasks-view"}),
            "gym-drone-geometry": frozenset({"gym-scene"}),
            "setup-recovery": frozenset({"first-run", "cluster-actions"}),

@@ -31,6 +31,7 @@ from ml_stack.workspace import (
     nudge,
     onboard,
     project,
+    project_connection,
     remote_cli,
     task_integration,
     task_outcomes,
@@ -81,6 +82,19 @@ def _label(args: argparse.Namespace) -> str:
 
 def _token(args: argparse.Namespace) -> str:
     return tokens.resolve(limits.root(), token_file=args.token_file, agent=args.agent)
+
+
+def _context(args: argparse.Namespace):
+    connection = project_connection.selected()
+    if connection is None:
+        return Workspace(), _token(args)
+    remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
+                                                cluster=connection.get("cluster", ""),
+                                                cluster_key=Path(connection["cluster_key"])
+                                                if connection.get("cluster_key") else None)
+    token = remote.token(agent=args.agent or connection.get("agent", ""),
+                         token_file=getattr(args, "token_file", ""))
+    return project_connection.CanonicalWorkspace(remote, token), token
 
 
 def _block(lines: list[str], what: str) -> str:
@@ -388,7 +402,8 @@ def _hook_snippet(args: argparse.Namespace, ws: Workspace) -> int:
 def _nudging(args: argparse.Namespace) -> int:
     if args.hook:
         return _hook(args)
-    line = Workspace().nudge(_token(args))
+    ws, token = _context(args)
+    line = ws.nudge(token)
     if line:
         say(line)
     return 0
@@ -397,7 +412,8 @@ def _nudging(args: argparse.Namespace) -> int:
 def _hook(args: argparse.Namespace) -> int:
     stdin = sys.stdin.read() if args.hook == "stop" and not sys.stdin.isatty() else ""
     try:
-        out = nudge.output(args.hook, Workspace().waiting(_token(args)), stdin)
+        ws, token = _context(args)
+        out = nudge.output(args.hook, ws.waiting(token), stdin)
     except tuple(kind for kind, _ in CODES):
         return 0
     if out:
@@ -632,6 +648,8 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
         remote = coordinator_client.client(limits.root())
+        if remote and project_connection.selected() is not None:
+            raise Denied("select one workspace authority before dispatching commands")
         if remote:
             options = next(options for name, _help, options, _fn in TABLE if name == args.cmd)
             for field in ('body', 'text', 'payload'):
@@ -640,7 +658,8 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
             result = remote.command(coordinator_client.argv_for(args, [*COMMON, *options]),
                                     _token(args), request_id=args.request_id)
         else:
-            result = handler(args, Workspace(), _token(args))
+            ws, token = _context(args)
+            result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)
         return 0
@@ -653,7 +672,8 @@ def _watching(args: argparse.Namespace) -> int:
             signal.signal(sig, lambda *_: CANCELLED.set())
         except ValueError:
             break
-    return _watch(args, Workspace(), _token(args))
+    ws, token = _context(args)
+    return _watch(args, ws, token)
 
 
 COMMANDS = Group(
@@ -675,6 +695,10 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
     def run(args):
         if coordinator_client.client(limits.root()) and handler is not _join:
             raise Denied('this is a local-only operation; this device uses a shared coordinator')
+        if project_connection.selected() is not None:
+            if handler in {_brief, _hook_snippet}:
+                return handler(args, None)
+            raise Denied("this command is unavailable in a canonical project; use its shared board")
         return handler(args, Workspace())
     return _guarded(run)
 

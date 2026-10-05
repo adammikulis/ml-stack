@@ -84,7 +84,7 @@ def _executable() -> list[str]:
     found = shutil.which(SERVICE)
     if found and _runs([found]):
         return [found]
-    return [sys.executable, "-m", "ml_stack.fleet.daemon"]
+    return [sys.executable, "-m", "ml_stack.cli.daemon"]
 
 
 def _args(slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -> list[str]:

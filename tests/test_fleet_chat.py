@@ -140,6 +140,7 @@ class TestChattingThroughTheInterface:
                                 body={"passphrase": WORDS})
         assert ui.ui.models is None
         assert ui.ui.serving is None
+        ui.ui.settings.download_sources = "both"
         ui.ui._peers = (time.time(), [host])
         try:
             yield ui, headers["Set-Cookie"].split(";")[0]

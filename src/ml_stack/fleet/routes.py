@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import component_routes, lan_clusters, recovery
+from . import component_routes, lan_clusters, project_client, recovery
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -540,9 +540,6 @@ class ModelRoutes:
     def _get_model(self, key: Any, auto_models: bool) -> bool:
         from .weights import ModelError
         ui, req = self.ui, self.body()
-        if ui.settings is not None and not ui.settings.download_sources:
-            self.send(409, {"error": "Choose download sources in Settings before downloading a model."})
-            return True
         name = str(req.get("name") or "")
         if not name:
             self.send(400, {"error": "no model was named"})
@@ -567,6 +564,9 @@ class ModelRoutes:
         here = ui.models.find(name)
         if here is not None and not components:
             self.send(200, here.public())
+            return True
+        if ui.settings is not None and not ui.settings.download_sources:
+            self.send(409, {"error": "Choose download sources in Settings before downloading a model."})
             return True
         source = str(req.get("source") or "")
         integrated = next((row for row in components if row["packaging"] == "integrated"), None)
@@ -839,6 +839,8 @@ class Router(PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, Measur
         if self.public_route():
             return True
         if not self.signed_in():
+            return True
+        if project_client.route(self):
             return True
         if self.route():
             return True

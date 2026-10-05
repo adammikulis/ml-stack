@@ -13,10 +13,11 @@ import importlib
 import io
 import sys
 import tomllib
+from collections.abc import Callable
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Callable
 
+from ml_stack.cli.daemon import main as daemon_main
 from ml_stack.cli.reference import HELP
 from ml_stack.log import say, warn
 
@@ -154,4 +155,4 @@ def main(argv: list[str] | None = None) -> int:
         say(listing(table))
         return 0
     from ml_stack.fleet.launch import main as app
-    return app(rest)
+    return app(rest, daemon_main=daemon_main)
