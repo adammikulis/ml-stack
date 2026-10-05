@@ -16,6 +16,7 @@ from ml_stack import jobs, roles
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
+    device_agent,
     issuepump,
     localagent as la,
     localeffort as le,
@@ -92,7 +93,32 @@ def _mint(ws: Workspace, name: str, project: dict[str, str]) -> None:
     ws.board.place(name, project)
 
 
-def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
+def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None, person_token="") -> Started:
+    """Start a worker and bind person-authorized launches to the persistent device account."""
+    if person_token:
+        device_agent.enroll(ws, person_token)
+    result = _start(ws, ask, pick=pick, spawn=spawn)
+    if person_token:
+        device_agent.bind_worker(ws, person_token, result.name)
+    return result
+
+
+def _worker_identity(ws, have, name, project):
+    if have and ws.registry.role_of(have.identity or name):
+        identity = have.identity or name
+        ws.auth(tokens.load(ws.base, identity))
+        return identity
+    _mint(ws, name, project)
+    return name
+
+
+def _running(have, chosen):
+    if have.model != chosen.ref:
+        raise ValueError(f"{have.name} already runs {have.model_name}; stop and restart that same name to change models")
+    return Started(have.name, have.pid, have.model_name, have.role, already=True)
+
+
+def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
           spawn: Callable[..., Any] | None = None) -> Started:
     """Join a local model to the workspace and run its loop detached; the same name again reports
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
@@ -112,21 +138,19 @@ def start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
     if problem:
         raise Unavailable(problem, hint)
-    name = la.check_name(ask.name or localmodel.agent_name(chosen.name))
+    name = la.check_name(ask.name or "local-agent")
     with held(la.folder(ws) / "start.lock"):
         if not ws.registry.ids():
             tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
         have = la.load(ws, name)
         if have is not None and la.alive(have):
-            return Started(name, have.pid, have.model_name, have.role, already=True)
+            return _running(have, chosen)
         if ws.registry.role_of(name) and have is None:
             raise ValueError(f"{name} is another agent's name; pass a different --name")
-        if ws.registry.role_of(name):
-            ws.registry.revoke(onboard.SETUP, name)
-        _mint(ws, name, projects.describe(folder_) if folder_ else {})
+        identity = _worker_identity(ws, have, name, projects.describe(folder_) if folder_ else {})
         _record_model(ws, name, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
-        agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
+        agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
                          project=folder_, orders_from=orders, started=time.time())
         la.save(ws, agent)
@@ -147,16 +171,17 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
     role = roles.get(ask.role).name
     if ask.harness not in ("codex", "claude"):
         raise ValueError("coding harness is codex or claude")
-    name = la.check_name(ask.name or f"{localmodel.agent_name(chosen.name)}-{ask.harness}")
+    name = la.check_name(ask.name or "local-coding")
     with held(la.folder(ws) / "start.lock"):
         have = la.load(ws, name)
         if have is not None and la.alive(have):
-            return Started(name, have.pid, have.model_name, have.role, already=True)
+            return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
                          ctx=ctx, project=project, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
-        _mint(ws, name, project)
+        identity = _worker_identity(ws, have, name, project)
+        agent = replace(agent, identity=identity)
         la.save(ws, agent)
         job = jobs.detach(lh.RUNNER, [name], log=la.log_file(ws, name), kind=name,
                           home=la.folder(ws) / "jobs")

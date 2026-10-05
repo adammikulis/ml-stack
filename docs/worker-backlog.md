@@ -31,3 +31,5 @@ An answer is a **proposal for independent review**, not a verified completion or
 credit. A proposal is not selected repeatedly. Worker status exposes its issue URL, state,
 failure summary and any result-delivery error; History links its native conversation to
 the issue. An empty eligible backlog remains idle and checks again without model inference.
+
+Local worker names default to `local-agent` or `local-coding`, independently of the loaded model. A running named worker rejects a different model until it is stopped and restarted under that same name. Person-authorized starts bind the worker to the device's persistent base agent, using the maintained machine identity. Worker stop and token revocation preserve the device membership graph and its verified work history. Delegate authentication stays separate from the device account; agents cannot enroll or self-assign membership. Browser callers pass the authenticated person token to `localstart.start(..., person_token=...)`; unbound programmatic starts remain explicitly unenrolled.
