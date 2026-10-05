@@ -13,7 +13,7 @@ from ml_stack.harnesspolicy import CATALOG, SHELL_TOOLS, _shell_line
 from ml_stack.interventions import Call
 from ml_stack.net import git
 from ml_stack.serve.process import started_at
-from ml_stack.workspace import tokens
+from ml_stack.workspace import claim_handoff, tokens
 from ml_stack.workspace.claims import normal
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.project import describe
@@ -82,7 +82,7 @@ def resources(name, args, cwd):
     return found
 
 
-def conflict(name, args, cwd, actor):
+def conflict(name, args, cwd, actor, roots=()):
     """Return an existing foreign ownership conflict before approval is requested."""
     if not isinstance(args, dict):
         return ''
@@ -92,9 +92,13 @@ def conflict(name, args, cwd, actor):
     ws = Workspace()
     if not ws.registry.role_of(actor):
         return ''
+    who = ws.auth(tokens.load(ws.base, actor))
+    scope = claim_handoff.assignment(ws, who, roots or [cwd])
     for kind, key in required:
         owner = ws.claims.who(kind, key)
-        if owner and owner['owner'] != actor:
+        delegated = (scope and owner and owner['kind'] == 'worktree'
+                     and owner['key'] == scope['project'] and owner['owner'] == scope['owner'])
+        if owner and owner['owner'] != actor and not delegated:
             return f"{kind} {key} belongs to {owner['owner']}"
     return ''
 
@@ -118,6 +122,7 @@ def reserve(name, args, cwd, actor, roots):
     grant = ws.registry.info(who.id).get('project') or ws.registry.info(who.parent).get('project')
     if not grant or any(describe(str(root)).get('key') != grant.get('key') for root in approved):
         raise Denied('mutation ownership requires an existing person-set project grant')
+    claim_handoff.acquire(ws, who, approved)
     try:
         commit = git.head(Path(cwd))
     except git.GitFailed:
