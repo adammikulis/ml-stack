@@ -24,13 +24,13 @@ from ml_stack.files import read_json, write_json
 from ml_stack.lock import Busy, only_one
 from ml_stack.log import say as say_out
 from ml_stack.platform import on_quit, private_file
-from ml_stack.serve import guarded, provenance
+from ml_stack.serve import broker_runtime, guarded, provenance
 from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.broker import IDLE_S, Ask, Broker, BrokerError, Grant, who
 from ml_stack.serve.events import Caller, Growth
 from ml_stack.serve.leases import lease_file
 from ml_stack.serve.ports import DEFAULT_HOST
-from ml_stack.serve.process import pid_exists
+from ml_stack.serve.process import pid_exists, started_at
 
 __all__ = ["call", "claim", "cores", "give_back_cores", "lease", "record_path", "release",
            "serve", "status", "stop", "unclaim"]
@@ -72,6 +72,7 @@ class _Server(socketserver.ThreadingTCPServer):
     def __init__(self, broker: Broker) -> None:
         super().__init__((DEFAULT_HOST, 0), _Handler)
         self.broker = broker
+        self.runtime = broker_runtime.snapshot()
         self.token = secrets.token_hex(16)
 
     def answer(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -81,7 +82,7 @@ class _Server(socketserver.ThreadingTCPServer):
         if isinstance(body.get("options"), dict):
             body["options"].pop("iq", None)
         if op == "ping":
-            return {"ok": True, "pid": os.getpid()}
+            return {"ok": True, "pid": os.getpid(), "runtime": self.runtime}
         if op == "lease":
             ask = Ask.from_json(body)
             return {"ok": True, **self.broker.lease(ask, timeout=float(body["wait_s"])).as_dict()}
@@ -108,7 +109,7 @@ class _Server(socketserver.ThreadingTCPServer):
         if op == "release":
             return {"ok": True, "released": self.broker.release(str(body["lease"]))}
         if op == "status":
-            return {"ok": True, **self.broker.snapshot()}
+            return {"ok": True, **self.broker.snapshot(), "runtime": self.runtime}
         if op == "stop":
             return {"ok": True, **self.broker.stop(int(body["port"]), force=bool(body.get("force")))}
         if op == "claim":
@@ -234,7 +235,8 @@ def serve(*, idle_s: float = IDLE_S, quiet_s: float = QUIET_S, say=say_out) -> i
             adopted = broker.adopt()
             server = _Server(broker)
             write_json(record_path(), {"pid": os.getpid(), "port": server.server_address[1],
-                                       "token": server.token, "started": time.time()})
+                                       "token": server.token, "started": time.time(),
+                                       "pid_started": server.runtime["pid_started"], "runtime": server.runtime})
             private_file(record_path())
             say(f"broker on {DEFAULT_HOST}:{server.server_address[1]} (pid {os.getpid()}), "
                 f"{len(broker.servers)} of {len(adopted)} running server(s) taken in")
@@ -296,8 +298,13 @@ def _answering() -> dict[str, Any] | None:
     record = _record()
     if not record or not pid_exists(record.get("pid")):
         return None
+    if record.get("pid_started") is not None and started_at(record["pid"]) != record["pid_started"]:
+        return None
     try:
-        return record if _send(record, {"op": "ping"}, timeout=5.0).get("ok") else None
+        reply = _send(record, {"op": "ping"}, timeout=5.0)
+        if not reply.get("ok") or reply.get("pid") != record["pid"]:
+            return None
+        return {**record, "runtime": broker_runtime.reported(reply.get("runtime"))}
     except (OSError, ValueError, BrokerError):
         return None
 
@@ -324,17 +331,27 @@ def running() -> int | None:
     return int(record["pid"]) if record else None
 
 
+
+def _checked(op: str, start: bool) -> dict[str, Any]:
+    record = _reach(start=start)
+    runtime = broker_runtime.reported(record.get('runtime'))
+    if op not in ('ping', 'status') and runtime['compatibility'] == 'incompatible':
+        raise BrokerError(f"Broker protocol {runtime['protocol']} differs from client {broker_runtime.PROTOCOL}. "
+                          + runtime['action'])
+    return record
+
+
 def call(op: str, *, timeout: float | None = 30.0, start: bool = True,
          **fields: Any) -> dict[str, Any]:
     """Send ``op`` to the broker, starting it first when ``start``. Raises `BrokerError`
     with the broker's own words when it refuses."""
     body = {"op": op, "pid": os.getpid(), **fields}
     try:
-        reply = _send(_reach(start=start), body, timeout=timeout)
+        reply = _send(_checked(op, start), body, timeout=timeout)
     except ConnectionRefusedError:
         if not start:
             raise
-        reply = _send(_reach(start=True), body, timeout=timeout)  # it quit after the ping
+        reply = _send(_checked(op, True), body, timeout=timeout)  # it quit after the ping
     if not reply.get("ok"):
         raise _error(str(reply.get("kind") or ""))(
             str(reply.get("error") or f"the broker refused {op}"))
@@ -370,7 +387,8 @@ def release(lease_id: str) -> bool:
 
 def status(*, start: bool = False) -> dict[str, Any]:
     """The broker's servers, their holders, the queue and the claims."""
-    return call("status", start=start)
+    reply = call("status", start=start)
+    return {**reply, "runtime": broker_runtime.reported(reply.get("runtime"))}
 
 
 def stop(port: int, *, force: bool = False) -> dict[str, Any]:
