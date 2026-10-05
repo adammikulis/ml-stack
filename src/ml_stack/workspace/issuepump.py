@@ -96,6 +96,7 @@ def step(ws, token, name):
     child = ws.auth(tokens.load(ws.base, identity))
     if child.parent != who.id:
         raise Denied('canonical repository intake requires the registered worker parent')
+    task_scheduler.integrate_completed(ws, token, identity)
     board = TaskBoard(ws)
     pending = _reconcile(ws, token, agent, board)
     if la.pause_file(ws, name).exists() or not la.alive(agent):
