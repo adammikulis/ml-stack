@@ -622,3 +622,5 @@ selects another saved worker. Context length, harness and reasoning effort are u
 physical-device account through the backend person handler. Browser requests never contain a
 workspace token or an identity override. Joined fleets retain their normal sign-in session;
 completed local setup can use the existing strictly local authorization policy.
+
+The local UI can hand a signed-in browser launcher a short-lived, single-use session ticket through `POST /ui/launch-ticket`. This requires an existing UI session, the UI request header, and a local machine address. Opening `/ui/?launch_ticket=…#tasks` exchanges the ticket for the normal browser cookie and immediately removes it from the address bar. Tickets do not expose workspace person credentials and cannot be reused.
