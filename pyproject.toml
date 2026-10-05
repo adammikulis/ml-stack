@@ -306,6 +306,7 @@ reportUnusedCoroutine = "error"
 reportUnusedExcept = "error"
 
 [project.entry-points."ml_stack.ui_routes"]
+agents = "ml_stack.workspace.agent_routes:route"
 tasks = "ml_stack.workspace.task_routes:route"
 board = "ml_stack.workspace.fleet_routes:route"
 coding = "ml_stack.workspace.coding_routes:route"

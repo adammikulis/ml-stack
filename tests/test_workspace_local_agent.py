@@ -22,6 +22,7 @@ from ml_stack.hub.discover import ModelInfo
 from ml_stack.hub.probe import MachineMemory
 from ml_stack.testing.fakes import reply_from
 from ml_stack.workspace import (
+    device_agent,
     localagent as la,
     localloop,
     localmodel,
@@ -349,6 +350,7 @@ def test_a_model_that_cannot_be_leased_fails_in_one_line(kit):
 # -- the routes ---------------------------------------------------------------------------
 @pytest.fixture
 def served(kit, monkeypatch):
+    monkeypatch.setattr(device_agent, "device_id", lambda: "abcdef0123456789")
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
     tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)

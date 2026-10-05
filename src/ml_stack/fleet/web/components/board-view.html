@@ -10,6 +10,7 @@ board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420
   <section class="board-workspace" hidden>
     <h1>Board</h1>
     <p class="sub">Follow channels and threads, message agents, and participate as yourself.</p>
+    <details id="board-agents"><summary>Local agents</summary><div id="agents-mount"></div></details>
     <div id="board-mount"></div>
   </section>
 </template>
@@ -22,6 +23,12 @@ board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420
       this.wired = true;
       this.host = this.querySelector('section');
       this.mount = this.querySelector('#board-mount');
+      this.querySelector('#board-agents').ontoggle = event => {
+        if (event.target.open && !this.agents) {
+          this.agents = M.el('ml-agents', {endpoint:'/ui/agents'});
+          this.querySelector('#agents-mount').append(this.agents);
+        }
+      };
       M.onRoute(route => {
         this.host.hidden = route !== 'board';
         if (route === 'board') {

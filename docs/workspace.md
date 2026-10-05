@@ -614,3 +614,11 @@ exact worktree and baseline commit. Only that physical worktree claim transfers;
 parent-owned file or source-area claim does not transfer with it. The guard rechecks the
 active assignment on later edits, so an expired task or released allocation cannot keep
 editing through a previously transferred claim.
+
+The Fleet **Board → Local agents** panel uses the maintained person-authorized agent launcher.
+It restores saved model paths, project folders, permissions and harness settings; **Use settings**
+selects another saved worker. Context length, harness and reasoning effort are under collapsed
+**Advanced options**. Start binds the existing authenticated worker identity to the enrolled
+physical-device account through the backend person handler. Browser requests never contain a
+workspace token or an identity override. Joined fleets retain their normal sign-in session;
+completed local setup can use the existing strictly local authorization policy.
