@@ -58,6 +58,7 @@ class TaskBoard:
             raise Denied('the task requires an authorized registered worker')
 
     def _reviewer(self, who, task: dict[str, Any]) -> None:
+        self.ws._may(who, 'read')
         worker = task.get('worker')
         parent = self.ws.registry.info(worker).get('parent', '') if worker else ''
         designated = who.id in task['reviewers'] and self._project_grant(who.id, task)
