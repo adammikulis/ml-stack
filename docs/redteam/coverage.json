@@ -1,7 +1,7 @@
 {
- "surfaces": 730,
+ "surfaces": 735,
  "by_status": {
-  "covered": 412,
+  "covered": 417,
   "partial": 199,
   "uncovered": 54,
   "n/a": 65,
@@ -37,7 +37,7 @@
    "unmapped": 0
   },
   "egress": {
-   "covered": 35,
+   "covered": 36,
    "partial": 47,
    "uncovered": 0,
    "n/a": 0,
@@ -86,7 +86,7 @@
    "unmapped": 0
   },
   "route": {
-   "covered": 72,
+   "covered": 76,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -1783,6 +1783,20 @@
     "tests/test_net_no_bypass.py"
    ],
    "note": "loopback and LAN calls to servers the person configured; the net-no-bypass scan keeps public hosts out, answers from a hostile server (oversized, slow, malformed JSON) are not sent"
+  },
+  {
+   "id": "egress:fleet/invite_client.py:_post",
+   "kind": "egress",
+   "source": "fleet/invite_client.py:_post",
+   "trust": "addresses and redirects named by pages, repositories and peers",
+   "attacker": "a redirect or address sends the request somewhere the person did not choose",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_invite_client.py::test_every_resolved_address_must_be_a_remote_lan_device",
+    "tests/test_fleet_invite_client.py::test_wrong_certificate_is_refused_before_any_http",
+    "tests/test_fleet_invite_client.py::test_modified_grant_is_rejected"
+   ],
+   "note": "Every DNS result is checked before a frozen sockaddr connection; the exact TLS leaf is pinned before HTTP; modified raw grants fail authentication"
   },
   {
    "id": "egress:fleet/join.py:_enrol_via_daemon.call",
@@ -7024,7 +7038,7 @@
    "tests": [
     "tests/test_activity_fleet_history.py::test_history_requires_ui_header_and_joined_session"
    ],
-   "note": "The installed read-only History extension runs after Fleet UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
+   "note": "The installed read-only History extension runs after custom UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
   },
   {
    "id": "route:fleet/api.py:/availability",
@@ -7418,6 +7432,64 @@
     "tests/test_fleet_workspace_routes.py"
    ],
    "note": "actual daemon sockets reject malformed bodies before dispatch, unauthenticated controls, coerced fields, command injection, private-path traversal, symlinked reviews and camera files"
+  },
+  {
+   "id": "route:fleet/invite_routes.py:/join/invite/challenge",
+   "kind": "route",
+   "source": "fleet/invite_routes.py:public",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_invites.py::test_public_exchange_refuses_plain_http",
+    "tests/test_fleet_invites.py::test_atomic_single_use_and_no_key_in_invite",
+    "tests/test_fleet_invites.py::test_wrong_proof_and_changed_fields_cannot_redeem",
+    "tests/test_fleet_invites.py::test_rate_limits_and_challenge_bound"
+   ],
+   "note": "TLS is required; wrong proofs, altered fields, expiry, rotation, rate excess and simultaneous replay cannot redeem a second grant"
+  },
+  {
+   "id": "route:fleet/invite_routes.py:/join/invite/redeem",
+   "kind": "route",
+   "source": "fleet/invite_routes.py:public",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_invites.py::test_public_exchange_refuses_plain_http",
+    "tests/test_fleet_invites.py::test_atomic_single_use_and_no_key_in_invite",
+    "tests/test_fleet_invites.py::test_wrong_proof_and_changed_fields_cannot_redeem",
+    "tests/test_fleet_invites.py::test_rate_limits_and_challenge_bound"
+   ],
+   "note": "TLS is required; wrong proofs, altered fields, expiry, rotation, rate excess and simultaneous replay cannot redeem a second grant"
+  },
+  {
+   "id": "route:fleet/invite_routes.py:/ui/fleet/invites",
+   "kind": "route",
+   "source": "fleet/invite_routes.py:ui_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_invites.py::test_ui_mint_requires_local_authenticated_owner",
+    "tests/test_fleet_invites.py::test_owner_mint_refuses_hostname_rebinding",
+    "tests/test_fleet_invites.py::test_join_invitation_passes_owner_and_setup_router_guards"
+   ],
+   "note": "Owner router guards reject missing UI headers, unauthenticated joined hosts and foreign addressed setup; local owner actions return noncacheable invitations and sessions"
+  },
+  {
+   "id": "route:fleet/invite_routes.py:/ui/fleet/join-invite",
+   "kind": "route",
+   "source": "fleet/invite_routes.py:ui_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_invites.py::test_ui_mint_requires_local_authenticated_owner",
+    "tests/test_fleet_invites.py::test_owner_mint_refuses_hostname_rebinding",
+    "tests/test_fleet_invites.py::test_join_invitation_passes_owner_and_setup_router_guards"
+   ],
+   "note": "Owner router guards reject missing UI headers, unauthenticated joined hosts and foreign addressed setup; local owner actions return noncacheable invitations and sessions"
   },
   {
    "id": "route:fleet/launch_routes.py:/ui/launch-ticket",

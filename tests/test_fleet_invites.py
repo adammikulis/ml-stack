@@ -2,15 +2,19 @@
 import base64
 import hashlib
 import hmac
+import io
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
 
+from ml_stack.fleet import routes
 from ml_stack.fleet.discovery import Membership
 from ml_stack.fleet.invite_routes import public, ui_route
 from ml_stack.fleet.invites import Invitations, decode, proof
+from ml_stack.fleet.ui import UI
 
 
 @pytest.fixture
@@ -173,3 +177,35 @@ def test_owner_mint_refuses_hostname_rebinding():
         ui=SimpleNamespace(host_ok=lambda host: False), send=lambda code, body: replies.append(code))
     assert ui_route(route)
     assert replies == [403]
+
+
+@pytest.mark.parametrize("case", [
+    (True, False, True, "localhost", 401),
+    (True, True, False, "localhost", 403),
+    (False, False, True, "attacker.invalid", 403),
+    (False, False, True, "localhost", 200),
+    (True, True, True, "localhost", 200),
+])
+def test_join_invitation_passes_owner_and_setup_router_guards(
+        tmp_path, monkeypatch, case):
+    joined, authenticated, header, host, expected = case
+    ui = UI(name="recipient", cluster_key_path=tmp_path / "cluster.key")
+    calls, replies = [], []
+    ui.join_guard = nullcontext
+    ui.join_invitation = lambda code: calls.append(code) or {"ok": True, "group": "lab"}
+    ui.authed = lambda cookie: authenticated
+    monkeypatch.setattr(routes, "in_cluster", lambda path: joined)
+    body = json.dumps({"invite": "test-invitation"}).encode()
+    headers = {"Host": host, "Content-Length": str(len(body))}
+    if header:
+        headers[routes.UI_HEADER] = "1"
+    handler = SimpleNamespace(path="/ui/fleet/join-invite", command="POST", headers=headers,
+                              client_address=("127.0.0.1", 1), rfile=io.BytesIO(body))
+    route = routes.Router(ui, handler)
+    route.send = lambda code, body, extra=None: replies.append((code, body, extra))
+    assert route.run()
+    assert replies[-1][0] == expected
+    assert calls == (["test-invitation"] if expected == 200 else [])
+    if expected == 200:
+        assert replies[-1][2]["Cache-Control"] == "no-store"
+        assert "HttpOnly" in replies[-1][2]["Set-Cookie"]

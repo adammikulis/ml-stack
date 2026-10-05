@@ -16,6 +16,34 @@ partial = 199
 
 
 [[group]]
+match = ["route:fleet/invite_routes.py:/join/invite/challenge", "route:fleet/invite_routes.py:/join/invite/redeem"]
+status = "covered"
+count = 2
+tests = ["tests/test_fleet_invites.py::test_public_exchange_refuses_plain_http",
+         "tests/test_fleet_invites.py::test_atomic_single_use_and_no_key_in_invite",
+         "tests/test_fleet_invites.py::test_wrong_proof_and_changed_fields_cannot_redeem",
+         "tests/test_fleet_invites.py::test_rate_limits_and_challenge_bound"]
+note = "TLS is required; wrong proofs, altered fields, expiry, rotation, rate excess and simultaneous replay cannot redeem a second grant"
+
+[[group]]
+match = ["route:fleet/invite_routes.py:/ui/fleet/invites", "route:fleet/invite_routes.py:/ui/fleet/join-invite"]
+status = "covered"
+count = 2
+tests = ["tests/test_fleet_invites.py::test_ui_mint_requires_local_authenticated_owner",
+         "tests/test_fleet_invites.py::test_owner_mint_refuses_hostname_rebinding",
+         "tests/test_fleet_invites.py::test_join_invitation_passes_owner_and_setup_router_guards"]
+note = "Owner router guards reject missing UI headers, unauthenticated joined hosts and foreign addressed setup; local owner actions return noncacheable invitations and sessions"
+
+[[group]]
+match = ["egress:fleet/invite_client.py:_post"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_invite_client.py::test_every_resolved_address_must_be_a_remote_lan_device",
+         "tests/test_fleet_invite_client.py::test_wrong_certificate_is_refused_before_any_http",
+         "tests/test_fleet_invite_client.py::test_modified_grant_is_rejected"]
+note = "Every DNS result is checked before a frozen sockaddr connection; the exact TLS leaf is pinned before HTTP; modified raw grants fail authentication"
+
+[[group]]
 match = ["egress:workspace/coordinator_client.py:client"]
 status = "covered"
 count = 1
@@ -86,7 +114,7 @@ note = "Verified-work standings are read-only and require the maintained Fleet U
 match = ["route:activity/fleet_routes.py:/ui/history/events"]
 status = "covered"
 tests = ["tests/test_activity_fleet_history.py::test_history_requires_ui_header_and_joined_session"]
-note = "The installed read-only History extension runs after Fleet UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
+note = "The installed read-only History extension runs after custom UI-header and signed-in-session authorization; native socket tests reject unauthenticated reads before exposing encrypted activity metadata"
 
 [[group]]
 match = ["spawn:fleet/environment.py:Environment.host_python"]
