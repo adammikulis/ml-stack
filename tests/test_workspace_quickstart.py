@@ -12,12 +12,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from workspace_kit import SRC, STRIPPED, clean_env
 
 from ml_stack.sentinel import human
-from ml_stack.workspace import Workspace, guide, onboard, project, tokens
+from ml_stack.workspace import Workspace, coordinator_config, guide, onboard, project, tokens
 from ml_stack.workspace.identity import Denied
 
 CODE = re.compile(r"join ((?:[A-Z0-9]{4}-){3}[A-Z0-9]{4})")
@@ -654,3 +655,59 @@ def test_connect_again_in_the_same_project_hands_out_the_same_open_code(base, ws
     ws.invites.close(code)
     guide.connect(ws, guide.Plan(live_s=0.0, wait_s=1.0, project=proj), talk)
     assert CODE.search(seen[3]).group(1) != code
+
+
+@pytest.mark.parametrize('options', [['--code-only'], ['--no-live', '--wait-seconds', '0']])
+def test_connect_code_only_prints_redeemable_invite_without_waiting(base, options):
+    term = Terminal(['connect', *options], base)
+    term.until('Invite ready. No join or live check was requested.')
+    assert term.finish() == 0
+    assert 'Nobody joined' not in term.heard
+    assert 'Waiting for the agent' not in term.heard
+    code = CODE.search(term.heard).group(1)
+    answer = child(['join', code, '--name', 'device-agent'], base)
+    assert answer.returncode == 0
+
+
+def test_hosted_code_only_paste_selects_the_authenticated_coordinator(base, ws, monkeypatch, capsys):
+    coordinator_config.save(base, {'mode': 'host', 'workspace': 'workspace:' + 'a' * 32})
+    monkeypatch.setattr(guide.coordinator_client, 'discover', lambda: [
+        (SimpleNamespace(name='Mac coordinator'), {'workspace': 'workspace:' + 'a' * 32})])
+    copied = []
+    talk = guide.Talk(copy=lambda text: copied.append(text) or True,
+                      sleep=lambda _: pytest.fail('code-only must not wait'))
+    assert guide.connect(ws, guide.Plan(code_only=True), talk) == []
+    visible = capsys.readouterr().out
+    assert "--coordinator 'Mac coordinator'" in visible
+    assert copied[0] in visible
+    assert 'does not grant cluster membership' in visible
+    assert 'Nobody joined' not in visible
+
+
+def test_remote_invitation_refuses_local_authority_before_issuing_code(base, ws):
+    with pytest.raises(ValueError, match='activate hosting first'):
+        guide.connect(ws, guide.Plan(remote=True, code_only=True), guide.Talk(copy=lambda _: False))
+    assert not ws.invites.path.exists()
+
+
+def test_expected_remote_workspace_never_redeems_at_local_registry(base):
+    answer = child(['join', 'AAAA-BBBB-CCCC-DDDD', '--workspace', 'workspace:' + 'a' * 32], base)
+    assert answer.returncode == 3
+    assert 'another coordinator workspace' in answer.stderr
+
+
+def test_person_coordinator_host_resolves_existing_owner_after_terminal_guard(base, ws):
+    tokens.store(base, tokens.OWNER_FILE, ws.init('owner'))
+    term = Terminal(['coordinator', 'host'], base)
+    term.until('workspace:')
+    assert term.finish() == 0
+    assert coordinator_config.load(base)['mode'] == 'host'
+    assert not any(secret in term.heard for secret in secrets_of(base))
+
+
+def test_host_discovery_failure_does_not_mint_or_remember_an_invite(base, ws, monkeypatch):
+    coordinator_config.save(base, {'mode': 'host', 'workspace': 'workspace:' + 'a' * 32})
+    monkeypatch.setattr(guide.coordinator_client, 'discover', lambda: [])
+    with pytest.raises(ValueError, match='one advertised coordinator'):
+        guide.connect(ws, guide.Plan(code_only=True, remote=True), guide.Talk(copy=lambda _: False))
+    assert not ws.invites.path.exists()

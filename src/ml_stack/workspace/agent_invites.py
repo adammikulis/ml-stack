@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from ml_stack import requests
+from ml_stack.log import warn
 from ml_stack.workspace import tokens
 from ml_stack.workspace.boards import ANNOUNCE
 from ml_stack.workspace.identity import AGENT, LEAD, Denied, Identity
@@ -58,6 +59,10 @@ def _request(ws: Workspace, who: Identity, summary: str, wait_s: float) -> None:
         "A joined agent asked to bring a new agent into the workspace. Nothing it read decides this; you do.",
         ("allow-once", "deny"),
         requests.Origin(who.id, str(info["project"].get("name", "")), "", model, state), ttl=wait_s))
+    warn(f"Waiting for person approval: request {handle.id or '(not stored)'}. "
+        "Open the app approvals/requests view to allow or deny it; "
+        f"timeout {wait_s:.0f} seconds. A person can use `connect --code-only` instead.",
+        flush=True)
     if not handle.wait(wait_s).approved:
         raise Denied(f"the person has not approved request {handle.id or '(not stored)'}; "
                      f"no invite was made")
