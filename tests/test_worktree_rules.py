@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,7 @@ def repo(tmp_path):
 
 
 def hook(script: Path, event: dict, **env: str) -> tuple[int, str]:
-    done = subprocess.run([str(script)], input=json.dumps(event), text=True, capture_output=True,
+    done = subprocess.run([sys.executable, str(script)], input=json.dumps(event), text=True, capture_output=True,
                           env={**CLEAN, **env})
     assert done.returncode in (BLOCKED, ALLOWED), done.stderr
     return done.returncode, done.stderr if done.returncode == BLOCKED else done.stdout
@@ -210,7 +211,7 @@ def test_a_subagent_is_told_the_rule_and_the_development_branch(repo):
 
 
 def commit(cwd: Path, **env: str) -> subprocess.CompletedProcess:
-    return subprocess.run([str(COMMIT)], cwd=cwd, text=True, capture_output=True, env={**CLEAN, **env})
+    return subprocess.run([sys.executable, str(COMMIT)], cwd=cwd, text=True, capture_output=True, env={**CLEAN, **env})
 
 
 def test_an_agent_cannot_commit_in_the_primary_checkout(repo):
@@ -230,16 +231,25 @@ def test_an_agent_cannot_commit_on_the_development_branch_in_another_tree(repo):
     assert refused.returncode == 1 and "the development branch" in refused.stderr
 
 
+@pytest.mark.skipif(not hasattr(os, "openpty"), reason="requires a POSIX pseudoterminal")
 def test_a_person_at_a_terminal_commits_anywhere(repo):
     primary, _, _ = repo
     master, slave = os.openpty()
     try:
-        done = subprocess.run([str(COMMIT)], cwd=primary, stdin=slave, stdout=slave,
+        done = subprocess.run([sys.executable, str(COMMIT)], cwd=primary, stdin=slave, stdout=slave,
                               stderr=subprocess.PIPE, env=CLEAN)
     finally:
         os.close(master)
         os.close(slave)
     assert done.returncode == 0
+
+
+def test_person_terminal_policy_permits_primary_and_worktree(repo, monkeypatch):
+    primary, work, _ = repo
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert worktreerules.commit_refusal(primary, {}) == ""
+    assert worktreerules.commit_refusal(work, {}) == ""
 
 
 def test_the_harness_policy_applies_the_same_rule_to_codex_and_local_sessions(repo):
