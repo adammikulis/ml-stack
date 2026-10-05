@@ -1,0 +1,46 @@
+<style>
+tasks-view{display:contents}tasks-view .task-controls{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}tasks-view .task-controls input{flex:1;min-width:160px}tasks-view .task-layout{display:grid;grid-template-columns:minmax(220px,340px) minmax(0,1fr);gap:16px}tasks-view .task-row{display:block;width:100%;text-align:left;margin-bottom:8px}tasks-view .task-row small{display:block;color:var(--muted)}tasks-view dl{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px}tasks-view dd{margin:0;overflow-wrap:anywhere}tasks-view .task-metrics{display:flex;gap:18px;flex-wrap:wrap}tasks-view .task-metrics strong{display:block;font-size:24px}tasks-view details{margin:14px 0}tasks-view summary{cursor:pointer}@media(max-width:700px){tasks-view .task-layout{grid-template-columns:1fr}}
+</style>
+<template>
+<section class="workspace" hidden>
+<h1>Tasks</h1><p class="intro">Track accepted outcomes, active resource claims, submitted evidence and independent reviews. Runs are free.</p>
+<div class="task-metrics"></div>
+<div class="task-controls"><input aria-label="Search tasks" placeholder="Search tasks"><select aria-label="Task status"><option value="">All statuses</option></select><button class="task-refresh">Refresh</button></div>
+<p class="status" role="status"></p>
+<details><summary>Create a task</summary><form class="task-create"><label>Title<input name="title" required maxlength="200"></label><label>Description<textarea name="description" maxlength="20000"></textarea></label><label>Acceptance criteria, one per line<textarea name="acceptance" required></textarea></label><button>Create task</button></form></details>
+<div class="task-layout"><div class="task-list"></div><article class="workspace-card task-detail"><p>Select a task to inspect its evidence.</p></article></div>
+</section>
+</template>
+<script>
+(function(){
+const M=window.fleetModel,W=window.workspaceModel,E=M.el;
+class TasksView extends HTMLElement{
+ connectedCallback(){if(this.wired)return;this.wired=true;this.host=this.querySelector('section');this.note=this.querySelector('.status');this.rows=[];this.selected='';
+ this.search=this.querySelector('input[aria-label="Search tasks"]');this.filter=this.querySelector('select');
+ for(const state of ['queued','working','review','completed','blocked','rejected'])this.filter.append(E('option',{value:state},state));
+ this.search.oninput=this.filter.onchange=()=>this.paint();this.querySelector('.task-refresh').onclick=()=>this.load();
+ this.querySelector('form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget;try{const row=await W.post('/ui/tasks',{spec:{title:form.elements.namedItem('title').value,description:form.elements.namedItem('description').value,acceptance:form.elements.namedItem('acceptance').value.split('\n').map(x=>x.trim()).filter(Boolean)}});this.selected=row.id;form.reset();await this.load();}catch(error){W.status(this.note,error);}};
+ W.route(this.host,'tasks',()=>this.load());this.timer=setInterval(()=>{if(!this.host.hidden)this.load();},5000);}
+ disconnectedCallback(){clearInterval(this.timer);}
+ async load(){if(this.loading)return;this.loading=true;try{const data=await W.api('/ui/tasks');this.rows=data.tasks||[];this.metrics=data.metrics||{};this.paint();this.note.textContent=`${this.rows.length} tasks. Worker checkpoints are claims until independently verified.`;}catch(error){W.status(this.note,error);}finally{this.loading=false;}}
+ paint(){const metrics=this.querySelector('.task-metrics');metrics.replaceChildren(...[['Accepted outcomes',this.metrics?.verified_outcomes],['Accepted artifacts',this.metrics?.accepted_artifacts],['Failures',this.metrics?.failures],['Blocked seconds',Math.round(this.metrics?.blocked_seconds||0)]].map(([label,value])=>E('div',{},E('strong',{},String(value||0)),label)));
+ const query=this.search.value.toLowerCase();const rows=this.rows.filter(row=>(!this.filter.value||row.state===this.filter.value)&&`${row.title} ${row.description} ${row.worker||''} ${row.base_id||''}`.toLowerCase().includes(query));
+ this.querySelector('.task-list').replaceChildren(...rows.map(row=>E('button',{class:'task-row',type:'button','aria-pressed':String(row.id===this.selected),onclick:()=>{this.selected=row.id;this.paint();}},row.title,E('small',{},`${row.state} · ${row.base_id||'Unassigned account'}`))));
+ if(!rows.length)this.querySelector('.task-list').append(E('p',{},'No matching tasks.'));
+ const row=this.rows.find(row=>row.id===this.selected);if(row)this.details(row);}
+ field(list,label,value){if(value!==undefined&&value!==null&&value!=='')list.append(E('dt',{},label),E('dd',{},String(value)));}
+ evidence(title,value){return E('details',{},E('summary',{},title),E('pre',{},W.json(value)));}
+ details(row){const host=this.querySelector('.task-detail'),list=E('dl',{});host.replaceChildren(E('h2',{},row.title),E('span',{class:'badge'},row.state),E('p',{},row.description),list);
+ for(const [label,value] of [['Account',row.base_id],['Device',row.device_id],['Worker',row.worker],['Task ID',row.id],['Blocked reason',row.blocked_reason],['Resource model',row.lease?.resource?.model],['Authorized project',row.lease?.resource?.project],['Lease expires',row.lease?.deadline?new Date(row.lease.deadline*1000).toLocaleString():null]])this.field(list,label,value);
+ host.append(E('h3',{},'Acceptance criteria'),E('ul',{},...row.acceptance.map(item=>E('li',{},item))));
+ if(row.dependencies?.length)host.append(this.evidence('Dependencies',row.dependencies));
+ for(const [label,value] of [['Resource lease',row.lease],['Worker checkpoints',row.checkpoints],['Submitted proposal and artifact hashes',row.proposal],['Independent reviews',row.reviews]])if(value&&(Array.isArray(value)?value.length:true))host.append(this.evidence(label,value));
+ if(row.state==='review')this.reviewForm(host,row);
+ if(row.state==='blocked'||row.state==='working'&&row.lease?.deadline*1000<Date.now())this.resumeForm(host,row);}
+ resumeForm(host,row){const action=row.state==='blocked'?'resume':'recover',form=E('form',{}),reason=E('textarea',{required:true,'aria-label':'Continuation reason'});form.append(E('h3',{},action==='resume'?'Resolve blockage':'Recover expired lease'),E('p',{},'Explain the changed condition. Continuation still requires a fresh verified resource claim.'),reason,E('button',{},action==='resume'?'Authorize resume':'Recover expired lease'));form.onsubmit=async event=>{event.preventDefault();try{await W.post('/ui/tasks',{action,id:row.id,reason:reason.value});await this.load();}catch(error){W.status(this.note,error);}};host.append(form);}
+ reviewForm(host,row){const box=E('details',{},E('summary',{},'Independently review this proposal')),form=E('form',{}),reason=E('textarea',{required:true,'aria-label':'Independent review reason'}),outcome=E('select',{'aria-label':'Review outcome'},...['accepted','rejected','blocked_infrastructure'].map(x=>E('option',{value:x},x.replaceAll('_',' '))));const checks=row.acceptance.map(name=>({name,input:E('input',{type:'checkbox'})}));form.append(E('label',{},'Outcome',outcome),E('label',{},'Review reason',reason),E('p',{},'Check only criteria you independently verified.'));
+ for(const check of checks)form.append(E('label',{},check.input,' '+check.name));form.append(E('button',{},'Record independent review'));form.onsubmit=async event=>{event.preventDefault();try{await W.post('/ui/tasks',{action:'review',id:row.id,decision:{accepted:outcome.value==='accepted',outcome:outcome.value,reason:reason.value,checks:checks.map(check=>({name:check.name,passed:check.input.checked}))}});await this.load();}catch(error){W.status(this.note,error);}};box.append(form);host.append(box);}
+}
+customElements.define('tasks-view',TasksView);
+})();
+</script>
