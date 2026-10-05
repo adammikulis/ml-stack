@@ -256,9 +256,9 @@ class TestTheClusterView:
     def test_benchmark_options_are_explicit_and_no_command_is_shown(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.locator("#cluster-sweep > summary").click()
-        page.get_by_label("Questions", exact=True).select_option("limit")
-        page.get_by_label("Question limit", exact=True).fill("40")
-        page.get_by_label("Run name", exact=False).fill("nightly")
+        page.locator("#cluster-sweep").get_by_label("Questions", exact=True).select_option("limit")
+        page.locator("#cluster-sweep").get_by_label("Question limit", exact=True).fill("40")
+        page.locator("#cluster-sweep").get_by_label("Run name", exact=False).fill("nightly")
         assert page.locator("#sample").input_value() == "40"
         assert "ml-stack-bench" not in page.locator("#cluster-sweep").inner_text()
         assert not errors
@@ -317,7 +317,7 @@ class TestTheModelsView:
         page.get_by_role("button", name="Hugging Face", exact=True).click()
         page.wait_for_selector("#browser-source")
         page.fill("#hunt", "thornfield")
-        page.wait_for_function("document.querySelector('model-browser').hubKey.includes('thornfield')")
+        page.wait_for_function("document.querySelector('model-browser').search.typed === 'thornfield'")
         assert page.locator("#hunt").input_value() == "thornfield"
         assert not errors
 

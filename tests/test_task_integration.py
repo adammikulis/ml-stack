@@ -34,6 +34,15 @@ if os.environ.get('FAIL_INTEGRATION_GATE') == sys.argv[1]:
 '''
 
 
+def install_push_hook(primary):
+    hook = Path(__file__).resolve().parents[1] / 'scripts' / 'hooks' / 'pre-push'
+    interpreter = Path(sys.executable).as_posix()
+    checker = (hook.parent / 'pushed').as_posix()
+    installed = primary / '.git' / 'hooks' / 'pre-push'
+    installed.write_text(hook.read_text().replace('"${PYTHON:-python3}" "$here/pushed"', f'\"{interpreter}\" \"{checker}\"'))
+    installed.chmod(0o755)
+
+
 @pytest.fixture
 def project(board, tmp_path, monkeypatch, request):
     project_root = tmp_path / 'integration-project'
@@ -89,12 +98,7 @@ def project(board, tmp_path, monkeypatch, request):
                                  {'summary': 'Native source is committed.', 'artifacts': artifacts,
                                   'checks': [{'name': 'Worker claim', 'passed': True}],
                                   'provenance': {'commit': repo.git(source, 'rev-parse', 'HEAD')}})
-    hook = Path(__file__).resolve().parents[1] / 'scripts' / 'hooks' / 'pre-push'
-    interpreter = Path(sys.executable).as_posix()
-    checker = (hook.parent / 'pushed').as_posix()
-    installed = primary / '.git' / 'hooks' / 'pre-push'
-    installed.write_text(hook.read_text().replace('python3 \"$here/pushed\"', f'\"{interpreter}\" \"{checker}\"'))
-    installed.chmod(0o755)
+    install_push_hook(primary)
     log = tmp_path / 'gate-commands.jsonl'
     monkeypatch.setenv('INTEGRATION_GATE_LOG', str(log))
     return {'primary': primary, 'source': source, 'origin': origin, 'log': log,
@@ -416,3 +420,13 @@ def test_unique_ignored_files_keep_task_pending_until_preserved(board, project, 
     assert result['state'] == 'completed'
     assert not project['source'].exists()
     assert (tmp_path / 'preserved.private').read_text() == 'unique work'
+
+
+def test_completed_task_refuses_recreated_branch_without_deleting_it(board, project):
+    board.board.review(board.parent, board.task['id'], accepted())
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'completed'
+    repo.git(project['primary'], 'branch', project['worktree']['branch'])
+    with pytest.raises(Denied, match='branch reappeared'):
+        task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert repo.git(project['primary'], 'rev-parse', project['worktree']['branch']) == result['commit']

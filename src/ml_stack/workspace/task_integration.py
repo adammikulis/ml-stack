@@ -236,9 +236,17 @@ def integrate(ws, token: str, task_id: str, *, publish: bool = False) -> dict:
                          if row['attrs']['task'] == task_id
                          and row['attrs']['review_id'] == task['review']['id']), None)
     if previous and previous.get('cleanup_verified'):
-        if Path(previous['source']).exists() or Path(previous['candidate']).exists():
-            raise Denied('a completed task checkout reappeared; inspect it before reporting completion')
-        return previous
+        primary = Path(previous['primary'])
+        with held(primary / '.git' / 'ml-stack-integration.lock'):
+            registered = repo.git(primary, 'worktree', 'list', '--porcelain').splitlines()
+            for path, branch in ((Path(previous['source']), previous['source_branch']),
+                                  (Path(previous['candidate']), previous['branch'])):
+                refs = repo.git(primary, 'for-each-ref', '--format=%(refname)', f'refs/heads/{branch}').splitlines()
+                if path.exists() or f'refs/heads/{branch}' in refs or any(
+                        line.startswith('worktree ') and Path(line[9:]).resolve() == path.resolve()
+                        for line in registered):
+                    raise Denied('a completed task checkout, registration or branch reappeared; preserve it before completion')
+            return previous
     if previous and previous['state'] in ('integrated', 'publication_confirmed', 'cleanup_required', 'blocked') \
             and previous.get('commit'):
         operation = DevelopmentIntegration.__new__(DevelopmentIntegration)

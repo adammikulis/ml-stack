@@ -25,9 +25,21 @@ from . import pake
 from .lan import require_local
 from .pairing import fingerprint_of, unverified_context
 
-__all__ = ["API", "Declined", "Joiner", "Joining", "Offer", "find_clusters", "cluster_action",
-           "create_by_passphrase", "find_joiners", "join_by_passphrase", "join_existing", "join_secret",
-           "matches"]
+__all__ = [
+    "API",
+    "Declined",
+    "Joiner",
+    "Joining",
+    "Offer",
+    "cluster_action",
+    "create_by_passphrase",
+    "find_clusters",
+    "find_joiners",
+    "join_by_passphrase",
+    "join_existing",
+    "join_secret",
+    "matches",
+]
 
 API = "/join/v1"
 CLIENT = "joiner"

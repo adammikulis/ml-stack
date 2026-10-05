@@ -16,7 +16,10 @@ because that is what its version was tested against.
 
 ## Hooks
 
-`scripts/install-hooks.sh` links the git hooks in `scripts/hooks/` into `.git/hooks`:
+`python scripts/install-hooks.py` installs the Git hooks using that Python interpreter,
+including on Windows, and preserves hooks managed by someone else. Run it from the primary
+checkout after landing the reviewed branch. The POSIX `scripts/install-hooks.sh` remains
+available for existing shell setups. Installed hooks run the checks in the invoking checkout:
 `no-real-names` refuses a commit whose staged files carry a person's name, `commit-msg`
 refuses one whose message does. A third hook there is for Claude Code rather than git:
 `scripts/hooks/claude-bash-guard` is a PreToolUse hook on Bash that refuses the shells
@@ -26,6 +29,15 @@ at the model, killing llama by name, `SKIP_NAME_CHECK=1` -- and names the comman
 instead. Wire it into a project's `.claude/settings.json` (the docstring shows the JSON);
 `MLSTACK_GUARD=off` disables it for a session. Both hooks are tested:
 `tests/test_no_real_names.py` and `tests/test_bash_guard.py`.
+
+Set `git config --local pull.ff only` for editor sync: a divergent pull refuses before
+creating a merge. Reconcile divergence in an integration worktree, then land with a reviewed
+fast-forward. The pre-push hook refuses dirty checkouts and unfinished Git operations for
+people and agents.
+
+Coding tasks own their branch and worktree through assignment, claim, review, integration
+and cleanup ([task lifecycle](tasks.md)). A reviewed coding proposal is accepted; completion
+requires the landed commit and verified removal of its worktrees and merged branches.
 
 The worktree rule is in `src/ml_stack/worktreerules.py` and reaches every harness. Claude Code
 runs `claude-edit-guard` (Write, Edit, MultiEdit, NotebookEdit) and `claude-bash-guard` before

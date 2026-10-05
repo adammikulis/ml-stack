@@ -1,7 +1,6 @@
 """Bounded native coding turns execute canonical task worktrees."""
 
 import hashlib
-
 import json
 import sys
 import threading
@@ -11,8 +10,14 @@ from pathlib import Path
 from ml_stack.client import families
 from ml_stack.fleet.conversations import Conversations
 from ml_stack.net import git
-from ml_stack.workspace import integration_git as repo
-from ml_stack.workspace import localagent as la, localeffort, localloop, tokens, work_reputation
+from ml_stack.workspace import (
+    integration_git as repo,
+    localagent as la,
+    localeffort,
+    localloop,
+    tokens,
+    work_reputation,
+)
 from ml_stack.workspace.coding_turns import Manager, Turn
 from ml_stack.workspace.harness_seat import Seat
 
@@ -113,7 +118,7 @@ def _proposal(agent, task, project, turn, environment):
     for name in sorted(paths):
         path = (project / name).resolve()
         if path.is_relative_to(project) and path.is_file():
-            artifacts[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            artifacts[name] = hashlib.sha256(repo.git(project, 'show', f'HEAD:{name}', binary=True)).hexdigest()
     return {'summary': turn.text[:2000], 'artifacts': artifacts,
             'checks': [{'name': 'Native harness returned a final answer', 'passed': True}],
             'provenance': {'commit': git.head(project), 'environment': environment,

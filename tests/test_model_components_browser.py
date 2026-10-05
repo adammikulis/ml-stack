@@ -14,6 +14,7 @@ pytestmark = pytest.mark.slow
 
 def test_download_component_choices_and_installed_component_action(joined, open_page, monkeypatch):
     from playwright.sync_api import expect
+
     from ml_stack.fleet import catalogue, model_components, routes
     from ml_stack.fleet.models import Getting
 

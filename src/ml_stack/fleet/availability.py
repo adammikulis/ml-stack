@@ -249,12 +249,12 @@ class Availability:
 
     # -- config ----------------------------------------------------------
     @classmethod
-    def from_specs(cls, busy: list[str] = (), free: list[str] = ()) -> "Availability":
+    def from_specs(cls, busy: list[str] = (), free: list[str] = ()) -> Availability:
         return cls(windows=[parse_window(s) for s in busy]
                    + [parse_window(s, busy=False) for s in free])
 
     @classmethod
-    def load(cls, path: Path | str) -> "Availability":
+    def load(cls, path: Path | str) -> Availability:
         """Read windows from a JSON file, so the UI can edit what the CLI set."""
         p = Path(path).expanduser()
         if not p.exists():

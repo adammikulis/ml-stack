@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import time
 from dataclasses import replace
-from pathlib import Path
 from uuid import uuid4
 
 from ml_stack import worktreerules

@@ -1,7 +1,6 @@
 """Optional components, verified linkage and full integrated replacement costs."""
 
 import struct
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -134,6 +133,7 @@ def test_vision_is_linked_and_not_listed_as_a_base_model(tmp_path, monkeypatch):
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_addon_route_refuses_untrusted_requests_before_component_lookup(method):
     from unittest.mock import patch
+
     from ml_stack.fleet import routes
 
     handler = Mock(path="/ui/models/addons?name=../../outside&source=file:///outside",

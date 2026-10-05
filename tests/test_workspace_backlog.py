@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack.net import git
 from ml_stack.workspace import backlog, issuepump, localagent as la, localcli, tokens
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.taskboard import TaskBoard
@@ -17,7 +18,11 @@ def setup(monkeypatch, tmp_path):
     parent = kit.agent("lead")
     project = tmp_path / "isolated"
     project.mkdir()
-    (project / ".git").write_text("gitdir: /scratch\n")
+    git.run(["init", str(project)])
+    (project / "source.py").write_text("VALUE = True\n")
+    git.run(["add", "source.py"], cwd=project)
+    git.run(["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+             "commit", "-m", "baseline"], cwd=project)
     child = kit.ws.delegate(parent, "worker")
     agent = la.Agent("worker", "local.gguf", identity=child["id"], profile="coding", project=str(project))
     la.save(kit.ws, agent)
@@ -38,7 +43,7 @@ def test_worker_cannot_authorize_itself_or_another_parents_worker(setup):
             backlog.configure(kit.ws, token, agent.name, "sample/project", str(project))
     with pytest.raises(ValueError, match="owner/name"):
         backlog.configure(kit.ws, kit.owner, agent.name, "../outside", str(project))
-    with pytest.raises(ValueError, match="isolated git worktree"):
+    with pytest.raises(ValueError, match="registered git checkout"):
         backlog.configure(kit.ws, kit.owner, agent.name, "sample/project", str(project.parent))
 
 

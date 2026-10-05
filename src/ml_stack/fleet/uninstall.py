@@ -86,7 +86,7 @@ def remove(root: Path | str, keys: list[str], *,
     from . import autostart
 
     root = Path(root).expanduser()
-    chosen = {k for k in keys}
+    chosen = set(keys)
     gone: list[str] = []
     failed: dict[str, str] = {}
     freed = 0

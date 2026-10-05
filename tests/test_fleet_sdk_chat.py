@@ -120,3 +120,20 @@ def test_disconnect_cancels_while_upstream_is_waiting_for_next_token():
         browser.close()
         handler.close()
         fake.close()
+
+
+def test_sdk_preserves_reasoning_alongside_the_answer():
+    from ml_stack.fleet.chat import reply_parts
+
+    fake = FakeLlamaServer(Served(model="qwen"))
+    fake.frames = lambda body: [
+        b'data: {"choices":[{"index":0,"delta":{"reasoning_content":"Consider the evidence."}}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":"The answer."}}]}\n\n',
+        b'data: [DONE]\n\n',
+    ]
+    try:
+        target = Target("qwen", f"http://127.0.0.1:{fake.port}/v1/chat/completions")
+        reply = b"".join(stream(target, {"model": "qwen", "messages": [{"role": "user", "content": "hi"}]}))
+        assert reply_parts(reply) == ("The answer.", "Consider the evidence.")
+    finally:
+        fake.close()

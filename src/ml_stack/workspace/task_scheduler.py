@@ -1,16 +1,17 @@
 """Registered parents allocate ready tasks to their enrolled local workers."""
 
+import os
 import time
 
 from ml_stack import activity
 from ml_stack.graph.store import GraphStore
+from ml_stack.serve.process import pid_exists, started_at
 from ml_stack.workspace import (
     child_renewal,
     localagent as la,
     resource_allocations,
     task_integration,
     task_scope,
-    task_worktrees,
     tokens,
 )
 from ml_stack.workspace.chain import held
@@ -38,7 +39,6 @@ def assign_next(ws, parent_token: str, worker: str, broker_lease: str):
     if not ready:
         return None
     task = min(ready, key=lambda row: row['created_at'])
-    task_worktrees.prepare(ws, parent_token, worker, task['id'])
     return resource_allocations.assign(ws, parent_token, worker, task['id'], broker_lease)
 
 
@@ -59,9 +59,20 @@ def integrate_completed(ws, parent_token, worker):
             continue
         ident = 'integration-attempt:' + review['review_hash']
         attempt = {'id': ident, 'task': task['id'], 'worker': worker, 'owner': parent.id,
-                   'review_hash': review['review_hash'], 'state': 'started', 'started': ws.clock()}
+                   'review_hash': review['review_hash'], 'state': 'started', 'started': ws.clock(),
+                   'owner_pid': os.getpid(), 'owner_started': started_at(os.getpid())}
         with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
-            if any(node['id'] == ident for node in graph.nodes('integration-attempt')):
+            old = next((node['attrs'] for node in graph.nodes('integration-attempt') if node['id'] == ident), None)
+            if old:
+                live = bool(old.get('owner_pid') and old.get('owner_started')
+                            and pid_exists(old['owner_pid'])
+                            and started_at(old['owner_pid']) == old['owner_started'])
+                if old['state'] == 'started' and old['owner'] == parent.id and not live:
+                    outcome = {'state': 'blocked', 'reason':
+                        'The previous integration owner is no longer live; preserve and inspect its candidate before recovery.'}
+                    old.update(state='blocked', outcome=outcome, finished=ws.clock(), recovery_required=True)
+                    save(graph, 'integration-attempt', old)
+                    results.append(outcome)
                 continue
             save(graph, 'integration-attempt', attempt)
             link(graph, ident, task['id'], 'integrates-task')

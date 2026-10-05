@@ -13,6 +13,8 @@ from ml_stack.serve import mtp
 from ml_stack.serve.preflight import read_gguf_header
 
 from . import component_store
+from .catalogue import SUGGESTED
+from .remote import Peer, PeerError
 from .weights import ModelError, is_a_piece
 
 KINDS = {"mtp", "vision"}
@@ -133,7 +135,6 @@ def source_for(model: Path) -> str:
     repo = hub.repo_of(model)
     if repo:
         return f"hf:{repo}/{model.name}"
-    from .catalogue import SUGGESTED
     return next((pick.ref for pick in SUGGESTED if pick.file == model.name), "")
 
 
@@ -160,7 +161,6 @@ def catalogue(models, name: str, source: str = "", key: bytes | None = None) -> 
     repo, _ = _reference(source)
     policy = models.sources()
     if key is not None and policy in {"lan", "both"}:
-        from .remote import Peer, PeerError
         for peer in Peer.discover(key=key, timeout_s=1):
             try:
                 for held in peer.models():

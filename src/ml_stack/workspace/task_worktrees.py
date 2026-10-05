@@ -5,8 +5,7 @@ from pathlib import Path
 from ml_stack import worktreerules
 from ml_stack.graph.store import GraphStore
 from ml_stack.net import git
-from ml_stack.workspace import integration_git as repo
-from ml_stack.workspace import localagent, task_scope, tokens
+from ml_stack.workspace import integration_git as repo, localagent, task_scope, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.task_schema import TASK_ID
@@ -43,7 +42,7 @@ def prepare(ws, token: str, worker: str, task: str) -> dict:
         if old:
             if old['worker'] != worker or old['source_project'] != str(source):
                 raise Denied('the task worktree belongs to another assignment')
-            if old.get('state') == 'reserved' and old['baseline_commit'] != baseline:
+            if old.get('state') == 'reserved' and not target.exists() and old['baseline_commit'] != baseline:
                 old = {**old, 'baseline_commit': baseline}
                 graph.upsert_node({'id': key, 'kind': 'task-worktree', 'label': task, 'attrs': old})
             return old

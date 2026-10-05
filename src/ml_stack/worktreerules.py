@@ -163,9 +163,8 @@ def bash_refusal(command: str, cwd: str) -> str:
             given = re.search(r"\s-C\s+(\S+)", segment)
             where = here / _unquote(given.group(1)) if given else here
             found = checkouts(where)
-            if found and _enforced(found[1]):
-                if why := worktree_refusal(where / target, where):
-                    return why
+            if found and _enforced(found[1]) and (why := worktree_refusal(where / target, where)):
+                return why
         if git and git["verb"] in CHANGES_THE_TREE:
             given = re.search(r"\s-C\s+(\S+)", segment)
             where = here / _unquote(given.group(1)) if given else here

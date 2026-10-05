@@ -20,7 +20,7 @@ def test_source_dedup_graph_artifacts_and_reopened_accepted_outcome(board):
     proposal = proposed(board)
     review = board.board.review(board.parent, task['id'], accepted())
     result = TaskBoard(board.ws).get(board.child, task['id'])
-    assert result['state'] == 'completed' and result['proposal']['proposal_hash'] == proposal['proposal_hash']
+    assert result['state'] == 'accepted' and result['proposal']['proposal_hash'] == proposal['proposal_hash']
     assert result['review']['proposal_id'] == proposal['id']
     assert result['review']['review_hash'] == review['review_hash']
     with GraphStore(board.base / 'coordination.db') as graph:
@@ -85,6 +85,10 @@ def test_dependencies_checkpoint_budget_and_infrastructure_outcome(board):
         board.board.claim(board.child, dependent['id'], allocation['allocation_id'])
     proposed(board)
     board.board.review(board.parent, board.task['id'], accepted())
+    with pytest.raises(Denied, match='dependencies'):
+        board.board.claim(board.child, dependent['id'], allocation['allocation_id'])
+    dependent = board.board.create(board.parent, {**board.spec, 'source_key': 'independent-infrastructure'})
+    allocation = assign(board.ws, board.parent, board.worker_id, dependent['id'], 'native-grant')
     board.board.claim(board.child, dependent['id'], allocation['allocation_id'])
     checkpoint = board.board.checkpoint(board.child, dependent['id'], {'summary': 'Replay started', 'commit': 'abc123'})
     assert board.board.get(board.parent, dependent['id'])['checkpoints'][0]['id'] == checkpoint['id']
@@ -163,7 +167,7 @@ def test_designated_peer_requires_existing_project_grant_and_cannot_self_review(
                                                    board.task['id'], 'native-grant')
     proposed(board)
     board.board.review(peer, board.task['id'], accepted())
-    assert board.board.assert_reviewer(peer, board.task['id'])['state'] == 'completed'
+    assert board.board.assert_reviewer(peer, board.task['id'])['state'] == 'accepted'
     board.ws.registry.set_project(owner, 'independent-reviewer', {'root': '/elsewhere'})
     with pytest.raises(Denied):
         board.board.assert_reviewer(peer, board.task['id'])

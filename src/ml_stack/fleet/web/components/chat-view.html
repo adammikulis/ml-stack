@@ -232,9 +232,9 @@
         if (!saved.ok) throw new Error(saved.error || "Could not read conversations.");
         const rows = saved.conversations || [];
         this.sidebar.replaceChildren(...rows.map((c) =>
-          el("div", { class: `chatrow${c.id === this.open ? " on" : ""}` },
+          el("div", { class: `chatrow${c.id === this.open ? " on" : ""}`, "data-conversation": c.id },
             el("a", { href: "#chat", onclick: (e) => {
-              e.preventDefault(); if (!this.request) this.load(c.id).then(() => this.paintList());
+              e.preventDefault(); if (!this.request) this.load(c.id);
             } }, c.title || "New chat"),
             el("details", { class: "chat-row-menu" },
               el("summary", { "aria-label": `Options for ${c.title || "New chat"}` }, "•••"),
@@ -306,6 +306,9 @@
         }
         if (!one.ok) throw new Error(one.error || "Could not open the conversation.");
         this.open = id;
+        this.sidebar.querySelectorAll(".chatrow").forEach((row) => {
+          row.classList.toggle("on", row.dataset.conversation === id);
+        });
         localStorage.setItem("ml-stack.chat.selected", id);
         this.heading.textContent = one.title || "New chat";
         this.messages = one.messages || [];

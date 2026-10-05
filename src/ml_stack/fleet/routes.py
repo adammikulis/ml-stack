@@ -22,19 +22,19 @@ from .discovery import (
     memberships,
     require_name,
 )
-from .onboard.joining import cluster_action, join_by_passphrase
 from .extension_routes import ExtensionRoutes
 from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
 from .launch_routes import LaunchRoutes
 from .onboard.clusters import known_clusters
+from .onboard.joining import cluster_action, join_by_passphrase
 from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .project_board_routes import ProjectBoardRoutes
 from .room_routes import RoomRoutes
 from .session import parse_cookie
-from .startup_models import choices
 from .setup_recovery_routes import SetupRecoveryRoutes
+from .startup_models import choices
 from .workspace_routes import WorkspaceRoutes
 
 ASSETS = Path(__file__).parent / "web"

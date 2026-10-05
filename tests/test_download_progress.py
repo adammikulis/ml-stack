@@ -1,6 +1,5 @@
 """Measured download rates and combined model/head progress."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 from ml_stack.fleet.download_progress import Transfer

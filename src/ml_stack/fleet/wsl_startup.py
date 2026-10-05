@@ -7,6 +7,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from ml_stack.log import say
+
 
 def guest() -> bool:
     return sys.platform.startswith("linux") and bool(os.environ.get("WSL_DISTRO_NAME"))
@@ -54,7 +56,7 @@ def answer(status: Callable, configure: Callable) -> int:
             raise ValueError("startup request too large")
         request = validate(json.loads(raw))
         result = status() if request["action"] == "status" else configure(request)
-        print(json.dumps(result))
+        say(json.dumps(result))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError):
         return 2

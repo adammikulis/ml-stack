@@ -104,7 +104,7 @@ class Transfer:
                 lock.release()
             self.emit(None)
 
-    def relay(self, handler: Any) -> tuple[bytes, str]:
+    def relay(self, handler: Any, *, defer_done: bool = False) -> tuple[bytes, str]:
         said = bytearray()
         status = "complete"
         self.worker.start()
@@ -117,6 +117,8 @@ class Transfer:
                 if block is None:
                     break
                 said.extend(block)
+                if defer_done and block.strip() == b"data: [DONE]":
+                    continue
                 handler.wfile.write(block)
                 handler.wfile.flush()
                 if b'"error"' in block:

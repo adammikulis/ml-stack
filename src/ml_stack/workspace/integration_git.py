@@ -50,7 +50,7 @@ def ancestor(root: Path, before: str, after: str) -> bool:
 def reviewed_files(root: Path, commit: str, artifacts: dict[str, str]) -> None:
     for name, digest in artifacts.items():
         path = Path(name)
-        if path.is_absolute() or '..' in path.parts or '\\' in name or '\x00' in name:
+        if path.anchor or '..' in path.parts or '\\' in name or '\x00' in name:
             raise Denied('integration artifacts must be tracked relative repository paths')
         entry = git(root, 'ls-tree', commit, '--', name)
         if not entry.startswith(('100644 blob ', '100755 blob ')):

@@ -49,9 +49,13 @@ async def _events(target: Any, payload: dict[str, Any], connection: Any, control
                 event = pending.result()
             except StopAsyncIteration:
                 break
-            if event.type == "raw_response_event" and event.data.type == "response.output_text.delta":
-                frame = {"choices": [{"delta": {"content": event.data.delta}}]}
-                yield b"data: " + json.dumps(frame).encode() + b"\n\n"
+            if event.type == "raw_response_event":
+                field = {"response.output_text.delta": "content",
+                         "response.reasoning_summary_text.delta": "reasoning_content",
+                         "response.reasoning_text.delta": "reasoning_content"}.get(event.data.type)
+                if field is not None:
+                    frame = {"choices": [{"delta": {field: event.data.delta}}]}
+                    yield b"data: " + json.dumps(frame).encode() + b"\n\n"
         yield b"data: [DONE]\n\n"
     finally:
         result.cancel()

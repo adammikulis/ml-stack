@@ -132,13 +132,13 @@ def test_model_picker_groups_and_searches_loaded_and_installed_models(chat_brows
     expect(page.locator("chat-view #chat-model-list")).to_contain_text("Installed · Q8_0")
     page.locator("chat-view").get_by_label("Search models", exact=True).fill("Qwen")
     expect(page.locator("chat-view .chat-model-choice")).to_have_count(1)
-    page.get_by_label("Search models", exact=True).press("Enter")
+    page.locator("chat-view").get_by_label("Search models", exact=True).press("Enter")
     expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
     expect(page.locator("chat-view #model")).to_have_value("model-a")
     page.locator("chat-view #chat-model-button").click()
     page.locator("chat-view").get_by_label("Search models", exact=True).fill("no matches")
     expect(page.locator("chat-view #chat-model-list")).to_have_text("No models match your search.")
-    page.get_by_label("Search models", exact=True).press("Escape")
+    page.locator("chat-view").get_by_label("Search models", exact=True).press("Escape")
     expect(page.locator("chat-view #chat-model-dialog")).not_to_be_visible()
     assert page.locator("chat-view textarea").count() == 1
 

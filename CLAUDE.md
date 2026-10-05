@@ -604,7 +604,7 @@ a vendored file's own license header names its holder, because the license makes
 condition of using the code. The hook does not read those files. `scripts/hooks/` enforces it —
 `no-real-names` on staged files, `commit-msg` on the message — and is worth installing:
 
-    scripts/install-hooks.sh
+    python scripts/install-hooks.py
     pip install -e '.[privacy]' && python -m spacy download en_core_web_sm
 
 It refuses a person it has never seen, not merely a list of known names. Invented names go in

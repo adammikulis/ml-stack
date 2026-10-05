@@ -59,19 +59,9 @@ class ChatRoutes(ConversationRoutes):
             if found is not None:
                 messages = [{"role": m.role, "content": m.content}
                             for m in found.messages if m.content] + [messages[-1]]
-            payload = {"model": target.alias or target.model, "messages": messages, "stream": True}
-            if req.get("max_output_tokens") is not None:
-                output_tokens = req["max_output_tokens"]
-                if type(output_tokens) is not int or output_tokens < 1:
-                    self.send(400, {"error": "Maximum output tokens must be a positive integer"})
-                    return True
-                payload["max_output_tokens"] = output_tokens
-            if req.get("temperature") is not None:
-                try:
-                    payload["temperature"] = float(req["temperature"])
-                except (TypeError, ValueError):
-                    self.send(400, {"error": "invalid temperature"})
-                    return True
+            payload = self._chat_payload(req, target, messages)
+            if payload is None:
+                return True
             if found is not None:
                 store.append(cid, "user", str(messages[-1]["content"]))
             handler = self.handler
@@ -88,11 +78,30 @@ class ChatRoutes(ConversationRoutes):
                 handler.wfile.flush()
             except OSError:
                 return True
-            said, status = Transfer(target, payload, cid, source=stream).relay(handler)
+            said, status = Transfer(target, payload, cid, source=stream).relay(handler, defer_done=True)
             spoken, reasoning = reply_parts(said)
             if found is not None and (spoken or reasoning):
                 store.append(cid, "assistant", spoken, reasoning=reasoning, status=status)
+            if status != "cancelled":
+                handler.wfile.write(b"data: [DONE]\n\n")
+                handler.wfile.flush()
         finally:
             if cid:
                 release(store, cid)
         return True
+
+    def _chat_payload(self, req, target, messages):
+        payload = {"model": target.alias or target.model, "messages": messages, "stream": True}
+        if req.get("max_output_tokens") is not None:
+            output_tokens = req["max_output_tokens"]
+            if type(output_tokens) is not int or output_tokens < 1:
+                self.send(400, {"error": "Maximum output tokens must be a positive integer"})
+                return None
+            payload["max_output_tokens"] = output_tokens
+        if req.get("temperature") is not None:
+            try:
+                payload["temperature"] = float(req["temperature"])
+            except (TypeError, ValueError):
+                self.send(400, {"error": "invalid temperature"})
+                return None
+        return payload

@@ -22,7 +22,7 @@ import pytest
 from ml_stack.fleet import tls
 from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.daemon import load_or_create_token
-from ml_stack.fleet.discovery import cluster_group, in_cluster, primary_ip
+from ml_stack.fleet.discovery import in_cluster, primary_ip
 from ml_stack.fleet.framing import LimitedServer
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.onboard.pairing import unverified_context
