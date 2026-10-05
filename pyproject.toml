@@ -62,7 +62,7 @@ fleet-update = ["cryptography>=50"]
 # adding a machine with a short code (`ml-stack-fleet listen` / `pair`): SPAKE2 from the
 # maintained `spake2` package, Ed25519 signing from cryptography, the signing key in the OS
 # keystore through `keyring`
-fleet-onboard = ["cryptography>=50", "spake2>=0.9", "keyring>=24", "py-machineid"]
+fleet-onboard = ["cryptography>=50", "spake2>=0.9", "keyring>=24", "py-machineid", "qrcode"]
 coordinator = ["py-machineid"]
 # `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what

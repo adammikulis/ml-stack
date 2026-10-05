@@ -31,7 +31,7 @@ from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
-from . import commands, projects as project_routes
+from . import commands, invite_routes, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
@@ -361,6 +361,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
 
         def _join(self, body: bytes | None) -> bool:
             """Answer a ``/join/v1`` request, which carries no signature; False for any other path."""
+            if invite_routes.public(ui, self, body):
+                return True
             if joining is None or not self.path.startswith(JOIN_API + "/"):
                 return False
             try:

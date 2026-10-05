@@ -1,4 +1,4 @@
-"""Authenticated UI routes composed from screen mixins."""
+"""UI routes with owner authentication and screen mixins."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import component_routes, lan_clusters, project_client, recovery
+from . import component_routes, invite_routes, lan_clusters, project_client, recovery
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -839,6 +839,8 @@ class Router(PageRoutes, SetupRecoveryRoutes, SetupRoutes, SessionRoutes, Measur
         if self.public_route():
             return True
         if not self.signed_in():
+            return True
+        if invite_routes.ui_route(self):
             return True
         if project_client.route(self):
             return True

@@ -29,7 +29,7 @@ from ml_stack.serve import canaries, guarded
 from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
 
-from . import autostart, tls, updates as updating
+from . import autostart, invite_client, invite_routes, tls, updates as updating
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
@@ -47,6 +47,7 @@ from .discovery import (
 from .environment import Environment
 from .files import Fetcher
 from .framing import LimitedServer
+from .invites import Invitations
 from .jobs import JobRunner
 from .join import default_root
 from .measuring import BenchHost, bench_home as bench_home_beside
@@ -249,6 +250,11 @@ def serve_forever(root: Path | str | None = None,
             return LimitedServer((address, port), handler)
         return LimitedServer((address, port), handler, tls=tls.server_context(found))
 
+    if interface is not None:
+        interface.invitations = Invitations(lambda: memberships(cluster_key_path),
+                                           lambda: (lan_host(port), fingerprint()))
+        interface.join_invitation = lambda code: invite_routes.joined(
+            interface, invite_client.redeem(code, live_name[0]))
     httpd = listen(listening[0])
     # Keeping this machine current, in one of two modes and never in both. Either way the
     # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
