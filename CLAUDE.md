@@ -240,7 +240,9 @@ have different requirements; no fixed vendor model name determines which may edi
 that has not demonstrated the needed capability gets a bounded trial with independent review.
 Escalate after evidence of failure or increased difficulty, rather than equating a larger model
 with correctness. Benchmark claims name the run, environment and artifact; model changes do not
-change the authenticated agent or physical-device account.
+change the authenticated worker identity. Economic accounts aggregate independently verified
+contributions by model family across devices; exact workers, devices and model loads remain
+provenance, and a family switch does not rebucket historical awards.
 
 Reasoning effort, response output tokens, context length, tool/model turns, wall time, and
 CPU/GPU or memory admission are independent settings. Do not derive an answer cap from a

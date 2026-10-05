@@ -17,8 +17,8 @@ quarters of the cores). Agents must not disable the queue with `DEV_TEST_SLOTS=o
 
 | tier | what runs | when |
 | --- | --- | --- |
-| `quick` | the tests the change reaches (below) | after every edit |
-| `fast` | every test not marked `slow` or `heavy`, and not the four that import mlx while collecting | before a commit |
+| `quick` | the tests the change reaches (below) | when relevant changed behavior needs verification |
+| `fast` | every test not marked `slow` or `heavy`, and not the four that import mlx while collecting | when broader affected coverage is justified |
 | `full` | every test not marked `slow` | background verification per batch/schedule |
 | `slow` | only the tests marked `slow` | after touching packaging, the page or the fleet |
 | `all` | everything, `--slow` included | background/CI suite, or explicit affected slow-test selectors |
