@@ -7,6 +7,7 @@ import threading
 from importlib.metadata import version
 from pathlib import Path
 
+from ml_stack.client import families
 from ml_stack.fleet.conversations import Conversations
 from ml_stack.net import git
 from ml_stack.workspace import localagent as la, localeffort, localloop, tokens, work_reputation
@@ -37,8 +38,17 @@ class TaskManager(Manager):
             raise ValueError('canonical coding currently requires the bounded Claude harness')
         command = [*command, '--max-turns', str(localloop.caps_of(self.agent).rounds)]
         level = localeffort.clamp(self.agent.effort if self.agent.effort != 'auto' else 'low', self.agent.max_effort)
-        environment = {**environment, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS': str(localeffort.TOKENS[level]),
-                       'CLAUDE_CODE_EFFORT_LEVEL': 'low' if level == 'off' else level}
+        environment = {**environment, 'CLAUDE_CODE_EFFORT_LEVEL': 'low' if level == 'off' else level}
+        extra = json.loads(environment.get('CLAUDE_CODE_EXTRA_BODY') or '{}')
+        if not isinstance(extra, dict):
+            raise ValueError('CLAUDE_CODE_EXTRA_BODY must be a JSON object')
+        kwargs = extra.get('chat_template_kwargs', {})
+        if not isinstance(kwargs, dict):
+            raise ValueError('chat_template_kwargs must be a JSON object')
+        family = families.for_model_id(self.agent.model)
+        if family is not families.GENERIC:
+            extra['chat_template_kwargs'] = {**kwargs, **family.think_kwargs(localeffort.thinks(level))}
+        environment['CLAUDE_CODE_EXTRA_BODY'] = json.dumps(extra)
         if level == 'off':
             environment['MAX_THINKING_TOKENS'] = '0'
         return super()._process(turn, command, environment, context)
