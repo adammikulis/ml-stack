@@ -33,14 +33,25 @@ class WorkspaceHost:
         return Workspace(self.projects.workspace_base(project_id))
 
     def prepare(self, project_id: str) -> dict:
+        if hasattr(self.projects, "claim_authority"):
+            self.projects.claim_authority(project_id)
         ws = self.workspace(project_id)
         if not ws.registry.ids():
             tokens.store(ws.base, tokens.OWNER_FILE, ws.init())
         return self.status(project_id)
 
     def status(self, project_id: str) -> dict:
-        ws = self.workspace(project_id)
         project = self.projects.get(project_id)
+        authority = getattr(project, "authority_machine", None)
+        if authority == "":
+            return {"project_id": project_id, "name": project.name, "state": "unconfigured",
+                    "authority_machine": "", "board_host": "", "agents": [], "boards": [],
+                    "messages": [], "history": []}
+        if authority and authority != getattr(self.projects, "machine", authority):
+            return {"project_id": project_id, "name": project.name, "state": "connection_required",
+                    "authority_machine": authority, "board_host": project.board_host,
+                    "agents": [], "boards": [], "messages": [], "history": []}
+        ws = self.workspace(project_id)
         agents = [row for row in ws.registered() if row["role"] == AGENT]
         seen = {row["who"]: row["ts"] for row in ws.audit_log.rows()
                 if row.get("event") == "remote.seen"}
@@ -53,6 +64,7 @@ class WorkspaceHost:
                     if row.get("to") in chosen][-20:]
         return {"project_id": project_id, "name": project.name,
                 "authority_machine": getattr(project, "authority_machine", ""),
+                "board_host": getattr(project, "board_host", ""),
                 "agents": agents,
                 "boards": sorted(chosen), "messages": messages,
                 "history": read_json(ws.base / "adopted-history.json", {}).get("messages", []),

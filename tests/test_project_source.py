@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import runpy
+import stat
 import threading
 import zipfile
 from types import SimpleNamespace
@@ -75,6 +76,31 @@ def test_archive_rejected_before_checkout(names, tmp_path):
     with pytest.raises(source.ProjectError):
         source.checkout(packed, IDENTIFIER, digest, base)
     assert not base.exists()
+
+
+@pytest.mark.parametrize("mode", [stat.S_IFLNK, stat.S_IFIFO, stat.S_IFCHR])
+def test_archive_rejects_links_and_special_files(mode, tmp_path):
+    packed, digest = archive(["safe.txt"])
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(packed)) as original, zipfile.ZipFile(output, "w") as hostile:
+        for info in original.infolist():
+            if info.filename.startswith("files/"):
+                info.external_attr = (mode | 0o644) << 16
+            hostile.writestr(info, original.read(info.filename))
+    with pytest.raises(source.ProjectError):
+        source.checkout(output.getvalue(), IDENTIFIER, digest, tmp_path / "checkout")
+    assert not (tmp_path / "checkout").exists()
+
+
+def test_digest_tampering_is_rejected_before_checkout(tmp_path):
+    packed, digest = archive(["safe.txt"])
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(packed)) as original, zipfile.ZipFile(output, "w") as hostile:
+        for info in original.infolist():
+            hostile.writestr(info, b"y" if info.filename.startswith("files/") else original.read(info.filename))
+    with pytest.raises(source.ProjectError, match="digest"):
+        source.checkout(output.getvalue(), IDENTIFIER, digest, tmp_path / "checkout")
+    assert not (tmp_path / "checkout").exists()
 
 
 def test_checkout_uses_verified_blobs_without_filters(repository, tmp_path):

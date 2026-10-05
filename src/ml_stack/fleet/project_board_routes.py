@@ -1,9 +1,12 @@
 """Local human controls for the canonical project board."""
 
 import re
+import shlex
 
 from ml_stack.workspace.identity import Denied
 from ml_stack.workspace.remote_host import WorkspaceHost
+
+from .discovery import memberships
 
 
 class ProjectBoardRoutes:
@@ -31,10 +34,12 @@ class ProjectBoardRoutes:
             elif match[2] == "invite" and self.method == "POST":
                 req = self.body()
                 made = host.invite(match[1], str(req.get("hint") or ""), int(req.get("uses") or 1))
-                made["host"] = f"http://{self.host_header}"
+                made["host"] = projects.get(match[1]).board_host
+                groups = [member.group for member in memberships(self.ui.cluster_key_path)]
+                selected_cluster = groups[0] if len(groups) == 1 else "CLUSTER"
                 made["command"] = (f"ml-stack-workspace remote join {made['code']} --name NAME "
-                                   f"--model MODEL --harness HARNESS --host HOST_URL "
-                                   f"--project-id {match[1]}")
+                                   f"--model MODEL --harness HARNESS --host {shlex.quote(made['host'])} "
+                                   f"--project-id {match[1]} --cluster {shlex.quote(selected_cluster)}")
                 self.send(201, made)
             elif match[2] == "adopt" and self.method == "POST":
                 self.send(200, host.adopt(match[1], self.body()))
