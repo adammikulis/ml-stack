@@ -35,6 +35,7 @@ ALLOWED: dict[str, str] = {
     "http.py": "the client for model servers on this machine and network; urllib lives here",
     "httpguard.py": "the guarded connection the pipeline is built on",
     "fleet/serving.py": "a port check on loopback",
+    "fleet/invite_client.py": "single-use LAN invitation; every resolved address is checked, the selected sockaddr is frozen and TLS is pinned before HTTP",
     "fleet/project_client.py": "sealed project source from a LAN peer; exact redirects and require_local_url at every request",
     "workspace/remote.py": "sealed project board on the LAN; exact redirects and require_local_url at every request",
     "fleet/wsl_network.py": "WSL LAN bridge; require_local before each TCP connection and restricted discovery destinations",
