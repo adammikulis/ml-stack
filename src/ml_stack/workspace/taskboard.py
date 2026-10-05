@@ -177,3 +177,11 @@ class TaskBoard:
     def block(self, token: str, ident: str, reason: str, *, kind: str = 'infrastructure') -> dict[str, Any]:
         """Record an authenticated active-task blockage without awarding an outcome."""
         return task_actions.block(self, token, ident, reason, kind)
+
+    def recover(self, token: str, ident: str, reason: str) -> dict[str, Any]:
+        """Authorize expired-lease recovery while preserving its checkpoint history."""
+        return task_actions.ready(self, token, ident, reason, expired=True)
+
+    def resume(self, token: str, ident: str, reason: str) -> dict[str, Any]:
+        """Explicitly authorize retry after a blocked condition has been addressed."""
+        return task_actions.ready(self, token, ident, reason, expired=False)
