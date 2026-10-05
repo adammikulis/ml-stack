@@ -141,9 +141,10 @@ def test_workspace_messages_and_claims_are_recorded_by_metadata_without_the_body
 def test_a_second_sync_writes_only_what_is_new(person, monkeypatch, tmp_path):
     kit = Kit(clean_env(monkeypatch, tmp_path))
     alpha = kit.agent("alpha")
+    kit.agent("beta")
     first = feeds.workspace_sync(kit.base)
     assert first >= 2 and feeds.workspace_sync(kit.base) == 0
-    kit.ws.send(alpha, "*", "status", "x")
+    kit.ws.send(alpha, "beta", "status", "x")
     assert feeds.workspace_sync(kit.base) == 1
 
 
