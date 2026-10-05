@@ -93,17 +93,17 @@ def mint_clicked(action: str, subject: str, *, answer: str, label: str,
 
 def protect(directory: Path | str) -> None:
     """Add a directory that `agent_may` refuses to let any tool call name."""
-    _PROTECTED.add(str(Path(directory).resolve()).lower())
-    _PROTECTED.add(str(Path(directory)).lower())
+    _PROTECTED.add(Path(directory).resolve().as_posix().lower())
+    _PROTECTED.add(Path(directory).as_posix().lower())
 
 
 def _flatten(value: Any) -> str:
     try:
-        text = json.dumps(value, ensure_ascii=True, default=str)
+        text = json.dumps(value, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         text = str(value)
-    text = text.replace("\\", "").replace('"', " ").replace("'", " ").replace(",", " ")
-    return re.sub(r"\s+", " ", text).lower()
+    text = text.replace("\\\\", "/").replace("\\", "").replace('"', " ").replace("'", " ").replace(",", " ")
+    return re.sub(r"\s+", " ", re.sub(r"/+", "/", text)).strip().lower()
 
 
 def agent_may(tool: str, arguments: Mapping[str, Any] | None = None) -> str:
@@ -114,7 +114,7 @@ def agent_may(tool: str, arguments: Mapping[str, Any] | None = None) -> str:
     if "sentinel" in name or name.startswith("security_") or name == "security":
         return f"tool {tool} is a sentinel verb"
     flat = _flatten(arguments or {})
-    guarded = {str(home.state("sentinel")).lower(), *_PROTECTED}
+    guarded = {_flatten(path) for path in (home.state("sentinel"), *_PROTECTED)}
     if any(d in flat for d in guarded) or _STATE_DIR.search(flat):
         return "the call names sentinel's state directory"
     for needle in _FORBIDDEN:
