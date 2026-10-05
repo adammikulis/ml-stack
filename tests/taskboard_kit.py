@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import device_agent, localagent, resource_allocations as resources, tokens
 from ml_stack.workspace.taskboard import TaskBoard
 
@@ -32,6 +33,16 @@ def board(tmp_path, monkeypatch):
     kit.spec = {'title': 'Inspect native simulation', 'description': 'Collect a reproducible replay.',
                 'acceptance': ['Replay passes'], 'source_key': 'repo:demo/sim:issue:42'}
     kit.task = kit.board.create(kit.parent, kit.spec)
+    project = tmp_path / 'task-worktree'
+    project.mkdir()
+    (project / '.git').write_text('gitdir: isolated-fixture\n')
+    def prepare(ident):
+        with GraphStore(kit.base / 'coordination.db') as graph:
+            graph.upsert_node({'id': 'task-worktree:' + ident, 'kind': 'task-worktree', 'label': ident,
+                              'attrs': {'task': ident, 'worker': kit.worker_id,
+                                        'project': str(project), 'source_project': '', 'baseline_commit': 'a' * 40}})
+    kit.prepare = prepare
+    prepare(kit.task['id'])
     kit.allocation = resources.assign(kit.ws, kit.parent, kit.worker_id, kit.task['id'], 'native-grant')
     return kit
 

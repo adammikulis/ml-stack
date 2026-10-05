@@ -7,7 +7,7 @@ from ml_stack.graph.store import GraphStore
 from ml_stack.home import device_id
 from ml_stack.serve import broker_wire
 from ml_stack.serve.process import pid_exists, started_at
-from ml_stack.workspace import localagent, tokens
+from ml_stack.workspace import localagent, task_worktrees, tokens
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.device_accounts import account_for
 from ml_stack.workspace.identity import HUMAN, Denied
@@ -59,6 +59,15 @@ def assign(ws, token, worker, task, lease_id):
     with held(ws.base / "coordination.lock"), GraphStore(ws.base / "coordination.db") as graph:
         if not graph.has(task):
             raise ValueError("the canonical task does not exist")
+        if runner.profile == 'coding':
+            scope = task_worktrees.binding(graph, worker, task)
+            allocation.update({key: scope[key] for key in ('project', 'source_project', 'baseline_commit')})
+        existing = next((row['attrs'] for row in graph.nodes('allocation')
+                         if row['attrs']['task'] == task and row['attrs']['worker'] == worker
+                         and row['attrs']['lease_id'] == lease_id), None)
+        if existing and all(existing.get(key) == allocation.get(key) for key in
+                            ('owner', 'holder_pid', 'holder_started', 'server_pid', 'server_started', 'project')):
+            return existing
         key = allocation["allocation_id"]
         graph.upsert_node({"id": key, "kind": "allocation", "label": task, "attrs": allocation})
         for target, kind, rel in ((f"agent:{worker}", "agent", "allocated-to"),
@@ -85,7 +94,7 @@ def verified_binding(ws, worker, task, allocation_id, *, status=None):
     if any(allocation[k] != value for k, value in grant.items()):
         raise Denied("the broker grant changed after resource assignment")
     runner = _worker(ws, worker)
-    if runner.profile != allocation["profile"] or runner.project != allocation["project"]:
+    if runner.profile != allocation["profile"] or runner.project != allocation.get("source_project", allocation["project"]):
         raise Denied("the worker configuration changed after allocation")
     if not allocation["person_assigned"] and (runner.pid != grant["holder_pid"]
                                               or runner.process_started != grant["holder_started"]):

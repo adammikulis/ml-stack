@@ -79,6 +79,7 @@ def test_dependencies_checkpoint_budget_and_infrastructure_outcome(board):
     dependent = board.board.create(board.parent, {**board.spec, 'source_key': '', 'deps': [board.task['id']]})
     from ml_stack.workspace.resource_allocations import assign
 
+    board.prepare(dependent['id'])
     allocation = assign(board.ws, board.parent, board.worker_id, dependent['id'], 'native-grant')
     with pytest.raises(Denied, match='dependencies'):
         board.board.claim(board.child, dependent['id'], allocation['allocation_id'])
@@ -100,6 +101,7 @@ def test_expired_lease_and_missing_capability_refuse_execution(board):
     from ml_stack.workspace.resource_allocations import assign
 
     task = board.board.create(board.parent, {**board.spec, 'source_key': '', 'capabilities': ['vision']})
+    board.prepare(task['id'])
     allocation = assign(board.ws, board.parent, board.worker_id, task['id'], 'native-grant')
     with pytest.raises(Denied, match='capability'):
         board.board.claim(board.child, task['id'], allocation['allocation_id'])
@@ -155,6 +157,7 @@ def test_designated_peer_requires_existing_project_grant_and_cannot_self_review(
         board.board.create(board.owner, spec)
     board.ws.registry.set_project(owner, 'independent-reviewer', project)
     board.task = board.board.create(board.owner, spec)
+    board.prepare(board.task['id'])
     board.allocation = resource_allocations.assign(board.ws, board.parent, board.worker_id,
                                                    board.task['id'], 'native-grant')
     proposed(board)
