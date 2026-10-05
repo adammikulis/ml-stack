@@ -12,7 +12,7 @@ from ml_stack.sentinel import human
 from ml_stack.workspace import agent_invites, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
-from ml_stack.workspace.service import Workspace
+from ml_stack.workspace.service import GREETER, Workspace
 
 HOOKS = {
     "claude-code": """\
@@ -79,7 +79,6 @@ __all__ = ["DEFAULT_AGENTS", "Finding", "Outcome", "brief", "doctor", "hello", "
 
 DEFAULT_AGENTS = ("lead", "codex")
 SETUP = Identity("setup", HUMAN)
-GREETER = Identity("workspace", AGENT)
 SOON_S = 86_400.0
 JOIN_RESERVED = frozenset({"admin", "system", "human", "workspace", "owner", "root",
                            "setup", "agent"})
