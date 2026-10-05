@@ -27,7 +27,7 @@ from ml_stack.workspace.service import Workspace
 
 __all__ = ["ACTIONS", "OPTIONS", "run"]
 
-ACTIONS = ("start", "stop", "list", "backlog", "schedule")
+ACTIONS = ("start", "stop", "list", "backlog", "schedule", "supersede-issue")
 READY_WAIT_S = 180.0
 OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
@@ -40,6 +40,8 @@ OPTIONS = [
          help="what it may do (`/role` in ml-stack-chat describes them); default: %(default)s"),
     flag("--project", default="", metavar="PATH", help="the project folder it works for"),
     flag("--repo", default="", metavar="OWNER/REPO", help="backlog: repository whose issues this coding worker may select"),
+    flag("--issue", type=int, default=0, help="supersede-issue: obsolete repository issue number"),
+    flag("--reason", default="", help="supersede-issue: current owner decision superseding the issue"),
     flag("--effort", default=le.DEFAULT, choices=[*le.LEVELS, le.AUTO],
          help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
@@ -139,6 +141,17 @@ def run(args: argparse.Namespace, ws: Workspace) -> int:
         if not args.target or not args.agent:
             raise ValueError('agent schedule requires a worker name and --agent registered-parent')
         return task_scheduler.watch(ws, tokens.load(ws.base, args.agent), la.check_name(args.target))
+    if args.action == "supersede-issue":
+        if not args.target:
+            raise ValueError("supersede-issue needs the existing worker name")
+        if args.agent:
+            token = tokens.load(ws.base, args.agent)
+        else:
+            human.require_person("supersede a repository issue")
+            token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)
+        backlog.supersede(ws, token, args.target, args.issue, args.reason)
+        say(f"issue {args.issue} excluded from this repository backlog")
+        return 0
     human.require_person(f"{args.action} a local agent")
     if args.action == "backlog":
         if not args.target:

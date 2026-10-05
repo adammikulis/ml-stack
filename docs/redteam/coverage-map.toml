@@ -174,7 +174,9 @@ match = ["parser:workspace/localroute.py"]
 status = "covered"
 tests = [
   "tests/test_task_coding.py::test_native_turn_and_output_limits_preserve_authority",
-  "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_revokes_only_its_private_identity",
+  "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_preserves_its_private_identity",
+  "tests/test_workspace_local_agent.py::test_stop_never_releases_a_foreign_holder",
+  "tests/test_workspace_local_agent.py::test_start_and_stop_refuse_a_process_an_agent_started",
   "tests/test_workspace_local_agent.py::test_paused_coding_worker_keeps_tasks_queued_until_resume",
   "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
   "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
