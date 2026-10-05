@@ -701,3 +701,18 @@ not byte-identical on Metal at n-max ≥ 3** (also seen on HIP) — so a bench c
 on this machine must watch its own F1 for a real quality change, not assume decoding stayed
 identical just because sampling is greedy.
 
+
+### Broker runtime provenance
+
+`ml-stack-serve queue --json` includes a `runtime` object. A newly started broker
+records the same object in its private registration and returns it through ping and
+status: wire protocol, actual PID and process birth, OS owner, claimed requester,
+loaded package location/version, Python interpreter/prefix, source commit and dirty
+state when running from that source checkout. Installed or frozen packages without
+source receipts report the source commit as unknown. No environment secrets are included.
+
+Clients report older brokers without these fields as `unknown`; they do not infer a
+commit from the client's checkout. An explicitly incompatible protocol permits
+status inspection and refuses mutations with an owned-broker upgrade instruction.
+Upgrade only an owned broker at a quiescent boundary, preserving foreign holders.
+A reused PID or a socket reporting another PID does not validate the registration.
