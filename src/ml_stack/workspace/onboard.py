@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -303,7 +304,8 @@ def doctor(ws: Workspace) -> list[Finding]:
     folder = tokens.directory(ws.base)
     for label, path in (("state directory", ws.base), ("token directory", folder)):
         why = tokens.problem(path)
-        fix = "ml-stack-workspace setup" if why == "missing" else f"chmod 700 {path}"
+        fix = ("ml-stack-workspace setup" if why == "missing" or os.name == "nt"
+               else f"chmod 700 {path}")
         found.append(Finding(not why, f"{label} {path}: {why or 'private'}", fix))
     repo = tokens.inside_repo(folder)
     found.append(Finding(repo is None, "tokens are outside any git work tree" if repo is None
