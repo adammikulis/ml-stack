@@ -351,6 +351,7 @@ def test_a_model_that_cannot_be_leased_fails_in_one_line(kit):
 def served(kit, monkeypatch):
     monkeypatch.setattr(localmodel, "choose", lambda asked="auto", **kw: PICK)
     monkeypatch.setattr(ls.jobs, "detach", sleeper)
+    tokens.store(kit.base, tokens.OWNER_FILE, kit.owner)
     listener = localroute.serve(kit.ws)
     listener.start()
     yield listener
@@ -405,6 +406,8 @@ def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(serv
     assert status == 200 and json.loads(body)["roles"] == la.role_choices()
     ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r"})
     assert ok[0] == 200 and json.loads(ok[1])["name"] == "local-r"
+    from ml_stack.workspace.device_accounts import account_for
+    assert account_for(kit.ws, "local-r")["base_id"].startswith("local-device-")
     listed = json.loads(request(served.port, "GET", "/agents/list")[1])["agents"]
     assert [a["name"] for a in listed] == ["local-r"] and "token" not in json.dumps(listed)
     for bad in ({"name": "../x"}, {"role": "root"}, {"project": "/nonexistent"}, {"extra": 1},
