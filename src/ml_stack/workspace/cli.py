@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.command import Group, flag, option
+from ml_stack.http import ServerError
 from ml_stack.log import say, warn
 from ml_stack.sentinel import human
 from ml_stack.sentinel.human import HumanRequired
 from ml_stack.workspace import (
     chat,
+    coordinator_client,
+    coordinator_config,
     filecli,
     guide,
     limits,
@@ -37,6 +40,7 @@ from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
 from ml_stack.workspace.bus import CALL_TYPES, TYPES
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import KINDS as CLAIM_KINDS, Conflict
+from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.identity import AGENT_MARKERS, ROLES, TOKEN_ENV, Denied
 from ml_stack.workspace.modelid import describe
 from ml_stack.workspace.notes import KINDS as NOTE_KINDS
@@ -49,11 +53,12 @@ __all__ = ["COMMANDS", "main"]
 
 CANCELLED = threading.Event()
 LABEL_ENV = "ML_STACK_WORKSPACE_LABEL"
-CODES = ((Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
+CODES = ((ServerError, 3), (Denied, 3), (Refused, 3), (RateLimited, 4), (Conflict, 5), (ChainBroken, 6),
          (HumanRequired, 3), (EOFError, 2), (ValueError, 2), (OSError, 2))
 Handler = Callable[[argparse.Namespace, Workspace, str], Any]
 
 COMMON = [option("json"),
+          flag("--request-id", default="", help="reuse an exact remote mutation request after a lost response"),
           flag("--token-file", default="", help=f"a file holding the sender's token "
                                                 f"(else --agent, else ${TOKEN_ENV}, "
                                                 f"else ${tokens.AGENT_ENV})"),
@@ -282,7 +287,12 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
 
 
 def _join(args: argparse.Namespace, ws: Workspace) -> int:
-    say(f"joined as {onboard.join(ws, args.code, args.name, claim=(args.model, args.harness))}")
+    if args.coordinator:
+        coordinator_client.connect(limits.root(), args.coordinator)
+    remote = coordinator_client.client(limits.root())
+    name = remote.join(limits.root(), args.code, args.name, args.model, args.harness) if remote else onboard.join(
+        ws, args.code, args.name, claim=(args.model, args.harness))
+    say(f"joined as {name}")
     return 0
 
 
@@ -427,6 +437,7 @@ BARE: tuple[tuple[str, str, list[Any], Callable[[argparse.Namespace, Workspace],
       *LIVE], _connect),
     ("join", "an agent redeems an invite code and saves its private token", [
         flag("code"), flag("--name", default="", help="a short id for yourself, e.g. codex"),
+        flag("--coordinator", default="", help="select this enrolled Fleet coordinator before redeeming the invite"),
         flag("--model", default="", help="the exact model id you run as; recorded as claimed"),
         flag("--harness", default="", help="your harness, e.g. claude-code or codex")],
      _join),
@@ -484,6 +495,8 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
                         "done, blocked only)"), flag("type", choices=CALL_TYPES),
         flag("body"), flag("--subject", default=""), flag("--reply-to", type=int, default=0),
         flag("--ttl", type=float, default=0.0, help="seconds until it expires")], _send),
+    ("task-create", "create a canonical task in your existing project grant", [flag("payload")],
+     lambda a, w, t: TaskBoard(w).create(t, json.loads(_body(a.payload)))),
     ("tasks", "authorized canonical tasks and progress metrics", [], lambda a, w, t: TaskBoard(w).list(t)),
     ("task", "task lease, checkpoints, proposal and independent review", [flag("id")],
      lambda a, w, t: TaskBoard(w).get(t, a.id)),
@@ -617,7 +630,16 @@ def _guarded(run: Callable[[argparse.Namespace], int | None]) -> Callable[[argpa
 
 def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
     def run(args: argparse.Namespace) -> int:
-        result = handler(args, Workspace(), _token(args))
+        remote = coordinator_client.client(limits.root())
+        if remote:
+            options = next(options for name, _help, options, _fn in TABLE if name == args.cmd)
+            for field in ('body', 'text', 'payload'):
+                if getattr(args, field, '') == '-':
+                    setattr(args, field, _body('-'))
+            result = remote.command(coordinator_client.argv_for(args, [*COMMON, *options]),
+                                    _token(args), request_id=args.request_id)
+        else:
+            result = handler(args, Workspace(), _token(args))
         _show(args, result)
         _held_note(result)
         return 0
@@ -640,7 +662,11 @@ COMMANDS = Group(
     f"token comes from ${TOKEN_ENV} or --token-file.",
     allow_abbrev=False)
 def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[argparse.Namespace], int]:
-    return _guarded(lambda args: handler(args, Workspace()))
+    def run(args):
+        if coordinator_client.client(limits.root()) and handler is not _join:
+            raise Denied('this is a local-only operation; this device uses a shared coordinator')
+        return handler(args, Workspace())
+    return _guarded(run)
 
 
 for _name, _help, _options, _handler in BARE:
@@ -649,6 +675,33 @@ for _name, _help, _options, _handler in BARE:
                           *_options])
 for _name, _help, _options, _handler in TABLE:
     COMMANDS.add(_name, _runner(_handler), help=_help, options=[*COMMON, *_options])
+
+
+def _coordinator(args):
+    base = limits.root()
+    if args.action == 'host':
+        human.require_person("choose the workspace coordinator")
+        ws = Workspace()
+        if ws.auth(_token(args)).role != 'human':
+            raise Denied('only the workspace person selects its coordinator')
+        result = coordinator_config.save(base, {'mode': 'host', 'workspace': workspace_id(ws)})
+    elif args.action == 'connect':
+        result = coordinator_client.connect(base, args.name)
+    elif args.action == 'list':
+        result = [{'name': peer.name, 'endpoint': peer.base_url, **info}
+                  for peer, info in coordinator_client.discover()]
+    else:
+        result = coordinator_config.load(base) or {'mode': 'local', 'shared': False}
+    if isinstance(result, dict):
+        result = {key: value for key, value in result.items() if key != 'cert'}
+    _show(args, result)
+    return 0
+
+
+COMMANDS.add("coordinator", _guarded(_coordinator),
+             help="inspect, host or select one authenticated Fleet workspace coordinator",
+             options=[*COMMON, flag("action", choices=('status', 'list', 'host', 'connect')),
+                      flag("name", nargs='?', default='')])
 COMMANDS.add("nudge", _guarded(_nudging),
              help="print one line summarising what waits for you (nothing when nothing does); for hooks",
              options=[*COMMON, flag("--hook", default="", choices=("", *nudge.EVENTS),

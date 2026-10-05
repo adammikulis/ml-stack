@@ -19,7 +19,7 @@ from ml_stack import activity
 from ml_stack.fleet.onboard.web import Call, Listener, Reply as WebReply
 from ml_stack.graph.guard import host_ok, refusal
 from ml_stack.ui import assets
-from ml_stack.workspace import plain, tokens
+from ml_stack.workspace import coordinator_config, plain, tokens
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
@@ -98,6 +98,10 @@ def respond(ws: Workspace, req: Request) -> Reply:
         return _json(401, {"error": "sign in first"})
     if not parts.path.startswith(PREFIX):
         return _json(404, {"error": "no such route"})
+    configured = coordinator_config.load(ws.base)
+    if configured.get('mode') == 'remote':
+        return _json(409, {'error': 'This device follows a shared coordinator; open its person Board.',
+                           'coordinator': configured['endpoint'], 'workspace': configured['workspace']})
     api = ws.board
     try:
         token = tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE)

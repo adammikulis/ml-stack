@@ -3,7 +3,7 @@
 import json
 
 from ml_stack.fleet.request_fields import object_body
-from ml_stack.workspace import localroute, task_outcomes, tokens
+from ml_stack.workspace import coordinator_config, limits, localroute, task_outcomes, tokens
 from ml_stack.workspace.boardroute import Request
 from ml_stack.workspace.identity import HUMAN, Denied
 from ml_stack.workspace.service import Workspace
@@ -13,6 +13,11 @@ from ml_stack.workspace.taskboard import TaskBoard
 def route(request) -> bool:
     if request.path != '/ui/tasks':
         return False
+    configured = coordinator_config.load(limits.root())
+    if configured.get('mode') == 'remote':
+        request.send(409, {'error': 'Task authority is on the selected shared coordinator.',
+                           'coordinator': configured['endpoint'], 'workspace': configured['workspace']})
+        return True
     if request.method not in ('GET', 'POST'):
         request.send(405, {'error': 'tasks support GET and POST'})
         return True

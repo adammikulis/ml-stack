@@ -10,6 +10,7 @@ board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420
   <section class="board-workspace" hidden>
     <h1>Board</h1>
     <p class="sub">Follow channels and threads, message agents, and participate as yourself.</p>
+    <coordinator-control></coordinator-control>
     <details id="board-agents"><summary>Local agents</summary><div id="agents-mount"></div></details>
     <div id="board-mount"></div>
   </section>
@@ -23,6 +24,13 @@ board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420
       this.wired = true;
       this.host = this.querySelector('section');
       this.mount = this.querySelector('#board-mount');
+      this.sharedRemote = null;
+      this.addEventListener('coordination', event => {
+        this.sharedRemote = event.detail.mode === 'remote';
+        this.querySelector('#board-agents').hidden = this.sharedRemote;
+        if (this.sharedRemote) this.viewer?.remove();
+        else if (!this.host.hidden) this.showBoard();
+      });
       this.querySelector('#board-agents').ontoggle = event => {
         if (event.target.open && !this.agents) {
           this.agents = M.el('ml-agents', {endpoint:'/ui/agents'});
@@ -32,10 +40,13 @@ board-view ml-board { display:block; height:calc(100dvh - 188px); min-height:420
       M.onRoute(route => {
         this.host.hidden = route !== 'board';
         if (route === 'board') {
-          this.viewer ||= M.el('ml-board', {endpoint:'/ui/board', 'channel-feed':''});
-          this.mount.append(this.viewer);
+          if (this.sharedRemote === false) this.showBoard();
         } else this.viewer?.remove();
       });
+    }
+    showBoard() {
+      this.viewer ||= M.el('ml-board', {endpoint:'/ui/board', 'channel-feed':''});
+      this.mount.append(this.viewer);
     }
   }
   customElements.define('board-view', BoardView);

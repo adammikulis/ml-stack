@@ -631,3 +631,50 @@ workspace token or an identity override. Joined fleets retain their normal sign-
 completed local setup can use the existing strictly local authorization policy.
 
 The local UI can hand a signed-in browser launcher a short-lived, single-use session ticket through `POST /ui/launch-ticket`. This requires an existing UI session, the UI request header, and a local machine address. Opening `/ui/?launch_ticket=…#tasks` exchanges the ticket for the normal browser cookie and immediately removes it from the address bar. Tickets do not expose workspace person credentials and cannot be reused.
+
+### Shared coordinator across devices
+
+The workspace defaults to device-local state. Joining a Fleet cluster alone does not share
+its Board, tasks or claims. In **Board → Shared coordinator**, the person selects **Use this
+device as coordinator** once on the existing workspace. This uses the Fleet daemon's
+normal authenticated peer server and TLS, with one stable workspace ID. Other devices
+must join the same Fleet cluster through the maintained pairing/setup flow.
+
+The person or an authorized parent creates a normal short-lived workspace invitation.
+Give its existing paste code directly to the agent being enrolled. On an enrolled remote
+device, run:
+
+```sh
+ml-stack-workspace join CODE --coordinator FLEET_NAME --name windows-codex --model EXACT_MODEL --harness codex
+ml-stack-workspace whoami --agent windows-codex
+ml-stack-workspace inbox --agent windows-codex
+```
+
+`--coordinator` discovers and pins that Fleet peer before redeeming the invitation there;
+an unavailable or ambiguous peer never causes local redemption. The invitation grants
+its existing bounded role/project permissions. Only the newly minted agent token is
+returned over encrypted remote transport and saved in that device's private token file.
+No person credential is sent or accepted by the agent RPC.
+
+`ml-stack-workspace coordinator list` shows offers; `coordinator status` shows the saved
+workspace ID and origin. Board shows hosted/remote/device-local mode, connection health,
+and a link to the coordinator's person UI. That UI requires its normal person session;
+a remote agent credential cannot enter it. Remote devices do not present a second local
+Board/task authority. A changed workspace ID, lost enrollment or unavailable endpoint
+fails explicitly without local fallback.
+
+Python services can use `coordinator_client.client(device_workspace_root).command(argv,
+agent_token, request_id=...)`. Remote commands are bounded coordination operations;
+local execution, processes, credentials, file paths, tests and publishing are excluded.
+Global branch/area claims remain shared. Device-local resource claims require a verified
+paired-device namespace and are refused by this initial transport instead of conflating
+two machines' ports or worktrees.
+
+For a lost mutation response, repeat the exact command with `--request-id ID`. One
+per-actor outcome is recorded in the coordinator graph, after fresh live authentication
+and applicable task/message checks. Reusing an ID for another payload is refused.
+Completed response caches expire after a day or bounded capacity; their audit nodes
+remain and expired IDs are refused. An interrupted request with an uncertain outcome
+is never silently executed again. Inspect shared state before issuing a new operation.
+This capability has local two-root/socket proof; a Windows machine is connected only
+when its actual authenticated handshake succeeds.
