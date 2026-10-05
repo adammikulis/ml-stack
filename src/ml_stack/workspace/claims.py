@@ -12,7 +12,7 @@ from typing import Any
 from ml_stack import worktreerules
 from ml_stack.files import read_json, write_json
 from ml_stack.workspace.chain import held
-from ml_stack.workspace.identity import AGENT, Denied, Identity
+from ml_stack.workspace.identity import AGENT, HUMAN, Denied, Identity
 
 __all__ = ["EXPIRING_SOON_S", "KINDS", "MAX_LIFETIME_S", "MAX_RENEW_S", "Claims", "Conflict", "alive", "normal"]
 
@@ -189,6 +189,26 @@ class Claims:
                 raise Denied('the assigned worktree has no matching parent ownership claim')
             if claim['owner'] == owner:
                 claim.update(owner=who.id, delegated_by=owner, assignment=assignment)
+                self._save(claims)
+            return dict(claim)
+
+    def return_worktree(self, who: Identity, scope: dict[str, Any]) -> dict[str, Any]:
+        """Return one child's exact claim after its canonical acceptance was independently checked."""
+        key = normal('worktree', scope['project'])
+        if who.role != HUMAN and who.id != scope['owner']:
+            raise Denied('only the registered task parent or person may return its reviewed worktree')
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            claim = claims.get(f'worktree:{key}')
+            if not claim or claim['owner'] not in (scope['owner'], scope['worker']):
+                raise Denied('the reviewed worktree has a different ownership claim')
+            if claim['owner'] == scope['worker']:
+                if claim.get('delegated_by') != scope['owner'] or claim.get('assignment') != scope['id']:
+                    raise Denied('the worktree claim does not match this exact task delegation')
+                claim.update(owner=scope['owner'], returned_by=who.id, reviewed_assignment=scope['id'])
+                claim.pop('delegated_by', None)
+                claim.pop('assignment', None)
                 self._save(claims)
             return dict(claim)
 

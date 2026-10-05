@@ -55,3 +55,17 @@ and `task-credit ID`). JSON payloads can be read from stdin with `-`. The corres
 create tasks, enroll identities or grant project permissions. Claims require a live trusted
 allocation. Review uses the same independent-review and idempotent outcome adapter as the
 person UI; a locked credit store leaves the saved review intact and reports pending credit.
+
+Reviewed native work can land through `task_integration.integrate(workspace, token, task_id)`.
+The helper requires the exact committed task branch, tracked artifact hashes and committed
+full patch that the independent review accepted. It merges unchanged source into its own
+candidate worktree, runs the maintained quick, structural and serving-security gates,
+then fast-forwards the checked-out development branch and pushes that exact commit.
+It records integration, gate, commit and outcome nodes in the coordinator graph. Publishing
+does not award credits or grant permissions.
+
+Conflicting changes, changed review evidence, failed gates and push-hook ownership blocks
+preserve the candidate for inspection. Only the authenticated parent or person can return
+the exact completed child's delegated worktree claim. The helper never removes or locks
+another agent's worktree to clear a publication block; the recorded reason identifies the
+condition that its owner must resolve. A published integration is idempotent.
