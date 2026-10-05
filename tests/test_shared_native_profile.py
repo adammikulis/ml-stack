@@ -79,6 +79,18 @@ def test_a_known_server_without_external_head_cannot_supply_one():
     assert held.short_of({"draft": "mtp.gguf"})
 
 
+@pytest.mark.parametrize("key", ["draft", "chat_template_file"])
+@pytest.mark.parametrize("empty", [None, ""])
+def test_explicit_empty_profile_cannot_reuse_a_configured_server(key, empty):
+    held = Held(port=51548, model="Qwen.gguf", shape=_shape_of({key: "configured-file"}))
+    assert held.short_of({key: empty})
+    assert held.short_of({}) == ""
+    unknown = Held(port=51548, model="Qwen.gguf", shape={})
+    assert unknown.short_of({key: empty}) == ""
+    disabled = Held(port=51548, model="Qwen.gguf", shape=_shape_of({key: empty}))
+    assert disabled.short_of({key: empty}) == ""
+
+
 def test_installed_aliases_share_one_native_server_with_matching_profile(tmp_path, monkeypatch):
     snapshot = tmp_path / "Qwen.gguf"
     snapshot.write_bytes(b"GGUF" + bytes(64))

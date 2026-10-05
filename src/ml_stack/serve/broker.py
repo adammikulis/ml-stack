@@ -172,8 +172,10 @@ class Held:
             want, got = asked.get(key), have.get(key)
             if isinstance(want, int) and want > 0 and isinstance(got, int) and got < want:
                 return f"port {self.port} serves {got:,} {what}, {want:,} asked"
-        for key in ("cache_type_k", "cache_type_v", "spec_type", "draft", "chat_template_file",
-                    "spec_draft_max", "spec_p_min"):
+        for key in ("draft", "chat_template_file"):
+            if key in asked and key in have and str(asked[key] or "") != str(have[key] or ""):
+                return f"port {self.port} serves {key} {have[key]!r}, {asked[key]!r} asked"
+        for key in ("cache_type_k", "cache_type_v", "spec_type", "spec_draft_max", "spec_p_min"):
             want, got = asked.get(key), have.get(key)
             if want and got is not None and want != got:
                 return f"port {self.port} serves {key} {got!r}, {want!r} asked"
