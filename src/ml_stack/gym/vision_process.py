@@ -91,7 +91,8 @@ def serve():
         with contextlib.redirect_stdout(sys.stderr):
             model = selected_vision(json.loads(sys.argv[1]))
             lease = serve_model(model["model"], context=4096, mmproj=model["mmproj"],
-                                timeout=300, escalate=False, anyway=False)
+                                timeout=300, escalate=False, anyway=False,
+                                reason="Live Gym RGB and synthetic thermal camera perception")
             with lease as server:
                 client = Client(server.base_url, request=Request(n_predict=256),
                                 transport=Transport(timeout=20))

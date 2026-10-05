@@ -535,7 +535,7 @@ def test_paused_vision_child_releases_its_broker_model_lease(tmp_path, llama_bin
 
     monkeypatch.setenv('LLAMA_CPP_SERVER', str(llama_binary))
     script = ('import json,time\nfrom ml_stack.serve import broker_wire\n'
-              f'g=broker_wire.lease("vision", [{models[0]!r}], spec={{"context":512}}, timeout=20)\n'
+              f'g=broker_wire.lease("vision", [{models[0]!r}], spec={{"context":512}}, timeout=20, reason="Paused vision child lease cleanup regression")\n'
               'print(json.dumps({"status":"ready"}),flush=True)\ntime.sleep(120)\n')
     monkeypatch.setattr(decision_process, 'start_process', lambda argv, **kwargs:
                         start_process([sys.executable, '-u', '-c', script], **kwargs))
@@ -563,8 +563,10 @@ def test_paused_vision_child_releases_its_broker_model_lease(tmp_path, llama_bin
         assert not any(h['pid'] == child.handle.pid for s in after['servers'] for h in s['holders'])
     finally:
         child.close()
-        record = json.loads(broker_wire.record_path().read_text())
-        for server in broker_wire.status()['servers']:
-            if server['pid']:
-                kill_process_tree(server['pid'])
-        kill_process_tree(record['pid'])
+        path = broker_wire.record_path()
+        if path.exists():
+            record = json.loads(path.read_text())
+            for server in broker_wire.status()['servers']:
+                if server['pid']:
+                    kill_process_tree(server['pid'])
+            kill_process_tree(record['pid'])

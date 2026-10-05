@@ -85,6 +85,7 @@ def test_vision_uses_rgb_thermal_pixels_without_simulator_truth(server, monkeypa
     assert result['perception'] == 'A warm visible shape on the left'
     assert result['sequence'] == 22 and result['revision'] == 7
     assert result['camera']['frame_id'] == 18 and result['camera']['image_hashes']['rgb']
+    assert leases[0][1]['reason'] == 'Live Gym RGB and synthetic thermal camera perception'
     assert leases[0][1]['escalate'] is False and leases[0][1]['anyway'] is False
     content = requests[0]['messages'][0]['content']
     assert [part['type'] for part in content] == ['text', 'image_url', 'image_url']
