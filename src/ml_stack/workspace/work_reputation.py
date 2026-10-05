@@ -9,6 +9,7 @@ from typing import Any
 
 from ml_stack import activity
 from ml_stack.files import read_json
+from ml_stack.reputation import economy
 from ml_stack.reputation.work import WorkLedger
 from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import HUMAN, Denied, valid_id, valid_name
@@ -33,7 +34,8 @@ def scope(ws) -> str:
 
 
 def _evidence(raw: dict[str, Any]) -> dict[str, Any]:
-    if type(raw) is not dict or set(raw) != {'task', 'completion', 'checks', 'artifacts'}:
+    if type(raw) is not dict or not {'task', 'completion', 'checks', 'artifacts'} <= set(raw) \
+            or set(raw) - {'task', 'completion', 'checks', 'artifacts', 'quality', 'review', 'usage', 'provenance'}:
         raise ValueError('verification needs task, completion, checks and artifact hashes')
     if any(type(raw[key]) is not int or raw[key] < 1 for key in ('task', 'completion')):
         raise ValueError('task and completion are positive message numbers')
@@ -48,7 +50,7 @@ def _evidence(raw: dict[str, Any]) -> dict[str, Any]:
             or any(not _text(name) or type(value) is not str or not _HEX.fullmatch(value)
                    for name, value in artifacts.items()):
         raise ValueError('verification needs bounded artifact names and SHA256 hashes')
-    return raw
+    return {**raw, 'award': economy.assessment(raw)}
 
 
 def _text(value: Any) -> bool:
@@ -117,12 +119,13 @@ def standings(ws, token: str, *, agent: str = "", offset: int = 0,
     for name in ws.registry.ids():
         if name not in known and ws.registry.info(name)['role'] != HUMAN:
             team.append({'agent': name, 'score': 0, 'verified_tasks': 0, 'evidence': [],
-                         'aliases': aliases.get(name, [])})
+                         'aliases': aliases.get(name, []), **economy.summary([])})
     own = next((item for item in team if item['agent'] == who.id),
-               {'agent': who.id, 'score': 0, 'verified_tasks': 0, 'evidence': []})
+               {'agent': who.id, 'score': 0, 'verified_tasks': 0, 'evidence': [], **economy.summary([])})
     return {'own': own, 'team': [item for item in team if not agent or item['agent'] == agent],
             'offset': offset, 'authority': 'none',
-            'metric': 'One credit per task independently verified by a person or registered parent.'}
+            'economy_mode': 'free',
+            'metric': 'Completion credits and reviewed quality bonuses; runs are free.'}
 
 
 def brief(ws, token: str) -> str:
@@ -131,9 +134,13 @@ def brief(ws, token: str) -> str:
         result = standings(ws, token)
     except (OSError, RuntimeError, ValueError):
         return 'Verified-work reputation is unavailable; no completion score can be inferred.'
-    rows = [f"{item['agent']}: {item['score']} verified tasks" for item in result['team'][:20]]
+    rows = [f"{item['agent']}: {item['verified_tasks']} verified tasks; "
+            f"{item['economy']['balance']} credits; reliability "
+            f"{item['work_reputation']['reliability']} ({item['work_reputation']['samples']} reviews)"
+            for item in result['team'][:20]]
     return ('Verified-work reputation (recorded evidence, no authority):\n'
-            f"Your verified completions: {result['own']['score']}\n" + '\n'.join(rows))
+            f"Your verified completions: {result['own']['verified_tasks']}\n"
+            f"Your credits: {result['own']['economy']['balance']}; runs are free, no charging.\n" + '\n'.join(rows))
 
 
 def fleet_route(request) -> bool:
