@@ -25,6 +25,7 @@ from ml_stack.workspace import (
     localprofile as lp,
     localstart as ls,
     plain,
+    tokens,
 )
 from ml_stack.workspace.boardroute import Reply, Request, _checked, _json
 from ml_stack.workspace.identity import Denied
@@ -98,7 +99,8 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
                                       data.get("role") or roles.DEFAULT, data.get("effort") or le.DEFAULT,
                                       data.get("max_effort") or le.DEFAULT_MAX,
                                       data.get("profile") or "chat", lp.parse_ctx(data.get("ctx", "")),
-                                      data.get("project", ""), harness=data.get("harness") or "codex"))
+                                      data.get("project", ""), harness=data.get("harness") or "codex"),
+                           person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}
         return 200, {"name": got.name, "pid": got.pid, "model": plain.line(got.model, 80),

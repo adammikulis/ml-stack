@@ -148,7 +148,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         if ws.registry.role_of(name) and have is None:
             raise ValueError(f"{name} is another agent's name; pass a different --name")
         identity = _worker_identity(ws, have, name, projects.describe(folder_) if folder_ else {})
-        _record_model(ws, name, chosen)
+        _record_model(ws, identity, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
@@ -182,6 +182,7 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick, ctx: int, project:
                          started=time.time())
         identity = _worker_identity(ws, have, name, project)
         agent = replace(agent, identity=identity)
+        _record_model(ws, identity, chosen)
         la.save(ws, agent)
         job = jobs.detach(lh.RUNNER, [name], log=la.log_file(ws, name), kind=name,
                           home=la.folder(ws) / "jobs")

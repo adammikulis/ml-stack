@@ -53,3 +53,26 @@ def test_person_start_binds_model_independent_default(tmp_path, monkeypatch):
     finally:
         localstart.stop(kit.ws, got.name, wait_s=5)
     assert account_for(kit.ws, got.name) == account
+
+
+def test_saved_delegated_coding_seat_survives_model_restart(tmp_path, monkeypatch):
+    from test_workspace_local_agent import PICK, sleeper
+
+    from ml_stack.workspace import localprofile, localstart
+    kit = Kit(tmp_path / "ws")
+    parent = kit.agent("parent")
+    child = kit.ws.delegate(parent, "worker")
+    identity = child["id"]
+    localagent.save(kit.ws, localagent.Agent("named-worker", "old-model", identity=identity, profile="coding"))
+    monkeypatch.setattr(localprofile, "admit", lambda *args: ("", ""))
+    monkeypatch.setattr(localstart.jobs, "detach", sleeper)
+    monkeypatch.setattr(device_agent.home, "machine_id", lambda: "1234567890abcdef")
+    got = localstart.start(kit.ws, localstart.Ask(name="named-worker", profile="coding"),
+                           pick=PICK, person_token=kit.owner)
+    try:
+        assert localagent.load(kit.ws, got.name).identity == identity
+        assert kit.ws.registry.role_of(got.name) == ""
+        assert account_for(kit.ws, identity)["base_id"].startswith("local-device-")
+        assert kit.ws.registry.info(identity)["model"] == PICK.name
+    finally:
+        localstart.stop(kit.ws, got.name, wait_s=5)
