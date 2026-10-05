@@ -3,6 +3,7 @@
 import os
 import shlex
 import shutil
+import stat
 import sys
 from pathlib import Path
 
@@ -25,6 +26,17 @@ FILE_COMMANDS = frozenset({'touch', 'mkdir', 'rm', 'rmdir', 'cp', 'mv', 'chmod',
 
 def _path(value, cwd):
     return str((Path(cwd) / value).resolve())
+
+
+def _null_sink(target):
+    if target != os.devnull:
+        return False
+    if os.name == 'nt':
+        return target.lower() == 'nul'
+    try:
+        return stat.S_ISCHR(Path(target).lstat().st_mode)
+    except OSError:
+        return False
 
 
 def resources(name, args, cwd):
@@ -50,7 +62,7 @@ def resources(name, args, cwd):
                 here = _path(words[1], here)
                 continue
             found.extend(('file', _path(target, here)) for operator, target in command.redirects
-                         if operator.startswith('>') or operator.startswith('2>'))
+                         if '>' in operator and not _null_sink(target))
             if verb in FILE_COMMANDS:
                 found.extend(('file', _path(word, here)) for word in words[1:] if not word.startswith('-'))
             known = verb in FILE_COMMANDS or verb in ('git', 'ml-stack-serve', 'ml-stack-workspace') or ('install' in words and 'pip' in words[:3])
