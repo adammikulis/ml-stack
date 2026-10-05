@@ -104,3 +104,45 @@ def test_only_live_harness_keys_linked_to_external_worker_are_excluded(tmp_path,
     ours_key = key.with_name(str(os.getpid()) + '.' + 'c' * 64 + '.key')
     ours_key.write_bytes(b'private test session key')
     assert ours_key.relative_to(tmp_path).as_posix() in file_mtimes(tmp_path)
+
+
+def test_scanner_write_attribution_excludes_only_live_external_registered_process(tmp_path, monkeypatch):
+    import conftest
+    import psutil
+
+    sentinel = tmp_path / 'sentinel'
+    sentinel.mkdir()
+    now = conftest.time.time()
+    payload = {'pid': 12345, 'started': now - 10, 'process_started': now - 20,
+               'beat': now, 'interval_s': 60, 'running': True}
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+        def create_time(self):
+            return now - 20
+        def is_running(self):
+            return True
+    monkeypatch.setattr(psutil, 'Process', Process)
+    monkeypatch.setattr(conftest, 'ours', lambda entry: entry['owner_pid'] == os.getpid())
+    def save():
+        (sentinel / 'scanner.json').write_text(json.dumps({'payload': payload}))
+        (sentinel / 'scanner.json.prev').write_text(json.dumps({'payload': payload}))
+        (sentinel / 'state.lock').write_text(str(payload['pid']))
+    save()
+    assert file_mtimes(tmp_path) == {}
+    payload['pid'] = os.getpid()
+    save()
+    assert len(file_mtimes(tmp_path)) == 3
+    payload.update(pid=12345, process_started=now - 30)
+    save()
+    assert len(file_mtimes(tmp_path)) == 3
+    payload.pop('pid')
+    (sentinel / 'scanner.json').write_text(json.dumps({'payload': payload}))
+    assert len(file_mtimes(tmp_path)) == 3
+    payload.update(pid=12345, process_started=now - 20)
+    save()
+    monkeypatch.setattr(Process, 'is_running', lambda self: False)
+    assert len(file_mtimes(tmp_path)) == 3
+    monkeypatch.setattr(Process, 'is_running', lambda self: True)
+    monkeypatch.setattr(Process, 'create_time', lambda self: now + 1)
+    assert len(file_mtimes(tmp_path)) == 3
