@@ -117,6 +117,8 @@ def schema_of(fn: Callable[..., Any]) -> dict[str, Any]:
     required: list[str] = []
     for name, param in inspect.signature(fn).parameters.items():
         hint = hints.get(name, str)
+        if type(None) in typing.get_args(hint):
+            hint = next(part for part in typing.get_args(hint) if part is not type(None))
         if typing.get_origin(hint) is list:
             inner = typing.get_args(hint)[0] if typing.get_args(hint) else str
             prop: dict[str, Any] = {"type": "array",
@@ -125,7 +127,7 @@ def schema_of(fn: Callable[..., Any]) -> dict[str, Any]:
             prop = dict(_JSON_TYPES.get(hint, {"type": "string"}))
         if param.default is inspect.Parameter.empty:
             required.append(name)
-        else:
+        elif param.default is not None:
             prop["default"] = param.default
         props[name] = prop
     out: dict[str, Any] = {"type": "object", "properties": props}
@@ -200,6 +202,8 @@ def _local_server(url: str) -> str:
 
 def _check_type(name: str, value: Any, hint: Any) -> None:
     """Raise ``TypeError`` unless ``value`` is what the tool's hint for ``name`` declares."""
+    if type(None) in typing.get_args(hint):
+        hint = next(part for part in typing.get_args(hint) if part is not type(None))
     if typing.get_origin(hint) is list:
         inner = (typing.get_args(hint) or (str,))[0]
         if not isinstance(value, list) or any(not _is(v, inner) for v in value):
@@ -249,8 +253,8 @@ _NOT_A_TOOL_ARGUMENT = ("--iq", "--port", "--escalate", "--binary", "--build", "
 picks the port, and growing a server, the binary and the fleet root are not a tool's to choose."""
 
 
-def serve_up(model: str, context: int = 0, parallel: int = 1, draft: str = "",
-             mmproj: str = "", extra: list[str] = []) -> dict[str, Any]:
+def serve_up(model: str, *, context: int = 0, draft: str = "",
+             mmproj: str = "", extra: list[str] | None = None) -> dict[str, Any]:
     """Ask for a lease on a server for ``model`` (a path or ``hf:owner/repo/file.gguf``) with
     ``ml-stack-serve up --no-wait``, detached; returns the log and pid, and ``serve_status``
     says when it is answering. The broker picks the port, checks the memory and queues the
@@ -261,7 +265,7 @@ def serve_up(model: str, context: int = 0, parallel: int = 1, draft: str = "",
         flag = str(one).split("=", 1)[0]
         if flag in _NOT_A_TOOL_ARGUMENT:
             raise ValueError(f"{flag} is a person's to set, not a tool argument")
-    argv = ["up", _not_an_option(model, "model"), "--no-wait", "--parallel", str(parallel)]
+    argv = ["up", _not_an_option(model, "model"), "--no-wait", "--parallel", "1"]
     if context:
         argv += ["--context", str(context)]
     if draft:
@@ -455,20 +459,20 @@ def speech_say(text: str, provider: str = "", voice: str = "") -> dict[str, Any]
             "sample_rate": spoken.sample_rate, "voice": spoken.voice}
 
 
-def decide(question: str, options: list[str], state_text: str = "", backend: str = "auto",
-           url: str = "", abstain_below: float = -1.0) -> dict[str, Any]:
+def decide(question: str, options: list[str], *, state_text: str = "", backend: str = "auto",
+           abstain_below: float = -1.0) -> dict[str, Any]:
     """Choose one of ``options`` (``NAME`` or ``NAME=description``) for ``question`` about
     ``state_text`` and say how sure (``ml-stack-decide ask``); ``backend`` is ``auto``,
-    ``logprob``, ``pointer``, ``embed`` or ``rules``, ``url`` the chat server for logprob,
-    and a positive ``abstain_below`` flags answers under that probability."""
+    ``logprob``, ``pointer``, ``embed`` or ``rules`` using the configured chat server;
+    a positive ``abstain_below`` flags answers under that probability."""
     named = {n.strip(): d.strip() for n, _, d in (o.partition("=") for o in options)}
     got = router.decide(question, state_text, named,
                         abstain_below=abstain_below if abstain_below > 0 else None,
-                        config=router.shared(backend, url))
+                        config=router.shared(backend, ""))
     return got.public()
 
 
-def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
+def doctor(repos: list[str] | None = None) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
     from ml_stack.doctor import look_checkouts, repositories
