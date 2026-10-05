@@ -913,6 +913,18 @@ def _external_keystore_lock(root: Path, rel: Path) -> bool:
     return owner > 0 and not ours({"owner_pid": owner})
 
 
+def _external_keystore_rate(root: Path, rel: Path) -> bool:
+    if rel.as_posix() != "keystore/rate.json":
+        return False
+    try:
+        record = json.loads((root / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict) or type(record.get("writer_pid")) is not int:
+        return False
+    return record["writer_pid"] > 0 and not ours({"owner_pid": record["writer_pid"]})
+
+
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
@@ -925,7 +937,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
         for name in filenames:
             if name.endswith(".tmp"):
                 continue
-            if skip is LIVE_WRITERS and _external_keystore_lock(root, rel / name):
+            if skip is LIVE_WRITERS and (_external_keystore_lock(root, rel / name)
+                                         or _external_keystore_rate(root, rel / name)):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
