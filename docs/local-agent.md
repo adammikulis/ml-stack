@@ -62,6 +62,8 @@ Effort selects reasoning: `off`, `low`, `medium`, or `high`. Native coding sends
 selected model family's thinking flag in `CLAUDE_CODE_EXTRA_BODY`; `off` explicitly disables
 Qwen template thinking. It does not impose an output limit from the effort level. Explicit
 caller output budgets are retained; otherwise the native harness uses its own output default.
+An explicit caller `MAX_THINKING_TOKENS=0` also disables template thinking. The runtime
+does not generate a thinking-token limit that can carry over when effort changes.
 The default is `off`. The model may raise or lower its own effort with `set_effort(level, reason)` up
 to `--max-effort` (default `medium`); above the ceiling is refused with the ceiling in the message.
 The change applies from the next task, so a task's prompt is never rewritten; it is recorded in the

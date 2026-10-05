@@ -2,6 +2,7 @@
 
 import json
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -44,8 +45,25 @@ def test_native_template_thinking_is_separate_from_output_and_stream(monkeypatch
     assert body == {'stream': True, 'max_tokens': 12000,
                     'chat_template_kwargs': {'custom': 'kept', 'enable_thinking': thinking}}
     assert seen['CLAUDE_CODE_MAX_OUTPUT_TOKENS'] == '12000'
-    if not thinking:
-        assert seen['MAX_THINKING_TOKENS'] == '0'
+    assert 'MAX_THINKING_TOKENS' not in seen
+
+
+def test_native_effort_switch_has_no_generated_output_or_thinking_cap(monkeypatch):
+    agent = localagent.Agent('worker', '/cache/Qwen3.8-27B-UD-Q4_K_XL.gguf', harness='claude', effort='off')
+    seen = {}
+    monkeypatch.setattr(task_coding.Manager, '_process',
+                        lambda self, turn, command, environment, context: seen.update(environment) or 0)
+    manager = task_coding.TaskManager(None, SimpleNamespace(base=None), agent)
+    context = (None, 'claude', '', None)
+    manager._process(None, ['claude'], {}, context)
+    assert json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])['chat_template_kwargs']['enable_thinking'] is False
+    assert 'MAX_THINKING_TOKENS' not in seen and 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen
+    manager.agent = replace(agent, effort='medium')
+    manager._process(None, ['claude'], seen.copy(), context)
+    assert json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])['chat_template_kwargs']['enable_thinking'] is True
+    manager._process(None, ['claude'], {'MAX_THINKING_TOKENS': '0'}, context)
+    assert seen['MAX_THINKING_TOKENS'] == '0'
+    assert json.loads(seen['CLAUDE_CODE_EXTRA_BODY'])['chat_template_kwargs']['enable_thinking'] is False
 
 
 @pytest.mark.parametrize('body', ['broken', '[]', '{"chat_template_kwargs":[]}'])
