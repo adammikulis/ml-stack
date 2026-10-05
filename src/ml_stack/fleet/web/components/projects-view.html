@@ -1,0 +1,160 @@
+<template>
+  <main id="projects" class="settingsmain" hidden>
+    <header><h1>Projects &amp; agents</h1><p class="hint">Share a project with your cluster, then give an agent access to its shared messageboard.</p></header>
+    <p id="projects-note" role="status"></p>
+    <section class="panel"><h2>Share a local project</h2>
+      <label for="project-candidate">Project</label><select id="project-candidate"></select>
+      <button id="project-share">Share with cluster</button>
+      <p class="hint">Sharing publishes the tracked source snapshot. Agent access is a separate step.</p>
+    </section>
+    <section class="panel"><h2>Cluster projects</h2><div id="project-list"></div></section>
+    <section class="panel" id="project-board" hidden>
+      <h2 id="project-title"></h2><p id="project-authority"></p><p id="project-board-state" role="status"></p>
+      <button id="project-checkout">Get source on this device</button>
+      <p id="project-checkout-state" role="status"></p>
+      <h3>Connect an agent</h3><label for="project-agent-label">Agent label (optional)</label>
+      <input id="project-agent-label" placeholder="For example, Mac reviewer">
+      <button id="project-invite">Create agent access code</button>
+      <div id="project-access" hidden><p id="project-access-hint"></p>
+        <pre id="project-command"></pre><button id="project-copy">Copy access details</button>
+      </div>
+      <h3>Connected agents</h3><div id="project-agents"></div>
+      <h3>Shared messageboard</h3><div id="project-messages"></div>
+    </section>
+  </main>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel, el = M.el;
+  class ProjectsView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector('#projects');
+      this.note = this.querySelector('#projects-note');
+      this.candidate = this.querySelector('#project-candidate');
+      this.share = this.querySelector('#project-share');
+      this.rows = this.querySelector('#project-list');
+      this.board = this.querySelector('#project-board');
+      this.share.onclick = async () => {
+        const result = await this.action('/ui/projects', {action: 'share', candidate_id: this.candidate.value});
+        if (result?.ok) await this.draw();
+      };
+      this.querySelector('#project-checkout').onclick = () => this.checkout();
+      this.querySelector('#project-invite').onclick = () => this.invite();
+      this.querySelector('#project-copy').onclick = async () => {
+        try { await navigator.clipboard.writeText(this.querySelector('#project-command').textContent); this.note.textContent = 'Command copied'; }
+        catch { this.note.textContent = 'Select and copy the command above.'; }
+      };
+      M.onRoute(route => {
+        this.box.hidden = route !== 'projects';
+        clearInterval(this.timer);
+        if (route === 'projects') { this.draw(); this.timer = setInterval(() => this.draw(), 4000); }
+      });
+    }
+
+    async draw() {
+      if (this.loading) return;
+      this.loading = true;
+      try {
+        const result = await M.api('/ui/projects');
+        if (!result.ok) { this.note.textContent = result.error || 'Project sharing is unavailable on this device. Update ml-stack to enable it.'; return; }
+        this.projects = result.projects || [];
+        const signature = JSON.stringify([this.projects, result.candidates, result.devices]);
+        if (signature !== this.signature) {
+          this.signature = signature;
+          const selected = this.candidate.value;
+          this.candidate.replaceChildren(...(result.candidates || []).map(p => el('option', {value: p.id}, p.name)));
+          if ([...this.candidate.options].some(p => p.value === selected)) this.candidate.value = selected;
+          this.share.disabled = !this.candidate.value;
+          this.rows.replaceChildren(...this.projects.map(p => el('div', {class: 'model-row'},
+            el('div', {}, el('b', {}, p.name), el('p', {class: 'hint'}, `${p.is_self ? 'This device' : p.peer || p.host || 'Cluster device'} · ${p.state || 'Shared'}`)),
+            el('button', {onclick: () => this.select(p)}, 'Open project'))));
+          if (!this.projects.length) this.rows.append(el('p', {class: 'hint'}, 'No shared projects found yet.'));
+          for (const d of result.devices || []) if (d.state === 'upgrade_required' || d.error) {
+            this.rows.append(el('p', {class: 'hint'}, `${d.name || d.peer}: ${d.error || 'Update ml-stack on this device to share projects.'}`));
+          }
+        }
+        if (this.selected) await this.loadBoard();
+      } catch (error) { this.note.textContent = error.message; }
+      finally { this.loading = false; }
+    }
+
+    select(project) {
+      this.selected = project;
+      this.board.hidden = false;
+      this.querySelector('#project-title').textContent = project.name;
+      this.querySelector('#project-authority').textContent = `Board authority: ${project.authority_machine || project.host || 'Unavailable'}`;
+      this.querySelector('#project-access').hidden = true;
+      this.querySelector('#project-command').textContent = '';
+      this.querySelector('#project-checkout-state').textContent = '';
+      this.boardSignature = null;
+      this.loadBoard();
+    }
+
+    async loadBoard() {
+      const project = this.selected;
+      const result = await M.api(`/ui/projects/${encodeURIComponent(project.id)}/board`);
+      if (this.selected !== project) return;
+      const available = result.ok && !['conflict', 'upgrade_required'].includes(result.state || project.state);
+      this.querySelector('#project-invite').disabled = !available || this.busy;
+      this.querySelector('#project-checkout').disabled = this.busy || ['conflict', 'upgrade_required'].includes(result.state || project.state);
+      this.querySelector('#project-board-state').textContent = !available
+        ? result.error || (project.state === 'conflict' ? 'Project authority conflict. Resolve it before connecting agents.' : 'Shared board unavailable. Update or reconnect the authority device.')
+        : result.state === 'connected' ? 'Agents connected to the shared board' : 'Waiting for agents to connect';
+      const signature = JSON.stringify([result.agents, result.messages, result.history]);
+      if (signature === this.boardSignature) return;
+      this.boardSignature = signature;
+      const agents = this.querySelector('#project-agents');
+      agents.replaceChildren(...(result.agents || []).map(a => el('p', {},
+        el('b', {}, a.label || a.name || a.id), ` · ${a.role || 'agent'}${a.model ? ` · ${a.model}` : ''}${a.model_state ? ` · ${a.model_state}` : ''}`)));
+      if (!result.agents?.length) agents.append(el('p', {class: 'hint'}, 'No agents connected yet.'));
+      const messages = this.querySelector('#project-messages');
+      messages.replaceChildren(...(result.messages || result.history || []).map(m => el('div', {class: 'project-message'},
+        el('b', {}, m.from || m.agent || m.author || 'Agent'), el('p', {}, m.text || m.message || m.body || ''))));
+      if (!messages.children.length) messages.append(el('p', {class: 'hint'}, 'No shared messages yet.'));
+    }
+
+    async action(path, body) {
+      if (this.busy) return null;
+      this.busy = true;
+      this.share.disabled = true;
+      this.querySelector('#project-invite').disabled = true;
+      this.querySelector('#project-checkout').disabled = true;
+      this.note.textContent = 'Working…';
+      try {
+        const result = await M.api(path, {method: 'POST', body: JSON.stringify(body)});
+        this.note.textContent = result.ok ? 'Done' : result.error || 'The action failed. Try again.';
+        return result;
+      } catch (error) { this.note.textContent = error.message; return null; }
+      finally {
+        this.busy = false;
+        this.share.disabled = !this.candidate.value;
+        if (this.selected) this.loadBoard();
+      }
+    }
+
+    async checkout() {
+      const project = this.selected;
+      const result = await this.action(`/ui/projects/${encodeURIComponent(project.id)}/checkout`, {peer: project.peer || project.host || ''});
+      if (result?.ok && this.selected === project) this.querySelector('#project-checkout-state').textContent =
+        `Source ready at ${result.checkout}. Connect an agent separately to join the shared board.`;
+    }
+
+    async invite() {
+      const project = this.selected;
+      const result = await this.action(`/ui/projects/${encodeURIComponent(project.id)}/invite`,
+        {hint: this.querySelector('#project-agent-label').value.trim(), uses: 1});
+      if (result?.ok && this.selected === project) {
+        this.querySelector('#project-access').hidden = false;
+        this.querySelector('#project-access-hint').textContent = result.command
+          ? 'Run this on the agent\'s device. The code expires after ten minutes.'
+          : 'Project-scoped access code. Use it with workspace remote join on the agent\'s device. It expires after ten minutes.';
+        this.querySelector('#project-command').textContent = result.command || result.code || '';
+        this.querySelector('#project-board-state').textContent = 'Access code ready. Waiting for the agent to connect.';
+      }
+    }
+  }
+  customElements.define('projects-view', ProjectsView);
+})();
+</script>

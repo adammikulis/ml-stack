@@ -11,6 +11,19 @@ from ml_stack.ui import assets_dir
 pytestmark = pytest.mark.slow
 
 
+def project_response(path, state):
+    if path == "/ui/projects":
+        return {"projects": [{"id": "project-a", "name": "Shared app", "peer": "mac-test",
+                              "authority_machine": "mac-authority", "state": "shared"}],
+                "candidates": [{"id": "local-a", "name": "Local app"}],
+                "devices": [{"name": "old-device", "state": "upgrade_required"}]}
+    if path.endswith("/board"):
+        return state.get("project_board") or {"state": "awaiting_agents", "agents": [], "messages": []}
+    if path.endswith("/invite"):
+        return {"code": "test-code", "command": "ml-stack-workspace join test-code", "ttl_s": 600}
+    return {"checkout": "/isolated/shared-app", "attached": False}
+
+
 def route(request, state):
     path = urlsplit(request.request.url).path
     state["requests"].append(path)
@@ -66,6 +79,8 @@ def route(request, state):
         body = {"pid": 1234}
     elif path == "/ui/chat" and method == "GET":
         body = {"models": [{"model": "quill-27B", "local": True}] if state["chat_available"] else []}
+    elif path.startswith("/ui/projects"):
+        body = project_response(path, state)
     elif path == "/ui/conversations" and method == "POST":
         body = {"id": "chat-test"}
     request.fulfill(body=json.dumps(body), content_type="application/json")
@@ -93,6 +108,44 @@ def app():
 def models(page):
     page.get_by_role("link", name="Models", exact=True).click()
     page.locator("[data-model='quill-27B.gguf']").wait_for()
+
+
+def test_projects_keep_source_checkout_separate_from_explicit_agent_access(app):
+    page, state, errors = app
+    page.get_by_role("link", name="Projects & agents", exact=True).click()
+    page.get_by_role("button", name="Open project", exact=True).click()
+    assert page.get_by_text("Board authority: mac-authority", exact=True).is_visible()
+    page.get_by_text("Waiting for agents to connect", exact=True).wait_for()
+    assert page.get_by_text("No agents connected yet.", exact=True).is_visible()
+    assert not state["posts"]
+    page.get_by_role("button", name="Get source on this device", exact=True).click()
+    page.get_by_text("Source ready at /isolated/shared-app. Connect an agent separately to join the shared board.").wait_for()
+    assert ("/ui/projects/project-a/checkout", {"peer": "mac-test"}) in state["posts"]
+    assert not any("invite" in path for path, _ in state["posts"])
+    page.get_by_label("Agent label (optional)").fill("Mac reviewer")
+    page.get_by_role("button", name="Create agent access code", exact=True).click()
+    page.get_by_text("ml-stack-workspace join test-code", exact=True).wait_for()
+    assert ("/ui/projects/project-a/invite", {"hint": "Mac reviewer", "uses": 1}) in state["posts"]
+    state["project_board"] = {"state": "connected", "agents": [{"id": "agent-a", "label": "Mac reviewer", "role": "agent"}],
+                              "messages": [{"from": "Mac reviewer", "text": "Review ready"}]}
+    page.evaluate("document.querySelector('projects-view').draw()")
+    page.get_by_text("Review ready", exact=True).wait_for()
+    assert page.get_by_label("Agent label (optional)").input_value() == "Mac reviewer"
+    assert page.get_by_text("Agents connected to the shared board", exact=True).is_visible()
+    assert not errors
+
+
+def test_project_authority_conflict_disables_access_without_fabricating_agents(app):
+    page, state, errors = app
+    state["project_board"] = {"state": "conflict", "error": "Two authorities claim this project"}
+    page.get_by_role("link", name="Projects & agents", exact=True).click()
+    page.get_by_role("button", name="Open project", exact=True).click()
+    page.get_by_text("Two authorities claim this project", exact=True).wait_for()
+    assert page.get_by_role("button", name="Create agent access code", exact=True).is_disabled()
+    assert page.get_by_role("button", name="Get source on this device", exact=True).is_disabled()
+    assert page.get_by_text("No agents connected yet.", exact=True).is_visible()
+    assert not state["posts"]
+    assert not errors
 
 
 def test_network_filter_uses_authenticated_inventory_without_hub_calls(app):

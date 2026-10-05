@@ -13,7 +13,7 @@ fleet-nav { display: contents; }
   const M = window.fleetModel;
   const el = M.el;
   const TABS = [["Chat", "chat"], ["Models", "models"], ["Cluster", "cluster"],
-                ["Settings", "settings"]];
+                ["Projects & agents", "projects"], ["Settings", "settings"]];
   // a screen the page was assembled without has no tab
   const here = ([, name]) => !!document.querySelector(`${name}-view`);
 
