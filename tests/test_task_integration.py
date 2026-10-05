@@ -17,6 +17,7 @@ from ml_stack.workspace import (
     localagent,
     resource_allocations,
     task_integration,
+    task_scheduler,
     task_worktrees,
 )
 from ml_stack.workspace.identity import Denied
@@ -331,3 +332,52 @@ def test_native_reservations_release_only_the_exact_accepted_task_assignment(boa
         returned = next(row['attrs'] for row in graph.nodes('integration-event')
                         if row['attrs']['state'] == 'scope_returned')
         assert {claim['kind'] for claim in returned['released_claims']} == {'file', 'area'}
+
+
+def test_authenticated_task_inspection_exposes_exact_published_review_and_once_only_attempt(board, project):
+    review = board.board.review(board.parent, board.task['id'], accepted())
+    outcome = task_scheduler.integrate_completed(board.ws, board.parent, board.worker_id)[0]
+    assert outcome['state'] == 'published'
+    assert task_scheduler.integrate_completed(board.ws, board.parent, board.worker_id) == []
+    detail = board.board.get(board.owner, board.task['id'])
+    integration = detail['integration']
+    assert integration['review_id'] == review['id'] and integration['review_hash'] == review['review_hash']
+    assert integration['proposal_id'] == detail['proposal']['id']
+    assert integration['proposal_hash'] == detail['proposal']['proposal_hash']
+    assert integration['source_commit'] == project['proposal']['provenance']['commit']
+    assert integration['commit'] == outcome['commit'] and len(integration['checks']) == 3
+    assert all(check['passed'] and len(check['output_hash']) == 64 for check in integration['checks'])
+    assert all(check['command'][0] == 'scripts/test' for check in integration['checks'])
+    assert len(detail['integration_attempts']) == 1
+    assert detail['integration_attempts'][0]['outcome'] == integration
+    listed = next(task for task in board.board.list(board.owner)['tasks'] if task['id'] == board.task['id'])
+    assert listed['integration'] == integration and listed['integration_attempts'] == detail['integration_attempts']
+    assert {event['state'] for event in detail['integration_events']} == {
+        'scope_returned', 'candidate', 'integrated', 'published'}
+    assert 'candidate' not in integration and 'released_claims' not in detail['integration_events'][0]
+
+
+@pytest.mark.redteam
+def test_blocked_integration_inspection_redacts_secrets_and_retains_authentication(board, project):
+    board.board.review(board.parent, board.task['id'], accepted())
+    other = board.agent('publication-owner')
+    board.ws.claim(other, 'branch', '0.2dev')
+    outcome = task_scheduler.integrate_completed(board.ws, board.parent, board.worker_id)[0]
+    assert outcome['state'] == 'blocked'
+    with GraphStore(board.base / 'coordination.db') as graph:
+        node = graph.nodes('integration')[0]
+        graph.upsert_node({**node, 'attrs': {**node['attrs'], 'reason':
+            f"token=very-private-value {board.base}/tokens/private.token unavailable"}})
+    detail = board.board.get(board.owner, board.task['id'])
+    assert detail['integration']['blocking_owner'] == 'publication-owner'
+    assert detail['integration']['blocking_claim'] == {'kind': 'branch', 'owner': 'publication-owner', 'key': '0.2dev'}
+    exposed = json.dumps({key: detail[key] for key in
+                          ('integration', 'integrations', 'integration_attempts', 'integration_events')})
+    assert 'very-private-value' not in exposed and 'private.token' not in exposed
+    assert 'candidate' not in detail['integration'] and 'interpreter' not in exposed
+    assert task_scheduler.integrate_completed(board.ws, board.parent, board.worker_id) == []
+    board.ws.registry.revoke(board.ws.auth(board.owner), 'lead')
+    with pytest.raises(Denied):
+        board.board.get(board.parent, board.task['id'])
+    with pytest.raises(Denied):
+        board.board.list(board.parent)

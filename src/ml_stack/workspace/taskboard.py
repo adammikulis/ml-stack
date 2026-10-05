@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import task_actions, task_scope
+from ml_stack.workspace import integration_view, task_actions, task_scope
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.coordination import workspace_id
 from ml_stack.workspace.device_accounts import account_for
@@ -127,7 +127,8 @@ class TaskBoard:
         return {**task, 'dependencies': dependencies,
                 'lease': index.get(task.get('lease_id')), 'proposal': index.get(task.get('proposal_id')),
                 'review': index.get(task.get('review_id')), 'checkpoints': children['checkpoint'],
-                'artifacts': children['artifact'], 'reviews': children['review']}
+                'artifacts': children['artifact'], 'reviews': children['review'],
+                **integration_view.inspection(children, index, task.get('review_id'), str(self.ws.base))}
 
     def get(self, token: str, ident: str) -> dict[str, Any]:
         """Read a task with its native lease, checkpoints, artifacts and independent reviews."""

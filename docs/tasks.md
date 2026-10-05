@@ -85,3 +85,16 @@ assignment. After exact accepted review and release of its execution lease, retu
 worktree also atomically releases only that task's matching file and area reservations.
 Claims for another assignment, unassigned work, ports or installation environments remain
 owned by their original agent.
+
+Task inspection includes the integration for its current independent review, earlier
+integrations, publishing events and the scheduler's once-only attempt. Details expose
+the exact reviewed proposal and source commit, gated development commit, gate results and
+output hashes, plus a blocked reason and claim owner. Credentials, interpreter paths and
+private workspace paths are excluded. Reading these records cannot retry publishing or
+change an acceptance decision.
+
+Blocked candidates remain owned and preserved. Conflicts or changed source require a new
+proposal and independent review. A future explicit publication recovery can reuse a gated
+candidate only after rechecking its immutable review, ownership, clean commit and unchanged
+development/remote heads; that recovery action is not currently exposed. The scheduler
+does not repeatedly attempt the same review.
