@@ -120,6 +120,12 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
     if plan.remote and config.get("mode") != "host":
         raise ValueError("activate hosting first: run `ml-stack-workspace coordinator host` in your "
                          "person terminal; then pair the receiving device into the same Fleet cluster")
+    offers = []
+    if config.get("mode") == "host":
+        offers = [(peer, info) for peer, info in coordinator_client.discover()
+                  if info.get("workspace") == config["workspace"]]
+        if len(offers) != 1:
+            raise ValueError("the hosted workspace needs one advertised coordinator before sharing a code")
     lim = ws.limits
     ttl, uses = (lim.shared_invite_ttl_s, lim.shared_invite_uses) if plan.shared else (
         lim.invite_ttl_s, 1)
@@ -128,16 +134,12 @@ def _offer(ws: Workspace, hint: str, plan: Plan, talk: Talk) -> str:
         _remember(ws, plan, code)
     block = onboard.snippet("", code, hint, plan.project.get("name", ""),
                           (uses, int(ttl // 60)))
-    if config.get("mode") == "host":
-        offers = [(peer, info) for peer, info in coordinator_client.discover()
-                  if info.get("workspace") == config["workspace"]]
-        if len(offers) != 1:
-            raise ValueError("the hosted workspace needs one advertised coordinator before sharing a code")
+    if offers:
         block = block.replace(f"join {code} --name",
                               f"join {code} --coordinator {shlex.quote(offers[0][0].name)} "
                               f"--workspace {shlex.quote(config['workspace'])} --name")
         block = ("First enroll this device in the same Fleet cluster using person-approved pairing. "
-                 "This agent code does not grant cluster membership.\n" + block)
+                 "This agent code does not grant cluster membership. Use PowerShell for this command on Windows.\n" + block)
     if plan.code_only or plan.wait_s <= 0:
         say(block)
     if talk.copy(block):

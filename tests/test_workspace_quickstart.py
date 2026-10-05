@@ -703,3 +703,11 @@ def test_person_coordinator_host_resolves_existing_owner_after_terminal_guard(ba
     assert term.finish() == 0
     assert coordinator_config.load(base)['mode'] == 'host'
     assert not any(secret in term.heard for secret in secrets_of(base))
+
+
+def test_host_discovery_failure_does_not_mint_or_remember_an_invite(base, ws, monkeypatch):
+    coordinator_config.save(base, {'mode': 'host', 'workspace': 'workspace:' + 'a' * 32})
+    monkeypatch.setattr(guide.coordinator_client, 'discover', lambda: [])
+    with pytest.raises(ValueError, match='one advertised coordinator'):
+        guide.connect(ws, guide.Plan(code_only=True, remote=True), guide.Talk(copy=lambda _: False))
+    assert not ws.invites.path.exists()
