@@ -1,7 +1,7 @@
 {
- "surfaces": 688,
+ "surfaces": 697,
  "by_status": {
-  "covered": 371,
+  "covered": 380,
   "partial": 200,
   "uncovered": 54,
   "n/a": 63,
@@ -72,7 +72,7 @@
    "unmapped": 0
   },
   "mcp-tool": {
-   "covered": 25,
+   "covered": 34,
    "partial": 19,
    "uncovered": 0,
    "n/a": 0,
@@ -3356,6 +3356,20 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
+   "id": "human:workspace/backlog.py:supersede",
+   "kind": "human",
+   "source": "workspace/backlog.py:supersede",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_backlog.py::test_parent_superseded_issue_stays_excluded_after_revision_change",
+    "tests/test_workspace_backlog.py::test_child_and_foreign_parent_cannot_supersede_repository_tasks",
+    "tests/test_workspace_backlog.py::test_maintained_cli_records_parent_decision_without_person_impersonation"
+   ],
+   "note": "Only the person or actual registered worker parent records an obsolete-issue decision; child and foreign-parent tokens mutate no decision, and later issue revisions preserve the authenticated exclusion"
+  },
+  {
    "id": "human:workspace/boardapi.py:BoardApi.follow",
    "kind": "human",
    "source": "workspace/boardapi.py:BoardApi.follow",
@@ -3681,26 +3695,6 @@
    "id": "human:workspace/issuepump.py:run",
    "kind": "human",
    "source": "workspace/issuepump.py:run",
-   "trust": "an agent process or a peer",
-   "attacker": "an agent or a forged grant takes an action only a person may take",
-   "status": "covered",
-   "tests": [
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
-    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
-    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
-    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
-    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
-    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
-    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
-    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
-    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
-   ],
-   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
-  },
-  {
-   "id": "human:workspace/issuepump.py:step",
-   "kind": "human",
-   "source": "workspace/issuepump.py:step",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -5143,6 +5137,150 @@
    "note": ""
   },
   {
+   "id": "mcp-tool:workspace_task",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_checkpoint",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_checkpoint",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_claim",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_claim",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_credit",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_credit",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_heartbeat",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_heartbeat",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_integrate",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_integrate",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_review",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_review",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_task_submit",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_task_submit",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
+   "id": "mcp-tool:workspace_tasks",
+   "kind": "mcp-tool",
+   "source": "mcp.py:workspace_tasks",
+   "trust": "tool arguments written by a model that may have read hostile text",
+   "attacker": "a prompt-injected model calls the tool with hostile arguments",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_surface.py::test_mcp_returns_injected_text_fenced_and_never_raw",
+    "tests/test_workspace_surface.py::test_mcp_writes_need_the_senders_token_and_reads_do_not_need_a_write",
+    "tests/test_workspace_bus.py::test_an_injected_instruction_is_held_and_never_reaches_the_reader",
+    "tests/test_workspace_quiet.py::test_an_announcement_is_one_short_line_and_the_sender_is_rate_limited",
+    "tests/test_workspace_quiet.py::test_repeated_reads_are_byte_identical_and_tool_descriptions_are_static"
+   ],
+   "note": ""
+  },
+  {
    "id": "mcp-tool:workspace_thread",
    "kind": "mcp-tool",
    "source": "mcp.py:workspace_thread",
@@ -6440,7 +6578,9 @@
    "status": "covered",
    "tests": [
     "tests/test_task_coding.py::test_native_turn_and_output_limits_preserve_authority",
-    "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_revokes_only_its_private_identity",
+    "tests/test_workspace_local_agent.py::test_stopping_a_delegated_worker_preserves_its_private_identity",
+    "tests/test_workspace_local_agent.py::test_stop_never_releases_a_foreign_holder",
+    "tests/test_workspace_local_agent.py::test_start_and_stop_refuse_a_process_an_agent_started",
     "tests/test_workspace_local_agent.py::test_paused_coding_worker_keeps_tasks_queued_until_resume",
     "tests/test_workspace_local_agent.py::test_start_and_stop_need_the_persons_session_origin_and_json",
     "tests/test_workspace_local_agent.py::test_a_token_in_a_header_starts_nothing",
