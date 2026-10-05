@@ -174,7 +174,7 @@ def ready(board, token, ident, reason, *, expired):
     reason = text(reason, 'resume reason', 2000)
     with board._store() as graph:
         task = board._task(graph, ident)
-        board._reviewer(who, task)
+        board._reviewer(who, task, economic=False)
         if expired:
             if task['state'] != 'working':
                 raise ValueError('only a working task can recover an expired lease')

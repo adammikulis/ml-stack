@@ -67,30 +67,44 @@ def _reason(value: Any) -> None:
         raise ValueError('review reasons must be bounded printable text')
 
 
-def summary(evidence: list[dict[str, Any]]) -> dict[str, Any]:
+def summary(evidence: list[dict[str, Any]], contributions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Aggregate credits and explicitly reviewed ratings, with unmeasured usage left unknown."""
     awards = [item.get('award') or {'base': 0, 'quality_bonus': 0, 'total': 0, 'quality': []} for item in evidence]
-    reviews = [item['review'] for item in evidence if item.get('review') is not None]
-    usage = [item['usage'] for item in evidence if item.get('usage') is not None]
+    attempts = contributions or []
+    reviews = [item['review'] for item in evidence if item.get('review') is not None
+               and item.get('source') != 'canonical-taskboard']
+    reviews += [item['review'] for item in attempts if item.get('review') is not None
+                and item['outcome'] != 'blocked_infrastructure']
+    usage = [item['usage'] for item in evidence if item.get('usage') is not None
+             and item.get('source') != 'canonical-taskboard']
+    usage += [item['usage'] for item in attempts if item.get('usage') is not None]
     earned = sum(item['total'] for item in awards)
     ratings = {key: round((100 + sum(item[key] for item in reviews)) / (2 + len(reviews)), 2)
                for key in ('quality', 'reliability')}
-    confidence = len(reviews) / (len(reviews) + 2)
+    outcomes = {outcome: sum(item['outcome'] == outcome for item in attempts)
+                for outcome in ('accepted', 'rejected', 'blocked_infrastructure')}
+    reliability_samples = outcomes['accepted'] + outcomes['rejected']
+    if reliability_samples:
+        ratings['reliability'] = round(100 * (1 + outcomes['accepted']) / (2 + reliability_samples), 2)
+    else:
+        reliability_samples = len(reviews)
+    confidence = reliability_samples / (reliability_samples + 2)
     modifier = round(1 + (50 - ratings['reliability']) / 250 * confidence, 3)
     return {'economy': {'mode': 'free', 'earned': earned, 'spent': 0, 'balance': earned,
                         'completion_credits': sum(item['base'] for item in awards),
                         'pending_awards': sum(not item.get('award') for item in evidence),
                         'quality_credits': sum(item['quality_bonus'] for item in awards),
                         'usage': {'recorded': bool(usage), 'tasks': len(usage),
-                                  'scope': 'verified_task_evidence',
+                                  'scope': 'independently_reviewed_contributions',
                                   'measurements': {key: sum(item[key] is not None for item in usage)
                                                    for key in ('tokens_in', 'tokens_out', 'wall_seconds')},
                                   **{key: sum(item[key] for item in usage if item[key] is not None)
                                      if any(item[key] is not None for item in usage) else None
                                      for key in ('tokens_in', 'tokens_out', 'wall_seconds')}}},
             'work_reputation': {**ratings, 'samples': len(reviews),
-                                'confidence': round(confidence, 3),
-                                'state': 'reviewed' if reviews else 'unrated'},
+                                'confidence': round(confidence, 3), 'quality_samples': len(reviews),
+                                'reliability_samples': reliability_samples, 'outcomes': outcomes,
+                                'state': 'reviewed' if reviews or reliability_samples else 'unrated'},
             'pricing': {'mode': 'free', 'price': 0, 'future_modifier': modifier,
                         'modifier_bounds': [0.8, 1.2], 'baseline_guaranteed': True,
                         'authority': 'none', 'active_charging': False}}

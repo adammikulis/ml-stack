@@ -18,7 +18,8 @@ def board(tmp_path, monkeypatch):
     delegated = kit.ws.delegate(kit.parent, 'worker')
     kit.worker_id = delegated['id']
     kit.child = tokens.read_file(Path(delegated['token_file']))
-    monkeypatch.setattr(device_agent.home, 'machine_id', lambda: '1234567890abcdef')
+    monkeypatch.setattr(device_agent, 'device_id', lambda: '1234567890abcdef')
+    monkeypatch.setattr(resources, 'device_id', lambda: '1234567890abcdef')
     localagent.save(kit.ws, localagent.Agent('native-worker', 'qwen', identity=kit.worker_id,
                                            profile='coding', pid=555, process_started=42))
     device_agent.bind_worker(kit.ws, kit.owner, 'native-worker')

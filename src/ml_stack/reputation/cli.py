@@ -122,7 +122,7 @@ COMMAND.add("show", _guarded(_show, writes=False), help="one source in full",
             options=[flag("source", help="kind:name, for example host:example.org")])
 COMMAND.add("forget", _guarded(_forget, writes=True), help="delete one source, or all",
             options=[flag("source", nargs="?", default=""),
-                     flag("--all", action="store_true", help="delete the whole store"),
+                     flag("--all", action="store_true", help="delete all source-risk records, preserving work credits and reviews"),
                      option("yes")])
 COMMAND.add("export", _guarded(_export, writes=False),
             help="every source as plain JSON on stdout: the only way names leave the encrypted store")
