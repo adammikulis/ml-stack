@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import psutil
+
 from ml_stack.lock import pid_alive
 from ml_stack.sentinel.events import Event, Severity
 from ml_stack.sentinel.policy import Mode
@@ -156,6 +158,7 @@ class Scanner:
     def _beat(self, running: bool) -> None:
         self._file.save({"pid": os.getpid(), "interval_s": self.interval_s,
                          "deep_every": self.deep_every, "started": self._started,
+                         "process_started": psutil.Process(os.getpid()).create_time(),
                          "beat": self.sentinel.clock(), "running": running})
 
 

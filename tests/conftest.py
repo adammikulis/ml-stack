@@ -19,11 +19,13 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import types
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
+import psutil
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
@@ -946,6 +948,28 @@ def _external_harness_key(root: Path, rel: Path) -> bool:
         return False
 
 
+def _external_scanner_write(root: Path, rel: Path) -> bool:
+    if rel.as_posix() not in ('sentinel/scanner.json', 'sentinel/scanner.json.prev', 'sentinel/state.lock'):
+        return False
+    try:
+        beat = json.loads((root / 'sentinel/scanner.json').read_text())['payload']
+        pid, started = beat['pid'], beat['started']
+        if type(pid) is not int or pid <= 0 or ours({'owner_pid': pid}) or not beat['running']:
+            return False
+        process = psutil.Process(pid)
+        born = process.create_time()
+        if not process.is_running() or born > started or started > beat['beat']:
+            return False
+        if beat.get('process_started', born) != born or time.time() - beat['beat'] > 3 * beat['interval_s'] + 5:
+            return False
+        if rel.name == 'state.lock':
+            return int((root / rel).read_text(encoding='ascii').strip()) == pid
+        written = json.loads((root / rel).read_text())['payload']
+        return written['pid'] == pid and written['started'] == started and written.get('process_started', born) == born
+    except (OSError, ValueError, KeyError, TypeError, psutil.Error):
+        return False
+
+
 def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, int]:
     """Every file under ``root`` by relative path with its mtime in ns, leaving out the
     top-level names in ``skip`` and atomic-write temporaries; empty when ``root`` is absent."""
@@ -960,7 +984,8 @@ def file_mtimes(root: Path, skip: frozenset[str] = LIVE_WRITERS) -> dict[str, in
                 continue
             if skip is LIVE_WRITERS and (_external_keystore_lock(root, rel / name)
                                          or _external_keystore_rate(root, rel / name)
-                                         or _external_harness_key(root, rel / name)):
+                                         or _external_harness_key(root, rel / name)
+                                         or _external_scanner_write(root, rel / name)):
                 continue
             if skip is LIVE_WRITERS and _live((rel / name).as_posix()):
                 continue
