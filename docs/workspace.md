@@ -606,3 +606,11 @@ The main **Tasks** view organizes canonical claims, resource leases, checkpoints
 artifacts, independent outcomes and credit recording. See [Tasks and independent outcomes](tasks.md)
 for the person workflow, service/API contract, recovery and supported limits. Task outcomes
 are verified separately from Board discussion and worker progress reports.
+
+A scheduler-prepared task worktree can be explicitly handed from its authenticated parent
+to the assigned child. Before a native mutation, the guard checks the graph assignment,
+actual parent relationship, active task lease and live broker allocation, including the
+exact worktree and baseline commit. Only that physical worktree claim transfers; another
+parent-owned file or source-area claim does not transfer with it. The guard rechecks the
+active assignment on later edits, so an expired task or released allocation cannot keep
+editing through a previously transferred claim.

@@ -28,6 +28,7 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
+from ml_stack.workspace.identity import Denied
 
 __all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
 
@@ -80,10 +81,12 @@ def pre(payload: dict[str, Any], rail: Rail, inbox: requests.Inbox | None = None
     try:
         name = str(payload.get("tool_name", ""))
         inputs = args if isinstance(args, dict) else None
-        ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), label)
+        ownership = harness_claims.conflict(name, inputs, str(payload.get('cwd') or (roots[0] if roots else Path.cwd())), label, roots)
         decision = (Decision('deny', 'destructive', ownership) if ownership else None) or (primary_decision(name, inputs, str(payload.get("cwd", "")))
                     or workspace_authority(_shell_line(name, inputs), label)
                     or decide(role, name, inputs, roots=roots, protected=protected))
+    except Denied as error:
+        decision = Decision('deny', 'destructive', str(error))
     except FAILURES:
         decision = Decision("ask", "unsure", "the call could not be classified", "tool_call_destructive")
     if decision.action == "allow":

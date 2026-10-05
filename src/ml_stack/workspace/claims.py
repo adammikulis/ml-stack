@@ -176,6 +176,22 @@ class Claims:
             self._save(claims)
             return made
 
+    def handoff(self, who: Identity, kind: str, key: str, owner: str, assignment: str) -> dict[str, Any]:
+        """Transfer one parent's exact claim under an already verified task assignment."""
+        key = normal(kind, key)
+        if kind != 'worktree' or who.parent != owner:
+            raise Denied('only an explicit parent worktree assignment can be handed off')
+        with held(self.lock):
+            claims = self._load()
+            self._sweep(claims)
+            claim = claims.get(f'{kind}:{key}')
+            if claim is None or claim['owner'] not in (owner, who.id):
+                raise Denied('the assigned worktree has no matching parent ownership claim')
+            if claim['owner'] == owner:
+                claim.update(owner=who.id, delegated_by=owner, assignment=assignment)
+                self._save(claims)
+            return dict(claim)
+
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim. Its owner, a lead or a human may."""
         key = normal(kind, key)
