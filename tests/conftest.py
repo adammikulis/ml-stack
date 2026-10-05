@@ -927,6 +927,7 @@ def _external_keystore_rate(root: Path, rel: Path) -> bool:
 
 def _external_harness_key(root: Path, rel: Path) -> bool:
     import re
+
     import psutil
 
     match = re.fullmatch(r"workspace/local-agents/([a-z0-9][a-z0-9._-]{0,47})-chats/harness/"
