@@ -136,15 +136,17 @@ def _show(args: argparse.Namespace) -> int:
 
 
 def _release(args: argparse.Namespace) -> int:
+    grant = human.mint("release", args.subject)
     record = _find(args.subject)
-    done = sentinel.default().store.release(record.id, human.mint("release", record.id))
+    done = sentinel.default().store.release(record.id, grant)
     say(f"{done.id} released ({done.kind}:{done.key})")
     return 0
 
 
 def _purge(args: argparse.Namespace) -> int:
+    grant = human.mint("purge", args.subject)
     record = _find(args.subject)
-    done = sentinel.default().store.purge(record.id, human.mint("purge", record.id))
+    done = sentinel.default().store.purge(record.id, grant)
     say(f"{done.id} purged: what was held is deleted, the record stays")
     return 0
 
@@ -266,15 +268,15 @@ def verify(args: argparse.Namespace) -> int:
     flag("to", nargs="?", default="", choices=["", *[m.value for m in Mode]]),))
 def mode(args: argparse.Namespace) -> int:
     """Print the mode, or change it (a person at a terminal)."""
-    node = sentinel.default()
     if not args.to:
-        say(node.mode.value)
+        say(sentinel.default().mode.value)
         return 0
     try:
-        node.set_mode(Mode(args.to), human.mint("mode", "sentinel"))
+        grant = human.mint("mode", "sentinel")
     except human.HumanRequired as exc:
         warn(f"ml-stack security: {exc}")
         return 2
+    sentinel.default().set_mode(Mode(args.to), grant)
     say(f"mode is {args.to}")
     return 0
 

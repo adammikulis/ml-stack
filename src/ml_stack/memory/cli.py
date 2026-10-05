@@ -17,6 +17,7 @@ from ml_stack.memory.project import SCOPES, at
 from ml_stack.memory.store import FACT_LINKS, Setup, Store, Tampered
 from ml_stack.memory.union import Memory
 from ml_stack.memory.vault import KeyUnavailable
+from ml_stack.person import is_terminal
 from ml_stack.sentinel.human import HumanRequired, require_person
 
 __all__ = ["COMMAND"]
@@ -39,7 +40,7 @@ def _guarded(fn: Handler, *, writes: bool) -> Callable[[argparse.Namespace], int
     def run(args: argparse.Namespace) -> int:
         try:
             require_person(f"ml-stack-memory {args.cmd}",
-                           (sys.stdin.isatty(), True if not writes else sys.stdout.isatty()))
+                           (is_terminal(sys.stdin), True if not writes else is_terminal(sys.stdout)))
         except HumanRequired as exc:
             warn(str(exc))
             return DENIED

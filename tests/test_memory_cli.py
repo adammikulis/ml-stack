@@ -14,6 +14,11 @@ from tests import memory_keys
 ring = memory_keys.ring
 
 
+@pytest.fixture(autouse=True)
+def terminal_streams(monkeypatch):
+    monkeypatch.setattr(cli, "is_terminal", lambda stream: stream.isatty())
+
+
 class Tty:
     def __init__(self, tty: bool) -> None:
         self.tty = tty
