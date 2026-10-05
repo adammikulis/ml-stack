@@ -78,7 +78,7 @@ regression must be fixed before the affected change lands.
 
 **Linux testing is paused by the owner.** Do not launch local or container Linux tests until
 the owner explicitly resumes them. Linux is not a per-merge prerequisite during this pause;
-record the platform coverage gap honestly. Maintained CI and background platform coverage do
+record the platform coverage gap honestly. Automated checks and background platform coverage do
 not change this local authorization. When resumed, Linux checks follow the same scoped and
 background policy, rather than a second full suite before every merge.
 
@@ -319,8 +319,9 @@ git worktree add -b <branch> ../ml-stack-<branch> "$(git -C ../ml-stack branch -
 
 `main` is the release branch: a commit that arrives there is a commit queued to publish. Work
 lands on the development branch, and promoting that to `main` is the owner's. Whoever made a
-branch finishes it. Fetch, merge into the development branch, then take the worktree and the
-branch away. Run removal from outside the worktree being removed:
+branch finishes it. Fetch before integrating, merge into the development branch, push that
+development branch after its scoped gates pass, then take the worktree and the branch away.
+Run removal from outside the worktree being removed:
 
 ```
 git fetch origin
@@ -330,10 +331,14 @@ git branch -d <branch>
 git worktree prune
 ```
 
-Push, tag and release are the owner's actions unless explicitly requested. Whoever merges, prunes: a subagent that
-lands its own branch removes its own worktree and branch, and when the main session merges it
-does so in the same step. A merge is not finished until `git worktree list` shows only trees
-with live work in them. Before removing a tree, check that it holds nothing unique -- unmerged
+Agents may fetch and fast-forward the development branch from its upstream, and may push the
+development branch after review, scoped gates, and integration pass. Keep local and upstream
+development branches synchronized as part of completing the task; report the resulting commit
+and upstream state. Never push with force, delete a remote ref, push tags, or push `main`.
+Promotion to `main`, tags, and releases remain the owner's actions. Whoever merges, prunes: a
+subagent that lands its own branch removes its own worktree and branch, and when the main session
+merges it does so in the same step. A merge is not finished until `git worktree list` shows only
+trees with live work in them. Before removing a tree, check that it holds nothing unique -- unmerged
 commits (`git cherry <dev-branch> <branch>`), uncommitted changes, or ignored state that is not
 a rebuildable cache -- and never remove one while an agent is still working in it; if one is,
 leave it and say so.
