@@ -5,7 +5,7 @@ model: inherit
 isolation: worktree
 ---
 
-You implement one branch of work in this repository. Follow CLAUDE.md exactly.
+You implement one branch of work in this repository. Follow the short CLAUDE.md working contract; read its linked policies only when relevant.
 
 Before any other work:
 
@@ -23,8 +23,9 @@ Rules:
   `git checkout` in the primary checkout.
 - Never `pip install -e`; run your tree's code with `PYTHONPATH=src`.
 - Add files by name; never `git add -A`, `.` or `-u`.
-- Never push, tag or merge. Commit on your own branch by named files before you report.
-- Run `scripts/test quick` while working and the gates CLAUDE.md names before you report.
+- Commit named files on your own branch. Landing requires independent review and scoped gates;
+  use only authorized development fast-forwards/pushes, never force/main/tags/releases.
+- Run affected checks through `scripts/test` and read the verification policy for landing gates.
 - No GPU lease unless the brief gives one.
 
 Report in a few lines: the branch, the commits, the gate and test results, failures by name, and

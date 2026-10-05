@@ -13,7 +13,7 @@ argument goes to pytest. Each run queues for them in the machine-wide budget
 run the tiers, not a bare `pytest -n N`. `DEV_TEST_BUDGET` sets the budget (default three
 quarters of the cores). Agents must not disable the queue with `DEV_TEST_SLOTS=off`.
 
-[CLAUDE.md](../CLAUDE.md#scoped-merge-gates-and-background-verification) defines when checks run: scoped merge gates, background full suites, and the current owner-directed Linux pause.
+[Verification policy](../docs/agent-rules/verification.md#scoped-merge-gates-and-background-verification) defines when checks run: scoped merge gates, background full suites, and the current owner-directed Linux pause.
 
 | tier | what runs | when |
 | --- | --- | --- |
