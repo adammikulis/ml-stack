@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from taskboard_kit import accepted, board as _board_fixture
 
+from ml_stack import harness_claims
 from ml_stack.graph.store import GraphStore
 from ml_stack.workspace import (
     claim_handoff,
@@ -19,6 +20,7 @@ from ml_stack.workspace import (
     task_worktrees,
 )
 from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.project import describe
 
 board = _board_fixture
 
@@ -62,6 +64,13 @@ def project(board, tmp_path, monkeypatch, request):
                                              board.task['id'], 'native-grant')
     board.board.claim(board.child, board.task['id'], allocation['allocation_id'])
     claim_handoff.acquire(board.ws, board.ws.auth(board.child), [str(source)])
+    if getattr(request, 'param', '') == 'native_claims':
+        monkeypatch.setattr(harness_claims, 'Workspace', lambda: board.ws)
+        board.ws.registry.set_project(board.ws.auth(board.owner), 'lead', describe(str(source)))
+        harness_claims.reserve('Write', {'file_path': str(source / 'sim.py')},
+                               str(source), board.worker_id, [str(source)])
+        harness_claims.reserve('Bash', {'command': 'git add sim.py'},
+                               str(source), board.worker_id, [str(source)])
     (source / 'sim.py').write_text('speed = 2\n')
     repo.git(source, 'add', '--', 'sim.py')
     repo.git(source, 'commit', '-m', 'fix: reviewed simulation speed')
@@ -213,7 +222,9 @@ def test_same_worker_claim_for_another_assignment_cannot_be_returned(board, proj
     wrong = {**project['worktree'], 'id': 'task-worktree:' + '0' * 32}
     with pytest.raises(Denied, match='exact task delegation'):
         board.ws.claims.return_worktree(board.ws.auth(board.parent), wrong)
-    assert board.ws.who_owns('worktree', str(project['source'])) == claim
+    current = board.ws.who_owns('worktree', str(project['source']))
+    assert {key: value for key, value in current.items() if key != 'expires_in_s'} == \
+        {key: value for key, value in claim.items() if key != 'expires_in_s'}
 
 
 @pytest.mark.redteam
@@ -284,3 +295,39 @@ def test_registered_parent_integrates_human_created_independently_reviewed_task(
     result = task_integration.integrate(board.ws, board.parent, board.task['id'])
     assert result['state'] == 'published'
     assert repo.git(project['origin'], 'rev-parse', 'refs/heads/0.2dev') == result['commit']
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize('project', ['native_claims'], indirect=True)
+def test_native_reservations_release_only_the_exact_accepted_task_assignment(board, project, tmp_path):
+    source, scope = project['source'], project['worktree']
+    target = str(source / 'sim.py')
+    before = board.ws.claims.listing(owner=board.worker_id)
+    assigned = [claim for claim in before if claim.get('assignment') == scope['id']]
+    assert {claim['kind'] for claim in assigned} == {'file', 'area', 'worktree'}
+    assert all(claim.get('task') == scope['task'] and claim.get('project') == scope['project']
+               for claim in assigned)
+    assert next(claim for claim in assigned if claim['kind'] == 'worktree')['delegated_by'] == 'lead'
+    with pytest.raises(Denied, match='different task assignment'):
+        board.ws.claims.reserve(board.ws.auth(board.child), [('file', target)],
+                                {'assignment': 'task-worktree:other'})
+    assert board.ws.claims.who('file', target)['assignment'] == scope['id']
+    unrelated = str(tmp_path / 'unrelated-worker-file')
+    board.ws.claims.reserve(board.ws.auth(board.child), [('file', unrelated)])
+    wrong = str(tmp_path / 'different-task-file')
+    board.ws.claims.reserve(board.ws.auth(board.child), [('file', wrong)],
+                            {'assignment': 'task-worktree:other', 'task': 'task:other', 'project': str(source)})
+    board.board.review(board.parent, board.task['id'], accepted())
+    result = task_integration.integrate(board.ws, board.parent, board.task['id'])
+    assert result['state'] == 'published'
+    assert board.ws.claims.who('area', target) is None
+    assert board.ws.claims.who('file', unrelated)['owner'] == board.worker_id
+    assert board.ws.claims.who('file', wrong)['assignment'] == 'task-worktree:other'
+    with pytest.raises(Denied, match='exact task delegation'):
+        board.ws.claims.return_worktree(board.ws.auth(board.parent),
+                                        {**scope, 'id': 'task-worktree:other'})
+    assert board.ws.claims.who('file', wrong)['assignment'] == 'task-worktree:other'
+    with GraphStore(board.base / 'coordination.db') as graph:
+        returned = next(row['attrs'] for row in graph.nodes('integration-event')
+                        if row['attrs']['state'] == 'scope_returned')
+        assert {claim['kind'] for claim in returned['released_claims']} == {'file', 'area'}

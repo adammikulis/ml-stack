@@ -122,7 +122,7 @@ def reserve(name, args, cwd, actor, roots):
     grant = ws.registry.info(who.id).get('project') or ws.registry.info(who.parent).get('project')
     if not grant or any(describe(str(root)).get('key') != grant.get('key') for root in approved):
         raise Denied('mutation ownership requires an existing person-set project grant')
-    claim_handoff.acquire(ws, who, approved)
+    scope = claim_handoff.acquire(ws, who, approved)
     try:
         commit = git.head(Path(cwd))
     except git.GitFailed:
@@ -130,4 +130,6 @@ def reserve(name, args, cwd, actor, roots):
     ws.claims.reserve(who, required, {'note': 'native harness mutation', 'commit': commit,
                                      'owner_pid': os.getppid(), 'owner_started': started_at(os.getppid()),
                                      'interpreter': str(Path(sys.executable).resolve()),
-                                     'environment': str(Path(sys.prefix).resolve())})
+                                     'environment': str(Path(sys.prefix).resolve()),
+                                     **({'assignment': scope['id'], 'task': scope['task'],
+                                         'project': scope['project']} if scope else {})})

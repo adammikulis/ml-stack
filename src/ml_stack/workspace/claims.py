@@ -160,6 +160,9 @@ class Claims:
                 for other in claims.values():
                     if _covers(other, kind, key) and other['owner'] != who.id:
                         raise Conflict(f"{kind} {key} belongs to {other['owner']}", other)
+                    if _covers(other, kind, key) and other.get('assignment') \
+                            and other['assignment'] != (fields or {}).get('assignment'):
+                        raise Denied('the resource is reserved for a different task assignment')
             now, made = self.clock(), []
             for kind, key in resources:
                 old = claims.get(f'{kind}:{key}')
@@ -171,6 +174,11 @@ class Claims:
                          'expires': expiry, 'note': str((fields or {}).get('note', ''))[:200]}
                 entry.update({key: value for key, value in (fields or {}).items()
                               if key in ('owner_pid', 'owner_started', 'interpreter', 'environment', 'commit')})
+                if kind in ('file', 'area', 'worktree'):
+                    entry.update({key: value for key, value in (fields or {}).items()
+                                  if key in ('assignment', 'task', 'project')})
+                if kind == 'worktree' and old and old.get('delegated_by'):
+                    entry['delegated_by'] = old['delegated_by']
                 claims[f'{kind}:{key}'] = entry
                 made.append(entry)
             self._save(claims)
@@ -203,14 +211,22 @@ class Claims:
             claim = claims.get(f'worktree:{key}')
             if not claim or claim['owner'] not in (scope['owner'], scope['worker']):
                 raise Denied('the reviewed worktree has a different ownership claim')
+            if claim['owner'] == scope['owner'] and claim.get('reviewed_assignment') != scope['id']:
+                raise Denied('the returned worktree does not match this exact task delegation')
             if claim['owner'] == scope['worker']:
                 if claim.get('delegated_by') != scope['owner'] or claim.get('assignment') != scope['id']:
                     raise Denied('the worktree claim does not match this exact task delegation')
                 claim.update(owner=scope['owner'], returned_by=who.id, reviewed_assignment=scope['id'])
                 claim.pop('delegated_by', None)
                 claim.pop('assignment', None)
-                self._save(claims)
-            return dict(claim)
+            released = [value for value in claims.values()
+                        if value['kind'] in ('file', 'area') and value['owner'] == scope['worker']
+                        and value.get('assignment') == scope['id'] and value.get('task') == scope['task']
+                        and value.get('project') == scope['project']]
+            for value in released:
+                claims.pop(f"{value['kind']}:{value['key']}")
+            self._save(claims)
+            return {**claim, 'released_claims': released}
 
     def release(self, who: Identity, kind: str, key: str) -> dict[str, Any]:
         """Give up a claim. Its owner, a lead or a human may."""

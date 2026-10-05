@@ -80,3 +80,8 @@ no arbitrary credit amount. Optional quality and reliability assessments require
 reason. Task reliability still derives from actual accepted/rejected outcomes, with
 infrastructure blockage excluded. Leaving advanced controls untouched keeps a plain accepted
 review at completion credit and leaves quality unrated.
+Native file and logical source-area reservations carry the authenticated task-worktree
+assignment. After exact accepted review and release of its execution lease, returning the
+worktree also atomically releases only that task's matching file and area reservations.
+Claims for another assignment, unassigned work, ports or installation environments remain
+owned by their original agent.

@@ -126,14 +126,15 @@ class DevelopmentIntegration:
         self.ws.claim(self.token, 'area', str(self.primary / '.ml-stack-integration'))
         self.ws.claim(self.token, 'branch', self.branch)
         self.ws.claim(self.token, 'worktree', str(self.candidate))
-        source_claim = self.ws.who_owns('worktree', str(self.source))
+        source_claim = next((claim for claim in self.ws.claims.listing(kind='worktree')
+                             if claim['key'] == str(self.source)), None)
         if source_claim and source_claim['owner'] == self.worktree['worker']:
             who = self.ws.auth(self.token)
             if who.role != HUMAN and self.ws.registry.info(self.worktree['worker'])['parent'] != who.id:
                 raise Denied('the current child worktree claim requires its registered parent to return it')
             source_claim = self.ws.claims.return_worktree(who, self.worktree)
             _event(self.ws, self.record, 'scope_returned', scope_owner=source_claim['owner'],
-                   worker=self.worktree['worker'])
+                   worker=self.worktree['worker'], released_claims=source_claim['released_claims'])
             self.ws.audit('task.claim_returned', who.id, task=self.task['id'], worker=self.worktree['worker'])
         if not source_claim or source_claim['owner'] != self.worktree['owner']:
             raise Denied('the prepared task source no longer has its recorded worktree owner')
