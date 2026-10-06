@@ -113,7 +113,7 @@ class Serving:
         running = {row["port"]: row for row in every_server()}
         verified = {served.port: _identity(served, running.get(served.port, {})) for served in snapshot}
         found = [served for served, answering in verified.values() if answering]
-        if snapshot:
+        if any(verified[served.port][0] != served for served in snapshot):
             with lock.only_one(self.path.with_suffix(".lock"), timeout=5, announce=lambda text: None):
                 old = {served.port: served for served in snapshot}
                 current = self.all()

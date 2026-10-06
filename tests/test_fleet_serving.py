@@ -101,6 +101,36 @@ def metadata_server(body, *, redirect=""):
 
 
 class TestRegistry:
+    def test_verified_unchanged_reads_do_not_create_a_write_lock(self, tmp_path, model):
+        registry = Serving(tmp_path / "serving.json")
+        registry.register(model.port, ["qwen3-4b.gguf"])
+        expected = registry.live(force=True)
+        lock_path = registry.path.with_suffix(".lock")
+        lock_path.unlink()
+        assert registry.live(force=True) == expected
+        assert not lock_path.exists()
+
+    def test_reconciliation_preserves_registration_changed_after_probe(self, tmp_path, model, monkeypatch):
+        from dataclasses import replace
+
+        from ml_stack.fleet import serving as module
+
+        registry = Serving(tmp_path / "serving.json")
+        original = registry.register(model.port, ["stale-claim.gguf"])
+        current = replace(original, models=["concurrent-claim.gguf"])
+        take_lock = module.lock.only_one
+
+        @contextmanager
+        def concurrent_registration(*args, **kwargs):
+            with take_lock(*args, **kwargs) as held:
+                registry._write([current])
+                yield held
+
+        monkeypatch.setattr(module.lock, "only_one", concurrent_registration)
+        live = registry.live(force=True)
+        assert live[0].models == ["qwen3-4b.gguf"]
+        assert registry.all() == [current]
+
     @pytest.mark.parametrize("port", [-1, 0, 65536, True, "8080", None])
     def test_invalid_persisted_ports_are_never_probed(self, tmp_path, port):
         path = tmp_path / "serving.json"
