@@ -15,7 +15,7 @@ def test_join_failure_preserves_existing_membership(tmp_path):
     path = tmp_path / "cluster.key"
     first = discovery.mint_cluster("default", path)
     with pytest.raises(discovery.DiscoveryError, match="No machine"):
-        joining.join_by_passphrase("quince larch marlow", "default", path)
+        joining.join_existing("quince larch marlow", "default", path)
     assert discovery.memberships(path) == [first]
 
 
@@ -28,7 +28,7 @@ def test_explicit_creation_mints_a_key_with_join_credential(tmp_path):
 
 
 def test_creation_refuses_an_existing_lan_cluster(monkeypatch, tmp_path):
-    monkeypatch.setattr(joining, "find_joiners", lambda *_args: [object()])
+    monkeypatch.setattr(joining, "find_joiners", lambda *_args, **_kwargs: [object()])
     with pytest.raises(discovery.DiscoveryError, match="Join it instead"):
         joining.create_by_passphrase("quince larch marlow", "default", tmp_path / "cluster.key")
     assert discovery.memberships(tmp_path / "cluster.key") == []
