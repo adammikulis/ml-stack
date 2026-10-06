@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import time
 import urllib.parse
@@ -11,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack import home
 from ml_stack.files import promote, sha256_file
 from ml_stack.http import (
     ONCE,
@@ -21,7 +23,7 @@ from ml_stack.http import (
     request_bytes,
 )
 
-from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key
+from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key, primary_ip
 
 if TYPE_CHECKING:
     from ml_stack.speech.protocols import Transcript
@@ -31,6 +33,27 @@ DIGEST_HEADER = "X-ML-Stack-SHA256"
 
 # A read is safe to send again; an unreachable peer is not worth waiting on twice.
 READS = Retry(tries=3, when_unreachable=False)
+
+
+def device_address(peer, declared: str) -> bool:
+    """Whether an origin names the authenticated device endpoint."""
+    beacon = peer.beacon
+    if not beacon or not beacon.cert or not beacon.machine:
+        return False
+    try:
+        observed, named = urllib.parse.urlsplit(peer.base_url), urllib.parse.urlsplit(declared)
+        if (named.scheme != 'https' or observed.scheme != 'https' or named.port != observed.port
+                or named.username or named.password or named.path not in ('', '/')
+                or named.query or named.fragment):
+            return False
+        if declared.rstrip('/') == peer.base_url.rstrip('/'):
+            return True
+        if beacon.machine != home.machine_id():
+            return False
+        return (ipaddress.ip_address(observed.hostname).is_loopback
+                and named.hostname == primary_ip())
+    except ValueError:
+        return False
 
 
 def range_total(content_range: str) -> int | None:

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ml_stack import sealing
+from ml_stack import home, sealing
+from ml_stack.fleet import remote as fleet_remote
 from ml_stack.http import Sealed
 from ml_stack.workspace import automatic_connection as automatic
 from ml_stack.workspace.identity import Denied
@@ -17,13 +18,14 @@ def peer(machine, authority="", host=""):
     address = f"https://{machine}:8770"
     row = {"id": PROJECT, "name": "sample", "machine": machine,
            "authority_machine": authority, "board_host": host}
-    return SimpleNamespace(base_url=address, beacon=SimpleNamespace(machine=machine),
+    return SimpleNamespace(base_url=address, beacon=SimpleNamespace(machine=machine, cert="fixture"),
                            document={"machine": machine, "boards": [row]})
 
 
 @pytest.fixture
 def found(monkeypatch):
     nodes = []
+    monkeypatch.setattr(home, "machine_id", lambda: "node-a")
     monkeypatch.setattr(automatic, "identity", lambda root: PROJECT)
     monkeypatch.setattr(automatic, "_register", lambda *args: None)
     monkeypatch.setattr(automatic, "memberships", lambda path: [
@@ -67,7 +69,7 @@ def test_local_authority_accepts_its_lan_origin_from_loopback_discovery(found, t
     node = peer("node-a", "node-a", "https://192.168.40.2:8770")
     node.base_url = "https://127.0.0.1:8770"
     found.append(node)
-    monkeypatch.setattr(automatic, "primary_ip", lambda: "192.168.40.2")
+    monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.40.2")
     assert automatic.discover(tmp_path)["host"] == node.base_url
 
 
@@ -78,7 +80,7 @@ def test_local_origin_alias_requires_same_device_and_tls_port(found, tmp_path, m
     node = peer("node-a", "node-a", origin)
     node.base_url = "https://127.0.0.1:8770"
     found.append(node)
-    monkeypatch.setattr(automatic, "primary_ip", lambda: "192.168.40.2")
+    monkeypatch.setattr(fleet_remote, "primary_ip", lambda: "192.168.40.2")
     with pytest.raises(Denied, match="address"):
         automatic.discover(tmp_path)
 
