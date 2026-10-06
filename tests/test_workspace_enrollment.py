@@ -38,7 +38,10 @@ def test_enrollment_bootstraps_only_project_agents_and_places_board(enrollment):
     assert ws.registry.info(first["id"])["model_state"] == "claimed"
     payload = {"agent_token": first["token"], "operation": "board.list"}
     code, reply = host.answer(PROJECT, "board", payload, admission=("dev", "c" * 64, True))
-    assert code == 200 and any(row["project"] == PROJECT for row in reply["result"])
+    assert code == 200
+    board = next(row for row in reply["result"] if row["name"] == "#fixture-project")
+    assert board["project"] is True and board["member"] is True
+    assert ws.board.store.state()[0][board["name"]]["project"] == PROJECT
     assert host.answer(PROJECT, "board", payload, admission=("prod", "c" * 64, True))[0] == 403
     assert host.answer(PROJECT, "board", payload, admission=("dev", "d" * 64, True))[0] == 403
     assert host.answer(PROJECT, "board", payload, admission=("dev", "c" * 64, False))[0] == 403
@@ -105,7 +108,10 @@ def test_native_child_delegation_inherits_scope_and_self_revocation(enrollment):
     assert ws.registry.info(identity.id)["expires"] <= ws.registry.info(parent["id"])["expires"]
     request = {"agent_token": child["token"], "operation": "board.list"}
     code, reply = host.answer(PROJECT, "board", request, admission=("dev", "c" * 64, True))
-    assert code == 200 and any(row["project"] == PROJECT for row in reply["result"])
+    assert code == 200
+    board = next(row for row in reply["result"] if row["name"] == "#fixture-project")
+    assert board["project"] is True and board["member"] is True
+    assert ws.board.store.state()[0][board["name"]]["project"] == PROJECT
     request["operation"], request["args"] = "delegate", ["another"]
     assert host.answer(PROJECT, "board", request, admission=("dev", "c" * 64, True))[0] == 403
     request["operation"], request["args"] = "revoke_self", [parent["id"]]
