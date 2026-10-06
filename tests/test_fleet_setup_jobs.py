@@ -30,8 +30,10 @@ def test_install_returns_before_operation_finishes_and_deduplicates(tmp_path):
     assert entered.wait(5)
     assert jobs.start('server', {}, install)['id'] == queued['id']
     assert jobs.all()[0]['state'] == 'installing'
+    assert jobs.active()
     release.set()
     assert wait_job(jobs, 'done')['result']['server'] == 'managed/server'
+    assert not jobs.active()
     assert setup_jobs.Jobs(tmp_path).all()[0]['state'] == 'done'
 
 

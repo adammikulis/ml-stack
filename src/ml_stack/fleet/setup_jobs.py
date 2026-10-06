@@ -42,6 +42,9 @@ class Jobs:
         with self._mutex, only_one(self.root / "setup-jobs.lock"), self._store() as graph:
             return sorted((node["attrs"] for node in graph.nodes("setup-job")), key=lambda row: row["created"])
 
+    def active(self):
+        return any(row["state"] in ACTIVE for row in self.all())
+
     def start(self, kind, request, operation, *, provenance=None):
         with self._mutex, only_one(self.root / "setup-jobs.lock"), self._store() as graph:
             rows = [node["attrs"] for node in graph.nodes("setup-job")]
