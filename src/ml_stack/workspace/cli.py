@@ -310,6 +310,15 @@ def _connect(args: argparse.Namespace, ws: Workspace) -> int:
     if agent:
         if args.no_project or args.one_agent or args.remote or args.code_only or args.name:
             raise Denied("agent connect takes --agent and --project; invite options need a person")
+        connection = project_connection.selected()
+        if connection is not None:
+            canonical, token = _context(args)
+            who = canonical.auth(token)
+            info = canonical.registry.info(who.id)
+            if info.get("project", {}).get("key") != connection["project_id"]:
+                raise Denied("this identity is not authorized for the canonical project")
+            _show(args, {"id": who.id, "project": connection["project_id"], "state": "connected"})
+            return 0
         found = project.describe(args.project)
         remote = coordinator_client.client(ws.base)
         if remote:
@@ -735,7 +744,7 @@ def _bare(handler: Callable[[argparse.Namespace, Workspace], int]) -> Callable[[
     def run(args):
         if handler is _connect and (args.agent or os.environ.get(tokens.AGENT_ENV, "")):
             if project_connection.selected() is not None:
-                raise Denied("agent sessions on canonical boards use the existing project connection")
+                return handler(args, None)
             return handler(args, Workspace())
         if coordinator_client.client(limits.root()) and handler is not _join:
             raise Denied('this is a local-only operation; this device uses a shared coordinator')

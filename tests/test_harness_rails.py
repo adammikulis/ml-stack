@@ -314,11 +314,11 @@ class TestWorkspaceCommands:
         assert harnesshook.nudge(hostile) == "nudge text"
         assert hostile in Path(f"{exe}.argv").read_text().splitlines()
 
-    def test_a_failed_announcement_says_the_command_that_joins(self, monkeypatch):
+    def test_a_failed_announcement_identifies_the_workspace_trust_check(self, monkeypatch):
         said = []
         monkeypatch.setenv("PATH", "/nonexistent")
         assert harnessid.announce(harnessid.Seat("l", "claude-code"), "t", said.append) is False
-        assert "ml-stack-workspace connect" in said[0]
+        assert "selected authority and device trust" in said[0]
 
 
 class TestSeat:
@@ -407,6 +407,32 @@ class TestSeat:
         monkeypatch.setenv("CLAUDECODE", "1")
         seat = harnessid.invite("local-test-codex", tmp_path, "claude-code", lambda _: None)
         assert seat.name == "local-test-codex" and seat.persistent
+
+    @pytest.mark.parametrize("canonical", [True, False])
+    def test_remote_launcher_uses_selected_authority_without_local_bootstrap(self, monkeypatch, tmp_path, canonical):
+        calls = []
+        class Remote:
+            base = tmp_path
+            def token(self, **kwargs):
+                return "saved-session"
+            def call(self, operation, token, *args):
+                calls.append((operation, args))
+                return {"id": "device-worker"}
+            def ensure(self, base, name, **kwargs):
+                calls.append(("ensure", kwargs))
+                return "device-worker"
+        remote = Remote()
+        selected = {"host": "https://192.0.2.1", "project_id": "a" * 32} if canonical else None
+        monkeypatch.setattr(harnessid.project_connection, "selected", lambda *a: selected)
+        monkeypatch.setattr(harnessid.project_connection, "RemoteWorkspace", lambda *a, **k: remote)
+        monkeypatch.setattr(harnessid.coordinator_client, "client", lambda *a: remote)
+        monkeypatch.setattr(harnessid.limits, "root", lambda: tmp_path)
+        monkeypatch.setattr(harnessid, "Workspace", lambda *a: pytest.fail("local fallback"))
+        seat = harnessid.invite("worker", tmp_path, "", lambda _: None)
+        assert seat.name == "device-worker" and seat.persistent
+        assert seat.record_model("test-model", "test-harness")
+        assert calls[-1][0] == ("claim_model" if canonical else "ensure")
+        assert not seat.revoke()
 
     def test_a_fake_endpoint_cannot_verify_a_delegated_agents_model(self, monkeypatch, tmp_path):
         from ml_stack.testing import FakeLlamaServer, Served

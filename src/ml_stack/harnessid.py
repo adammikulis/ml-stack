@@ -9,7 +9,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ml_stack.workspace import Denied, Workspace, guide, tokens
+from ml_stack.workspace import Denied, Workspace, coordinator_client, guide, limits, project_connection, tokens
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT_MARKERS, valid_name
 from ml_stack.workspace.project import describe
@@ -52,6 +52,23 @@ def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
     try:
+        connection = project_connection.selected(project_dir)
+        if connection is not None:
+            remote = project_connection.RemoteWorkspace(
+                connection["host"], connection["project_id"], cluster=connection.get("cluster", ""),
+                cluster_key=Path(connection["cluster_key"]) if connection.get("cluster_key") else None)
+            token = remote.token(agent=name)
+            actual = remote.call("whoami", token)["id"]
+            return Seat(actual, base=remote.base, persistent=True,
+                        record_claim=lambda model, harness: remote.call(
+                            "claim_model", remote.token(agent=actual), model, harness))
+        coordinator = coordinator_client.client(limits.root())
+        if coordinator is not None:
+            found = describe(str(project_dir))
+            actual = coordinator.ensure(limits.root(), name, project=found)
+            return Seat(actual, base=limits.root(), persistent=True,
+                        record_claim=lambda model, harness: coordinator.ensure(
+                            limits.root(), actual, model=model, harness=harness, project=found))
         ws = Workspace()
         if parent and any(os.environ.get(marker) for marker in AGENT_MARKERS) and parent in ws.registry.ids():
             try:
@@ -85,5 +102,5 @@ def announce(seat: Seat, text: str, say: Callable[[str], None]) -> bool:
         except (OSError, subprocess.SubprocessError):
             ok = False
     if not ok:
-        say(f"not on the workspace; join it once with `ml-stack-workspace connect`, then pass --as {seat.parent or 'NAME'}")
+        say(f"workspace announcement failed for {seat.name}; check the selected authority and device trust")
     return ok

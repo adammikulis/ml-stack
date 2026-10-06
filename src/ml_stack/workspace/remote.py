@@ -14,7 +14,9 @@ from ml_stack.fleet.discovery import derive_token, load_cluster_key, memberships
 from ml_stack.fleet.onboard.lan import require_local_url
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import ServerError, open_stream
-from ml_stack.workspace import tokens
+from ml_stack.graph.store import GraphStore
+from ml_stack.workspace import coordinator_client, tokens
+from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import Denied
 
 
@@ -44,10 +46,13 @@ class RemoteWorkspace:
         if key is None:
             raise Denied("join the host's cluster before attaching its project board")
         self.fleet_token = derive_token(key)
+        self.device_cert = ""
         if parts.scheme == "https":
             peers = Peer.discover(key=key, timeout_s=2)
-            if not any(peer.base_url.rstrip("/") == self.host for peer in peers):
+            matched = [peer for peer in peers if peer.base_url.rstrip("/") == self.host]
+            if len(matched) != 1:
                 raise Denied("the project host was not authenticated by cluster discovery; check its address and cluster")
+            self.device_cert = matched[0].beacon.cert if matched[0].beacon else ""
         label = hashlib.sha256(f"{self.host}/{project_id}".encode()).hexdigest()
         self.base = home.state("workspace-remote", label)
 
@@ -101,5 +106,37 @@ class RemoteWorkspace:
             return tokens.read_file(path)
         name = agent or os.environ.get(tokens.AGENT_ENV, "")
         if not name:
-            raise Denied("attach a project agent and select it with --agent NAME")
-        return tokens.load(self.base, name)
+            raise Denied("select the local agent identity with --agent NAME")
+        path = self.base / "remote-sessions.db"
+        session = {}
+        if path.exists():
+            with held(self.base / "remote-sessions.lock"), GraphStore(path) as graph:
+                session = next((node["attrs"] for node in graph.nodes("remote-session")
+                                if name in (node["attrs"].get("name"), node["attrs"].get("id"))), {})
+        if session:
+            self._device_transport()
+        try:
+            saved = tokens.load(self.base, str(session.get("id", name)))
+        except Denied:
+            saved = ""
+        if saved:
+            try:
+                self.call("whoami", saved)
+                return saved
+            except Denied as error:
+                if not isinstance(error.__cause__, ServerError) or error.__cause__.status != 403:
+                    raise
+        self._device_transport()
+        result = self._request("ensure", {"name": str(session.get("name", name)),
+                                         "model": "", "harness": "",
+                                         "project": {"key": self.project_id}, "agent_token": saved})
+        ident, token = str(result["id"]), str(result["token"])
+        tokens.store(self.base, ident, token)
+        with held(self.base / "remote-sessions.lock"), GraphStore(path) as graph:
+            graph.upsert_node({"id": f"session:{name}", "kind": "remote-session", "label": ident,
+                               "attrs": {"name": str(session.get("name", name)), "id": ident}})
+        return token
+
+    def _device_transport(self) -> None:
+        self.fleet_token = coordinator_client._device_peer(
+            {"endpoint": self.host, "cert": self.device_cert}).token

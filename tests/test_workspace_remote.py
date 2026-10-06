@@ -26,6 +26,52 @@ PROJECT = "a" * 32
 OTHER = "b" * 32
 
 
+def test_canonical_client_recovers_and_remembers_device_scoped_identity(tmp_path, monkeypatch):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id = tmp_path, PROJECT
+    requests = []
+    transports = []
+    monkeypatch.setattr(remote, "_device_transport", lambda: transports.append("device"))
+    def request(action, payload):
+        requests.append((action, payload))
+        return {"id": "worker-peer", "token": "mlws1.worker-peer.saved", "project_id": PROJECT}
+    monkeypatch.setattr(remote, "_request", request)
+    monkeypatch.setattr(remote, "call", lambda operation, token: {"id": "worker-peer"})
+    token = remote.token(agent="worker")
+    assert requests[0][0] == "ensure"
+    assert requests[0][1]["name"] == "worker"
+    assert requests[0][1]["project"] == {"key": PROJECT}
+    assert requests[0][1]["agent_token"] == ""
+    assert remote.token(agent="worker-peer") == token
+    assert len(requests) == 1 and len(transports) == 2
+    (tokens.directory(tmp_path) / "worker-peer").unlink()
+    assert remote.token(agent="worker") == token
+    assert requests[-1][1]["name"] == "worker"
+
+
+@pytest.mark.parametrize("status, recovered", [(403, True), (503, False)])
+def test_canonical_client_recovers_expiry_and_preserves_outage_failure(tmp_path, monkeypatch, status, recovered):
+    remote = RemoteWorkspace.__new__(RemoteWorkspace)
+    remote.base, remote.project_id = tmp_path, PROJECT
+    tokens.store(tmp_path, "worker", "mlws1.worker.saved")
+    requests = []
+    monkeypatch.setattr(remote, "_device_transport", lambda: None)
+    def call(operation, token):
+        from ml_stack.workspace.identity import Denied
+        raise Denied("unavailable") from ServerError("unavailable", status=status)
+    monkeypatch.setattr(remote, "call", call)
+    monkeypatch.setattr(remote, "_request", lambda action, payload:
+                        requests.append(action) or {"id": "worker", "token": "mlws1.worker.recovered"})
+    if recovered:
+        assert remote.token(agent="worker") == "mlws1.worker.recovered"
+        assert requests == ["ensure"]
+    else:
+        from ml_stack.workspace.identity import Denied
+        with pytest.raises(Denied, match="unavailable"):
+            remote.token(agent="worker")
+        assert requests == []
+
+
 @pytest.fixture
 def host(tmp_path):
     class Projects:

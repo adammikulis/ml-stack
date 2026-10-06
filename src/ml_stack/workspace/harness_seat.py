@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from http.client import HTTPException
 from pathlib import Path
 
@@ -23,6 +24,7 @@ class Seat:
     issuer: Identity | None = None
     managed_inbox: bool = False
     persistent: bool = False
+    record_claim: Callable[[str, str], object] | None = None
 
     def flags(self) -> list[str]:
         """The workspace command flags this session's messages carry."""
@@ -33,6 +35,9 @@ class Seat:
         if not self.minted and not self.persistent:
             return False
         try:
+            if self.record_claim is not None:
+                self.record_claim(Path(alias).name, harness)
+                return True
             ws = Workspace(self.base)
             if server:
                 who = ws.auth(tokens.load(ws.base, self.name))
