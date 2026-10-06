@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from ml_stack import credentials
-from ml_stack.fleet.room_routes import _origin_ok
+from ml_stack.fleet.room_routes import LOOPBACK, _origin_ok
+from ml_stack.fleet.session import parse_cookie
 
 
 def route(request) -> bool:
@@ -12,6 +13,12 @@ def route(request) -> bool:
         return True
     if request.method not in ("POST", "DELETE"):
         return False
+    session = request.ui.sessions.get(parse_cookie(request.cookie))
+    if (request.client_ip != LOOPBACK or not request.ui.host_ok(request.host_header)
+            or request.header("Authorization") or request.header("X-ML-Stack-Token")
+            or (session is not None and session.who == "token")):
+        request.send(403, {"error": "credential changes require a person in this machine's browser"})
+        return True
     if not _origin_ok(request.header("Origin"), request.host_header):
         request.send(403, {"error": "credential changes require the local UI origin"})
         return True
