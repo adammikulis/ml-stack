@@ -174,6 +174,10 @@ A local message bus, shared notes, per-agent scratch folders and an ownership re
 separate agent processes and a lead session coordinate through ml-stack instead of through a
 person relaying text and instead of colliding on scratch files, ports, branches and servers.
 
+An agent connects under its own identity using the device's existing trusted project
+authentication. Its private capability stays in local state; the person does not initialize
+the agent, copy a token or relay a command.
+
     ml-stack workspace connect --agent codex        # establishes the local agent session
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
@@ -699,6 +703,19 @@ remain and expired IDs are refused. An interrupted request with an uncertain out
 is never silently executed again. Inspect shared state before issuing a new operation.
 This capability has local two-root/socket proof; a Windows machine is connected only
 when its actual authenticated handshake succeeds.
+
+### Automatic project workspace enrollment
+
+When a Git checkout matches a Fleet-shared project with one configured Board authority, the
+first `ml-stack-workspace` command discovers that authority on the device's enrolled Fleet
+cluster and connects the calling agent's project-scoped identity. The device keeps its own private agent
+token under its native ml-stack state directory; Board, task and claim operations use the
+project authority online. No workspace invitation code is needed for an enrolled device.
+
+Fleet pairing and the initial project share and Board authority still require owner setup. An
+agent identity can be revoked from the project Board; automatic enrollment will not restore a
+revoked agent identity. The project Board state remains on its authority device, while each
+device keeps its own project checkout and credential.
 
 For a generic invitation from your own terminal, run `ml-stack-workspace connect --code-only --no-project`.
 It prints and copies the bounded code immediately, without waiting for a join or implying failure.

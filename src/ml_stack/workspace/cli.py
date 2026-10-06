@@ -106,7 +106,9 @@ def _project_connection(cwd: Path | None = None):
 def _context(args: argparse.Namespace, connection=None):
     connection = connection or _project_connection()
     if connection is None:
-        return Workspace(), _token(args)
+        connection = project_connection.auto_attach()
+        if connection is None:
+            return Workspace(), _token(args)
     remote = project_connection.RemoteWorkspace(connection["host"], connection["project_id"],
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])

@@ -77,7 +77,7 @@ class WorkspaceRoutes:
             path = safe_relpath(root, self.asked("path"))
             with path.open("rb") as source:
                 raw = source.read(1_000_001)
-            self.send(200, {"path": self.asked("path"), "text": raw[:1_000_000].decode("utf-8", "replace"),
+            self.send(200, {"path": path.relative_to(root).as_posix(), "text": raw[:1_000_000].decode("utf-8", "replace"),
                             "truncated": len(raw) > 1_000_000})
             return True
         if self.path == "/ui/workspace/file" and self.method == "POST":
@@ -87,9 +87,9 @@ class WorkspaceRoutes:
             if len(content.encode()) > 10_000_000:
                 raise ValueError("Dataset upload limit is 10 MB; use ml-stack-peers for larger files.")
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("x", encoding="utf-8") as target:
+            with path.open("x", encoding="utf-8", newline="") as target:
                 target.write(content)
-            self.send(201, {"path": str(path.relative_to(root))})
+            self.send(201, {"path": path.relative_to(root).as_posix()})
             return True
         if self.path == "/ui/workspace/jobs" and self.method == "GET":
             self.send(200, {"jobs": runner.snapshot(), "capacity": runner.status()})
@@ -120,9 +120,10 @@ class WorkspaceRoutes:
                 resolved = child.resolve()
                 if not resolved.is_relative_to(root.resolve()):
                     continue
-                rows.append({"name": child.name, "path": str(child.relative_to(root)),
+                rows.append({"name": child.name, "path": child.relative_to(root).as_posix(),
                              "directory": child.is_dir(), "bytes": child.stat().st_size})
-        self.send(200, {"path": rel, "root": str(root), "files": rows})
+        self.send(200, {"path": path.relative_to(root).as_posix() if rel else "",
+                        "root": str(root), "files": rows})
         return True
 
     def _submit(self, root: Path) -> bool:
@@ -162,7 +163,7 @@ class WorkspaceRoutes:
         if log.exists():
             with log.open("rb") as source:
                 source.seek(max(0, log.stat().st_size - 100_000))
-                text = source.read().decode("utf-8", "replace")
+                text = source.read().decode("utf-8", "replace").replace("\r\n", "\n")
         metrics = runner.job_dir(job.id) / "metrics.jsonl"
         rows = []
         if metrics.exists():

@@ -407,7 +407,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not (path == "/health" and here and "Authorization" not in self.headers) \
                     and not self._guard():
                 return
-            if self._extension() or project_routes.answer(self, daemon.projects, parsed):
+            if project_routes.answer(self, daemon.projects, parsed) or self._extension():
                 return
             if path == "/health":
                 status = runner.status()
@@ -570,11 +570,12 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             body = self._unsealed(body)
             if body is None:
                 return
-            if self._extension(body):
-                return
             try:
-                if not self._workspace(body or b"{}"):
-                    self._route_post(body or b"{}")
+                if self._workspace(body or b"{}"):
+                    return
+                if self._extension(body):
+                    return
+                self._route_post(body or b"{}")
             except Malformed as bad:
                 self._send(bad.status, {"error": bad.message})
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+
 import pytest
 from test_fleet_ui import Serving
 
@@ -21,6 +24,8 @@ def test_data_upload_preview_and_path_boundary(daemon, tmp_path):
     code, result, _ = daemon.call('/ui/workspace/file', method='POST',
                                   body={'path': 'datasets/sample.jsonl', 'text': '{"input":"stop"}\n'})
     assert code == 201
+    assert result['path'] == 'datasets/sample.jsonl'
+    assert (daemon.files / 'datasets' / 'sample.jsonl').read_bytes() == b'{"input":"stop"}\n'
     code, result, _ = daemon.call('/ui/workspace/files?path=datasets')
     assert code == 200
     assert result['files'][0]['path'] == 'datasets/sample.jsonl'
@@ -29,9 +34,18 @@ def test_data_upload_preview_and_path_boundary(daemon, tmp_path):
     assert not result['truncated']
     assert daemon.call('/ui/workspace/file?path=../outside')[0] == 400
     outside = tmp_path / 'outside'
-    outside.write_text('private')
-    (daemon.files / 'escape').symlink_to(outside)
-    assert daemon.call('/ui/workspace/file?path=escape')[0] == 400
+    outside.mkdir()
+    (outside / 'private.txt').write_text('private')
+    alias = daemon.files / 'escape'
+    if os.name == 'nt':
+        subprocess.run(['cmd', '/c', 'mklink', '/J', str(alias), str(outside)],
+                       capture_output=True, check=True)
+    else:
+        alias.symlink_to(outside, target_is_directory=True)
+    try:
+        assert daemon.call('/ui/workspace/file?path=escape/private.txt')[0] == 400
+    finally:
+        alias.rmdir() if os.name == 'nt' else alias.unlink()
     assert daemon.call('/ui/workspace/file', method='POST',
                        body={'path': 'datasets/sample.jsonl', 'text': 'replace'})[0] == 400
 
@@ -62,11 +76,11 @@ def test_job_preview_is_not_submitted_and_commands_are_installed(daemon, monkeyp
 def test_job_log_metrics_and_cancel(daemon):
     daemon.runner.gate = lambda: (False, 'test hold')
     job = daemon.runner.submit('check', ['unused'], str(daemon.files))
-    daemon.runner.log_path(job.id).write_text('step 1\n')
+    daemon.runner.log_path(job.id).write_bytes(b'step 1\r\nstep 2\nprogress\rnext')
     (daemon.runner.job_dir(job.id) / 'metrics.jsonl').write_text('{"loss":0.5}\npartial\n')
     code, result, _ = daemon.call('/ui/workspace/jobs/' + job.id)
     assert code == 200
-    assert result['log'] == 'step 1\n'
+    assert result['log'] == 'step 1\nstep 2\nprogress\rnext'
     assert result['metrics'] == [{'loss': 0.5}]
     code, result, _ = daemon.call('/ui/workspace/jobs/' + job.id + '/stop', method='POST', body={})
     assert code == 200
