@@ -47,6 +47,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     served, page, project = coding_browser
     page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
     page.get_by_label("Mode", exact=True).select_option("coding")
+    page.get_by_label("Coding agent", exact=True).select_option("codex")
     page.get_by_label("Project directory", exact=True).fill(str(project))
     page.get_by_label("Project directory", exact=True).press("Tab")
     expect(page.locator("chat-view #model")).to_have_value("test-model")
@@ -54,7 +55,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     composer.fill("inspect the brakes")
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect the brakes")
-    expect(page.locator("chat-view #chat-stop")).to_be_hidden()
+    expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
     assert page.locator("chat-view textarea").count() == 1
     assert not page.locator("chat-view #chat-options").evaluate("node => node.open")
     cid = page.locator("chat-view").evaluate("node => node.open")
@@ -69,7 +70,7 @@ def test_shared_composer_saves_coding_settings_and_resumes_native_session(coding
     composer.fill("inspect the sensors")
     composer.press("Enter")
     expect(page.locator("chat-view #chat-messages")).to_contain_text("Inspected: inspect the sensors")
-    expect(page.locator("chat-view #chat-stop")).to_be_hidden()
+    expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
     assert len(served.ui.conversations.get(cid).messages) == 4
 
 
@@ -78,7 +79,7 @@ def test_reload_reattaches_running_coding_turn_and_stop_keeps_the_conversation(c
 
     served, page, project = coding_browser
     saved = served.ui.conversations.start(model="test-model", title="Live coding", settings={
-        "mode": "coding", "project": str(project), "role": "read-only"})
+        "mode": "coding", "project": str(project), "role": "read-only", "harness": "codex"})
     page.goto(f"http://127.0.0.1:{served.port}/ui#chat")
     page.get_by_role("link", name="Live coding", exact=True).click()
     expect(page.get_by_label("Mode", exact=True)).to_have_value("coding")
@@ -90,9 +91,9 @@ def test_reload_reattaches_running_coding_turn_and_stop_keeps_the_conversation(c
     composer.press("Enter")
     expect(page.locator("chat-view #chat-status")).to_contain_text("running")
     page.reload()
-    expect(page.locator("chat-view #chat-stop")).to_be_visible()
-    page.locator("chat-view #chat-stop").click()
-    expect(page.locator("chat-view #chat-stop")).to_be_hidden()
+    expect(page.locator("chat-view #chat-cancel")).to_be_visible()
+    page.locator("chat-view #chat-cancel").click()
+    expect(page.locator("chat-view #chat-cancel")).to_be_hidden()
     assert served.ui.coding_turns.status(saved.id)["state"] == "cancelled"
     composer.fill("continue inspection")
     composer.press("Enter")
