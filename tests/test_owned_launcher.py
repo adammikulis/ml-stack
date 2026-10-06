@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from workspace_kit import Kit, clean_env
 
 from ml_stack.workspace import localcli, localroute, localstart, tokens
 
@@ -40,9 +41,31 @@ def test_parent_launch_binds_only_its_owned_worker(monkeypatch):
     workspace = SimpleNamespace(auth=lambda token: SimpleNamespace(role='agent'))
     calls = []
     monkeypatch.setattr(localstart, '_start', lambda *_args, **_kw:
-                        localstart.Started('worker', 123, 'qwen', 'read-only'))
+                        localstart.Started('worker', 123, 'qwen', 'read-only', already=True))
     monkeypatch.setattr(localstart.device_agent, 'enroll', lambda *_: pytest.fail('person enrollment'))
     monkeypatch.setattr(localstart.device_agent, 'bind_owned_worker',
                         lambda *args: calls.append(args), raising=False)
     localstart.start(workspace, localstart.Ask(), parent_token='own-parent-token')
     assert calls == [(workspace, 'own-parent-token', 'worker')]
+
+
+def test_device_membership_is_bound_before_worker_process_starts(tmp_path, monkeypatch):
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    parent = kit.agent('launcher')
+    events = []
+    monkeypatch.setattr(localstart.lp, 'admit', lambda *_: ('', ''))
+    monkeypatch.setattr(localstart, '_mint', lambda *_: pytest.fail('minted top-level worker'))
+    monkeypatch.setattr(localstart, '_record_model', lambda *_: None)
+    monkeypatch.setattr(localstart, 'started_at', lambda *_: 42)
+    def bind(ws, token, name):
+        saved = localstart.la.load(ws, name)
+        assert ws.auth(tokens.load(ws.base, saved.identity)).parent == ws.auth(token).id
+        events.append('bound')
+    def spawn(*_args, **_kwargs):
+        assert events == ['bound']
+        events.append('started')
+        return SimpleNamespace(pid=123, log=tmp_path / 'worker.log')
+    monkeypatch.setattr(localstart.device_agent, 'bind_owned_worker', bind, raising=False)
+    pick = localstart.localmodel.Pick(ref='qwen', name='qwen')
+    localstart.start(kit.ws, localstart.Ask(name='worker'), pick=pick, spawn=spawn, parent_token=parent)
+    assert events == ['bound', 'started']

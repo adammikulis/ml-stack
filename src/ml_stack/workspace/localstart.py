@@ -109,7 +109,7 @@ def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None, person_token="", pa
     result = _start(ws, ask, pick=pick, spawn=spawn, parent_token=parent_token)
     if person_token:
         device_agent.bind_worker(ws, person_token, result.name)
-    elif parent_token:
+    elif parent_token and result.already:
         device_agent.bind_owned_worker(ws, parent_token, result.name)
     return result
 
@@ -181,6 +181,8 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
                          size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
                          project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {})
         la.save(ws, agent)
+        if parent_token:
+            device_agent.bind_owned_worker(ws, parent_token, name)
         job = (spawn or jobs.detach)(LOOP, [name], log=la.log_file(ws, name), kind=name,
                                      home=la.folder(ws) / "jobs")
         la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
@@ -225,6 +227,8 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
         if not ask.authority:
             _record_model(ws, identity, chosen)
         la.save(ws, agent)
+        if parent_token:
+            device_agent.bind_owned_worker(ws, parent_token, name)
         job = jobs.detach(lh.RUNNER, [name], log=la.log_file(ws, name), kind=name,
                           home=la.folder(ws) / "jobs")
         la.save(ws, replace(agent, pid=job.pid, process_started=started_at(job.pid) or 0.0,
