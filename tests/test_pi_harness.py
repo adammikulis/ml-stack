@@ -152,4 +152,23 @@ def test_chat_agent_output_default_keeps_caller_caps():
         assert guarded.chat([], n_predict=32000)["n_predict"] == 32000
         assert guarded.chat([], n_predict=0)["n_predict"] == 0
         explicit = guarded.chat([], max_tokens=17000)
-        assert explicit["max_tokens"] == 17000 and "n_predict" not in explicit
+        assert explicit["n_predict"] == 17000 and "max_tokens" not in explicit
+
+
+def test_guarded_output_cap_reaches_real_client_body():
+    from ml_stack.client import Client, Request
+    from ml_stack.workspace.localtools import Guarded
+
+    class BodyClient(Client):
+        def chat(self, messages, **kwargs):
+            return self.build_body(messages, **kwargs)
+    for api in ("llama", "openai"):
+        from ml_stack.client import Transport
+        client = BodyClient("http://127.0.0.1:1", model="qwen", request=Request(n_predict=2048),
+                            transport=Transport(api=api))
+        guarded = Guarded(client, effort="off", limits=(60, 5), stop=lambda: False,
+                          max_output_tokens=8192)
+        key = "max_tokens" if api == "openai" else "n_predict"
+        assert guarded.chat([], max_tokens=17000)[key] == 17000
+        assert guarded.chat([], max_completion_tokens=19000)[key] == 19000
+        assert guarded.chat([])[key] == 8192
