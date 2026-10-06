@@ -235,6 +235,7 @@ class Claims:
         if who.role != HUMAN and who.id != scope['owner']:
             raise Denied('inactive worktree recovery requires its registered parent or person')
         resources = [('worktree', normal('worktree', scope['project'])), ('branch', scope['branch'])]
+        repository_area = normal('area', scope['source_project'])
         with held(self.lock):
             claims = self._load()
             self._sweep(claims)
@@ -242,6 +243,9 @@ class Claims:
             for claim in claims.values():
                 assigned = claim.get('assignment') == scope['id'] or claim.get('task') == scope['task'] \
                     or claim.get('project') == scope['project']
+                if claim['kind'] == 'area' and _nested(claim['key'], repository_area) \
+                        and not claim.get('project'):
+                    raise Denied('an unbound repository area reservation requires an explicit handoff')
                 if claim['kind'] in ('file', 'area') and assigned:
                     raise Denied('inactive recovery requires release of exact task file and area reservations')
                 if any(_covers(claim, kind, key) for kind, key in resources):
