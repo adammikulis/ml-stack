@@ -65,7 +65,9 @@ def _post_refusal(req: Request) -> Reply | None:
 
 
 def _model_view(*, coding: bool = False) -> dict[str, Any]:
-    pick = localmodel.choose(localmodel.AUTO, search=False, coding=coding)
+    selected = lp.CODING if coding else lp.CHAT
+    pick = localmodel.choose(localmodel.AUTO, selection=localmodel.Selection(
+        search=False, coding=coding, context=selected.ctx))
     return {"name": plain.line(pick.name, 80), "size_bytes": pick.size_bytes, "verdict": pick.verdict,
             "ok": pick.ok, "problem": plain.line(pick.problem, 300), "hint": plain.line(pick.hint, 200)}
 

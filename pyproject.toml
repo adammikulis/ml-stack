@@ -127,6 +127,9 @@ agents = ["openai-agents>=0.23.1"]
 all = [
     "ml-stack[agents,train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-update,fleet-onboard]",
 ]
+wsl-dev = [
+    "ml-stack[all,test,arrays,claude,coordinator,decide,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,speech,standard,train-lora,web]",
+]
 
 [project.urls]
 Homepage = "https://github.com/adammikulis/ml-stack"

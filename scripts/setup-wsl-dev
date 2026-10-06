@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+VENV="${ML_STACK_WSL_VENV:-$HOME/.venvs/ml-stack-dev}"
+UV="${UV:-$(command -v uv || true)}"
+if [[ -z "$UV" && -x "$HOME/.local/bin/uv" ]]; then
+  UV="$HOME/.local/bin/uv"
+fi
+BASHRC="${BASHRC:-$HOME/.bashrc}"
+CONFIG="$HOME/.config/ml-stack/wsl-dev.sh"
+
+case "$(uname -r)" in
+  *[Mm]icrosoft*) ;;
+  *) printf '%s\n' 'setup-wsl-dev must run inside WSL' >&2; exit 2 ;;
+esac
+if [[ -z "$UV" ]]; then
+  printf '%s\n' 'uv is required; install it before running setup-wsl-dev' >&2
+  exit 2
+fi
+
+"$UV" venv --python 3.12 "$VENV"
+"$UV" pip install --python "$VENV/bin/python" "${ROOT}[wsl-dev]" \
+    "ruff==0.13.3" "pyright==1.1.411"
+"$UV" pip install --python "$VENV/bin/python" \
+    'metadrive-simulator @ git+https://github.com/metadriverse/metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db'
+
+mkdir -p "$(dirname -- "$CONFIG")"
+tmp="$CONFIG.tmp"
+{
+  printf 'export ML_STACK_DEV_ROOT=%q\n' "$ROOT"
+  printf 'export ML_STACK_DEV_VENV=%q\n' "$VENV"
+  cat <<'ENV'
+case ":$PATH:" in
+    *":$ML_STACK_DEV_VENV/bin:"*) ;;
+    *) export PATH="$ML_STACK_DEV_VENV/bin:$PATH" ;;
+esac
+export PYTHON="$ML_STACK_DEV_VENV/bin/python"
+case ":${PYTHONPATH:-}:" in
+    *":$ML_STACK_DEV_ROOT/src:"*) ;;
+    *) export PYTHONPATH="$ML_STACK_DEV_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" ;;
+esac
+
+if [[ -d /mnt/c/Users ]]; then
+    _ml_stack_windows_home="$(find /mnt/c/Users -mindepth 1 -maxdepth 1 -type d -iname "${ML_STACK_WINDOWS_USER:-${USER:-}}" -print -quit 2>/dev/null || true)"
+    for _ml_stack_model_root in \
+        "$_ml_stack_windows_home/.ml-stack/models" \
+        "$_ml_stack_windows_home/.cache/huggingface/hub" \
+        "$_ml_stack_windows_home/.ollama/models" \
+        "$_ml_stack_windows_home/.lmstudio/models" \
+        "$_ml_stack_windows_home/.local/share/llama.cpp" \
+        "$_ml_stack_windows_home/AppData/Local/llama.cpp" \
+        "$_ml_stack_windows_home/jan/models" \
+        "$_ml_stack_windows_home/AppData/Roaming/Jan/data/models"; do
+        [[ -d "$_ml_stack_model_root" ]] || continue
+        case ":${ML_STACK_MODEL_PATHS:-}:" in
+            *":$_ml_stack_model_root:"*) ;;
+            *) export ML_STACK_MODEL_PATHS="${ML_STACK_MODEL_PATHS:+$ML_STACK_MODEL_PATHS:}$_ml_stack_model_root" ;;
+        esac
+    done
+    unset _ml_stack_windows_home _ml_stack_model_root
+fi
+ENV
+} > "$tmp"
+chmod 600 "$tmp"
+mv -f -- "$tmp" "$CONFIG"
+
+source_line='[ -f "$HOME/.config/ml-stack/wsl-dev.sh" ] && . "$HOME/.config/ml-stack/wsl-dev.sh"'
+touch "$BASHRC"
+if ! grep -Fqx "$source_line" "$BASHRC"; then
+  printf '\n%s\n' "$source_line" >> "$BASHRC"
+fi
+
+printf 'Installed ml-stack with all supported extras and test dependencies in %s\n' "$VENV"
+printf 'Opened shells will use source at %s and scan configured Windows model caches.\n' "$ROOT"
+printf 'Run: source %s\n' "$BASHRC"

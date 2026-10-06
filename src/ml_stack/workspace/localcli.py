@@ -33,7 +33,7 @@ OPTIONS = [
     flag("action", choices=ACTIONS, help="start a local model as an agent, stop one, or list them"),
     flag("target", nargs="?", default="", metavar="NAME", help="stop: the agent to stop"),
     flag("--model", default=localmodel.AUTO, metavar="auto|ID",
-         help="auto: the best downloaded mixture-of-experts Qwen model for agent work, or the id "
+         help="auto: the best downloaded Qwen model that fits this machine, or the id "
               "of a downloaded model"),
     flag("--name", default="", help="the agent's workspace name (default: local- and the model's short name)"),
     flag("--role", default=roles.DEFAULT, choices=list(roles.ROLES),
@@ -84,7 +84,10 @@ def _wait(ws: Workspace, name: str, seconds: float) -> int:
 def _start(args: argparse.Namespace, ws: Workspace) -> int:
     if not ws.registry.ids():
         tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
-    pick = localmodel.choose(args.model, coding=args.profile == "coding")
+    selected_profile = lp.profile(args.profile)
+    selected_context = lp.parse_ctx(args.ctx) or selected_profile.ctx
+    pick = localmodel.choose(args.model, selection=localmodel.Selection(
+        coding=selected_profile.name == "coding", context=selected_context))
     if not pick.ok:
         warn(pick.problem)
         if pick.hint:
@@ -93,7 +96,7 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, lp.parse_ctx(args.ctx), args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
+                                  args.profile, selected_context, args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
                        person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
     except ls.Unavailable as err:
         warn(str(err))

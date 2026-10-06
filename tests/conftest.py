@@ -30,12 +30,12 @@ import psutil
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tests"))
+sys.path.insert(0, str(REPO))
 
 
 def _no_shadowing_tests_package() -> None:
-    """The repo's ``tests`` has no ``__init__.py`` (a namespace package), so a REGULAR ``tests`` package in
-    site-packages always wins the import, whatever the order of ``sys.path``: some wheels (confusables, ecoji) ship
-    their own test files as a top-level ``tests/``. Say so in plain words instead of 'No module named tests.x'."""
+    """The repository test package must not resolve to an installed wheel."""
     import importlib.util
 
     spec = importlib.util.find_spec("tests")

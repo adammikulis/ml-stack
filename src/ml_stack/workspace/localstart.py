@@ -130,7 +130,8 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     orders = la.check_orders(list(ask.orders_from))
     prof = lp.profile(ask.profile)
     ctx = ask.ctx or prof.ctx
-    chosen = pick or localmodel.choose(ask.model, coding=prof.name == "coding")
+    chosen = pick or localmodel.choose(
+        ask.model, selection=localmodel.Selection(coding=prof.name == "coding", context=ctx))
     if not chosen.ok:
         raise Unavailable(chosen.problem, chosen.hint)
     if prof.name == "coding":

@@ -76,6 +76,25 @@ the installers). Code in `src/` and `tests/` uses nothing newer than 3.12:
 
 `vermin -t=3.12- --no-tips src tests scripts` lists what a change added.
 
+## WSL development environment
+
+Run `scripts/setup-wsl-dev` from the primary checkout in WSL. It fills the persistent
+`~/.venvs/ml-stack-dev` environment with the compatible `[wsl-dev]` dependency bundle using a
+regular wheel install, then configures Bash to use that environment and the checkout's live `src/`
+tree. It also adds existing Windows model stores and Hugging Face, Ollama, LM Studio, llama.cpp,
+and Jan caches to `ML_STACK_MODEL_PATHS`, so WSL reuses downloaded weights.
+
+`[wsl-dev]` includes the Linux-compatible runtime and test extras plus the pinned Ruff and Pyright
+versions used by the structural gates. The setup script also installs MetaDrive from the source
+revision pinned in [the Gym guide](studio-gym.md). `[viz]` conflicts with `[gym-warehouse]`, and
+`[privacy-transformers]` conflicts with `[train-lora]`; those optional combinations stay in
+separate environments. The Apple-only `[mlx]` and opt-in `[pdf-agpl]` are also excluded.
+
+The setup is repeatable after dependency changes. Open a new shell or run `source ~/.bashrc`
+after the first setup. `ML_STACK_WSL_VENV` selects another persistent venv, and
+`ML_STACK_WINDOWS_USER` selects the matching Windows profile when its name differs from the WSL
+login.
+
 ## Testing
 
 ```
@@ -142,4 +161,3 @@ that accepts every keyword lets a test pass on a keyword the real thing refuses,
 how a `--also tight` flag once reached `Client.__init__` in a benchmark and took the load
 down with it. `tests/test_testing_fakes.py` diffs every fake's signature against the real
 one (`mirrors`, `drift`), so a change to the real one fails the suite until the fake follows.
-

@@ -14,8 +14,8 @@ a link, `/agents?session=...`, that sets the browser session cookie the start an
 
 ## What `start` does
 
-1. **Model.** `auto` is the best already-downloaded mixture-of-experts Qwen model ranked for agent
-   work on this machine; Flash-Next is never chosen. With none downloaded it prints the one command
+1. **Model.** `auto` is the highest-ranked already-downloaded Qwen model that fits the requested
+   context on this machine; Flash-Next is never chosen. With none downloaded it prints the one command
    that fetches one (`ml-stack-models fetch REF`, or the `find` that locates it) and downloads nothing.
    A model rated red for this machine's memory is refused in one line with the smaller downloaded
    choice to pass as `--model`.
