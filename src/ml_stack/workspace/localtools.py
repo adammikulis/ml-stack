@@ -17,7 +17,7 @@ from ml_stack.workspace.rates import RateLimited
 from ml_stack.workspace.screen import Refused
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["Guarded", "Needs", "Sink", "TaskState", "TaskStopped", "Unattended", "ask_a_person",
+__all__ = ["Guarded", "Limits", "Needs", "Sink", "TaskState", "TaskStopped", "Unattended", "ask_a_person",
            "workspace_extension"]
 
 SEND_KINDS = ("task", "question", "status")
@@ -113,14 +113,23 @@ class Unattended(do.Person):
         return allowed
 
 
+@dataclass(frozen=True, slots=True)
+class Limits:
+    seconds: float
+    steps: int
+    context: int = 0
+    max_output_tokens: int = 0
+
+
 class Guarded:
     """A model client that stops before a call once the kill switch is set, the task's wall-clock
     runs out or its step count is spent, and asks with thinking set as the person chose."""
 
-    def __init__(self, client: Any, *, effort: str, limits: tuple[float, int],
-                 stop: Callable[[], bool], ctx: int = 0) -> None:
-        seconds, steps = limits
-        self.ctx = ctx
+    def __init__(self, client: Any, *, effort: str, limits: Limits,
+                 stop: Callable[[], bool]) -> None:
+        seconds, steps = limits.seconds, limits.steps
+        self.ctx = limits.context
+        self.max_output_tokens = limits.max_output_tokens
         self.client, self.think, self.steps, self.stop = client, le.thinks(effort), steps, stop
         self.deadline, self.used, self.seconds = time.monotonic() + seconds, 0, seconds
 
@@ -134,6 +143,14 @@ class Guarded:
         self.used += 1
         if self.ctx:
             lp.trim(messages, self.ctx)
+        for key in ("max_tokens", "max_completion_tokens"):
+            if key in kwargs:
+                cap = kwargs.pop(key)
+                if "n_predict" in kwargs and kwargs["n_predict"] != cap:
+                    raise ValueError("conflicting output token limits")
+                kwargs["n_predict"] = cap
+        if self.max_output_tokens and "n_predict" not in kwargs:
+            kwargs["n_predict"] = self.max_output_tokens
         return self.client.chat(messages, **{**kwargs, "think": self.think})
 
     def __getattr__(self, name: str) -> Any:

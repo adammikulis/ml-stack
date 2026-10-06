@@ -81,6 +81,7 @@ def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake
 
     class Server:
         base_url = "http://127.0.0.1:8899"
+        adopted = False
 
     @contextlib.contextmanager
     def fake_serve(model, manager=None, **lease):
@@ -99,11 +100,13 @@ def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake
     monkeypatch.setattr("ml_stack.serve.chat_template.written_beside",
                         lambda model: pathlib.Path("/tmp/kestrel-8B.jinja"))
     assert on_a_fresh_thread(harness.main, ["what is this?", "--model", "kestrel", "--port", "8899",
-                                            "--allow", "Read", "--max-turns", "2"]) == 0
+                                            "--context", "256k", "--allow", "Read",
+                                            "--max-turns", "2"]) == 0
     out = capsys.readouterr()
     assert "It is a lattice." in out.out and "spent: 2 turn(s)" in out.out
     assert "renders it instead (kestrel-8B.jinja)" in out.out
     assert seen["lease"]["port"] == 8899 and seen["lease"]["cache_type_k"] == "q8_0"
+    assert seen["lease"]["context"] == 262144
     assert seen["lease"]["chat_template_file"] == pathlib.Path("/tmp/kestrel-8B.jinja")
     assert seen["released"]
     assert fake_sdk["options"]["allowed_tools"] == ["Read"] and fake_sdk["options"]["max_turns"] == 2

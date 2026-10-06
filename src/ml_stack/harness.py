@@ -28,11 +28,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack import hub
+from ml_stack import harnessing, hub
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of, environment
 from ml_stack.guard import start
 from ml_stack.guard.hooks import MAX_TURNS, sdk_guard, sdk_hooks
 from ml_stack.log import say
+from ml_stack.workspace.localprofile import parse_ctx
 
 __all__ = ["Answer", "Harness", "Usage", "main", "session"]
 
@@ -153,31 +154,25 @@ def _usage_of(message: Any) -> Usage:
 
 
 @contextmanager
-def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
-            profile: bool = True, offline: bool = True, draft: str = "auto",
+def session(model: str, *, want: harnessing.Want | None = None, offline: bool = True,
             say: Callable[[str], None] = lambda _line: None, **options: Any) -> Iterator[Harness]:
     """Lease ``model`` in the settings it scored best with and yield a :class:`Harness` on it; the server
-    goes when the block ends. ``draft`` is the head to guess tokens ahead with -- 'auto'
-    takes the smallest one on this machine, 'none' takes none -- and a measured record's
-    own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
-    allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...) and
-    ``guard``, the list of interventions (`ml_stack.guard`) every tool call passes (the built-in rails if absent)."""
-    from ml_stack.serve import chat_template, leases, profile as records
+    goes when the block ends. ``want`` carries port, slots, context, profile and draft settings;
+    other options are `ClaudeAgentOptions` fields
+    (cwd, allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...) and
+    ``guard`` is the list of interventions (`ml_stack.guard`) every tool call passes (the built-in
+    rails if absent)."""
+    from ml_stack.serve import chat_template, leases
     from ml_stack.serve.recent import note
-    from ml_stack.serve.serving import Config, Serving, drafted, served
+    from ml_stack.serve.serving import served
 
+    want = want or harnessing.Want()
     found = str(hub.located(model, loose=True) or model)
     note(found, by="agent")
-    # a server already holding these weights is joined, so nothing below is what it serves
-    leasing = say if leases.already_up(found, port) is None else (lambda _line: None)
-    measured = records.profile_for(found) if profile else None
-    if measured is not None:
-        config = measured.config(port=port, slots=slots, model=found)
-        leasing(f"serving in the settings it scored best with: {records.said(measured)}")
-        config = drafted(config, "none", say=leasing)
-    else:
-        config = Config(serving=Serving(model=found, port=port, slots=slots))
-        config = drafted(config, draft, say=leasing)
+    leasing = say if leases.already_up(found, want.port) is None else (lambda _line: None)
+    config = harnessing.config_for(found, want, leasing)
+    if not harnessing.admitted(found, config.serving.context, say, kv=config.serving.cache_type):
+        raise ValueError("the model configuration exceeds this device's wired-memory limit")
     patched = chat_template.written_beside(found)
     if patched is not None:
         leasing("this model's template refuses a system message after the first; serving "
@@ -199,6 +194,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("prompt")
     ap.add_argument("--model", required=True)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    ap.add_argument("--context", default="", metavar="TOKENS",
+                    help="context to serve, such as 32768, 32k or 256k; overrides the profile")
     ap.add_argument("--slots", type=int, default=DEFAULT_SLOTS,
                     help="conversations the server holds at once; one slot gets "
                          "the whole measured cache (default: %(default)s)")
@@ -228,8 +225,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         options["allowed_tools"] = list(args.allow)
     if args.permission_mode:
         options["permission_mode"] = args.permission_mode
-    with session(args.model, port=args.port, slots=args.slots, profile=not args.no_profile,
-                 offline=not args.online, draft=args.draft, say=say, **options) as agent:
+    want = harnessing.Want(port=args.port, slots=args.slots, ctx=parse_ctx(args.context),
+                           no_profile=args.no_profile, draft=args.draft)
+    with session(args.model, want=want, offline=not args.online, say=say, **options) as agent:
         answer = agent.ask(args.prompt)
     say(answer.text)
     say(f"spent: {answer.spent.said()}")

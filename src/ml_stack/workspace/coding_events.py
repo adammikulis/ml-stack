@@ -1,8 +1,39 @@
-"""Native Codex and Claude stream events exposed as conversation progress."""
+"""Native harness stream events exposed as conversation progress."""
 from __future__ import annotations
 
 
 def event(row: dict, harness: str) -> dict:
+    if harness == "pi":
+        kind = row.get("type", "")
+        if kind == "session":
+            return {"session": row.get("id", "")}
+        if kind == "message_update":
+            delta = row.get("assistantMessageEvent", {})
+            return {"delta": delta.get("delta", "")} if delta.get("type") == "text_delta" else {}
+        if kind == "message_end":
+            message = row.get("message", {})
+            if message.get("stopReason") in ("error", "aborted"):
+                return {"error": message.get("errorMessage") or "Pi coding turn failed"}
+            content = message.get("content", [])
+            text = "".join(block.get("text", "") for block in content if isinstance(block, dict)) \
+                if isinstance(content, list) else ""
+            if message.get("role") == "assistant":
+                return {"text": text} if text else {}
+        if kind == "tool_execution_start":
+            return {"activity": {"type": "tool", "name": row.get("toolName", ""),
+                                  "args": row.get("args", {})}}
+        if kind == "tool_execution_end":
+            result = row.get("result", {})
+            content = result.get("content", []) if isinstance(result, dict) else []
+            text = " ".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+            if row.get("isError") and "ml-stack:" in text:
+                return {"blocked": text[:1000]}
+        if kind == "turn_end":
+            usage = row.get("message", {}).get("usage", {})
+            return {"usage": usage} if usage else {}
+        if kind == "error":
+            return {"error": row.get("message") or "Pi coding turn failed"}
+        return {}
     if harness == "codex":
         kind = row.get("type", "")
         if kind == "thread.started":

@@ -23,7 +23,7 @@ from pathlib import Path
 from ml_stack import harnessid, home, hub
 from ml_stack.chatpolicy import APPROVE_FIRST, ROLE_NAMES
 from ml_stack.harnesshook import WAIT_S
-from ml_stack.serve import chat_template, leases, profile, wired
+from ml_stack.serve import chat_template, leases, profile, suggest, wired
 from ml_stack.serve.recent import note
 from ml_stack.serve.serving import Config, Serving, drafted, served, serving_params
 
@@ -48,7 +48,7 @@ __all__ = [
     "window_of",
 ]
 
-DEFAULT_CTX = 262144
+DEFAULT_CTX = 0
 DEFAULT_MODEL = "Qwen3.8-27B-UD-Q4_K_XL.gguf"
 DEFAULT_ROLE = APPROVE_FIRST
 PARENT = "claude-code"
@@ -72,7 +72,7 @@ def parser(name: str, what: str, port: int, slots: int) -> argparse.ArgumentPars
     ap.add_argument("--slots", type=int, default=slots,
                     help="conversations the server holds at once (default: %(default)s)")
     ap.add_argument("--ctx", type=int, default=DEFAULT_CTX,
-                    help="tokens served in all, split across the slots (default: %(default)s)")
+                    help="tokens served in all, split across slots (default: largest safe fit for this device and model)")
     ap.add_argument("--role", default=DEFAULT_ROLE,
                     help="read-only, approve-first or plan-and-go: what the hooks let a call do "
                          "(default: %(default)s)")
@@ -119,11 +119,11 @@ def binary_for(name: str) -> str:
             return str(binary)
     return ""
 
-def admitted(found: str, ctx: int, say: Callable[[str], None], *, plan: Callable[..., object] | None = None) -> bool:
+def admitted(found: str, ctx: int, say: Callable[[str], None], *, plan: Callable[..., object] | None = None, kv: str = KV) -> bool:
     """Whether the wired-memory limit now holds ``found`` at ``ctx``; when it does not, the
     command a person runs to raise it is printed and nothing is raised here."""
     try:
-        got = (plan or wired.plan)(found, wired.Ask(context=ctx, kv=KV))
+        got = (plan or wired.plan)(found, wired.Ask(context=ctx, kv=kv))
     except (OSError, ValueError):
         return True
     if getattr(got, "enough_now", True):
@@ -131,7 +131,7 @@ def admitted(found: str, ctx: int, say: Callable[[str], None], *, plan: Callable
     say(f"error: {Path(found).name} at {ctx:,} tokens needs a wiring limit of {got.needed_mb:,} MB "
         f"and this machine's is {got.current_mb or got.default_mb:,} MB.\n"
         f"  Raising it is for a person at their own terminal: "
-        f"ml-stack-serve memory --for {Path(found).name} --ctx {ctx} --kv {KV} --apply")
+        f"ml-stack-serve memory --for {Path(found).name} --ctx {ctx} --kv {kv} --apply")
     return False
 
 
@@ -148,10 +148,32 @@ class Want:
 
 def config_for(found: str, want: Want, say: Callable[[str], None]):
     """The `Config` a session serves: the model's measured settings (or bare), ``ctx`` tokens
-    over ``slots`` slots, q8_0 KV cache."""
+    over ``slots`` slots, with the admitted automatic cache profile."""
     port, slots, draft = want.port, want.slots, want.draft
+    if isinstance(slots, bool) or not isinstance(slots, int) or slots <= 0:
+        raise ValueError("slots must be a positive integer")
     whole = chat_template.trained_context(found)
-    each = (min(want.ctx, whole) if whole else want.ctx) // max(1, slots)
+    requested = want.ctx
+    fit = None
+    if isinstance(requested, bool) or not isinstance(requested, int) or requested < 0:
+        raise ValueError("context must be 0 (automatic) or a positive token count")
+    if not requested:
+        if slots != 1:
+            raise ValueError("automatic context supports one slot; specify context for multiple slots")
+        fit = suggest.suggest(found, goal="long-context", max_verdict="yellow")
+        requested = fit.context
+        if requested <= 0 or fit.verdict not in {"green", "yellow"}:
+            raise ValueError(f"{Path(found).name} has no context that fits this device's memory")
+        if "/" in fit.kv_cache_type:
+            raise ValueError("automatic context requires matching K and V cache types; specify context explicitly")
+        if fit.n_gpu_layers != "auto":
+            raise ValueError("automatic context requires a full GPU offload fit; specify context explicitly")
+        say(f"automatically selected {requested:,} context tokens for this device and model")
+    if fit is None and requested % slots:
+        raise ValueError("explicit context must divide evenly across slots")
+    each = (min(requested, whole) if fit is not None and whole else requested) // slots
+    if each <= 0:
+        raise ValueError("context must provide at least one token per slot")
     measured = None if want.no_profile else profile.profile_for(found)
     if measured is not None:
         config = measured.config(port=port, slots=slots, model=found)
@@ -162,9 +184,15 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     if draft.lower() != "auto":
         config = config.over(draft="", spec_type="", mtp=False if draft.lower() == "none" else None)
     config = drafted(config, draft, say=say)
-    say(f"  {each:,} tokens a slot, {KV} KV cache")
-    return dataclasses.replace(config, serving=dataclasses.replace(config.serving, slot_context=each,
-                                                                   cache_type=KV))
+    settings = {"slot_context": each, "cache_type": KV}
+    if fit is not None:
+        flags = config.serving.extra_args
+        if flags and (len(flags) != 2 or flags[0] != "-ub"):
+            raise ValueError("automatic context cannot estimate measured server flags; specify context explicitly")
+        settings.update(cache_type=fit.kv_cache_type, flash_attn=fit.flash_attn,
+                        extra_args=("-ub", str(fit.batch)))
+    say(f"  {each:,} tokens a slot, {settings['cache_type']} KV cache")
+    return dataclasses.replace(config, serving=dataclasses.replace(config.serving, **settings))
 
 
 @contextlib.contextmanager
@@ -175,7 +203,7 @@ def serving(model: str, want: Want, say: Callable[[str], None], by: str) -> Iter
     note(found, by=by)
     leasing = say if leases.already_up(found, want.port) is None else (lambda _line: None)
     config = config_for(found, want, leasing)
-    if not admitted(found, config.serving.context, say):
+    if not admitted(found, config.serving.context, say, kv=config.serving.cache_type):
         raise SystemExit(2)
     patched = chat_template.written_beside(found)
     if patched is not None:

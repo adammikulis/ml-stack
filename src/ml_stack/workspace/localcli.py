@@ -46,12 +46,14 @@ OPTIONS = [
          help="how much the model thinks (off is fastest); auto picks per task; default: %(default)s"),
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
          help="the most effort the model may give itself with set_effort; default: %(default)s"),
+    flag("--max-output-tokens", type=int, default=8192,
+         help="maximum generated tokens per response; independent of reasoning effort; default: %(default)s"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--profile", default="chat", choices=["chat", "coding"],
-         help="chat: 32K context and small per-task caps; coding: 256K context, Qwen3.8-27B and larger caps"),
-    flag("--harness", default="codex", choices=["codex", "claude"], help="native coding harness"),
-    flag("--ctx", default="", metavar="TOKENS", help="context to serve, such as 32768, 32k or 256k (default: the profile's)"),
+         help="chat or coding task limits; context is selected for the model and this device's memory"),
+    flag("--harness", default="pi", choices=["pi", "codex", "claude"], help="native coding harness"),
+    flag("--ctx", default="", metavar="TOKENS", help="optional context override, such as 32768, 32k or 256k (default: fit this device)"),
     flag("--for", dest="lease_for", default="", metavar="TEXT",
          help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
@@ -96,7 +98,7 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     say(f"model: {pick.name} ({pick.note})")
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, args.role, args.effort, args.max_effort,
-                                  args.profile, selected_context, args.project, la.check_orders(args.orders_from.split(",")), args.harness), pick=pick,
+                                  args.profile, selected_context, args.project, la.check_orders(args.orders_from.split(",")), args.harness, args.max_output_tokens), pick=pick,
                        person_token=tokens.read_file(tokens.directory(ws.base) / tokens.OWNER_FILE))
     except ls.Unavailable as err:
         warn(str(err))

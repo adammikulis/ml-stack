@@ -28,8 +28,8 @@ class Profile:
     seconds: float
 
 
-CHAT = Profile("chat", 32768, 12, 30, 24, 600.0)
-CODING = Profile("coding", 262144, 60, 150, 120, 3600.0)
+CHAT = Profile("chat", 0, 12, 30, 24, 600.0)
+CODING = Profile("coding", 0, 60, 150, 120, 3600.0)
 PROFILES = {p.name: p for p in (CHAT, CODING)}
 
 

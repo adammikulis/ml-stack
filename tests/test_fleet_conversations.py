@@ -97,7 +97,7 @@ class TestSearching:
 
 
 def test_conversation_settings_and_model_survive_reopening(store, tmp_path):
-    made = store.start(model="small", settings={"mode": "coding", "project": "/tmp/project", "effort": "low"})
+    made = store.start(model="small", settings={"mode": "coding", "project": "/tmp/project", "effort": "low", "max_output_tokens": 23456})
     store.append(made.id, "user", "Review the brakes")
     store.update(made.id, model="large", settings={"temperature": .3, "max_effort": "high"}, title="Brake review")
     again = Conversations(tmp_path / "chats").get(made.id)
@@ -107,11 +107,15 @@ def test_conversation_settings_and_model_survive_reopening(store, tmp_path):
     assert again.settings["temperature"] == .3
     assert again.settings["effort"] == "low"
     assert again.settings["max_effort"] == "high"
+    assert again.settings["harness"] == "pi"
+    assert again.settings["context"] == 0
+    assert again.settings["max_output_tokens"] == 23456
     assert [message.content for message in again.messages] == ["Review the brakes"]
 
 
 @pytest.mark.parametrize("settings", [{"temperature": True}, {"temperature": -1}, {"temperature": float("nan")},
                                       {"temperature": 3}, {"mode": "unknown"}, {"unknown": "setting"},
+                                      {"max_output_tokens": True}, {"max_output_tokens": 0}, {"max_output_tokens": 1.5},
                                       {"effort": "infinite"}, {"max_effort": "auto"}, {"role": 42}, []])
 def test_invalid_settings_leave_the_conversation_unchanged(store, settings):
     made = store.start(title="Kept")
@@ -131,6 +135,7 @@ def test_old_saved_messages_acquire_default_settings_and_version_on_update(store
     old = store.get("legacy")
     assert old.model == "old-model"
     assert old.settings["mode"] == "chat"
+    assert old.settings["max_output_tokens"] == 8192
     store.update("legacy", settings={"temperature": .7})
     saved = store.get("legacy").public()
     assert saved["version"] == 1

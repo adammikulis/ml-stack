@@ -25,16 +25,16 @@
       </div>
       <details class="aside" id="chat-options" hidden>
         <summary>Advanced options</summary>
-        <div data-chat>
         <label for="chat-output-tokens">Maximum output tokens</label>
-        <input id="chat-output-tokens" type="number" min="1" step="1" placeholder="Model server default">
-        <p class="hint">Independent of reasoning effort. Leave blank to use the model server's output limit.</p>
+        <input id="chat-output-tokens" type="number" min="1" step="1" value="8192">
+        <p class="hint">Applies to Chat and Pi coding. Independent of reasoning effort. Default: 8192 tokens.</p>
+        <div data-chat>
         <label for="chat-temperature">Temperature</label>
         <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="Model default">
         <p class="hint">Controls sampling randomness. Leave blank to use the model server's default.</p>
-        </div><div data-coding hidden><label for="chat-context">Context length</label>
-          <input id="chat-context" type="number" min="1024" max="1048576" step="1024" value="262144">
-          <p class="hint">Tokens available to the coding agent. Memory admission runs before the model starts.</p>
+        </div><div data-coding hidden><label for="chat-context">Context override (tokens)</label>
+          <input id="chat-context" type="number" min="0" max="1048576" step="1024" value="0" placeholder="Auto for this device">
+          <p class="hint">Leave at 0 to fit the context to the selected model and this device's memory. Memory admission runs before the model starts.</p>
           <label for="chat-draft">Draft model / MTP head</label><input id="chat-draft" value="auto" placeholder="auto, none, or /path/to/head.gguf">
           <p class="hint">Auto uses a matching head when available. Use none to disable, or an explicit installed head path.</p></div>
       </details>
@@ -100,12 +100,15 @@
       this.querySelector("#chat-manage-cancel").onclick = () => this.dialog.close();
       this.open = null;
       this.messages = [];
-      this.savedSettings = { mode: "chat", temperature: null };
+      this.savedSettings = {};
+      this.defaultSettings = {};
       this.searchEpoch = 0;
       this.loadEpoch = 0;
       this.send.onclick = () => this.ask();
       this.picker.onchange = () => { this.updateReadiness(); this.modelPicker.render(); this.saveSettings(); };
       this.temperature.onchange = () => this.saveSettings();
+      this.outputTokens = this.querySelector("#chat-output-tokens");
+      this.outputTokens.onchange = () => this.saveSettings();
       this.coding = new window.ChatCoding(this);
       this.modelPicker = new window.ChatModelPicker(this);
       this.newChat.onclick = () => {
@@ -116,8 +119,9 @@
         this.loadEpoch++;
         this.input.value = "";
         this.messages = [];
-        this.savedSettings = { mode: "chat", temperature: null };
+        this.savedSettings = { ...this.defaultSettings };
         this.temperature.value = "";
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? 8192;
         this.coding.restore(this.savedSettings);
         this.welcome();
         this.note.replaceChildren();
@@ -176,6 +180,11 @@
 
     async draw() {
       try {
+        const defaults = await api("/ui/conversations/defaults");
+        if (M.refused(defaults)) return;
+        if (!defaults.ok) throw new Error(defaults.error || "Could not read conversation settings.");
+        this.defaultSettings = defaults.settings || {};
+        if (!Object.keys(this.savedSettings).length) this.savedSettings = { ...this.defaultSettings };
         const where = await api("/ui/chat");
         if (M.refused(where)) return;
         if (!where.ok) throw new Error(where.error || "Could not read the serving models.");
@@ -190,6 +199,7 @@
         this.none.hidden = !!available.length;
         this.options.hidden = !available.length;
         await this.modelPicker.catalogue();
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? 8192;
         await this.coding.restore(this.savedSettings, this.picker.value);
         this.updateReadiness();
         await this.paintList();
@@ -199,10 +209,11 @@
     }
 
     settings() {
-      return { ...this.savedSettings, ...this.coding.settings(), temperature: this.temperature.value === "" ? null : Number(this.temperature.value) };
+      return { ...this.savedSettings, ...this.coding.settings(), temperature: this.temperature.value === "" ? null : Number(this.temperature.value), max_output_tokens: Number(this.outputTokens.value || 8192) };
     }
 
     saveSettings() {
+      if (!this.outputTokens.checkValidity()) { this.showError("Maximum output tokens must be a positive integer."); return; }
       if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
       this.savedSettings = this.settings();
       if (!this.open) return;
@@ -312,8 +323,9 @@
         localStorage.setItem("ml-stack.chat.selected", id);
         this.heading.textContent = one.title || "New chat";
         this.messages = one.messages || [];
-        this.savedSettings = one.settings || { mode: "chat", temperature: null };
+        this.savedSettings = one.settings || { ...this.defaultSettings };
         this.temperature.value = this.savedSettings.temperature ?? "";
+        this.outputTokens.value = this.savedSettings.max_output_tokens ?? 8192;
         await this.coding.restore(this.savedSettings, one.model);
         this.list.replaceChildren();
         for (const m of this.messages) this.say(m.role, m.content, m.reasoning || "");
@@ -332,6 +344,7 @@
 
     async ask() {
       const text = this.input.value.trim();
+      if (!this.outputTokens.checkValidity()) { this.showError("Maximum output tokens must be a positive integer."); return; }
       if (!this.temperature.checkValidity()) { this.showError("Temperature must be between 0 and 2."); return; }
       if (!text || !this.picker.value || this.picker.selectedOptions[0]?.disabled || this.request) return;
       this.request = new AbortController();
@@ -367,7 +380,7 @@
         const messages = [...this.messages, { role: "user", content: text }];
         const r = await fetch("/ui/chat", { method: "POST", headers: M.headers, signal: this.request.signal,
           body: JSON.stringify({ conversation: this.open, model: this.picker.value, messages,
-            ...(this.querySelector('#chat-output-tokens').value !== "" ? {max_output_tokens:Number(this.querySelector('#chat-output-tokens').value)} : {}),
+            max_output_tokens: this.settings().max_output_tokens,
             ...(this.temperature.value !== "" ? { temperature: Number(this.temperature.value) } : {}) }) });
         if (!r.ok) {
           const why = await r.json().catch(() => ({}));

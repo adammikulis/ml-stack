@@ -4,7 +4,7 @@ One command starts a downloaded model, joins it to the workspace and runs its lo
 
     ml-stack-workspace agent start [--model auto|ID] [--name NAME] [--role ROLE] [--project PATH]
                                    [--effort off|low|medium|high|auto] [--max-effort LEVEL]
-                                   [--orders-from NAMES] [--no-wait]
+                                   [--max-output-tokens TOKENS] [--orders-from NAMES] [--no-wait]
     ml-stack-workspace agent list
     ml-stack-workspace agent stop NAME
 
@@ -61,7 +61,9 @@ Caps per task: 12 tool-calling rounds, 30 tool calls, 24 model calls, 600 s, and
 Effort selects reasoning: `off`, `low`, `medium`, or `high`. Native coding sends the
 selected model family's thinking flag in `CLAUDE_CODE_EXTRA_BODY`; `off` explicitly disables
 Qwen template thinking. It does not impose an output limit from the effort level. Explicit
-caller output budgets are retained; otherwise the native harness uses its own output default.
+caller output budgets are retained. `--max-output-tokens` sets an independent response cap
+(default 8192 tokens) for Chat and Pi coding; Codex and Claude use their native output settings.
+The Agents panel exposes the same cap under Advanced options and preserves it with saved settings.
 An explicit caller `MAX_THINKING_TOKENS=0` also disables template thinking. The runtime
 does not generate a thinking-token limit that can carry over when effort changes.
 The default is `off`. The model may raise or lower its own effort with `set_effort(level, reason)` up
@@ -73,17 +75,18 @@ review, design: medium; otherwise low), never above the ceiling.
 Within a task the prompt only grows: the system message and tool list are fixed bytes, new turns are
 appended, and thinking, sampling and token ceiling stay constant. Requests go to slot 0 with
 `cache_prompt`, and the server runs with `cache_idle_slots`, so the prefix survives between tasks.
-No context trimming is done; the task caps keep a task inside the 32768-token context.
+No context trimming is done; the task caps keep a task within the context selected for this device.
 `tests/test_workspace_local_agent.py::test_each_turn_extends_the_last_prompt_byte_for_byte_and_tasks_share_their_prefix`
 checks this against a fake server.
 
 ## Profiles
 
-`--profile chat` (default) serves 32K with the caps above. `--profile coding` is 256K (`--ctx 256k`
-accepts k and K) with Qwen3.8-27B (Q4_K_XL first; `ml-stack-serve memory` rates it 27.2 GiB at 256K,
+`--profile chat` (default) and `--profile coding` set task caps; context defaults to the largest safe fit
+for the selected model and this device's memory. `--ctx 256k` (k and K are accepted) overrides that choice.
+Coding prefers Qwen3.8-27B (Q4_K_XL first; `ml-stack-serve memory` rates it 27.2 GiB at 256K,
 q8_0 cache, MTP head shared) and caps of 60 rounds, 150 calls, 120 model calls and an hour. A coding
-agent runs on the Codex harness through `ml_stack.coding.launch_coding_agent(model, role, project,
-harness='codex')`; until that lands `start` prints the one command to run (`localharness.stub_command`).
+agent runs on Pi by default through `ml_stack.coding.launch_coding_agent(model, role, project,
+harness='pi')`; Codex and Claude Code are also supported.
 Flash-Next is used only when named with `--model`. Before starting, the memory estimator checks the
 context; when it does not fit, `start` says the longest context that does and prints the person-only
 `ml-stack-serve memory --for ... --apply`. Past 85% of the context the chat loop drops whole oldest turns
@@ -103,7 +106,7 @@ latest message. Stopping a delegated worker revokes its child token, preserving 
 `agent.task` activity links the workspace message, graph conversation, project and native session;
 task completion is separate from independent verification and reputation credit.
 
-Coding start accepts `harness` (`codex` or `claude`), also available as CLI `--harness`.
+Coding start defaults to Pi and accepts `harness` (`pi`, `codex` or `claude`), also available as CLI `--harness`.
 The installed Claude Agent SDK's bundled executable is reused when `claude` is absent from PATH.
 The person-authorized start registers one worker identity before launching its inbox loop;
 native tasks reuse that identity rather than minting a new agent for each job.

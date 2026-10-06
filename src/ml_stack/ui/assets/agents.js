@@ -75,6 +75,7 @@ class MlAgents extends MlElement {
       value: "chat" });
     this.profile.options = [{value:"chat",label:"Chat"},{value:"coding",label:"Coding"}];
     this.contextField = h("input", { type:"text", id:"context", value:"32K" });
+    this.outputField = h("input", { type:"number", id:"output-tokens", min:"1", step:"1", required:"", value:"8192" });
     this.harness = h("ml-select", { label:"Harness", value:"ml-stack-agent" });
     this.profile.addEventListener("change", event => { if (event.detail?.value) { this.contextField.value = event.detail.value === "coding" ? "256K" : "32K"; this.update(); } });
     this.ceiling = h("ml-select", { label: "Maximum reasoning effort", hint: "It can raise its own effort up to this",
@@ -93,7 +94,8 @@ class MlAgents extends MlElement {
           this.roleControl, this.profile),
         h("details", {}, h("summary", {}, "Advanced options"),
           h("div", {class:"grid"}, h("div", {}, h("label", {for:"model"}, "Exact model path or reference (auto selects for the kind of work)"), this.modelField), this.effort, this.ceiling, this.harness,
-            h("div", {}, h("label", {for:"context"}, "Context length"), this.contextField))),
+            h("div", {}, h("label", {for:"context"}, "Context length"), this.contextField),
+            h("div", {}, h("label", {for:"output-tokens"}, "Maximum output tokens (Chat and Pi coding)"), this.outputField))),
         this.rolesEl, this.preview,
         h("div", { class: "row" }, this.go, this.note)),
       h("section", {}, h("h2", {}, "Running agents"), this.list));
@@ -144,6 +146,7 @@ class MlAgents extends MlElement {
         this.ceiling.options = levels.filter((l) => l.value !== "auto");
         this.effort.value = line(data.default_effort, 12);
         this.ceiling.value = line(data.default_max_effort, 12);
+        this.outputField.value = data.default_max_output_tokens ?? 8192;
       }
       if (!this.settingsLoaded && this.saved.length) { this.applySettings(this.saved[0]); this.settingsLoaded = true; }
       this.failed = false;
@@ -164,13 +167,14 @@ class MlAgents extends MlElement {
 
   async start() {
     if (this.busy) return;
+    if (!this.outputField.checkValidity()) { this.say("Maximum output tokens must be a positive integer.", true); return; }
     this.busy = true;
     this.say("Starting. Loading the model can take a minute.", false);
     try {
       const got = await this.call("start", {
         model: this.modelField.value.trim() || "auto", name: this.nameField.value.trim(),
         role: this.roleControl.value, profile: this.profile.value || "chat", effort: this.effort.value || "off", max_effort: this.ceiling.value || "medium", project: this.projectField.value.trim(),
-        harness:this.harness.value, ctx:this.contextField.value.trim() });
+        harness:this.harness.value, ctx:this.contextField.value.trim(), max_output_tokens:Number(this.outputField.value) });
       this.say(got.already ? `${line(got.name, 48)} is already running.` : `${line(got.name, 48)} started.`, false);
     } catch (e) {
       this.say(`${line(e.message, 300)}${e.hint ? ` Run: ${line(e.hint, 200)}` : ""}`, true);
@@ -185,6 +189,7 @@ class MlAgents extends MlElement {
     this.profile.value = saved.profile; this.effort.value = saved.effort;
     this.ceiling.value = saved.max_effort; this.harness.value = saved.harness;
     this.contextField.value = String(saved.ctx);
+    this.outputField.value = saved.max_output_tokens ?? 8192;
     this.update();
   }
 
@@ -238,6 +243,7 @@ class MlAgents extends MlElement {
       h("div", { class: "meta" },
         `${line(a.model, 80)} on ${line(a.harness, 24)}, ${line(a.role, 40)}`
         + `, ${Math.round((Number(a.ctx) || 0) / 1024)}K context, effort ${line(a.effort, 12)} (ceiling ${line(a.max_effort, 12)})`
+        + `, ${Number(a.max_output_tokens) || 8192} maximum output tokens`
         + `, ${fmt(a.memory_bytes, "bytes-iec")} held, ${Number(a.tasks) || 0} tasks, ${Number(a.steps) || 0} steps`),
       h("div", { class: "meta" }, a.device?.label ? `${line(a.device.label, 128)} · ${line(a.device.verification, 24)}` : "Device not recorded"),
       a.detail ? h("div", { class: "meta" }, line(a.detail, 200)) : null,
