@@ -18,14 +18,15 @@ from ml_stack.workspace.service import Workspace
 
 __all__ = ["Plan", "Talk", "clipboard", "connect", "walk"]
 
-COPIERS = (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"])
+COPIERS = (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["clip.exe"])
 
 def clipboard(text: str) -> bool:
     """Put ``text`` on the clipboard with whichever tool the machine has; False when none works."""
     for cmd in COPIERS:
         if shutil.which(cmd[0]):
             try:
-                subprocess.run(cmd, input=text, text=True, check=True, timeout=5)
+                payload = text.encode("utf-16-le") if cmd[0] == "clip.exe" else text
+                subprocess.run(cmd, input=payload, text=isinstance(payload, str), check=True, timeout=5)
                 return True
             except (OSError, subprocess.SubprocessError):
                 continue

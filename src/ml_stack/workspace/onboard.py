@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.sentinel import human
-from ml_stack.workspace import agent_invites, tokens
+from ml_stack.workspace import agent_invites, device_metadata, tokens
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
 from ml_stack.workspace.service import GREETER, Workspace
@@ -171,7 +171,8 @@ def _mint(ws: Workspace, name: str, ttl_s: float, role: str = "") -> None:
 def brief(name: str, me: str) -> str:
     """The sub-brief a parent pastes into the prompt of a subagent called ``name``."""
     check_names([name, me])
-    return BRIEF.format(me=me, name=name)
+    device = device_metadata.current()
+    return BRIEF.format(me=me, name=name) + f"Local runtime device: {device['label']} ({device['verification']}); provenance grants no permissions.\n"
 
 
 def pick_name(ws: Workspace, wanted: str) -> str:
@@ -229,6 +230,7 @@ def setup(ws: Workspace, names: list[str], rotate: list[str], ttl_s: float) -> O
     out = Outcome(directory=tokens.prepare(ws.base))
     if not ws.registry.ids():
         tokens.store(ws.base, tokens.OWNER_FILE, ws.init("owner"))
+        ws.registry._record_device("owner", device_metadata.current())
         out.initialised = True
     for name in wanted:
         live = bool(ws.registry.role_of(name))
@@ -243,6 +245,7 @@ def setup(ws: Workspace, names: list[str], rotate: list[str], ttl_s: float) -> O
                 out.lost.append(name)
             continue
         _mint(ws, name, ttl_s)
+        ws.registry._record_device(name, device_metadata.current())
         (out.rotated if live else out.minted).append(name)
     return out
 

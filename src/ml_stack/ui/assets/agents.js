@@ -239,6 +239,7 @@ class MlAgents extends MlElement {
         `${line(a.model, 80)} on ${line(a.harness, 24)}, ${line(a.role, 40)}`
         + `, ${Math.round((Number(a.ctx) || 0) / 1024)}K context, effort ${line(a.effort, 12)} (ceiling ${line(a.max_effort, 12)})`
         + `, ${fmt(a.memory_bytes, "bytes-iec")} held, ${Number(a.tasks) || 0} tasks, ${Number(a.steps) || 0} steps`),
+      h("div", { class: "meta" }, a.device?.label ? `${line(a.device.label, 128)} · ${line(a.device.verification, 24)}` : "Device not recorded"),
       a.detail ? h("div", { class: "meta" }, line(a.detail, 200)) : null,
       h("div", { class: "meta" }, last));
   }

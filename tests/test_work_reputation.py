@@ -272,7 +272,7 @@ def test_model_switches_keep_one_authenticated_agent_account(work):
     assert len([item for item in result['team'] if item['agent'] == work.agent_id]) == 1
 
 
-def test_two_workers_roll_up_to_one_owner_enrolled_device_across_models(work, monkeypatch):
+def test_historical_awards_without_verified_family_stay_with_their_workers(work, monkeypatch):
     from ml_stack.workspace import device_agent, localagent
 
     monkeypatch.setattr(device_agent, 'device_id', lambda: 'physical-one')
@@ -290,12 +290,14 @@ def test_two_workers_roll_up_to_one_owner_enrolled_device_across_models(work, mo
                                         'provenance': {'model': 'second.gguf', 'harness': 'claude'}},
            ledger=work.ledger)
     row = standings(work.ws, second_token, ledger=work.ledger)['own']
-    assert row['agent'] == account['base_id'] and row['device_id'] == 'physical-one'
-    assert row['economy']['balance'] == 30 and row['verified_tasks'] == 2
-    assert {work.agent_id, second} <= set(row['members'])
-    assert {item['agent'] for item in row['evidence']} == {work.agent_id, second}
-    assert {'worker-one', 'worker-two'} <= set(row['aliases'])
-    assert standings(work.ws, work.child, ledger=work.ledger)['own']['agent'] == row['agent']
+    assert row['agent'] == second and row['agent'] != account['base_id']
+    assert row['account_type'] == 'unassigned'
+    assert row['economy']['balance'] == 15 and row['verified_tasks'] == 1
+    assert row['members'] == [second]
+    assert {item['agent'] for item in row['evidence']} == {second}
+    assert 'worker-two' in row['aliases']
+    first = standings(work.ws, work.child, ledger=work.ledger)['own']
+    assert first['agent'] == work.agent_id and first['economy']['balance'] == 15
 
 
 @pytest.mark.redteam

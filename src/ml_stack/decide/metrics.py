@@ -3,10 +3,12 @@ baseline"."""
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ml_stack.decide import calibrate
 from ml_stack.decide.eval import FLOOR, brier, ece, top_of
 
 
@@ -60,3 +62,15 @@ def worse_than(candidate: Metrics, baseline: Metrics) -> list[str]:
     if candidate.brier > baseline.brier:
         out.append(f"Brier {candidate.brier:.3f} is above the baseline's {baseline.brier:.3f}")
     return out
+
+
+def fit_temperature_ece(rows: Sequence[Sequence[float]], labels: Sequence[int], *,
+                        low: float = 0.25, high: float = 8.0, steps: int = 80) -> float:
+    """The temperature on a log grid that minimises expected calibration error, ties broken
+    by NLL."""
+    if len(rows) != len(labels):
+        raise ValueError(f"{len(rows)} rows but {len(labels)} labels")
+    grid = [math.exp(math.log(low) + (math.log(high) - math.log(low)) * i / (steps - 1))
+            for i in range(steps)]
+    return min(grid, key=lambda t: (round(ece([calibrate.rescale(p, t) for p in rows], labels), 6),
+                                    calibrate.nll(rows, labels, t)))

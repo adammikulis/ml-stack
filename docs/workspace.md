@@ -163,7 +163,7 @@ separate agent processes and a lead session coordinate through ml-stack instead 
 person relaying text and instead of colliding on scratch files, ports, branches and servers.
 
     ml-stack workspace init                         # a person, at a terminal, once (setup does this)
-    ml-stack workspace mint lead-1 --role lead      # prints that agent's token once
+    ml-stack workspace mint --role lead lead-1      # prints that agent's token once
     export ML_STACK_WORKSPACE_TOKEN=...             # per agent process (or --agent NAME)
     ml-stack workspace send reviewer task "check the lease tests"
     ml-stack workspace watch --once --timeout 600   # run in the background; exits on a message
@@ -555,7 +555,7 @@ agent processes, 2000 messages, send p99 58 ms, nothing refused. Every limit bel
 | Unread inbox | 500 per recipient (`inbox_pending`), 100 from any one sender (`unread_per_sender`) | the sender is refused with "N has 500 unread messages" (`why: inbox-full`) or "already has 100 unread messages waiting for N" (`why: sender-share`); broadcasts and board posts are not counted | `inbox`, `status` (`fullest_inboxes`) |
 | Message and note size | 16 KiB body, 200 character subject, 8 KiB note, 500 notes per agent | `Refused`, exit 3 | the refusal text |
 | Retention | 7 days of messages (`retention_s`) | `gc` drops the oldest rows; the chain continues from the last dropped row; readers re-read the file | `audit-verify` (rows, head) |
-| Claim TTL | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
+| Claim lifetime | 15 minutes, renewed by `heartbeat`; one renewal adds at most 1 hour and no claim lives past 8 hours from when it was taken | the claim is released the next time anyone reads the registry and audited as `claim.expired` or `claim.dead-pid`; another agent that takes it is audited as `claim.stolen` with the previous owner | `claims` lists `expires_in_s` and `expiring_soon` (true in the last 5 minutes or a third of the TTL, whichever is shorter) |
 | Token TTL | 24 hours (`token_ttl_s`) | the token stops authenticating; mint a new one | `whoami` |
 | Delegation | a human mints anyone, a lead mints `agent` tokens, an agent mints nothing; a lead or agent that mints holds at most 16 live identities (`mints_per_identity`) and the workspace at most 64 (`agents_live`) | the mint is refused (`Denied`) | `status` (agents) |
 | Keystore reads | 600 per hour per user, backoff from 480 | `KeystoreBusy` naming the hour | `ml-stack-security keystore` |
@@ -706,3 +706,20 @@ Now run `ml-stack-workspace connect --remote --code-only --no-project` on the co
 The complete paste binds the advertised Fleet coordinator and its workspace ID. Paste the whole
 join command: its code alone cannot identify the correct authority. `--remote` refuses to create
 an invitation before hosting is active, and a workspace-bound join never falls back to a local registry.
+
+### Model-family accounts and device provenance
+
+Completion credits and work reputation belong to a logical model-family account across
+workers and devices. A canonical submission binds its account to the model in the verified
+live broker allocation. Qwen variants contribute to Qwen; Gemma contributes separately.
+Switching a worker's model leaves earlier award bindings and evidence unchanged. Historical
+awards without a verified family binding remain unassigned; their totals and IDs are preserved.
+Runs remain free. Family membership grants no project, tool or reviewer permissions.
+
+Every authenticated worker retains its own identity and credentials. Local registration and
+CLI activity record the maintained machine identity, OS and hostname; local children inherit
+that provenance. Board directories and agent cards show the device and its verification state.
+An agent report is labelled `agent-reported`; a local observation is `local-observed`, and a
+paired transport adapter may record `paired` only after checking the actual device proof.
+Missing metadata stays unknown. These labels are separate from authorization and from source
+security reputation. History shows one family credit balance and its contributing device IDs.

@@ -20,6 +20,8 @@ def authorize(ws, token, worker, task):
     runner = matches[0]
     child = ws.auth(tokens.load(ws.base, runner.identity or runner.name))
     ws._may(caller, 'read')
+    if caller.role == HUMAN or child.role == HUMAN or caller.id == child.id:
+        raise Denied('task management requires separate authenticated agents and a registered parent or task creator')
     if type(task) is not str or not TASK_ID.fullmatch(task):
         raise ValueError('a canonical task ID is required')
     with held(ws.base / 'coordination.lock'), GraphStore(ws.base / 'coordination.db') as graph:
@@ -27,8 +29,6 @@ def authorize(ws, token, worker, task):
         if fingerprint({key: spec[key] for key in SPEC_FIELDS}) != spec['spec_hash']:
             raise ValueError('the task specification changed after creation')
     caller_info, child_info = ws.registry.info(caller.id), ws.registry.info(child.id)
-    if caller.role == HUMAN or child.role == HUMAN or caller.id == child.id:
-        raise Denied('task management requires separate authenticated agent identities')
     if spec['created_by'] != caller.id or child.id not in spec['assignees']:
         raise Denied('only the registered worker parent or task creator manages an explicitly assigned worker')
     if not spec['project'] or caller_info.get('project') != spec['project'] \
@@ -45,4 +45,3 @@ def authorize(ws, token, worker, task):
     if spec['state'] not in ('queued', 'working', 'blocked', 'review', 'accepted'):
         raise Denied('the task is no longer active')
     return runner, spec
-

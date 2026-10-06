@@ -786,5 +786,5 @@ class Workspace:
                             "unread": self.bus.pending(name), "expires": info["expires"],
                             "project": info["project"].get("name", ""),
                             "model": (shown := self.registry.model_of(name))[0],
-                            "model_state": shown[1], "harness": info["harness"]})
+                            "model_state": shown[1], "harness": info["harness"], "device": info["device"]})
         return out

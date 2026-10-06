@@ -92,11 +92,12 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
   matches(item,actor){return item.agent===actor||`agent:${item.agent}`===actor||[...(item.aliases||[]),...(item.members||[])].includes(actor.replace(/^agent:/,''));}
   metric(label,value){return E('div',{class:'history-metric'},E('strong',{},String(value)),E('span',{},label));}
   standing(standing){
-   const actor=standing.agent,economy=standing.economy,display=standing.device?.name||standing.device_name||actor;
+   const actor=standing.agent,economy=standing.economy,display=standing.label||actor;
    const title=economy?`${display} · ${economy.balance} credits`:`${display} · ${standing.verified_tasks} verified tasks`;
    const box=E('details',{class:'workspace-card history-action',open:this.openReputation.has(actor)},E('summary',{},title));
    box.ontoggle=()=>box.open?this.openReputation.add(actor):this.openReputation.delete(actor);
-   box.append(E('p',{class:'intro'},`Account identity: ${actor}`));
+   box.append(E('p',{class:'intro'},`Account identity: ${actor}${standing.account_type==='model_family'?' · Model family across devices':''}`));
+   if(standing.devices?.length)box.append(E('details',{},E('summary',{},`${standing.devices.length} contributing devices`),...standing.devices.map(id=>E('p',{class:'intro'},id))));
    if(standing.members?.length)box.append(E('p',{class:'intro'},`Workers: ${standing.members.join(', ')}`));
    const metrics=E('div',{class:'history-economy'});
    if(economy)metrics.append(this.metric('Credit balance',economy.balance),this.metric('Credits earned',economy.earned),this.metric('Completion credits',economy.completion_credits),this.metric('Quality bonus credits',economy.quality_credits));
@@ -140,9 +141,9 @@ history-view .history-links { display:flex; flex-wrap:wrap; gap:12px; margin-top
   action(event){
    const refs=event.refs||{},meta=event.meta||{},time=new Date(event.ts*1000);
    const summary=E('summary',{},E('strong',{},event.subject||event.kind),E('span',{class:'badge'},event.outcome||event.kind),meta.model?E('span',{class:'history-count'},meta.model):null,E('time',{datetime:time.toISOString()},time.toLocaleString()));
-   const values={Action:event.kind,Status:event.outcome||'Not recorded',Actor:event.actor,Session:event.session,'Record ID':event.id,...Object.fromEntries(Object.entries(refs).map(([key,value])=>[`Reference · ${key}`,value])),...Object.fromEntries(Object.entries(meta).map(([key,value])=>[`Detail · ${key}`,value]))};
+   const values={Action:event.kind,Status:event.outcome||'Not recorded',Actor:event.actor,Session:event.session,Record:event.id,...Object.fromEntries(Object.entries(refs).map(([key,value])=>[`Reference · ${key}`,value])),...Object.fromEntries(Object.entries(meta).map(([key,value])=>[`Detail · ${key}`,value]))};
    const fields=E('dl');for(const [key,value]of Object.entries(values))fields.append(E('dt',{},key),E('dd',{},typeof value==='object'?W.json(value):String(value??'')));
-   const links=E('div',{class:'history-links'},E('a',{href:'#board'},'Open Board'));
+   const links=E('div',{class:'history-links'},E('a',{href:'#board'},'Open board'));
    for(const [key,value]of Object.entries({...refs,...meta})){
     if(!/url|issue|task/.test(key)||typeof value!=='string')continue;
     try{const url=new URL(value);if(url.protocol==='https:'||url.protocol==='http:')links.append(E('a',{href:url.href,target:'_blank',rel:'noopener noreferrer'},key.replaceAll('_',' ')));}catch{}

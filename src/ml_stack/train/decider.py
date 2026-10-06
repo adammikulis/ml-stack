@@ -26,7 +26,7 @@ from typing import Any
 from ml_stack import sentinel
 from ml_stack.decide import dataset, metrics, pointer_prompt, registry
 from ml_stack.decide.base import text_of
-from ml_stack.decide.calibrate import fit_temperature, fit_temperature_ece, softmax
+from ml_stack.decide.calibrate import fit_temperature, softmax
 from ml_stack.decide.cases import Case, fingerprint
 from ml_stack.decide.fetch import locate
 from ml_stack.decide.pins import QWEN35_0_8B_BASE, STRANDS_V19, Checkpoint
@@ -248,7 +248,7 @@ def fit_temperatures(logits: Sequence[Sequence[float]], cases: Sequence[Case]
     def fit_on(idx: list[int]) -> float:
         rows = [softmax(logits[i]) for i in idx]
         labels = [cases[i].label_index for i in idx]
-        return (fit_temperature_ece if len(idx) >= ECE_FIT_CASES else fit_temperature)(rows, labels)
+        return (metrics.fit_temperature_ece if len(idx) >= ECE_FIT_CASES else fit_temperature)(rows, labels)
 
     everything = fit_on(list(range(len(cases))))
     by_kind: dict[str, float] = {}

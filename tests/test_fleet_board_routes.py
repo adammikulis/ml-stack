@@ -34,7 +34,7 @@ def post(server, doc, **options):
 def test_local_person_posts_dm_and_thread_without_exposing_credentials(board):
     server, kit = board
     code, directory, _ = server.call('/ui/board/agents')
-    assert code == 200 and directory == {'owner_id': 'owner', 'agents': [{'id': 'builder', 'role': 'agent'}]}
+    assert code == 200 and directory == {'owner_id': 'owner', 'agents': [{'id': 'builder', 'role': 'agent', 'device': kit.ws.registry.info('builder')['device']}]}
     code, dm, _ = post(server, {'to': 'builder', 'body': 'Please inspect the simulation.'})
     assert code == 200
     inbox = kit.ws.inbox(kit.worker)
