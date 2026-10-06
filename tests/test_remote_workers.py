@@ -92,7 +92,9 @@ def devices(tmp_path, monkeypatch):
         actual_remote = RemoteWorkspace
         def target_remote(*args, **kwargs):
             result = actual_remote(*args, **kwargs)
-            result.base = tmp_path / 'device-b' / 'remote-sessions'
+            if (threading.current_thread() is not threading.main_thread() or
+                    remote_workers.home.device_id() != 'device-a'):
+                result.base = tmp_path / 'device-b' / 'remote-sessions'
             return result
         monkeypatch.setattr(remote_workers, 'RemoteWorkspace', target_remote)
         local = Workspace(tmp_path / 'device-b' / 'workspace')
@@ -199,18 +201,23 @@ def test_cli_discovers_target_without_a_saved_project_connection(devices, monkey
         return {'host': state.caller.host, 'project_id': PROJECT, 'cluster': CLUSTER}
     monkeypatch.setattr(remote_workers.automatic_connection, 'discover', attach)
     monkeypatch.setattr(remote_workers.home, 'device_id', lambda: 'device-a')
-    monkeypatch.setattr(remote_workers, 'credential', lambda *args, **kwargs: state.token
-                        if kwargs.get('harness') == 'ml-stack-workspace'
-                        else tokens.load(args[0].base, args[0].enroll(args[1], model=args[2],
-                                harness='ml-stack-agent', authority_machine=args[3])['id']))
+    helper_name = 'lan-launch-device-a'
+    with pytest.raises(PermissionError):
+        tokens.load(state.caller.base, helper_name)
     args = SimpleNamespace(project=str(state.roots['device-a']), device='device-b', agent='',
                            name='cli-qwen', model='auto', effort='off', max_effort='medium',
                            ctx='32k', max_output_tokens=2048, task='Report the shared project identity')
     result = remote_workers.run(args)
     assert result['identity'].startswith('lan-device-b-')
-    rows = state.caller.call('thread', state.token, result['task_seq'])
-    assert rows[0]['from'] == 'test-caller' and rows[0]['to'] == result['identity']
+    helper = RemoteWorkspace(state.caller.host, PROJECT, cluster=CLUSTER)
+    helper_token = tokens.load(helper.base, helper_name)
+    rows = helper.call('thread', helper_token, result['task_seq'])
+    assert rows[0]['from'] == helper_name and rows[0]['to'] == result['identity']
     assert rows[0]['type'] == 'task' and 'shared project identity' in rows[0]['text']
+    worker = localagent.load(state.local, 'cli-qwen')
+    assert worker.orders_from == (helper_name,)
+    helper_info = helper.call('whoami', helper_token)
+    assert helper_info['model'] == '' and helper_info['harness'] == 'ml-stack-workspace'
     assert discovered == [state.roots['device-a']]
     assert len(state.spawned) == 1
 
@@ -289,17 +296,18 @@ def test_generic_canonical_adapter_does_not_supply_a_worker_token_hook(devices):
     assert loop.token != devices.token
 
 
-def _rotate_cluster(state):
+def _rotate_cluster(state, group=CLUSTER):
     key = base64.urlsafe_b64encode(bytes(reversed(range(32)))).rstrip(b'=')
     state.keyfile.write_bytes(key)
-    _write_memberships([Membership(CLUSTER, key, mode='dev')], state.keyfile)
+    _write_memberships([Membership(group, key, mode='dev')], state.keyfile)
     for peer in state.peers:
         peer.token = derive_token(key)
     return hashlib.sha256(key).hexdigest()
 
 
 @pytest.mark.parametrize('legacy', [False, True])
-def test_worker_alias_renews_after_dev_key_rotation_without_changing_identity(devices, legacy):
+@pytest.mark.parametrize('group', [CLUSTER, 'converged-development'])
+def test_worker_alias_renews_after_dev_key_rotation_without_changing_identity(devices, legacy, group):
     from ml_stack.graph.store import GraphStore
     before = remote_workers.credential(devices.caller, 'rotating-worker', 'Qwen3.8-test', 'device-a')
     identity = devices.caller.call('whoami', before)['id']
@@ -309,8 +317,8 @@ def test_worker_alias_renews_after_dev_key_rotation_without_changing_identity(de
             attrs = dict(node['attrs'])
             attrs.pop('cluster_id')
             graph.upsert_node({**node, 'attrs': attrs})
-    cluster_id = _rotate_cluster(devices)
-    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=CLUSTER)
+    cluster_id = _rotate_cluster(devices, group)
+    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=group)
     after = remote_workers.credential(current, 'rotating-worker', 'Qwen3.8-test', 'device-a')
     assert after == before
     who = current.call('whoami', after)
@@ -336,14 +344,15 @@ def test_rekey_cannot_restore_a_revoked_worker(devices):
     assert ws.registry.ids() == before
 
 
-def test_live_board_worker_refreshes_tls_transport_and_sidecar_after_rekey(devices):
+@pytest.mark.parametrize('group', [CLUSTER, 'converged-development'])
+def test_live_board_worker_refreshes_tls_transport_and_sidecar_after_rekey(devices, group):
     result = devices.target._request('worker', devices.body)
     from ml_stack.files import read_json
     path = localagent.folder(devices.local) / 'local-qwen.remote.json'
     worker = remote_workers.BoardWorker(devices.local, read_json(path, {}))
     old_token = worker.token
-    cluster_id = _rotate_cluster(devices)
-    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=CLUSTER)
+    cluster_id = _rotate_cluster(devices, group)
+    current = RemoteWorkspace(devices.caller.host, PROJECT, cluster=group)
     current.renew('test-caller', 'device-a')
     current.call('send', devices.token, result['identity'], 'question', 'Report after the cluster refresh')
     rows = worker.wait(old_token, 0, raw=True)
@@ -353,3 +362,42 @@ def test_live_board_worker_refreshes_tls_transport_and_sidecar_after_rekey(devic
     assert worker.auth(old_token).id == result['identity'] and worker.token == old_token
     assert read_json(path, {})['cluster_id'] == cluster_id
     assert len(devices.spawned) == 1
+
+
+@pytest.mark.redteam
+def test_explicit_missing_cli_identity_cannot_enroll_a_replacement(devices, monkeypatch):
+    monkeypatch.setattr(remote_workers, 'selected', lambda root: {'host': devices.caller.host,
+                        'project_id': PROJECT, 'cluster': CLUSTER})
+    monkeypatch.setattr(remote_workers.home, 'device_id', lambda: 'device-a')
+    args = SimpleNamespace(project=str(devices.roots['device-a']), device='device-b', agent='missing-caller',
+                           name='missing-qwen', model='auto', effort='off', max_effort='medium',
+                           ctx='32k', max_output_tokens=2048, task='')
+    before = devices.authority.workspace(PROJECT).registry.ids()
+    with pytest.raises(PermissionError):
+        remote_workers.run(args)
+    assert devices.authority.workspace(PROJECT).registry.ids() == before and not devices.spawned
+
+
+def test_restarted_worker_renews_saved_scope_after_dev_group_convergence(devices):
+    from ml_stack.files import read_json
+    result = devices.target._request('worker', devices.body)
+    path = localagent.folder(devices.local) / 'local-qwen.remote.json'
+    record = read_json(path, {})
+    cluster_id = _rotate_cluster(devices, 'converged-development')
+    worker = remote_workers.BoardWorker(devices.local, record)
+    assert worker.auth(worker.token).id == result['identity']
+    assert read_json(path, {})['cluster'] == 'converged-development'
+    assert read_json(path, {})['cluster_id'] == cluster_id
+    assert len(devices.spawned) == 1
+
+
+@pytest.mark.redteam
+def test_running_worker_cannot_adopt_another_board_certificate_during_rekey(devices):
+    from ml_stack.files import read_json
+    devices.target._request('worker', devices.body)
+    path = localagent.folder(devices.local) / 'local-qwen.remote.json'
+    worker = remote_workers.BoardWorker(devices.local, read_json(path, {}))
+    _rotate_cluster(devices)
+    devices.peers[0].beacon.cert = devices.peers[1].beacon.cert
+    with pytest.raises(PermissionError, match='cannot switch'):
+        worker.auth(worker.token)

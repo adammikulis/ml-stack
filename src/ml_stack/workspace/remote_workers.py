@@ -67,19 +67,20 @@ def credential(remote, name, model, authority, harness="ml-stack-agent"):
                 raise
             token = ''
         if token:
-            if not record or record.get('cluster_id') != remote.cluster_id:
+            if (not record or record.get('cluster_id') != remote.cluster_id
+                    or record.get('cluster') != remote.cluster):
                 remote.renew(alias, authority)
             who = remote.call('whoami', token)
             if who.get('project', {}).get('cluster_id') != remote.cluster_id:
                 raise Denied('worker launch requires an existing Dev project capability')
             graph.upsert_node({'id': 'worker:' + name, 'kind': 'worker-identity', 'label': name,
-                               'attrs': {'requested': name, 'identity': alias, 'cluster_id': remote.cluster_id}})
+                               'attrs': {'requested': name, 'identity': alias, 'cluster_id': remote.cluster_id, 'cluster': remote.cluster}})
             return token
         if record is not None:
             raise Denied('the saved Dev worker capability is unavailable')
         result = remote.enroll(name, model=model, harness=harness, authority_machine=authority)
         graph.upsert_node({'id': 'worker:' + name, 'kind': 'worker-identity', 'label': name,
-                           'attrs': {'requested': name, 'identity': result['id'], 'cluster_id': remote.cluster_id}})
+                           'attrs': {'requested': name, 'identity': result['id'], 'cluster_id': remote.cluster_id, 'cluster': remote.cluster}})
         return tokens.load(remote.base, result['id'])
 
 
@@ -138,7 +139,7 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
                 if body.get('model', localmodel.AUTO) not in (localmodel.AUTO, agent.model):
                     raise ValueError('stop the running worker before changing its model')
                 credential(remote, prior['identity'], agent.model_name, project.authority_machine)
-                write_json(connection, {**prior, 'cluster_id': cluster_id})
+                write_json(connection, {**prior, 'cluster_id': cluster_id, 'cluster': cluster})
                 connection.chmod(0o600)
                 return 200, {'name': name, 'identity': prior['identity'], 'model': agent.model_name,
                              'pid': agent.pid, 'project_id': project_id, 'state': 'running', 'already': True}
@@ -152,7 +153,8 @@ def start(projects, project_id, body, *, admission, cluster_key=None):
             record = {'host': remote.host, 'project_id': project_id, 'cluster': cluster,
                       'cluster_key': str(cluster_key) if cluster_key else '',
                       'identity': canonical_identity, 'requested_by': caller['id'],
-                      'name': name, 'cluster_id': cluster_id}
+                      'name': name, 'cluster_id': cluster_id, 'authority_machine': remote.authority_machine,
+                      'device_cert': remote.device_cert}
             root = str(Path(project.root).resolve(strict=True))
             ask = localstart.Ask(model=chosen.ref, name=name, project=root,
                                  orders_from=(caller['id'],), effort=body.get('effort', 'off'),
@@ -186,18 +188,19 @@ class WorkerRemote:
     def refresh(self):
         old = self.current
         rows = memberships(Path(old.cluster_key) if old.cluster_key else None)
-        if not rows or rows[0].mode != 'dev' or rows[0].group != old.cluster:
+        if not rows or rows[0].mode != 'dev':
             raise Denied('the running worker requires its active Dev cluster')
         current_id = hashlib.sha256(rows[0].key).hexdigest()
-        if current_id != old.cluster_id:
+        if current_id != old.cluster_id or rows[0].group != old.cluster:
             fresh = RemoteWorkspace(old.host, old.project_id,
                                     cluster_key=Path(old.cluster_key) if old.cluster_key else None,
-                                    cluster=old.cluster)
+                                    cluster=rows[0].group)
             if (fresh.authority_machine != old.authority_machine or fresh.device_cert != old.device_cert):
                 raise Denied('the running worker cannot switch its authenticated Board authority')
         else:
             fresh = old
-        if current_id == self.record.get('cluster_id') and fresh is old:
+        if (current_id == self.record.get('cluster_id') and rows[0].group == self.record.get('cluster')
+                and fresh is old):
             return
         identity = self.record['identity']
         fresh.renew(identity, fresh.authority_machine)
@@ -210,12 +213,13 @@ class WorkerRemote:
             for node in graph.nodes('worker-identity'):
                 attrs = node['attrs']
                 if attrs.get('identity') == identity:
-                    graph.upsert_node({**node, 'attrs': {**attrs, 'cluster_id': current_id}})
+                    graph.upsert_node({**node, 'attrs': {**attrs, 'cluster_id': current_id, 'cluster': rows[0].group}})
         if self.path is not None:
             fresh._safe_storage(self.path)
-            write_json(self.path, {**self.record, 'cluster_id': current_id})
+            write_json(self.path, {**self.record, 'cluster_id': current_id, 'cluster': rows[0].group})
             self.path.chmod(0o600)
-        self.current, self.record['cluster_id'] = fresh, current_id
+        self.current = fresh
+        self.record.update(cluster_id=current_id, cluster=rows[0].group)
 
     def call(self, operation, token, *args, **kwargs):
         self.refresh()
@@ -226,9 +230,15 @@ class BoardWorker(CanonicalWorkspace):
     """Keep runtime files local while using the selected canonical agent capability."""
 
     def __init__(self, local, record, name=""):
-        remote = RemoteWorkspace(record['host'], record['project_id'],
-                                 cluster_key=Path(record['cluster_key']) if record['cluster_key'] else None,
-                                 cluster=record['cluster'])
+        cluster_key = Path(record['cluster_key']) if record['cluster_key'] else None
+        rows = memberships(cluster_key)
+        if not rows or rows[0].mode != 'dev':
+            raise Denied('the worker requires its active Dev cluster')
+        remote = RemoteWorkspace(record['host'], record['project_id'], cluster_key=cluster_key,
+                                 cluster=rows[0].group)
+        if (remote.authority_machine != record.get('authority_machine') or
+                remote.device_cert != record.get('device_cert')):
+            raise Denied('the worker cannot switch its saved authenticated Board authority')
         token = tokens.load(remote.base, record['identity'])
         local_name = name or record.get('name', '')
         path = la.folder(local) / f'{la.check_name(local_name)}.remote.json' if local_name else None
@@ -259,13 +269,13 @@ def run(args):
     connection = selected(root) or automatic_connection.discover(root)
     if not connection:
         raise Denied('no canonical project Board was discovered for this checkout')
-    remote = RemoteWorkspace(connection['host'], connection['project_id'],
-                             cluster=connection.get('cluster', ''),
-                             cluster_key=Path(connection['cluster_key']) if connection.get('cluster_key') else None)
-    members = [row for row in memberships(Path(remote.cluster_key) if remote.cluster_key else None)
-               if row.group == remote.cluster and row.mode == 'dev']
-    if len(members) != 1:
+    cluster_key = Path(connection['cluster_key']) if connection.get('cluster_key') else None
+    rows = memberships(cluster_key)
+    members = rows[:1] if rows and rows[0].mode == 'dev' else []
+    if not members:
         raise Denied('remote worker launch requires the active Dev cluster')
+    remote = RemoteWorkspace(connection['host'], connection['project_id'],
+                             cluster=members[0].group, cluster_key=cluster_key)
     peers = Peer.discover(key=members[0].key, group=members[0].group)
     targets = [peer for peer in peers if peer.beacon and peer.beacon.machine != home.device_id()
                and (not args.device or peer.name == args.device or peer.beacon.machine == args.device)]
@@ -279,6 +289,7 @@ def run(args):
         raise Denied('the canonical Board authority is not discoverable or is ambiguous')
     if args.agent:
         token = tokens.load(remote.base, args.agent)
+        remote.renew(args.agent, authorities[0])
     else:
         token = credential(remote, 'lan-launch-' + home.device_id()[:12], '', authorities[0],
                            harness='ml-stack-workspace')
