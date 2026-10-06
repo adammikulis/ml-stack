@@ -115,38 +115,7 @@ class WorkspaceHost:
             device_sessions.check(ws, token, device, self.projects)
             who = self._identity(ws, project_id, token)
             ws.audit("remote.seen", who.id, project_id=project_id)
-            operation = str(body.get("operation") or "")
-            args, kwargs = body.get("args", []), body.get("kwargs", {})
-            if (not isinstance(args, list) or len(args) > 12 or not isinstance(kwargs, dict)
-                    or "token" in kwargs or len(kwargs) > 12):
-                raise ValueError("invalid operation arguments")
-            if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
-                raise Denied("agent capability has no read permission")
-            if operation == "whoami":
-                result = {"id": who.id, **ws.registry.info(who.id)}
-            elif operation == "history":
-                result = read_json(ws.base / "adopted-history.json", {}).get("messages", [])
-            elif operation == "agents":
-                result = [row for row in ws.registered() if row["role"] == AGENT]
-            elif operation == "claims":
-                result = ws.claims.listing()
-            elif operation == "who":
-                result = ws.who_owns(*args, **kwargs)
-            elif operation in METHODS:
-                owner, name = (ws.board, operation[6:]) if operation.startswith("board.") else (ws, operation)
-                method = getattr(owner, name)
-                if operation == "claim":
-                    kwargs["pid"] = 0
-                bound = inspect.signature(method).bind(token, *args, **kwargs)
-                if "limit" in bound.arguments:
-                    bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
-                if "widen" in bound.arguments:
-                    bound.arguments["widen"] = False
-                if "timeout_s" in bound.arguments:
-                    bound.arguments["timeout_s"] = min(max(float(bound.arguments["timeout_s"]), 0), 20)
-                result = method(*bound.args, **bound.kwargs)
-            else:
-                raise Denied("this operation is unavailable to remote agents")
+            result = self._operation(ws, who, token, body)
             reply = {"result": result}
             if len(json.dumps(reply).encode()) > MAX_REPLY:
                 return 413, {"error": "answer too large; request fewer messages"}
@@ -159,6 +128,41 @@ class WorkspaceHost:
             return 409, {"error": str(exc)}
         except (ValueError, TypeError) as exc:
             return 400, {"error": str(exc)}
+
+    def _operation(self, ws, who, token, body):
+        operation = str(body.get("operation") or "")
+        args, kwargs = body.get("args", []), body.get("kwargs", {})
+        if (not isinstance(args, list) or len(args) > 12 or not isinstance(kwargs, dict)
+                or "token" in kwargs or len(kwargs) > 12):
+            raise ValueError("invalid operation arguments")
+        if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
+            raise Denied("agent capability has no read permission")
+        if operation == "whoami":
+            result = {"id": who.id, **ws.registry.info(who.id)}
+        elif operation == "history":
+            result = read_json(ws.base / "adopted-history.json", {}).get("messages", [])
+        elif operation == "agents":
+            result = [row for row in ws.registered() if row["role"] == AGENT]
+        elif operation == "claims":
+            result = ws.claims.listing()
+        elif operation == "who":
+            result = ws.who_owns(*args, **kwargs)
+        elif operation in METHODS:
+            owner, name = (ws.board, operation[6:]) if operation.startswith("board.") else (ws, operation)
+            method = getattr(owner, name)
+            if operation == "claim":
+                kwargs["pid"] = 0
+            bound = inspect.signature(method).bind(token, *args, **kwargs)
+            if "limit" in bound.arguments:
+                bound.arguments["limit"] = min(max(int(bound.arguments["limit"]), 1), 100)
+            if "widen" in bound.arguments:
+                bound.arguments["widen"] = False
+            if "timeout_s" in bound.arguments:
+                bound.arguments["timeout_s"] = min(max(float(bound.arguments["timeout_s"]), 0), 20)
+            result = method(*bound.args, **bound.kwargs)
+        else:
+            raise Denied("this operation is unavailable to remote agents")
+        return result
 
     def _identity(self, ws: Workspace, project_id: str, token: str) -> Any:
         who = ws.auth(token)
