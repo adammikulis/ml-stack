@@ -259,3 +259,43 @@ def test_origin_attack_regression_detects_removed_validation_guard(tmp_path, mon
         with pytest.raises(pytest.fail.Exception, match='reached credential/transport setup'):
             test_hostile_saved_coordinator_origin_is_refused_before_transport(
                 tmp_path, changed, 'http://192.0.2.10:8786')
+
+
+def test_fleet_membership_without_coordinator_selection_preserves_local_workspace(tmp_path, monkeypatch):
+    registry = tmp_path / 'agents.json'
+    registry.write_text('{"existing": true}', encoding='utf-8')
+    before = registry.read_bytes()
+    monkeypatch.setattr(coordinator_client, 'load_cluster_key', lambda: bytes(range(32)))
+    monkeypatch.setattr(coordinator_client, 'discover', lambda: [])
+    monkeypatch.setattr(coordinator_client, '_device_peer',
+                        lambda config: pytest.fail('unselected coordinator reached device proof'))
+    assert coordinator_client.client(tmp_path) is None
+    assert registry.read_bytes() == before
+    assert not (tmp_path / 'coordinator.json').exists()
+
+
+def test_selected_coordinator_outage_preserves_remote_authority(tmp_path, monkeypatch):
+    coordinator_config.save(tmp_path, {'mode': 'remote', 'workspace': 'workspace:' + 'a' * 32,
+                                      'endpoint': 'https://coordinator.example:8770'})
+    before = (tmp_path / 'coordinator.json').read_bytes()
+    monkeypatch.setattr(coordinator_client, 'discover', lambda: [])
+
+    def unavailable(config):
+        raise Denied('selected device is unavailable')
+
+    monkeypatch.setattr(coordinator_client, '_device_peer', unavailable)
+    with pytest.raises(Denied, match='selected coordinator'):
+        coordinator_client.client(tmp_path)
+    assert (tmp_path / 'coordinator.json').read_bytes() == before
+    assert not (tmp_path / 'agents.json').exists()
+
+
+def test_missing_selection_for_existing_remote_session_refuses_local_authority(tmp_path, monkeypatch):
+    marker = tmp_path / 'remote-sessions.db'
+    marker.write_bytes(b'existing remote session')
+    monkeypatch.setattr(coordinator_client, 'discover',
+                        lambda: pytest.fail('missing selection reached discovery'))
+    with pytest.raises(Denied, match='selection is missing'):
+        coordinator_client.client(tmp_path)
+    assert marker.read_bytes() == b'existing remote session'
+    assert not (tmp_path / 'agents.json').exists()

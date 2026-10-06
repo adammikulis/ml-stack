@@ -94,12 +94,14 @@ def client(base):
 
 def _client(base):
     config = coordinator_config.load(base)
+    if not config and (base / 'remote-sessions.db').exists():
+        raise Denied('the workspace coordinator selection is missing for an existing remote session')
     if not config and load_cluster_key() is not None:
         candidates = [(peer, info) for peer, info in discover()]
         if len(candidates) > 1:
             raise Denied('several trusted coordinators are advertised; workspace routing is ambiguous')
         if not candidates:
-            raise Denied('the enrolled workspace coordinator is unavailable; shared authority is preserved')
+            return None
         peer, info = candidates[0]
         selected = {'mode': 'remote', 'workspace': info['workspace'], 'name': peer.name,
                     'endpoint': peer.base_url, 'cert': peer.beacon.cert if peer.beacon else ''}
