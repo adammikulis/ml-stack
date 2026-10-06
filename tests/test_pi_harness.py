@@ -43,6 +43,7 @@ def test_pi_launch_is_offline_and_uses_the_policy_extension(monkeypatch, tmp_pat
     assert pi.launch(["--on", "http://127.0.0.1:8080", "--project", str(tmp_path)],
                      say=lambda _: None, run_pi=run_pi) == 0
     assert seen["command"][:5] == [str(binary), "--provider", "mlstack", "--model", "local-model"]
+    assert seen["command"][seen["command"].index("--thinking") + 1] == "off"
     assert "--no-session" in seen["command"] and "--no-mcp" in seen["command"]
     extension = Path(seen["command"][seen["command"].index("--extension") + 1]).read_text()
     assert 'pi.on("tool_call"' in extension and "ml_stack.harnesshook" in extension
@@ -90,3 +91,65 @@ def test_pi_extension_denies_writes_and_reports_exhausted_turns(tmp_path):
     assert rows[1]["state"] == {"aborted": True, "stopped": True}
     assert rows[1]["result"]["block"] and "ml-stack:" in rows[1]["result"]["reason"]
     assert not (tmp_path / "output.py").exists()
+
+
+def test_pi_provider_payload_preserves_explicit_output_budget(tmp_path):
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required by Pi")
+    hook = tmp_path / "budget.mjs"
+    hook.write_text(pi.extension({"maxOutputTokens": 32000,
+                                 "thinking": {"enable_thinking": False}}))
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        'import extension from "./budget.mjs";\n'
+        'const handlers={}; extension({on:(name,fn)=>handlers[name]=fn});\n'
+        'const original={max_tokens:4096,max_completion_tokens:4096,messages:[{role:"user",content:"hello"}],chat_template_kwargs:{other:1}};\n'
+        'console.log(JSON.stringify({original,payload:handlers.before_provider_request({payload:original})}));\n')
+    done = subprocess.run([node, str(driver)], capture_output=True, text=True, timeout=30, check=True)
+    result = json.loads(done.stdout)
+    payload = result["payload"]
+    assert payload["max_tokens"] == 32000
+    assert "max_completion_tokens" not in payload
+    assert payload["messages"] == result["original"]["messages"]
+    assert payload["chat_template_kwargs"] == {"other": 1, "enable_thinking": False}
+    assert result["original"]["max_tokens"] == 4096
+    model = json.loads(pi.models("http://localhost:8080", "local-model", 49152, 32000))["providers"]["mlstack"]["models"][0]
+    assert model["contextWindow"] == 49152 and model["maxTokens"] == 32000
+
+
+def test_native_pi_options_keep_output_effort_and_turns_separate(monkeypatch):
+    from ml_stack import coding
+
+    seen = {}
+    def launch(argv, **kwargs):
+        seen["args"] = argv
+        return 0
+    monkeypatch.setitem(coding.HARNESSES, "pi", launch)
+    assert coding.launch_coding_agent("model", "read-only", "/tmp", max_output_tokens=32000,
+                                      max_turns=7, effort="high", context=65536) == 0
+    for flag, expected in (("--max-output-tokens", "32000"), ("--max-turns", "7"),
+                           ("--effort", "high"), ("--ctx", "65536")):
+        assert seen["args"][seen["args"].index(flag) + 1] == expected
+
+
+def test_chat_agent_output_default_keeps_caller_caps():
+    from ml_stack.workspace.localtools import Guarded
+
+    class Client:
+        def chat(self, messages, **kwargs):
+            return kwargs
+    for effort in ("off", "low", "medium", "high"):
+        guarded = Guarded(Client(), effort=effort, limits=(60, 5), stop=lambda: False,
+                          max_output_tokens=8192)
+        assert guarded.chat([])["n_predict"] == 8192
+        assert guarded.chat([], n_predict=32000)["n_predict"] == 32000
+        assert guarded.chat([], n_predict=0)["n_predict"] == 0
+        explicit = guarded.chat([], max_tokens=17000)
+        assert explicit["max_tokens"] == 17000 and "n_predict" not in explicit

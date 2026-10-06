@@ -60,9 +60,7 @@ class TaskManager(Manager):
         if harness not in ('pi', 'claude'):
             raise ValueError('canonical coding needs a supported coding harness')
         if harness == 'pi':
-            level = localeffort.clamp(self.agent.effort if self.agent.effort != 'auto' else 'low',
-                                      self.agent.max_effort)
-            return super()._process(turn, [*command, '--thinking', level], environment, context)
+            return super()._process(turn, command, environment, context)
         command = [*command, '--system-prompt', BOOTSTRAP,
                    '--tools', 'Read,Edit,Write,Bash,Glob,Grep,Agent',
                    '--max-turns', str(localloop.caps_of(self.agent).rounds)]
@@ -91,7 +89,7 @@ def perform(ws, agent, task, project, control):
     conversation = store.start(model=agent.model, title=task['title'], settings={
         'mode': 'coding', 'harness': agent.harness, 'role': agent.role,
         'project': str(project), 'context': agent.ctx, 'draft': 'auto',
-        'effort': agent.effort, 'max_effort': agent.max_effort})
+        'effort': agent.effort, 'max_effort': agent.max_effort, 'max_output_tokens': agent.max_output_tokens})
     turn, done = Turn(conversation.id), threading.Event()
     root = Path(__file__).resolve().parents[3]
     runtime_commit = git.head(root) if (root / '.git').exists() else f'installed {version("ml-stack")}'

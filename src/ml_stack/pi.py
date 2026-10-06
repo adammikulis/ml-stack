@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from ml_stack import harnessing
+from ml_stack.client import families
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of
 from ml_stack.log import say
 from ml_stack.serve import provenance
@@ -19,11 +20,11 @@ from ml_stack.serve import provenance
 __all__ = ["extension", "launch", "models"]
 
 
-def models(base_url: str, alias: str, window: int) -> str:
+def models(base_url: str, alias: str, window: int, max_output_tokens: int = 8192) -> str:
     """Pi provider configuration for the model already served by ml-stack."""
     model = {"id": alias, "name": alias, "reasoning": True, "input": ["text"],
              "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-             "contextWindow": window, "maxTokens": max(1, window)}
+             "contextWindow": window, "maxTokens": max_output_tokens}
     return json.dumps({"providers": {"mlstack": {"baseUrl": base_url.rstrip("/"),
         "api": "openai-completions", "apiKey": "local", "models": [model]}}}, sort_keys=True)
 
@@ -41,6 +42,13 @@ function call(args, payload) {{
 }}
 export default function (pi) {{
   let turns = 0;
+  pi.on("before_provider_request", (event) => {{
+    const payload = {{...event.payload}};
+    delete payload.max_completion_tokens;
+    payload.max_tokens = cfg.maxOutputTokens;
+    if (cfg.thinking) payload.chat_template_kwargs = {{...payload.chat_template_kwargs, ...cfg.thinking}};
+    return payload;
+  }});
   pi.on("turn_start", (_event, ctx) => {{
     if (++turns > cfg.maxTurns) {{
       console.log(JSON.stringify({{type:"error",message:"Pi turn budget exhausted"}}));
@@ -68,6 +76,8 @@ export default function (pi) {{
 def parser() -> argparse.ArgumentParser:
     ap = harnessing.parser("pi", "Pi", DEFAULT_PORT, DEFAULT_SLOTS)
     ap.add_argument("--max-turns", type=int, default=60)
+    ap.add_argument("--max-output-tokens", type=int, default=8192)
+    ap.add_argument("--effort", choices=("off", "low", "medium", "high"), default="off")
     return ap
 
 
@@ -85,6 +95,9 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         return 2
     if args.on and args.model:
         say("error: --on names a server already running; do not name a model as well")
+        return 2
+    if args.max_output_tokens <= 0:
+        say("error: --max-output-tokens must be positive")
         return 2
     if args.max_turns <= 0:
         say("error: --max-turns must be positive")
@@ -120,16 +133,17 @@ def _run(args, command, served, say, runner):
     try:
         with harnessing.opened(args,"pi",served,say) as run:
             config_dir = run.files.path
-            (config_dir / "models.json").write_text(models(base_url,alias,window),encoding="utf-8")
+            (config_dir / "models.json").write_text(models(base_url,alias,window,args.max_output_tokens),encoding="utf-8")
             protected = harnessing.protected_paths(run.files)
             hook = run.files.write("ml-stack.ts", extension({"python": sys.executable,
                 "role": args.role, "label": run.seat.name, "root": str(run.cwd),
-                "protected": protected, "maxTurns": args.max_turns}))
+                "protected": protected, "maxTurns": args.max_turns, "maxOutputTokens": args.max_output_tokens,
+                "thinking": families.for_model_id(alias).think_kwargs(args.effort != "off")}))
             env = {**os.environ,"PI_CODING_AGENT_DIR":str(config_dir),"PI_OFFLINE":"1",
                    "ML_STACK_AGENT":"1","ML_STACK_NONINTERACTIVE":"1"}
             argv = [binary,"--provider","mlstack","--model",alias,"--mode","json","--print","--no-session",
                     "--no-mcp","--no-skills","--no-prompt-templates","--no-extensions","--extension",str(hook),
-                    "--append-system-prompt",run.brief,*extra]
+                    "--append-system-prompt",run.brief,"--thinking",args.effort,*extra]
             say(f"role {args.role}; Pi tools pass through ml-stack's classifier")
             return int(runner(argv,env))
     except ValueError as why:
