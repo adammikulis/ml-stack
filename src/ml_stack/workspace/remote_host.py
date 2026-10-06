@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json
 from ml_stack.workspace import onboard, tokens
 from ml_stack.workspace.boards import ANNOUNCE
-from ml_stack.workspace.claims import Conflict
+from ml_stack.workspace.claims import Conflict, normal
 from ml_stack.workspace.identity import AGENT, Denied
 from ml_stack.workspace.project_history import adopt
 from ml_stack.workspace.rates import RateLimited, Rates
@@ -152,7 +153,10 @@ class WorkspaceHost:
                 raise ValueError("invalid operation arguments")
             if operation in {"whoami", "agents", "claims", "who", "history"} and "read" not in who.can:
                 raise Denied("agent capability has no read permission")
-            if operation == "delegate":
+            if operation in {"native.reserve", "native.release"}:
+                ws._may(who, "claim")
+                result = self._native_claims(ws, who, token, project_id, operation, args, kwargs)
+            elif operation == "delegate":
                 if len(args) != 1 or kwargs:
                     raise ValueError("delegation takes one child name")
                 name = args[0]
@@ -209,6 +213,50 @@ class WorkspaceHost:
             return 409, {"error": str(exc)}
         except (ValueError, TypeError) as exc:
             return 400, {"error": str(exc)}
+
+    def _native_claims(self, ws, who, token, project_id, operation, args, kwargs):
+        if operation == "native.release":
+            if len(args) != 2 or kwargs:
+                raise ValueError("native release takes a resource kind and relative key")
+            kind, key = args
+            mapped = self._native_resource(project_id, kind, key)
+            return {**ws.release(token, kind, mapped), "key": key}
+        if len(args) != 1 or not isinstance(args[0], list) or not 1 <= len(args[0]) <= 128:
+            raise ValueError("native reservation takes 1-128 resource pairs")
+        if set(kwargs) - {"label"}:
+            raise ValueError("native reservation accepts only a label")
+        label = kwargs.get("label", "")
+        if not isinstance(label, str) or len(label) > 200 or any(ord(char) < 32 for char in label):
+            raise ValueError("native reservation label is bounded text")
+        resources, originals = [], {}
+        for resource in args[0]:
+            if not isinstance(resource, (list, tuple)) or len(resource) != 2:
+                raise ValueError("native reservation takes resource pairs")
+            kind, key = resource
+            mapped = self._native_resource(project_id, kind, key)
+            resources.append((kind, mapped))
+            originals[(kind, normal(kind, mapped))] = key
+        try:
+            made = ws.claims.reserve(who, resources, {"note": label})
+        except Conflict as exc:
+            raise Conflict("a requested project resource belongs to another worker", {}) from exc
+        ws.audit("remote.native.reserve", who.id, project_id=project_id, resources=len(made))
+        return [{**row, "key": originals[(row["kind"], row["key"])]} for row in made]
+
+    def _native_resource(self, project_id, kind, key):
+        if kind not in {"area", "branch"} or not isinstance(key, str):
+            raise ValueError("native reservations use project areas and branches")
+        if kind == "branch":
+            return normal(kind, key)
+        if (not key or len(key) > 4096 or "\\" in key or key.startswith("/")
+                or any(part in {"", ".", ".."} for part in key.split("/"))
+                or any(ord(char) < 32 for char in key)):
+            raise ValueError("native areas are relative project paths")
+        root = Path(self.projects.get(project_id).root).resolve()
+        target = (root / key).resolve()
+        if not target.is_relative_to(root):
+            raise Denied("native area escapes its project")
+        return str(target)
 
     def _identity(self, ws: Workspace, project_id: str, token: str, *, cluster: str = "", cluster_id: str = "") -> Any:
         who = ws.auth(token)
