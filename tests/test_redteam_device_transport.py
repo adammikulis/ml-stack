@@ -14,6 +14,8 @@ from ml_stack.http import Server, ServerError
 from ml_stack.workspace import coordinator_client
 from ml_stack.workspace.identity import Denied
 
+pytest_plugins = ("test_device_agent_bootstrap",)
+
 
 @pytest.mark.redteam
 @pytest.mark.parametrize("change", ["revoked", "certificate", "unpaired", "missing", "ambiguous"])

@@ -262,6 +262,23 @@ class ProjectRegistry:
                 "bootstrap_sha256": hashlib.sha256(code).hexdigest()}
 
 
+def register(handler, registry: ProjectRegistry | None, cluster_key_path: Path | None, body: bytes) -> bool:
+    """Register a local Git checkout under authenticated active Dev membership."""
+    if urllib.parse.urlparse(handler.path).path != "/workspace/v1/local-project":
+        return False
+    if not project_enrollment.local(handler._sealing(), cluster_key_path, handler.client_address[0]):
+        handler._send(403, {"error": "project registration requires this device's authenticated Dev cluster"})
+    elif registry is None:
+        handler._send(501, {"error": "project registry unavailable"})
+    else:
+        request = handler._object(body)
+        try:
+            handler._send(200, registry.register(Path(request.get("root", "")), request.get("project_id", "")))
+        except (TypeError, ValueError, OSError):
+            handler._send(400, {"error": "project registration requires a matching local Git checkout"})
+    return True
+
+
 def answer(handler, registry: ProjectRegistry | None, parsed, *, cluster_key_path: Path | None = None) -> bool:
     """Answer authenticated source catalogue and immutable bundle requests."""
     prefix = "/workspace/v1/projects"

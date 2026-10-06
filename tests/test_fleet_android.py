@@ -1,4 +1,5 @@
 """Android enrollment, scoped sessions and streaming route boundaries."""
+import base64
 import io
 import json
 import ssl
@@ -9,14 +10,16 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack.fleet import companion_routes
-from ml_stack.fleet.discovery import Membership
+from ml_stack.fleet.discovery import Membership, derive_token
 from ml_stack.fleet.invite_routes import ui_route
 from ml_stack.fleet.invites import Invitations, decode, proof
+
+CLUSTER_KEY = base64.urlsafe_b64encode(b"x" * 32).rstrip(b"=")
 
 
 @pytest.fixture
 def enrolled():
-    members = [Membership("lab", b"cluster-secret")]
+    members = [Membership("lab", CLUSTER_KEY)]
     store = Invitations(lambda: members, lambda: ("https://192.168.2.59:8770", "a" * 64))
     clock = [1000]
     store.clock = lambda: clock[0]
@@ -36,7 +39,7 @@ def test_android_grant_contains_only_scoped_session(enrolled):
     assert grant["capabilities"] == ["fleet.status", "chat"]
     assert len(grant["device_id"]) == 32 and len(decode(grant["token"])) == 32
     assert store.authorize(grant["token"])["group"] == "lab"
-    assert b"cluster-secret" not in json.dumps(grant).encode()
+    assert CLUSTER_KEY not in json.dumps(grant).encode()
     assert grant["token"] not in repr(store.devices)
     assert "token" not in store.active_devices()[0]
 
@@ -103,7 +106,7 @@ def test_route_authentication_refuses_inappropriate_authority(enrolled, change):
     if change == "missing":
         request.headers = {}
     if change == "cluster":
-        request.headers = {"Authorization": "Bearer cluster-secret"}
+        request.headers = {"Authorization": "Bearer " + derive_token(CLUSTER_KEY)}
     if change == "revoked":
         store.revoke(grant["device_id"])
     assert companion_routes.answer(ui(store), request)

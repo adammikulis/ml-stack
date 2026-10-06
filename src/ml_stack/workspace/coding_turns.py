@@ -111,7 +111,7 @@ class Manager:
             context = multiprocessing.get_context("spawn")
             messages = context.Queue(maxsize=128)
             turn.cancellation = context.Event()
-            process = context.Process(target=worker, args=(str(self.store.root), turn.conversation, conversation, prompt, messages, turn.cancellation), daemon=True)
+            process = context.Process(target=worker, args=(str(self.store.root), turn.conversation, conversation, prompt, (messages, turn.cancellation)), daemon=True)
             turn.process = process
             process.start()
             threading.Thread(target=self._collect, args=(turn, messages), daemon=True).start()
@@ -293,7 +293,8 @@ class Manager:
                             shutil.copy2(path, destination)
 
 
-def worker(root, cid, conversation, prompt, output, cancellation) -> None:
+def worker(root, cid, conversation, prompt, communication) -> None:
+    output, cancellation = communication
     turn = Turn(cid, output=output)
     finished = threading.Event()
     def watch():

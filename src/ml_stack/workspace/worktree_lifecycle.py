@@ -53,9 +53,10 @@ def checkpoint(base: Path, owner: str) -> None:
             remember(base, owner, scope['label'], str(path))
 
 
-def record_cleanup(base: Path, path: Path, commit: str, landed: str,
+def record_cleanup(base: Path, path: Path, proof: tuple[str, str],
                    primary: Path, development: str) -> None:
     """Record a completed maintained removal with its captured source and landed commits."""
+    commit, landed = proof
     with held(base / 'worktree-lifecycle.lock'), GraphStore(base / 'worktree-lifecycle.db') as graph:
         for row in graph.nodes('worktree-lifecycle'):
             scope = row['attrs']
@@ -96,7 +97,7 @@ def cleanup(base: Path, owner: str, path: str, claims, *, claim_owner: str = '')
     commit = repo.git(target, 'rev-parse', 'HEAD')
     landed = repo.git(primary, 'rev-parse', f"refs/heads/{source['development']}")
     repo.remove_merged(primary, target, branch, landed)
-    record_cleanup(base, target, commit, landed, primary, source['development'])
+    record_cleanup(base, target, (commit, landed), primary, source['development'])
     return {'path': str(target), 'commit': commit, 'landed': landed, 'cleanup_verified': True}
 
 

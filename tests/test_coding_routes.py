@@ -22,7 +22,7 @@ def coding_api(tmp_path, monkeypatch):
     server.ui.conversations = Conversations(tmp_path / "chats")
     folder = tmp_path / "project"
     folder.mkdir()
-    made = server.ui.conversations.start(model="test-model", settings={"mode": "coding", "project": str(folder), "role": "read-only"})
+    made = server.ui.conversations.start(model="test-model", settings={"mode": "coding", "project": str(folder), "role": "read-only", "harness": "codex"})
     try:
         yield server, made, kit
     finally:

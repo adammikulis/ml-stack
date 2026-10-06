@@ -213,7 +213,7 @@ class DevelopmentIntegration:
             commit = repo.git(path, 'rev-parse', 'HEAD') if path.exists() else ''
             repo.remove_merged(self.primary, path, branch, tip, lock_reason=self.record['id'])
             if commit:
-                worktree_lifecycle.record_cleanup(self.ws.base, path, commit, tip,
+                worktree_lifecycle.record_cleanup(self.ws.base, path, (commit, tip),
                                                  self.primary, self.development)
         with held(self.ws.base / 'coordination.lock'), GraphStore(self.ws.base / 'coordination.db') as graph, graph.transaction():
             scope = {**self.worktree, 'state': 'cleaned', 'landed_commit': tip}

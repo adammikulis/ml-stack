@@ -27,7 +27,7 @@ def native_cli() -> None:
     print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 4}}), flush=True)
 
 
-def fixture_worker(root, cid, conversation, prompt, output, cancellation) -> None:
+def fixture_worker(root, cid, conversation, prompt, communication) -> None:
     from ml_stack import coding
     from ml_stack.workspace.coding_turns import worker
     def launch(model, role, project, **options):
@@ -41,7 +41,7 @@ def fixture_worker(root, cid, conversation, prompt, output, cancellation) -> Non
         finally:
             seat.revoke()
     coding.launch_coding_agent = launch
-    worker(root, cid, conversation, prompt, output, cancellation)
+    worker(root, cid, conversation, prompt, communication)
 
 
 if __name__ == "__main__":
