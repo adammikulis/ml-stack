@@ -24,6 +24,14 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
     uname.chmod(0o755)
 
     uv_log = tmp_path / "uv.log"
+    fake_packages = tmp_path / "fake-packages"
+    fake_packages.mkdir()
+    ffmpeg = tmp_path / "fake-ffmpeg"
+    ffmpeg.write_text("#!/bin/sh\necho ffmpeg-test-binary\n")
+    ffmpeg.chmod(0o755)
+    (fake_packages / "imageio_ffmpeg.py").write_text(
+        "import os\n\ndef get_ffmpeg_exe():\n    return os.environ['FAKE_FFMPEG']\n"
+    )
     uv = fake_bin / "uv"
     uv.write_text(
         "#!/bin/sh\n"
@@ -44,6 +52,8 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
             "UV": str(uv),
             "UV_LOG": str(uv_log),
             "PYTHON_FOR_TEST": sys.executable,
+            "FAKE_FFMPEG": str(ffmpeg),
+            "PYTHONPATH": str(fake_packages),
             "ML_STACK_WINDOWS_USER": "no-such-user",
         }
     )
@@ -66,7 +76,7 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
         [
             "bash",
             "-c",
-            '. "$1"; printf "%s\\n%s\\n%s\\n" "$CUDA_HOME" "$CUDA_PATH" "$(command -v nvcc)"; nvcc --version',
+            '. "$1"; printf "%s\\n%s\\n%s\\n%s\\n" "$CUDA_HOME" "$CUDA_PATH" "$(command -v nvcc)" "$(command -v ffmpeg)"; nvcc --version; ffmpeg --version',
             "test-shell",
             str(config),
         ],
@@ -79,9 +89,14 @@ def test_setup_wsl_dev_persists_cuda_compiler_in_environment(tmp_path: Path) -> 
         str(venv / "lib/python3.12/site-packages/nvidia/cu13"),
         str(venv / "lib/python3.12/site-packages/nvidia/cu13"),
         str(nvcc),
+        str(venv / "bin/ffmpeg"),
         "Cuda compilation tools, release 13.0, V13.0.88",
+        "ffmpeg-test-binary",
     ]
 
     install_args = uv_log.read_text()
     assert "build>=1.2" in install_args
     assert "cuda-toolkit[nvcc]==13.0.3" in install_args
+    assert "--index-url https://download.pytorch.org/whl/cu130 torchaudio==2.11.0+cu130" in install_args
+    assert (venv / "bin/ffmpeg").is_symlink()
+    assert (venv / "bin/ffmpeg").resolve() == ffmpeg

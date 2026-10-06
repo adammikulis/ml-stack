@@ -71,6 +71,7 @@ coordinator = ["py-machineid"]
 # pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
 # each engine still wants
 speech = ["faster-whisper>=1.2.1", "piper-tts>=1.8.0"]
+audio = ["ml-stack[speech]", "imageio-ffmpeg>=0.6,<1", "torchaudio>=2.11"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
 # `ml-stack-decide`: the embed backend's head
@@ -128,7 +129,7 @@ all = [
     "ml-stack[agents,train,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot,fleet-tls,fleet-update,fleet-onboard]",
 ]
 wsl-dev = [
-    "ml-stack[all,test,arrays,claude,coordinator,decide,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,speech,standard,train-lora,web]",
+    "ml-stack[all,test,arrays,audio,claude,coordinator,decide,decide-pointer,gym-drone,guardrails,guard-model,gym,hub,mcp,memory,privacy,redteam,standard,train-lora,web]",
 ]
 
 [project.urls]

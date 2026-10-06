@@ -44,7 +44,12 @@ fi
 "$UV" pip install --python "$VENV/bin/python" "${ROOT}[wsl-dev]" \
     "ruff==0.13.3" "pyright==1.1.411" "build>=1.2" 'cuda-toolkit[nvcc]==13.0.3'
 "$UV" pip install --python "$VENV/bin/python" \
+    --index-url https://download.pytorch.org/whl/cu130 'torchaudio==2.11.0+cu130'
+"$UV" pip install --python "$VENV/bin/python" \
     'metadrive-simulator @ git+https://github.com/metadriverse/metadrive.git@85e5dadc6c7436d324348f6e3d8f8e680c06b4db'
+
+ffmpeg_binary="$("$VENV/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+ln -sfn -- "$ffmpeg_binary" "$VENV/bin/ffmpeg"
 
 mkdir -p "$(dirname -- "$CONFIG")"
 tmp="$CONFIG.tmp"
@@ -103,5 +108,6 @@ if ! grep -Fqx "$source_line" "$BASHRC"; then
 fi
 
 printf 'Installed ml-stack with all supported extras and test dependencies in %s\n' "$VENV"
+printf 'Installed CUDA-matched torchaudio and exposed the bundled ffmpeg executable in %s/bin.\n' "$VENV"
 printf 'Opened shells will use source at %s and scan configured Windows model caches.\n' "$ROOT"
 printf 'Run: source %s\n' "$BASHRC"
