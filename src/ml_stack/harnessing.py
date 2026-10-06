@@ -184,7 +184,7 @@ def config_for(found: str, want: Want, say: Callable[[str], None]):
     if draft.lower() != "auto":
         config = config.over(draft="", spec_type="", mtp=False if draft.lower() == "none" else None)
     config = drafted(config, draft, say=say)
-    settings = dict(slot_context=each, cache_type=KV)
+    settings = {"slot_context": each, "cache_type": KV}
     if fit is not None:
         settings.update(cache_type=fit.kv_cache_type, flash_attn=fit.flash_attn,
                         extra_args=("-ub", str(fit.batch)))
