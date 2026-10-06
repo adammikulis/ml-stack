@@ -48,3 +48,45 @@ def test_pi_launch_is_offline_and_uses_the_policy_extension(monkeypatch, tmp_pat
     assert 'pi.on("tool_call"' in extension and "ml_stack.harnesshook" in extension
     assert seen["env"]["PI_OFFLINE"] == "1"
     assert seen["env"]["PI_CODING_AGENT_DIR"] == str(config)
+
+
+def test_pi_events_stream_usage_and_fail_closed():
+    from ml_stack.workspace.coding_events import event
+
+    assert event({"type": "message_update", "assistantMessageEvent":
+        {"type": "text_delta", "delta": "Hello"}}, "pi") == {"delta": "Hello"}
+    assert event({"type": "turn_end", "message": {"usage": {"output": 17}}}, "pi") == {"usage": {"output": 17}}
+    assert event({"type": "message_end", "message": {"role": "assistant",
+        "stopReason": "error", "errorMessage": "local runtime failed"}}, "pi") == {"error": "local runtime failed"}
+    assert event({"type": "tool_execution_end", "isError": True, "result":
+        {"content": [{"type": "text", "text": "ml-stack: person refused"}]}}, "pi") == {"blocked": "ml-stack: person refused"}
+
+
+def test_pi_extension_denies_writes_and_reports_exhausted_turns(tmp_path):
+    import json
+    import shutil
+    import subprocess
+    import sys
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required by Pi")
+    hook = tmp_path / "policy.mjs"
+    hook.write_text(pi.extension({"python": sys.executable, "role": "read-only",
+        "label": "isolated-pi", "root": str(tmp_path), "protected": [], "maxTurns": 1}))
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        'import extension from "./policy.mjs";\n'
+        'const handlers={}; extension({on:(name,fn)=>handlers[name]=fn});\n'
+        'const state={}; const ctx={abort:()=>state.aborted=true,shutdown:()=>state.stopped=true};\n'
+        'handlers.turn_start({},ctx); handlers.turn_start({},ctx);\n'
+        'const result=handlers.tool_call({toolName:"write",input:{path:"output.py",content:"x"}});\n'
+        'console.log(JSON.stringify({state,result}));\n')
+    done = subprocess.run([node, str(driver)], capture_output=True, text=True, timeout=30, check=True)
+    rows = [json.loads(line) for line in done.stdout.splitlines()]
+    assert rows[0] == {"type": "error", "message": "Pi turn budget exhausted"}
+    assert rows[1]["state"] == {"aborted": True, "stopped": True}
+    assert rows[1]["result"]["block"] and "ml-stack:" in rows[1]["result"]["reason"]
+    assert not (tmp_path / "output.py").exists()
