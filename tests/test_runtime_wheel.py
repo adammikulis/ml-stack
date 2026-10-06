@@ -106,6 +106,13 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
     cached = prefix / "ml-stack-wheels" / COMMIT / wheel.name
     cached.parent.mkdir(parents=True)
     shutil.copy2(wheel, cached)
+    newer = tmp_path / "newer" / wheel.name
+    newer.parent.mkdir()
+    shutil.copy2(wheel, newer)
+    runtime_wheel.stamp(newer, "f" * 40, root)
+    next_cache = prefix / "ml-stack-wheels" / ("f" * 40) / newer.name
+    next_cache.parent.mkdir(parents=True)
+    shutil.copy2(newer, next_cache)
     env = {**os.environ, "PYTHONPATH": str(target)}
     script = ("import json, os, subprocess, sys; from pathlib import Path; from importlib.metadata import version; "
               "from ml_stack.fleet import runtime_wheel as r; from ml_stack.fleet.environment import Environment; "
@@ -115,18 +122,24 @@ def test_built_wheel_imports_from_an_immutable_install(tmp_path):
               "loaded = subprocess.run([str(managed.python), '-c', "
               "'from ml_stack.fleet import runtime_wheel as r; print(r.current_wheel()); print(r.wheel_commit(r.current_wheel()))'], "
               "env=clean, capture_output=True, text=True, check=True); "
+              "before = Path(r.__file__).with_name('built-from').read_text().strip(); old_wheels = str(managed.wheels()); "
+              "Path(r.__file__).with_name('built-from').write_text('f' * 40); "
+              "updated = managed.install(['core']); assert updated['core']['ok'], updated; "
+              "reloaded = subprocess.run([str(managed.python), '-c', "
+              "'from ml_stack.fleet import runtime_wheel as r; print(r.wheel_commit(r.current_wheel()))'], "
+              "env=clean, capture_output=True, text=True, check=True); "
               "print(json.dumps([r.__file__, r.source_checkout().as_posix(), "
-              "Path(r.__file__).with_name('built-from').read_text().strip(), version('ml-stack'), "
-              "str(managed.wheels()), loaded.stdout.splitlines()]))")
+              "before, version('ml-stack'), old_wheels, loaded.stdout.splitlines(), reloaded.stdout.strip()]))")
     done = subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=env,
                           check=True, capture_output=True, text=True)
-    installed, source, commit, version, wheels, managed_runtime = json.loads(done.stdout)
+    installed, source, commit, version, wheels, managed_runtime, updated_commit = json.loads(done.stdout)
     assert Path(installed).is_relative_to(target)
     assert source == str(root) and commit == COMMIT
     assert version == wheel.name.split("-")[1]
     assert Path(wheels) == cached.parent
     assert Path(managed_runtime[0]).is_relative_to(tmp_path / "managed" / "env")
     assert managed_runtime[1] == COMMIT
+    assert updated_commit == "f" * 40
 
 
 def test_current_wheel_requires_matching_immutable_commit(tmp_path, monkeypatch):
