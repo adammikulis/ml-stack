@@ -106,11 +106,14 @@ def test_chat_assignment_review_finishes_without_git_scope(board):
     from dataclasses import replace
 
     from ml_stack.workspace import localagent
+    complete(board)
     runner = localagent.load(board.ws, 'native-worker')
     localagent.save(board.ws, replace(runner, profile='chat'))
     spec = dict(board.spec, title='Answer a question', source_key='chat:question', capabilities=['chat'])
     task = board.board.create(board.parent, spec)
     allocation = task_scheduler.assign_next(board.ws, board.parent, board.worker_id, 'native-grant')
+    assert allocation['task'] == task['id']
+    assert allocation['worker'] == board.worker_id
     board.board.claim(board.child, task['id'], allocation['allocation_id'])
     board.board.submit(board.child, task['id'], {
         'artifacts': {'answer.txt': 'a' * 64},
