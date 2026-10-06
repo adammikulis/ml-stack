@@ -11,7 +11,7 @@
 # tests    `path` or `path::test_name`; the gate fails when either is gone.
 
 [ratchet]
-uncovered = 54
+uncovered = 53
 partial = 199
 
 [[group]]
@@ -21,6 +21,33 @@ count = 1
 tests = ["tests/test_workspace_backlog.py::test_repository_infers_github_origin_as_argument_vector",
          "tests/test_workspace_backlog.py::test_repository_rejects_traversal_owner_in_origin"]
 note = "Origin URLs are read with a fixed argv, timeout and checkout directory; hostile URL syntax does not become a repository"
+
+
+[[group]]
+match = ["egress:workspace/automatic_connection.py:_register"]
+status = "covered"
+count = 1
+tests = ["tests/test_automatic_project_connection.py::test_local_registration_refuses_hostile_response"]
+note = "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
+
+[[group]]
+match = ["route:fleet/api.py:/workspace/v1/local-project"]
+status = "covered"
+count = 1
+tests = ["tests/test_project_enrollment_admission.py::test_local_project_route_refuses_unauthorized_registration",
+         "tests/test_project_enrollment_admission.py::test_native_registration_requires_local_active_dev_proof",
+         "tests/test_project_board_metadata.py::test_native_registration_refuses_identity_mismatch_before_mutation",
+         "tests/test_project_board_metadata.py::test_native_registration_refuses_unbounded_or_relative_path"]
+note = "native registration requires loopback sealed active Dev admission and an exact bounded local Git identity; rejected requests do not register or expose a path"
+
+[[group]]
+match = ["route:fleet/api.py:/jobs/*"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_daemon.py::test_job_reads_refuse_unknown_or_traversing_identifiers",
+         "tests/test_fleet_daemon.py::test_job_runs_and_reports_success",
+         "tests/test_fleet_daemon.py::test_unknown_job_is_404"]
+note = "job reads require authentication and select existing job identifiers; unknown, traversing and malformed paths cannot return outside-file contents"
 
 
 [[group]]
@@ -261,8 +288,9 @@ note = "start and stop need the person's session, a loopback origin and JSON; ho
 [[group]]
 match = ["route:fleet/conversation_routes.py:/ui/conversations*"]
 status = "covered"
-count = 1
-tests = ["tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
+count = 2
+tests = ["tests/test_fleet_conversation_settings_routes.py::test_defaults_endpoint_exposes_the_persisted_settings_source",
+         "tests/test_fleet_conversation_settings_routes.py::test_conversation_mutations_require_ui_authority",
          "tests/test_fleet_conversation_settings_routes.py::test_invalid_updates_return_400_without_changing_the_chat"]
 note = "socket requests reject missing UI authority and foreign origins; invalid settings and unknown fields preserve persisted history"
 
@@ -452,6 +480,21 @@ tests = [
   "tests/test_fleet_found_route.py::test_first_run_refuses_the_list_from_another_machine",
   "tests/test_fleet_found_route.py::test_a_machine_in_a_cluster_asks_for_the_list_behind_its_sign_in",
 ]
+
+[[group]]
+match = ["spawn:pi.py:launch"]
+status = "covered"
+count = 1
+tests = ["tests/test_pi_harness.py::test_pi_launch_is_offline_and_uses_the_policy_extension"]
+note = "Pi runs offline with ml-stack's tool-policy extension and an explicit local model endpoint"
+
+[[group]]
+match = ["route:fleet/routes.py:/ui/credentials"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_credentials.py::test_ui_saves_multiple_named_credentials_without_returning_values",
+         "tests/test_fleet_credentials.py::test_joined_credential_management_requires_a_signed_in_session"]
+note = "credential values are saved without being returned; joined credential management requires a signed-in session"
 
 [[group]]
 match = ["route:fleet/routes.py:*", "route:fleet/chat_routes.py:*", "handler:fleet/ui.py:*"]

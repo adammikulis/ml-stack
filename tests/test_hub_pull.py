@@ -227,6 +227,17 @@ def test_the_token_comes_from_the_environment_then_the_login_file(tmp_path, monk
     assert remote.token() == "from-env"
 
 
+def test_the_token_can_come_from_the_ml_stack_credential_store(tmp_path, monkeypatch):
+    from ml_stack import credentials
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "state"))
+    credentials.set("HF_TOKEN", "from-ml-stack")
+    assert remote.token() == "from-ml-stack"
+
+
 def test_search_returns_gguf_repositories_with_builds_and_sizes(server):
     found = hub.search("thing")
     (one,) = found

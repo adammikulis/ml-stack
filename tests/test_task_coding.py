@@ -41,8 +41,10 @@ def test_native_turn_and_output_limits_preserve_authority(monkeypatch, native):
     assert 'CLAUDE_CODE_MAX_OUTPUT_TOKENS' not in seen['environment']
     assert seen['environment']['CLAUDE_CODE_EFFORT_LEVEL'] == 'low'
     assert seen['environment']['AUTHORITY'] == 'unchanged'
-    with pytest.raises(ValueError, match='bounded Claude'):
-        manager._process(None, ['codex'], {}, (None, 'codex', 'prompt', None))
+    manager._process(None, ['pi', '--mode', 'json'], {'AUTHORITY': 'unchanged'},
+                     (None, 'pi', 'prompt', None))
+    assert seen['command'] == ['pi', '--mode', 'json']
+    assert seen['environment']['AUTHORITY'] == 'unchanged'
 
 
 @pytest.mark.parametrize('effort, thinking', [('off', False), ('medium', True)])
@@ -140,3 +142,26 @@ def test_proposal_binds_committed_files_and_deletions(tmp_path):
     (tmp_path / 'new.py').write_text('DIRTY = True\n')
     with pytest.raises(RuntimeError, match='uncommitted changes'):
         task_coding._proposal(localagent.Agent('worker', 'qwen'), task, tmp_path, turn, 'python')
+
+
+def test_canonical_pi_launcher_receives_independent_budget_and_clamped_effort(tmp_path, monkeypatch):
+    from ml_stack import coding
+    from ml_stack.fleet.conversations import Conversations
+
+    project = tmp_path / 'project'
+    project.mkdir()
+    store = Conversations(tmp_path / 'chats')
+    conversation = store.start(model='qwen', settings={
+        'mode': 'coding', 'harness': 'pi', 'project': str(project),
+        'effort': 'high', 'max_effort': 'low', 'max_output_tokens': 32000})
+    seen = {}
+    def launch(model, role, project, **options):
+        seen.update(options)
+        return 0
+    monkeypatch.setattr(coding, 'launch_coding_agent', launch)
+    agent = localagent.Agent('worker', 'qwen', profile='coding', harness='pi', max_output_tokens=32000)
+    manager = task_coding.TaskManager(store, SimpleNamespace(base=None), agent)
+    manager._run(task_coding.Turn(conversation.id), conversation, 'Implement a queue')
+    assert seen['max_output_tokens'] == 32000
+    assert seen['effort'] == 'low'
+    assert seen['max_turns'] == 60

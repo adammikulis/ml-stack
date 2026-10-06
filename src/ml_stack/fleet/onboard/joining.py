@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import http.client
 import json
+import re
 import secrets
 import threading
 import time
@@ -28,6 +29,7 @@ from .pairing import fingerprint_of, unverified_context
 __all__ = [
     "API",
     "Declined",
+    "JoinOptions",
     "Joiner",
     "Joining",
     "Offer",
@@ -49,6 +51,20 @@ PLAIN = "plain"
 MOST_PENDING = 16
 PENDING_S = 30.0
 MOST_BODY = 4096
+
+
+@dataclass(frozen=True, slots=True)
+class JoinOptions:
+    """Cluster admission profile and discovery controls."""
+
+    mode: str | None = None
+    port: int | None = None
+    timeout_s: float = 1.5
+    action: str | None = None
+    existing: bool = False
+
+
+DEFAULT_JOIN_OPTIONS = JoinOptions()
 
 
 def join_secret(passphrase: str, group: str) -> str:
@@ -102,9 +118,12 @@ class Joining:
         self._pending: dict[str, _Pending] = {}
         self._lock = threading.Lock()
 
-    def handle(self, path: str, body: dict[str, Any], source: str) -> tuple[int, dict[str, Any]]:
+    def handle(self, path: str, body: dict[str, Any], source: str, *,
+               transport_tls: bool = False) -> tuple[int, dict[str, Any]]:
         """The status and body answering ``POST`` to ``path`` under `API`."""
         try:
+            if path == f"{API}/automatic":
+                return 200, self._automatic(body, source, transport_tls=transport_tls)
             if path == f"{API}/start":
                 return 200, self._start(body, source)
             if path == f"{API}/finish":
@@ -112,6 +131,28 @@ class Joining:
         except Refusal as why:
             return why.status, {"error": why.reason}
         return 404, {"error": "no such route"}
+
+    def _automatic(self, body: dict[str, Any], source: str, *, transport_tls: bool) -> dict[str, Any]:
+        try:
+            group = disc.require_name(body.get("group"))
+        except DiscoveryError as exc:
+            raise Refusal(400, str(exc)) from None
+        groups = self.groups()
+        member = next((row for row in groups if row.group == group), None)
+        if not groups or groups[0].mode != "dev" or member is None or member.mode != "dev":
+            raise Refusal(403, "this cluster requires explicit admission")
+        if not transport_tls or self.fingerprint() == PLAIN:
+            raise Refusal(403, "automatic cluster admission requires TLS")
+        if self.lockout.locked(source) or self.everyone.locked("automatic"):
+            raise Refusal(429, "too many automatic joins; retry shortly")
+        nonce = body.get("nonce")
+        if not isinstance(nonce, str) or not re.fullmatch("[0-9a-f]{32}", nonce):
+            raise Refusal(400, "automatic join needs a request nonce")
+        self.lockout.failed(source)
+        self.everyone.failed("automatic")
+        self._note(source, group, "joined development cluster")
+        return {"group": group, "key": member.key.decode(), "mode": member.mode,
+                "cluster_id": hashlib.sha256(member.key).hexdigest(), "nonce": nonce}
 
     def _note(self, source: str, group: str, outcome: str) -> None:
         self.attempts.append((time.time(), source, group, outcome))
@@ -162,7 +203,7 @@ class Joining:
         if member is None:
             raise Refusal(404, "this machine left that cluster")
         self.lockout.passed(source)
-        payload = json.dumps({"group": member.group, "key": member.key.decode()}).encode()
+        payload = json.dumps({"group": member.group, "key": member.key.decode(), "mode": member.mode}).encode()
         sealed = sealing.seal(held.session.key("join"), payload, held.context)
         self._note(source, held.group, "joined")
         return {"confirmation": held.session.confirmation(), "sealed": sealed.hex()}
@@ -297,7 +338,7 @@ class _Call:
         return response.status, parsed if isinstance(parsed, dict) else {}
 
 
-def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> bytes:
+def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> Membership:
     """The cluster key ``joiner`` gives a machine that knows ``words``; `Declined` when it will not."""
     call = _Call(joiner, timeout)
     context = _context(group, secrets.token_hex(16))
@@ -323,14 +364,14 @@ def _shake(joiner: Joiner, group: str, words: str, timeout: float) -> bytes:
             session.key("join"), bytes.fromhex(str(done.get("sealed"))), context).decode())
         if held.group != group:
             raise DiscoveryError("the machine answered for a different cluster")
-        key = held.key
     except (sealing.SealError, ValueError, KeyError, TypeError, DiscoveryError):
         raise Declined(400, "the machine's answer did not authenticate") from None
-    return key
+    return held
 
 
 def create_by_passphrase(passphrase: str, group: str,
-                         path: Path | str | None = None, *, port: int | None = None) -> Membership:
+                         path: Path | str | None = None, *, port: int | None = None,
+                         mode: str = "prod") -> Membership:
     """Create a named cluster with a passphrase."""
     group = disc.require_name(group)
     if any(member.group == group for member in disc.memberships(path)):
@@ -338,50 +379,54 @@ def create_by_passphrase(passphrase: str, group: str,
     words = disc.check_length(passphrase)
     if find_joiners(group, port=port):
         raise DiscoveryError(f"A cluster named '{group}' is on this network. Join it instead.")
-    return disc.mint_cluster(group, path, join=join_secret(words, group))
+    return disc.mint_cluster(group, path, join=join_secret(words, group), mode=mode)
 
 
 def cluster_action(mode: str, passphrase: str, group: str,
-                   path: Path | str | None = None, *, port: int | None = None) -> Membership:
+                   path: Path | str | None = None, *, options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> Membership:
     """Join an existing cluster or create a new one."""
     if mode == "join":
-        return join_existing(passphrase, group, path, port=port)
+        return join_existing(passphrase, group, path, options=options)
     if mode == "create":
-        return create_by_passphrase(passphrase, group, path, port=port)
+        return create_by_passphrase(passphrase, group, path, port=options.port, mode=options.mode or "prod")
     raise DiscoveryError("Choose Join existing cluster or Create new cluster.")
 
 
 def join_by_passphrase(passphrase: str, group: str,
-                       path: Path | str | None = None, *, timeout_s: float = 1.5,
-                       port: int | None = None) -> Membership:
+                       path: Path | str | None = None, *, options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> Membership:
     """Join a named cluster or create it when no daemon answers."""
     group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
-    joiners = find_joiners(group, timeout_s=timeout_s, port=port)
+    joiners = find_joiners(group, timeout_s=options.timeout_s, port=options.port)
     if not joiners:
         held = next((m for m in disc.memberships(path) if m.group == group), None)
-        return held or disc.mint_cluster(group, path, join=secret)
-    return _accept(joiners, group, secret, path)
+        if held is not None and options.mode is not None and held.mode != options.mode:
+            raise DiscoveryError("the cluster admission mode differs from the requested mode")
+        return held or disc.mint_cluster(group, path, join=secret, mode=options.mode or "prod")
+    return _accept(joiners, group, secret, path, mode=options.mode)
 
 
 def join_existing(passphrase: str, group: str, path: Path | str | None = None, *,
-                  timeout_s: float = 1.5, port: int | None = None) -> Membership:
+                  options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> Membership:
     """Join a live cluster without creating a replacement when it disappears."""
     group = disc.require_name(group)
     secret = join_secret(disc.check_length(passphrase), group)
-    joiners = find_joiners(group, timeout_s=timeout_s, port=port)
+    joiners = find_joiners(group, timeout_s=options.timeout_s, port=options.port)
     if not joiners:
         raise DiscoveryError(f"No machine in '{group}' answered on this network; "
                              "cluster is no longer available; refresh nearby clusters.")
-    return _accept(joiners, group, secret, path)
+    return _accept(joiners, group, secret, path, mode=options.mode)
 
 
 def _accept(joiners: list[Joiner], group: str, secret: str,
-            path: Path | str | None) -> Membership:
+            path: Path | str | None, *, mode: str | None = None) -> Membership:
     refused: list[Declined] = []
     for one in joiners:
         try:
-            return disc.adopt(Membership(group=group, key=_shake(one, group, secret, 10.0), join=secret), path)
+            held = _shake(one, group, secret, 10.0)
+            if mode is not None and held.mode != mode:
+                raise Declined(403, "the cluster admission mode differs from the requested mode")
+            return disc.adopt(Membership(group=held.group, key=held.key, join=secret, mode=held.mode), path)
         except Declined as why:
             refused.append(why)
         except DiscoveryError as why:

@@ -33,3 +33,8 @@ subagent. Read it first. This summary adds no restrictions or exceptions.
   throughout multi-device landing and cleanup, and report its final upstream state. Never force
   push, delete remote refs, push tags, or push `main`. Main promotion and releases remain the owner's.
   Budgets and red-team debt only fall. Preserve independent authorization and review checks.
+
+## Dependencies and root causes
+
+- Never modify application code, remove imports, or create local mock implementations to bypass a missing package or dependency. If a library is required, install it with the appropriate package manager and retry.
+- When behavior is broken, trace the failing path and fix the underlying cause. Do not add narrowly scoped workarounds that leave the root behavior broken; add regression coverage for the corrected behavior.

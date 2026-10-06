@@ -6,13 +6,22 @@ import json
 from pathlib import Path
 
 import pytest
+from workspace_kit import Kit, clean_env
 
 from ml_stack import claude, harnessid
 
 
 @pytest.fixture(autouse=True)
-def _no_workspace(monkeypatch):
-    monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent))
+def _no_workspace(monkeypatch, tmp_path):
+    from ml_stack.workspace import harness_seat, tokens
+
+    kit = Kit(clean_env(monkeypatch, tmp_path))
+    def invite(name, project, parent, say, *, claim):
+        token = kit.agent(name)
+        tokens.store(kit.base, name, token)
+        monkeypatch.setattr(harness_seat, 'reported_models', lambda url: [claim[0]])
+        return harnessid.Seat(name, minted=True, base=kit.base, issuer=kit.ws.auth(kit.owner))
+    monkeypatch.setattr(harnessid, "invite", invite)
     monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
 
 
@@ -36,6 +45,7 @@ def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, 
     seen = {}
 
     class Server:
+        adopted = False
         base_url = "http://127.0.0.1:8899"
 
     @contextlib.contextmanager
@@ -60,7 +70,7 @@ def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, 
         assert not seen.get("released"), "claude runs inside the lease"
         return 7
 
-    code = claude.launch(["kestrel", "--port", "8899", "--claude", str(binary), "--",
+    code = claude.launch(["kestrel", "--ctx", "32768", "--port", "8899", "--claude", str(binary), "--",
                           "--print", "hello"], say=lambda _: None, run_claude=run_claude)
     assert code == 7
     assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 1, "one conversation, one slot"
@@ -79,6 +89,7 @@ def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
     seen = {}
 
     class Server:
+        adopted = False
         base_url = "http://127.0.0.1:8899"
 
     @contextlib.contextmanager
@@ -108,15 +119,15 @@ def test_slots_asked_for_reach_the_lease(monkeypatch, tmp_path):
 
 
 def test_launch_refuses_without_a_claude_binary(monkeypatch, capsys):
-    monkeypatch.setattr(claude.shutil, "which", lambda name: None)
+    monkeypatch.setattr(claude.harnessing, "binary_for", lambda name: "")
     assert claude.launch(["kestrel"], say=print) == 2
     assert "no `claude` on PATH" in capsys.readouterr().out
 
 
 def test_alias_falls_back_to_the_file_stem(monkeypatch):
-    monkeypatch.setattr("ml_stack.client.reported_models", lambda url, **kw: [])
+    monkeypatch.setattr("ml_stack.claude.reported_models", lambda url, **kw: [])
     assert claude.alias_of("http://127.0.0.1:1", "/m/kestrel-8B-UD-Q4_K_XL.gguf") == "kestrel-8B-UD-Q4_K_XL"
-    monkeypatch.setattr("ml_stack.client.reported_models", lambda url, **kw: ["served-name"])
+    monkeypatch.setattr("ml_stack.claude.reported_models", lambda url, **kw: ["served-name"])
     assert claude.alias_of("http://127.0.0.1:1", "x.gguf") == "served-name"
 
 
@@ -127,6 +138,7 @@ def _lease(seen, model, manager=None, **lease):
 
 
 class _Served:
+    adopted = False
     base_url = "http://127.0.0.1:8899"
 
 
@@ -199,7 +211,15 @@ class TestJoiningAServerAlreadyUp:
         from ml_stack.serve import leases
 
         seen: dict = {}
-        monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
+        @contextlib.contextmanager
+        def adopted(model, manager=None, **lease):
+            seen['model'] = model
+            server = _Served()
+            server.adopted, server.port = True, lease['port']
+            server.base_url = f"http://127.0.0.1:{server.port}"
+            yield server
+
+        monkeypatch.setattr("ml_stack.serve.manager.serve", adopted)
         monkeypatch.setattr(leases, "already_up",
                             lambda model, port, **_: {"base_url": f"http://127.0.0.1:{port}",
                                                       "pid": 1, "model": model})
@@ -214,10 +234,10 @@ class TestJoiningAServerAlreadyUp:
         binary.chmod(0o755)
         said: list[str] = []
         where: dict = {}
-        claude.launch(["quince-2b", "--port", "8123", "--claude", str(binary)],
+        claude.launch(["quince-2b", "--ctx", "32768", "--port", "8123", "--claude", str(binary)],
                       say=said.append,
                       run_claude=lambda cmd, env: where.update(env=env) or 0)
-        assert "lease" not in seen, "the weights are not loaded a second time"
+        assert seen["model"] == "/models/quince-2b-Q4_K_M.gguf"
         assert any("already up on 8123" in one and "left running" in one for one in said)
         assert where["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8123"
 

@@ -25,8 +25,10 @@
     }
     get active() { return this.mode.value === "coding"; }
     settings() {
-      return { mode: this.mode.value, project: this.project.value, harness: this.harness.value || "codex",
-        role: this.role.value, context: Number(this.context.value || 262144), draft: this.draft.value.trim() || "auto" };
+      const defaults = this.chat.defaultSettings;
+      return { mode: this.mode.value || defaults.mode, project: this.project.value,
+        harness: this.harness.value || defaults.harness, role: this.role.value || defaults.role,
+        context: Number(this.context.value || defaults.context), draft: this.draft.value.trim() || defaults.draft };
     }
     async catalogue() {
       if (this.data) return;
@@ -37,18 +39,19 @@
       }
       this.data = data;
       this.harness.replaceChildren(...data.harnesses.map((one) => el("option", { value: one.name,
-        ...(one.available ? {} : { disabled: "" }) }, one.name === "claude" ? "Claude Code" : "Codex")));
+        ...(one.available ? {} : { disabled: "" }) }, one.name === "claude" ? "Claude Code" : one.name === "pi" ? "Pi" : "Codex")));
       this.role.replaceChildren(...data.roles.map((one) => el("option", { value: one.name, title: one.summary },
         ({ "read-only": "Read only", "approve-first": "Ask before changes", "plan-and-go": "Follow approved plan" })[one.name] || one.name)));
     }
     async restore(settings, model) {
-      this.mode.value = settings.mode || "chat";
+      const defaults = this.chat.defaultSettings;
+      this.mode.value = settings.mode || defaults.mode;
       if (this.active) await this.catalogue();
       this.project.value = settings.project || "";
-      this.harness.value = settings.harness || "codex";
-      this.role.value = settings.role || this.data?.default_role || "";
-      this.context.value = settings.context || this.data?.context || 262144;
-      this.draft.value = settings.draft || "auto";
+      this.harness.value = settings.harness || defaults.harness;
+      this.role.value = settings.role || this.data?.default_role || defaults.role;
+      this.context.value = settings.context ?? defaults.context;
+      this.draft.value = settings.draft || defaults.draft;
       this.render(model);
     }
     render(model) {
@@ -111,11 +114,11 @@
       catch (error) { if (error.name !== "AbortError") chat.showError(error.message); }
       finally {
         chat.request = null;
+        await chat.load(chat.open);
         chat.list.removeAttribute("aria-busy");
         chat.send.hidden = false; chat.stop.hidden = true;
         chat.newChat.disabled = chat.picker.disabled = false;
         this.busy(false);
-        await chat.load(chat.open);
         chat.paintList();
       }
     }

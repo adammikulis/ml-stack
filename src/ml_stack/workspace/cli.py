@@ -26,6 +26,7 @@ from ml_stack.workspace import (
     coordinator_config,
     filecli,
     guide,
+    harness_remote,
     limits,
     localcli,
     localroute,
@@ -34,10 +35,12 @@ from ml_stack.workspace import (
     project,
     project_connection,
     remote_cli,
+    remote_task_client,
     task_integration,
     task_outcomes,
     task_worktree_recovery,
     tokens,
+    worktree_lifecycle,
 )
 from ml_stack.workspace.boardapi import Follow
 from ml_stack.workspace.boards import ANNOUNCE_KINDS, MODES, STYPES
@@ -301,7 +304,11 @@ def _note_add(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
 
 def _claim(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
     note = f"[{_label(args)}] {args.note}".strip() if _label(args) else args.note
-    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=note)
+    return ws.claim(token, args.kind, args.key, ttl_s=args.ttl, pid=args.pid, note=note, label=_label(args))
+
+
+def _worktrees(args, ws, token):
+    return worktree_lifecycle.pending(ws.base, ws.auth(token).id, _label(args))
 
 
 def _released(args: argparse.Namespace, ws: Workspace, token: str) -> Any:
@@ -696,6 +703,7 @@ TABLE: tuple[tuple[str, str, list[Any], Handler], ...] = (
         flag("--pid", type=int, default=0, help="release when this process is gone"),
         flag("--note", default="")], _claim),
     ("release", "give a claim up", CLAIM, lambda a, w, t: w.release(t, a.kind, a.key)),
+    ("worktrees", "inspect your unfinished coding checkout scopes", [], _worktrees),
     ("heartbeat", "renew every claim you hold", [flag("--ttl", type=float, default=0.0)], _heartbeat),
     ("who", "who owns this?", CLAIM,
      lambda a, w, t: w.who_owns(a.kind, a.key) or {"owner": None}),
@@ -751,7 +759,17 @@ def _runner(handler: Handler) -> Callable[[argparse.Namespace], int]:
             ws, token = _context(args, connection)
             if isinstance(ws, Workspace) and handler is not _init:
                 ws.registry._record_device(ws.auth(token).id, onboard.device_metadata.current())
-            result = handler(args, ws, token)
+            if isinstance(ws, project_connection.CanonicalWorkspace) and args.cmd.startswith('task'):
+                result = remote_task_client.command(ws.remote, token, args)
+            elif isinstance(ws, project_connection.CanonicalWorkspace) and (
+                    args.cmd in ('claim', 'release', 'heartbeat', 'who', 'worktrees')
+                    or (args.cmd == 'announce' and args.kind == 'done')
+                    or (args.cmd == 'send' and args.type == 'done')):
+                result = harness_remote.cli_command(ws.remote, token, args)
+                if args.cmd in ('announce', 'send'):
+                    result = handler(args, ws, token)
+            else:
+                result = handler(args, ws, token)
         _show(args, result)
         _held_note(result)
         return 0

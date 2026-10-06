@@ -65,9 +65,15 @@ class TaskManager(Manager):
                     self.checkpoint({'summary': 'Native tool returned successfully',
                                      'progress': str(block.get('tool_use_id', ''))})
 
+    def _max_turns(self):
+        return localloop.caps_of(self.agent).rounds
+
     def _process(self, turn, command, environment, context):
-        if context[1] != 'claude':
-            raise ValueError('canonical coding currently requires the bounded Claude harness')
+        harness = context[1]
+        if harness not in ('pi', 'claude'):
+            raise ValueError('canonical coding needs a supported coding harness')
+        if harness == 'pi':
+            return super()._process(turn, command, environment, context)
         caps = localloop.caps_of(self.agent)
         command = [*command, '--system-prompt', BOOTSTRAP,
                    '--tools', 'Read,Edit,Write,Bash,Glob,Grep,Agent',
@@ -119,7 +125,7 @@ def perform(ws, agent, task, project, control):
     conversation = store.start(model=agent.model, title=task['title'], settings={
         'mode': 'coding', 'harness': agent.harness, 'role': agent.role,
         'project': str(project), 'context': agent.ctx, 'draft': 'auto',
-        'effort': agent.effort, 'max_effort': agent.max_effort})
+        'effort': agent.effort, 'max_effort': agent.max_effort, 'max_output_tokens': agent.max_output_tokens})
     turn, done = Turn(conversation.id), threading.Event()
     root = Path(__file__).resolve().parents[3]
     runtime_commit = git.head(root) if (root / '.git').exists() else f'installed {version("ml-stack")}'
@@ -178,4 +184,4 @@ def _proposal(agent, task, project, turn, environment):
     return {'summary': turn.text[:2000], 'artifacts': artifacts,
             'checks': [{'name': 'Native harness returned a final answer', 'passed': True}],
             'provenance': {'commit': git.head(project), 'environment': environment,
-                           'model': agent.model_name, 'runtime': f'Claude native; session {turn.session}'}}
+                           'model': agent.model_name, 'runtime': f'{agent.harness} native; session {turn.session}'}}

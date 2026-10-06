@@ -17,6 +17,7 @@ import secrets
 import socket
 import threading
 from collections.abc import Callable, Iterable
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,15 @@ from ml_stack.serve.leases import lease_file
 from ml_stack.speech import service as speech
 from ml_stack.fleet.onboard.requests import Devices
 
-from . import autostart, invite_client, invite_routes, tls, updates as updating
+from . import (
+    automatic_clusters,
+    autostart,
+    cluster_modes,
+    invite_client,
+    invite_routes,
+    tls,
+    updates as updating,
+)
 from .api import Daemon, make_handler
 from .availability import Availability, parse_window
 from .conversations import Conversations
@@ -91,11 +100,22 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
     return tok
 
 
+def workspace_host(projects: ProjectRegistry, factory: Callable[[ProjectRegistry], Any] | None = None) -> Any:
+    """Create project hosting from the injected or installed provider."""
+    if factory is None:
+        providers = tuple(entry_points(group="ml_stack.workspace_hosts", name="default"))
+        if len(providers) != 1:
+            raise RuntimeError("install one ml-stack default workspace hosting provider")
+        factory = providers[0].load()
+    return factory(projects)
+
+
 def serve_forever(root: Path | str | None = None,
                   host: str | None = None, port: int = DEFAULT_PORT, *,
                   lan: bool = False, ui_from_lan: bool = False,
                   name: str = "", announce: bool = True,
                   cluster_key_path: Path | str | None = None,
+                  cluster_mode: str | None = None,
                   device_report: Callable[[], dict[str, Any]] | None = None,
                   slots: int = 1, labels: Iterable[str] = (),
                   fetch_slots: int = 2, web: bool = True,
@@ -120,6 +140,14 @@ def serve_forever(root: Path | str | None = None,
     live_token: list[str] = [""]
     files_root = root / "files"
     files_root.mkdir(exist_ok=True)
+    selected = memberships(cluster_key_path)
+    effective_mode = cluster_modes.validate(cluster_mode or (selected[0].mode if selected else "dev"))
+    if selected and selected[0].mode != effective_mode:
+        raise DiscoveryError("select a cluster with the requested mode before starting this daemon")
+    if announce:
+        selected_member = automatic_clusters.ensure(cluster_key_path, mode=effective_mode)
+        effective_mode = selected_member.mode
+    say(cluster_modes.notice(effective_mode))
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
     live_token[0] = token
@@ -215,13 +243,13 @@ def serve_forever(root: Path | str | None = None,
 
     projects = ProjectRegistry(root, bench_host[0].machine,
                                (Path(__file__).resolve().parents[3], Path.cwd()), lan_host(port))
-    workspaces = workspace_factory(projects) if workspace_factory else None
+    workspaces = workspace_host(projects, workspace_factory)
     handler = make_handler(Daemon(
         runner, files_root, lambda: live_token[0],
         name=lambda: live_name[0], report=report, fetcher=fetcher,
         ui=interface, projects=projects, workspaces=workspaces, schedule=schedule, on_paused=on_paused,
         schedule_path=schedule_path, serving=serving, models=models,
-        cluster_key_path=cluster_key_path, tokens=every_token,
+        cluster_key_path=cluster_key_path, cluster_mode=effective_mode, tokens=every_token,
         devices=lambda: Devices(home.state('onboard', 'devices.json')).all(),
         bench=bench_host[0], hosting=hosting,
         decide=Deciding(serving), ui_from_lan=ui_from_lan or setup_from_lan,
@@ -293,44 +321,51 @@ def serve_forever(root: Path | str | None = None,
         b.device = {**report(), "availability": available,
                     "serving": serving.public(), **models.beacon()}
 
+    announcement_lock = threading.RLock()
+
     def start_announcing() -> None:
         """Advertise on every cluster this machine is in, and stop on any it left."""
         nonlocal advertiser, key
-        if not announce:
-            return
-        joined = {m.group: m for m in memberships(cluster_key_path)}
+        with announcement_lock:
+            if not announce:
+                return
+            joined = {m.group: m for m in memberships(cluster_key_path)}
 
-        for group in [g for g in advertisers if g not in joined]:
-            with contextlib.suppress(Exception):
-                advertisers.pop(group).stop()
+            for group in [g for g in advertisers if g not in joined]:
+                with contextlib.suppress(Exception):
+                    advertisers.pop(group).stop()
 
-        for group, member in joined.items():
-            if group in advertisers:
-                advertisers[group].joinable = bool(member.join)
-                continue
-            try:
-                offered = served_cert()
-            except tls.TlsUnavailable as exc:
-                say(f"  discovery OFF for {group}: {exc}")
-                continue
-            beacon = Beacon(name=live_name[0], port=port, device=report(), cert=offered,
-                            slots=runner.slots, free=runner.slots,
-                            machine=bench_host[0].machine)
-            try:
-                # Not group=: that is the multicast address every cluster shares.
-                # Clusters are told apart by the key their beacons are signed with.
-                tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
-                tell.joinable = bool(member.join)
-                advertisers[group] = tell.start()
-            except DiscoveryError as exc:
-                say(f"  discovery OFF for {group}: {exc}")
+            for group, member in joined.items():
+                if group in advertisers and advertisers[group].key != member.key:
+                    advertisers.pop(group).stop()
+                if group in advertisers:
+                    advertisers[group].mode = member.mode
+                    advertisers[group].joinable = member.mode == "dev" or bool(member.join)
+                    continue
+                try:
+                    offered = served_cert()
+                except tls.TlsUnavailable as exc:
+                    say(f"  discovery OFF for {group}: {exc}")
+                    continue
+                beacon = Beacon(name=live_name[0], port=port, device=report(), cert=offered,
+                                slots=runner.slots, free=runner.slots,
+                                machine=bench_host[0].machine)
+                try:
+                    # Not group=: that is the multicast address every cluster shares.
+                    # Clusters are told apart by the key their beacons are signed with.
+                    tell = Advertiser(beacon, member.key, cluster=group, refresh=refresh)
+                    tell.mode = member.mode
+                    tell.joinable = member.mode == "dev" or bool(member.join)
+                    advertisers[group] = tell.start()
+                except DiscoveryError as exc:
+                    say(f"  discovery OFF for {group}: {exc}")
 
-        first = next(iter(joined.values()), None)
-        if first is not None:
-            key = first.key
-            fetcher.key = first.key
-            live_token[0] = load_or_create_token(root, first.key)
-            advertiser = advertisers.get(first.group)
+            first = next(iter(joined.values()), None)
+            if first is not None:
+                key = first.key
+                fetcher.key = first.key
+                live_token[0] = load_or_create_token(root, first.key)
+                advertiser = advertisers.get(first.group)
 
     def rename(called: str) -> str:
         """Give this machine a new name now, on the page and on the network."""
@@ -434,6 +469,14 @@ def serve_forever(root: Path | str | None = None,
     if idle_s:
         say(f"  reclaiming a server unused for {idle_s:.0f}s")
         reclaiming.enter_context(watching(older_than=idle_s, say=print))
+    convergence_stop = threading.Event()
+    convergence = None
+    if announce and effective_mode == "dev":
+        convergence = threading.Thread(
+            target=automatic_clusters.converge,
+            args=(convergence_stop, start_announcing, cluster_key_path),
+            name="development-cluster-convergence", daemon=True)
+        convergence.start()
     try:
         while True:
             httpd.serve_forever()
@@ -450,6 +493,9 @@ def serve_forever(root: Path | str | None = None,
     except KeyboardInterrupt:
         pass
     finally:
+        convergence_stop.set()
+        if convergence is not None:
+            convergence.join(timeout=12.0)
         reclaiming.close()
         scanner.stop()
         _stop_advertisers(advertisers)
@@ -512,6 +558,8 @@ def run(argv: list[str] | None = None, *,
                          "(default: $ML_STACK_PEER_NAME, else the hostname)")
     ap.add_argument("--cluster-key", default=None,
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
+    ap.add_argument("--mode", choices=("dev", "prod"), default=None,
+                    help="cluster admission mode (default: existing cluster mode, otherwise dev)")
     ap.add_argument("--no-announce", action="store_true",
                     help="serve, but stay invisible to peer discovery")
     ap.add_argument("--busy", action="append", default=[], metavar="WHEN",
@@ -584,7 +632,7 @@ def run(argv: list[str] | None = None, *,
         return out
 
     serve_forever(a.root, a.host, a.port, name=a.name, lan=a.lan, ui_from_lan=a.ui_from_lan,
-                  announce=not a.no_announce, cluster_key_path=a.cluster_key,
+                  announce=not a.no_announce, cluster_key_path=a.cluster_key, cluster_mode=a.mode,
                   slots=a.slots, device_report=report if probes else None,
                   labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),
                   fetch_slots=a.fetch_slots, web=not a.no_web,

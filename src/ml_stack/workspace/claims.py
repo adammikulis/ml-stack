@@ -152,7 +152,7 @@ class Claims:
             return made, swept
 
     def reserve(self, who: Identity, resources: list[tuple[str, str]],
-                fields: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+                fields: Mapping[str, Any] | None = None, *, with_previous: bool = False):
         """Atomically reserve a mutation's resources or refuse its entire conflicting set."""
         if len(resources) > 128:
             raise ValueError('a mutation reserves at most 128 resources')
@@ -167,6 +167,7 @@ class Claims:
                     if _covers(other, kind, key) and other.get('assignment') \
                             and other['assignment'] != (fields or {}).get('assignment'):
                         raise Denied('the resource is reserved for a different task assignment')
+            previous = {f'{kind}:{key}' for kind, key in resources if f'{kind}:{key}' in claims}
             now, made = self.clock(), []
             for kind, key in resources:
                 old = claims.get(f'{kind}:{key}')
@@ -186,7 +187,7 @@ class Claims:
                 claims[f'{kind}:{key}'] = entry
                 made.append(entry)
             self._save(claims)
-            return made
+            return (made, previous) if with_previous else made
 
     def handoff(self, who: Identity, kind: str, key: str, owner: str, assignment: str) -> dict[str, Any]:
         """Transfer one parent's exact claim under an already verified task assignment."""
@@ -290,7 +291,8 @@ class Claims:
             self._save(claims)
             return found
 
-    def renew(self, who: Identity, ttl_s: float = 0.0) -> list[dict[str, Any]]:
+    def renew(self, who: Identity, ttl_s: float = 0.0, *,
+              predicate: Callable[[dict[str, Any]], bool] | None = None) -> list[dict[str, Any]]:
         """Extend every claim ``who`` holds by ``ttl_s`` (at most ``MAX_RENEW_S``) from now, never
         past ``MAX_LIFETIME_S`` after it was first taken; returns the renewed claims, each marked
         ``capped`` when the lifetime cap held it back."""
@@ -299,7 +301,8 @@ class Claims:
             claims = self._load()
             self._sweep(claims)
             now = self.clock()
-            mine = [c for c in claims.values() if c["owner"] == who.id]
+            mine = [c for c in claims.values() if c["owner"] == who.id
+                    and (predicate is None or predicate(c))]
             for claim in mine:
                 limit = claim["since"] + MAX_LIFETIME_S
                 claim["expires"] = max(claim["expires"], min(now + step, limit))

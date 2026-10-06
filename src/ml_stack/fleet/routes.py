@@ -12,7 +12,14 @@ from typing import Any
 from ml_stack.log import say
 from ml_stack.ui import assets as ui_assets
 
-from . import component_routes, invite_routes, lan_clusters, project_client, recovery
+from . import (
+    component_routes,
+    credential_routes,
+    invite_routes,
+    lan_clusters,
+    project_client,
+    recovery,
+)
 from .chat_routes import ChatRoutes
 from .discovery import (
     DiscoveryError,
@@ -27,7 +34,7 @@ from .gym_recording_routes import GymRecordingRoutes
 from .gym_routes import GymRoutes
 from .launch_routes import LaunchRoutes
 from .onboard.clusters import known_clusters
-from .onboard.joining import cluster_action, join_by_passphrase
+from .onboard.joining import JoinOptions, cluster_action, join_by_passphrase
 from .page import COMPONENTS, render
 from .pausing import minutes_of
 from .project_board_routes import ProjectBoardRoutes
@@ -253,7 +260,8 @@ class SetupRoutes:
                 raise DiscoveryError("existing cluster selection must be true or false")
             state, sid = ui.join(str(req.get("passphrase") or ""),
                                  require_name(req.get("group")), self.client_ip,
-                                 mode=req.get("mode"), existing=req.get("existing") is True)
+                                 options=JoinOptions(action=req.get("mode"), existing=req.get("existing") is True,
+                                                     mode=req.get("cluster_mode")))
         except DiscoveryError as exc:
             self.send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                       {"error": str(exc)})
@@ -358,6 +366,8 @@ class SettingsRoutes:
     def route(self) -> bool:
         if self.path == "/ui/settings":
             return self._settings()
+        if self.path == "/ui/credentials":
+            return credential_routes.route(self) or super().route()
         if self.path == "/ui/libraries":
             return self._libraries()
         if self.path == "/ui/uninstall":
@@ -727,9 +737,11 @@ class ClusterRoutes:
                 group = require_name(req.get("group"))
                 with ui.join_guard():
                     if req.get("mode") is not None:
-                        cluster_action(str(req["mode"]), words, group, ui.cluster_key_path, port=ui.discovery_port)
+                        cluster_action(str(req["mode"]), words, group, ui.cluster_key_path,
+                                       options=JoinOptions(port=ui.discovery_port, mode=req.get("cluster_mode")))
                     else:
-                        join_by_passphrase(words, group, ui.cluster_key_path, port=ui.discovery_port)
+                        join_by_passphrase(words, group, ui.cluster_key_path,
+                                           options=JoinOptions(port=ui.discovery_port, mode=req.get("cluster_mode")))
             except DiscoveryError as exc:
                 self.send(400, {"error": str(exc)})
                 return True

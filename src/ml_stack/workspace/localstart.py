@@ -64,7 +64,8 @@ class Ask:
     ctx: int = 0
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
-    harness: str = lh.CODEX
+    harness: str = lh.PI
+    max_output_tokens: int = 8192
     authority: tuple[str, str] | None = None
     repo: str = ""
 
@@ -149,6 +150,8 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     """Join a local model to the workspace and run its loop detached; the same name again reports
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
     would not fit, ValueError for a bad name, role or project."""
+    if isinstance(ask.max_output_tokens, bool) or not isinstance(ask.max_output_tokens, int) or ask.max_output_tokens < 1:
+        raise ValueError("maximum output tokens must be a positive integer")
     role = roles.get(ask.role).name
     ceiling = le.valid(ask.max_effort)
     effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
@@ -163,6 +166,11 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         ask.model, selection=localmodel.Selection(coding=prof.name == "coding", context=ctx))
     if not chosen.ok:
         raise Unavailable(chosen.problem, chosen.hint)
+    if not ctx:
+        try:
+            ctx = localmodel.context_for(chosen, coding=prof.name == "coding")
+        except (OSError, ValueError) as error:
+            raise Unavailable(str(error)) from error
     if prof.name == "coding":
         return _coding(ws, ask, chosen, ctx, folder_, parent_token)
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
@@ -179,7 +187,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         _record_model(ws, identity, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
-                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
+                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling, max_output_tokens=ask.max_output_tokens,
                          project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {})
         la.save(ws, agent)
         if parent_token:
@@ -202,8 +210,8 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
     if problem:
         raise Unavailable(problem, hint)
     role = roles.get(ask.role).name
-    if ask.harness not in ("codex", "claude"):
-        raise ValueError("coding harness is codex or claude")
+    if ask.harness not in ("pi", "codex", "claude"):
+        raise ValueError("coding harness is pi, codex or claude")
     name = la.check_name(ask.name or "local-coding")
     with held(la.folder(ws) / "start.lock"):
         have = la.load(ws, name)
@@ -219,7 +227,7 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
-                         ctx=ctx, project=project, effort=le.clamp(le.valid(ask.effort), le.valid(ask.max_effort)), max_effort=ask.max_effort,
+                         ctx=ctx, project=project, effort=(le.AUTO if ask.effort == le.AUTO else le.clamp(le.valid(ask.effort), le.valid(ask.max_effort))), max_effort=ask.max_effort, max_output_tokens=ask.max_output_tokens,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
         identity = (have.identity or have.name) if ask.authority else _worker_identity(
@@ -333,7 +341,7 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         state = str(status.get("state") or "starting") if live else (
             "failed" if status.get("state") == "failed" else "stopped")
         out.append({
-            "name": name, "identity": agent.identity or name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx,
+            "name": name, "identity": agent.identity or name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx, "max_output_tokens": agent.max_output_tokens,
             "project": Path(agent.project).name if agent.project else "", "running": live,
             "state": state, "detail": str(status.get("detail") or ""),
             "steps": int(status.get("steps") or 0), "tasks": int(status.get("tasks") or 0),

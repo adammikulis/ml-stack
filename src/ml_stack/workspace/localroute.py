@@ -37,7 +37,7 @@ __all__ = ["COOKIE", "PREFIX", "respond", "serve", "session_ok"]
 PREFIX = "/agents/"
 COOKIE = "ml_session"
 BODY_MAX = 4096
-START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "repo": str, "harness": str}
+START_KEYS = {"model": str, "name": str, "role": str, "effort": str, "max_effort": str, "profile": str, "ctx": str, "project": str, "repo": str, "harness": str, "max_output_tokens": int}
 STOP_WAIT_S = 10.0
 
 
@@ -75,7 +75,7 @@ def _model_view(*, coding: bool = False) -> dict[str, Any]:
 def _read(ws: Workspace, route: str) -> Any:
     if route == "list":
         return {"agents": ls.listing(ws), "roles": la.role_choices(), "default_role": roles.DEFAULT, "efforts": [*le.LEVELS, le.AUTO],
-                "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX,
+                "default_effort": le.DEFAULT, "default_max_effort": le.DEFAULT_MAX, "default_max_output_tokens": 8192,
                 "orders_from": list(la.DEFAULT_ORDERS_FROM), "harnesses": [localharness.OWN, *coding.HARNESSES],
                 "saved": [{key: (agent.extra.get("backlog", {}).get("repo", "") if key == "repo"
                                  else getattr(agent, key)) for key in START_KEYS}
@@ -102,15 +102,14 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
         data = _typed(body, START_KEYS)
         profile = data.get("profile") or "coding"
         role = data.get("role") or (la.PLAN_AND_GO if profile == "coding" else roles.DEFAULT)
-        context = lp.parse_ctx(data.get("ctx", "")) or (
-            131072 if profile == "coding" else lp.profile(profile).ctx)
+        context = lp.parse_ctx(data.get("ctx", ""))
         try:
             got = ls.start(ws, ls.Ask(data.get("model") or localmodel.AUTO, data.get("name", ""),
                                       role, data.get("effort") or le.DEFAULT,
                                       data.get("max_effort") or le.DEFAULT_MAX,
                                       profile, context,
-                                      data.get("project", ""), harness=data.get("harness") or "claude",
-                                      repo=data.get("repo", "")),
+                                      data.get("project", ""), harness=data.get("harness") or "pi",
+                                      max_output_tokens=data.get("max_output_tokens", 8192), repo=data.get("repo", "")),
                            parent_token=ls.launch_parent(ws, data.get('project', '')))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}

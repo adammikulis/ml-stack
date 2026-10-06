@@ -154,6 +154,17 @@ def _fits_context(pick: Pick, context: int) -> bool:
     return plan.context >= context and plan.verdict in FITS
 
 
+def context_for(pick: Pick, *, coding: bool = False) -> int:
+    """Choose a context from this device's memory and the model's trained limit."""
+    if not pick.ref or not Path(pick.ref).is_file():
+        raise ValueError(f"cannot determine a safe context for {pick.name or pick.ref}")
+    plan = suggest.suggest(pick.ref, goal="long-context" if coding else "agent",
+                           max_verdict="yellow")
+    if plan.context <= 0 or plan.verdict not in FITS:
+        raise ValueError(f"{pick.name} has no context that fits this device's memory")
+    return plan.context
+
+
 def _checked(pick: Pick, rows: Sequence[object]) -> Pick:
     """``pick``, or the same model with the one-line reason it will not fit and the smaller choice."""
     if pick.verdict in FITS:

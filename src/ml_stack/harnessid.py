@@ -9,7 +9,8 @@ import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ml_stack.workspace import Denied, Workspace, coordinator_client, guide, limits, project_connection, tokens
+from ml_stack.person import HumanRequired
+from ml_stack.workspace import Denied, Workspace, automatic_connection, coordinator_client, guide, limits, onboard, project_connection, tokens
 from ml_stack.workspace.harness_seat import Seat
 from ml_stack.workspace.identity import AGENT_MARKERS, valid_name
 from ml_stack.workspace.project import authoritative, describe
@@ -20,7 +21,7 @@ LONGEST = 48
 SENDER_WAIT_S = 15
 BRIEF = """\
 You are {name}, a coding agent running on a local model ({alias}) through the {harness} harness, on
-this machine's ml-stack workspace. Run every workspace command with `--agent {name}`, for example
+this project's ml-stack workspace. Run every workspace command with `--agent {name}`, for example
 `ml-stack-workspace inbox --agent {name}`. You need `inbox`, `send TO KIND TEXT`, `thread SEQ`,
 `claim KIND KEY`, `who KIND KEY` and `board post #BOARD TEXT`.
 You were announced as joined when this session started; read your inbox before anything else.
@@ -46,11 +47,15 @@ def brief(name: str, alias: str, harness: str, parent: str, orders_from: Sequenc
     return BRIEF.format(name=name, alias=alias, harness=harness, orders=obey)
 
 
-def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None]) -> Seat:
-    """Connect a persistent local project agent or a private child of ``parent``."""
+def invite(name: str, project_dir: Path, parent: str, say: Callable[[str], None],
+           *, claim: tuple[str, str] = ("", "")) -> Seat:
+    """Connect a local or canonical project agent under its authenticated authority."""
     if not valid_name(name):
         say(f"error: {name!r} is not a usable agent id (a-z, 0-9, . _ -; up to {LONGEST})")
         raise ValueError("the coding agent needs a usable workspace identity")
+    canonical = automatic_connection.startup(project_dir, name, parent, claim=claim)
+    if canonical is not None:
+        return canonical
     try:
         connection = project_connection.selected(project_dir) or project_connection.auto_attach(project_dir)
         if connection is not None:

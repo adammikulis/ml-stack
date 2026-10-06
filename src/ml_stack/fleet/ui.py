@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,14 @@ from .discovery import (
     require_name,
 )
 from .join import default_root
-from .onboard.joining import cluster_action, join_by_passphrase, join_existing, matches
+from .onboard.joining import (
+    DEFAULT_JOIN_OPTIONS,
+    JoinOptions,
+    cluster_action,
+    join_by_passphrase,
+    join_existing,
+    matches,
+)
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -223,8 +231,8 @@ class UI:
         finally:
             self._join_lock.release()
 
-    def join(self, passphrase: str, group: str, source: str, mode: str | None = None, *,
-             existing: bool = False) -> tuple[dict[str, Any], str]:
+    def join(self, passphrase: str, group: str, source: str, *,
+             options: JoinOptions = DEFAULT_JOIN_OPTIONS) -> tuple[dict[str, Any], str]:
         """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
         group = require_name(group)
         held = self.throttle.blocked_for(source)
@@ -232,11 +240,13 @@ class UI:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
         try:
             with self.join_guard():
-                if mode is not None:
-                    cluster_action(mode, passphrase, group, self.cluster_key_path, port=self.discovery_port)
+                if options.action is not None:
+                    cluster_action(options.action, passphrase, group, self.cluster_key_path,
+                                   options=replace(options, port=options.port if options.port is not None else self.discovery_port))
                 else:
-                    joiner = join_existing if existing else join_by_passphrase
-                    joiner(passphrase, group, self.cluster_key_path, port=self.discovery_port)
+                    joiner = join_existing if options.existing else join_by_passphrase
+                    joiner(passphrase, group, self.cluster_key_path,
+                           options=replace(options, port=options.port if options.port is not None else self.discovery_port))
                 recovery.remember(passphrase, group, self.cluster_key_path)
         except DiscoveryError:
             self.throttle.failed(source)

@@ -25,17 +25,18 @@ from typing import Any
 
 from ml_stack import gate, sealing, sentinel, serverkeys
 from ml_stack.files import promote
+from ml_stack.http import _open
 from ml_stack.macauth import Authenticator, Verdict, parts
 from ml_stack.sentinel.adapters import watch_authenticator
 from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
-from . import commands, companion_routes, device_auth, invite_routes, projects as project_routes
+from . import commands, companion_routes, device_auth, invite_routes, project_enrollment, projects as project_routes
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report
-from .discovery import load_cluster_key
+from .discovery import load_cluster_key, memberships
 from .files import (
     DIGEST_HEADER,
     FILE_CHUNK,
@@ -95,6 +96,7 @@ class Daemon:
     serving: Serving | None = None
     models: Models | None = None
     cluster_key_path: Path | str | None = None
+    cluster_mode: str | None = None
     tokens: Callable[[], set[str]] | None = None
     devices: Callable[[], list] = lambda: []
     bench: BenchHost | None = None
@@ -309,7 +311,11 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
         def _forward(self, upstream: urllib.request.Request) -> bool:
             """Relay ``upstream`` to the caller as it is generated."""
             try:
-                response = urllib.request.urlopen(upstream, timeout=INFER_TIMEOUT)
+                def destination(url):
+                    if url != upstream.full_url:
+                        raise urllib.error.URLError("the model proxy cannot redirect")
+                    return url
+                response = _open(upstream, INFER_TIMEOUT, destination)
             except urllib.error.HTTPError as exc:
                 raw = exc.read()
                 self._send(exc.code, None, raw=raw,
@@ -328,8 +334,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 return True
             self.send_response(response.status)
             self.send_header("Content-Type", kind)
-            # No Content-Length and close framing: a streamed completion must reach the
-            # caller as it is generated, not after the last token.
             self.send_header("Connection", "close")
             self.end_headers()
             # read1, not read: read(n) blocks until it has n bytes, and a token is
@@ -378,7 +382,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not isinstance(asked, dict):
                 self._send(400, {"error": "the body is not a JSON object"})
                 return True
-            status, answer = joining.handle(self.path.split("?")[0], asked, self.client_address[0])
+            status, answer = joining.handle(self.path.split("?")[0], asked, self.client_address[0],
+                                            transport_tls=isinstance(self.connection, ssl.SSLSocket))
             self._send(status, answer)
             return True
 
@@ -409,18 +414,28 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if not (path == "/health" and here and "Authorization" not in self.headers) \
                     and not self._guard():
                 return
-            if project_routes.answer(self, daemon.projects, parsed) or self._extension():
+            if project_routes.answer(self, daemon.projects, parsed,
+                                     cluster_key_path=cluster_key_path) or self._extension():
                 return
             if path == "/health":
                 status = runner.status()
                 sched = schedule.public() if schedule is not None else None
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
-                self._send(200, {"ok": True, "name": self._name(), **status, **report(),
+                joined = memberships(cluster_key_path)
+                self._send(200, {"ok": True, "name": self._name(),
+                                 "cluster_mode": daemon.cluster_mode or (joined[0].mode if joined else "dev"), **status, **report(),
                                  **({"availability": sched} if sched else {}),
                                  **({"serving": serving.public()} if serving is not None
                                     else {})})
                 return
+            if path == "/models" or path.startswith("/models/"):
+                return self._read_models(path)
+            if path in {"/availability", "/jobs", "/speech/providers", "/bench", "/bench/export"} or path.startswith("/jobs/"):
+                return self._read_jobs(path, q)
+            return self._read_files(path)
+
+        def _read_models(self, path):
             if path == "/models":
                 if models is None:
                     self._send(501, {"error": "no model store on this daemon"})
@@ -445,6 +460,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send_file(found.path, start, end)
                 return
+
+        def _read_jobs(self, path, q):
             if path == "/availability":
                 if schedule is None:
                     self._send(501, {"error": "no schedule on this daemon"})
@@ -505,6 +522,9 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                             rows.append(json.loads(line))
                 self._send(200, {"metrics": rows, "next": since + len(rows)})
                 return
+            self._send(404, {"error": "no such route"})
+
+        def _read_files(self, path):
             m = re.match(r"^/fetch/([^/]+)$", path)
             if m:
                 if fetcher is None:
@@ -577,6 +597,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             body = self._unsealed(body)
             if body is None:
                 return
+            if self._project_register(body):
+                return
             try:
                 if self._workspace(body or b"{}"):
                     return
@@ -596,8 +618,24 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 raise Malformed(400, "the body is not a JSON object")
             return got
 
+        def _project_register(self, body: bytes) -> bool:
+            if urllib.parse.urlparse(self.path).path != "/workspace/v1/local-project":
+                return False
+            if not project_enrollment.local(self._sealing(), cluster_key_path, self.client_address[0]):
+                self._send(403, {"error": "project registration requires this device's authenticated Dev cluster"})
+            elif daemon.projects is None:
+                self._send(501, {"error": "project registry unavailable"})
+            else:
+                request = self._object(body)
+                try:
+                    self._send(200, daemon.projects.register(Path(request.get("root", "")),
+                                                            request.get("project_id", "")))
+                except (TypeError, ValueError, OSError):
+                    self._send(400, {"error": "project registration requires a matching local Git checkout"})
+            return True
+
         def _workspace(self, body: bytes) -> bool:
-            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure)",
+            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|ensure|enroll)",
                                  urllib.parse.urlparse(self.path).path)
             if not match:
                 return False
@@ -608,8 +646,18 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             elif opening is None or not opening[2]:
                 self._send(403, {"error": "project agent capabilities require sealed fleet requests"})
             else:
-                code, reply = host.answer(match[1], match[2], self._object(body),
-                                          device=self._workspace_device)
+                request = self._object(body)
+                cluster, cluster_id = project_enrollment.authenticated_cluster(opening, cluster_key_path)
+                if match[2] == "enroll":
+                    if not project_enrollment.admit(self.connection, opening, cluster_key_path, request):
+                        self._send(403, {"error": "automatic project enrollment requires the active Dev cluster over TLS"})
+                        return True
+                    code, reply = host.enroll(match[1], request, cluster=cluster, cluster_id=cluster_id)
+                else:
+                    code, reply = host.answer(match[1], match[2], request,
+                                              device=self._workspace_device,
+                                              admission=(cluster, cluster_id, project_enrollment.visible(
+                                                  self.connection, opening, cluster_key_path)))
                 self._send(code, reply)
             return True
 
@@ -618,6 +666,25 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/decide":
                 self._decide(body)
                 return
+            routes = {"/speech/transcribe": self._post_speech, "/jobs": self._post_jobs,
+                      "/bench": self._post_jobs, "/models/get": self._post_jobs,
+                      "/availability": self._post_schedule, "/fetch": self._post_fetch,
+                      "/serve": self._post_serve}
+            if route := routes.get(parsed.path):
+                route(body, parsed)
+                return
+            m = re.match(r"^/jobs/([^/]+)/stop$", parsed.path)
+            if m:
+                try:
+                    job = runner.stop(m.group(1))
+                except DaemonError as e:
+                    self._send(404, {"error": str(e)})
+                    return
+                self._send(200, job.public())
+                return
+            self._send(404, {"error": "no such route"})
+
+        def _post_speech(self, body, parsed):
             if parsed.path == "/speech/transcribe":
                 want = urllib.parse.parse_qs(parsed.query)
                 try:
@@ -629,6 +696,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(200, as_json(heard))
                 return
+
+        def _post_jobs(self, body, parsed):
             if parsed.path == "/jobs":
                 try:
                     req = self._object(body)
@@ -652,8 +721,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                 try:
                     job = bench.submit(BenchJob.from_request(self._object(body)))
                 except Refused as e:
-                    # 409: the job is well-formed and this peer will not run it now --
-                    # its code, its lock or its memory says so, and `refused` says which
                     self._send(409, {"error": str(e), "refused": e.kind})
                     return
                 except (DaemonError, ValueError) as e:
@@ -676,6 +743,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(200, got.public())
                 return
+
+        def _post_schedule(self, body, parsed):
             if parsed.path == "/availability":
                 if schedule is None:
                     self._send(501, {"error": "no schedule on this daemon"})
@@ -712,6 +781,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     schedule.save(schedule_path)
                 self._send(200, schedule.public())
                 return
+
+        def _post_fetch(self, body, parsed):
             if parsed.path == "/fetch":
                 if fetcher is None:
                     self._send(501, {"error": "peer-to-peer fetch is not enabled"})
@@ -735,6 +806,8 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(202, fetch.public())
                 return
+
+        def _post_serve(self, body, parsed):
             if parsed.path == "/serve":
                 if hosting is None or models is None:
                     self._send(501, {"error": "this daemon serves no models"})
@@ -771,16 +844,6 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
                     return
                 self._send(201, served.public())
                 return
-            m = re.match(r"^/jobs/([^/]+)/stop$", parsed.path)
-            if m:
-                try:
-                    job = runner.stop(m.group(1))
-                except DaemonError as e:
-                    self._send(404, {"error": str(e)})
-                    return
-                self._send(200, job.public())
-                return
-            self._send(404, {"error": "no such route"})
 
         def do_DELETE(self) -> None:
             if self._ui():

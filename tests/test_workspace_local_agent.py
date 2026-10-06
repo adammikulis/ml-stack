@@ -117,6 +117,7 @@ def test_an_id_that_is_not_downloaded_is_refused():
 # -- start and stop -----------------------------------------------------------------------
 @pytest.fixture
 def kit(monkeypatch, tmp_path):
+    monkeypatch.setattr(localmodel, "context_for", lambda pick, coding=False: 262144 if coding else 32768)
     k = Kit(clean_env(monkeypatch, tmp_path))
     k.limits(sends_per_window=1000)
     tokens.store(k.base, tokens.OWNER_FILE, k.owner)
@@ -141,7 +142,8 @@ def test_start_mints_a_private_token_records_the_pid_and_a_second_start_changes_
         spawned.append(sleeper(*a, **k))
         return spawned[-1]
 
-    got = ls.start(kit.ws, ls.Ask(), pick=PICK, spawn=spawn)
+    got = ls.start(kit.ws, ls.Ask(max_output_tokens=23456), pick=PICK, spawn=spawn)
+    assert la.load(kit.ws, got.name).max_output_tokens == 23456
     try:
         assert got.name == "local-agent" and not got.already
         tok = tokens.directory(kit.base) / got.name
@@ -173,7 +175,7 @@ def test_stop_releases_the_lease_the_loop_recorded(kit):
 
 def test_hostile_names_projects_and_roles_are_refused_before_anything_is_written(kit, tmp_path):
     before = sorted(p.name for p in kit.base.rglob("*"))
-    for ask in (ls.Ask(name="../evil"), ls.Ask(name="human"), ls.Ask(name="ml-stack-x"),
+    for ask in (ls.Ask(max_output_tokens=0), ls.Ask(max_output_tokens=True), ls.Ask(name="../evil"), ls.Ask(name="human"), ls.Ask(name="ml-stack-x"),
                 ls.Ask(name="a" * 60), ls.Ask(project="/nonexistent/x"), ls.Ask(project=str(kit.base)),
                 ls.Ask(project="/tmp\x00x"), ls.Ask(role="root"), ls.Ask(orders_from=("a/b/c",))):
         with pytest.raises(ValueError):
@@ -453,14 +455,21 @@ def test_a_token_in_a_header_starts_nothing(served, kit):
 def test_the_page_start_list_and_stop_round_trip_with_hostile_input_refused(served, kit):
     status, body = request(served.port, "GET", "/agents/list")
     assert status == 200 and json.loads(body)["roles"] == la.role_choices()
-    ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r"})
+    ok = post(served, "start", {"role": roles.DEFAULT, "effort": "low", "max_effort": "high", "name": "local-r", "max_output_tokens": 23456})
     assert ok[0] == 200 and json.loads(ok[1])["name"] == "local-r"
     from ml_stack.workspace.device_accounts import account_for
     assert account_for(kit.ws, "local-r")["base_id"].startswith("local-device-")
     listed = json.loads(request(served.port, "GET", "/agents/list")[1])["agents"]
-    assert [a["name"] for a in listed] == ["local-r"] and "token" not in json.dumps(listed)
+    assert [a["name"] for a in listed] == ["local-r"]
+    assert '"token":' not in json.dumps(listed)
+    agent = la.load(kit.ws, "local-r")
+    assert tokens.load(kit.base, agent.identity or agent.name) not in json.dumps(listed)
+    assert listed[0]["max_output_tokens"] == 23456
+    saved = json.loads(request(served.port, "GET", "/agents/list")[1])["saved"]
+    assert saved[0]["max_output_tokens"] == 23456
     for bad in ({"name": "../x"}, {"role": "root"}, {"project": "/nonexistent"}, {"extra": 1},
-                {"effort": "extreme"}, {"max_effort": "auto"}, {"effort": 3}, {"name": 5}):
+                {"effort": "extreme"}, {"max_effort": "auto"}, {"effort": 3}, {"name": 5},
+                {"max_output_tokens": 0}, {"max_output_tokens": True}, {"max_output_tokens": 2.5}):
         assert post(served, "start", bad)[0] == 400, bad
     assert post(served, "stop", {"name": "local-r"})[0] == 200
     assert json.loads(request(served.port, "GET", "/agents/list")[1])["agents"][0]["state"] == "stopped"
@@ -575,8 +584,8 @@ def test_with_no_one_to_ask_an_acting_call_and_a_plan_are_denied(kit):
 # -- profiles, context, coding model -------------------------------------------------------
 def test_context_sizes_parse_k_and_profiles_carry_their_caps():
     from ml_stack.workspace import localprofile as lp
-    assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144 == lp.CODING.ctx
-    assert lp.parse_ctx("32768") == lp.CHAT.ctx and lp.parse_ctx("") == 0
+    assert lp.parse_ctx("256k") == lp.parse_ctx("256K") == 262144
+    assert lp.parse_ctx("32768") == 32768 and lp.parse_ctx("") == lp.CODING.ctx == lp.CHAT.ctx == 0
     for bad in ("big", "1", "-5k", "256 k"):
         with pytest.raises(ValueError):
             lp.parse_ctx(bad)
@@ -648,7 +657,7 @@ def test_the_guarded_client_trims_a_long_task_before_a_call(kit):
         msgs += [{"role": "assistant", "content": "", "tool_calls": [{"id": str(n), "function": {"name": "t"}}]},
                  {"role": "tool", "tool_call_id": str(n), "content": big}]
     model = Script([done("x")])
-    guarded = localtools.Guarded(model, effort="off", limits=(60.0, 5), stop=lambda: False, ctx=32768)
+    guarded = localtools.Guarded(model, effort="off", limits=localtools.Limits(60.0, 5, context=32768), stop=lambda: False)
     guarded.chat(msgs, tools=[])
     assert len(model.seen[0][0]) < 61 and any(m.get("content") == "[earlier turns of this task were dropped to stay inside the context]" for m in model.seen[0][0])
 
@@ -673,7 +682,7 @@ def test_a_coding_worker_is_registered_once_before_its_native_harness_starts(kit
     got = ls.start(kit.ws, ls.Ask(profile="coding", role=roles.DEFAULT))
     try:
         row = ls.listing(kit.ws)[0]
-        assert got.name == "local-coding" and row["harness"] == "codex" and row["ctx"] == 262144
+        assert got.name == "local-coding" and row["harness"] == "pi" and row["ctx"] == 262144
         assert sorted(kit.ws.registry.ids()) == sorted(["owner", got.name])
     finally:
         ls.stop(kit.ws, got.name, release=lambda lease: True, wait_s=5)
@@ -859,7 +868,7 @@ def test_exact_downloaded_model_path_resolves_cache_symlinks_without_basename_fa
 @pytest.mark.parametrize('effort',['off','low','medium','high'])
 def test_reasoning_effort_never_overrides_explicit_response_budget(effort):
     model=Script([done('answer')])
-    guarded=localtools.Guarded(model,effort=effort,limits=(60,5),stop=lambda:False)
+    guarded=localtools.Guarded(model,effort=effort,limits=localtools.Limits(60,5),stop=lambda:False)
     guarded.chat([{'role':'user','content':'answer'}],n_predict=32000)
     assert model.kw[-1]['n_predict'] == 32000
     guarded.chat([{'role':'user','content':'answer'}])

@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any, TypedDict, Unpack
 
 from ml_stack.sentinel import human
-from ml_stack.workspace import agent_invites, limits as limits_mod, reports, tokens, wake
+from ml_stack.workspace import (
+    agent_invites,
+    limits as limits_mod,
+    reports,
+    tokens,
+    wake,
+    worktree_lifecycle,
+)
 from ml_stack.workspace.boardapi import BoardApi, Follow, Held
 from ml_stack.workspace.boards import ANNOUNCE, ANNOUNCE_KINDS
 from ml_stack.workspace.bus import BROADCAST, TYPES, Bus
@@ -24,8 +31,9 @@ from ml_stack.workspace.nudge import Waiting
 from ml_stack.workspace.quarantine import Quarantine
 from ml_stack.workspace.rates import RateLimited, Rates
 from ml_stack.workspace.scratch import Scratch
-from ml_stack.workspace.screen import Refused, fence, injection_markers, refusals
+from ml_stack.workspace.screen import Refused, fence, marker_tiers, refusals
 from ml_stack.workspace.slots import testslots
+from ml_stack.workspace.standing import ledger_installed, record_injection, sender_standing
 
 __all__ = ["Workspace"]
 
@@ -79,6 +87,7 @@ class ClaimOptions(TypedDict, total=False):
     ttl_s: float
     pid: int
     note: str
+    label: str
 
 
 def _only(given: dict[str, Any], allowed: type) -> dict[str, Any]:
@@ -224,9 +233,15 @@ class Workspace:
 
     def _hold(self, who: Identity, kind: str, subject: str, *texts: str) -> tuple[str, list[str]]:
         joined = "\n".join(t for t in texts if t)
-        flags = injection_markers(joined)
+        hard, soft = marker_tiers(joined)
+        flags = sorted([*hard, *soft])
         if not flags:
             return "", []
+        if not hard and sender_standing(who) == "good":
+            self.audit("screen.flagged", who.id, what=kind, flags=flags, ledger=ledger_installed())
+            return "", flags
+        if hard:
+            record_injection(who)
         qid = self.quarantine.hold(kind, subject, flags, joined, who.id)
         if who.parent:
             self.registry.strike(who.id)
@@ -692,6 +707,8 @@ class Workspace:
         except Conflict:
             self.audit("claim.conflict", who.id, kind=kind, key=key)
             raise
+        if kind == "worktree":
+            worktree_lifecycle.remember(self.base, who.id, str(given.get("label", "")), made["key"])
         self.audit("claim", who.id, kind=kind, key=made["key"])
         return made
 

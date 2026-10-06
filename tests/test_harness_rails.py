@@ -274,7 +274,7 @@ class TestLaunch:
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch, tmp_path):
         monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, **kwargs: harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
         monkeypatch.setattr(claude, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
@@ -294,7 +294,7 @@ class TestLaunch:
 
         assert claude.launch(["--claude", str(binary), "--role", "plan-and-go"], say=lambda _: None,
                              run_claude=run) == 0
-        assert seen["model"] == harnessing.DEFAULT_MODEL and seen["want"].ctx == 262144 and seen["want"].slots == 1
+        assert seen["model"] == harnessing.DEFAULT_MODEL and seen["want"].ctx == 0 and seen["want"].slots == 1
         assert seen["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "262144"
         assert seen["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "262144"
         command = _command_text(seen["settings"]["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
@@ -522,14 +522,14 @@ class TestSeat:
 
 
 class TestCodingAgent:
-    def test_launch_coding_agent_runs_codex_by_default_with_the_project_and_the_orders(self, monkeypatch, tmp_path):
+    def test_launch_coding_agent_runs_codex_with_the_project_and_the_orders(self, monkeypatch, tmp_path):
         seen = {}
         monkeypatch.setattr(codex.tokens, "load", lambda base, agent: "assigned-test-seat")
         monkeypatch.setattr(harnessing, "serving", _fake_serving(seen))
         monkeypatch.setattr(codex, "alias_of", lambda url, model: "qwen-27b")
         monkeypatch.setattr(harnessid, "announce", lambda *a, **k: True)
-        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say: seen.update(
-            name=name, project=project) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
+        monkeypatch.setattr(harnessid, "invite", lambda name, project, parent, say, *, claim: seen.update(
+            name=name, project=project, claim=claim) or harnessid.Seat(name, parent, base=tmp_path / "workspace"))
         binary = tmp_path / "codex"
         binary.write_text("#!/bin/sh\n")
         (tmp_path / "proj").mkdir()
@@ -540,12 +540,20 @@ class TestCodingAgent:
             return 0
 
         monkeypatch.setattr(codex.shutil, "which", lambda n: str(binary))
-        assert coding.launch_coding_agent("", "plan-and-go", tmp_path / "proj", orders_from=["reviewer"],
+        assert coding.launch_coding_agent("", "plan-and-go", tmp_path / "proj", harness="codex", orders_from=["reviewer"],
                                           harness_args=["exec", "go"], say=lambda _: None, run_codex=run) == 0
         assert seen["model"] == harnessing.DEFAULT_MODEL == "Qwen3.8-27B-UD-Q4_K_XL.gguf"
         assert seen["name"] == "local-qwen-27b-codex" and seen["project"] == (tmp_path / "proj").resolve()
+        assert seen["claim"] == ("qwen-27b", "codex")
         assert "reviewer" in seen["agents"] and seen["command"][-2:] == ["exec", "go"]
         assert "workspace-write" in seen["command"]
+
+    def test_pi_is_the_default_coding_harness(self, monkeypatch, tmp_path):
+        seen = {}
+        monkeypatch.setitem(coding.HARNESSES, "pi", lambda argv, **options: seen.update(argv=argv, options=options) or 0)
+        assert coding.launch_coding_agent("local-model.gguf", "plan-and-go", tmp_path,
+                                          say=lambda _: None) == 0
+        assert seen["argv"] == ["local-model.gguf", "--role", "plan-and-go", "--project", str(tmp_path)]
 
     def test_an_unknown_harness_is_refused(self):
         assert coding.launch_coding_agent("", "read-only", ".", "bash", say=lambda _: None) == 2
@@ -563,13 +571,29 @@ def test_explicit_head_and_none_override_measured_profile(monkeypatch):
     monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 262144)
     monkeypatch.setattr(hub, "head_choice", lambda model, asked: None if asked == "none" else SimpleNamespace(
         serving=lambda: "requested MTP head", over=lambda: {"draft": asked, "spec_type": "draft-mtp"}))
-    selected = harnessing.config_for("qwen.gguf", harnessing.Want(draft="matching-head.gguf"), lambda _: None)
+    selected = harnessing.config_for("qwen.gguf", harnessing.Want(ctx=262144, draft="matching-head.gguf"), lambda _: None)
     assert selected.serving.draft == "matching-head.gguf"
     assert selected.serving.slot_context == 262144
-    disabled = harnessing.config_for("qwen.gguf", harnessing.Want(draft="none"), lambda _: None)
+    disabled = harnessing.config_for("qwen.gguf", harnessing.Want(ctx=262144, draft="none"), lambda _: None)
     assert disabled.serving.draft == "" and disabled.serving.mtp is False
-    automatic = harnessing.config_for("qwen.gguf", harnessing.Want(draft="auto"), lambda _: None)
+    automatic = harnessing.config_for("qwen.gguf", harnessing.Want(ctx=262144, draft="auto"), lambda _: None)
     assert automatic.serving.draft == "old-head.gguf"
+
+
+def test_automatic_context_comes_from_the_device_model_fit(monkeypatch):
+    from types import SimpleNamespace
+
+    from ml_stack import hub
+    monkeypatch.setattr(hub, "located", lambda model, loose=True: Path("qwen.gguf"))
+    monkeypatch.setattr(harnessing.chat_template, "trained_context", lambda _: 200000)
+    monkeypatch.setattr(harnessing.suggest, "suggest", lambda *a, **k: SimpleNamespace(context=98304, verdict="yellow", n_gpu_layers="auto",
+                            kv_cache_type="q8_0", flash_attn=True, batch=512))
+    monkeypatch.setattr(harnessing.profile, "profile_for", lambda _: None)
+    monkeypatch.setattr(hub, "head_choice", lambda *_: None)
+    said = []
+    config = harnessing.config_for("qwen.gguf", harnessing.Want(ctx=0), said.append)
+    assert config.serving.slot_context == 98304
+    assert any("automatically selected 98,304" in line for line in said)
 
 
 @pytest.mark.parametrize("line, expected", [

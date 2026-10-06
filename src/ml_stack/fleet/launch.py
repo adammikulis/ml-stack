@@ -13,6 +13,7 @@ from typing import Any
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 
+from .cluster_modes import notice
 from .discovery import (
     DEFAULT_PORT as DISCOVERY_PORT,  # noqa: F401  (keeps ports in view)
     memberships,
@@ -108,6 +109,8 @@ def main(argv: list[str] | None = None, *,
 
     running = already_running(known.port)
     if running is not None:
+        groups = memberships()
+        say(notice(running.get("cluster_mode") or (groups[0].mode if groups else "dev")))
         say(f"ml-stack is already running as '{running.get('name', '?')}'.")
         if not known.no_browser:
             webbrowser.open(url)

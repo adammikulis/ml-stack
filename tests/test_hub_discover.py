@@ -262,16 +262,59 @@ def test_an_hf_reference_finds_its_installed_copy(tmp_path):
     assert hub.installed_for("/some/path.gguf", pool) is None
 
 
-def test_the_standard_folders_are_searched_when_no_roots_are_given(tmp_path, monkeypatch):
-    monkeypatch.setattr(places, "system", lambda: "Linux")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    for var in ("HF_HOME", "HF_HUB_CACHE", "XDG_CACHE_HOME", "LLAMA_CACHE", "OLLAMA_MODELS"):
+@pytest.mark.parametrize("system", ("Darwin", "Linux"))
+def test_the_standard_folders_find_a_model_in_each_location(tmp_path, monkeypatch, system):
+    for var in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_HOME", "TRANSFORMERS_CACHE",
+                "XDG_CACHE_HOME", "LLAMA_CACHE", "OLLAMA_MODELS", "MODELSCOPE_CACHE",
+                "KAGGLEHUB_CACHE", "ML_STACK_SCAN_VOLUMES"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(places, "system", lambda: system)
     monkeypatch.setattr("ml_stack.home.user_home", lambda: tmp_path)
-    hf_repo(tmp_path / ".cache" / "huggingface" / "hub", "maker/a", {"a.gguf": 0})
-    model(tmp_path / ".cache" / "llama.cpp" / "b.gguf")
-    ollama(tmp_path / ".ollama" / "models", "c", "latest")
-    assert {m.source for m in hub.discover()} == {"huggingface", "llama.cpp", "ollama"}
+    extra = tmp_path / "extra-models"
+    monkeypatch.setenv(places.EXTRA_ENV, str(extra))
+    at = {
+        "huggingface": tmp_path / ".cache/huggingface/hub",
+        "llama.cpp": tmp_path / ("Library/Caches/llama.cpp" if system == "Darwin"
+                                  else ".cache/llama.cpp"),
+        "ollama": tmp_path / ".ollama/models",
+        "lmstudio": tmp_path / ".lmstudio/models",
+        "gpt4all": tmp_path / ("Library/Application Support/nomic.ai/GPT4All"
+                                if system == "Darwin" else ".local/share/nomic.ai/GPT4All"),
+        "jan": tmp_path / "jan/models",
+        "modelscope": tmp_path / ".cache/modelscope/hub",
+        "kagglehub": tmp_path / ".cache/kagglehub/models",
+    }
+
+    hf_repo(at["huggingface"], "maker/hf-model", {"hf-model-Q4_K_M.gguf": 0})
+    model(at["llama.cpp"] / "llama-cache-model.gguf", {"general.name": "llama-cache-model"})
+    ollama(at["ollama"], "ollama-model", "latest")
+    model(at["lmstudio"] / "maker" / "lms-model" / "lms-model-Q4_K_M.gguf",
+          {"general.name": "lms-model"})
+    model(at["gpt4all"] / "gpt4all-model.gguf", {"general.name": "gpt4all-model"})
+    model(at["jan"] / "jan-model" / "jan-model-Q4_K_M.gguf", {"general.name": "jan-model"})
+    model(at["modelscope"] / "models" / "owner" / "ms-model" / "ms-model-Q4_K_M.gguf",
+          {"general.name": "ms-model"})
+    model(at["kagglehub"] / "owner" / "kg-model" / "kg-model-Q4_K_M.gguf",
+          {"general.name": "kg-model"})
+    model(extra / "extra-model.gguf", {"general.name": "extra-model"})
+
+    found = {m.id: m for m in hub.discover()}
+    want = {
+        "hf:maker/hf-model/hf-model-Q4_K_M.gguf": ("huggingface", True),
+        "file:llama-cache-model.gguf": ("llama.cpp", True),
+        "ollama:ollama-model:latest": ("ollama", True),
+        "hf:maker/lms-model/lms-model-Q4_K_M.gguf": ("lmstudio", False),
+        "file:gpt4all-model.gguf": ("gpt4all", False),
+        "file:jan-model-Q4_K_M.gguf": ("jan", False),
+        "hf:owner/ms-model/ms-model-Q4_K_M.gguf": ("modelscope", False),
+        "file:kg-model-Q4_K_M.gguf": ("kagglehub", False),
+        "file:extra-model.gguf": ("extra", True),
+    }
+    for one, (source, verified) in want.items():
+        got = found[one]
+        assert (got.source, got.verified, got.quantization, got.is_complete) == (
+            source, verified, "Q4_K_M", True)
 
 
 def test_scan_depth_stops_at_the_places_depth(tmp_path):

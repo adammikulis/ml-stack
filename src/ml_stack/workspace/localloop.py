@@ -197,7 +197,8 @@ class Loop:
         level = self.level(row)
         person = lt.Unattended(self.agent.name, state, self.approval)
         guarded = lt.Guarded(self.held.client, effort=level,
-                             limits=(self.caps.seconds, self.caps.steps), stop=self.stopped, ctx=self.agent.ctx)
+                             limits=lt.Limits(self.caps.seconds, self.caps.steps, self.agent.ctx,
+                                              self.agent.max_output_tokens), stop=self.stopped)
         extension = lt.workspace_extension(self.ws, self.token, self.agent.name, state, self.obeyed)
         agent = chatting.Chat(guarded, person, tools=chatting.tools_for_chat(person=person),
                               role=self.agent.role, task=True, extension=extension)

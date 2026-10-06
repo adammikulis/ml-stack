@@ -234,7 +234,7 @@ def test_same_device_parent_cannot_review_through_another_worker_seat(board, led
     proposed(board)
     with pytest.raises(Denied, match='different enrolled device'):
         completed_review(board, board.parent, board.task['id'], accepted())
-    board.board.review(board.owner, board.task['id'], accepted())
+    completed_review(board, board.owner, board.task['id'], accepted())
     with pytest.raises(Denied, match='different enrolled device'):
         task_credit.verify_task(board.ws, board.parent, board.task['id'], ledger=ledger)
     assert task_credit.verify_task(board.ws, board.owner, board.task['id'], ledger=ledger)['credited']

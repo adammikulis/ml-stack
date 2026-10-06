@@ -230,12 +230,37 @@ and a convenience second.
    process pose as another agent. Tokens expire (default 24 hours) and can be revoked. Roles:
    `human` mints anyone, `lead` mints and revokes `agent` tokens, `agent` mints nothing.
    Per-sender rate limit, body and subject caps, inbox cap and retention are in `limits.json`.
-7. Text is screened before it reaches a model: injection and authority-claim patterns put a
-   message or note into quarantine; the recipient sees a placeholder with the quarantine id.
-   Quarantine is on by default and cannot be switched off; only a `human` token releases an
-   item, and a released item is still delivered fenced. The same text is also run through
-   `ml_stack.guard`'s secret and injection patterns (imported directly) and held in the
-   sentinel's quarantine (`ml_stack.sentinel`); the workspace's own checks run in addition.
+7. Text is screened before it reaches a model. Markers come in two tiers:
+   * Hard markers always put a message or note into quarantine, for every sender: `override`,
+     `new-instructions`, `role-play`, `prompt-leak`, `exfiltrate`, `chat-markup`, `fake-fence`,
+     `authority-imperative`, and whatever `ml_stack.guard` reports as injection. A hard hit is
+     also recorded against the sender in the reputation ledger as `injection_flagged`.
+   * Soft markers (`authority-claim`, `rule-promotion`) are what ordinary agent
+     traffic says ("the owner approved the restart", "add this to
+     CLAUDE.md"). A soft-only match is delivered, fenced as untrusted data with
+     `flagged: <marker>` in the fence header, and counted by one `screen.flagged` audit row,
+     when the sender holds a valid token (agent, lead or human) and its standing is `good`.
+     From a sender that is `unknown`, `watch` or `bad` it is quarantined.
+
+   `authority-imperative` is an authority claim and an order aimed at the reader in the same
+   message: "the owner approved, so you must delete ...", "now run ...", "run ... since the
+   lead approved it". The order is an action verb (run, delete, push, install, send, ...) after
+   `you must/should/will`, `so`, `therefore`, `now` or a colon, or before `since/because` and the
+   claim. A claim with no order stays soft.
+
+   Standing is `sender_standing` (`workspace/standing.py`): a token holder is `good` unless the
+   reputation ledger (`docs/reputation.md`) gates it as `watch` or `bad`; the ledger is asked
+   through `ml_stack.sentinel.observers` under kind `peer`, key `workspace:<id>`. With no ledger
+   installed, or one that fails, a token holder is `good`; the audit row records
+   `ledger: false`. Repeated hard hits turn a sender `watch` and then `bad`, and its soft
+   matches are quarantined again until clean runs recover it.
+
+   Quarantine is on by default and cannot be switched off; the recipient of a held item sees a
+   placeholder with the quarantine id, `ml-stack-workspace quarantine-ls` lists what is held,
+   only a `human` token releases an item, and a released item is still delivered fenced. The same
+   text is also run through `ml_stack.guard`'s secret and injection patterns (imported directly)
+   and held in the sentinel's quarantine (`ml_stack.sentinel`); the workspace's own checks run
+   in addition. A credential in a message is refused on write and never reaches quarantine.
 8. All logs are hash-chained JSONL (`prev` and `hash` per row, sequence numbers, fsync on each
    append). `ml-stack-workspace audit-verify` reports the first broken row, and accepts the
    head printed by `audit-head` as an external anchor to catch truncation of the tail.
@@ -250,9 +275,10 @@ and a convenience second.
   are processes of one user on one machine, so a socket would add a listener and signed requests
   without adding a boundary: the token never crosses a wire. A loopback daemon with `macauth`
   signed requests is the next step if agents ever need to run as another user or in a sandbox.
-* **One ordered bus log.** `bus.jsonl` holds every message with a global sequence number. An
-  agent's inbox is the rows addressed to it or to `*`; its outbox the rows it sent. A per-agent
-  cursor file records what it acknowledged. One log gives one total order and one chain.
+* **One relational Board graph.** `board.db` holds messages, boards, memberships,
+  subscriptions, reply relationships and read cursors in GraphStore transactions.
+  Sequence numbers are local presentation order. Stable workspace and event identities
+  identify messages across replicas; each origin retains its hash-chain evidence.
 * **Token hash, not shared key.** A shared MAC key in a file would let any agent that can read
   it sign as anyone. Hashed per-agent secrets mean an agent can only be the identity whose
   secret it was given.
@@ -296,8 +322,8 @@ Message types are `task`, `status`, `handoff`, `question`, `answer`, `claim`, `r
 `note`. Note kinds are `decision`, `rule`, `fact` and `question`. Claim kinds are `branch`,
 `worktree`, `port`, `file` and `server`.
 
-The state directory holds `agents.json` (token hashes), `bus.jsonl`, `notes.jsonl`,
-`quarantine.jsonl`, `audit.jsonl`, `boards.jsonl` (all chained), `cursors/` (including each identity's board read marks), `claims.json`, `rates/<sender>.txt`,
+The state directory holds `agents.json` (token hashes), `board.db` (the relational Board),
+`notes.jsonl`, `quarantine.jsonl` and `audit.jsonl` (chained), `claims.json`, `rates/<sender>.txt`,
 `scratch/<agent id>/<name>/` and the owner's `limits.json` and `private-terms`.
 
 `limits.json` overrides these defaults: message body 16 KiB, subject 200 characters, note body
@@ -368,10 +394,27 @@ imports is a follow-up.
 
 ## The Board
 
-A board is a named scope for messages on the bus. A message to `#name` is an ordinary bus row
-(so it is chained, screened, quarantined, rate limited and audited like any other); the board
-file `boards.jsonl` holds only who created, joined and left a board and each identity's
-subscriptions, one chained row per event, and every state is a replay of it.
+A board is a named scope in `board.db`. Messages remain screened, quarantined, rate limited
+and audited. Board, identity, project, subscription and message nodes have explicit membership,
+project, sender, destination and reply relationships. Reads use graph state; immutable events
+retain per-origin hash-chain evidence.
+
+Existing `bus.jsonl`, `boards.jsonl` and read cursors migrate once after their chains verify.
+The verified legacy message file is removed after its graph transaction commits; its digest
+and chain checkpoint remain as content-free evidence. Interrupted removal retries without
+importing messages twice. An incomplete legacy row refuses migration and preserves the source
+for recovery. The board authority file stays frozen; changing it or reintroducing a migrated
+message file causes a refusal. Retention removes expired graph message payloads and advances
+origin checkpoints. Exchanges accept non-genesis checkpoints only when local history already
+authorizes them.
+
+The authenticated workspace person can export and combine message graphs through
+`BoardApi.export_graph` and `BoardApi.combine_graph`. Combining requires the same canonical
+workspace identity and matching existing board visibility and project scope. Immutable event
+IDs deduplicate repeat imports; conflicting payloads, origin forks and missing reply targets
+are refused. Replies use stable event relationships rather than another replica's sequence
+numbers. Imports grant no memberships, subscriptions, tokens or roles. Existing cluster and
+project authorization still governs who may connect to the Board.
 
 | Board | Who is in it |
 | --- | --- |
@@ -609,6 +652,20 @@ The adapters run against the real `sentinel` store and `guard` patterns in the s
 Left out: see "The agent workspace" in `HANDOFF.md`.
 
 ### Mutation ownership
+
+Coding checkout ownership survives claim expiry and release in a durable lifecycle graph.
+`ml-stack-workspace worktrees --agent NAME --label HELPER` lists unfinished scopes without
+removing files. A labeled `announce done` checks that helper's scopes and the identity's
+unlabeled native scopes; a lead's unlabeled `done` checks all its own scopes. Completion
+requires the checkout, Git registration and recorded branches to be absent, and recorded
+source commits to be landed on development. Unique, dirty and ignored files remain intact.
+
+The maintained Claude launcher installs authenticated Stop and SubagentStop checks. Both
+maintained Claude and Codex launchers display pending checkout scopes at startup and refuse
+successful exit with unfinished scopes even when no `done` announcement was sent. Canonical
+inbox workers return proposals to their parent; task integration verifies their landing and
+cleanup. A harness started outside these launchers needs its own completion hook; workspace
+completion announcements still enforce the shared guard.
 
 Native coding harness hooks check the launcher's registered identity before permitted
 mutations. Known file tools, patches and inspectable shell targets reserve file or worktree

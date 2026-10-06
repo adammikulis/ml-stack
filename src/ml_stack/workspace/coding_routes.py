@@ -3,23 +3,28 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import suppress
 
 from ml_stack import coding, harnessing, hub, roles
 from ml_stack.workspace import localagent, localmodel, localroute
 from ml_stack.workspace.boardroute import Request
 from ml_stack.workspace.coding_turns import Manager
 
-LIMIT = 262144
+LIMIT = 1048576
 
 
 def catalogue() -> dict:
     installed = hub.discover(formats=("gguf",))
     preferred = localmodel.choose(installed=installed, selection=localmodel.Selection(
-        coding=True, search=False, context=LIMIT))
+        coding=True, search=False, context=0))
     preferred_path = next((str(model.path) for model in installed if model.path and preferred.name == model.name), preferred.ref)
+    context = 0
+    if preferred.ok:
+        with suppress(OSError, ValueError):
+            context = localmodel.context_for(preferred, coding=True)
     return {"harnesses": [{"name": name, "available": bool(harnessing.binary_for(name))} for name in coding.HARNESSES],
             "roles": localagent.role_choices(), "default_role": roles.DEFAULT,
-            "context": 262144, "default_model": preferred_path, "model_problem": preferred.problem,
+            "context": context, "default_model": preferred_path, "model_problem": preferred.problem,
             "model_hint": preferred.hint, "models": [{"name": model.name, "ref": str(model.path) if model.path else model.id}
                                             for model in installed]}
 

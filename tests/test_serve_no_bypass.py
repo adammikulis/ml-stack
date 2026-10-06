@@ -158,12 +158,17 @@ def test_a_broker_is_only_built_where_the_machines_is_chosen():
 
 
 def test_a_connection_to_a_server_goes_through_the_request_queue():
-    """`ml_stack.http` queues every generation request; the one other module that opens
-    a connection to a model server's port takes its turn itself."""
+    """Model connections use the HTTP helper and the generation request queue."""
     opens = {name for name, tree in parsed().items()
              if any(dotted(c) in ("urllib.request.urlopen", "urlopen") for c in calls(tree))}
-    assert opens == {"http.py", "fleet/api.py"}, where(opens)
+    assert opens == {"http.py"}, where(opens)
+    guarded = {name for name, tree in parsed().items()
+               if any(isinstance(node, ast.ImportFrom) and node.module == "ml_stack.http"
+                      and any(alias.name == "_open" for alias in node.names)
+                      for node in ast.walk(tree))}
+    assert guarded == {"fleet/api.py"}, where(guarded)
     api = parsed()["fleet/api.py"]
+    assert any(dotted(c) == "_open" for c in calls(api))
     assert any(dotted(c) == "gate.turn" for c in calls(api))
     http = parsed()["http.py"]
     assert sum(1 for c in calls(http) if dotted(c) == "gate.turn") == 1

@@ -45,6 +45,8 @@ class RemoteWorkspace:
         key = rows[0].key if rows else load_cluster_key(cluster_key)
         if key is None:
             raise Denied("join the host's cluster before attaching its project board")
+        self.cluster = rows[0].group if rows else cluster
+        self.cluster_id = hashlib.sha256(key).hexdigest()
         self.fleet_token = derive_token(key)
         self.device_cert = ""
         if parts.scheme == "https":
@@ -94,9 +96,46 @@ class RemoteWorkspace:
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
 
+    def enroll(self, name: str, *, model: str, harness: str, authority_machine: str) -> dict:
+        """Save a newly issued private Dev project agent capability."""
+        result = self._request("enroll", {"name": name, "model": model,
+                                          "harness": harness, "cluster": self.cluster, "cluster_id": self.cluster_id,
+                                          "authority_machine": authority_machine})
+        name, token = str(result["id"]), str(result["token"])
+        if result.get("project_id") != self.project_id:
+            raise Denied("agent enrollment returned another project")
+        path = tokens.store(self.base, name, token)
+        return {"id": name, "project_id": self.project_id, "host": self.host,
+                "token_file": str(path), "state": "connected"}
+
     def call(self, operation: str, token: str, *args, **kwargs):
         return self._request("board", {"agent_token": token, "operation": operation,
-                                       "args": list(args), "kwargs": kwargs})["result"]
+                                       "args": list(args), "kwargs": kwargs, "cluster": self.cluster})["result"]
+
+    def delegate(self, parent: str, name: str) -> dict:
+        """Store a private bounded child capability delegated by the selected parent."""
+        result = self.call("delegate", self.token(agent=parent), name)
+        child = f"{parent}/{name}"
+        if result.get("id") != child or result.get("project_id") != self.project_id:
+            raise Denied("delegation returned another project or identity")
+        path = tokens.store(self.base, child, str(result["token"]))
+        return {"id": child, "token_file": str(path), "expires": result["expires"]}
+
+    def self_revoke(self, name: str) -> dict:
+        """Revoke the selected agent's own capability and remove its private token file."""
+        result = self.call("revoke_self", self.token(agent=name))
+        if result.get("id") != name or result.get("revoked") is not True:
+            raise Denied("self revocation returned another identity")
+        (tokens.directory(self.base) / name.replace("/", "~")).unlink()
+        return result
+
+    def native_reserve(self, name: str, resources: list, label: str = "") -> list:
+        """Atomically reserve canonical project areas and branches for the selected worker."""
+        return self.call("native.reserve", self.token(agent=name), resources, label=label)
+
+    def native_release(self, name: str, kind: str, relativekey: str) -> dict:
+        """Release the selected worker's canonical project resource."""
+        return self.call("native.release", self.token(agent=name), kind, relativekey)
 
     def token(self, *, agent: str = "", token_file: str = "") -> str:
         if token_file:

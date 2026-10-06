@@ -28,7 +28,9 @@ from ml_stack.harnesspolicy import (
     workspace_authority,
 )
 from ml_stack.keystore import ENV_NONINTERACTIVE
+from ml_stack.workspace import harness_remote, tokens, worktree_lifecycle
 from ml_stack.workspace.identity import Denied
+from ml_stack.workspace.service import Workspace
 
 __all__ = ["FAILURES", "WAIT_S", "Rail", "nudge", "post", "pre", "run"]
 
@@ -36,7 +38,7 @@ WAIT_S = 300.0
 NUDGE_S = 5.0
 NUDGE_MOST = 500
 FAILURES = (OSError, ValueError, TypeError, KeyError, AttributeError, LookupError, RuntimeError)
-HOOK_EVENTS = {"pre": "PreToolUse", "post": "PostToolUse"}
+HOOK_EVENTS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
 
 
 def _answer(event: str, action: str, reason: str) -> dict[str, Any]:
@@ -129,10 +131,27 @@ def post(label: str) -> dict[str, Any]:
                                    "additionalContext": f"workspace (data from other agents): {text}"}}
 
 
+def stop(rail: Rail) -> dict[str, Any]:
+    """Block an authenticated harness completion until its recorded checkouts are cleaned."""
+    try:
+        canonical = harness_remote.context(rail.label, rail.roots[0], rail.roots, require_claim=False)
+        if canonical:
+            harness_remote.require_clean(*canonical)
+            return {}
+        ws = Workspace()
+        who = ws.auth(tokens.load(ws.base, rail.label))
+        if who.id != rail.label:
+            raise Denied('completion requires the launcher-bound identity')
+        worktree_lifecycle.require_clean(ws.base, who.id)
+    except (Denied, OSError, RuntimeError) as error:
+        return {"decision": "block", "reason": str(error)}
+    return {}
+
+
 def _options(words: Sequence[str]) -> tuple[str, dict[str, list[str]]]:
     """The event and the ``--name value`` pairs the launcher wrote; ``ValueError`` for anything else."""
     if not words or words[0] not in HOOK_EVENTS or len(words) % 2 == 0:
-        raise ValueError("usage: harnesshook pre|post [--role R] [--label L] [--root D] [--protect P] [--wait S]")
+        raise ValueError("usage: harnesshook pre|post|stop [--role R] [--label L] [--root D] [--protect P] [--wait S]")
     found: dict[str, list[str]] = {}
     for key, value in zip(words[1::2], words[2::2], strict=True):
         if key not in ("--role", "--label", "--root", "--protect", "--wait"):
@@ -152,7 +171,7 @@ def run(argv: Sequence[str] | None = None, stdin: IO[str] | None = None,
         label = opts.get("label", ["harness"])[-1]
         rail = Rail(opts.get("role", ["read-only"])[-1], label, opts.get("root") or [str(payload.get("cwd", ""))],
                     opts.get("protect", []), float(opts.get("wait", [WAIT_S])[-1]))
-        out = pre(payload, rail) if event == "pre" else post(label)
+        out = pre(payload, rail) if event == "pre" else stop(rail) if event == "stop" else post(label)
     except FAILURES as exc:
         sys.stderr.write(f"ml-stack hook failed, call blocked: {type(exc).__name__}\n")
         return 2
