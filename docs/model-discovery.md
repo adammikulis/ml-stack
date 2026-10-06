@@ -20,7 +20,22 @@ print(estimate.estimate(path, context=16384).breakdown)  # bytes per part, for a
 ```
 
 `ml-stack-models` (or `ml-stack models`) has the same as commands, each with `--json`:
-`list`, `where`, `info`, `which`, `fit`, `suggest`, `pull`, `search`, `recommend`, `machine`.
+`list`, `where`, `info`, `which`, `fit`, `suggest`, `pull`, `snapshot`, `search`, `recommend`,
+`machine`. `snapshot OWNER/REPO --repo-type model|dataset --revision REF` downloads a public
+Hub snapshot into the standard Hugging Face cache, outside the repository. It does not read a
+Hugging Face token and excludes pickle-based weight files.
+
+For example:
+
+```sh
+ml-stack-models snapshot StrandsAgents/strands-decider-2B-hobson-v21 \
+  --revision 2b52a6235c1b8306bbfa30b00b9d4b74b63a39f5 --json
+```
+
+This prints the persistent snapshot path and the resolved revision. An agent running this command needs write access only to that
+cache directory; the command has no destination option that can write into a checkout. It does
+not grant that filesystem access itself: the host sandbox or operating system still controls it.
+Files pass through the maintained download pipeline with the revision's size and digest checks.
 
 ## Where models are searched
 

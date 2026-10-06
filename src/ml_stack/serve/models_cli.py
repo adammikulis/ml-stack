@@ -8,12 +8,12 @@ import json
 from collections.abc import Callable
 
 from ml_stack import hub
-from ml_stack.hub import cli as hub_cli, origins
+from ml_stack.hub import cli as hub_cli, hf_cache, origins
 from ml_stack.log import say, warn
 from ml_stack.serve import estimate as est, suggest as pick
 from ml_stack.units import human_bytes
 
-COMMANDS = ("list", "where", "info", "which", "fit", "suggest", "pull", "search",
+COMMANDS = ("list", "where", "info", "which", "fit", "suggest", "pull", "snapshot", "search",
             "recommend", "machine")
 
 
@@ -60,6 +60,10 @@ def add(sub: argparse._SubParsersAction) -> None:
     pull.add_argument("--dest", help="folder to download into (default: the store)")
     pull.add_argument("--no-peers", action="store_true",
                       help="do not ask paired devices first; download from the Hub (also ML_STACK_NO_PEERS=1)")
+    snapshot = make("snapshot", "download a public Hub model or dataset into the persistent Hugging Face cache",
+                    arg="repo")
+    snapshot.add_argument("--repo-type", choices=("model", "dataset"), default="model")
+    snapshot.add_argument("--revision", default="main")
     find = make("search", "GGUF repositories on the Hub", arg="query")
     find.add_argument("--max-size", type=float, default=0, help="largest build, in GB")
     find.add_argument("--quant", default="")
@@ -228,10 +232,18 @@ def _machine(args: argparse.Namespace) -> int:
                                                got.as_dict().items()])
 
 
+def _snapshot(args: argparse.Namespace) -> int:
+    path = hf_cache.fetch(args.repo, revision=args.revision, repo_type=args.repo_type)
+    return _emit(args, {"repo": args.repo, "repo_type": args.repo_type,
+                        "requested_revision": args.revision,
+                        "resolved_revision": path.name, "path": str(path)},
+                 lambda: say(str(path)))
+
+
 RUN: dict[str, Callable[[argparse.Namespace], int]] = {
     "list": _list, "where": _where, "info": _info, "which": _which, "fit": _fit,
     "suggest": _suggest, "pull": _pull, "search": _search, "recommend": _recommend,
-    "machine": _machine,
+    "machine": _machine, "snapshot": _snapshot,
 }
 
 

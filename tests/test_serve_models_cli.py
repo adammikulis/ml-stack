@@ -9,6 +9,7 @@ from conftest import LLAMA_SERVER_HELP
 from test_hub_discover import hf_repo, ollama
 
 from ml_stack import hub
+from ml_stack.hub import hf_cache
 from ml_stack.hub.probe import GIB, MachineMemory
 from ml_stack.serve import models_cli
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
@@ -48,6 +49,22 @@ def test_where_lists_every_folder_with_whether_it_is_there(machine, capsys):
     rows = json.loads(out)
     assert {r["path"] for r in rows} == {str(machine / "hf"), str(machine / "ollama")}
     assert all(r["present"] for r in rows)
+
+
+def test_snapshot_downloads_a_revisioned_repo_into_the_standard_hub_cache(capsys, monkeypatch,
+                                                                          tmp_path):
+    seen = []
+    monkeypatch.setattr(hf_cache, "fetch", lambda repo, **kw: seen.append((repo, kw))
+                        or tmp_path / "snapshot")
+
+    code, out = run(capsys, "snapshot", "Cloudflare/clef-flash", "--repo-type", "model",
+                    "--revision", "commit", "--json")
+
+    assert code == 0
+    assert seen == [("Cloudflare/clef-flash", {"repo_type": "model", "revision": "commit"})]
+    assert json.loads(out) == {"repo": "Cloudflare/clef-flash", "repo_type": "model",
+                               "requested_revision": "commit", "resolved_revision": "snapshot",
+                               "path": str(tmp_path / "snapshot")}
 
 
 def test_which_says_where_a_reference_would_come_from(machine, capsys):

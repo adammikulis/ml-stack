@@ -12,6 +12,8 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from ml_stack import installed
@@ -32,13 +34,13 @@ def test_every_extra_a_full_install_asks_for_is_one_pip_can_install():
 
 
 def test_the_module_each_extra_is_read_by_is_one_that_extra_installs():
-    """The import stands in for the extra. A module no requirement provides reads as
-    missing on a machine that has everything."""
+    """Each capability import is provided by a distribution declared in its extra."""
     have = offered()
+    distributions = {"agents": "openai-agents"}
     for one in STANDARD:
-        named = {req.split(">")[0].split("<")[0].split("[")[0].strip().replace("-", "_")
-                 for req in have[one.extra]}
-        assert one.module in named, f"[{one.extra}] does not install {one.module}"
+        named = {canonicalize_name(Requirement(req).name) for req in have[one.extra]}
+        package = canonicalize_name(distributions.get(one.module, one.module))
+        assert package in named, f"[{one.extra}] does not install {one.module} through {package}"
 
 
 def test_a_module_that_is_here_reads_as_present():
