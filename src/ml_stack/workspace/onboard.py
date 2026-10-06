@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +11,6 @@ from typing import Any
 
 from ml_stack.sentinel import human
 from ml_stack.workspace import agent_invites, tokens
-from ml_stack.workspace.chain import held
 from ml_stack.workspace.identity import AGENT, HUMAN, LEAD, Denied, Identity, valid_name
 from ml_stack.workspace.modelid import CLAIMED, clean_harness, clean_model
 from ml_stack.workspace.service import GREETER, Workspace
@@ -78,7 +76,7 @@ def install_hooks(settings: Path, name: str) -> list[str]:
 
 
 __all__ = ["DEFAULT_AGENTS", "Finding", "Outcome", "brief", "doctor", "hello", "hook_snippet", "install_hooks",
-           "join", "join_device", "setup", "snippet"]
+           "join", "setup", "snippet"]
 
 DEFAULT_AGENTS = ("lead", "codex")
 SETUP = Identity("setup", HUMAN)
@@ -217,38 +215,6 @@ def join(ws: Workspace, code: str, wanted: str, ttl_s: float = 0.0,
         return name
 
     return ws.invites.redeem(code, take)
-
-
-def join_device(ws: Workspace, project: dict[str, str], installation: str,
-                current_token: str = "") -> tuple[str, str]:
-    """Enroll one Fleet-authenticated installation in its project workspace once."""
-    if not re.fullmatch(r"[a-f0-9]{16}", installation):
-        raise ValueError("invalid installation identity")
-    if not project.get("key") or not project.get("name"):
-        raise ValueError("device enrollment needs a project identity")
-    name = f"device-{installation}"
-    with held(ws.base / "device-joins.lock"):
-        info = ws.registry.info(name)
-        if info["role"]:
-            if (info["role"] != AGENT or info["project"].get("key") != project["key"]
-                    or info["revoked"]):
-                raise Denied("device identity belongs to another workspace or was revoked")
-            identity = ws.auth(current_token) if current_token else None
-            if identity is None or identity.id != name:
-                raise Denied("device identity already exists; prove possession of its local token")
-            return name, tokens.load(ws.base, name)
-        if name in ws.registry.ids():
-            raise Denied("device enrollment was revoked; a person must restore access")
-        if current_token:
-            raise Denied("device token has no matching enrollment")
-        live = sum(bool(ws.registry.role_of(agent)) for agent in ws.registry.ids())
-        if live >= ws.limits.agents_live:
-            raise Denied("the project workspace has reached its live-agent limit")
-        _mint(ws, name, 0, AGENT)
-        ws.registry.set_project(SETUP, name, project)
-        ws.board.place(name, project)
-        ws.audit("device.auto-join", name, project_id=project["key"])
-        return name, tokens.load(ws.base, name)
 
 
 def setup(ws: Workspace, names: list[str], rotate: list[str], ttl_s: float) -> Outcome:

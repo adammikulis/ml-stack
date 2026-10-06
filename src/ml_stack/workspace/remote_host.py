@@ -87,37 +87,20 @@ class WorkspaceHost:
         self.prepare(project_id)
         return adopt(self.workspace(project_id).base, history)
 
-    def _join_device(self, project_id: str, body: dict, ws: Workspace) -> tuple[int, dict]:
-        if (set(body) - {"installation", "token"}
-                or not isinstance(body.get("installation"), str)
-                or not isinstance(body.get("token", ""), str)):
-            raise ValueError("device enrollment requires an installation identity")
-        project = self.projects.get(project_id)
-        name, token = onboard.join_device(
-            ws, {"key": project_id, "name": project.name}, body["installation"],
-            body.get("token", ""))
-        self._identity(ws, project_id, token)
-        ws.audit("remote.seen", name, project_id=project_id)
-        return 201, {"id": name, "token": token, "project_id": project_id}
-
-    def _join_invitation(self, project_id: str, body: dict, ws: Workspace) -> tuple[int, dict]:
-        name = onboard.join(ws, str(body.get("code") or ""), str(body.get("name") or ""),
-                            claim=(str(body.get("model") or ""),
-                                   str(body.get("harness") or "")))
-        token = tokens.load(ws.base, name)
-        self._identity(ws, project_id, token)
-        ws.audit("remote.seen", name, project_id=project_id)
-        return 201, {"id": name, "token": token, "project_id": project_id}
-
     def answer(self, project_id: str, action: str, body: dict) -> tuple[int, dict]:
         try:
             if len(json.dumps(body).encode()) > 32 * 1024:
                 return 413, {"error": "workspace operation exceeds the size limit"}
-            if action == "device":
-                return self._join_device(project_id, body, self.workspace(project_id))
             ws = self.workspace(project_id)
             if action == "join":
-                return self._join_invitation(project_id, body, ws)
+                name = onboard.join(ws, str(body.get("code") or ""),
+                                    str(body.get("name") or ""),
+                                    claim=(str(body.get("model") or ""),
+                                           str(body.get("harness") or "")))
+                token = tokens.load(ws.base, name)
+                self._identity(ws, project_id, token)
+                ws.audit("remote.seen", name, project_id=project_id)
+                return 201, {"id": name, "token": token, "project_id": project_id}
             if action != "board":
                 return 404, {"error": "no such workspace operation"}
             token = str(body.get("agent_token") or "")

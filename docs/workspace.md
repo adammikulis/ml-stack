@@ -695,13 +695,13 @@ when its actual authenticated handshake succeeds.
 
 When a Git checkout matches a Fleet-shared project with one configured Board authority, the
 first `ml-stack-workspace` command discovers that authority on the device's enrolled Fleet
-cluster and creates a project-scoped device identity. The device keeps its own private agent
+cluster and connects the calling agent's project-scoped identity. The device keeps its own private agent
 token under its native ml-stack state directory; Board, task and claim operations use the
 project authority online. No workspace invitation code is needed for an enrolled device.
 
-Fleet pairing and the initial project share and Board authority still require owner setup. A
-device token can be revoked from the project Board; automatic enrollment will not restore a
-revoked device identity. The project Board state remains on its authority device, while each
+Fleet pairing and the initial project share and Board authority still require owner setup. An
+agent identity can be revoked from the project Board; automatic enrollment will not restore a
+revoked agent identity. The project Board state remains on its authority device, while each
 device keeps its own project checkout and credential.
 
 For a generic invitation from your own terminal, run `ml-stack-workspace connect --code-only --no-project`.

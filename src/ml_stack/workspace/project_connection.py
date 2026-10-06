@@ -117,7 +117,7 @@ def _find_authority(project_id: str) -> tuple[str, str] | None:
 
 
 def auto_attach(cwd: Path | None = None) -> dict | None:
-    """Discover and join this Git project's one workspace through an enrolled Fleet cluster."""
+    """Discover this Git project's one workspace through an enrolled Fleet cluster."""
     from ml_stack.fleet.projects import identity
 
     current = (cwd or Path.cwd()).resolve()
@@ -131,8 +131,8 @@ def auto_attach(cwd: Path | None = None) -> dict | None:
         return None
     cluster, host = authority
     remote = RemoteWorkspace(host, project_id, cluster=cluster)
-    joined = remote.join_device(home.machine_id())
-    return bind(remote, root, joined["id"], cluster)
+    return {"host": remote.host, "project_id": project_id, "agent": "",
+            "cluster": cluster, "cluster_key": remote.cluster_key, "root": str(root)}
 
 
 class Operations:

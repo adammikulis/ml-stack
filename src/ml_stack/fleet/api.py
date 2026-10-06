@@ -584,7 +584,7 @@ def make_handler(daemon: Daemon) -> type[BaseHTTPRequestHandler]:
             return got
 
         def _workspace(self, body: bytes) -> bool:
-            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board|device)",
+            match = re.fullmatch(r"/workspace/v1/projects/([a-f0-9]{32})/(join|board)",
                                  urllib.parse.urlparse(self.path).path)
             if not match:
                 return False

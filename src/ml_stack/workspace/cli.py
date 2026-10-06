@@ -94,12 +94,13 @@ def _context(args: argparse.Namespace):
                                                 cluster=connection.get("cluster", ""),
                                                 cluster_key=Path(connection["cluster_key"])
                                                 if connection.get("cluster_key") else None)
-    if not connection.get("agent"):
-        joined = remote.join_device()
-        connection = project_connection.bind(remote, Path(connection["root"]), joined["id"],
-                                             connection.get("cluster", ""))
-    token = remote.token(agent=args.agent or connection.get("agent", ""),
+    token = remote.token(agent=args.agent or os.environ.get(tokens.AGENT_ENV, "")
+                         or connection.get("agent", ""),
                          token_file=getattr(args, "token_file", ""))
+    if not connection.get("agent"):
+        who = remote.call("whoami", token)
+        project_connection.bind(remote, Path(connection["root"]), who["id"],
+                                connection.get("cluster", ""))
     return project_connection.CanonicalWorkspace(remote, token), token
 
 

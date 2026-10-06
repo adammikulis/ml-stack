@@ -89,23 +89,6 @@ class RemoteWorkspace:
         return {"id": name, "project_id": self.project_id, "host": self.host,
                 "token_file": str(path), "state": "connected"}
 
-    def join_device(self, installation: str = "") -> dict:
-        """Join this project workspace using the authenticated Fleet device membership."""
-        installation = installation or home.machine_id()
-        name = f"device-{installation}"
-        existing = tokens.load(self.base, name) if (tokens.directory(self.base) / name).exists() else ""
-        payload = {"installation": installation}
-        if existing:
-            payload["token"] = existing
-        result = self._request("device", payload)
-        name, token = str(result.get("id") or ""), str(result.get("token") or "")
-        if (result.get("project_id") != self.project_id or name != f"device-{installation}"
-                or not token):
-            raise Denied("the project coordinator returned an invalid device enrollment")
-        path = tokens.store(self.base, name, token)
-        return {"id": name, "project_id": self.project_id, "host": self.host,
-                "token_file": str(path), "state": "connected"}
-
     def call(self, operation: str, token: str, *args, **kwargs):
         return self._request("board", {"agent_token": token, "operation": operation,
                                        "args": list(args), "kwargs": kwargs})["result"]

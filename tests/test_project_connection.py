@@ -118,3 +118,17 @@ def test_auto_discovery_refuses_conflicting_project_authorities(monkeypatch):
         {"id": PROJECT, "authority_machine": peer.beacon.machine}]})
     with pytest.raises(Denied, match="conflicting workspace authorities"):
         connection._find_authority(PROJECT)
+
+
+def test_auto_attach_discovers_authority_without_registering_a_device(monkeypatch, tmp_path):
+    from ml_stack.fleet import projects
+
+    monkeypatch.setattr(connection.git, "run", lambda *args, **kwargs:
+                        SimpleNamespace(stdout=str(tmp_path)))
+    monkeypatch.setattr(projects, "identity", lambda root: PROJECT)
+    monkeypatch.setattr(connection, "_find_authority", lambda project: ("home", "https://host.local:8770"))
+    monkeypatch.setattr(connection, "RemoteWorkspace", lambda host, project_id, **kwargs:
+                        SimpleNamespace(host=host, cluster_key=""))
+    assert connection.auto_attach(tmp_path) == {
+        "host": "https://host.local:8770", "project_id": PROJECT, "agent": "",
+        "cluster": "home", "cluster_key": "", "root": str(tmp_path.resolve())}
