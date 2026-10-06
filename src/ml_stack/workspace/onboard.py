@@ -304,8 +304,12 @@ def doctor(ws: Workspace) -> list[Finding]:
     folder = tokens.directory(ws.base)
     for label, path in (("state directory", ws.base), ("token directory", folder)):
         why = tokens.problem(path)
-        fix = ("ml-stack-workspace setup" if why == "missing" or os.name == "nt"
-               else f"chmod 700 {path}")
+        if why == "missing" or os.name == "nt":
+            fix = "ml-stack-workspace setup"
+        elif "Windows-mounted filesystem" in why:
+            fix = "unset ML_STACK_WORKSPACE_HOME and run ml-stack-workspace join again"
+        else:
+            fix = f"chmod 700 {path}"
         found.append(Finding(not why, f"{label} {path}: {why or 'private'}", fix))
     repo = tokens.inside_repo(folder)
     found.append(Finding(repo is None, "tokens are outside any git work tree" if repo is None

@@ -8,6 +8,16 @@ from ml_stack.workspace import tokens
 from ml_stack.workspace.identity import PREFIX
 
 
+def test_workspace_token_directory_rejects_windows_mount(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    monkeypatch.setattr(tokens, "_windows_mount", lambda path: True)
+    base.mkdir()
+    assert "Windows-mounted filesystem" in tokens.problem(base)
+    with pytest.raises(ValueError, match="Windows-mounted filesystem"):
+        tokens.prepare(base)
+    assert not (base / "tokens").exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows access control")
 def test_created_token_and_directory_are_private(tmp_path):
     held = f"{PREFIX}fixture-agent.private-token"

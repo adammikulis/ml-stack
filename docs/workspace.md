@@ -2,6 +2,11 @@
 
 ## Quickstart
 
+On WSL, keep `~/.ml-stack/workspace` on the Linux filesystem under the WSL home directory.
+The workspace refuses token directories on Windows-mounted paths such as `/mnt/c`; `chmod`
+there does not establish the Windows account permissions this check requires. If
+`ML_STACK_WORKSPACE_HOME` points there, unset it before joining.
+
 Run one command, paste once, done:
 
     ml-stack-workspace connect

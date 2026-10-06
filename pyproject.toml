@@ -38,7 +38,10 @@ gym = ["ml-stack[gym-driving,gym-warehouse,gym-traffic,gym-rl]"]
 privacy = ["presidio-analyzer>=2.2.364", "spacy>=3.8"]
 # presidio over a transformers NER model rather than spaCy's own
 privacy-transformers = ["ml-stack[privacy]", "presidio-analyzer[transformers]>=2.2.364"]
-test = ["ml-stack[agents]", "distlib", "pip", "hatchling", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7"]
+test = [
+    "ml-stack[agents,memory,store]", "distlib", "pip", "hatchling", "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0", "pytest-testmon>=2.2", "pyyaml>=6.0", "defusedxml>=0.7",
+]
 
 claude = ["claude-agent-sdk>=0.1"]
 arrays = ["numpy>=1.24"]

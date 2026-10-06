@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -47,6 +48,9 @@ def prepare(base: Path) -> Path:
     if repo is not None:
         raise ValueError(f"{path} resolves into the git work tree {repo}; "
                          f"move ML_STACK_HOME out of it")
+    if _windows_mount(path):
+        raise ValueError(f"{path} is on a Windows-mounted filesystem; keep workspace tokens "
+                         "under the WSL home directory")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "nt":
         if _redirected(base.lstat()):
@@ -73,6 +77,9 @@ def problem(path: Path) -> str:
         return "is a symlink or Windows reparse point"
     if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
         return "is not a plain file"
+    if _windows_mount(path):
+        return ("is on a Windows-mounted filesystem; keep workspace tokens under the WSL "
+                "home directory")
     if os.name == "nt":
         return windows_problem(path)
     if info.st_uid != os.getuid():
@@ -80,6 +87,36 @@ def problem(path: Path) -> str:
     if info.st_mode & 0o077:
         return f"mode {info.st_mode & 0o777:o} lets others read it; chmod {'700' if stat.S_ISDIR(info.st_mode) else '600'}"
     return ""
+
+
+def _windows_mount(path: Path) -> bool:
+    """Whether a WSL path is backed by a Windows filesystem."""
+    if sys.platform == "win32":
+        return False
+    try:
+        release = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8").lower()
+    except OSError:
+        return False
+    if "microsoft" not in release:
+        return False
+    target = path.resolve()
+    try:
+        mounts = Path("/proc/mounts").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    best = (0, False)
+    for line in mounts:
+        fields = line.split()
+        if len(fields) < 3 or fields[2] not in ("9p", "drvfs"):
+            continue
+        mountpoint = Path(fields[1].replace("\\040", " "))
+        try:
+            target.relative_to(mountpoint)
+        except ValueError:
+            continue
+        if len(mountpoint.parts) > best[0]:
+            best = (len(mountpoint.parts), True)
+    return best[1]
 
 
 def store(base: Path, name: str, token: str) -> Path:
