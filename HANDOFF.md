@@ -1,5 +1,12 @@
 # Handoff
 
+## Pending recovery work
+
+- Canonical Board delivery latency exceeds the existing budgets: measured single-recipient DM 479 ms and Board 363 ms against 50/150 ms. Reduce graph opening and integrity-query costs; preserve integrity, privacy and latency budgets. Evidence: `/private/tmp/ml-stack-board-observer-handoff.md`.
+- Preserve `/private/tmp/ml-stack-qwen-worker-project/published-source` while pending task scopes and the stopped worker reference it. Add an authenticated offline source-rebinding operation before removing this source anchor; preserve pending task states and grants.
+- Triage the remaining failures from the October 6 macOS background full red-team run: 118 failed, 28 errors, 12,874 passed, 328 skipped. Routing and observer repairs require focused verification; fixture contract mismatches and other failures remain separate work. Evidence: `/private/tmp/ml-stack-final-background-full.log` and `/private/tmp/ml-stack-full-lifecycle-project-diagnosis.md`. Linux testing remains owner-paused.
+- Verify an authenticated connection and a Board message/reply with the other physical device after separate Dev profile activation. Local discovery and browser checks do not establish this roundtrip.
+
 ## Active work (2026-10-06)
 
 - **Speed up checks without reducing coverage.** `scripts/gates/_floors.py` now reuses the gate's
@@ -13,9 +20,8 @@
   and orders from codex. Confirm the new process uses the wheel and resumes its existing
   workspace; do not launch a duplicate worker or point it at a changing checkout.
 
-## Current state (2026-10-03)
 
-Open, and known limits (each is a task or a gap, not a done item):
+## Pending setup and coverage
 
 - [ ] **The release signing key does not exist yet.** Run `scripts/release-key create --write` at a
   terminal and commit `src/ml_stack/fleet/signing.py`. `packaging/install.sh` and `install.ps1`
@@ -47,38 +53,6 @@ Open, and known limits (each is a task or a gap, not a done item):
   the terminal's second prompt.
 - [ ] **A background process that cannot read the keystore keeps no requests on disk.** Sentinel's
   dialog keeps its own in memory for that process; the page does not see them.
-- [ ] **Not run for this tidy:** `scripts/test-on-linux`, Windows, the slow tier, any model-backed
-  test. Docs were checked against code and the docs tests, not by driving the app.
-
-The sections below are earlier state and may describe items since finished; read them against
-`git log` before acting.
-
-
-**Every item here is a task.** A finished task is deleted, not marked done — what exists and
-why is in `README.md`, `docs/`, the code and `git log`. Each carries the context to pick it
-up cold. Rules: invented names only, everywhere (`tests/known-fixtures.txt`, or a rule in
-`contracts/name-shapes.json` when the refusal is a code fragment); tests build their own
-fixtures and never read `~/.ml-stack`; a measurement is estimated before it runs and smoked
-before it is paid for; the development branch is pushed after every merge and `main` is
-pushed by Adam alone (a push there cuts a release).
-The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
-Slack-specific. What the kept runs say is `docs/report-2026-09-23.md`,
-`docs/model-ranking.md`, `docs/architectures/` and `src/ml_stack/data/profiles.json` (the shape a model measured best in for one workload --
-`ask`, `ingest` or `chat` -- read by `ml-stack-serve up --for WORKLOAD` (profile by default;
-`--no-profile` serves the model bare), `sweep`, `extract` and `converse`).
-
-Settled: Flash-Next answers (80% F1 at 26.7 s/q, 100 questions) and extracts (96% node / 76%
-relation F1); its head is served at length 4, and the paired runs put lengths 2 to 7 at
-1.14-1.74x without separating them; one slot for extraction; `single` +8 pts on E4B at ten
-questions, unconfirmed.
-
-Fixes first, then measurements that need the card, then what does not exist yet.
-Inside the fixes, most blocking first.
-
-Nothing here is blocked by a kept measurement, a hash or a pin: `CLAUDE.md` says what that
-means and what it costs. An entry that reads "we cannot change that, it would invalidate
-the benchmarks" is an entry someone should rewrite as the change plus the re-measurement.
-
 ## Fixes
 
 What is broken, unproven, or claims more than it does. Nothing here is a new
@@ -204,10 +178,10 @@ capability; every line is something that already exists not being what it says.
   "Machine Learning toolkit and algorithms library", last uploaded 2018-09-14 -- and a
   pending publisher for it is refused. `ml-stack` itself is unregistered, so this is a
   request to waive the similarity check at `github.com/pypi/support`, not a PEP 541
-  takeover of `mlstack`. The name stays `ml-stack` (Adam, 2026-09-18): `llm-stack` is
+  takeover of `mlstack`. The name stays `ml-stack` (the owner, 2026-09-18): `llm-stack` is
   refused the same way by `llmstack`, which unlike `mlstack` is live and in this field,
   and every other free single word is free because it is obscure. When the waiver lands,
-  add the pending publisher -- owner `adammikulis`, repository `ml-stack`, workflow
+  add the pending publisher -- the owner's GitHub account, repository `ml-stack`, workflow
   `release.yml`, no environment. Until then it uploads nothing and the docs install from
   git.
 - [ ] **Set the `PYPI_ENABLED` repository variable to `true` once the waiver above lands
@@ -217,7 +191,7 @@ capability; every line is something that already exists not being what it says.
   turn uploads on.
 
 ### Not losing what it read
-- [ ] **Two ladybug faults are worked around here and stay here** (Adam, 2026-09-04: no
+- [ ] **Two ladybug faults are worked around here and stay here** (the owner, 2026-09-04: no
   upstreaming to public repositories). `CypherStore._run` prepares every statement that
   carries values afresh, and `access.read_lock` keeps a writer out while a read runs.
   `tests/test_graph_engine_contract.py` has one test for each that goes red when a ladybug
@@ -256,7 +230,7 @@ capability; every line is something that already exists not being what it says.
 
 ### The vocabulary
 
-Words this library coined that a reader has to learn before the code means anything. Adam,
+Words this library coined that a reader has to learn before the code means anything. the owner,
 2026-09-09, on `measured shape`: "it tells you nothing"; "look at the other jargon and see
 if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
 across `src/`.
@@ -429,8 +403,7 @@ across `src/`.
 ### Measuring across the fleet
 - [ ] **Run it for real across two machines.** Everything is tested against fakes and
   loopback; nothing has crossed a real network or a real Windows box. One visit:
-  `irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 |
-  iex` (the app) or the `--headless` mode, then from here `ml-stack-fleet status`, a
+  `packaging/install.ps1` from the release repository (the app) or the `--headless` mode, then from here `ml-stack-fleet status`, a
   `ml-stack-fleet plan --users 3 --context 16384 --apply`, and a `sweep --fleet --serve
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
@@ -496,7 +469,7 @@ across `src/`.
   `test_fleet_daemon.py` 1,002, `test_fleet_models.py` 969, `test_hub.py` 963,
   `test_fleet_join.py` 936. Widen `ROOTS` to `tests/` and split all thirteen; the gate
   takes no budget line, so this lands as one branch per file, not as a recorded number.
-  Held until 0.2.0 was cut (Adam, 2026-09-18) on sequencing alone -- a 4,828-line file is
+  Held until 0.2.0 was cut (the owner, 2026-09-18) on sequencing alone -- a 4,828-line file is
   not a one-branch job -- and nothing else.
 - [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
   that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
@@ -520,9 +493,6 @@ across `src/`.
   that is not the daemon's own process.
 
 ### The test suite
-
-Part of the public "Integration pass" issue: the suite is the thing every agent reruns before a
-merge, so what it costs is what the pass costs.
 
 - [ ] **The red-team runs do not use the verdict cache yet.** `ml_stack.testing.verdicts` has the
   cache (key: model-file hash, attack id, guard or prompt version, source of the modules the
@@ -593,7 +563,7 @@ directory. What it does not do yet:
 
 ## Measurements
 
-Each needs the GPU and Adam's call. Estimate before it runs, smoke it before it is
+Each needs the GPU and the owner's call. Estimate before it runs, smoke it before it is
 paid for, and one thing on the card at a time.
 
 ### Served shapes with no paired baseline
@@ -638,7 +608,7 @@ no such pair, so what their head buys is unmeasured; each is read again with
   `ServerUnreachable` -- nothing was serving on 8080 at the time -- so it needs
   `ml-stack-ingest retry --out ~/.ml-stack/sources.ladybug` before a `--resume` reads it for
   real; the other six have never been attempted. Whether they are worth it -- about three
-  days of GPU at 86 s a unit, one slot -- is Adam's call; the command is `ml-stack-ingest
+  days of GPU at 86 s a unit, one slot -- is the owner's call; the command is `ml-stack-ingest
   ~/Documents/Textbooks/<pdf> --out ~/.ml-stack/sources.ladybug --model <flash-next>
   --images --resume --serve-port 8080`, one source at a time, and it tidies itself at the
   source's end. Two answers before that: what a question over the store scores
@@ -787,7 +757,7 @@ works against any client, lm-eval included. Servers are now launched with `--met
 
 ### Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
 
-Adam, 2026-09-03: which is better, faster, or both; a LinkedIn graphic; "if ollama can't
+the owner, 2026-09-03: which is better, faster, or both; a LinkedIn graphic; "if ollama can't
 keep up due to lack of drafting head, points in llama.cpp's favor"; "make sure we're
 measuring actual max mem usage during the test". The machine has 128 GB; the GGUF serves at
 ~90 GB and the Ollama model is 104 GB on disk (`qwen3.8-flash-next:125b-mlx`, 1658
@@ -935,7 +905,7 @@ time with the page's server down for the Ollama half.
   the sweep would settle. `chat` has no bench of its own -- the world writer and
   `fleet.chat` both point at a server already up -- so measuring it needs a command first.
 
-Adam, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
+the owner, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
 go (with shared MTP) always." So ranking a second model is not worth GPU: `gpt-oss-20b`
 (a profile, no fit record), `Qwen3.8-27B` (a fit record, no profile) and Flash-Next
 `IQ4_XS` (a fit record, no profile) stay half-measured on purpose, and `ml-stack-fleet
@@ -973,14 +943,14 @@ plan` names them as unplaceable rather than guessing.
   2.1k a question from 5.2k; F1 81% against 85% inside the ±19 band. But calls went 6.2 to
   7.7 a question -- 22 `show` calls over nine questions where one is the design -- and
   written tokens 5.1k to 7.8k, so the wall clock (27.7 against 25.6 s/q) did not move; three
-  agents' suites were running, so the wall clock is unreliable either way (Adam). Next:
+  agents' suites were running, so the wall clock is unreliable either way (the owner). Next:
   `show --trace flashprefix-plain`, find what invites the second `show` (the show nudge now
   offers every tool), then a quiet `--sample 20` of both.
 - [ ] **The fine-tuned tool caller.** `ml-stack-train-tools from-bench` over the traced runs
   (traces are on by default at ≤20 questions; the hundred-question runs before that carry
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
   `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
-  here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
+  here; the owner's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
 - [ ] **Watch ggml-org/llama.cpp#27836, then measure it here; nobody has compared it to
   the fork.** A draft, last touched 2026-09-02, checked 2026-09-06. Mainline is b10825,
   the fork b10715, and the profile pins `--build unsloth` so mainline moving changes
@@ -1157,14 +1127,8 @@ What the 2026-10 hardening pass left open; `docs/security.md` has the model and 
 - [ ] **Sandbox: Claude Code's Bash sandbox** is configured in `harness.confined_bash()` and
   checked as options only; no model-driven run has exercised it.
 
-## Verifying
+## Pending verification
 
-```bash
-python3 -m pytest tests -q -n 4 > /tmp/out.txt; echo $?   # never pipe into tail; -n 4 while a bench runs
-ml-stack-setup                                             # the machine
-ml-stack-bench status                                      # measuring, serving, what the job kept
-ml-stack-serve profile                                     # every model's serving
-```
 - [ ] **The destructive-action classifier's model layer has not been measured on a real decider**
   (`docs/destructive-actions.md`); only the stub logprob server has exercised it.
 - [ ] **Destructive verdicts are not written to the activity log.** They reach `Run.events` and
@@ -1174,8 +1138,7 @@ ml-stack-serve profile                                     # every model's servi
 - [ ] **The Board is not in the MCP tools or the chat tools.** Agents reach it through
   `ml-stack-workspace board ...` only; an MCP `workspace_board_*` set needs the same membership checks
   and a red-team pass.
-- [ ] **The Board page has no shell tab yet.** `boardroute.respond` and `<ml-board>` are ready; the shell
-  must supply its signed-in check and place the element (`docs/workspace.md`, The Board).
+
 - [ ] **Board subscriptions deliver a board's older messages to a new member.** A subscription made
   after others posted delivers every unread row after the inbox cursor, bounded by `--limit` only.
 - [ ] **The page's live feed is a long poll on one wake pipe name per person (`<id>.web`).** Two open tabs

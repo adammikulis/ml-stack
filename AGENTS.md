@@ -3,10 +3,10 @@
 [CLAUDE.md](CLAUDE.md) is the complete trusted repository policy for every coding agent and
 subagent. Read it first. This summary adds no restrictions or exceptions.
 
-- Edit, stage and commit only named files in your own isolated worktree and branch. Never use
-  an editable install. An independently reviewed, scoped-gated `git merge --ff-only <branch>`
-  into the primary checkout's development branch is explicitly permitted; editing, staging and
-  committing in that checkout are forbidden. Resolve conflicts in an integration worktree.
+- Edit, stage and commit only named files in a claimed checkout. The primary development
+  checkout may be used when it is the best way to complete the task. Use isolated sibling
+  worktrees and branches for concurrent writers, experiments and conflict resolution.
+  Preserve unrelated work, independent review and scoped gates. Never use an editable install.
 - Create worktrees beside the primary checkout, never inside it. Completion includes checking
   for unique work, removing the worktree and merged branch, pruning and verifying cleanup
   before the final report or `announce done` (see `CLAUDE.md`, "Worktrees").

@@ -1,4 +1,4 @@
-"""The hooks that keep agents out of the primary checkout, run as scripts with JSON on stdin."""
+"""The hooks that protect checkout and branch changes, run as scripts with JSON on stdin."""
 
 from __future__ import annotations
 
@@ -65,10 +65,10 @@ def edit(path: Path, cwd: Path, tool: str = "Write", key: str = "file_path", **e
 
 @pytest.mark.parametrize("tool, key", [("Write", "file_path"), ("Edit", "file_path"),
                                        ("MultiEdit", "file_path"), ("NotebookEdit", "notebook_path")])
-def test_a_write_into_the_primary_checkout_is_refused(repo, tool, key):
+def test_a_write_into_the_primary_development_checkout_is_allowed(repo, tool, key):
     primary, work, _ = repo
-    assert edit(primary / "a.py", work, tool, key) == BLOCKED
-    assert edit(primary / "new" / "deep" / "b.py", primary, tool, key) == BLOCKED
+    assert edit(primary / "a.py", work, tool, key) == ALLOWED
+    assert edit(primary / "new" / "deep" / "b.py", primary, tool, key) == ALLOWED
 
 
 def test_a_write_in_any_other_tree_or_outside_the_repository_is_allowed(repo, tmp_path):
@@ -85,11 +85,10 @@ def test_the_edit_guard_can_be_switched_off(repo):
 
 
 @pytest.mark.parametrize("command", [
-    "git add a.py", "git commit -m x", "git checkout work", "git switch work", "git reset --hard",
+    "git checkout work", "git switch work", "git reset --hard",
     "git restore a.py", "git stash", "git rebase work", "git cherry-pick abc", "git am p.patch",
     "git apply p.patch", "git merge work", "git merge --no-ff work", "git merge --ff-only a b",
-    "git merge --ff-only origin/work:x", "FOO=1 git commit -m x", "echo hi && git add a.py",
-    "git -c core.editor=true commit", "(git commit -m x)", "cd . && git stash",
+    "git merge --ff-only origin/work:x", "cd . && git stash",
 ])
 def test_a_tree_changing_git_command_in_the_primary_checkout_is_refused(repo, command):
     primary, _, _ = repo
@@ -97,6 +96,8 @@ def test_a_tree_changing_git_command_in_the_primary_checkout_is_refused(repo, co
 
 
 @pytest.mark.parametrize("command", [
+    "git add a.py", "git commit -m x", "FOO=1 git commit -m x", "echo hi && git add a.py",
+    "git -c core.editor=true commit", "(git commit -m x)",
     "git merge --ff-only work", "git merge --ff-only work && git push origin dev",
     "git worktree remove ../work", "git worktree add -b x ../x dev", "git worktree prune",
     "git worktree list", "git branch -d work", "git fetch origin", "git status", "git log --oneline",
@@ -136,13 +137,12 @@ def test_a_redirection_is_not_an_argument_of_the_command_it_follows(repo, comman
 def test_a_landing_merge_after_cd_to_the_primary_checkout_may_carry_redirections(repo):
     primary, work, _ = repo
     assert bash(f"cd {primary} && git merge --ff-only work 2>&1 | tail -1; git status", work) == ALLOWED
-    assert bash(f"cd {primary} && git merge --ff-only work 2>&1 | tail -1; git commit -m x", work) == BLOCKED
+    assert bash(f"cd {primary} && git merge --ff-only work 2>&1 | tail -1; git commit -m x", work) == ALLOWED
 
 
 @pytest.mark.parametrize("command", [
-    "git add a.py 2>&1", "git commit -m x >/dev/null", "git merge --no-ff work 2>&1",
-    "git merge --ff-only a b 2>&1", "git merge work &> out", "git commit -m x 2>out",
-    "git commit -m 'a > b' >/dev/null", "git add a.py > out && git status",
+    "git merge --no-ff work 2>&1",
+    "git merge --ff-only a b 2>&1", "git merge work &> out",
 ])
 def test_a_redirection_does_not_hide_a_refused_command(repo, command):
     primary, _, _ = repo
@@ -152,7 +152,7 @@ def test_a_redirection_does_not_hide_a_refused_command(repo, command):
 def test_a_redirection_after_a_cd_or_an_install_is_still_read(repo):
     primary, work, _ = repo
     assert bash(f"cd {work} 2>&1 && git commit -m x", primary) == ALLOWED
-    assert bash(f"git -C {primary} add a.py 2>&1", work) == BLOCKED
+    assert bash(f"git -C {primary} add a.py 2>&1", work) == ALLOWED
     assert bash("pip install -e . 2>&1 | tail -1", work) == BLOCKED
     assert bash("pip install -e . >log", work) == BLOCKED
     assert bash("pip install requests 2>&1", work) == ALLOWED
@@ -162,8 +162,8 @@ def test_the_directory_a_compound_command_runs_in_is_followed(repo):
     primary, work, _ = repo
     assert bash(f"cd {work} && git commit -m x", primary) == ALLOWED
     assert bash(f"git -C {work} commit -m x", primary) == ALLOWED
-    assert bash(f"cd {primary} && git commit -m x", work) == BLOCKED
-    assert bash(f"git -C {primary} add a.py", work) == BLOCKED
+    assert bash(f"cd {primary} && git commit -m x", work) == ALLOWED
+    assert bash(f"git -C {primary} add a.py", work) == ALLOWED
 
 
 def test_the_bash_guard_can_be_switched_off(repo):
@@ -181,15 +181,18 @@ def test_an_editable_install_of_a_worktree_is_refused(repo, command):
     assert bash(command, inside) == BLOCKED
 
 
-@pytest.mark.parametrize("command", [
-    "pip install -e .", "pip install -e '.[test]'", "pip install requests", "pip install -r r.txt",
-])
-def test_an_install_that_points_at_the_primary_checkout_is_allowed(repo, command):
+@pytest.mark.parametrize("command", ["pip install -e .", "pip install -e '.[test]'"])
+def test_an_editable_install_of_the_primary_checkout_is_refused(repo, command):
+    primary, work, _ = repo
+    assert bash(command, primary) == BLOCKED
+    assert bash(f"pip install -e {primary}", work) == BLOCKED
+
+
+@pytest.mark.parametrize("command", ["pip install requests", "pip install -r r.txt"])
+def test_noneditable_installs_are_allowed(repo, command):
     primary, work, _ = repo
     assert bash(command, primary) == ALLOWED
-    if "-e" not in command:
-        assert bash(command, work) == ALLOWED
-    assert bash(f"pip install -e {primary}", work) == ALLOWED
+    assert bash(command, work) == ALLOWED
 
 
 def test_a_repository_without_the_marker_is_left_alone(tmp_path):
@@ -214,11 +217,11 @@ def commit(cwd: Path, **env: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, str(COMMIT)], cwd=cwd, text=True, capture_output=True, env={**CLEAN, **env})
 
 
-def test_an_agent_cannot_commit_in_the_primary_checkout(repo):
+def test_an_agent_can_commit_in_the_primary_development_checkout(repo):
     primary, work, _ = repo
     refused = commit(primary, CLAUDECODE="1")
-    assert refused.returncode == 1 and "git worktree add -b" in refused.stderr
-    assert commit(primary).returncode == 1
+    assert refused.returncode == 0
+    assert commit(primary).returncode == 0
     assert commit(work, CLAUDECODE="1").returncode == 0
     assert commit(primary, CLAUDECODE="1", MLSTACK_GUARD="off").returncode == 0
 
@@ -260,18 +263,20 @@ def test_the_harness_policy_applies_the_same_rule_to_codex_and_local_sessions(re
                        ("shell", {"command": ["git", "commit", "-m", "x"]}),
                        ("Bash", {"command": "git add a.py"})]:
         verdict = harnesspolicy.primary_decision(name, args, str(primary))
-        assert verdict and verdict.action == "deny" and "git worktree add" in verdict.reason, name
+        assert verdict is None, name
     for name, args in [("Write", {"file_path": str(work / "a.py")}),
                        ("Bash", {"command": "git add a.py"})]:
         assert harnesspolicy.primary_decision(name, args, str(work)) is None
 
 
-def test_the_harness_hook_denies_a_write_to_the_primary_checkout(repo):
+def test_the_harness_hook_preserves_primary_checkout_ownership_checks(repo, monkeypatch):
     primary, work, _ = repo
     event = {"tool_name": "Write", "cwd": str(work), "tool_input": {"file_path": str(primary / "a.py")}}
+    monkeypatch.setattr(harnesshook.harness_claims, "conflict",
+                        lambda *args: "file area is claimed by another worker")
     out = harnesshook.pre(event, harnesshook.Rail("plan-and-go", "t"))["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny"
-    assert "git worktree add" in out["permissionDecisionReason"]
+    assert "claimed by another worker" in out["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("name", ["a; touch pwned", "$(touch pwned)", "`touch pwned`", "-C", "a b\nc"])
@@ -282,7 +287,7 @@ def test_a_hostile_path_is_one_argv_item_and_never_reaches_a_shell(repo, tmp_pat
     worktreerules.checkouts(here / name)
     worktreerules.commit_refusal(str(here / name), {"CLAUDECODE": "1"})
     assert worktreerules.bash_refusal(f"cd '{here / name}' && git add a.py", str(here)) == ""
-    assert worktreerules.edit_refusal([str(primary / name / "f.py")], str(here))
+    assert worktreerules.edit_refusal([str(primary / name / "f.py")], str(here)) == ""
     assert not (here / "pwned").exists() and not Path("pwned").exists()
 
 
@@ -297,4 +302,26 @@ def test_hook_repository_environment_does_not_change_checkout_identity(repo, mon
     assert worktreerules.checkouts(primary) == (primary, primary)
     assert worktreerules.checkouts(work) == (work, primary)
     assert worktreerules.commit_refusal(work, {"ML_STACK_AGENT": "test"}) == ""
-    assert "primary checkout" in worktreerules.commit_refusal(primary, {"ML_STACK_AGENT": "test"})
+    assert worktreerules.commit_refusal(primary, {"ML_STACK_AGENT": "test"}) == ""
+
+
+def test_main_branch_edits_and_commits_are_refused(repo):
+    primary, work, _ = repo
+    git(primary, "checkout", "-q", "-b", "main")
+    assert worktreerules.edit_refusal([str(primary / "a.py")], str(primary))
+    assert worktreerules.bash_refusal("git add a.py", str(primary))
+    assert worktreerules.bash_refusal("git commit -m x", str(primary))
+    assert commit(primary, CLAUDECODE="1").returncode == 1
+    assert edit(work / "a.py", work) == ALLOWED
+
+
+def test_claimed_primary_write_reaches_ownership_reservation(repo, monkeypatch):
+    primary, _, _ = repo
+    reserved = []
+    monkeypatch.setattr(harnesshook.harness_claims, "conflict", lambda *args: "")
+    monkeypatch.setattr(harnesshook.harness_claims, "reserve", lambda *args: reserved.append(args))
+    event = {"tool_name": "Write", "cwd": str(primary),
+             "tool_input": {"file_path": str(primary / "a.py")}}
+    out = harnesshook.pre(event, harnesshook.Rail("plan-and-go", "worker", roots=[str(primary)]))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert len(reserved) == 1 and reserved[0][3] == "worker"

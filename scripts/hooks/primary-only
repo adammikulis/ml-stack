@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse a commit by an agent in the primary checkout or on the development branch.
+"""Refuse an agent commit on main or a shared development branch in a linked checkout.
 
 An agent is a command run with CLAUDECODE, ML_STACK_AGENT or ML_STACK_NONINTERACTIVE set, or one
 whose stdin or stdout is not a terminal. A person at a terminal is never refused.

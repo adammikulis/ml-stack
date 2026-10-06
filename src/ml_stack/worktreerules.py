@@ -23,7 +23,7 @@ GIT = RUN + r"git\s+((-C\s+\S+|-c\s+\S+|--no-pager)\s+)*(?P<verb>[a-z-]+)"
 INSTALL = RUN + r"(uv\s+)?(python3?\s+-m\s+)?pip3?\s+install\b"
 
 USE_A_WORKTREE = (
-    "The primary checkout is what runs; it changes only by landing a branch. Work in your own "
+    "Resolve destructive changes and conflicts in your own "
     "worktree: git worktree add -b <branch> ../ml-stack-<branch> "
     '"$(git -C {primary} branch --show-current)" -- then edit and commit there.')
 
@@ -68,16 +68,22 @@ def _unquote(word: str) -> str:
     return re.sub(r"^~(?=/|$)", lambda _: os.environ.get("HOME", "~"), word.strip("'\""))
 
 
+def _branch(directory: Path) -> str:
+    return subprocess.run(["git", "-C", str(directory), "branch", "--show-current"],
+                          capture_output=True, text=True, check=False,
+                          env=_git_environment()).stdout.strip()
+
+
 def edit_refusal(paths: Iterable[str], cwd: str) -> str:
-    """Why a write to any of `paths` is refused, empty when none is in the primary checkout."""
+    """Why a write to any of `paths` is refused, empty for permitted development changes."""
     if switched_off():
         return ""
     base = Path(cwd or Path.cwd())
     for raw in filter(None, paths):
         target = base / _unquote(raw)
         primary = in_primary(target.parent)
-        if primary:
-            return f"{target} is in the primary checkout. " + USE_A_WORKTREE.format(primary=primary)
+        if primary and _branch(primary) == "main":
+            return f"{target} is on main; development changes require a development branch."
     return ""
 
 
@@ -175,6 +181,10 @@ def bash_refusal(command: str, cwd: str) -> str:
             given = re.search(r"\s-C\s+(\S+)", segment)
             where = here / _unquote(given.group(1)) if given else here
             primary = in_primary(where)
+            if primary and git["verb"] in {"add", "commit"}:
+                if _branch(primary) == "main":
+                    return "An agent may not stage or commit on main."
+                continue
             if primary and not (git["verb"] == "merge" and _landing(segment)):
                 what = ("`git merge` in the primary checkout lands one branch: "
                         "`git merge --ff-only <branch>`" if git["verb"] == "merge"
@@ -182,11 +192,9 @@ def bash_refusal(command: str, cwd: str) -> str:
                 return f"{what}. " + USE_A_WORKTREE.format(primary=primary)
         for target in _installs(segment, here):
             found = checkouts(target)
-            if found and target != found[1] and _enforced(found[1]):
-                return (f"`pip install -e {target}` repoints the machine's install at that tree and "
-                        f"every `ml-stack-*` command then runs it. The install points at the primary "
-                        f"checkout, {found[1]}, which changes only by landing a branch; run a "
-                        f"worktree's code with `PYTHONPATH=src`.")
+            if found and _enforced(found[1]):
+                return (f"`pip install -e {target}` is forbidden; use an immutable built wheel "
+                        "for runtimes or `PYTHONPATH=src` for development checks.")
     return ""
 
 
@@ -206,12 +214,12 @@ def commit_refusal(cwd: str, environ: dict[str, str] | None = None) -> str:
     top, primary = found
     if not _enforced(primary):
         return ""
+    here = _branch(top)
+    if here == "main":
+        return "a commit on main; use a development branch."
     if top == primary:
-        return "a commit in the primary checkout. " + USE_A_WORKTREE.format(primary=primary)
-    dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
-                         capture_output=True, text=True, check=False, env=_git_environment()).stdout.strip()
-    here = subprocess.run(["git", "-C", str(top), "branch", "--show-current"],
-                          capture_output=True, text=True, check=False, env=_git_environment()).stdout.strip()
+        return ""
+    dev = _branch(primary)
     if dev and here == dev:
         return (f"a commit on {dev}, the development branch. Commit on your own branch; it "
                 f"lands with `git merge --ff-only` from the primary checkout.")

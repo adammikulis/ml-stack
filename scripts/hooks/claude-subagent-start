@@ -21,11 +21,12 @@ def main() -> int:
     primary = found[1]
     dev = subprocess.run(["git", "-C", str(primary), "branch", "--show-current"],
                          capture_output=True, text=True, check=False).stdout.strip()
-    text = (f"Worktree rule: the primary checkout {primary} is on the development branch {dev} and "
-            f"changes only by landing a branch. Work in your own worktree on your own branch cut "
-            f"from {dev}: `git log -1` there must contain the tip of {dev}, otherwise run "
-            f"`git reset --hard {dev}` in your worktree. Never edit, `git add`, `git commit` or "
-            f"`pip install -e` in {primary}; add files by name; never push or merge.")
+    text = (f"Checkout rule: the primary checkout {primary} is on the development branch {dev}. "
+            "Use it when that is the best way to complete the task; concurrent writers, experiments "
+            "and conflicts require separate sibling worktrees and branches. Acquire authenticated "
+            "claims before mutation, preserve unrelated work, and stage files by name. "
+            "Independent review and affected tests are required. Never use editable installs "
+            "or commit or push main without the owner's explicit instruction.")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                              "additionalContext": text}}))
     return 0
