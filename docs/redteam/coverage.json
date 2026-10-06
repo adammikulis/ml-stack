@@ -1,10 +1,10 @@
 {
- "surfaces": 752,
+ "surfaces": 768,
  "by_status": {
-  "covered": 433,
+  "covered": 448,
   "partial": 199,
   "uncovered": 53,
-  "n/a": 67,
+  "n/a": 68,
   "unmapped": 0
  },
  "by_kind": {
@@ -51,7 +51,7 @@
    "unmapped": 0
   },
   "human": {
-   "covered": 92,
+   "covered": 97,
    "partial": 0,
    "uncovered": 0,
    "n/a": 0,
@@ -68,7 +68,7 @@
    "covered": 3,
    "partial": 5,
    "uncovered": 0,
-   "n/a": 13,
+   "n/a": 14,
    "unmapped": 0
   },
   "mcp-tool": {
@@ -79,14 +79,14 @@
    "unmapped": 0
   },
   "parser": {
-   "covered": 72,
+   "covered": 75,
    "partial": 0,
    "uncovered": 49,
    "n/a": 0,
    "unmapped": 0
   },
   "route": {
-   "covered": 80,
+   "covered": 86,
    "partial": 58,
    "uncovered": 0,
    "n/a": 0,
@@ -100,7 +100,7 @@
    "unmapped": 0
   },
   "spawn": {
-   "covered": 44,
+   "covered": 45,
    "partial": 63,
    "uncovered": 0,
    "n/a": 2,
@@ -2554,17 +2554,18 @@
    "note": "bounded loopback registration rejects foreign redirects, oversized replies, absent or tampered seals, malformed JSON and another project identity"
   },
   {
-   "id": "egress:workspace/coordinator_client.py:client",
+   "id": "egress:workspace/coordinator_client.py:_device_peer",
    "kind": "egress",
-   "source": "workspace/coordinator_client.py:client",
+   "source": "workspace/coordinator_client.py:_device_peer",
    "trust": "addresses and redirects named by pages, repositories and peers",
    "attacker": "a redirect or address sends the request somewhere the person did not choose",
    "status": "covered",
    "tests": [
+    "tests/test_redteam_device_transport.py::test_coordinator_peer_rejects_untrusted_pairing_before_transport",
     "tests/test_workspace_coordinator.py::test_hostile_saved_coordinator_origin_is_refused_before_transport",
     "tests/test_workspace_coordinator.py::test_remote_mcp_never_falls_back_to_local_workspace"
    ],
-   "note": "Saved origins reject plaintext remote, credentials, foreign schemes, paths, queries and fragments before credential or transport setup; remote clients refuse local workspace fallback"
+   "note": "Saved origins reject plaintext, credentials and foreign URL components; revoked, missing, ambiguous, unpaired and certificate-mismatched device rows cannot install a pin or open transport; remote clients refuse local fallback"
   },
   {
    "id": "egress:workspace/remote.py:RemoteWorkspace._request",
@@ -3759,9 +3760,9 @@
    "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
-   "id": "human:workspace/coordinator_routes.py:change",
+   "id": "human:workspace/coordinator_routes.py:_change",
    "kind": "human",
-   "source": "workspace/coordinator_routes.py:change",
+   "source": "workspace/coordinator_routes.py:_change",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -3861,6 +3862,46 @@
    "note": "an agent tries to delete a file, read a held file or fetch one unfenced"
   },
   {
+   "id": "human:workspace/guide.py:_ensure",
+   "kind": "human",
+   "source": "workspace/guide.py:_ensure",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/guide.py:agent_connect",
+   "kind": "human",
+   "source": "workspace/guide.py:agent_connect",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
    "id": "human:workspace/guide.py:connect",
    "kind": "human",
    "source": "workspace/guide.py:connect",
@@ -3924,6 +3965,26 @@
    "id": "human:workspace/identity.py:Registry._add",
    "kind": "human",
    "source": "workspace/identity.py:Registry._add",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/identity.py:Registry.init",
+   "kind": "human",
+   "source": "workspace/identity.py:Registry.init",
    "trust": "an agent process or a peer",
    "attacker": "an agent or a forged grant takes an action only a person may take",
    "status": "covered",
@@ -4277,6 +4338,46 @@
     "tests/test_task_credit.py::test_review_and_proposal_tampering_cannot_mint_credits"
    ],
    "note": "Native coordinator graphs and Fleet sockets reject self-review, same-device economic review, missing read/project authority, altered task/proposal/review hashes, browser identity overrides and foreign-page mutations"
+  },
+  {
+   "id": "human:workspace/task_authority.py:authorize",
+   "kind": "human",
+   "source": "workspace/task_authority.py:authorize",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
+  },
+  {
+   "id": "human:workspace/task_integration.py:DevelopmentIntegration.__init__",
+   "kind": "human",
+   "source": "workspace/task_integration.py:DevelopmentIntegration.__init__",
+   "trust": "an agent process or a peer",
+   "attacker": "an agent or a forged grant takes an action only a person may take",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_started_by_an_agent",
+    "tests/test_redteam_human_floor.py::test_every_human_only_command_refuses_a_process_with_no_terminal",
+    "tests/test_sentinel_redteam.py::test_a_grant_cannot_be_built_without_a_person",
+    "tests/test_workspace_rules.py::test_only_a_human_token_reads_or_releases_a_held_item",
+    "tests/test_requests_floor.py::test_the_request_commands_refuse_a_process_an_agent_started",
+    "tests/test_redteam_requests.py::test_a_model_cannot_answer_its_own_request_by_any_tool_name_or_command_text",
+    "tests/test_workspace_model.py::test_only_a_person_or_launcher_process_records_a_verified_model",
+    "tests/test_workspace_model.py::test_an_agent_cannot_verify_itself_or_overwrite_a_verified_model_or_set_anothers",
+    "tests/test_workspace_model.py::test_a_claimed_model_changes_no_right"
+   ],
+   "note": "grant minting, release and purge, signing keys, host approval, vault rekey, workspace human tokens"
   },
   {
    "id": "human:workspace/task_integration.py:DevelopmentIntegration.prepare",
@@ -4763,6 +4864,16 @@
    "id": "listener:workspace/automatic_connection.py:startup",
    "kind": "listener",
    "source": "workspace/automatic_connection.py:startup",
+   "trust": "anything that can connect to the address",
+   "attacker": "an unauthenticated or cross-origin client reaches the port",
+   "status": "n/a",
+   "tests": [],
+   "note": "binds only to probe whether a port is free, to serve a local fit page on loopback, or to run the sandbox self-test; no request is read from a client"
+  },
+  {
+   "id": "listener:workspace/cli.py:_context",
+   "kind": "listener",
+   "source": "workspace/cli.py:_context",
    "trust": "anything that can connect to the address",
    "attacker": "an unauthenticated or cross-origin client reaches the port",
    "status": "n/a",
@@ -7001,6 +7112,32 @@
    "note": "the sealed snapshot and blobs: a wrong key or a tampered file refuses"
   },
   {
+   "id": "parser:workspace/integration_git.py",
+   "kind": "parser",
+   "source": "workspace/integration_git.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
+   "id": "parser:workspace/integration_staging.py",
+   "kind": "parser",
+   "source": "workspace/integration_staging.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/localroute.py",
    "kind": "parser",
    "source": "workspace/localroute.py",
@@ -7166,6 +7303,19 @@
    "note": ""
   },
   {
+   "id": "parser:workspace/task_caps.py",
+   "kind": "parser",
+   "source": "workspace/task_caps.py",
+   "trust": "files, pages and archives from outside",
+   "attacker": "a crafted file or page crashes the reader, exhausts it or smuggles text",
+   "status": "covered",
+   "tests": [
+    "tests/test_workspace_bus.py",
+    "tests/test_workspace_rules.py"
+   ],
+   "note": ""
+  },
+  {
    "id": "parser:workspace/task_coding.py",
    "kind": "parser",
    "source": "workspace/task_coding.py",
@@ -7281,6 +7431,23 @@
     "tests/test_fleet_handshake.py"
    ],
    "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
+  },
+  {
+   "id": "route:fleet/api.py:/companion/*",
+   "kind": "route",
+   "source": "fleet/api.py:make_handler.Handler.do_POST",
+   "trust": "peer holding the cluster key; /health open to anyone",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes",
+    "tests/test_fleet_android.py::test_route_authentication_refuses_inappropriate_authority",
+    "tests/test_fleet_android.py::test_chat_rejects_extra_authority_and_unavailable_targets",
+    "tests/test_fleet_android.py::test_revocation_closes_stream_before_more_output",
+    "tests/test_fleet_android.py::test_status_omits_computer_capabilities_paths_and_secrets",
+    "tests/test_fleet_android.py::test_session_invalidates_with_authority"
+   ],
+   "note": "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
   },
   {
    "id": "route:fleet/api.py:/decide",
@@ -7521,6 +7688,21 @@
    "note": "authentication, traversal, framing, body sealing, the /jobs allowlist and the join handshake are attacked; the JSON bodies of /models/get, /serve, /fetch, /decide, /bench and /availability are not"
   },
   {
+   "id": "route:fleet/api.py:/workspace/v1/*",
+   "kind": "route",
+   "source": "fleet/api.py:make_handler.Handler._guard",
+   "trust": "peer holding the cluster key; /health open to anyone",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_redteam_device_transport.py::test_daemon_project_dispatch_refuses_invalid_device_requests",
+    "tests/test_device_agent_bootstrap.py::test_canonical_project_bootstrap_has_same_device_boundary",
+    "tests/test_device_agent_bootstrap.py::test_http_device_session_recovery_and_revocation",
+    "tests/test_workspace_remote.py::test_signed_sealed_fleet_and_agent_capabilities_both_required"
+   ],
+   "note": "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; canonical project operations require both paired-device and agent authority"
+  },
+  {
    "id": "route:fleet/api.py:/workspace/v1/local-project",
    "kind": "route",
    "source": "fleet/api.py:make_handler.Handler._project_register",
@@ -7549,6 +7731,57 @@
     "tests/test_fleet_ui.py::TestSignIn::test_the_cluster_cannot_be_browsed_without_signing_in"
    ],
    "note": "session, header and host checks are attacked; the query and body of each /ui screen route are not"
+  },
+  {
+   "id": "route:fleet/companion_routes.py:/companion/*",
+   "kind": "route",
+   "source": "fleet/companion_routes.py:answer",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes",
+    "tests/test_fleet_android.py::test_route_authentication_refuses_inappropriate_authority",
+    "tests/test_fleet_android.py::test_chat_rejects_extra_authority_and_unavailable_targets",
+    "tests/test_fleet_android.py::test_revocation_closes_stream_before_more_output",
+    "tests/test_fleet_android.py::test_status_omits_computer_capabilities_paths_and_secrets",
+    "tests/test_fleet_android.py::test_session_invalidates_with_authority"
+   ],
+   "note": "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
+  },
+  {
+   "id": "route:fleet/companion_routes.py:/companion/v1/chat",
+   "kind": "route",
+   "source": "fleet/companion_routes.py:answer",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes",
+    "tests/test_fleet_android.py::test_route_authentication_refuses_inappropriate_authority",
+    "tests/test_fleet_android.py::test_chat_rejects_extra_authority_and_unavailable_targets",
+    "tests/test_fleet_android.py::test_revocation_closes_stream_before_more_output",
+    "tests/test_fleet_android.py::test_status_omits_computer_capabilities_paths_and_secrets",
+    "tests/test_fleet_android.py::test_session_invalidates_with_authority"
+   ],
+   "note": "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
+  },
+  {
+   "id": "route:fleet/companion_routes.py:/companion/v1/status",
+   "kind": "route",
+   "source": "fleet/companion_routes.py:answer",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes",
+    "tests/test_fleet_android.py::test_route_authentication_refuses_inappropriate_authority",
+    "tests/test_fleet_android.py::test_chat_rejects_extra_authority_and_unavailable_targets",
+    "tests/test_fleet_android.py::test_revocation_closes_stream_before_more_output",
+    "tests/test_fleet_android.py::test_status_omits_computer_capabilities_paths_and_secrets",
+    "tests/test_fleet_android.py::test_session_invalidates_with_authority"
+   ],
+   "note": "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
   },
   {
    "id": "route:fleet/component_routes.py:/ui/models/addons",
@@ -7700,6 +7933,19 @@
     "tests/test_fleet_invites.py::test_rate_limits_and_challenge_bound"
    ],
    "note": "TLS is required; wrong proofs, altered fields, expiry, rotation, rate excess and simultaneous replay cannot redeem a second grant"
+  },
+  {
+   "id": "route:fleet/invite_routes.py:/ui/fleet/android-devices",
+   "kind": "route",
+   "source": "fleet/invite_routes.py:ui_route",
+   "trust": "network peer or local browser",
+   "attacker": "reach a protected path, crash the handler, read or write a file outside the root",
+   "status": "covered",
+   "tests": [
+    "tests/test_fleet_android.py::test_android_device_controls_reject_foreign_authority_without_revocation",
+    "tests/test_fleet_android.py::test_owner_controls_android_enrollment_and_revocation"
+   ],
+   "note": "Foreign source/host, machine-token browser authority, oversized bodies, wrong methods and unauthenticated revocation are refused while the existing phone session remains valid"
   },
   {
    "id": "route:fleet/invite_routes.py:/ui/fleet/invites",

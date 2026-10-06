@@ -37,7 +37,7 @@ def _worker(ws, identity):
 
 def _execution_config(runner):
     return {key: getattr(runner, key) for key in
-            ('model', 'harness', 'ctx', 'effort', 'max_effort', 'role', 'profile', 'project')}
+            ('model', 'harness', 'ctx', 'effort', 'max_effort', 'max_output_tokens', 'role', 'profile', 'project')}
 
 
 def assign(ws, token, worker, task, lease_id):

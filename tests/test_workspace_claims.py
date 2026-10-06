@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from workspace_kit import Kit, clean_env
 
+from ml_stack.windows_private import problem as windows_problem
 from ml_stack.workspace import Conflict, Denied, Workspace, claims
-from ml_stack.workspace.windows_tokens import problem as windows_problem
 
 
 def directory_link(link: Path, target: Path) -> None:

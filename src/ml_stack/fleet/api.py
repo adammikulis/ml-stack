@@ -32,7 +32,14 @@ from ml_stack.speech import service as speech
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import as_json, transcribe
 
-from . import commands, companion_routes, device_auth, invite_routes, project_enrollment, projects as project_routes
+from . import (
+    commands,
+    companion_routes,
+    device_auth,
+    invite_routes,
+    project_enrollment,
+    projects as project_routes,
+)
 from .availability import Availability, parse_window
 from .deciding import MAX_REQUEST, Deciding
 from .device import device_report

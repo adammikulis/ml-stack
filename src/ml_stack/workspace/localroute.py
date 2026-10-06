@@ -26,7 +26,6 @@ from ml_stack.workspace import (
     localprofile as lp,
     localstart as ls,
     plain,
-    tokens,
 )
 from ml_stack.workspace.boardroute import Reply, Request, _checked, _json
 from ml_stack.workspace.identity import Denied
@@ -102,15 +101,15 @@ def _write(ws: Workspace, route: str, body: bytes) -> tuple[int, Any]:
         data = _typed(body, START_KEYS)
         profile = data.get("profile") or "coding"
         role = data.get("role") or (la.PLAN_AND_GO if profile == "coding" else roles.DEFAULT)
-        context = lp.parse_ctx(data.get("ctx", ""))
+        context = lp.parse_ctx(data.get("ctx", "")) or lp.profile(profile).ctx
         try:
             got = ls.start(ws, ls.Ask(data.get("model") or localmodel.AUTO, data.get("name", ""),
                                       role, data.get("effort") or le.DEFAULT,
                                       data.get("max_effort") or le.DEFAULT_MAX,
                                       profile, context,
                                       data.get("project", ""), harness=data.get("harness") or "pi",
-                                      max_output_tokens=data.get("max_output_tokens", 8192), repo=data.get("repo", "")),
-                           parent_token=ls.launch_parent(ws, data.get('project', '')))
+                                      repo=data.get("repo", ""), max_output_tokens=data.get('max_output_tokens', 8192)),
+                           authority=ls.Authority(parent_token=ls.launch_parent(ws, data.get('project', ''))))
         except ls.Unavailable as err:
             return 409, {"error": plain.line(err.problem, 300), "hint": plain.line(err.hint, 200)}
         return 200, {"name": got.name, "pid": got.pid, "model": plain.line(got.model, 80),

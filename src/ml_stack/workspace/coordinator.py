@@ -4,7 +4,14 @@ import json
 import ssl
 
 from ml_stack.fleet.onboard.web import Call
-from ml_stack.workspace import cli, coordinator_calls, coordinator_config, device_sessions, onboard, tokens
+from ml_stack.workspace import (
+    cli,
+    coordinator_calls,
+    coordinator_config,
+    device_sessions,
+    onboard,
+    tokens,
+)
 from ml_stack.workspace.chain import ChainBroken
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.coordination import workspace_id

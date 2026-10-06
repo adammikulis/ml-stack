@@ -37,7 +37,8 @@ from ml_stack.workspace.identity import AGENT, LEAD, Denied
 from ml_stack.workspace.modelid import clean_model
 from ml_stack.workspace.service import Workspace
 
-__all__ = ["Ask", "Started", "Stopped", "Unavailable", "listing", "start", "stop"]
+__all__ = ["Ask", "Authority", "Runtime", "Started", "Stopped", "Unavailable", "launch_parent",
+           "listing", "start", "stop"]
 
 LOOP = "ml_stack.workspace.localloop"
 STOP_WAIT_S = 20.0
@@ -65,9 +66,26 @@ class Ask:
     project: str = ""
     orders_from: tuple[str, ...] = la.DEFAULT_ORDERS_FROM
     harness: str = lh.PI
-    max_output_tokens: int = 8192
     authority: tuple[str, str] | None = None
     repo: str = ""
+    max_output_tokens: int = 8192
+
+
+@dataclass(frozen=True, slots=True)
+class Authority:
+    """Authenticated person or project-agent authority for a worker launch."""
+
+    person_token: str = field(default="", repr=False)
+    parent_token: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class Runtime:
+    """The selected model, context size and project for a coding worker."""
+
+    model: localmodel.Pick | None
+    context: int
+    project: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,8 +120,11 @@ def _mint(ws: Workspace, name: str, project: dict[str, str]) -> None:
     ws.board.place(name, project)
 
 
-def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None, person_token="", parent_token="") -> Started:
+def start(ws: Workspace, ask: Ask, *, pick=None, spawn=None,
+          authority: Authority | None = None) -> Started:
     """Start a worker and bind person-authorized launches to the persistent device account."""
+    authority = authority or Authority()
+    person_token, parent_token = authority.person_token, authority.parent_token
     if parent_token and ws.auth(parent_token).role not in (AGENT, LEAD):
         raise Denied('coding queue launch requires an authenticated agent parent')
     if person_token:
@@ -150,8 +171,7 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     """Join a local model to the workspace and run its loop detached; the same name again reports
     the agent already running. Raises `Unavailable` when no suitable model is downloaded or it
     would not fit, ValueError for a bad name, role or project."""
-    if isinstance(ask.max_output_tokens, bool) or not isinstance(ask.max_output_tokens, int) or ask.max_output_tokens < 1:
-        raise ValueError("maximum output tokens must be a positive integer")
+    output_tokens = _output_tokens(ask.max_output_tokens)
     role = roles.get(ask.role).name
     ceiling = le.valid(ask.max_effort)
     effort = le.clamp(le.valid(ask.effort, allow_auto=True), ceiling) if ask.effort != le.AUTO else le.AUTO
@@ -168,11 +188,11 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         raise Unavailable(chosen.problem, chosen.hint)
     if not ctx:
         try:
-            ctx = localmodel.context_for(chosen, coding=prof.name == "coding")
+            ctx = localmodel.context_for(chosen, coding=prof.name == 'coding')
         except (OSError, ValueError) as error:
             raise Unavailable(str(error)) from error
     if prof.name == "coding":
-        return _coding(ws, ask, chosen, ctx, folder_, parent_token)
+        return _coding(ws, ask, Runtime(chosen, ctx, folder_), parent_token)
     problem, hint = lp.admit(chosen.ref or chosen.name, ctx)
     if problem:
         raise Unavailable(problem, hint)
@@ -187,8 +207,9 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
         _record_model(ws, identity, chosen)
         la.stop_file(ws, name).unlink(missing_ok=True)
         agent = la.Agent(name=name, identity=identity, model=chosen.ref, model_name=chosen.name,
-                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling, max_output_tokens=ask.max_output_tokens,
-                         project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {})
+                         size_bytes=chosen.size_bytes, role=role, profile=prof.name, ctx=ctx, effort=effort, max_effort=ceiling,
+                         project=folder_, orders_from=orders, started=time.time(), extra=dict(have.extra) if have else {},
+                         max_output_tokens=output_tokens)
         la.save(ws, agent)
         if parent_token:
             device_agent.bind_owned_worker(ws, parent_token, name)
@@ -200,9 +221,11 @@ def _start(ws: Workspace, ask: Ask, *, pick: localmodel.Pick | None = None,
     return Started(name, job.pid, chosen.name, role)
 
 
-def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, project: str,
+def _coding(ws: Workspace, ask: Ask, runtime: Runtime,
             parent_token="") -> Started:
     """Start a coding worker through its configured native harness and maintained broker."""
+    output_tokens = _output_tokens(ask.max_output_tokens)
+    chosen, ctx, project = runtime.model, runtime.context, runtime.project
     chosen = chosen or localmodel.choose(ask.model, selection=localmodel.Selection(coding=True, context=ctx))
     if not chosen.ok:
         raise Unavailable(chosen.problem, chosen.hint)
@@ -220,14 +243,17 @@ def _coding(ws: Workspace, ask: Ask, chosen: localmodel.Pick | None, ctx: int, p
             if chosen.ref != authorized.model:
                 raise ValueError('task launch must preserve the saved worker model')
             if any(getattr(ask, key) != getattr(authorized, key) for key in
-                   ('model', 'name', 'role', 'effort', 'max_effort', 'ctx', 'project', 'orders_from')):
+                   ('model', 'name', 'role', 'effort', 'max_effort', 'ctx', 'project', 'orders_from',
+                    'harness', 'max_output_tokens')):
                 raise ValueError('saved worker configuration changed before task launch')
             have = replace(have, extra={**have.extra, 'task_caps': asdict(localloop.caps_of(have))})
         if have is not None and la.alive(have):
             return _running(have, chosen)
         agent = la.Agent(name=name, model=chosen.ref, model_name=chosen.name,
                          size_bytes=chosen.size_bytes, role=role, profile="coding", harness=ask.harness,
-                         ctx=ctx, project=project, effort=(le.AUTO if ask.effort == le.AUTO else le.clamp(le.valid(ask.effort), le.valid(ask.max_effort))), max_effort=ask.max_effort, max_output_tokens=ask.max_output_tokens,
+                         ctx=ctx, project=project, effort=(le.AUTO if ask.effort == le.AUTO else
+                             le.clamp(le.valid(ask.effort), le.valid(ask.max_effort))), max_effort=ask.max_effort,
+                         max_output_tokens=output_tokens,
                          extra=dict(have.extra) if have else {}, orders_from=la.check_orders(list(ask.orders_from)),
                          started=time.time())
         identity = (have.identity or have.name) if ask.authority else _worker_identity(
@@ -299,6 +325,13 @@ def _record_model(ws: Workspace, name: str, chosen: localmodel.Pick, harness: st
     ws.claim_model(tokens.load(ws.base, name), model, harness)
 
 
+def _output_tokens(value: int) -> int:
+    """Validate the positive generated-token limit."""
+    if type(value) is not int or value < 1:
+        raise ValueError('maximum output tokens must be a positive integer')
+    return value
+
+
 def _owns_lease(agent: la.Agent, lease: str) -> bool:
     if not lease or not agent.pid:
         return False
@@ -341,7 +374,8 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         state = str(status.get("state") or "starting") if live else (
             "failed" if status.get("state") == "failed" else "stopped")
         out.append({
-            "name": name, "identity": agent.identity or name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx, "max_output_tokens": agent.max_output_tokens,
+            "name": name, "identity": agent.identity or name, "model": agent.model_name, "role": agent.role, "effort": status.get("effort") or agent.effort, "max_effort": agent.max_effort, "profile": agent.profile, "harness": agent.harness, "ctx": agent.ctx,
+            "max_output_tokens": agent.max_output_tokens,
             "project": Path(agent.project).name if agent.project else "", "running": live,
             "state": state, "detail": str(status.get("detail") or ""),
             "steps": int(status.get("steps") or 0), "tasks": int(status.get("tasks") or 0),

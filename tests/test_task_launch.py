@@ -32,15 +32,19 @@ def audit(board):
     for ident in ('lead', 'audit-worker'):
         board.ws.registry.set_project(person, ident, grant)
     runner = la.Agent('audit-worker', 'qwen', role='read-only', project=str(board.source),
-                      ctx=131072, max_effort='low', orders_from=('lead',))
+                      ctx=131072, max_effort='low', orders_from=('lead',), harness='claude',
+                      max_output_tokens=12345)
     la.save(board.ws, runner)
     spec = {**board.spec, 'source_key': 'audit-request', 'project': grant, 'assignees': ['audit-worker']}
     task = board.board.create(board.parent, spec)
     return board, runner, task
 
 
-def test_existing_nonchild_launch_preserves_identity_configuration_and_caps(audit, monkeypatch):
+@pytest.mark.parametrize('harness', ['pi', 'claude', 'codex'])
+def test_existing_nonchild_launch_preserves_identity_configuration_and_caps(audit, monkeypatch, harness):
     kit, runner, task = audit
+    runner = replace(runner, harness=harness)
+    la.save(kit.ws, runner)
     assert not kit.ws.auth(tokens.load(kit.ws.base, runner.name)).parent
     monkeypatch.setattr(localstart.localmodel, 'choose', lambda *_args, **_kw: localmodel.Pick(ref='qwen', name='qwen'))
     monkeypatch.setattr(localstart.lp, 'admit', lambda *_: ('', ''))
@@ -50,7 +54,8 @@ def test_existing_nonchild_launch_preserves_identity_configuration_and_caps(audi
     monkeypatch.setattr(localstart, '_record_model', lambda *_: pytest.fail('changed verified model'))
     task_launch.start(kit.ws, kit.parent, runner.name, task['id'])
     saved = la.load(kit.ws, runner.name)
-    assert saved.identity == runner.name and saved.profile == 'coding' and saved.harness == 'claude'
+    assert saved.identity == runner.name and saved.profile == 'coding' and saved.harness == harness
+    assert saved.max_output_tokens == runner.max_output_tokens == 12345
     assert (saved.model, saved.role, saved.ctx, saved.max_effort, saved.orders_from) == (
         runner.model, runner.role, runner.ctx, runner.max_effort, runner.orders_from)
     assert localloop.caps_of(saved) == localloop.caps_of(runner)

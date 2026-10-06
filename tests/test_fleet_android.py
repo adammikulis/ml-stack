@@ -212,11 +212,22 @@ def test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes(enroll
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        for path, expected in [("/companion/v1/status", 200), ("/jobs", 401), ("/workspace/v1/projects", 401)]:
+        cases = [("GET", "/companion/v1/status", None, True, 200),
+                 ("GET", "/jobs", None, True, 401),
+                 ("GET", "/workspace/v1/projects", None, True, 401),
+                 ("GET", "/companion/v1/unknown", None, True, 404),
+                 ("GET", "/companion/v1/chat", None, True, 404),
+                 ("POST", "/companion/v1/status", b"{}", True, 404),
+                 ("POST", "/companion/v1/chat", b"{", True, 400),
+                 ("POST", "/companion/v1/chat", b"x" * 65537, True, 413),
+                 ("POST", "/companion/v1/chat", b"{}", False, 403),
+                 ("GET", "/companion/v1/status", None, False, 403)]
+        for method, path, body, authorized, expected in cases:
             connection = http.client.HTTPSConnection("127.0.0.1", server.server_port,
                                                      context=tls.pinned_context(identity.beacon), timeout=5)
             try:
-                connection.request("GET", path, headers={"Authorization": "Bearer " + grant["token"]})
+                headers = {"Authorization": "Bearer " + grant["token"]} if authorized else {}
+                connection.request(method, path, body=body, headers=headers)
                 response = connection.getresponse()
                 assert response.status == expected
                 response.read()
@@ -227,3 +238,25 @@ def test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes(enroll
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
+
+
+@pytest.mark.redteam
+@pytest.mark.parametrize("change", ["remote", "host", "machine", "oversize", "method"])
+def test_android_device_controls_reject_foreign_authority_without_revocation(enrolled, change):
+    store, grant, _, _ = enrolled
+    replies = []
+    owner = ui(store)
+    owner.host_ok = lambda host: change != "host"
+    owner.authed = lambda cookie: True
+    owner.sessions = SimpleNamespace(get=lambda cookie: SimpleNamespace(
+        who="token" if change == "machine" else "passphrase"))
+    route = SimpleNamespace(path="/ui/fleet/android-devices",
+        client_ip="192.168.2.8" if change == "remote" else "127.0.0.1",
+        host_header="localhost", ui=owner, cookie="owner",
+        method="POST" if change == "method" else "DELETE",
+        header=lambda *args: "8193" if change == "oversize" else "100",
+        body=lambda: {"device_id": grant["device_id"]},
+        send=lambda code, body, extra=None: replies.append((code, body)))
+    assert ui_route(route)
+    assert replies[-1][0] == (400 if change == "oversize" else 405 if change == "method" else 403)
+    assert store.authorize(grant["token"])

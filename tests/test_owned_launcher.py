@@ -24,17 +24,17 @@ def test_launch_callers_pass_own_agent_parent_without_person_credentials(monkeyp
                             SimpleNamespace(ok=True, name='qwen', note='fits'))
         args = SimpleNamespace(agent='', profile='coding', ctx='', project='.', role='read-only',
             model='qwen', name='worker', effort='off', max_effort='medium', orders_from='lead',
-            harness='claude', repo='sample/project', no_wait=True)
+            harness='claude', repo='sample/project', no_wait=True, max_output_tokens=12345)
         assert localcli._start(args, workspace) == 0
         assert seen['ask'].repo == 'sample/project' and seen['ask'].authority is None
     else:
         code, _ = localroute._write(workspace, 'start', json.dumps({
             'model': 'qwen', 'name': 'worker', 'profile': 'coding', 'project': '.',
-            'role': 'read-only', 'repo': 'sample/project'}).encode())
+            'role': 'read-only', 'repo': 'sample/project', 'max_output_tokens': 12345}).encode())
         assert code == 200 and seen['ask'].repo == 'sample/project'
     assert seen['workspace'] is workspace
-    assert seen['authority']['parent_token'] == 'own-parent-token'
-    assert 'person_token' not in seen['authority']
+    assert seen['ask'].max_output_tokens == 12345
+    assert seen['authority']['authority'] == localstart.Authority(parent_token='own-parent-token')
 
 
 def test_parent_launch_binds_only_its_owned_worker(monkeypatch):
@@ -45,7 +45,7 @@ def test_parent_launch_binds_only_its_owned_worker(monkeypatch):
     monkeypatch.setattr(localstart.device_agent, 'enroll', lambda *_: pytest.fail('person enrollment'))
     monkeypatch.setattr(localstart.device_agent, 'bind_owned_worker',
                         lambda *args: calls.append(args), raising=False)
-    localstart.start(workspace, localstart.Ask(), parent_token='own-parent-token')
+    localstart.start(workspace, localstart.Ask(), authority=localstart.Authority(parent_token='own-parent-token'))
     assert calls == [(workspace, 'own-parent-token', 'worker')]
 
 
@@ -57,6 +57,7 @@ def test_device_membership_is_bound_before_worker_process_starts(tmp_path, monke
     monkeypatch.setattr(localstart, '_mint', lambda *_: pytest.fail('minted top-level worker'))
     monkeypatch.setattr(localstart, '_record_model', lambda *_: None)
     monkeypatch.setattr(localstart, 'started_at', lambda *_: 42)
+    monkeypatch.setattr(localstart.localmodel, 'context_for', lambda *_args, **_kwargs: 65536)
     def bind(ws, token, name):
         saved = localstart.la.load(ws, name)
         assert ws.auth(tokens.load(ws.base, saved.identity)).parent == ws.auth(token).id
@@ -67,8 +68,11 @@ def test_device_membership_is_bound_before_worker_process_starts(tmp_path, monke
         return SimpleNamespace(pid=123, log=tmp_path / 'worker.log')
     monkeypatch.setattr(localstart.device_agent, 'bind_owned_worker', bind, raising=False)
     pick = localstart.localmodel.Pick(ref='qwen', name='qwen')
-    localstart.start(kit.ws, localstart.Ask(name='worker'), pick=pick, spawn=spawn, parent_token=parent)
+    localstart.start(kit.ws, localstart.Ask(name='worker', max_output_tokens=12345), pick=pick, spawn=spawn,
+                     authority=localstart.Authority(parent_token=parent))
     assert events == ['bound', 'started']
+    saved = localstart.la.load(kit.ws, 'worker')
+    assert saved.ctx == 65536 and saved.max_output_tokens == 12345
 
 
 @pytest.mark.redteam

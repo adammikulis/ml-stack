@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import read_json, write_json
+from ml_stack.windows_private import restrict
 from ml_stack.workspace.identity import AGENT, Denied, Identity
-from ml_stack.workspace.windows_tokens import restrict
 
 __all__ = ["Scratch", "inside"]
 

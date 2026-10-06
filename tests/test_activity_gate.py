@@ -123,7 +123,7 @@ def test_runner_writes_local_evidence_without_user_activity(repo, monkeypatch, c
         if os.name == "nt":
             import win32security
 
-            from ml_stack.workspace.windows_tokens import _user
+            from ml_stack.windows_private import _user
 
             descriptor = win32security.GetNamedSecurityInfo(
                 str(artifact), win32security.SE_FILE_OBJECT, win32security.OWNER_SECURITY_INFORMATION)

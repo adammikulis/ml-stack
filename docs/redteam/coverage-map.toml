@@ -79,12 +79,13 @@ tests = ["tests/test_fleet_invite_client.py::test_every_resolved_address_must_be
 note = "Every DNS result is checked before a frozen sockaddr connection; the exact TLS leaf is pinned before HTTP; modified raw grants fail authentication"
 
 [[group]]
-match = ["egress:workspace/coordinator_client.py:client"]
+match = ["egress:workspace/coordinator_client.py:_device_peer"]
 status = "covered"
 count = 1
-tests = ["tests/test_workspace_coordinator.py::test_hostile_saved_coordinator_origin_is_refused_before_transport",
+tests = ["tests/test_redteam_device_transport.py::test_coordinator_peer_rejects_untrusted_pairing_before_transport",
+         "tests/test_workspace_coordinator.py::test_hostile_saved_coordinator_origin_is_refused_before_transport",
          "tests/test_workspace_coordinator.py::test_remote_mcp_never_falls_back_to_local_workspace"]
-note = "Saved origins reject plaintext remote, credentials, foreign schemes, paths, queries and fragments before credential or transport setup; remote clients refuse local workspace fallback"
+note = "Saved origins reject plaintext, credentials and foreign URL components; revoked, missing, ambiguous, unpaired and certificate-mismatched device rows cannot install a pin or open transport; remote clients refuse local fallback"
 
 [[group]]
 match = ["route:fleet/launch_routes.py:/ui/launch-ticket"]
@@ -430,6 +431,36 @@ tests = [
 ]
 note = "the loopback route (reads, and one person-only post), live follow and chat, board and conversation privacy, board and subscription caps, quiet defaults, a person's board membership"
 
+[[group]]
+match = ["route:fleet/api.py:/companion/*", "route:fleet/companion_routes.py:/companion/*",
+         "route:fleet/companion_routes.py:/companion/v1/chat", "route:fleet/companion_routes.py:/companion/v1/status"]
+status = "covered"
+count = 4
+tests = ["tests/test_fleet_android.py::test_real_tls_dispatcher_refuses_phone_credentials_on_computer_routes",
+         "tests/test_fleet_android.py::test_route_authentication_refuses_inappropriate_authority",
+         "tests/test_fleet_android.py::test_chat_rejects_extra_authority_and_unavailable_targets",
+         "tests/test_fleet_android.py::test_revocation_closes_stream_before_more_output",
+         "tests/test_fleet_android.py::test_status_omits_computer_capabilities_paths_and_secrets",
+         "tests/test_fleet_android.py::test_session_invalidates_with_authority"]
+note = "TLS daemon requests attack missing phone authority, wrong methods, unknown routes, malformed/oversized bodies and computer-route escalation; direct route attacks cover plaintext/public sources, revoked sessions, model and role injection, redaction and stream revocation"
+
+[[group]]
+match = ["route:fleet/api.py:/workspace/v1/*"]
+status = "covered"
+count = 1
+tests = ["tests/test_redteam_device_transport.py::test_daemon_project_dispatch_refuses_invalid_device_requests",
+         "tests/test_device_agent_bootstrap.py::test_canonical_project_bootstrap_has_same_device_boundary",
+         "tests/test_device_agent_bootstrap.py::test_http_device_session_recovery_and_revocation",
+         "tests/test_workspace_remote.py::test_signed_sealed_fleet_and_agent_capabilities_both_required"]
+note = "Real daemon project requests reject missing, revoked and cluster-only device proof, unsealed bodies and malformed JSON before host dispatch; canonical project operations require both paired-device and agent authority"
+
+[[group]]
+match = ["route:fleet/invite_routes.py:/ui/fleet/android-devices"]
+status = "covered"
+count = 1
+tests = ["tests/test_fleet_android.py::test_android_device_controls_reject_foreign_authority_without_revocation",
+         "tests/test_fleet_android.py::test_owner_controls_android_enrollment_and_revocation"]
+note = "Foreign source/host, machine-token browser authority, oversized bodies, wrong methods and unauthenticated revocation are refused while the existing phone session remains valid"
 # -- HTTP routes and handlers --------------------------------------------------------------
 [[group]]
 match = ["route:fleet/gym_routes.py:*", "route:fleet/gym_recording_routes.py:*", "route:fleet/workspace_routes.py:*"]

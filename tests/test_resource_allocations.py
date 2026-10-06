@@ -34,7 +34,7 @@ def test_shared_managed_holder_allowed_but_changed_grant_denied(tmp_path, monkey
     assert resources.verified_binding(kit.ws, worker, "task:1234", allocation["allocation_id"]) == allocation
     original = localagent.load(kit.ws, 'local-worker')
     for fields in ({'model': 'other'}, {'harness': 'claude'}, {'ctx': 65536}, {'effort': 'high'},
-                   {'max_effort': 'high'}, {'role': 'manual'}):
+                   {'max_effort': 'high'}, {'max_output_tokens': 16384}, {'role': 'manual'}):
         localagent.save(kit.ws, replace(original, **fields))
         with pytest.raises(Denied, match='execution configuration changed'):
             resources.verified_binding(kit.ws, worker, "task:1234", allocation["allocation_id"])

@@ -13,14 +13,14 @@ from uuid import uuid4
 import pytest
 from workspace_kit import Kit, clean_env
 
-from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet import projects, tls
-from ml_stack.hub.peerbook import PeerBook
+from ml_stack.fleet.api import Daemon, make_handler
 from ml_stack.fleet.discovery import derive_token, mint_cluster
 from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.onboard.requests import Device, Devices
 from ml_stack.fleet.remote import Peer
 from ml_stack.http import Server, ServerError
+from ml_stack.hub.peerbook import PeerBook
 from ml_stack.net import git
 from ml_stack.workspace import cli, coordinator, coordinator_client, coordinator_config, tokens
 from ml_stack.workspace.coordination import workspace_id

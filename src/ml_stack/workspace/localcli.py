@@ -50,13 +50,13 @@ OPTIONS = [
     flag("--max-effort", default=le.DEFAULT_MAX, choices=list(le.LEVELS),
          help="the most effort the model may give itself with set_effort; default: %(default)s"),
     flag("--max-output-tokens", type=int, default=8192,
-         help="maximum generated tokens per response; independent of reasoning effort; default: %(default)s"),
+         help="maximum generated tokens per response, independent of reasoning effort"),
     flag("--orders-from", default=",".join(la.DEFAULT_ORDERS_FROM), metavar="NAMES",
          help="agents it takes tasks from besides the person and any lead (comma list)"),
     flag("--profile", default="coding", choices=["chat", "coding"],
          help="coding: durable project task queue; chat: interactive message loop"),
     flag("--harness", default="pi", choices=["pi", "codex", "claude"], help="native coding harness"),
-    flag("--ctx", default="", metavar="TOKENS", help="optional context override, such as 32768, 32k or 256k (default: fit this device)"),
+    flag("--ctx", default="", metavar="TOKENS", help="context to serve (profile default), or such as 32k, 128k or 256k"),
     flag("--for", dest="lease_for", default="", metavar="TEXT",
          help="why the model is leased, one line, shown by `ml-stack-serve status|leases|history`"),
     flag("--no-wait", action="store_true", help="return as soon as the agent is started"),
@@ -98,7 +98,7 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
             f'{caps.rounds} turns, {caps.calls} tool calls, {caps.steps} model calls, {caps.seconds:g}s wall time')
         return 0 if args.no_wait else _wait(ws, got.name, READY_WAIT_S)
     selected_profile = lp.profile(args.profile)
-    selected_context = lp.parse_ctx(args.ctx)
+    selected_context = lp.parse_ctx(args.ctx) or selected_profile.ctx
     project = args.project or ("." if selected_profile.name == "coding" else "")
     selected_role = args.role or (la.PLAN_AND_GO if selected_profile.name == "coding" else roles.DEFAULT)
     pick = localmodel.choose(args.model, selection=localmodel.Selection(
@@ -112,8 +112,8 @@ def _start(args: argparse.Namespace, ws: Workspace) -> int:
     try:
         got = ls.start(ws, ls.Ask(args.model, args.name, selected_role, args.effort, args.max_effort,
                                   args.profile, selected_context, project, la.check_orders(args.orders_from.split(",")), args.harness,
-                                  max_output_tokens=args.max_output_tokens, repo=args.repo), pick=pick,
-                       parent_token=ls.launch_parent(ws, project))
+                                  repo=args.repo, max_output_tokens=args.max_output_tokens), pick=pick,
+                       authority=ls.Authority(parent_token=ls.launch_parent(ws, project)))
     except ls.Unavailable as err:
         warn(str(err))
         return 1

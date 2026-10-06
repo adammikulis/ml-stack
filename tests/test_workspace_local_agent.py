@@ -7,7 +7,6 @@ import contextlib
 import http.client
 import json
 import os
-import stat
 import subprocess
 import sys
 import threading
@@ -714,7 +713,8 @@ def test_a_project_coding_launch_starts_its_issue_queue(kit, monkeypatch, tmp_pa
     from ml_stack.workspace import project as projects
     kit.ws.registry.set_project(kit.ws.auth(kit.owner), "queue-parent", projects.describe(project))
     got = ls.start(kit.ws, ls.Ask(name="queue-worker", profile="coding", project=str(project),
-                                  repo="sample/project", harness="claude"), pick=PICK, parent_token=parent)
+                                  repo="sample/project", harness="claude"), pick=PICK,
+                   authority=ls.Authority(parent_token=parent))
     try:
         assert started == [(got.name, "sample/project", str(project.resolve()))]
         worker = la.load(kit.ws, got.name)

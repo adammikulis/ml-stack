@@ -6,8 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.workspace import integration_git as repo, integration_staging
-from ml_stack.workspace import worktree_lifecycle
+from ml_stack.workspace import integration_git as repo, integration_staging, worktree_lifecycle
 from ml_stack.workspace.chain import held
 from ml_stack.workspace.claims import Conflict
 from ml_stack.workspace.identity import HUMAN, Denied, Identity
