@@ -114,11 +114,11 @@
       catch (error) { if (error.name !== "AbortError") chat.showError(error.message); }
       finally {
         chat.request = null;
+        await chat.load(chat.open);
         chat.list.removeAttribute("aria-busy");
         chat.send.hidden = false; chat.stop.hidden = true;
         chat.newChat.disabled = chat.picker.disabled = false;
         this.busy(false);
-        await chat.load(chat.open);
         chat.paintList();
       }
     }
