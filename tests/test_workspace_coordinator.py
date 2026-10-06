@@ -342,3 +342,14 @@ def test_missing_selection_for_existing_remote_session_refuses_local_authority(t
         coordinator_client.client(tmp_path)
     assert marker.read_bytes() == b'existing remote session'
     assert not (tmp_path / 'agents.json').exists()
+@pytest.mark.parametrize('path', [
+    '/workspace/v1/projects', '/workspace/v1/projects/' + 'a' * 32 + '/snapshot?hash=revision',
+    '/workspace/v1/projects/' + 'a' * 32 + '/join',
+    '/workspace/v1/projects/' + 'a' * 32 + '/board',
+    '/workspace/v1/local-project', '/workspace/v1/unknown', '/workspace/v1/info/extra',
+])
+def test_non_coordinator_routes_fall_through_without_opening_workspace(monkeypatch, path):
+    def forbidden():
+        pytest.fail('an unrelated route must not open the coordinator workspace')
+    monkeypatch.setattr(coordinator, 'Workspace', forbidden)
+    assert coordinator.route(SimpleNamespace(path=path), b'project request') is False

@@ -80,10 +80,11 @@ def answer(ws, call, *, device=None, projects=None):
 
 
 def route(handler, body=None):
-    if handler.path.split('?')[0].startswith(PREFIX + 'projects/'):
+    path = handler.path.split('?')[0]
+    if path not in (PREFIX + 'info', PREFIX + 'call', PREFIX + 'join', PREFIX + 'ensure'):
         return False
     encrypted = isinstance(handler.connection, ssl.SSLSocket) or handler.client_address[0] in ('127.0.0.1', '::1')
-    call = Call(handler.command, handler.path.split('?')[0], handler.headers,
+    call = Call(handler.command, path, handler.headers,
                 handler.client_address[0], encrypted, lambda _most: body or b'')
     status, result = answer(Workspace(), call, device=getattr(handler, '_workspace_device', None),
                             projects=getattr(handler, '_workspace_projects', None))
